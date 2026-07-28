@@ -55,9 +55,11 @@ def advance(ns: str, n: int) -> None:
 
 
 def upload_sig(uploaded) -> str | None:
-    """Stable identity for an uploaded file. None if nothing staged."""
-    if uploaded is None:
+    """Stable identity for uploaded file(s). None if nothing staged."""
+    if not uploaded:
         return None
+    if isinstance(uploaded, list):
+        return ";".join(f"{f.name}|{f.size}" for f in uploaded)
     return f"{uploaded.name}|{uploaded.size}"
 
 
@@ -71,11 +73,13 @@ def reset_from(ns: str, n: int) -> None:
 
     if n <= STEP_CONFIGURE:
         media.discard_result(get(ns, "result"))
-        for leaf in ("result", "log", "error", "running"):
+        media.discard_result(get(ns, "results"))
+        for leaf in ("result", "results", "log", "error", "running", "batch_progress"):
             clear(ns, leaf)
     if n <= STEP_UPLOAD:
         media.discard_staged(get(ns, "src_path"))
-        for leaf in ("sig", "bytes", "src_path", "meta"):
+        media.discard_staged(get(ns, "src_paths"))
+        for leaf in ("sig", "bytes", "src_path", "src_paths", "meta", "items"):
             clear(ns, leaf)
         set_(ns, "step", STEP_UPLOAD)
     else:

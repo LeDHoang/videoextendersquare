@@ -1,5 +1,6 @@
 import os
 import tempfile
+import uuid
 import fal_client
 from pipeline.utils import get_image_dimensions, calculate_square_padding
 
@@ -101,12 +102,14 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
             if status_callback:
                 status_callback("Downloading outpainted image for local upscaling...")
                 
-            temp_outpaint_path = os.path.join(tempfile.gettempdir(), "outpainted_temp.png")
+            uid = uuid.uuid4().hex[:8]
+            temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_temp_{uid}.png")
             import urllib.request
             urllib.request.urlretrieve(outpaint_url, temp_outpaint_path)
         
         # Determine output location
-        output_image_path = os.path.join(tempfile.gettempdir(), "delivery_4k_square.png")
+        uid = uuid.uuid4().hex[:8]
+        output_image_path = os.path.join(tempfile.gettempdir(), f"delivery_4k_square_{uid}.png")
         if os.path.exists(output_image_path):
             os.unlink(output_image_path)
             

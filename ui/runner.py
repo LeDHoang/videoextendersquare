@@ -84,113 +84,195 @@ def format_error(ex: Exception) -> tuple[str, str]:
     return (f"{name.upper()}", msg)
 
 
-def run_pipeline(ns: str, kind: str, fn, kwargs: dict):
-    """Execute a pipeline worker, streaming progress into st.status.
+def run_batch_pipeline(ns: str, kind: str, fn, items_kwargs: list[dict]):
+    """Execute a batch of pipeline tasks with auto-scaling parallel workers and queuing.
 
-    The worker runs in a background thread. The main thread ticks the
-    elapsed-time counter every second via a child st.empty() element —
-    never via status.update(), which would collapse a user-opened dropdown.
+    Calculates max parallel concurrency from system resources. Items exceeding
+    concurrency limit are queued and start automatically as slots free up.
 
-    Returns (result_tuple, error) — exactly one is None.
+    Returns list of (result_tuple, error) matching items_kwargs order.
     """
-    lines: list[str] = []
-    lock = _run_lock()
+    import os
+    from concurrent.futures import ThreadPoolExecutor
 
-    if not lock.acquire(blocking=False):
-        return None, ("RENDER IN PROGRESS",
-                      "Another render is already running in this app. "
-                      "Wait for it to finish, then try again.")
+    num_items = len(items_kwargs)
+    if num_items == 0:
+        return []
+
+    # Auto-scale concurrency pool based on CPU resources and task type
+    cpus = os.cpu_count() or 2
+    if kind == "video":
+        max_workers = max(1, min(2, cpus // 2))
+    else:
+        max_workers = max(1, min(4, cpus))
+
+    # Thread safety for session state & delta emissions
     try:
-        with st.status("RENDERING…", expanded=True, state="running") as status:
-            # phase label — updated by cb() on each pipeline callback
-            head = st.empty()
-            # live elapsed clock — updated by heartbeat; a child element so
-            # the heartbeat never touches status.update() itself
-            timer_el = st.empty()
-            meter = st.progress(0.0)
-            pane = st.container(height=220, border=False, key=f"sx-log-{kind}")
-            body = pane.empty()
+        from streamlit.runtime.scriptrunner import (
+            add_script_run_ctx,
+            get_script_run_ctx,
+        )
+        ctx = get_script_run_ctx()
+    except Exception:
+        ctx = None
 
-            t0 = time.monotonic()
-            highest = [0.0]
-            current_label = ["WORKING"]
+    # Track state for each item in batch
+    batch_state = []
+    for i, kw in enumerate(items_kwargs):
+        name = kw.get("name", f"Item {i+1}")
+        batch_state.append({
+            "index": i,
+            "name": name,
+            "status": "QUEUED",  # QUEUED, PROCESSING, COMPLETE, FAILED
+            "phase": "QUEUED",
+            "progress": 0.0,
+            "elapsed": "0:00",
+            "lines": [],
+            "result": None,
+            "error": None,
+            "kwargs": kw,
+        })
 
-            def cb(msg: str) -> None:
-                label, weight = classify(msg)
-                elapsed = time.monotonic() - t0
-                current_label[0] = label
-                highest[0] = max(highest[0], weight)  # never rewind
-                # Update phase label and progress in the body; do NOT call
-                # status.update() here either — it re-renders the header and
-                # may collapse the dropdown on every phase transition.
-                head.markdown(
-                    f'<div class="sx-phase">{html.escape(label)}</div>',
+    with st.status(f"PROCESSING BATCH ({num_items} items, max {max_workers} parallel)…", expanded=True, state="running") as status:
+        header_el = st.empty()
+        overall_meter = st.progress(0.0)
+        table_el = st.empty()
+        log_pane = st.container(height=180, border=False, key=f"sx-batch-log-{kind}")
+        log_body = log_pane.empty()
+
+        lock = threading.Lock()
+        t0 = time.monotonic()
+
+        def update_ui():
+            with lock:
+                done_count = sum(1 for item in batch_state if item["status"] in ("COMPLETE", "FAILED"))
+                running_count = sum(1 for item in batch_state if item["status"] == "PROCESSING")
+                queued_count = sum(1 for item in batch_state if item["status"] == "QUEUED")
+                overall_frac = done_count / num_items
+
+                header_el.markdown(
+                    f'<div class="sx-phase">'
+                    f'Completed {done_count}/{num_items} · Running {running_count} · Queued {queued_count}'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
-                meter.progress(highest[0])
-                lines.append(f"{int(elapsed):>5}s  {msg}")
-                # Fal log messages are third-party strings going into
-                # unsafe_allow_html — escape every one.
-                body.markdown(
+                overall_meter.progress(overall_frac)
+
+                # Render compact item list
+                rows = []
+                for item in batch_state:
+                    st_color = "#3b82f6" if item["status"] == "PROCESSING" else ("#22c55e" if item["status"] == "COMPLETE" else ("#ef4444" if item["status"] == "FAILED" else "#888888"))
+                    rows.append(
+                        f"<tr>"
+                        f"<td style='padding:4px 8px;font-weight:600;'>{html.escape(item['name'])}</td>"
+                        f"<td style='padding:4px 8px;'><span style='color:{st_color};font-weight:700;'>● {item['status']}</span></td>"
+                        f"<td style='padding:4px 8px;'>{html.escape(item['phase'])}</td>"
+                        f"<td style='padding:4px 8px;'>{item['elapsed']}</td>"
+                        f"</tr>"
+                    )
+                table_el.markdown(
+                    f"<table style='width:100%;font-size:0.85rem;border-collapse:collapse;margin:8px 0;'>"
+                    f"<thead><tr style='text-align:left;border-bottom:1px solid rgba(255,255,255,0.1);'>"
+                    f"<th>ITEM</th><th>STATUS</th><th>PHASE</th><th>ELAPSED</th></tr></thead>"
+                    f"<tbody>{''.join(rows)}</tbody></table>",
+                    unsafe_allow_html=True,
+                )
+
+                # Active log stream (tail of all items)
+                all_logs = []
+                for item in batch_state:
+                    if item["lines"]:
+                        all_logs.append(f"[{item['name']}] {item['lines'][-1]}")
+                log_body.markdown(
                     '<div class="sx-log">'
-                    + "<br>".join(html.escape(x) for x in lines[-MAX_LOG_LINES:])
+                    + "<br>".join(html.escape(x) for x in all_logs[-MAX_LOG_LINES:])
                     + "</div>",
                     unsafe_allow_html=True,
                 )
 
-            result_holder: list = [None]
-            error_holder: list = [None]
-            done = threading.Event()
-
-            # Share the Streamlit script context so cb() can call element
-            # methods (meter.progress, body.markdown, etc.) from the worker
-            # thread — they emit to the same delta queue as the main thread.
-            try:
-                from streamlit.runtime.scriptrunner import (
-                    add_script_run_ctx,
-                    get_script_run_ctx,
-                )
-                _ctx = get_script_run_ctx()
-            except Exception:
-                _ctx = None
-
-            def _worker():
+        def process_item(item):
+            if ctx is not None:
                 try:
-                    result_holder[0] = fn(status_callback=cb, **kwargs)
-                except Exception as ex:  # noqa: BLE001
-                    error_holder[0] = ex
-                finally:
-                    done.set()
+                    add_script_run_ctx(threading.current_thread(), ctx)
+                except Exception:
+                    pass
+            item_t0 = time.monotonic()
+            with lock:
+                item["status"] = "PROCESSING"
+                item["phase"] = "STARTING"
+            update_ui()
 
-            worker = threading.Thread(target=_worker, daemon=True)
-            if _ctx is not None:
-                add_script_run_ctx(worker, _ctx)
-            worker.start()
+            highest_w = [0.0]
 
-            # Heartbeat: tick the elapsed clock every second. Updating
-            # timer_el is a targeted child-element delta — it does NOT
-            # re-render or collapse the parent st.status component.
-            while not done.wait(timeout=1.0):
-                elapsed = time.monotonic() - t0
-                timer_el.markdown(
-                    f'<span class="sx-eyebrow" style="color:var(--sx-ink-2)">'
-                    f'&#9201; {fmt_elapsed(elapsed)}</span>',
-                    unsafe_allow_html=True,
-                )
+            def item_cb(msg: str):
+                lbl, weight = classify(msg)
+                elapsed_s = time.monotonic() - item_t0
+                highest_w[0] = max(highest_w[0], weight)
+                with lock:
+                    item["phase"] = lbl
+                    item["progress"] = highest_w[0]
+                    item["elapsed"] = fmt_elapsed(elapsed_s)
+                    item["lines"].append(f"{int(elapsed_s):>5}s  {msg}")
+                update_ui()
 
-            # Worker has finished — clear the timer and render final state
-            timer_el.empty()
-            if error_holder[0] is not None:
-                status.update(label="FAILED", state="error", expanded=True)
-                S.set_(ns, "log", lines[-MAX_LOG_LINES:])
-                return None, format_error(error_holder[0])
+            kwargs = item["kwargs"].copy()
+            kwargs.pop("name", None)
 
-            meter.progress(1.0)
-            total = fmt_elapsed(time.monotonic() - t0)
-            status.update(label=f"COMPLETE · {total}", state="complete",
-                          expanded=False)
-            S.set_(ns, "log", lines[-MAX_LOG_LINES:])
-            S.set_(ns, "elapsed", total)
-            return result_holder[0], None
-    finally:
-        lock.release()
+            try:
+                res = fn(status_callback=item_cb, **kwargs)
+                with lock:
+                    item["status"] = "COMPLETE"
+                    item["phase"] = "COMPLETE"
+                    item["progress"] = 1.0
+                    item["result"] = res
+            except Exception as ex:
+                with lock:
+                    item["status"] = "FAILED"
+                    item["phase"] = "FAILED"
+                    item["error"] = format_error(ex)
+            update_ui()
+
+        # Submit tasks to pool
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_item, item) for item in batch_state]
+
+            # Heartbeat while tasks complete
+            all_done = False
+            while not all_done:
+                time.sleep(0.5)
+                with lock:
+                    all_done = all(item["status"] in ("COMPLETE", "FAILED") for item in batch_state)
+                    # Update elapsed timers for running items
+                    for item in batch_state:
+                        if item["status"] == "PROCESSING":
+                            item["elapsed"] = fmt_elapsed(time.monotonic() - t0)
+                update_ui()
+
+        total_elapsed = fmt_elapsed(time.monotonic() - t0)
+        failures = [i for i in batch_state if i["status"] == "FAILED"]
+        if failures and len(failures) == num_items:
+            status.update(label=f"BATCH FAILED · {total_elapsed}", state="error", expanded=True)
+        elif failures:
+            status.update(label=f"BATCH FINISHED WITH {len(failures)} ERROR(S) · {total_elapsed}", state="error", expanded=True)
+        else:
+            status.update(label=f"ALL {num_items} ITEMS COMPLETE · {total_elapsed}", state="complete", expanded=False)
+
+        results = []
+        for item in batch_state:
+            results.append((item["result"], item["error"]))
+
+        S.set_(ns, "batch_progress", batch_state)
+        S.set_(ns, "elapsed", total_elapsed)
+        return results
+
+
+def run_pipeline(ns: str, kind: str, fn, kwargs: dict):
+    """Execute a single pipeline worker, streaming progress into st.status.
+
+    Returns (result_tuple, error) — exactly one is None.
+    """
+    batch_res = run_batch_pipeline(ns, kind, fn, [kwargs])
+    if batch_res and len(batch_res) > 0:
+        return batch_res[0]
+    return None, ("PIPELINE ERROR", "Execution failed to start")
+

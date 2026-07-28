@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import tempfile
+import uuid
 import platform
 import fal_client
 from pipeline.utils import get_video_dimensions_and_duration, calculate_square_padding
@@ -72,16 +73,63 @@ _HEVC_CANDIDATES = [
 ]
 
 
-def _find_vspipe() -> str:
-    """Locate vspipe, checking the active venv's Scripts/ before PATH."""
-    import shutil as _shutil, pathlib as _pl
+def _find_ffms2_plugin() -> str | None:
+    """Return explicit path to ffms2 plugin if not automatically loaded into core."""
     try:
         import vapoursynth as _vs
-        candidate = (
-            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe"
-        )
-        if candidate.exists():
-            return str(candidate)
+        if hasattr(_vs.core, "ffms2"):
+            return None
+    except Exception:
+        pass
+    candidates = []
+    try:
+        import vapoursynth as _vs, os as _os
+        venv_plugins = _os.path.join(_os.path.dirname(_vs.__file__), "plugins")
+        for root, _, files in _os.walk(venv_plugins):
+            for f in files:
+                if "ffms2" in f.lower():
+                    candidates.append(_os.path.join(root, f))
+    except Exception:
+        pass
+    sysname = platform.system()
+    if sysname == "Darwin":
+        candidates.extend([
+            "/opt/homebrew/lib/libffms2.dylib",
+            "/opt/homebrew/lib/python3.14/site-packages/vapoursynth/plugins/libffms2.dylib",
+            "/opt/homebrew/lib/vapoursynth/libffms2.dylib",
+            "/usr/local/lib/libffms2.dylib",
+        ])
+    elif sysname == "Windows":
+        candidates.extend([
+            r"C:\Program Files\VapourSynth\plugins64\ffms2.dll",
+            r"C:\Program Files (x86)\VapourSynth\plugins32\ffms2.dll",
+        ])
+    else:
+        candidates.extend([
+            "/usr/lib/x86_64-linux-gnu/vapoursynth/libffms2.so",
+            "/usr/lib/vapoursynth/libffms2.so",
+            "/usr/local/lib/vapoursynth/libffms2.so",
+        ])
+    return next((p for p in candidates if os.path.isfile(p)), None)
+
+
+def _find_vspipe() -> str:
+    """Locate vspipe, checking active venv's bin/ or Scripts/ before system PATH."""
+    import shutil as _shutil, pathlib as _pl, sys as _sys
+    try:
+        import vapoursynth as _vs
+        prefix = _pl.Path(_sys.prefix)
+        candidates = [
+            prefix / "bin" / "vspipe",
+            prefix / "Scripts" / "vspipe.exe",
+            prefix / "Scripts" / "vspipe",
+            prefix / "bin" / "vspipe.exe",
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe",
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "bin" / "vspipe",
+        ]
+        for cand in candidates:
+            if cand.exists():
+                return str(cand)
     except Exception:
         pass
     found = _shutil.which("vspipe")
@@ -202,12 +250,14 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
         if status_callback:
             status_callback("Downloading outpainted video for local upscaling...")
             
-        temp_outpaint_path = os.path.join(tempfile.gettempdir(), "outpainted_video_temp.mp4")
+        uid = uuid.uuid4().hex[:8]
+        temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_video_temp_{uid}.mp4")
         import urllib.request
         urllib.request.urlretrieve(outpaint_url, temp_outpaint_path)
     
     # Determine output location
-    output_video_path = os.path.join(tempfile.gettempdir(), "delivery_4k_square.mp4")
+    uid = uuid.uuid4().hex[:8]
+    output_video_path = os.path.join(tempfile.gettempdir(), f"delivery_4k_square_{uid}.mp4")
     if os.path.exists(output_video_path):
         os.unlink(output_video_path)
         
@@ -217,15 +267,16 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
         if status_callback:
             status_callback("Performing studio-quality VapourSynth upscale (znedi3 + FineSharp). This will take a LONG time...")
 
-        vpy_path = os.path.join(tempfile.gettempdir(), "upscale.vpy")
+        vpy_path = os.path.join(tempfile.gettempdir(), f"upscale_{uid}.vpy")
 
-        # Plugins installed into the vapoursynth package's plugins/ dir are
-        # auto-loaded — no explicit LoadPlugin call needed.
+        ffms2_plugin = _find_ffms2_plugin()
+        load_ffms2 = f"core.std.LoadPlugin(r'{os.path.abspath(ffms2_plugin)}')\n" if ffms2_plugin else ""
+
         with open(vpy_path, "w") as f:
             f.write(f'''import vapoursynth as vs
 
 core = vs.core
-
+{load_ffms2}
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
 # Double luma resolution using neural net predictor

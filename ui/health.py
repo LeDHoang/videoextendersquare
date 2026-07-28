@@ -63,6 +63,13 @@ def ensure_ffmpeg_on_path() -> str | None:
         except Exception:
             pass
 
+    # Ensure vapoursynth config file exists for vspipe
+    try:
+        import sys as _sys, subprocess as _sp
+        _sp.run([_sys.executable, "-m", "vapoursynth", "config"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         return None
 
@@ -118,16 +125,22 @@ def smoke_encode(name: str, opts: list[str]) -> bool:
 
 
 def _vspipe_path() -> str | None:
-    """Find vspipe, checking the active venv's Scripts/ before relying on PATH."""
-    # The vapoursynth pip wheel bundles vspipe next to the Python scripts.
+    """Find vspipe, checking active venv's bin/ or Scripts/ before system PATH."""
     try:
         import vapoursynth as _vs
-        import pathlib as _pl
-        candidate = (
-            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe"
-        )
-        if candidate.exists():
-            return str(candidate)
+        import pathlib as _pl, sys as _sys
+        prefix = _pl.Path(_sys.prefix)
+        candidates = [
+            prefix / "bin" / "vspipe",
+            prefix / "Scripts" / "vspipe.exe",
+            prefix / "Scripts" / "vspipe",
+            prefix / "bin" / "vspipe.exe",
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe",
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "bin" / "vspipe",
+        ]
+        for cand in candidates:
+            if cand.exists():
+                return str(cand)
     except Exception:
         pass
     return shutil.which("vspipe")
@@ -135,19 +148,26 @@ def _vspipe_path() -> str | None:
 
 def _znedi3_plugin_path() -> str | None:
     """Return the first existing znedi3 plugin path, or None."""
+    try:
+        import vapoursynth as _vs
+        if hasattr(_vs.core, "znedi3"):
+            return "pip:vapoursynth"
+    except Exception:
+        pass
     candidates: list[str] = []
-    # Venv pip-installed vapoursynth auto-loads from its own plugins/ dir.
     try:
         import vapoursynth as _vs, os as _os
         venv_plugins = _os.path.join(_os.path.dirname(_vs.__file__), "plugins")
-        ext = ".dll" if platform.system() == "Windows" else ".so"
-        candidates.append(_os.path.join(venv_plugins, f"vsznedi3{ext}"))
+        for root, _, files in _os.walk(venv_plugins):
+            for f in files:
+                if "znedi3" in f.lower():
+                    candidates.append(_os.path.join(root, f))
     except Exception:
         pass
-    # System-wide fallbacks
     sysname = platform.system()
     if sysname == "Darwin":
         candidates.append("/opt/homebrew/lib/vapoursynth/vsznedi3.so")
+        candidates.append("/opt/homebrew/lib/vapoursynth/vsznedi3.dylib")
     elif sysname == "Windows":
         candidates.append(r"C:\Program Files\VapourSynth\plugins64\vsznedi3.dll")
     else:
@@ -227,7 +247,7 @@ def probe_environment(nonce: int = 0) -> dict[str, Probe]:
     )
 
     plugin = _znedi3_plugin_path()
-    has_znedi3 = bool(plugin and os.path.isfile(plugin))
+    has_znedi3 = bool(plugin and (plugin == "pip:vapoursynth" or os.path.isfile(plugin)))
     out["znedi3"] = Probe(
         "znedi3", "ZNEDI3", has_znedi3, "degrade",
         "available" if has_znedi3 else "not found",

@@ -104,12 +104,22 @@ def stage_video(uploaded) -> str:
     return str(dest)
 
 
-def discard_staged(path: str | None) -> None:
-    if path:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+def discard_staged(path: str | list[str] | None) -> None:
+    if not path:
+        return
+    paths = path if isinstance(path, list) else [path]
+    for p in paths:
+        if p and isinstance(p, str):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def batch_sig(uploaded_files: list | None) -> str | None:
+    if not uploaded_files:
+        return None
+    return ";".join(f"{f.name}|{f.size}" for f in uploaded_files)
 
 
 # --------------------------------------------------------------------------
@@ -173,16 +183,19 @@ def persist_result(worker_path: str, kind: str, params: dict) -> dict:
     }
 
 
-def discard_result(result: dict | None) -> None:
+def discard_result(result: dict | list[dict] | None) -> None:
     if not result:
         return
-    for key in ("path", "preview"):
-        p = result.get(key)
-        if p:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
+    items = result if isinstance(result, list) else [result]
+    for res in items:
+        if isinstance(res, dict):
+            for key in ("path", "preview"):
+                p = res.get(key)
+                if p:
+                    try:
+                        os.unlink(p)
+                    except OSError:
+                        pass
 
 
 @st.cache_data(show_spinner=False)
