@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat ~/.claude.json 2>/dev/null | grep -i \"account\\\\|plan\\\\|billing\\\\|key\\\\|auth\" || echo \"No relevant fields found\")",
+      "Read(//Users/hoangleduc/**)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); acct=d.get\\('oauthAccount',{}\\); print\\(f'Email: {acct.get\\(\\\\\"emailAddress\\\\\",\\\\\"N/A\\\\\"\\)}'\\); print\\(f'Name: {acct.get\\(\\\\\"fullName\\\\\",\\\\\"N/A\\\\\"\\)}'\\); print\\(f'Account UUID: {acct.get\\(\\\\\"accountUuid\\\\\",\\\\\"N/A\\\\\"\\)}'\\)\")",
+      "Bash(claude config *)",
+      "Bash(claude auth *)",
+      "Bash(env)",
+      "Bash(curl -s -o /dev/null -w \"HTTP Status: %{http_code}\\\\nTime: %{time_total}s\\\\n\" --connect-timeout 5 https://qgenie-api.qualcomm.com/)",
+      "Bash(nslookup qgenie-api.qualcomm.com)"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+fal-client
+streamlit
+Pillow
+opencv-python-headless
+python-dotenv
