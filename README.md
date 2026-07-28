@@ -1,109 +1,100 @@
 # Square Extender 4K
 
-Converts images and videos to a 1:1 square 4K master (3840×3840) by generatively
-outpainting the short edge via [fal.ai](https://fal.ai), then upscaling locally
-with FFmpeg.
+Converts images and videos into a **1:1 square 4K master (3840×3840)** by generatively outpainting padding via [fal.ai](https://fal.ai) and upscaling locally with hardware-accelerated **FFmpeg** or **VapourSynth**.
 
 ```
-UPLOAD  →  CONFIGURE  →  RESULT
+UPLOAD (Single / Batch)  →  CONFIGURE (Outpaint & Upscale)  →  RESULT (4K Master)
 ```
 
-## Requirements
+---
 
-- **Python 3.12** — must be an **x64** build. ARM64 Windows has no prebuilt
-  wheels for Streamlit's `pyarrow`/`httptools` dependencies, and building them
-  from source needs a C/C++ toolchain. An x64 interpreter runs fine under
-  Windows' emulation and gets the full wheel ecosystem.
-- **FFmpeg** (with `ffprobe`) — used for metadata, upscaling, and encoding.
+## Visual Showcase
+
+### Image Processing & Multi-File Batch Mode
+![Image Processing Interface](docs/images/image_extender.png)
+
+### Video Processing & Engine Selection
+![Video Processing Interface](docs/images/video_extender.png)
+
+### Interactive Render Comparison
+![Compare Page Interface](docs/images/compare_slider.png)
+
+---
+
+## Key Features
+
+- ⚡ **Multi-Item Batch Upload**: Drop single or multiple images (`PNG`, `JPG`, `WEBP`) or videos (`MP4`, `MOV`, `AVI`, `WEBM`) at once.
+- ⚙️ **Auto-Scaling Task Pool**: Dynamically manages CPU/GPU resources and queues jobs automatically when batch sizes exceed hardware capacity.
+- 🎨 **Dual Pipeline Modes**:
+  - **OUTPAINT + UPSCALE**: Generatively extends short edges via `fal.ai` cloud models before upscaling.
+  - **UPSCALE ONLY**: Runs 100% locally with zero cloud API keys required.
+- 🚀 **Dual Video Upscale Engines**:
+  - **FAST**: FFmpeg Lanczos4 + Contrast Adaptive Sharpening (CAS). High-speed & universal.
+  - **STUDIO**: VapourSynth `znedi3` neural net luma reconstruction + FineSharp.
+- 🔍 **System Diagnostic & Self-Healing**: Auto-locates `ffmpeg`, `ffprobe`, `vspipe`, and HEVC hardware encoders across system PATHs and virtual environments.
+
+---
+
+## Quick Start
+
+### 1. Requirements
+
+- **Python 3.10 to 3.12+**
+- **FFmpeg & FFprobe** (installed on system or PATH)
+
+### 2. Environment Setup
 
 ```bash
-python -m venv venv
-venv/Scripts/python.exe -m pip install -r requirements.txt   # Windows
-venv/Scripts/python.exe -m streamlit run app.py
+# Clone repository
+git clone https://github.com/LeDHoang/videoextendersquare.git
+cd videoextendersquare
+
+# Create virtual environment & install dependencies
+python -m venv .venv
+source .venv/bin/activate      # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Open http://localhost:8501.
+### 3. API Key Configuration
 
-### FFmpeg discovery
+Create a `.env` file from `.env.example`:
 
-The app locates FFmpeg at startup and prepends it to `PATH` in-process, so it
-works even when your shell can't see it (e.g. right after `winget install
-Gyan.FFmpeg`, before the shell restarts). It searches, in order:
+```env
+FAL_KEY=your_fal_ai_api_key_here
+```
 
-1. `SX_FFMPEG_DIR` or `FFMPEG_DIR` from the environment / `.env`
-2. `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\**\bin`
-3. `C:\ffmpeg\bin`, `C:\Program Files\ffmpeg\bin`
-4. `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`
+> **Note**: `FAL_KEY` is only required for generative outpainting. **UPSCALE ONLY** mode runs entirely offline.
 
-If none match, set `FFMPEG_DIR` in `.env`. The sidebar **SYSTEM** panel reports
-what was found.
+### 4. Launch Web Application
 
-### Configuration
+```bash
+streamlit run app.py
+```
 
-Copy `.env.example` to `.env` and set `FAL_KEY`. The key is only needed for
-outpainting — **UPSCALE ONLY** mode runs entirely locally. `.env` is gitignored;
-never commit it.
+Open **http://localhost:8501** in your browser.
 
-## Modes
-
-| | Needs `FAL_KEY` | What it does |
-|---|---|---|
-| **OUTPAINT + UPSCALE** | yes | Generatively fills the padding, then upscales to 4K |
-| **UPSCALE ONLY** | no | Skips the cloud entirely; local upscale only |
-
-### Upscale engines (video)
-
-- **FAST** — FFmpeg Lanczos4 + CAS sharpening. Always available.
-- **STUDIO** — VapourSynth `znedi3` neural luma reconstruction. Requires
-  VapourSynth, `vspipe` on `PATH`, and the `znedi3` plugin. The UI disables this
-  and explains what's missing when it can't run.
-
-The video master is **HEVC**, which most browsers cannot decode, so the player
-shows a generated H.264 proxy and the master is offered as a download.
-
-## Compare
-
-The Compare page A/B's a FAST vs STUDIO render of the same source with a drag
-slider. It scans `output/pairs/` for `<stem>_fast.mp4` + `<stem>_studio.mp4`
-pairs — generate them with `batch_upscale.py`. Media is served by a loopback
-HTTP server started automatically on an ephemeral port (no manual
-`python -m http.server` needed).
+---
 
 ## Architecture
 
 ```
-app.py                  entrypoint: page config, PATH heal, theme, navigation
-.streamlit/config.toml   native theme tokens + web font faces
-ui/
-├─ tokens.py             design tokens mirrored for Python
-├─ theme.py              CSS injection
-├─ assets/app.css        all custom CSS
-├─ assets/compare.html   compare-slider template
-├─ components.py         editorial primitives (hero, rules, stat rows, blocks)
-├─ state.py              namespaced session_state + step flow
-├─ health.py             PATH self-heal + environment probes
-├─ media.py              upload staging, metadata, result persistence, proxies
-├─ runner.py             st.status execution wrapper
-├─ mediaserver.py        loopback media server
-├─ sidebar.py            API key + SYSTEM panel
-└─ views/                image_view, video_view, compare_view
-pipeline/                unchanged processing core (fal.ai + FFmpeg)
+app.py                  Streamlit entrypoint: layout, navigation, environment setup
+.streamlit/config.toml  Native dark theme tokens & web fonts
+docs/images/            Documentation UI screenshots
+pipeline/               Core processing workers (thread-isolated)
+├─ image_worker.py      fal.ai flux outpaint + FFmpeg Lanczos4 upscale
+├─ video_worker.py      fal.ai Kling video outpaint + FFmpeg / VapourSynth znedi3 upscale
+└─ utils.py             Geometry & padding math
+ui/                     Editorial UI & state engine
+├─ views/               image_view, video_view, compare_view
+├─ runner.py            Thread pool manager with live progress streaming & queuing
+├─ health.py            System PATH self-heal & hardware probes
+├─ media.py             Session staging, proxies & result persistence
+└─ assets/app.css       Custom theme CSS
 ```
 
-`pipeline/` is treated as a fixed API; the UI layer never changes its function
-signatures.
+---
 
-## Maintenance notes
+## License
 
-- **After upgrading Streamlit**, check the `FRAGILE` block at the bottom of
-  `ui/assets/app.css`. Those rules target internal `data-testid` attributes,
-  which are not a public API and have changed across minor releases. They are
-  scoped and written so that failure is cosmetic only.
-- **Web fonts must be declared as `[[theme.fontFaces]]`** in
-  `.streamlit/config.toml`. Streamlit strips `<link>` tags from `st.markdown`
-  and relocates injected `<style>` blocks, so neither a `<link>` nor an
-  `@import` will ever fetch a font.
-- **Concurrent renders are serialized** by a process-wide lock. The pipeline
-  workers write to a fixed shared temp path and unlink it at run start, so two
-  simultaneous renders would corrupt each other. Results are moved to a
-  per-session directory the moment a worker returns.
+MIT License. Built for high-performance video and image transformation workflows.
