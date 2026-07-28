@@ -8,7 +8,9 @@
       "Bash(claude auth *)",
       "Bash(env)",
       "Bash(curl -s -o /dev/null -w \"HTTP Status: %{http_code}\\\\nTime: %{time_total}s\\\\n\" --connect-timeout 5 https://qgenie-api.qualcomm.com/)",
-      "Bash(nslookup qgenie-api.qualcomm.com)"
+      "Bash(nslookup qgenie-api.qualcomm.com)",
+      "Bash(\"venv/Scripts/streamlit.exe\" run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501/_stcore/health)"
     ]
   }
 }
