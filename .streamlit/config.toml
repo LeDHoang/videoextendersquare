@@ -20,8 +20,30 @@ baseRadius = "none"
 buttonRadius = "none"
 baseFontSize = 15
 font = "Archivo, ui-sans-serif, system-ui, sans-serif"
-headingFont = "'Archivo Black', Archivo, sans-serif"
+headingFont = "'Archivo Black', Archivo, 'Arial Black', system-ui, sans-serif"
 codeFont = "'JetBrains Mono', ui-monospace, monospace"
+
+# Fonts must be declared here, not via @import or <link> in st.markdown:
+# Streamlit strips <link> tags and relocates injected <style> blocks, so
+# neither mechanism ever fetches the font. Archivo and JetBrains Mono are
+# variable fonts, so one file covers the whole weight range.
+[[theme.fontFaces]]
+family = "Archivo"
+url = "https://fonts.gstatic.com/s/archivo/v25/k3kPo8UDI-1M0wlSV9XAw6lQkqWY8Q82sLydOxI.woff2"
+weight = "100 900"
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Archivo Black"
+url = "https://fonts.gstatic.com/s/archivoblack/v23/HTxqL289NzCGg4MzN6KJ7eW6CYyF_g.woff2"
+weight = "400"
+style = "normal"
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2"
+weight = "100 800"
+style = "normal"
 
 [theme.sidebar]
 backgroundColor = "#0C0E10"

@@ -1,6 +1,8 @@
 import os
+import sys
 import time
 import tempfile
+import platform
 import fal_client
 from pipeline.utils import get_video_dimensions_and_duration, calculate_square_padding
 
@@ -56,6 +58,58 @@ def poll_job_status(handler, status_prefix, status_callback=None):
         
     # Retrieve final result
     return handler.get()
+
+_ENCODER_CACHE = None
+
+# HEVC encoders, best-first. Hardware encoders are preferred but must be
+# verified: hevc_nvenc lists in -encoders on any machine with the ffmpeg build,
+# then fails at runtime with "Cannot load nvcuda.dll" if there is no NVIDIA GPU.
+_HEVC_CANDIDATES = [
+    ("hevc_videotoolbox", ["-q:v", "65", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]),
+    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-cq", "28"]),
+    ("hevc_qsv", ["-global_quality", "28"]),
+    ("libx265", ["-crf", "28", "-preset", "slow", "-tag:v", "hvc1"]),
+]
+
+
+def _pick_encoder():
+    """Probe for an HEVC encoder that actually works. Cached per process.
+
+    Presence in `ffmpeg -encoders` is necessary but not sufficient, so each
+    candidate gets a one-frame smoke encode before being selected.
+
+    Returns (encoder_name, opts_list).
+    """
+    global _ENCODER_CACHE
+    if _ENCODER_CACHE:
+        return _ENCODER_CACHE
+
+    import subprocess
+
+    no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    listed = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        capture_output=True, text=True, creationflags=no_window,
+    ).stdout or ""
+
+    for name, opts in _HEVC_CANDIDATES:
+        if name not in listed:
+            continue
+        probe = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-v", "error",
+             "-f", "lavfi", "-i", "testsrc=d=0.1:s=64x64",
+             "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, creationflags=no_window,
+        )
+        if probe.returncode == 0:
+            _ENCODER_CACHE = (name, opts)
+            return _ENCODER_CACHE
+
+    raise RuntimeError(
+        "No working HEVC encoder found (tried: "
+        + ", ".join(n for n, _ in _HEVC_CANDIDATES) + ")"
+    )
+
 
 def process_video(video_path, prompt, fal_key=None, status_callback=None, outpaint_model="fal-ai/klingx", upscale_model="fal-ai/seedvr-upscale-video", upscale_only=False, sharpening=0.0, upscale_engine="fast"):
     """
@@ -142,15 +196,26 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
     if upscale_engine == "studio":
         if status_callback:
             status_callback("Performing studio-quality VapourSynth upscale (znedi3 + FineSharp). This will take a LONG time...")
-            
+
         vpy_path = os.path.join(tempfile.gettempdir(), "upscale.vpy")
-        pipeline_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Detect platform and set appropriate plugin path
+        system = platform.system()
+        if system == "Darwin":
+            plugin_path = "/opt/homebrew/lib/vapoursynth/vsznedi3.so"
+        elif system == "Linux":
+            plugin_path = "/usr/lib/vapoursynth/vsznedi3.so"
+        elif system == "Windows":
+            plugin_path = "C:\\Program Files\\VapourSynth\\plugins64\\vsznedi3.dll"
+        else:
+            raise RuntimeError(f"Unsupported platform for VapourSynth: {system}")
+
         with open(vpy_path, "w") as f:
             f.write(f'''import vapoursynth as vs
 import os
 
 core = vs.core
-core.std.LoadPlugin('/opt/homebrew/lib/vapoursynth/vsznedi3.so')
+core.std.LoadPlugin(r'{plugin_path}')
 
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
@@ -160,40 +225,42 @@ clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=
 clip = core.resize.Spline36(clip, width=3840, height=3840)
 clip.set_output()
 ''')
-        
-        # Run vspipe and stream stdout into ffmpeg, applying CAS sharpening hardware-accelerated
+
+        # Probe for a working encoder rather than assuming one per OS.
+        encoder, encoder_opts = _pick_encoder()
+
+        # Run vspipe and stream stdout into ffmpeg, applying CAS sharpening
         cmd = [
             "sh", "-c",
-            f"vspipe -c y4m '{vpy_path}' - | ffmpeg -y -i - -vf 'cas=0.5' -c:v hevc_videotoolbox -q:v 65 -pix_fmt yuv420p -tag:v hvc1 '{output_video_path}'"
+            f"vspipe -c y4m '{vpy_path}' - | ffmpeg -y -i - -vf 'cas=0.5' -c:v {encoder} {' '.join(encoder_opts)} '{output_video_path}'"
         ]
-        
+
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"FFmpeg pipeline crashed with error:\\n{e.stderr.decode()}")
         finally:
-            os.unlink(vpy_path)
+            if os.path.exists(vpy_path):
+                os.unlink(vpy_path)
     else:
         if status_callback:
-            status_callback("Performing hardware-accelerated 4K VideoToolbox upscale via FFmpeg...")
-            
+            status_callback("Performing hardware-accelerated 4K upscale via FFmpeg...")
+
         # Build the filter graph
         vf_filter = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
         if sharpening > 0.0:
             vf_filter += f",cas={sharpening}"
-            
-        # Run the hardware-accelerated Mac-optimized upscale command
+
+        # Probe for a working encoder rather than assuming one per OS.
+        encoder, encoder_opts = _pick_encoder()
+
         cmd = [
             "ffmpeg", "-y",
             "-i", temp_outpaint_path,
             "-vf", vf_filter,
-            "-c:v", "hevc_videotoolbox",
-            "-q:v", "65",
-            "-pix_fmt", "yuv420p",
-            "-tag:v", "hvc1",
-            output_video_path
-        ]
-        
+            "-c:v", encoder
+        ] + encoder_opts + [output_video_path]
+
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     
     # Clean up intermediate video

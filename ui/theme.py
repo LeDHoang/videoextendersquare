@@ -19,6 +19,11 @@ def inject_theme() -> None:
     """Inject the editorial theme CSS into the page.
 
     Call this once from app.py, before any view renders.
+
+    Note: web fonts are NOT loaded here. Streamlit strips <link> tags out of
+    st.markdown and relocates injected <style> blocks, so neither a <link> nor
+    an @import ever triggers the fetch. Fonts are declared as
+    [[theme.fontFaces]] in .streamlit/config.toml instead.
     """
     css = _load_css()
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)

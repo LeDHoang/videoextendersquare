@@ -1,14 +1,15 @@
 import io
-import cv2
+import json
+import subprocess
 from PIL import Image
 
 def get_image_dimensions(image_path_or_bytes):
     """
     Reads an image from a file path or bytes and returns its dimensions.
-    
+
     Args:
         image_path_or_bytes: Str path or bytes object.
-        
+
     Returns:
         tuple: (width, height)
     """
@@ -16,35 +17,40 @@ def get_image_dimensions(image_path_or_bytes):
         image_file = io.BytesIO(image_path_or_bytes)
     else:
         image_file = image_path_or_bytes
-        
+
     with Image.open(image_file) as img:
         return img.size  # (width, height)
 
 def get_video_dimensions_and_duration(video_path):
     """
-    Reads a video from a file path and returns its dimensions and duration.
-    
+    Reads a video from a file path and returns its dimensions and duration using ffprobe.
+
     Args:
         video_path: Path to the local video file.
-        
+
     Returns:
         tuple: (width, height, duration_seconds)
     """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
-        
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    cap.release()
-    
-    duration = 0.0
-    if fps > 0:
-        duration = frame_count / fps
-        
-    return width, height, duration
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=width,height,duration", "-of", "json", video_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        data = json.loads(result.stdout)
+        stream = data["streams"][0]
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        duration = float(stream.get("duration", 0))
+
+        if width == 0 or height == 0:
+            raise ValueError(f"Could not determine video dimensions for {video_path}")
+
+        return width, height, duration
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, IndexError) as e:
+        raise ValueError(f"Could not read video metadata from {video_path}: {e}")
 
 def calculate_square_padding(width, height):
     """
