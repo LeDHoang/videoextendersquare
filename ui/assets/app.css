@@ -1,0 +1,626 @@
+/* Square Extender 4K — Editorial CSS
+   ====================================
+
+   Design tokens (keep in sync with ui/tokens.py and .streamlit/config.toml):
+   - Colors: --sx-bg, --sx-surface, --sx-rule, --sx-ink, --sx-accent, --sx-warn
+   - Type: --sx-t-hero, --sx-t-display, --sx-t-stat, --sx-t-body, --sx-t-eyebrow, --sx-t-mono
+   - Spacing: --sx-1 through --sx-9 (4px base)
+   - Rules: hairline (1px), heavy (3px), accent (6px)
+
+   CSS architecture (three tiers, strict preference order):
+   1. Own markup + CSS custom properties (80% of aesthetic, zero Streamlit coupling)
+   2. st.container(key="...") → .st-key-<key> scoped selectors (documented hook)
+   3. Bare [data-testid=...] — last resort, listed in FRAGILE block at bottom
+*/
+
+:root {
+  /* Color palette */
+  --sx-bg: #08090A;
+  --sx-surface: #101214;
+  --sx-surface-2: #16191C;
+  --sx-rule: #24282D;
+  --sx-rule-strong: #3A4047;
+  --sx-ink: #F2F3F5;
+  --sx-ink-2: #9BA1A8;
+  --sx-ink-3: #5F666D;
+  --sx-accent: #FF3B1F;
+  --sx-accent-hi: #FF5C42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-on-accent: #0A0A0A;
+  --sx-warn: #F2C744;
+
+  /* Type scale (baseFontSize=15, so 1rem=15px) */
+  --sx-t-hero: clamp(2.75rem, 7vw, 5.25rem);
+  --sx-t-display: 3rem;
+  --sx-t-numeral: 4.5rem;
+  --sx-t-stat: 2.25rem;
+  --sx-t-h2: 1.4rem;
+  --sx-t-body: 0.9375rem;
+  --sx-t-eyebrow: 0.6875rem;
+  --sx-t-mono: 0.8125rem;
+
+  /* Spacing (4px base) */
+  --sx-1: 4px;
+  --sx-2: 8px;
+  --sx-3: 12px;
+  --sx-4: 16px;
+  --sx-5: 24px;
+  --sx-6: 32px;
+  --sx-7: 48px;
+  --sx-8: 64px;
+  --sx-9: 96px;
+
+  /* Rule weights */
+  --sx-rule-hairline: 1px solid var(--sx-rule);
+  --sx-rule-heavy: 3px solid var(--sx-ink);
+  --sx-rule-accent: 6px solid var(--sx-accent);
+}
+
+/* Google Fonts import — single network dependency, no hash rot */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Archivo+Black&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ============================================================================
+   GLOBAL TYPOGRAPHY & LAYOUT
+   ============================================================================ */
+
+html, body, .stApp {
+  background-color: var(--sx-bg);
+  color: var(--sx-ink);
+  font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400; /* Archivo Black is a single ultra weight */
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+
+code, pre, .sx-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+   EDITORIAL PRIMITIVES
+   ============================================================================ */
+
+/* Hero wordmark — solid ink with accent rule beneath */
+.sx-hero {
+  font-size: var(--sx-t-hero);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  line-height: 0.84;
+  letter-spacing: -0.045em;
+  text-transform: uppercase;
+  color: var(--sx-ink);
+  margin: 0 0 var(--sx-4) 0;
+  text-wrap: balance;
+}
+
+.sx-hero::after {
+  content: '';
+  display: block;
+  height: 6px;
+  background-color: var(--sx-accent);
+  margin-top: var(--sx-3);
+}
+
+/* Display headings — step titles, section headers */
+.sx-display {
+  font-size: var(--sx-t-display);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  margin: 0 0 var(--sx-3) 0;
+}
+
+.sx-display.sx-inactive {
+  color: var(--sx-ink-3);
+}
+
+.sx-display.sx-active {
+  color: var(--sx-ink);
+}
+
+/* Subtitle / eyebrow — kickers, widget labels */
+.sx-eyebrow {
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sx-ink-2);
+  margin: 0;
+}
+
+/* Body text */
+.sx-body {
+  font-size: var(--sx-t-body);
+  line-height: 1.55;
+  color: var(--sx-ink);
+}
+
+.sx-body-secondary {
+  color: var(--sx-ink-2);
+}
+
+/* Monospace — paths, model IDs, log lines */
+.sx-mono {
+  font-size: var(--sx-t-mono);
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--sx-ink-2);
+  background-color: var(--sx-surface-2);
+  padding: var(--sx-2) var(--sx-3);
+  border-radius: 0;
+  word-break: break-all;
+}
+
+/* ============================================================================
+   RULES & DIVIDERS
+   ============================================================================ */
+
+.sx-rule {
+  border: none;
+  height: 1px;
+  background-color: var(--sx-rule);
+  margin: var(--sx-4) 0;
+}
+
+.sx-rule.sx-heavy {
+  height: 3px;
+  background-color: var(--sx-ink);
+  margin: var(--sx-5) 0;
+}
+
+.sx-rule.sx-accent {
+  height: 6px;
+  background-color: var(--sx-accent);
+  margin: var(--sx-4) 0;
+}
+
+/* ============================================================================
+   STEP LAYOUT
+   ============================================================================ */
+
+.sx-step-container {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sx-6);
+  padding-top: var(--sx-6);
+  border-top: var(--sx-rule-heavy);
+  margin-bottom: var(--sx-8);
+}
+
+.sx-step-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sx-3);
+  min-width: 80px;
+}
+
+.sx-step-numeral {
+  font-size: var(--sx-t-numeral);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  line-height: 0.8;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sx-ink-3);
+}
+
+.sx-step-gutter.sx-active .sx-step-numeral {
+  color: var(--sx-accent);
+}
+
+.sx-step-accent-rule {
+  width: 6px;
+  height: 0;
+  background-color: transparent;
+  transition: height 0.2s ease;
+}
+
+.sx-step-gutter.sx-active .sx-step-accent-rule {
+  height: 100%;
+  background-color: var(--sx-accent);
+}
+
+.sx-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sx-5);
+}
+
+/* ============================================================================
+   STAT ROWS — dimensions, durations, file sizes
+   ============================================================================ */
+
+.sx-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sx-4);
+  padding: var(--sx-4);
+  border: var(--sx-rule-hairline);
+  border-radius: 0;
+  background-color: var(--sx-surface);
+}
+
+.sx-stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sx-2);
+}
+
+.sx-stat-label {
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sx-ink-3);
+}
+
+.sx-stat-value {
+  font-size: var(--sx-t-stat);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sx-ink);
+}
+
+/* ============================================================================
+   ACCENT BLOCKS — warnings, explanations, degraded states
+   ============================================================================ */
+
+.sx-accent-block {
+  padding: var(--sx-4);
+  border-left: var(--sx-rule-accent);
+  background-color: var(--sx-accent-dim);
+  border-radius: 0;
+}
+
+.sx-accent-block.sx-warn {
+  border-left-color: var(--sx-warn);
+  background-color: rgba(242, 199, 68, 0.08);
+}
+
+.sx-accent-block-title {
+  font-size: var(--sx-t-h2);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--sx-accent);
+  margin: 0 0 var(--sx-2) 0;
+}
+
+.sx-accent-block.sx-warn .sx-accent-block-title {
+  color: var(--sx-warn);
+}
+
+.sx-accent-block-body {
+  font-size: var(--sx-t-body);
+  line-height: 1.55;
+  color: var(--sx-ink-2);
+}
+
+/* ============================================================================
+   BUTTONS & CONTROLS
+   ============================================================================ */
+
+.sx-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sx-2);
+  padding: var(--sx-3) var(--sx-4);
+  background-color: var(--sx-accent);
+  color: var(--sx-on-accent);
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.sx-button:hover:not(:disabled) {
+  background-color: var(--sx-accent-hi);
+}
+
+.sx-button:focus {
+  outline: 2px solid var(--sx-ink);
+  outline-offset: 2px;
+}
+
+.sx-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+   EMPTY STATE
+   ============================================================================ */
+
+.sx-empty-state {
+  padding: var(--sx-6);
+  border: var(--sx-rule-hairline);
+  border-radius: 0;
+  background-color: var(--sx-surface);
+  text-align: center;
+}
+
+.sx-empty-state-title {
+  font-size: var(--sx-t-h2);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--sx-ink-3);
+  margin: 0 0 var(--sx-3) 0;
+}
+
+.sx-empty-state-body {
+  font-size: var(--sx-t-body);
+  line-height: 1.55;
+  color: var(--sx-ink-2);
+  margin: 0;
+}
+
+/* ============================================================================
+   RESULT HERO — full-width result display area
+   ============================================================================ */
+
+.sx-result-hero {
+  width: 100%;
+  padding: var(--sx-6);
+  border-top: var(--sx-rule-accent);
+  background-color: var(--sx-surface);
+  border-radius: 0;
+}
+
+.sx-result-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--sx-5);
+  gap: var(--sx-4);
+}
+
+.sx-result-hero-title {
+  font-size: var(--sx-t-display);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--sx-ink);
+  margin: 0;
+}
+
+.sx-result-hero-meta {
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sx-ink-2);
+}
+
+.sx-result-media {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
+  margin: var(--sx-5) 0;
+  background-color: var(--sx-surface-2);
+  border-radius: 0;
+}
+
+.sx-result-media img,
+.sx-result-media video {
+  max-width: 100%;
+  max-height: 900px;
+  object-fit: contain;
+}
+
+/* ============================================================================
+   PROGRESS & STATUS
+   ============================================================================ */
+
+.sx-phase {
+  font-size: var(--sx-t-h2);
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--sx-accent);
+  margin: 0 0 var(--sx-3) 0;
+}
+
+.sx-log {
+  font-size: var(--sx-t-mono);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--sx-ink-2);
+  background-color: var(--sx-surface-2);
+  padding: var(--sx-4);
+  border-radius: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ============================================================================
+   SIDEBAR STYLING
+   ============================================================================ */
+
+.sx-sidebar-section {
+  margin-bottom: var(--sx-6);
+  padding-bottom: var(--sx-5);
+  border-bottom: var(--sx-rule-hairline);
+}
+
+.sx-sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.sx-sidebar-title {
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sx-ink-2);
+  margin: 0 0 var(--sx-3) 0;
+}
+
+.sx-health-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sx-3);
+  padding: var(--sx-2) 0;
+  font-size: var(--sx-t-body);
+  color: var(--sx-ink-2);
+}
+
+.sx-health-glyph {
+  font-size: 1.2em;
+  min-width: 1.2em;
+  text-align: center;
+}
+
+.sx-health-glyph.sx-ok {
+  color: var(--sx-ink-2);
+}
+
+.sx-health-glyph.sx-degrade {
+  color: var(--sx-warn);
+}
+
+.sx-health-glyph.sx-block {
+  color: var(--sx-accent);
+}
+
+/* ============================================================================
+   BLOCKING BANNER — full-bleed accent bar for critical issues
+   ============================================================================ */
+
+.sx-blocking-banner {
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  padding: var(--sx-4) var(--sx-6);
+  background-color: var(--sx-accent);
+  color: var(--sx-on-accent);
+  border-radius: 0;
+  margin-bottom: var(--sx-6);
+}
+
+.sx-blocking-banner-title {
+  font-size: var(--sx-t-eyebrow);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin: 0 0 var(--sx-2) 0;
+}
+
+.sx-blocking-banner-body {
+  font-size: var(--sx-t-body);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* ============================================================================
+   FRAGILE — Streamlit 1.60 internals
+
+   These selectors target internal Streamlit DOM. They are scoped where possible
+   to minimize breakage on version upgrades. If a testid changes, the scoped
+   version affects only that one widget, not the whole page.
+
+   Verify after upgrading Streamlit: grep -n "FRAGILE" ui/assets/app.css
+   ============================================================================ */
+
+/* File uploader restyle — scoped to a keyed container */
+.st-key-sx-upload-zone [data-testid="stFileUploaderDropzone"] {
+  border: var(--sx-rule-hairline) !important;
+  border-radius: 0 !important;
+  background-color: var(--sx-surface) !important;
+  padding: var(--sx-5) !important;
+}
+
+.st-key-sx-upload-zone [data-testid="stFileUploaderDropzone"]:hover {
+  background-color: var(--sx-surface-2) !important;
+}
+
+/* Streamlit native buttons — override the default styling */
+button[kind="primary"] {
+  background: var(--sx-accent) !important;
+  color: var(--sx-on-accent) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: var(--sx-3) var(--sx-4) !important;
+  font-size: var(--sx-t-eyebrow) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  transition: background-color 0.2s ease !important;
+}
+
+button[kind="primary"]:hover {
+  background: var(--sx-accent-hi) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+button[kind="primary"]:focus {
+  outline: 2px solid var(--sx-ink) !important;
+  outline-offset: 2px !important;
+}
+
+button[kind="primary"]:disabled {
+  opacity: 0.5 !important;
+}
+
+/* Streamlit text input / textarea */
+input, textarea {
+  background-color: var(--sx-surface) !important;
+  color: var(--sx-ink) !important;
+  border: var(--sx-rule-hairline) !important;
+  border-radius: 0 !important;
+}
+
+input:focus, textarea:focus {
+  border-color: var(--sx-accent) !important;
+  box-shadow: none !important;
+}
+
+/* Streamlit slider */
+.stSlider [data-testid="stSlider"] {
+  border-radius: 0 !important;
+}
+
+/* Streamlit expander */
+details {
+  border: var(--sx-rule-hairline) !important;
+  border-radius: 0 !important;
+  background-color: var(--sx-surface) !important;
+}
+
+details summary {
+  padding: var(--sx-3) var(--sx-4) !important;
+  cursor: pointer;
+}
+
+/* Streamlit container borders */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: 0 !important;
+}
