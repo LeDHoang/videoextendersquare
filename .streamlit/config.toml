@@ -1,0 +1,29 @@
+[server]
+maxUploadSize = 1024
+fileWatcherType = "auto"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#FF3B1F"
+backgroundColor = "#08090A"
+secondaryBackgroundColor = "#101214"
+textColor = "#F2F3F5"
+linkColor = "#FF5C42"
+codeBackgroundColor = "#16191C"
+borderColor = "#24282D"
+dataframeBorderColor = "#24282D"
+showWidgetBorder = true
+baseRadius = "none"
+buttonRadius = "none"
+baseFontSize = 15
+font = "Archivo, ui-sans-serif, system-ui, sans-serif"
+headingFont = "'Archivo Black', Archivo, sans-serif"
+codeFont = "'JetBrains Mono', ui-monospace, monospace"
+
+[theme.sidebar]
+backgroundColor = "#0C0E10"
+secondaryBackgroundColor = "#16191C"
+borderColor = "#24282D"
