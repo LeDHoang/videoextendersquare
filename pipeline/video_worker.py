@@ -72,6 +72,26 @@ _HEVC_CANDIDATES = [
 ]
 
 
+def _find_vspipe() -> str:
+    """Locate vspipe, checking the active venv's Scripts/ before PATH."""
+    import shutil as _shutil, pathlib as _pl
+    try:
+        import vapoursynth as _vs
+        candidate = (
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe"
+        )
+        if candidate.exists():
+            return str(candidate)
+    except Exception:
+        pass
+    found = _shutil.which("vspipe")
+    if found:
+        return found
+    raise RuntimeError(
+        "vspipe not found. Install VapourSynth or add it to PATH."
+    )
+
+
 def _pick_encoder():
     """Probe for an HEVC encoder that actually works. Cached per process.
 
@@ -199,23 +219,12 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
 
         vpy_path = os.path.join(tempfile.gettempdir(), "upscale.vpy")
 
-        # Detect platform and set appropriate plugin path
-        system = platform.system()
-        if system == "Darwin":
-            plugin_path = "/opt/homebrew/lib/vapoursynth/vsznedi3.so"
-        elif system == "Linux":
-            plugin_path = "/usr/lib/vapoursynth/vsznedi3.so"
-        elif system == "Windows":
-            plugin_path = "C:\\Program Files\\VapourSynth\\plugins64\\vsznedi3.dll"
-        else:
-            raise RuntimeError(f"Unsupported platform for VapourSynth: {system}")
-
+        # Plugins installed into the vapoursynth package's plugins/ dir are
+        # auto-loaded — no explicit LoadPlugin call needed.
         with open(vpy_path, "w") as f:
             f.write(f'''import vapoursynth as vs
-import os
 
 core = vs.core
-core.std.LoadPlugin(r'{plugin_path}')
 
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
@@ -229,16 +238,18 @@ clip.set_output()
         # Probe for a working encoder rather than assuming one per OS.
         encoder, encoder_opts = _pick_encoder()
 
-        # Run vspipe and stream stdout into ffmpeg, applying CAS sharpening
+        # Use the venv's vspipe if it isn't on PATH yet.
+        vspipe = _find_vspipe()
+
         cmd = [
             "sh", "-c",
-            f"vspipe -c y4m '{vpy_path}' - | ffmpeg -y -i - -vf 'cas=0.5' -c:v {encoder} {' '.join(encoder_opts)} '{output_video_path}'"
+            f"'{vspipe}' -c y4m '{vpy_path}' - | ffmpeg -y -i - -vf 'cas=0.5' -c:v {encoder} {' '.join(encoder_opts)} '{output_video_path}'"
         ]
 
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"FFmpeg pipeline crashed with error:\\n{e.stderr.decode()}")
+            raise RuntimeError(f"FFmpeg pipeline crashed with error:\n{e.stderr.decode()}")
         finally:
             if os.path.exists(vpy_path):
                 os.unlink(vpy_path)

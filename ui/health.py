@@ -48,10 +48,21 @@ def _candidate_dirs() -> list[str]:
 
 def ensure_ffmpeg_on_path() -> str | None:
     """Prepend a directory containing both ffmpeg and ffprobe to PATH.
+    Also sets VSSCRIPT_PATH if the vapoursynth pip package is installed,
+    so that vspipe can find vsscript.dll without a system-wide VapourSynth install.
 
-    Returns the directory used, or None if ffmpeg was already resolvable or
-    no candidate worked. Idempotent — safe to call on every rerun.
+    Returns the ffmpeg directory added, or None. Idempotent.
     """
+    # Set VSSCRIPT_PATH for the pip-installed vapoursynth package.
+    if not os.environ.get("VSSCRIPT_PATH"):
+        try:
+            import vapoursynth as _vs
+            vsscript = os.path.join(os.path.dirname(_vs.__file__), "vsscript.dll")
+            if os.path.isfile(vsscript):
+                os.environ["VSSCRIPT_PATH"] = vsscript
+        except Exception:
+            pass
+
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         return None
 
@@ -106,13 +117,42 @@ def smoke_encode(name: str, opts: list[str]) -> bool:
     return bool(p and p.returncode == 0)
 
 
-def _znedi3_plugin_path() -> str:
+def _vspipe_path() -> str | None:
+    """Find vspipe, checking the active venv's Scripts/ before relying on PATH."""
+    # The vapoursynth pip wheel bundles vspipe next to the Python scripts.
+    try:
+        import vapoursynth as _vs
+        import pathlib as _pl
+        candidate = (
+            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe"
+        )
+        if candidate.exists():
+            return str(candidate)
+    except Exception:
+        pass
+    return shutil.which("vspipe")
+
+
+def _znedi3_plugin_path() -> str | None:
+    """Return the first existing znedi3 plugin path, or None."""
+    candidates: list[str] = []
+    # Venv pip-installed vapoursynth auto-loads from its own plugins/ dir.
+    try:
+        import vapoursynth as _vs, os as _os
+        venv_plugins = _os.path.join(_os.path.dirname(_vs.__file__), "plugins")
+        ext = ".dll" if platform.system() == "Windows" else ".so"
+        candidates.append(_os.path.join(venv_plugins, f"vsznedi3{ext}"))
+    except Exception:
+        pass
+    # System-wide fallbacks
     sysname = platform.system()
     if sysname == "Darwin":
-        return "/opt/homebrew/lib/vapoursynth/vsznedi3.so"
-    if sysname == "Windows":
-        return r"C:\Program Files\VapourSynth\plugins64\vsznedi3.dll"
-    return "/usr/lib/vapoursynth/vsznedi3.so"
+        candidates.append("/opt/homebrew/lib/vapoursynth/vsznedi3.so")
+    elif sysname == "Windows":
+        candidates.append(r"C:\Program Files\VapourSynth\plugins64\vsznedi3.dll")
+    else:
+        candidates.append("/usr/lib/vapoursynth/vsznedi3.so")
+    return next((p for p in candidates if os.path.isfile(p)), None)
 
 
 @st.cache_resource(show_spinner=False)
@@ -179,7 +219,7 @@ def probe_environment(nonce: int = 0) -> dict[str, Probe]:
         "Needed for browser-playable previews. HEVC will not play in the player.",
     )
 
-    has_vs = find_spec("vapoursynth") is not None and shutil.which("vspipe") is not None
+    has_vs = find_spec("vapoursynth") is not None and _vspipe_path() is not None
     out["vapoursynth"] = Probe(
         "vapoursynth", "STUDIO", has_vs, "degrade",
         "available" if has_vs else "unavailable",
@@ -187,11 +227,13 @@ def probe_environment(nonce: int = 0) -> dict[str, Probe]:
     )
 
     plugin = _znedi3_plugin_path()
-    has_znedi3 = os.path.isfile(plugin)
+    has_znedi3 = bool(plugin and os.path.isfile(plugin))
     out["znedi3"] = Probe(
         "znedi3", "ZNEDI3", has_znedi3, "degrade",
-        "available" if has_znedi3 else "not at expected path",
-        f"Studio engine needs the znedi3 plugin at {plugin}",
+        "available" if has_znedi3 else "not found",
+        f"Studio engine needs the znedi3 plugin."
+        + (f" Found at: {plugin}" if plugin else
+           " Install VapourSynth via winget or pip install vapoursynth."),
     )
 
     return out

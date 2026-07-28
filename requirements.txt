@@ -2,3 +2,4 @@ streamlit>=1.60,<2
 fal-client>=1.0
 Pillow>=10
 python-dotenv>=1.0
+vapoursynth==78
