@@ -506,8 +506,100 @@ code, pre, .sx-mono {
 }
 
 /* ============================================================================
-   SIDEBAR STYLING
+   SIDEBAR STYLING & NAVIGATION
    ============================================================================ */
+
+/* Streamlit Native Navigation Container */
+[data-testid="stSidebarNav"] {
+  padding-top: var(--sx-1) !important;
+  padding-bottom: var(--sx-2) !important;
+  border-bottom: var(--sx-rule-hairline) !important;
+  margin-bottom: var(--sx-3) !important;
+}
+
+/* Header label above navigation links */
+[data-testid="stSidebarNav"]::before {
+  content: "MODE NAVIGATION";
+  display: block;
+  font-size: 0.58rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sx-ink-3);
+  margin-bottom: 4px;
+  padding-left: 4px;
+}
+
+[data-testid="stSidebarNavItems"] {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  padding: 0 !important;
+  list-style: none !important;
+}
+
+[data-testid="stSidebarNavItems"] li {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Navigation Links (inactive) - 30% scaled down */
+[data-testid="stSidebarNavItems"] a,
+[data-testid="stSidebarNavLink"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 10px !important;
+  border-radius: 4px !important;
+  font-family: 'Archivo', ui-sans-serif, sans-serif !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--sx-ink-2) !important;
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  text-decoration: none !important;
+}
+
+/* Hover state for navigation links */
+[data-testid="stSidebarNavItems"] a:hover,
+[data-testid="stSidebarNavLink"]:hover,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a:hover {
+  color: var(--sx-ink) !important;
+  background-color: var(--sx-surface-2) !important;
+  border-color: var(--sx-rule-strong) !important;
+  transform: translateX(3px) !important;
+}
+
+/* Active / Selected navigation link state */
+[data-testid="stSidebarNavItems"] a[aria-current="page"],
+[data-testid="stSidebarNavLink"][aria-current="page"],
+[data-testid="stSidebarNavItems"] a[data-test-is-active="true"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a[aria-current="page"] {
+  color: #FFFFFF !important;
+  background: linear-gradient(90deg, rgba(255, 59, 31, 0.22) 0%, rgba(255, 59, 31, 0.04) 100%) !important;
+  border: 1px solid rgba(255, 59, 31, 0.45) !important;
+  border-left: 3px solid var(--sx-accent) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 3px 10px rgba(255, 59, 31, 0.14) !important;
+  transform: none !important;
+}
+
+/* Icon alignment inside nav links - 30% scaled down */
+[data-testid="stSidebarNavItems"] a span,
+[data-testid="stSidebarNavLink"] span {
+  font-size: 0.85rem !important;
+  opacity: 0.85;
+}
+
+[data-testid="stSidebarNavItems"] a[aria-current="page"] span,
+[data-testid="stSidebarNavLink"][aria-current="page"] span {
+  opacity: 1;
+}
 
 .sx-sidebar-section {
   margin-bottom: var(--sx-6);

@@ -51,10 +51,10 @@ def reels_page() -> None:
 # compare slider globbed the disk even while viewing images.
 _nav = st.navigation(
     [
-        st.Page(image_page, title="Image", url_path="image", default=True),
-        st.Page(video_page, title="Video", url_path="video"),
-        st.Page(compare_page, title="Compare", url_path="compare"),
-        st.Page(reels_page, title="Reels", url_path="reels"),
+        st.Page(image_page, title="IMAGE", icon=":material/image:", url_path="image", default=True),
+        st.Page(video_page, title="VIDEO", icon=":material/movie:", url_path="video"),
+        st.Page(compare_page, title="COMPARE", icon=":material/compare:", url_path="compare"),
+        st.Page(reels_page, title="REELS", icon=":material/grid_view:", url_path="reels"),
     ],
     position="sidebar",
 )
