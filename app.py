@@ -23,7 +23,7 @@ load_dotenv()
 health.ensure_ffmpeg_on_path()
 
 from ui import sidebar, theme  # noqa: E402 - must follow the PATH heal
-from ui.views import compare_view, image_view, video_view  # noqa: E402
+from ui.views import compare_view, image_view, reels_view, video_view  # noqa: E402
 
 theme.inject_theme()
 
@@ -42,6 +42,10 @@ def compare_page() -> None:
     compare_view.render(_ctx)
 
 
+def reels_page() -> None:
+    reels_view.render(_ctx)
+
+
 # Pages, not tabs: st.tabs re-executes every branch on every rerun, which is
 # why the old video tab needed such defensive temp-file handling and why the
 # compare slider globbed the disk even while viewing images.
@@ -50,6 +54,7 @@ _nav = st.navigation(
         st.Page(image_page, title="Image", url_path="image", default=True),
         st.Page(video_page, title="Video", url_path="video"),
         st.Page(compare_page, title="Compare", url_path="compare"),
+        st.Page(reels_page, title="Reels", url_path="reels"),
     ],
     position="sidebar",
 )

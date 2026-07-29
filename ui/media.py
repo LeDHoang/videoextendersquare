@@ -217,31 +217,100 @@ def download_bytes(path: str) -> bytes:
 # Browser-playable proxy
 # --------------------------------------------------------------------------
 
-def make_web_preview(src: str, height: int = 1080) -> str | None:
+@st.cache_data(show_spinner=False)
+def get_video_codec(src: str) -> str:
+    """Return the video stream codec name (e.g. 'hevc', 'h264') via ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name", "-of", "csv=p=0", src
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW)
+        return p.stdout.strip().lower()
+    except Exception:
+        return "unknown"
+
+
+def has_web_preview(src: str) -> bool:
+    """Check if an H.264 preview proxy or native H.264 source exists for web playback."""
+    if get_video_codec(src) in {"h264", "avc1"}:
+        return True
+    dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
+    return dest.exists() and dest.stat().st_size > 0
+
+
+def make_web_preview(src: str, height: int = 720) -> str | None:
     """Transcode an H.264 proxy for in-browser playback.
 
-    The master stays HEVC; only this proxy is shown in the player. Returns
-    None if ffmpeg fails, in which case the caller should say so rather than
-    render a black player.
+    If source is already H.264, returns source untouched.
+    Otherwise transcodes a fast 720p H.264 proxy.
     """
+    if get_video_codec(src) in {"h264", "avc1"}:
+        return src
+
     dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
     if dest.exists() and dest.stat().st_size > 0:
         return str(dest)
+
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
         "-vf", f"scale=-2:{height}",
-        "-c:v", "libx264", "-crf", "23", "-preset", "veryfast",
+        "-c:v", "libx264", "-crf", "26", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-an",
         str(dest),
     ]
     try:
         p = subprocess.run(
-            cmd, capture_output=True, timeout=600, creationflags=_NO_WINDOW
+            cmd, capture_output=True, timeout=300, creationflags=_NO_WINDOW
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
         return None
     return str(dest)
+
+
+
+# --------------------------------------------------------------------------
+# Output Directory Video Discovery
+# --------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def scan_output_videos(root: str = "output", nonce: int = 0) -> list[dict]:
+    """Recursively scan root directory for video files, excluding preview proxies."""
+    base = Path(root)
+    if not base.exists():
+        return []
+
+    videos = []
+    for file in base.rglob("*"):
+        if not file.is_file():
+            continue
+        if file.name.startswith(".") or file.name.endswith("-preview.mp4"):
+            continue
+        ext = file.suffix.lstrip(".").lower()
+        if ext not in VIDEO_EXTS:
+            continue
+
+        try:
+            rel = file.relative_to(base)
+            folder = str(rel.parent) if rel.parent != Path(".") else "root"
+            stat = file.stat()
+            videos.append({
+                "path": str(file.resolve()),
+                "rel_path": rel.as_posix(),
+                "filename": file.name,
+                "folder": folder,
+                "size_bytes": stat.st_size,
+                "size_human": human_bytes(stat.st_size),
+                "mtime": stat.st_mtime,
+            })
+        except OSError:
+            continue
+
+    # Default sort by modification time descending (newest first)
+    videos.sort(key=lambda x: x["mtime"], reverse=True)
+    return videos
+
