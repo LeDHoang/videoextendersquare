@@ -20,23 +20,49 @@ PAIRS_DIR = Path("output/pairs")
 FAST_SUFFIX = "_fast.mp4"
 STUDIO_SUFFIX = "_studio.mp4"
 
+CANDIDATE_DIRS = [
+    Path("output/pairs"),
+    Path("input/1:1"),
+    Path("input"),
+    Path("output"),
+    Path("output/FAL Playground test 4K"),
+]
+
 
 @st.cache_data(show_spinner=False)
-def scan_pairs(root: str, nonce: int = 0) -> list[dict]:
-    """Find *_fast.mp4 files and note whether the _studio sibling exists."""
-    base = Path(root)
-    if not base.is_dir():
-        return []
+def scan_pairs(root: str = "output/pairs", nonce: int = 0) -> list[dict]:
+    """Find *_fast.mp4 files and note whether the _studio sibling exists across pairs directories."""
     out = []
-    for fast in sorted(base.glob(f"*{FAST_SUFFIX}")):
-        stem = fast.name[: -len(FAST_SUFFIX)]
-        studio = base / f"{stem}{STUDIO_SUFFIX}"
-        out.append({
-            "name": stem,
-            "fast": str(fast),
-            "studio": str(studio),
-            "complete": studio.is_file(),
-        })
+    seen = set()
+
+    # Ensure primary pairs directory exists
+    Path(root).mkdir(parents=True, exist_ok=True)
+
+    dirs_to_scan = [Path(root)] + [d for d in CANDIDATE_DIRS if d != Path(root)]
+
+    for base in dirs_to_scan:
+        if not base.is_dir():
+            continue
+        fast_files = sorted(list(base.glob("*_fast.mp4")) + list(base.glob("*_fast_4k.mp4")))
+        for fast in fast_files:
+            fast_suffix = "_fast_4k.mp4" if fast.name.endswith("_fast_4k.mp4") else "_fast.mp4"
+            stem = fast.name[: -len(fast_suffix)]
+            if stem in seen:
+                continue
+
+            studio_candidates = [
+                base / f"{stem}_studio.mp4",
+                base / f"{stem}_studio_4k.mp4",
+            ]
+            studio = next((s for s in studio_candidates if s.is_file()), studio_candidates[0])
+
+            seen.add(stem)
+            out.append({
+                "name": stem,
+                "fast": str(fast),
+                "studio": str(studio),
+                "complete": studio.is_file(),
+            })
     return out
 
 
