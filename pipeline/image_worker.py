@@ -27,10 +27,10 @@ def extract_image_url(result):
             
     raise ValueError(f"Could not find output URL in result: {result}")
 
-def process_image(image_source, prompt, fal_key=None, status_callback=None, upscale_only=False, sharpening=0.0):
+def process_image(image_source, prompt, fal_key=None, status_callback=None, upscale_only=False, sharpening=0.0, upscale_engine="fast", upscale_model="fal-ai/clarity-upscaler"):
     """
     Saves image, uploads to fal, calculates padding, calls flux/outpaint, 
-    and upscaled the output using local FFmpeg.
+    and upscales the output using local FFmpeg or fal.ai cloud upscale.
     
     Args:
         image_source: Path to file (str) or raw bytes.
@@ -39,11 +39,13 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
         status_callback: Optional status updates callback.
         upscale_only: If True, skips outpainting and only scales the original image.
         sharpening: Contrast Adaptive Sharpening (CAS) strength (0.0 to 1.0).
+        upscale_engine: "fast" (FFmpeg Lanczos+CAS) or "fal" (fal.ai Cloud Upscaler).
+        upscale_model: Model ID to use for fal.ai upscaling.
         
     Returns:
         tuple: (outpaint_url, upscaled_url)
     """
-    if not upscale_only:
+    if (not upscale_only) or (upscale_engine == "fal"):
         if fal_key:
             os.environ["FAL_KEY"] = fal_key
             
@@ -97,10 +99,9 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 )
                 outpaint_url = extract_image_url(result)
 
-            # 5. Upscaling
-            # Chain into local FFmpeg Lanczos upscale
+            # 5. Download intermediate for upscale processing
             if status_callback:
-                status_callback("Downloading outpainted image for local upscaling...")
+                status_callback("Downloading outpainted image for upscaling...")
                 
             uid = uuid.uuid4().hex[:8]
             temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_temp_{uid}.png")
@@ -113,8 +114,39 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
         if os.path.exists(output_image_path):
             os.unlink(output_image_path)
             
+        if upscale_engine == "fal":
+            if status_callback:
+                status_callback("Uploading image to fal.ai CDN for upscale...")
+            
+            if upscale_only or not outpaint_url:
+                image_url_to_upscale = fal_client.upload_file(temp_outpaint_path)
+            else:
+                image_url_to_upscale = outpaint_url
+
+            if status_callback:
+                status_callback(f"Submitting image upscaling job to {upscale_model}...")
+
+            arguments = {"image_url": image_url_to_upscale}
+            result = fal_client.subscribe(
+                upscale_model,
+                arguments=arguments,
+                with_logs=True
+            )
+            upscaled_url = extract_image_url(result)
+
+            if status_callback:
+                status_callback("Downloading upscaled image from fal.ai...")
+
+            import urllib.request
+            temp_fal_out = os.path.join(tempfile.gettempdir(), f"fal_upscaled_img_{uid}.png")
+            urllib.request.urlretrieve(upscaled_url, temp_fal_out)
+            temp_outpaint_path = temp_fal_out
+
         if status_callback:
-            status_callback("Performing local high-quality Lanczos4 upscale via FFmpeg...")
+            if upscale_engine == "fal":
+                status_callback("Finalizing 4K square output via FFmpeg...")
+            else:
+                status_callback("Performing local high-quality Lanczos4 upscale via FFmpeg...")
             
         import subprocess
         # Use FFmpeg to scale the image using Lanczos and optional CAS sharpening
@@ -141,4 +173,5 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
         # Clean up temp file
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
+
 

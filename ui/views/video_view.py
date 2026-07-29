@@ -136,10 +136,28 @@ def render(ctx: dict) -> None:
 
         C.eyebrow("UPSCALE ENGINE")
         engine = st.segmented_control(
-            "Engine", ["FAST", "STUDIO"], default="FAST",
+            "Engine", ["FAST", "STUDIO", "FAL AI"], default="FAST",
             label_visibility="collapsed", key=S.wkey(NS, "engine"),
         ) or "FAST"
         studio_picked = engine == "STUDIO"
+        fal_picked = engine == "FAL AI"
+
+        fal_upscale_model = ctx["models"]["upscale_vid"]
+        if fal_picked:
+            C.eyebrow("FAL AI UPSCALE OPTION")
+            fal_options = {
+                "SeedVR Video": "fal-ai/seedvr-upscale-video",
+                "Kling Video": "fal-ai/kling-video/v1.5/pro/upscale",
+                "ESRGAN Video": "fal-ai/esrgan-video",
+            }
+            selected_opt = st.segmented_control(
+                "FAL AI Model Options",
+                list(fal_options.keys()),
+                default="SeedVR Video",
+                label_visibility="collapsed",
+                key=S.wkey(NS, "fal_vid_model"),
+            ) or "SeedVR Video"
+            fal_upscale_model = fal_options[selected_opt]
 
         if studio_picked and not studio_ok:
             missing = []
@@ -168,7 +186,8 @@ def render(ctx: dict) -> None:
                 C.gated_reason("CAS FILTER UNAVAILABLE — SHARPENING SKIPPED")
                 sharpening = 0.0
 
-        missing_key = (not upscale_only) and not ctx["fal"].ok
+        needs_key = (not upscale_only) or fal_picked
+        missing_key = needs_key and not ctx["fal"].ok
         studio_blocked = studio_picked and not studio_ok
         disabled = (bool(blocked) or missing_key or studio_blocked
                     or S.get(NS, "running", False))
@@ -181,9 +200,9 @@ def render(ctx: dict) -> None:
         if blocked:
             C.gated_reason(f"{blocked[0].label} UNAVAILABLE — SEE SYSTEM")
         elif studio_blocked:
-            C.gated_reason("STUDIO ENGINE NOT INSTALLED — SWITCH TO FAST")
+            C.gated_reason("STUDIO ENGINE NOT INSTALLED — SWITCH TO FAST OR FAL AI")
         elif missing_key:
-            C.gated_reason("FAL KEY REQUIRED FOR OUTPAINTING — OR USE UPSCALE ONLY")
+            C.gated_reason("FAL KEY REQUIRED FOR OUTPAINTING / FAL AI UPSCALE")
 
         if go and items:
             from pipeline.video_worker import process_video
@@ -195,12 +214,12 @@ def render(ctx: dict) -> None:
                     "name": item["name"],
                     "video_path": item["path"],
                     "prompt": None if upscale_only else prompt,
-                    "fal_key": None if upscale_only else ctx["fal_key"],
+                    "fal_key": ctx["fal_key"] if needs_key else None,
                     "outpaint_model": None if upscale_only else ctx["models"]["outpaint_vid"],
-                    "upscale_model": None if upscale_only else ctx["models"]["upscale_vid"],
+                    "upscale_model": fal_upscale_model if fal_picked else ctx["models"]["upscale_vid"],
                     "upscale_only": upscale_only,
                     "sharpening": sharpening,
-                    "upscale_engine": "studio" if studio_picked else "fast",
+                    "upscale_engine": "fal" if fal_picked else ("studio" if studio_picked else "fast"),
                 })
 
             raw_results = R.run_batch_pipeline(NS, "video", process_video, items_kwargs)

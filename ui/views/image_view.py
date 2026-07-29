@@ -126,6 +126,31 @@ def render(ctx: dict) -> None:
             )
             S.set_(NS, "prompt_cache", prompt)
 
+        C.eyebrow("UPSCALE ENGINE")
+        engine = st.segmented_control(
+            "Engine", ["FAST", "FAL AI"], default="FAST",
+            label_visibility="collapsed", key=S.wkey(NS, "engine"),
+        ) or "FAST"
+        fal_picked = engine == "FAL AI"
+
+        fal_upscale_model = ctx["models"]["upscale_img"]
+        if fal_picked:
+            C.eyebrow("FAL AI UPSCALE OPTION")
+            fal_options = {
+                "Clarity Upscaler": "fal-ai/clarity-upscaler",
+                "CCSR": "fal-ai/ccsr",
+                "AuraSR": "fal-ai/aura-sr",
+                "ESRGAN": "fal-ai/esrgan",
+            }
+            selected_opt = st.segmented_control(
+                "FAL AI Model Options",
+                list(fal_options.keys()),
+                default="Clarity Upscaler",
+                label_visibility="collapsed",
+                key=S.wkey(NS, "fal_img_model"),
+            ) or "Clarity Upscaler"
+            fal_upscale_model = fal_options[selected_opt]
+
         cas_ok = probes["cas"].ok
         C.eyebrow("SHARPEN (CAS)")
         sharpening = st.slider(
@@ -138,7 +163,7 @@ def render(ctx: dict) -> None:
             C.gated_reason("CAS FILTER UNAVAILABLE — SHARPENING SKIPPED")
             sharpening = 0.0
 
-        needs_key = not upscale_only
+        needs_key = (not upscale_only) or fal_picked
         missing_key = needs_key and not ctx["fal"].ok
         disabled = bool(blocked) or missing_key or S.get(NS, "running", False)
 
@@ -151,7 +176,7 @@ def render(ctx: dict) -> None:
         if blocked:
             C.gated_reason(f"{blocked[0].label} UNAVAILABLE — SEE SYSTEM")
         elif missing_key:
-            C.gated_reason("FAL KEY REQUIRED FOR OUTPAINTING — OR USE UPSCALE ONLY")
+            C.gated_reason("FAL KEY REQUIRED FOR OUTPAINTING / FAL AI UPSCALE")
 
         if go and items:
             from pipeline.image_worker import process_image
@@ -163,9 +188,11 @@ def render(ctx: dict) -> None:
                     "name": item["name"],
                     "image_source": item["bytes"],
                     "prompt": None if upscale_only else prompt,
-                    "fal_key": None if upscale_only else ctx["fal_key"],
+                    "fal_key": ctx["fal_key"] if needs_key else None,
                     "upscale_only": upscale_only,
                     "sharpening": sharpening,
+                    "upscale_engine": "fal" if fal_picked else "fast",
+                    "upscale_model": fal_upscale_model,
                 })
 
             raw_results = R.run_batch_pipeline(NS, "image", process_image, items_kwargs)

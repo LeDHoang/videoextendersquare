@@ -198,7 +198,7 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
     Returns:
         tuple: (outpaint_video_url, upscaled_video_url)
     """
-    if not upscale_only:
+    if (not upscale_only) or (upscale_engine == "fal"):
         if fal_key:
             os.environ["FAL_KEY"] = fal_key
             
@@ -248,7 +248,7 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
 
         # 4. Upscaling
         if status_callback:
-            status_callback("Downloading outpainted video for local upscaling...")
+            status_callback("Downloading outpainted video for upscaling...")
             
         uid = uuid.uuid4().hex[:8]
         temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_video_temp_{uid}.mp4")
@@ -263,7 +263,49 @@ def process_video(video_path, prompt, fal_key=None, status_callback=None, outpai
         
     import subprocess
     
-    if upscale_engine == "studio":
+    if upscale_engine == "fal":
+        if status_callback:
+            status_callback("Uploading video file to fal.ai CDN for cloud upscale...")
+
+        if upscale_only or not outpaint_url:
+            video_url_to_upscale = fal_client.upload_file(temp_outpaint_path)
+        else:
+            video_url_to_upscale = outpaint_url
+
+        if status_callback:
+            status_callback(f"Submitting video upscaling job to {upscale_model}...")
+
+        arguments = {"video_url": video_url_to_upscale}
+        handler = fal_client.submit(upscale_model, arguments=arguments)
+        result = poll_job_status(handler, "Video Upscaling (FAL AI)", status_callback)
+        upscaled_video_url = extract_video_url(result)
+
+        if status_callback:
+            status_callback("Downloading upscaled video from fal.ai...")
+
+        temp_fal_vid = os.path.join(tempfile.gettempdir(), f"fal_upscaled_vid_{uid}.mp4")
+        import urllib.request
+        urllib.request.urlretrieve(upscaled_video_url, temp_fal_vid)
+
+        # Probe for a working encoder
+        encoder, encoder_opts = _pick_encoder()
+
+        vf_filter = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        if sharpening > 0.0:
+            vf_filter += f",cas={sharpening}"
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", temp_fal_vid,
+            "-vf", vf_filter,
+            "-c:v", encoder
+        ] + encoder_opts + [output_video_path]
+
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if os.path.exists(temp_fal_vid):
+            os.unlink(temp_fal_vid)
+    elif upscale_engine == "studio":
         if status_callback:
             status_callback("Performing studio-quality VapourSynth upscale (znedi3 + FineSharp). This will take a LONG time...")
 
