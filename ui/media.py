@@ -239,12 +239,13 @@ def has_web_preview(src: str) -> bool:
     return dest.exists() and dest.stat().st_size > 0
 
 
-def make_web_preview(src: str, height: int = 720) -> str | None:
+def make_web_preview(src: str, height: int = 1080) -> str | None:
     """Transcode an H.264 proxy for in-browser playback.
 
     If source is already H.264, returns source untouched.
-    Otherwise transcodes a fast 720p H.264 proxy.
+    Otherwise transcodes a fast 1080p H.264 proxy.
     """
+
     if get_video_codec(src) in {"h264", "avc1"}:
         return src
 

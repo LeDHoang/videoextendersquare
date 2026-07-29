@@ -278,6 +278,7 @@ def render(ctx: dict) -> None:
             file_name=fname, mime="video/mp4",
             type="primary", width="stretch", key=S.wkey(NS, f"dl_{selected_result['path']}"),
         )
+        st.caption("Full 4K · 3840×3840 · HEVC/H.265 Master")
     with d2:
         if selected_result.get("preview"):
             st.download_button(
@@ -286,10 +287,13 @@ def render(ctx: dict) -> None:
                 file_name=f"preview_{fname}", mime="video/mp4",
                 width="stretch", key=S.wkey(NS, f"dlp_{selected_result['path']}"),
             )
+            st.caption("Web Proxy · 1080p · Universal H.264 Playback")
+
     with d3:
         if st.button("↻  RUN AGAIN", key=S.wkey(NS, "again"), width="stretch"):
             S.reset_from(NS, S.STEP_CONFIGURE)
             st.rerun()
+
 
     C.mono(selected_result["path"])
 

@@ -1,13 +1,13 @@
-"""Reels view — Instagram Reels-style video feed with auto-playback.
+"""Reels view — 4K Master Video Feed with auto-playback.
 
 Scans all output directories recursively and presents an interactive video player
-with auto-advance, sound controls, swipe/keyboard navigation, and loopback HTTP streaming.
+playing full 4K master video outputs directly with auto-advance, sound controls,
+WASD & swipe/keyboard navigation, and loopback HTTP streaming.
 """
 
 import importlib
 import json
 import random
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import streamlit as st
@@ -16,20 +16,13 @@ import streamlit.components.v1 as components
 from ui import components as C
 from ui import media as M
 from ui import mediaserver as MS
-from ui.media import (
-    get_video_codec,
-    has_web_preview,
-    make_web_preview,
-    scan_output_videos,
-)
+from ui.media import scan_output_videos
 
 # Force refresh of media module if running under a persistent Streamlit process
 try:
     importlib.reload(M)
 except Exception:
     pass
-
-
 
 OUTPUT_DIR = Path("output")
 
@@ -40,12 +33,11 @@ def _template() -> str:
 
 
 def render(ctx: dict) -> None:
-    probes = ctx["probes"]
     nonce = st.session_state.get("sx.reels_nonce", 0)
 
-    C.hero("Reels", "INSTAGRAM REELS FEED · AUTO PLAYBACK")
+    C.hero("Reels", "4K MASTER REELS FEED · AUTO PLAYBACK")
 
-    # Scan all videos inside output directory recursively
+    # Scan all 4K master videos inside output directory recursively
     raw_videos = scan_output_videos("output", nonce)
 
     if not raw_videos:
@@ -115,54 +107,14 @@ def render(ctx: dict) -> None:
         st.warning("No videos match the current filters.")
         return
 
-    # Check which videos need H.264 preview proxy generation
-    unproxied = [v for v in filtered_videos if not has_web_preview(v["path"])]
-
-    if unproxied:
-        col_msg, col_btn = st.columns([3, 1])
-        with col_msg:
-            st.info(
-                f"⚡ **{len(unproxied)} of {len(filtered_videos)} videos** are encoded in HEVC and need H.264 web proxies to play in browser."
-            )
-        with col_btn:
-            if st.button("⚡ GENERATE PROXIES", key="sx.reels.gen_proxies", width="stretch"):
-                progress_bar = st.progress(0.0, text="Generating fast H.264 web proxies…")
-                total = len(unproxied)
-                done = 0
-
-                def _work(v):
-                    return make_web_preview(v["path"], height=720)
-
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    futures = [executor.submit(_work, v) for v in unproxied]
-                    for _ in as_completed(futures):
-                        done += 1
-                        progress_bar.progress(
-                            done / total,
-                            text=f"Generating proxies ({done}/{total})…",
-                        )
-                progress_bar.empty()
-                st.success("Web proxies generated successfully!")
-                st.rerun()
-
-    # Fast URL resolution without blocking page render
+    # Serve 4K master videos directly
     root_dir = str(OUTPUT_DIR.resolve())
     video_payload = []
 
     for item in filtered_videos:
         src_path = item["path"]
-        dest_preview = Path(src_path).with_name(Path(src_path).stem + "-preview.mp4")
-
-        # Use preview proxy if available or if native H.264, else fallback to src_path
-        if dest_preview.exists() and dest_preview.stat().st_size > 0:
-            play_path = str(dest_preview)
-        elif get_video_codec(src_path) in {"h264", "avc1"}:
-            play_path = src_path
-        else:
-            play_path = src_path
-
-        url = MS.media_url(root_dir, play_path) or MS.media_url(
-            str(Path(play_path).parent), play_path
+        url = MS.media_url(root_dir, src_path) or MS.media_url(
+            str(Path(src_path).parent), src_path
         )
         if url:
             video_payload.append({
@@ -171,7 +123,6 @@ def render(ctx: dict) -> None:
                 "folder": item["folder"],
                 "size": item["size_human"],
                 "path": item["rel_path"],
-                "has_proxy": play_path != src_path,
             })
 
     if not video_payload:
@@ -181,14 +132,11 @@ def render(ctx: dict) -> None:
         )
         return
 
-    # Render HTML5 1:1 Square Reels Component
+    # Render HTML5 1:1 Square Reels Component with 4K Master URLs
     html = _template().replace("__VIDEO_DATA_JSON__", json.dumps(video_payload))
     components.html(html, height=750)
 
-
-
     # Info footer / list view
-    with st.expander(f"▸ PLAYLIST METADATA ({len(video_payload)} VIDEOS)"):
+    with st.expander(f"▸ 4K MASTER PLAYLIST METADATA ({len(video_payload)} VIDEOS)"):
         for idx, item in enumerate(video_payload, 1):
-            status = " [WEB READY]" if item.get("has_proxy") else " [HEVC SOURCE]"
-            st.text(f"{idx:02d}. [{item['folder']}] {item['filename']} ({item['size']}){status}")
+            st.text(f"{idx:02d}. [{item['folder']}] {item['filename']} ({item['size']}) [4K MASTER]")
