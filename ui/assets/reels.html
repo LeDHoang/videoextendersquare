@@ -455,6 +455,10 @@
       }
       video.src = itemUrl;
       video.muted = isMuted;
+
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
+        WebXRVR.onVideoChange();
+      }
       video.play().then(() => {
         playBtn.textContent = '⏸';
       }).catch((err) => {

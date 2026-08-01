@@ -430,7 +430,7 @@ const WebXRVR = (function () {
 
     // ── Layers path (Quest) ──
     if (useLayers && videoLayer) {
-      // Update video layer transform
+      // Update video layer transform & scale directly (no updateRenderState in frame loop)
       videoLayer.transform = new XRRigidTransform(screenPos, screenQuat);
       videoLayer.width = screenScale;
       videoLayer.height = screenScale;
@@ -656,7 +656,6 @@ const WebXRVR = (function () {
     if (typeof XRMediaBinding !== 'undefined') {
       try {
         const binding = new XRMediaBinding(xrSession);
-        // Try creating the video quad layer
         videoLayer = binding.createQuadLayer(videoElement, {
           space: xrRefSpace,
           width: screenScale,
@@ -665,49 +664,12 @@ const WebXRVR = (function () {
           transform: new XRRigidTransform(screenPos, screenQuat),
         });
         useLayers = true;
-
-        // Create controls layer from canvas
-        initControlsCanvas();
-        renderControlsCanvas();
-
-        // For controls, we need an XRWebGLBinding to create a quad from texture
-        // Actually, for simplicity on Quest, we can use a second XRMediaBinding
-        // but it only works with video elements. So we use XRWebGLBinding for
-        // the controls quad, or just overlay the controls info on the same layer.
-        // Simplification: render controls as a second quad layer if possible,
-        // otherwise render it as part of the same session.
-        //
-        // The Meta Quest compositor supports multiple layers. We'll create
-        // the controls as an XRWebGLBinding quad with canvas texture.
-        const glCanvas = document.createElement('canvas');
-        const glCtx = glCanvas.getContext('webgl', { xrCompatible: true });
-        if (glCtx) {
-          const webglBinding = new XRWebGLBinding(xrSession, glCtx);
-          controlsLayer = webglBinding.createQuadLayer({
-            space: xrRefSpace,
-            width: screenScale * 0.8,
-            height: screenScale * 0.8 * (CONTROLS_H / CONTROLS_W),
-            viewPixelWidth: CONTROLS_W,
-            viewPixelHeight: CONTROLS_H,
-            layout: 'mono',
-            transform: new XRRigidTransform(
-              {
-                x: screenPos.x,
-                y: screenPos.y - screenScale / 2 - 0.25,
-                z: screenPos.z,
-              },
-              screenQuat
-            ),
-          });
-        }
-
         xrSession.updateRenderState({ layers: [videoLayer] });
-        console.log('[WebXRVR] Using XRQuadLayer (hardware compositor)');
+        console.log('[WebXRVR] Bound 4K XRMediaBinding QuadLayer to hardware compositor');
       } catch (e) {
         console.warn('[WebXRVR] XRMediaBinding failed, using WebGL fallback:', e);
         useLayers = false;
         videoLayer = null;
-        controlsLayer = null;
       }
     }
 
@@ -777,6 +739,26 @@ const WebXRVR = (function () {
     if (frame) frame.classList.remove('vr-active');
   }
 
+  function onVideoChange() {
+    if (!xrSession || !useLayers || !xrRefSpace || !videoElement) return;
+    try {
+      if (typeof XRMediaBinding !== 'undefined') {
+        const binding = new XRMediaBinding(xrSession);
+        videoLayer = binding.createQuadLayer(videoElement, {
+          space: xrRefSpace,
+          width: screenScale,
+          height: screenScale,
+          layout: 'mono',
+          transform: new XRRigidTransform(screenPos, screenQuat),
+        });
+        xrSession.updateRenderState({ layers: [videoLayer] });
+        console.log('[WebXRVR] Refreshed XRMediaBinding QuadLayer for new reel');
+      }
+    } catch (e) {
+      console.warn('[WebXRVR] Failed to refresh video layer on change:', e);
+    }
+  }
+
   // ─── Public API ──────────────────────────────────────────────────────
 
   return {
@@ -796,5 +778,6 @@ const WebXRVR = (function () {
 
     enterVR,
     exitVR,
+    onVideoChange,
   };
 })();
