@@ -27,3 +27,47 @@ def inject_theme() -> None:
     """
     css = _load_css()
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    st.markdown("""
+    <script>
+    (function() {
+        if (window._xrIframePatchDone) return;
+        window._xrIframePatchDone = true;
+
+        const ALLOW_FLAGS = 'xr-spatial-tracking; fullscreen; autoplay; accelerometer; gyroscope';
+
+        // Patch document.createElement so iframes get WebXR permissions before window initialization
+        const origCreateElement = document.createElement;
+        document.createElement = function(tagName, options) {
+            const el = origCreateElement.call(document, tagName, options);
+            if (tagName && String(tagName).toLowerCase() === 'iframe') {
+                el.setAttribute('allow', ALLOW_FLAGS);
+            }
+            return el;
+        };
+
+        function patchIframe(el) {
+            if (!el || el.tagName !== 'IFRAME') return;
+            const cur = el.getAttribute('allow') || '';
+            if (!cur.includes('xr-spatial-tracking')) {
+                el.setAttribute('allow', cur ? cur + '; ' + ALLOW_FLAGS : ALLOW_FLAGS);
+            }
+        }
+
+        document.querySelectorAll('iframe').forEach(patchIframe);
+
+        try {
+            const obs = new MutationObserver(function(mutations) {
+                mutations.forEach(function(m) {
+                    m.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) {
+                            if (node.tagName === 'IFRAME') patchIframe(node);
+                            else if (node.querySelectorAll) node.querySelectorAll('iframe').forEach(patchIframe);
+                        }
+                    });
+                });
+            });
+            obs.observe(document.documentElement, { childList: true, subtree: true });
+        } catch(e) {}
+    })();
+    </script>
+    """, unsafe_allow_html=True)

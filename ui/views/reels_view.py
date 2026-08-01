@@ -28,8 +28,14 @@ OUTPUT_DIR = Path("output")
 
 
 def _template() -> str:
-    template_path = Path(__file__).parent.parent / "assets" / "reels.html"
-    return template_path.read_text(encoding="utf-8")
+    assets = Path(__file__).parent.parent / "assets"
+    html = (assets / "reels.html").read_text(encoding="utf-8")
+    # Inline the WebXR VR module so it's available inside the Streamlit iframe
+    vr_js_path = assets / "webxr_vr.js"
+    vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""
+    html = html.replace("__WEBXR_VR_JS__", vr_js)
+    html = html.replace("__MEDIA_PORT__", str(MS.MEDIA_PORT))
+    return html
 
 
 def render(ctx: dict) -> None:
@@ -56,7 +62,7 @@ def render(ctx: dict) -> None:
     folders = sorted(list({v["folder"] for v in raw_videos}))
     folder_options = ["ALL FOLDERS"] + folders
 
-    c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
     with c1:
         selected_folder = st.selectbox(
             "Folder",
@@ -65,20 +71,27 @@ def render(ctx: dict) -> None:
             label_visibility="collapsed",
         )
     with c2:
+        codec_mode = st.selectbox(
+            "Codec",
+            ["H.264 4K (Web & VR)", "HEVC 4K (Raw Master)", "ALL CODECS"],
+            key="sx.reels.codec_mode",
+            label_visibility="collapsed",
+        )
+    with c3:
         sort_order = st.selectbox(
             "Sort",
             ["NEWEST FIRST", "OLDEST FIRST", "ALPHABETICAL", "SHUFFLE"],
             key="sx.reels.sort",
             label_visibility="collapsed",
         )
-    with c3:
+    with c4:
         search_query = st.text_input(
             "Search",
             placeholder="Search filename…",
             key="sx.reels.search",
             label_visibility="collapsed",
         )
-    with c4:
+    with c5:
         if st.button("↻ RESCAN", key="sx.reels.rescan", width="stretch"):
             st.session_state["sx.reels_nonce"] = nonce + 1
             scan_output_videos.clear()
@@ -107,23 +120,97 @@ def render(ctx: dict) -> None:
         st.warning("No videos match the current filters.")
         return
 
-    # Serve 4K master videos directly
+    # Serve video streams based on selected codec mode
     root_dir = str(OUTPUT_DIR.resolve())
     video_payload = []
 
+    media_tunnel_url = st.session_state.get("sx.reels.media_tunnel", "")
+
+    hevc_needs_proxy = []
     for item in filtered_videos:
         src_path = item["path"]
-        url = MS.media_url(root_dir, src_path) or MS.media_url(
-            str(Path(src_path).parent), src_path
+        codec = M.get_video_codec(src_path)
+
+        play_path = src_path
+        if codec_mode == "HEVC 4K (Raw Master)":
+            play_path = src_path
+        else:
+            # H.264 (Web & VR) or ALL CODECS
+            if codec not in {"h264", "avc1"}:
+                preview_p = Path(src_path).with_name(Path(src_path).stem + "-preview.mp4")
+                if preview_p.exists() and preview_p.stat().st_size > 0:
+                    play_path = str(preview_p)
+                elif codec_mode == "H.264 4K (Web & VR)":
+                    # Auto-generate H.264 proxy on the fly if H.264 mode is explicitly selected
+                    proxy = M.make_web_preview(src_path, height=3840)
+                    if proxy:
+                        play_path = proxy
+                    else:
+                        hevc_needs_proxy.append(src_path)
+
+        play_codec = M.get_video_codec(play_path)
+        url = MS.media_url(root_dir, play_path) or MS.media_url(
+            str(Path(play_path).parent), play_path
         )
         if url:
+            is_proxy = play_path != src_path
             video_payload.append({
                 "url": url,
                 "filename": item["filename"],
                 "folder": item["folder"],
                 "size": item["size_human"],
                 "path": item["rel_path"],
+                "codec": play_codec.upper(),
+                "is_proxy": is_proxy,
+                "stream_tag": "H.264 4K PROXY" if is_proxy else f"{codec.upper()} MASTER",
+                "tunnel_url": media_tunnel_url.strip() if media_tunnel_url else "",
             })
+
+    if hevc_needs_proxy:
+        st.info("💡 Some videos are HEVC. Click below to generate 4K H.264 Web & VR streams.")
+        if st.button("⚡ GENERATE H.264 4K PROXIES", key="sx.reels.gen_proxies"):
+            with st.spinner("Generating 4K H.264 streams for browser & VR playback…"):
+                for p in hevc_needs_proxy:
+                    M.make_web_preview(p, height=3840)
+            st.success("4K H.264 streams generated!")
+            st.rerun()
+
+    with st.expander("⚙️ ADVANCED PROXY & HTTPS TUNNEL CONTROLS"):
+        st.caption("If accessing over HTTPS tunnel (localtunnel / ngrok), paste the port 8502 tunnel URL below and click **SET TUNNEL**.")
+        tc1, tc2 = st.columns([3, 1])
+        with tc1:
+            media_tunnel_val = st.text_input(
+                "Media Tunnel URL",
+                value=st.session_state.get("sx.reels.media_tunnel", ""),
+                placeholder="e.g. https://xxxx.loca.lt",
+                key="sx.reels.media_tunnel_input",
+                label_visibility="collapsed",
+            )
+        with tc2:
+            if st.button("SET TUNNEL 🔗", key="sx.reels.set_tunnel", use_container_width=True):
+                st.session_state["sx.reels.media_tunnel"] = media_tunnel_val.strip()
+                st.success(f"Applied Tunnel: {media_tunnel_val.strip()}")
+                st.rerun()
+
+        if st.session_state.get("sx.reels.media_tunnel"):
+            st.info(f"🔗 Active Media Tunnel: `{st.session_state.get('sx.reels.media_tunnel')}`")
+
+        st.divider()
+        st.caption("Re-encode all HEVC 4K master videos into ultra-sharp 3840×3840 H.264 streams for WebXR & browser playback.")
+        if st.button("⚡ FORCE RE-TRANSCODE ALL 4K H.264 PROXIES", key="sx.reels.force_retranscode"):
+            with st.spinner("Force re-encoding all 4K H.264 streams…"):
+                for item in raw_videos:
+                    src_p = item["path"]
+                    if M.get_video_codec(src_p) not in {"h264", "avc1"}:
+                        preview_p = Path(src_p).with_name(Path(src_p).stem + "-preview.mp4")
+                        if preview_p.exists():
+                            try:
+                                preview_p.unlink()
+                            except OSError:
+                                pass
+                        M.make_web_preview(src_p, height=3840)
+            st.success("All 4K H.264 proxies re-generated!")
+            st.rerun()
 
     if not video_payload:
         C.accent_block(
@@ -137,6 +224,6 @@ def render(ctx: dict) -> None:
     components.html(html, height=750)
 
     # Info footer / list view
-    with st.expander(f"▸ 4K MASTER PLAYLIST METADATA ({len(video_payload)} VIDEOS)"):
+    with st.expander(f"▸ 4K REELS PLAYLIST METADATA ({len(video_payload)} VIDEOS)"):
         for idx, item in enumerate(video_payload, 1):
-            st.text(f"{idx:02d}. [{item['folder']}] {item['filename']} ({item['size']}) [4K MASTER]")
+            st.text(f"{idx:02d}. [{item['folder']}] {item['filename']} ({item['size']}) [{item['stream_tag']}]")

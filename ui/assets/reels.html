@@ -278,6 +278,24 @@
     text-align: center;
     padding: 24px;
   }
+
+  /* VR Button */
+  #vrBtn {
+    background: rgba(88, 28, 135, 0.8);
+    border-color: rgba(168, 85, 247, 0.5);
+  }
+  #vrBtn:hover {
+    background: #7C3AED;
+    border-color: #A855F7;
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+    transform: scale(1.08);
+  }
+  .vr-active .reels-badge {
+    background: #7C3AED;
+  }
+  .vr-active .reels-badge::after {
+    content: ' · VR';
+  }
 </style>
 </head>
 <body>
@@ -328,6 +346,10 @@
       <button class="action-btn" id="fullBtn" title="Fullscreen">⛶</button>
       <div class="action-btn-label">FULL</div>
     </div>
+    <div id="vrBtnWrap" style="display:none;">
+      <button class="action-btn" id="vrBtn" title="Enter VR Mode">🥽</button>
+      <div class="action-btn-label">VR</div>
+    </div>
   </div>
 
   <div class="reels-meta">
@@ -346,6 +368,7 @@
   </div>
 </div>
 
+<script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
     const videoData = __VIDEO_DATA_JSON__;
@@ -421,7 +444,16 @@
       metaTitle.textContent = item.filename;
       metaSize.textContent = item.size || '';
 
-      video.src = item.url;
+      let itemUrl = item.url;
+      if (item.tunnel_url && item.tunnel_url.trim()) {
+        const tBase = item.tunnel_url.trim().replace(/\/+$/, '');
+        itemUrl = itemUrl.replace(/http:\/\/[^/]+:8502/, tBase);
+      } else if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
+      } else if (location.protocol === 'http:') {
+        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
+      }
+      video.src = itemUrl;
       video.muted = isMuted;
       video.play().then(() => {
         playBtn.textContent = '⏸';
@@ -439,7 +471,21 @@
     }
 
     video.addEventListener('error', () => {
-      showError('This browser cannot play HEVC videos. Click "Generate Web Proxies" above to transcode to H.264.');
+      const err = video.error;
+      console.error('[ReelsPlayer] Video load error:', err, 'src:', video.src);
+      if (!video.src) return;
+      
+      const isProxy = video.src.includes('-preview.mp4');
+      if (window.location.protocol === 'https:' && video.src.startsWith('http:')) {
+        showError('HTTPS Mixed Content Blocked: Page is HTTPS but media URL is HTTP. Open app over http://localhost:8501 or use USB Chrome Remote Debugging.');
+      } else if (isProxy) {
+        // H.264 proxies are guaranteed browser-playable; ignore transient load errors
+        console.warn('[ReelsPlayer] Transient error on H.264 proxy stream:', video.src);
+      } else if (err && err.code === 4 /* MEDIA_ERR_SRC_NOT_SUPPORTED */) {
+        showError('Video format (HEVC) not supported by browser. Select "H.264 4K (Web & VR)" in the Codec filter above.');
+      } else {
+        showError('Media playback error (Code ' + (err ? err.code : 'unknown') + '). Check media server connection on port 8502.');
+      }
     });
 
     skipErrorBtn.addEventListener('click', () => {
@@ -616,6 +662,32 @@
 
     // Focus frame on click for direct keyboard capture
     frame.focus();
+
+    // ── WebXR VR Integration ──
+    const vrBtnWrap = document.getElementById('vrBtnWrap');
+    const vrBtn = document.getElementById('vrBtn');
+
+    if (typeof WebXRVR !== 'undefined') {
+      WebXRVR.init(video, {
+        onNext: nextVideo,
+        onPrev: prevVideo,
+        onTogglePlay: togglePlay,
+        onSeek: seekRelative,
+        getPlaylist: function() { return videoData; },
+        getCurrentIndex: function() { return idx; },
+      });
+
+      // Always show VR button so user can test on any browser or emulator
+      if (vrBtnWrap) {
+        vrBtnWrap.style.display = '';
+      }
+
+      if (vrBtn) {
+        vrBtn.addEventListener('click', function() {
+          WebXRVR.enterVR();
+        });
+      }
+    }
 
     // Initial Load
     loadVideo(0);
