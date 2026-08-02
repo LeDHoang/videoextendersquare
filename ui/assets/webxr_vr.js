@@ -1,16 +1,17 @@
 /**
- * WebXR VR Module for Reels — v3.9 (YouTube VR Curve & DeoVR 6DOF Grab)
+ * WebXR VR Module for Reels — v4.1 (Tangent-to-Viewer POV & Horizontally Level Grip Drag)
  *
- * Key Improvements in v3.9:
+ * Key Improvements in v4.1:
+ *  - Tangent to Viewer POV: Screen tilts forward/backward when moved up/down to face your eyes directly
+ *  - 100% Horizontally Level: Zero sideways roll along Z-axis (left/right edges stay level)
+ *  - DeoVR/Skybox 6DOF Natural Grab & Repositioning
  *  - YouTube VR Standard Curved Screen (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
- *  - DeoVR / Skybox 6DOF Grab & Repositioning restored from commit ddcd715
- *  - Exact 1:1 Square Aspect Ratio preserved in both Curved & Flat modes
  */
 const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.0-20260803';
+  const VR_VERSION = 'v4.1-20260803';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -141,8 +142,6 @@ const WebXRVR = (function () {
 
   function quatLevelFromDir(dir) {
     // Compute yaw such that screen's local +Z axis points towards viewer direction.
-    // Correct formula: yaw = atan2(dir.x, dir.z).
-    // (Previous -dir.x, -dir.z produced a 180° wrong rotation causing screen flip.)
     const len = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
     if (len < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
     const yaw = Math.atan2(dir.x, dir.z);
@@ -152,6 +151,70 @@ const WebXRVR = (function () {
       z: 0,
       w: Math.cos(yaw / 2),
     };
+  }
+
+  function quatFaceViewerLevel(screenPos, headPos) {
+    const head = headPos || { x: 0, y: 1.6, z: 0 };
+    const dx = head.x - screenPos.x;
+    const dy = head.y - screenPos.y;
+    const dz = head.z - screenPos.z;
+
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
+
+    // Normalized dir pointing to viewer (local +Z)
+    const zx = dx / len;
+    const zy = dy / len;
+    const zz = dz / len;
+
+    // Horizontal len in X-Z plane
+    const lenXZ = Math.sqrt(zx * zx + zz * zz);
+    if (lenXZ < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
+
+    // Local +X axis = (0, 1, 0) x (zx, zy, zz) = (zz, 0, -zx) / lenXZ (Zero Y component = 100% Level)
+    const xx = zz / lenXZ;
+    const xy = 0;
+    const xz = -zx / lenXZ;
+
+    // Local +Y axis = Z_axis x X_axis
+    const yx = zy * xz - zz * xy;
+    const yy = zz * xx - zx * xz;
+    const yz = zx * xy - zy * xx;
+
+    const m00 = xx,  m01 = yx,  m02 = zx;
+    const m10 = xy,  m11 = yy,  m12 = zy;
+    const m20 = xz,  m21 = yz,  m22 = zz;
+
+    const trace = m00 + m11 + m22;
+    let qx, qy, qz, qw;
+
+    if (trace > 0) {
+      const s = 0.5 / Math.sqrt(trace + 1.0);
+      qw = 0.25 / s;
+      qx = (m21 - m12) * s;
+      qy = (m02 - m20) * s;
+      qz = (m10 - m01) * s;
+    } else if (m00 > m11 && m00 > m22) {
+      const s = 2.0 * Math.sqrt(1.0 + m00 - m11 - m22);
+      qw = (m21 - m12) / s;
+      qx = 0.25 * s;
+      qy = (m01 + m10) / s;
+      qz = (m02 + m20) / s;
+    } else if (m11 > m22) {
+      const s = 2.0 * Math.sqrt(1.0 + m11 - m00 - m22);
+      qw = (m02 - m20) / s;
+      qx = (m01 + m10) / s;
+      qy = 0.25 * s;
+      qz = (m12 + m21) / s;
+    } else {
+      const s = 2.0 * Math.sqrt(1.0 + m22 - m00 - m11);
+      qw = (m10 - m01) / s;
+      qx = (m02 + m20) / s;
+      qy = (m12 + m21) / s;
+      qz = 0.25 * s;
+    }
+
+    return { x: qx, y: qy, z: qz, w: qw };
   }
 
   // ─── Premium UI Controls Canvas Rendering ────────────────────────────
@@ -819,10 +882,8 @@ const WebXRVR = (function () {
           const rotatedRel = quatRotVec(controllerQuat, grabRelPos);
           screenPos = vecAdd(controllerPos, rotatedRel);
 
-          // Keep screen horizontally level & upright (zero pitch/roll, facing viewer)
-          const toViewer = vecNorm(vecSub({ x: 0, y: 1.6, z: 0 }, screenPos));
-          const yaw = Math.atan2(toViewer.x, toViewer.z);
-          screenQuat = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+          // Rotate screen tangent to viewer POV (facing head, 100% horizontally level)
+          screenQuat = quatFaceViewerLevel(screenPos, { x: 0, y: 1.6, z: 0 });
         }
       } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
                                  (hand === 'left' && grabControllerIdx === 0))) {
