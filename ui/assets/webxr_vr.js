@@ -1,26 +1,16 @@
 /**
- * WebXR VR Module for Reels — v3.1 (1:1 Curved Screen & Red Laser Pointer)
+ * WebXR VR Module for Reels — v3.9 (YouTube VR Curve & DeoVR 6DOF Grab)
  *
- * Key Enhancements & Fixes in v3.1:
- *  - 1:1 Aspect Ratio Preserved on Curved Screen (No Ultrawide stretching!)
- *  - Meta Quest-style Red Laser Pointer Beam & Reticle Target Dot (#FF3B1F neon red)
- *  - Right Trigger Raycast Pointer selection & Click-to-Play/Pause
- *  - 6DOF Natural Grip Grab & Reposition (DeoVR / Skybox style)
- *  - Curved / Flat Toggle in UI Control Panel
- *  - Premium UI Control Panel matching website aesthetics
- *
- * Public API:
- *   WebXRVR.init(videoEl, callbacks)
- *   WebXRVR.enterVR()
- *   WebXRVR.exitVR()
- *   WebXRVR.isSupported() → Promise<boolean>
- *   WebXRVR.onVideoChange()
+ * Key Improvements in v3.9:
+ *  - YouTube VR Standard Curved Screen (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
+ *  - DeoVR / Skybox 6DOF Grab & Repositioning restored from commit ddcd715
+ *  - Exact 1:1 Square Aspect Ratio preserved in both Curved & Flat modes
  */
 const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v3.1-20260802';
+  const VR_VERSION = 'v4.0-20260803';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -30,7 +20,7 @@ const WebXRVR = (function () {
   let callbacks = {};
 
   // Display Settings
-  let isCurved = true;         // Default to Curved Screen (YouTube VR style)
+  let isCurved = true;         // Default to Deep IMAX Curved Screen
 
   // WebGL state
   let gl = null;
@@ -68,7 +58,7 @@ const WebXRVR = (function () {
   let screenQuat = { x: 0, y: 0, z: 0, w: 1 };
   let screenScale = DEFAULT_SCALE;
 
-  // 6DOF Grab state (DeoVR style)
+  // 6DOF Grab state (DeoVR / Skybox style)
   let isGrabbing = false;
   let grabControllerIdx = -1;
   let grabRelPos = { x: 0, y: 0, z: 0 };
@@ -88,8 +78,9 @@ const WebXRVR = (function () {
   let hasNewVideoFrame = true;
   let lastVideoTime = -1;
 
-  // Thumbstick flick debounce
+  // Thumbstick flick debounces
   let flickedX = false;
+  let flickedY = false;
   const FLICK_THRESHOLD = 0.5;
   const FLICK_RESET = 0.3;
 
@@ -148,6 +139,21 @@ const WebXRVR = (function () {
     return { x: res.x, y: res.y, z: res.z };
   }
 
+  function quatLevelFromDir(dir) {
+    // Compute yaw such that screen's local +Z axis points towards viewer direction.
+    // Correct formula: yaw = atan2(dir.x, dir.z).
+    // (Previous -dir.x, -dir.z produced a 180° wrong rotation causing screen flip.)
+    const len = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+    if (len < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
+    const yaw = Math.atan2(dir.x, dir.z);
+    return {
+      x: 0,
+      y: Math.sin(yaw / 2),
+      z: 0,
+      w: Math.cos(yaw / 2),
+    };
+  }
+
   // ─── Premium UI Controls Canvas Rendering ────────────────────────────
 
   function initControlsCanvas() {
@@ -174,7 +180,7 @@ const WebXRVR = (function () {
     ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 16);
     ctx.fill();
 
-    // Subtle Glowing Border
+    // Glowing Border
     ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -193,7 +199,6 @@ const WebXRVR = (function () {
     ctx.textBaseline = 'middle';
     ctx.fillText('4K VR REELS', 70, 21);
 
-    // Playlist info & counter
     const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
     const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
     const item = playlist[idx];
@@ -221,7 +226,6 @@ const WebXRVR = (function () {
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
       if (btn.action === 'curve') btn.label = isCurved ? '🌙 CURVE' : '📺 FLAT';
 
-      // Button Background
       if (isHover || btn.action === 'play') {
         ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 59, 31, 0.85)';
         ctx.shadowColor = 'rgba(255, 59, 31, 0.6)';
@@ -235,14 +239,12 @@ const WebXRVR = (function () {
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Button Border
       ctx.strokeStyle = isHover ? '#FF3B1F' : 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(btn.x, y, btn.w, h, 8);
       ctx.stroke();
 
-      // Button Text / Icon
       ctx.fillStyle = (isHover || btn.action === 'play') ? '#0A0A0A' : '#F2F3F5';
       ctx.font = btn.action === 'curve' ? 'bold 12px sans-serif' : 'bold 18px sans-serif';
       ctx.textAlign = 'center';
@@ -279,7 +281,61 @@ const WebXRVR = (function () {
     ctx.fillText(formatTime(currentTime) + ' / ' + formatTime(duration), CONTROLS_W - 16, CONTROLS_H - 16);
   }
 
-  // ─── Raycast & Distance Helpers ──────────────────────────────────────
+  // ─── YouTube VR Curved Screen Arc Geometry Math ─────────────────────
+  // ARC_ANGLE = 0.6 rad (~34.4° arc angle for authentic YouTube VR curve)
+  // R_CURVE = 1.0 / 0.6 = 1.6667 (Arc length == 1.0, perfect 1:1 square ratio)
+
+  const ARC_ANGLE = 0.6;
+  const R_CURVE = 1.6667;
+
+  function hitTestCurvedScreen(rayOrigin, rayDir) {
+    const halfW = screenScale / 2;
+    const halfH = screenScale / 2;
+
+    const invQ = quatInvert(screenQuat);
+    const O_loc = quatRotVec(invQ, vecSub(rayOrigin, screenPos));
+    const D_loc = quatRotVec(invQ, rayDir);
+
+    if (isCurved) {
+      const R_world = R_CURVE * screenScale;
+      const Ox = O_loc.x, Oz = O_loc.z - R_world;
+      const Dx = D_loc.x, Dz = D_loc.z;
+
+      const A = Dx * Dx + Dz * Dz;
+      if (A < 0.00001) return { hit: false, dist: -1 };
+
+      const B = 2 * (Ox * Dx + Oz * Dz);
+      const C = Ox * Ox + Oz * Oz - R_world * R_world;
+
+      const disc = B * B - 4 * A * C;
+      if (disc < 0) return { hit: false, dist: -1 };
+
+      let t = (-B - Math.sqrt(disc)) / (2 * A);
+      if (t < 0) t = (-B + Math.sqrt(disc)) / (2 * A);
+      if (t < 0 || t > 20) return { hit: false, dist: -1 };
+
+      const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
+      const angle = Math.atan2(hitLocal.x, R_world - hitLocal.z);
+      const halfArc = (ARC_ANGLE * 0.5);
+
+      if (Math.abs(angle) <= halfArc && Math.abs(hitLocal.y) <= halfH) {
+        return { hit: true, dist: t, hitLocal };
+      }
+      return { hit: false, dist: -1 };
+    } else {
+      const denom = D_loc.z;
+      if (Math.abs(denom) < 0.0001) return { hit: false, dist: -1 };
+
+      const t = -O_loc.z / denom;
+      if (t < 0 || t > 20) return { hit: false, dist: -1 };
+
+      const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
+      if (Math.abs(hitLocal.x) <= halfW && Math.abs(hitLocal.y) <= halfH) {
+        return { hit: true, dist: t, hitLocal };
+      }
+      return { hit: false, dist: -1 };
+    }
+  }
 
   function getHitDistControls(rayOrigin, rayDir) {
     const ctrlCenter = {
@@ -293,16 +349,6 @@ const WebXRVR = (function () {
     const t = ((ctrlCenter.x - rayOrigin.x) * normal.x +
                (ctrlCenter.y - rayOrigin.y) * normal.y +
                (ctrlCenter.z - rayOrigin.z) * normal.z) / denom;
-    return t > 0 ? t : -1;
-  }
-
-  function getHitDistMainScreen(rayOrigin, rayDir) {
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-    if (Math.abs(denom) < 0.0001) return -1;
-    const t = ((screenPos.x - rayOrigin.x) * normal.x +
-               (screenPos.y - rayOrigin.y) * normal.y +
-               (screenPos.z - rayOrigin.z) * normal.z) / denom;
     return t > 0 ? t : -1;
   }
 
@@ -345,26 +391,6 @@ const WebXRVR = (function () {
       }
     }
     return -1;
-  }
-
-  function hitTestMainScreen(rayOrigin, rayDir) {
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-
-    if (Math.abs(denom) < 0.0001) return false;
-    const t = ((screenPos.x - rayOrigin.x) * normal.x +
-               (screenPos.y - rayOrigin.y) * normal.y +
-               (screenPos.z - rayOrigin.z) * normal.z) / denom;
-    if (t < 0 || t > 20) return false;
-
-    const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
-    const invQ = quatInvert(screenQuat);
-    const localP = quatRotVec(invQ, vecSub(hitP, screenPos));
-
-    const halfW = screenScale / 2;
-    const halfH = screenScale / 2;
-
-    return (Math.abs(localP.x) <= halfW && Math.abs(localP.y) <= halfH);
   }
 
   function executeControlButton(index) {
@@ -434,9 +460,8 @@ const WebXRVR = (function () {
   // ─── WebGL Setup & Shaders ──────────────────────────────────────────
 
   /**
-   * Vertex Shader: Preserves exact 1:1 square aspect ratio when curved!
-   * ARC_ANGLE = 0.6 rad (~34.4 deg). Radius R = 1.6667.
-   * Arc length = R * ARC_ANGLE = 1.0, matching the mesh height (1.0).
+   * YouTube VR Curved Arc Shader (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
+   * Arc length = R * ARC_ANGLE = 1.0 → perfect 1:1 square video ratio preserved.
    */
   const VERT = `
     attribute vec3 aPos;
@@ -454,7 +479,7 @@ const WebXRVR = (function () {
       if (uCurved > 0.5) {
         float angle = aPos.x * ARC_ANGLE;
         pos.x = R * sin(angle);
-        pos.z = R * (1.0 - cos(angle)); // Curves towards viewer
+        pos.z = R * (1.0 - cos(angle)); // YouTube VR style subtle curve towards viewer
       }
       gl_Position = uMVP * vec4(pos, 1.0);
     }
@@ -487,7 +512,6 @@ const WebXRVR = (function () {
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
 
-    // Outer Red Glow
     const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
     grad.addColorStop(0, '#FFFFFF');
     grad.addColorStop(0.25, '#FF3B1F');
@@ -499,14 +523,12 @@ const WebXRVR = (function () {
     ctx.arc(32, 32, 30, 0, Math.PI * 2);
     ctx.fill();
 
-    // Solid Inner Ring
     ctx.strokeStyle = '#FF3B1F';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(32, 32, 12, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Center Bright Dot
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
     ctx.arc(32, 32, 4, 0, Math.PI * 2);
@@ -544,7 +566,6 @@ const WebXRVR = (function () {
       return false;
     }
 
-    // Cache locations
     loc_aPos = gl.getAttribLocation(glProgram, 'aPos');
     loc_aUV = gl.getAttribLocation(glProgram, 'aUV');
     loc_uMVP = gl.getUniformLocation(glProgram, 'uMVP');
@@ -552,15 +573,12 @@ const WebXRVR = (function () {
     loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
     loc_uCurved = gl.getUniformLocation(glProgram, 'uCurved');
 
-    // Subdivided Grid Geometry (stride = 20 bytes: x, y, z, u, v)
     const COLS = 32;
     const verts = [];
     for (let col = 0; col <= COLS; col++) {
       const u = col / COLS;
       const x = u - 0.5;
-      // Top vertex (x, +0.5, 0, u, 0)
       verts.push(x, 0.5, 0.0, u, 0);
-      // Bottom vertex (x, -0.5, 0, u, 1)
       verts.push(x, -0.5, 0.0, u, 1);
     }
     glGridVertCount = (COLS + 1) * 2;
@@ -568,12 +586,10 @@ const WebXRVR = (function () {
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
 
-    // Laser Ray Buffer (2 points: origin & hitP)
     glLaserBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, glLaserBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(10), gl.DYNAMIC_DRAW);
 
-    // Textures
     glVideoTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -593,23 +609,36 @@ const WebXRVR = (function () {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    console.log('[WebXRVR] WebGL initialised OK with 1:1 Curved Grid & Laser Reticle');
+    console.log('[WebXRVR] WebGL initialised OK with Deep IMAX Curve & Smooth 6DOF');
     return true;
   }
 
   // ─── Matrix & Transformation Math ────────────────────────────────────
 
   function mat4FromRotationTranslationScale(q, p, sW, sH) {
+    const sZ = sW; // Uniform Z scale matching screen width scale
     const x = q.x, y = q.y, z = q.z, w = q.w;
     const x2 = x + x, y2 = y + y, z2 = z + z;
     const xx = x * x2, xy = x * y2, xz = x * z2;
     const yy = y * y2, yz = y * z2, zz = z * z2;
     const wx = w * x2, wy = w * y2, wz = w * z2;
 
+    const m00 = (1 - (yy + zz)) * sW;
+    const m10 = (xy + wz) * sW;
+    const m20 = (xz - wy) * sW;
+
+    const m01 = (xy - wz) * sH;
+    const m11 = (1 - (xx + zz)) * sH;
+    const m21 = (yz + wx) * sH;
+
+    const m02 = (xz + wy) * sZ;
+    const m12 = (yz - wx) * sZ;
+    const m22 = (1 - (xx + yy)) * sZ;
+
     return new Float32Array([
-      (1 - (yy + zz)) * sW, (xy + wz) * sW, (xz - wy) * sW, 0,
-      (xy - wz) * sH, (1 - (xx + zz)) * sH, (yz + wx) * sH, 0,
-      (xz + wy), (yz - wx), (1 - (xx + yy)), 0,
+      m00, m10, m20, 0,
+      m01, m11, m21, 0,
+      m02, m12, m22, 0,
       p.x, p.y, p.z, 1
     ]);
   }
@@ -660,7 +689,6 @@ const WebXRVR = (function () {
     const hitDist = (activeHitDist > 0) ? activeHitDist : 3.0;
     const hitP = vecAdd(activeRayOrigin, vecScale(activeRayDir, hitDist));
 
-    // 1. Draw Red Laser Beam Ray (gl.LINES)
     const lineVerts = new Float32Array([
       activeRayOrigin.x, activeRayOrigin.y, activeRayOrigin.z, 0.5, 0.5,
       hitP.x, hitP.y, hitP.z, 0.5, 0.5
@@ -686,7 +714,6 @@ const WebXRVR = (function () {
 
     gl.drawArrays(gl.LINES, 0, 2);
 
-    // 2. Draw Red Reticle Target Dot at hitP
     const dotScale = activeIsHovering ? 0.06 : 0.04;
     drawGrid(viewMat, projMat, glReticleTexture, hitP, screenQuat, dotScale, dotScale, 0.95, false);
   }
@@ -700,22 +727,18 @@ const WebXRVR = (function () {
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
 
-    // Process controller input
     processInput(frame);
 
-    // Auto-show controls when paused
     if (videoElement && videoElement.paused && !controlsVisible) {
       showControls();
     }
 
     if (!glLayer || !gl) return;
 
-    // Bind XR framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
     gl.clearColor(0.03, 0.03, 0.04, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Upload video texture
     if (videoElement && videoElement.readyState >= 2) {
       const vt = videoElement.currentTime;
       if (hasNewVideoFrame || vt !== lastVideoTime) {
@@ -726,14 +749,12 @@ const WebXRVR = (function () {
       }
     }
 
-    // Upload controls texture
     if (controlsVisible) {
       renderControlsCanvas();
       gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
     }
 
-    // Render per eye
     for (const view of pose.views) {
       const vp = glLayer.getViewport(view);
       gl.viewport(vp.x, vp.y, vp.width, vp.height);
@@ -741,10 +762,8 @@ const WebXRVR = (function () {
       const viewMat = view.transform.inverse.matrix;
       const projMat = view.projectionMatrix;
 
-      // Video Quad (1:1 Curved or Flat)
       drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, isCurved);
 
-      // Controls Overlay (Flat panel floating below video)
       if (controlsVisible) {
         const offsetLocal = { x: 0, y: -screenScale / 2 - 0.28, z: 0 };
         const offsetWorld = quatRotVec(screenQuat, offsetLocal);
@@ -755,7 +774,6 @@ const WebXRVR = (function () {
         drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, screenQuat, ctrlW, ctrlH, 0.96, false);
       }
 
-      // Red Laser Pointer Beam & Reticle Target Dot
       drawLaserPointer(viewMat, projMat);
     }
   }
@@ -771,7 +789,6 @@ const WebXRVR = (function () {
       const gp = source.gamepad;
       const hand = source.handedness;
 
-      // Controller Pose
       let controllerPos = null;
       let controllerDir = null;
       let controllerQuat = { x: 0, y: 0, z: 0, w: 1 };
@@ -798,19 +815,25 @@ const WebXRVR = (function () {
           grabRelPos = quatRotVec(qCtrlInv, pDiff);
           grabRelQuat = quatMul(qCtrlInv, screenQuat);
         }
-        const rotatedRel = quatRotVec(controllerQuat, grabRelPos);
-        screenPos = vecAdd(controllerPos, rotatedRel);
-        screenQuat = quatMul(controllerQuat, grabRelQuat);
+        if ((hand === 'right' && grabControllerIdx === 1) || (hand === 'left' && grabControllerIdx === 0)) {
+          const rotatedRel = quatRotVec(controllerQuat, grabRelPos);
+          screenPos = vecAdd(controllerPos, rotatedRel);
+
+          // Keep screen horizontally level & upright (zero pitch/roll, facing viewer)
+          const toViewer = vecNorm(vecSub({ x: 0, y: 1.6, z: 0 }, screenPos));
+          const yaw = Math.atan2(toViewer.x, toViewer.z);
+          screenQuat = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+        }
       } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
                                  (hand === 'left' && grabControllerIdx === 0))) {
         isGrabbing = false;
         grabControllerIdx = -1;
       }
 
-      // Process right controller inputs for pointer & UI buttons
+      // Process right controller inputs
       if (hand !== 'right') continue;
 
-      // Active pointer tracking for Laser Beam & Reticle
+      // Active pointer ray tracking
       if (controllerPos && controllerDir) {
         activeRayOrigin = controllerPos;
         activeRayDir = controllerDir;
@@ -829,37 +852,45 @@ const WebXRVR = (function () {
           }
         }
 
-        if (!isHover && hitTestMainScreen(controllerPos, controllerDir)) {
-          hitDist = getHitDistMainScreen(controllerPos, controllerDir);
-          isHover = true;
+        if (!isHover) {
+          const mainHit = hitTestCurvedScreen(controllerPos, controllerDir);
+          if (mainHit.hit) {
+            hitDist = mainHit.dist;
+            isHover = true;
+          }
         }
 
         activeHitDist = (hitDist > 0) ? hitDist : 3.0;
         activeIsHovering = isHover;
       }
 
-      // ── A Button: Toggle Play / Pause ──
-      const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
-      if (aPressed && !prevBtnState.rightA) {
-        callbacks.onTogglePlay && callbacks.onTogglePlay();
-        showControls();
-      }
-      prevBtnState.rightA = aPressed;
-
-      // ── B Button: Disabled (no-op) ──
-      const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
-      prevBtnState.rightB = bPressed;
-
-      // ── Right Thumbstick Y: Resize Screen ──
+      // ── 2. Right Joystick Handling ──
       const thumbY = gp.axes[3] || 0;
-      if (Math.abs(thumbY) > FLICK_THRESHOLD) {
-        screenScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE,
-          screenScale + (-thumbY) * SCALE_SPEED
-        ));
+      const thumbX = gp.axes[2] || 0;
+
+      if (gripPressed) {
+        // A) GRIP HELD + Joystick Y Up/Down -> Scale Screen Larger / Smaller
+        if (Math.abs(thumbY) > FLICK_THRESHOLD) {
+          screenScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE,
+            screenScale + (-thumbY) * SCALE_SPEED
+          ));
+        }
+      } else {
+        // B) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation
+        if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
+          flickedY = true;
+          if (thumbY > 0) {
+            callbacks.onNext && callbacks.onNext();
+          } else {
+            callbacks.onPrev && callbacks.onPrev();
+          }
+          showControls();
+        } else if (Math.abs(thumbY) < FLICK_RESET) {
+          flickedY = false;
+        }
       }
 
-      // ── Right Thumbstick X: Seek ±5s ──
-      const thumbX = gp.axes[2] || 0;
+      // C) Joystick X Left/Right -> Seek ±5s
       if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
         flickedX = true;
         callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
@@ -867,6 +898,18 @@ const WebXRVR = (function () {
       } else if (Math.abs(thumbX) < FLICK_RESET) {
         flickedX = false;
       }
+
+      // ── 3. A Button: Toggle Play / Pause ──
+      const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
+      if (aPressed && !prevBtnState.rightA) {
+        callbacks.onTogglePlay && callbacks.onTogglePlay();
+        showControls();
+      }
+      prevBtnState.rightA = aPressed;
+
+      // ── 4. B Button: Disabled (no-op) ──
+      const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
+      prevBtnState.rightB = bPressed;
     }
   }
 
@@ -904,7 +947,6 @@ const WebXRVR = (function () {
       }
     }
 
-    // Reset state
     screenPos = { ...DEFAULT_POS };
     screenQuat = { x: 0, y: 0, z: 0, w: 1 };
     screenScale = DEFAULT_SCALE;
@@ -915,6 +957,8 @@ const WebXRVR = (function () {
     isGrabbing = false;
     activeRayOrigin = null;
     activeRayDir = null;
+    flickedX = false;
+    flickedY = false;
 
     initControlsCanvas();
 
@@ -932,7 +976,6 @@ const WebXRVR = (function () {
 
     setupVideoFrameTracking();
 
-    // Controller Select Events
     xrSession.addEventListener('selectstart', onSelectStart);
     xrSession.addEventListener('end', onSessionEnd);
 
@@ -985,10 +1028,13 @@ const WebXRVR = (function () {
     }
 
     // 2. Check Click on Main Video Screen
-    if (rayOrigin && rayDir && hitTestMainScreen(rayOrigin, rayDir)) {
-      callbacks.onTogglePlay && callbacks.onTogglePlay();
-      toggleControls();
-      return;
+    if (rayOrigin && rayDir) {
+      const mainHit = hitTestCurvedScreen(rayOrigin, rayDir);
+      if (mainHit.hit) {
+        callbacks.onTogglePlay && callbacks.onTogglePlay();
+        toggleControls();
+        return;
+      }
     }
 
     // 3. Click outside screen -> toggle controls visibility
@@ -1033,6 +1079,8 @@ const WebXRVR = (function () {
     hoveredButton = -1;
     activeRayOrigin = null;
     activeRayDir = null;
+    flickedX = false;
+    flickedY = false;
 
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.remove('vr-active');
