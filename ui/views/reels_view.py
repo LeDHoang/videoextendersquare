@@ -58,41 +58,57 @@ def render(ctx: dict) -> None:
             st.rerun()
         return
 
-    # Filter controls
+    # Folder Filter Pills & Controls
+    folder_counts = {"ALL FOLDERS": len(raw_videos)}
+    for v in raw_videos:
+        folder_counts[v["folder"]] = folder_counts.get(v["folder"], 0) + 1
+
     folders = sorted(list({v["folder"] for v in raw_videos}))
     folder_options = ["ALL FOLDERS"] + folders
+    folder_labels = [
+        f"📂 ALL ({len(raw_videos)})" if f == "ALL FOLDERS" else f"📁 {f} ({folder_counts[f]})"
+        for f in folder_options
+    ]
 
-    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
+    st.caption("FILTER REELS BY OUTPUT FOLDER")
+    selected_label = st.pills(
+        "Folder Filter",
+        options=folder_labels,
+        selection_mode="single",
+        default=folder_labels[0],
+        key="sx.reels.folder_pills",
+        label_visibility="collapsed",
+    )
+
+    selected_folder = "ALL FOLDERS"
+    if selected_label:
+        idx = folder_labels.index(selected_label)
+        selected_folder = folder_options[idx]
+
+    c1, c2, c3, c4 = st.columns([2, 2, 3, 1])
     with c1:
-        selected_folder = st.selectbox(
-            "Folder",
-            folder_options,
-            key="sx.reels.folder",
-            label_visibility="collapsed",
-        )
-    with c2:
         codec_mode = st.selectbox(
             "Codec",
             ["H.264 4K (Web & VR)", "HEVC 4K (Raw Master)", "ALL CODECS"],
             key="sx.reels.codec_mode",
             label_visibility="collapsed",
         )
-    with c3:
+    with c2:
         sort_order = st.selectbox(
             "Sort",
             ["NEWEST FIRST", "OLDEST FIRST", "ALPHABETICAL", "SHUFFLE"],
             key="sx.reels.sort",
             label_visibility="collapsed",
         )
-    with c4:
+    with c3:
         search_query = st.text_input(
             "Search",
             placeholder="Search filename…",
             key="sx.reels.search",
             label_visibility="collapsed",
         )
-    with c5:
-        if st.button("↻ RESCAN", key="sx.reels.rescan", width="stretch"):
+    with c4:
+        if st.button("↻ RESCAN", key="sx.reels.rescan", use_container_width=True):
             st.session_state["sx.reels_nonce"] = nonce + 1
             scan_output_videos.clear()
             st.rerun()
