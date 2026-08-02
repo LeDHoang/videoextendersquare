@@ -1,42 +1,57 @@
 /**
- * WebXR VR Module for Reels — Option C (XRQuadLayer)
+ * WebXR VR Module for Reels — v2.1 (Fixed & Stabilised)
  *
- * Provides a YouTube-VR-style immersive viewing experience:
- *  - XRQuadLayer path for Meta Quest (hardware compositor, max sharpness)
- *  - WebGL fallback for desktop WebXR Emulator testing
- *  - Grip-to-reposition, thumbstick resize/seek, floating transport controls
+ * Architecture: Single XRWebGLLayer with video texture quad + controls overlay quad.
+ * This approach is universally supported (Quest Browser, desktop emulator, etc.)
+ * unlike the XRMediaBinding + XRWebGLBinding mixed-layer approach which has
+ * compatibility issues on Quest.
+ *
+ * Features:
+ *  - Video rendered as a textured quad in front of the user
+ *  - YouTube VR-style floating transport controls (show on pause, B button, auto-hide)
+ *  - Grip-to-reposition, thumbstick resize/seek
+ *  - No per-frame updateRenderState (was crashing Quest)
+ *  - No layer recreation on video change (was crashing on auto-advance/trigger)
+ *  - requestVideoFrameCallback for efficient texture uploads
  *
  * Public API:
  *   WebXRVR.init(videoEl, callbacks)
  *   WebXRVR.enterVR()
  *   WebXRVR.exitVR()
  *   WebXRVR.isSupported() → Promise<boolean>
+ *   WebXRVR.onVideoChange()  — lightweight, no layer recreation
  */
 const WebXRVR = (function () {
   'use strict';
+
+  /* ═══ VERSION TAG — check console to confirm fresh code ═══ */
+  const VR_VERSION = 'v2.3-20260802';
+  console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
   let xrSession = null;
   let xrRefSpace = null;
   let videoElement = null;
-  let callbacks = {};          // { onNext, onPrev, onTogglePlay, onSeek, getPlaylist, getCurrentIndex }
-  let useLayers = false;       // true on Quest (XRMediaBinding available)
+  let callbacks = {};
 
-  // Layers path
-  let videoLayer = null;       // XRQuadLayer for video
-  let controlsLayer = null;    // XRQuadLayer for transport controls
-
-  // WebGL fallback path
-  let glLayer = null;
+  // WebGL state
   let gl = null;
+  let glLayer = null;
   let glProgram = null;
   let glVideoTexture = null;
   let glControlsTexture = null;
-  let glQuadVAO = null;
+  let glQuadBuf = null;
+
+  // Cached GL locations
+  let loc_aPos = -1;
+  let loc_aUV = -1;
+  let loc_uMVP = null;
+  let loc_uTex = null;
+  let loc_uAlpha = null;
 
   // Screen transform
   const DEFAULT_POS = { x: 0, y: 1.6, z: -2.8 };
-  const DEFAULT_SCALE = 4.0;   // meters (full cinema screen scale by default)
+  const DEFAULT_SCALE = 4.0;
   const MIN_SCALE = 1.0;
   const MAX_SCALE = 10.0;
   const SCALE_SPEED = 0.04;
@@ -48,7 +63,7 @@ const WebXRVR = (function () {
   // Grab state
   let isGrabbing = false;
   let grabControllerIdx = -1;
-  let grabDistance = 3.0;      // distance along ray when grab started
+  let grabDistance = 3.0;
 
   // Controls panel state
   let controlsVisible = false;
@@ -57,12 +72,21 @@ const WebXRVR = (function () {
   const CONTROLS_W = 512;
   const CONTROLS_H = 128;
   let hoveredButton = -1;
+  let controlsAutoHideTimer = null;
+  const CONTROLS_AUTO_HIDE_MS = 5000;
+
+  // Video frame tracking
+  let hasNewVideoFrame = true;
+  let lastVideoTime = -1;
 
   // Thumbstick flick debounce
   let flickedX = false;
-  let flickedY = false;
   const FLICK_THRESHOLD = 0.5;
   const FLICK_RESET = 0.3;
+
+  // External button state tracking — WebXR gamepads are snapshots recreated each
+  // frame, so you CANNOT persist state on gp.buttons[n].  Track externally.
+  const prevBtnState = { rightA: false, rightB: false, leftA: false, leftB: false };
 
   // Button definitions for the controls panel
   const CTRL_BUTTONS = [
@@ -84,22 +108,10 @@ const WebXRVR = (function () {
     return m + ':' + (sec < 10 ? '0' : '') + sec;
   }
 
-  function vecLen(a) {
-    return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
-  }
-
-  function vecSub(a, b) {
-    return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-  }
-
-  function vecAdd(a, b) {
-    return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-  }
-
-  function vecScale(a, s) {
-    return { x: a.x * s, y: a.y * s, z: a.z * s };
-  }
-
+  function vecLen(a) { return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z); }
+  function vecSub(a, b) { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
+  function vecAdd(a, b) { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
+  function vecScale(a, s) { return { x: a.x * s, y: a.y * s, z: a.z * s }; }
   function vecNorm(a) {
     const l = vecLen(a) || 1;
     return { x: a.x / l, y: a.y / l, z: a.z / l };
@@ -123,8 +135,9 @@ const WebXRVR = (function () {
     const currentTime = videoElement ? videoElement.currentTime : 0;
     const duration = videoElement ? videoElement.duration : 0;
 
-    // Background — dark semi-transparent panel
     ctx.clearRect(0, 0, CONTROLS_W, CONTROLS_H);
+
+    // Background
     ctx.fillStyle = 'rgba(8, 9, 10, 0.88)';
     ctx.beginPath();
     ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 12);
@@ -137,23 +150,20 @@ const WebXRVR = (function () {
     ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 12);
     ctx.stroke();
 
-    // Buttons row (top half)
+    // Buttons row
     CTRL_BUTTONS.forEach((btn, i) => {
       const isHover = (hoveredButton === i);
       const y = 10;
       const h = 40;
 
-      // Update play button label
       if (btn.action === 'play') btn.label = isPaused ? '▶' : '⏸';
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
 
-      // Button background
       ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 255, 255, 0.1)';
       ctx.beginPath();
       ctx.roundRect(btn.x, y, btn.w, h, 6);
       ctx.fill();
 
-      // Button label
       ctx.fillStyle = isHover ? '#0A0A0A' : '#F2F3F5';
       ctx.font = 'bold 18px sans-serif';
       ctx.textAlign = 'center';
@@ -161,35 +171,28 @@ const WebXRVR = (function () {
       ctx.fillText(btn.label, btn.x + btn.w / 2, y + h / 2);
     });
 
-    // Progress bar (bottom section)
-    const barX = 16;
-    const barY = 65;
-    const barW = CONTROLS_W - 32;
-    const barH = 6;
+    // Progress bar
+    const barX = 16, barY = 65;
+    const barW = CONTROLS_W - 32, barH = 6;
     const progress = duration > 0 ? currentTime / duration : 0;
 
-    // Track
     ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
     ctx.beginPath();
     ctx.roundRect(barX, barY, barW, barH, 3);
     ctx.fill();
 
-    // Fill
     ctx.fillStyle = '#FF3B1F';
     ctx.beginPath();
-    ctx.roundRect(barX, barY, barW * progress, barH, 3);
+    ctx.roundRect(barX, barY, Math.max(1, barW * progress), barH, 3);
     ctx.fill();
 
-    // Time text
+    // Time
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     ctx.font = '11px monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(
-      formatTime(currentTime) + ' / ' + formatTime(duration),
-      CONTROLS_W - 16, barY + barH + 16
-    );
+    ctx.fillText(formatTime(currentTime) + ' / ' + formatTime(duration), CONTROLS_W - 16, barY + barH + 16);
 
-    // Metadata line
+    // Metadata
     const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
     const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
     const item = playlist[idx];
@@ -197,11 +200,8 @@ const WebXRVR = (function () {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.font = '10px monospace';
       ctx.textAlign = 'left';
-      const meta = `${item.filename}  ·  📁 ${item.folder}  ·  ${item.size}`;
-      ctx.fillText(meta, 16, CONTROLS_H - 14);
+      ctx.fillText(`${item.filename}  ·  📁 ${item.folder}  ·  ${item.size}`, 16, CONTROLS_H - 14);
     }
-
-    // Counter top-right
     if (playlist.length > 0) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.font = '10px monospace';
@@ -213,16 +213,14 @@ const WebXRVR = (function () {
   // ─── Controls Raycast ────────────────────────────────────────────────
 
   function hitTestControls(rayOrigin, rayDir) {
-    // The controls panel sits below the video screen
     const ctrlCenter = {
       x: screenPos.x,
-      y: screenPos.y - screenScale / 2 - 0.25,  // 0.25m below video
+      y: screenPos.y - screenScale / 2 - 0.25,
       z: screenPos.z,
     };
     const ctrlWidth = screenScale * 0.8;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
 
-    // Simple ray-plane intersection (panel faces +Z toward user)
     if (Math.abs(rayDir.z) < 0.001) return -1;
     const t = (ctrlCenter.z - rayOrigin.z) / rayDir.z;
     if (t < 0 || t > 20) return -1;
@@ -230,11 +228,10 @@ const WebXRVR = (function () {
     const hitX = rayOrigin.x + rayDir.x * t;
     const hitY = rayOrigin.y + rayDir.y * t;
 
-    // Convert to panel UV (0..1)
     const halfW = ctrlWidth / 2;
     const halfH = ctrlHeight / 2;
     const localX = hitX - (ctrlCenter.x - halfW);
-    const localY = (ctrlCenter.y + halfH) - hitY;  // flip Y
+    const localY = (ctrlCenter.y + halfH) - hitY;
 
     if (localX < 0 || localX > ctrlWidth || localY < 0 || localY > ctrlHeight) return -1;
 
@@ -243,7 +240,6 @@ const WebXRVR = (function () {
     const canvasX = u * CONTROLS_W;
     const canvasY = v * CONTROLS_H;
 
-    // Check button hit
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= 10 && canvasY <= 50) {
@@ -256,6 +252,7 @@ const WebXRVR = (function () {
   function executeControlButton(index) {
     if (index < 0 || index >= CTRL_BUTTONS.length) return;
     const action = CTRL_BUTTONS[index].action;
+    resetAutoHideTimer();
     switch (action) {
       case 'prev':  callbacks.onPrev && callbacks.onPrev(); break;
       case 'next':  callbacks.onNext && callbacks.onNext(); break;
@@ -263,17 +260,61 @@ const WebXRVR = (function () {
       case 'rew':   callbacks.onSeek && callbacks.onSeek(-5); break;
       case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mute':
-        if (videoElement) {
-          videoElement.muted = !videoElement.muted;
-        }
+        if (videoElement) videoElement.muted = !videoElement.muted;
         break;
       case 'exit':  exitVR(); break;
     }
   }
 
-  // ─── WebGL Fallback Shaders ──────────────────────────────────────────
+  // ─── Controls Visibility ─────────────────────────────────────────────
 
-  const VERT_SRC = `
+  function showControls() {
+    controlsVisible = true;
+    resetAutoHideTimer();
+  }
+
+  function hideControls() {
+    controlsVisible = false;
+    clearAutoHideTimer();
+  }
+
+  function toggleControls() {
+    if (controlsVisible) hideControls();
+    else showControls();
+  }
+
+  function resetAutoHideTimer() {
+    clearAutoHideTimer();
+    if (videoElement && !videoElement.paused) {
+      controlsAutoHideTimer = setTimeout(function() {
+        controlsVisible = false;
+      }, CONTROLS_AUTO_HIDE_MS);
+    }
+  }
+
+  function clearAutoHideTimer() {
+    if (controlsAutoHideTimer) {
+      clearTimeout(controlsAutoHideTimer);
+      controlsAutoHideTimer = null;
+    }
+  }
+
+  // ─── Video Frame Tracking ───────────────────────────────────────────
+
+  function setupVideoFrameTracking() {
+    if (!videoElement) return;
+    if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+      function onFrame(now, metadata) {
+        hasNewVideoFrame = true;
+        if (xrSession) videoElement.requestVideoFrameCallback(onFrame);
+      }
+      videoElement.requestVideoFrameCallback(onFrame);
+    }
+  }
+
+  // ─── WebGL Setup ────────────────────────────────────────────────────
+
+  const VERT = `
     attribute vec2 aPos;
     attribute vec2 aUV;
     varying vec2 vUV;
@@ -284,7 +325,7 @@ const WebXRVR = (function () {
     }
   `;
 
-  const FRAG_SRC = `
+  const FRAG = `
     precision mediump float;
     varying vec2 vUV;
     uniform sampler2D uTex;
@@ -295,40 +336,56 @@ const WebXRVR = (function () {
     }
   `;
 
-  function compileShader(gl, type, src) {
+  function compileShader(type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
     gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.error('Shader compile error:', gl.getShaderInfoLog(s));
+      console.error('[WebXRVR] Shader error:', gl.getShaderInfoLog(s));
     }
     return s;
   }
 
-  function initWebGLFallback(session) {
+  function initGL(session) {
     const canvas = document.createElement('canvas');
-    gl = canvas.getContext('webgl', { xrCompatible: true });
+    gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false });
+    if (!gl) {
+      console.error('[WebXRVR] Failed to create WebGL context');
+      return false;
+    }
 
     glLayer = new XRWebGLLayer(session, gl);
     session.updateRenderState({ baseLayer: glLayer });
 
-    // Compile shaders
-    const vs = compileShader(gl, gl.VERTEX_SHADER, VERT_SRC);
-    const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+    // Shaders
+    const vs = compileShader(gl.VERTEX_SHADER, VERT);
+    const fs = compileShader(gl.FRAGMENT_SHADER, FRAG);
     glProgram = gl.createProgram();
     gl.attachShader(glProgram, vs);
     gl.attachShader(glProgram, fs);
     gl.linkProgram(glProgram);
 
-    // Quad geometry: [-0.5, 0.5] with UVs
+    if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS)) {
+      console.error('[WebXRVR] Program link error:', gl.getProgramInfoLog(glProgram));
+      return false;
+    }
+
+    // Cache locations ONCE
+    loc_aPos = gl.getAttribLocation(glProgram, 'aPos');
+    loc_aUV = gl.getAttribLocation(glProgram, 'aUV');
+    loc_uMVP = gl.getUniformLocation(glProgram, 'uMVP');
+    loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
+    loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
+
+    // Quad verts
     const verts = new Float32Array([
       -0.5, -0.5,  0, 1,
        0.5, -0.5,  1, 1,
       -0.5,  0.5,  0, 0,
        0.5,  0.5,  1, 0,
     ]);
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    glQuadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glQuadBuf);
     gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
 
     // Video texture
@@ -349,30 +406,12 @@ const WebXRVR = (function () {
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    console.log('[WebXRVR] WebGL initialised OK');
+    return true;
   }
 
-  /**
-   * Build a simple model-view-projection matrix for a quad at screenPos
-   * with the given scale, viewed from viewMatrix + projMatrix.
-   */
-  function buildMVP(view, proj, pos, scale, aspect) {
-    // Model matrix: translate to pos, scale
-    // We build a 4x4 column-major array for WebGL
-    const sw = scale;
-    const sh = scale * aspect;
-
-    const model = new Float32Array([
-      sw, 0, 0, 0,
-      0, sh, 0, 0,
-      0, 0, 1, 0,
-      pos.x, pos.y, pos.z, 1,
-    ]);
-
-    // MV = view * model
-    const mv = mat4Mul(view, model);
-    // MVP = proj * MV
-    return mat4Mul(proj, mv);
-  }
+  // ─── Matrix Math ────────────────────────────────────────────────────
 
   function mat4Mul(a, b) {
     const r = new Float32Array(16);
@@ -387,27 +426,34 @@ const WebXRVR = (function () {
     return r;
   }
 
-  function renderWebGLQuad(viewMatrix, projMatrix, texture, pos, scale, aspect, alpha) {
+  function buildMVP(viewMat, projMat, pos, scaleW, scaleH) {
+    const model = new Float32Array([
+      scaleW, 0, 0, 0,
+      0, scaleH, 0, 0,
+      0, 0, 1, 0,
+      pos.x, pos.y, pos.z, 1,
+    ]);
+    return mat4Mul(projMat, mat4Mul(viewMat, model));
+  }
+
+  // ─── Draw a Quad ────────────────────────────────────────────────────
+
+  function drawQuad(viewMat, projMat, texture, pos, scaleW, scaleH, alpha) {
     gl.useProgram(glProgram);
 
-    const aPos = gl.getAttribLocation(glProgram, 'aPos');
-    const aUV = gl.getAttribLocation(glProgram, 'aUV');
-    const uMVP = gl.getUniformLocation(glProgram, 'uMVP');
-    const uTex = gl.getUniformLocation(glProgram, 'uTex');
-    const uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
+    gl.bindBuffer(gl.ARRAY_BUFFER, glQuadBuf);
+    gl.enableVertexAttribArray(loc_aPos);
+    gl.enableVertexAttribArray(loc_aUV);
+    gl.vertexAttribPointer(loc_aPos, 2, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(loc_aUV, 2, gl.FLOAT, false, 16, 8);
 
-    gl.enableVertexAttribArray(aPos);
-    gl.enableVertexAttribArray(aUV);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
-    gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, 16, 8);
-
-    const mvp = buildMVP(viewMatrix, projMatrix, pos, scale, aspect);
-    gl.uniformMatrix4fv(uMVP, false, mvp);
+    const mvp = buildMVP(viewMat, projMat, pos, scaleW, scaleH);
+    gl.uniformMatrix4fv(loc_uMVP, false, mvp);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(uTex, 0);
-    gl.uniform1f(uAlpha, alpha);
+    gl.uniform1i(loc_uTex, 0);
+    gl.uniform1f(loc_uAlpha, alpha);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
@@ -421,53 +467,41 @@ const WebXRVR = (function () {
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
 
-    // ── Process controller input ──
+    // Process controller input
     processInput(frame);
 
-    // ── Update controls visibility (auto-show on pause) ──
-    const shouldShowControls = videoElement && videoElement.paused;
-    controlsVisible = shouldShowControls || controlsVisible;
-
-    // ── Layers path (Quest) ──
-    if (useLayers && videoLayer) {
-      // Update video layer transform & scale directly (no updateRenderState in frame loop)
-      videoLayer.transform = new XRRigidTransform(screenPos, screenQuat);
-      videoLayer.width = screenScale;
-      videoLayer.height = screenScale;
-
-      // Update controls layer
-      if (controlsVisible && controlsLayer) {
-        renderControlsCanvas();
-        controlsLayer.transform = new XRRigidTransform(
-          {
-            x: screenPos.x,
-            y: screenPos.y - screenScale / 2 - 0.25,
-            z: screenPos.z,
-          },
-          screenQuat
-        );
-        controlsLayer.width = screenScale * 0.8;
-        controlsLayer.height = screenScale * 0.8 * (CONTROLS_H / CONTROLS_W);
-
-        xrSession.updateRenderState({
-          layers: [videoLayer, controlsLayer],
-        });
-      } else {
-        xrSession.updateRenderState({
-          layers: [videoLayer],
-        });
-      }
-      return;
+    // Auto-show controls when paused
+    if (videoElement && videoElement.paused && !controlsVisible) {
+      showControls();
     }
 
-    // ── WebGL fallback path (Desktop/Emulator) ──
     if (!glLayer || !gl) return;
 
+    // Bind XR framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-    gl.viewport(0, 0, glLayer.framebufferWidth, glLayer.framebufferHeight);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(0.03, 0.03, 0.04, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+    // Upload video texture only when there's a new frame
+    // Fallback: check currentTime change for browsers without requestVideoFrameCallback
+    if (videoElement && videoElement.readyState >= 2) {
+      const vt = videoElement.currentTime;
+      if (hasNewVideoFrame || vt !== lastVideoTime) {
+        gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+        hasNewVideoFrame = false;
+        lastVideoTime = vt;
+      }
+    }
+
+    // Upload controls texture if visible
+    if (controlsVisible) {
+      renderControlsCanvas();
+      gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+    }
+
+    // Render for each eye
     for (const view of pose.views) {
       const vp = glLayer.getViewport(view);
       gl.viewport(vp.x, vp.y, vp.width, vp.height);
@@ -475,33 +509,24 @@ const WebXRVR = (function () {
       const viewMat = view.transform.inverse.matrix;
       const projMat = view.projectionMatrix;
 
-      // Update video texture from <video> element
-      if (videoElement && videoElement.readyState >= 2) {
-        gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-      }
+      // Video quad (1:1 square)
+      drawQuad(viewMat, projMat, glVideoTexture, screenPos, screenScale, screenScale, 1.0);
 
-      // Render video quad
-      renderWebGLQuad(viewMat, projMat, glVideoTexture, screenPos, screenScale, 1.0, 1.0);
-
-      // Render controls quad if visible
+      // Controls overlay (below video)
       if (controlsVisible) {
-        renderControlsCanvas();
-        gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
-
         const ctrlPos = {
           x: screenPos.x,
           y: screenPos.y - screenScale / 2 - 0.25,
           z: screenPos.z,
         };
-        const ctrlScale = screenScale * 0.8;
-        renderWebGLQuad(viewMat, projMat, glControlsTexture, ctrlPos, ctrlScale, CONTROLS_H / CONTROLS_W, 0.95);
+        const ctrlW = screenScale * 0.8;
+        const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
+        drawQuad(viewMat, projMat, glControlsTexture, ctrlPos, ctrlW, ctrlH, 0.95);
       }
     }
   }
 
-  // ─── Controller Input Processing ─────────────────────────────────────
+  // ─── Controller Input ───────────────────────────────────────────────
 
   function processInput(frame) {
     if (!xrSession) return;
@@ -510,9 +535,9 @@ const WebXRVR = (function () {
       if (!source.gamepad) continue;
 
       const gp = source.gamepad;
-      const hand = source.handedness;  // 'left', 'right', or 'none'
+      const hand = source.handedness;
 
-      // Get controller pose for ray direction
+      // Controller pose
       let controllerPos = null;
       let controllerDir = null;
       if (source.targetRaySpace) {
@@ -520,173 +545,153 @@ const WebXRVR = (function () {
         if (rayPose) {
           const t = rayPose.transform;
           controllerPos = { x: t.position.x, y: t.position.y, z: t.position.z };
-          // The ray direction is -Z in the ray space's orientation
           const m = t.matrix || rayPose.transform.matrix;
-          if (m) {
-            controllerDir = { x: -m[8], y: -m[9], z: -m[10] };
-          }
+          if (m) controllerDir = { x: -m[8], y: -m[9], z: -m[10] };
         }
       }
 
-      // ── Grip: Grab & Reposition ──
-      // Grip is typically gp.buttons[2]
-      const gripPressed = gp.buttons[2] && gp.buttons[2].pressed;
+      // Grip: Grab & reposition (Quest Touch = buttons[1])
+      const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
       if (gripPressed && controllerPos && controllerDir) {
         if (!isGrabbing) {
           isGrabbing = true;
-          grabControllerIdx = source.handedness === 'right' ? 1 : 0;
-          // Calculate current grab distance
+          grabControllerIdx = hand === 'right' ? 1 : 0;
           const toScreen = vecSub(screenPos, controllerPos);
           grabDistance = vecLen(toScreen) || 3.0;
         }
-        // Move screen to follow controller ray
-        const dir = vecNorm(controllerDir);
-        screenPos = vecAdd(controllerPos, vecScale(dir, grabDistance));
+        screenPos = vecAdd(controllerPos, vecScale(vecNorm(controllerDir), grabDistance));
       } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
                                  (hand === 'left' && grabControllerIdx === 0))) {
         isGrabbing = false;
         grabControllerIdx = -1;
       }
 
-      // Only process other controls for the right hand
+      // Right hand only for other controls
       if (hand !== 'right') continue;
 
-      // ── Trigger: Next/Prev Reel ──
-      // Right trigger = button[0] (select)
-      // We use the 'selectstart'/'selectend' events instead for triggers
-      // to avoid repeated firing. But we can also detect rising edge:
-      // Actually, let's use gamepad for left trigger too.
-
-      // ── A Button (button[4] on Quest) — Play/Pause ──
-      if (gp.buttons[4] && gp.buttons[4].pressed) {
-        if (!gp.buttons[4]._wasPressed) {
-          callbacks.onTogglePlay && callbacks.onTogglePlay();
-          gp.buttons[4]._wasPressed = true;
-        }
-      } else if (gp.buttons[4]) {
-        gp.buttons[4]._wasPressed = false;
+      // A button (buttons[4]) — Play/Pause
+      // Using external state tracking because WebXR gamepad is a snapshot
+      const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
+      if (aPressed && !prevBtnState.rightA) {
+        callbacks.onTogglePlay && callbacks.onTogglePlay();
+        showControls();
       }
+      prevBtnState.rightA = aPressed;
 
-      // ── B Button (button[5] on Quest) — Toggle controls ──
-      if (gp.buttons[5] && gp.buttons[5].pressed) {
-        if (!gp.buttons[5]._wasPressed) {
-          controlsVisible = !controlsVisible;
-          gp.buttons[5]._wasPressed = true;
-        }
-      } else if (gp.buttons[5]) {
-        gp.buttons[5]._wasPressed = false;
+      // B button (buttons[5]) — Toggle controls
+      const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
+      if (bPressed && !prevBtnState.rightB) {
+        toggleControls();
       }
+      prevBtnState.rightB = bPressed;
 
-      // ── Right Thumbstick (axes[2]=X, axes[3]=Y) ──
+      // Right thumbstick
       const thumbX = gp.axes[2] || 0;
       const thumbY = gp.axes[3] || 0;
 
-      // Y-axis: resize screen
+      // Y: resize
       if (Math.abs(thumbY) > FLICK_THRESHOLD) {
-        // Continuous resize while held
         screenScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE,
           screenScale + (-thumbY) * SCALE_SPEED
         ));
       }
 
-      // X-axis: seek ±5s (flick, not continuous)
+      // X: seek (flick)
       if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
         flickedX = true;
         callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
+        showControls();
       } else if (Math.abs(thumbX) < FLICK_RESET) {
         flickedX = false;
       }
 
-      // ── Raycast against controls panel when visible ──
+      // Raycast controls
       if (controlsVisible && controllerPos && controllerDir) {
         hoveredButton = hitTestControls(controllerPos, controllerDir);
+      } else {
+        hoveredButton = -1;
       }
     }
+  }
 
-    // ── Left controller: trigger for Previous ──
-    for (const source of xrSession.inputSources) {
-      if (!source.gamepad || source.handedness !== 'left') continue;
-      // Left trigger = button[0]
-      // Handled via select events below
-    }
+  // ─── XR Availability ───────────────────────────────────────────────
+
+  function getXR() {
+    try { if (window.top && window.top.navigator && window.top.navigator.xr) return window.top.navigator.xr; } catch (e) {}
+    try { if (window.parent && window.parent.navigator && window.parent.navigator.xr) return window.parent.navigator.xr; } catch (e) {}
+    return navigator.xr;
   }
 
   // ─── Session Management ──────────────────────────────────────────────
 
   async function enterVR() {
     if (xrSession) return;
-    if (!navigator.xr) {
-      alert('WebXR is not available in this browser context. WebXR requires HTTPS or localhost, and feature policy permission on the iframe.');
-      console.warn('WebXR not available');
+    console.log('[WebXRVR] enterVR() called —', VR_VERSION);
+
+    const xr = getXR();
+    if (!xr) {
+      alert('WebXR not available. Requires HTTPS or localhost.');
       return;
     }
 
+    // Request session
     try {
-      xrSession = await navigator.xr.requestSession('immersive-vr', {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['layers'],
+      xrSession = await xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor', 'local'],
       });
     } catch (e) {
-      // Fallback without local-floor
       try {
-        xrSession = await navigator.xr.requestSession('immersive-vr', {
-          optionalFeatures: ['local-floor', 'layers'],
-        });
+        xrSession = await xr.requestSession('immersive-vr');
       } catch (e2) {
-        console.error('Failed to start WebXR session:', e2);
-        alert('Could not start Immersive VR session: ' + e2.message);
+        console.error('[WebXRVR] Session request failed:', e2);
+        alert('Could not start VR: ' + e2.message);
         return;
       }
     }
+    console.log('[WebXRVR] XR session started');
 
-    // Reset screen position
+    // Reset state
     screenPos = { ...DEFAULT_POS };
     screenScale = DEFAULT_SCALE;
     controlsVisible = false;
+    hasNewVideoFrame = true;
+    lastVideoTime = -1;
+    hoveredButton = -1;
+    isGrabbing = false;
 
-    // Get reference space
+    // Init controls canvas
+    initControlsCanvas();
+
+    // Reference space
     try {
       xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
     } catch {
       xrRefSpace = await xrSession.requestReferenceSpace('local');
     }
+    console.log('[WebXRVR] Reference space acquired');
 
-    // Detect Layers API support
-    useLayers = false;
-    if (typeof XRMediaBinding !== 'undefined') {
-      try {
-        const binding = new XRMediaBinding(xrSession);
-        videoLayer = binding.createQuadLayer(videoElement, {
-          space: xrRefSpace,
-          width: screenScale,
-          height: screenScale,
-          layout: 'mono',
-          transform: new XRRigidTransform(screenPos, screenQuat),
-        });
-        useLayers = true;
-        xrSession.updateRenderState({ layers: [videoLayer] });
-        console.log('[WebXRVR] Bound 4K XRMediaBinding QuadLayer to hardware compositor');
-      } catch (e) {
-        console.warn('[WebXRVR] XRMediaBinding failed, using WebGL fallback:', e);
-        useLayers = false;
-        videoLayer = null;
-      }
+    // Init WebGL — this is the ONLY rendering path now (no XRMediaBinding)
+    if (!initGL(xrSession)) {
+      console.error('[WebXRVR] WebGL init failed, ending session');
+      xrSession.end().catch(() => {});
+      xrSession = null;
+      return;
     }
 
-    // WebGL fallback
-    if (!useLayers) {
-      initControlsCanvas();
-      initWebGLFallback(xrSession);
-      console.log('[WebXRVR] Using WebGL fallback (texture quad)');
-    }
+    // Video frame tracking
+    setupVideoFrameTracking();
 
-    // Controller events for trigger-based navigation
+    // Events
     xrSession.addEventListener('selectstart', onSelectStart);
     xrSession.addEventListener('end', onSessionEnd);
+    if (videoElement) {
+      videoElement.addEventListener('pause', onVideoPause);
+      videoElement.addEventListener('play', onVideoPlay);
+    }
 
-    // Add VR active class
-    const frame = document.getElementById('reelsFrame');
-    if (frame) frame.classList.add('vr-active');
+    // VR active indicator
+    const frameEl = document.getElementById('reelsFrame');
+    if (frameEl) frameEl.classList.add('vr-active');
 
     // Ensure video is playing
     if (videoElement && videoElement.paused) {
@@ -694,69 +699,85 @@ const WebXRVR = (function () {
     }
 
     // Start render loop
+    console.log('[WebXRVR] Starting render loop');
     xrSession.requestAnimationFrame(onXRFrame);
+  }
+
+  function onVideoPause() {
+    if (xrSession) showControls();
+  }
+
+  function onVideoPlay() {
+    if (xrSession && controlsVisible) resetAutoHideTimer();
   }
 
   function onSelectStart(ev) {
     const hand = ev.inputSource.handedness;
-    if (hand === 'right') {
-      callbacks.onNext && callbacks.onNext();
-    } else if (hand === 'left') {
-      callbacks.onPrev && callbacks.onPrev();
-    }
 
-    // Also check if we hit a controls button
+    // Priority: controls button click
     if (controlsVisible && hoveredButton >= 0) {
       executeControlButton(hoveredButton);
+      return;
+    }
+
+    // Otherwise: navigate
+    if (hand === 'right') {
+      callbacks.onNext && callbacks.onNext();
+      showControls();
+    } else if (hand === 'left') {
+      callbacks.onPrev && callbacks.onPrev();
+      showControls();
     }
   }
 
   function onSessionEnd() {
+    console.log('[WebXRVR] Session ended');
     cleanup();
   }
 
   function exitVR() {
-    if (xrSession) {
-      xrSession.end().catch(() => {});
-    }
+    if (xrSession) xrSession.end().catch(() => {});
   }
 
   function cleanup() {
+    if (videoElement) {
+      videoElement.removeEventListener('pause', onVideoPause);
+      videoElement.removeEventListener('play', onVideoPlay);
+    }
+    clearAutoHideTimer();
     xrSession = null;
     xrRefSpace = null;
-    videoLayer = null;
-    controlsLayer = null;
-    glLayer = null;
     gl = null;
+    glLayer = null;
     glProgram = null;
     glVideoTexture = null;
     glControlsTexture = null;
-    useLayers = false;
-    isGrabbing = false;
+    glQuadBuf = null;
+    loc_aPos = -1;
+    loc_aUV = -1;
+    loc_uMVP = null;
+    loc_uTex = null;
+    loc_uAlpha = null;
     controlsVisible = false;
+    isGrabbing = false;
+    hasNewVideoFrame = true;
+    lastVideoTime = -1;
+    hoveredButton = -1;
 
-    const frame = document.getElementById('reelsFrame');
-    if (frame) frame.classList.remove('vr-active');
+    const frameEl = document.getElementById('reelsFrame');
+    if (frameEl) frameEl.classList.remove('vr-active');
   }
 
+  /**
+   * Called when video source changes. NO-OP by design.
+   * The video quad reads from the <video> element each frame.
+   * When src changes, we just pick up the new frames automatically.
+   */
   function onVideoChange() {
-    if (!xrSession || !useLayers || !xrRefSpace || !videoElement) return;
-    try {
-      if (typeof XRMediaBinding !== 'undefined') {
-        const binding = new XRMediaBinding(xrSession);
-        videoLayer = binding.createQuadLayer(videoElement, {
-          space: xrRefSpace,
-          width: screenScale,
-          height: screenScale,
-          layout: 'mono',
-          transform: new XRRigidTransform(screenPos, screenQuat),
-        });
-        xrSession.updateRenderState({ layers: [videoLayer] });
-        console.log('[WebXRVR] Refreshed XRMediaBinding QuadLayer for new reel');
-      }
-    } catch (e) {
-      console.warn('[WebXRVR] Failed to refresh video layer on change:', e);
-    }
+    // Intentionally lightweight — just reset frame tracking
+    hasNewVideoFrame = true;
+    lastVideoTime = -1;
+    console.log('[WebXRVR] Video source changed — will pick up new frames next render');
   }
 
   // ─── Public API ──────────────────────────────────────────────────────
@@ -765,15 +786,13 @@ const WebXRVR = (function () {
     init(video, cbs) {
       videoElement = video;
       callbacks = cbs || {};
+      console.log('[WebXRVR] Initialised', VR_VERSION);
     },
 
     async isSupported() {
-      if (!navigator.xr) return false;
-      try {
-        return await navigator.xr.isSessionSupported('immersive-vr');
-      } catch {
-        return false;
-      }
+      const xr = getXR();
+      if (!xr) return false;
+      try { return await xr.isSessionSupported('immersive-vr'); } catch { return false; }
     },
 
     enterVR,
