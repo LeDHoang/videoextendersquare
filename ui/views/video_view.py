@@ -179,9 +179,16 @@ def render(ctx: dict) -> None:
         fal_upscale_model = ctx["models"]["upscale_vid"]
         seedvr_factor = 2.0
         seedvr_target = "1080p"
+        bytedance_target_res = "1080p"
+        bytedance_target_fps = "30fps"
+        bytedance_tier = "standard"
+        bytedance_preset = "general"
+        bytedance_fidelity = "high"
+
         if fal_picked:
             C.eyebrow("FAL AI UPSCALE MODEL")
             fal_options = {
+                "Bytedance Upscaler": "fal-ai/bytedance-upscaler/upscale/video",
                 "SeedVR2 Video": "fal-ai/seedvr/upscale/video",
                 "Kling Video": "fal-ai/kling-video/v1.5/pro/upscale",
                 "ESRGAN Video": "fal-ai/esrgan-video",
@@ -189,13 +196,42 @@ def render(ctx: dict) -> None:
             selected_opt = st.segmented_control(
                 "FAL AI Model Options",
                 list(fal_options.keys()),
-                default="SeedVR2 Video",
+                default="Bytedance Upscaler",
                 label_visibility="collapsed",
                 key=S.wkey(NS, "fal_vid_model"),
-            ) or "SeedVR2 Video"
+            ) or "Bytedance Upscaler"
             fal_upscale_model = fal_options[selected_opt]
 
-            if "seedvr" in fal_upscale_model.lower():
+            if "bytedance" in fal_upscale_model.lower():
+                with st.expander("▸ BYTEDANCE UPSCALER SETTINGS", expanded=False):
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        bytedance_target_res = st.selectbox(
+                            "Target Resolution", ["1080p", "2k", "4k"],
+                            key=S.wkey(NS, "bytedance_res"),
+                            help="1080p ($0.0072/s), 2K ($0.0144/s), 4K ($0.0288/s) @ 30fps"
+                        )
+                        bytedance_target_fps = st.selectbox(
+                            "Target FPS", ["30fps", "60fps"],
+                            key=S.wkey(NS, "bytedance_fps"),
+                            help="60fps doubles the processing cost for any resolution."
+                        )
+                        bytedance_fidelity = st.selectbox(
+                            "Fidelity Intensity", ["high", "medium"],
+                            key=S.wkey(NS, "bytedance_fidelity")
+                        )
+                    with bc2:
+                        bytedance_tier = st.selectbox(
+                            "Quality Tier", ["standard", "fast", "pro"],
+                            key=S.wkey(NS, "bytedance_tier"),
+                            help="'pro' tier uses large-model restoration at 10× the cost."
+                        )
+                        bytedance_preset = st.selectbox(
+                            "Scenario Preset", ["general", "ugc", "short_series", "aigc", "old_film"],
+                            key=S.wkey(NS, "bytedance_preset")
+                        )
+
+            elif "seedvr" in fal_upscale_model.lower():
                 with st.expander("▸ SEEDVR2 UPSCALE SETTINGS", expanded=False):
                     cs1, cs2 = st.columns(2)
                     with cs1:
@@ -277,6 +313,81 @@ def render(ctx: dict) -> None:
         disabled = (bool(blocked) or missing_key or studio_blocked
                     or S.get(NS, "running", False))
 
+        # ── Pre-Render Cost Breakdown Calculation ──
+        total_effective_dur = 0.0
+        if items:
+            for it in items:
+                src_dur = it["meta"]["dur"]
+                eff_dur = min(trim_duration, max(1.0, src_dur - trim_start)) if trim_enabled else src_dur
+                total_effective_dur += eff_dur
+
+        est_outpaint_cost = 0.0
+        outpaint_label = "None (Upscale Only)"
+        if not upscale_only:
+            outpaint_lower = outpaint_model_id.lower()
+            if "luma" in outpaint_lower or "reframe" in outpaint_lower:
+                est_outpaint_cost = total_effective_dur * 0.06
+                outpaint_label = "Luma Ray-2 Reframe ($0.06/s)"
+            elif "ltx" in outpaint_lower:
+                w_ltx, h_ltx = (720, 720) if ltx_resolution == "720p" else ((1080, 1080) if ltx_resolution == "1080p" else (480, 480))
+                frames_est = int(total_effective_dur * 24) if total_effective_dur > 0 else 121
+                mp = (w_ltx * h_ltx * frames_est) / 1000000.0
+                est_outpaint_cost = mp * 0.0024075
+                outpaint_label = f"LTX 2.3 Quality ({ltx_resolution}) (~$0.0024/MP)"
+            else:
+                est_outpaint_cost = max(0.10 * len(items or []), total_effective_dur * 0.025)
+                outpaint_label = "Kling Outpaint (~$0.025/s)"
+
+        est_upscale_cost = 0.0
+        upscale_label = f"Local ({engine} Engine — $0.00)"
+        if fal_picked:
+            upscale_lower = fal_upscale_model.lower()
+            if "bytedance" in upscale_lower:
+                b_base_rates = {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288}
+                b_rate = b_base_rates.get(bytedance_target_res, 0.0072)
+                if bytedance_target_fps == "60fps":
+                    b_rate *= 2.0
+                if bytedance_tier == "pro":
+                    b_rate *= 10.0
+                est_upscale_cost = total_effective_dur * b_rate
+                upscale_label = f"Bytedance ({bytedance_target_res}, {bytedance_target_fps}, {bytedance_tier}) (${b_rate:.4f}/s)"
+            elif "seedvr" in upscale_lower:
+                w_s, h_s = (1080, 1080) if seedvr_target == "1080p" else ((2160, 2160) if seedvr_target == "2160p" else (720, 720))
+                frames_est_s = int(total_effective_dur * 24) if total_effective_dur > 0 else 121
+                mp_s = (w_s * h_s * frames_est_s) / 1000000.0
+                est_upscale_cost = mp_s * 0.001
+                upscale_label = f"SeedVR2 ({seedvr_target}) ($0.001/MP)"
+            elif "kling" in upscale_lower:
+                est_upscale_cost = total_effective_dur * 0.014
+                upscale_label = "Kling Upscale ($0.014/s)"
+            else:
+                est_upscale_cost = total_effective_dur * 0.003
+                upscale_label = "ESRGAN Video ($0.003/s)"
+
+        est_total_cost = est_outpaint_cost + est_upscale_cost
+
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 59, 31, 0.04); border: 1px solid rgba(255, 59, 31, 0.25); border-radius: 8px; padding: 14px 16px; margin: 16px 0 12px 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-weight: 800; font-size: 11px; letter-spacing: 0.1em; color: #FF3B1F; text-transform: uppercase;">
+                        💰 ESTIMATED CLOUD BILLING BREAKDOWN
+                    </span>
+                    <span style="font-family: monospace; font-size: 13px; font-weight: 800; color: #FF3B1F; background: rgba(255, 59, 31, 0.15); padding: 3px 10px; border-radius: 4px;">
+                        EST. TOTAL: ~${est_total_cost:.4f} USD
+                    </span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-family: monospace; font-size: 11px; color: #D1D5DB;">
+                    <div>• <b>Batch Scope:</b> {len(items or [])} video(s) ({total_effective_dur:.1f}s total duration)</div>
+                    <div>• <b>Clip Trimming:</b> {'YES (' + str(trim_duration) + 's clip max)' if trim_enabled else 'NO (Full video)'}</div>
+                    <div>• <b>Outpaint Stage:</b> ~${est_outpaint_cost:.4f} USD &nbsp;<span style="color: #9CA3AF;">({outpaint_label})</span></div>
+                    <div>• <b>Upscale Stage:</b> ~${est_upscale_cost:.4f} USD &nbsp;<span style="color: #9CA3AF;">({upscale_label})</span></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         st.markdown("")
         btn_label = f"▶  RENDER {len(items or [])} VIDEO(S) 4K SQUARE" if items else "▶  RENDER 4K SQUARE"
 
@@ -310,6 +421,11 @@ def render(ctx: dict) -> None:
                     "ltx_audio": ltx_audio,
                     "seedvr_factor": seedvr_factor,
                     "seedvr_target": seedvr_target,
+                    "bytedance_target_res": bytedance_target_res,
+                    "bytedance_target_fps": bytedance_target_fps,
+                    "bytedance_tier": bytedance_tier,
+                    "bytedance_preset": bytedance_preset,
+                    "bytedance_fidelity": bytedance_fidelity,
                     "trim_enabled": trim_enabled,
                     "trim_start": trim_start,
                     "trim_duration": trim_duration,

@@ -253,7 +253,8 @@ def make_web_preview(src: str, height: int | None = 3840) -> str | None:
     if dest.exists() and dest.stat().st_size > 0:
         return str(dest)
 
-    vf_args = ["-vf", f"scale=-2:{height}"] if height and height > 0 else []
+    target_h = min(height or 2160, 2160)
+    vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
@@ -261,7 +262,7 @@ def make_web_preview(src: str, height: int | None = 3840) -> str | None:
         *vf_args,
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-an",
+        "-c:a", "aac", "-b:a", "192k",
         str(dest),
     ]
     try:

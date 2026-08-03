@@ -89,9 +89,10 @@ def render(ctx: dict) -> None:
     with c1:
         codec_mode = st.selectbox(
             "Codec",
-            ["H.264 4K (Web & VR)", "HEVC 4K (Raw Master)", "ALL CODECS"],
+            ["HEVC 4K (Raw Master)", "H.264 4K (Web & VR)", "ALL CODECS"],
             key="sx.reels.codec_mode",
             label_visibility="collapsed",
+            help="Meta Quest 3 Browser features native 4K HEVC hardware decoding for zero-lag playback.",
         )
     with c2:
         sort_order = st.selectbox(

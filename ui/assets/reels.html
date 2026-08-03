@@ -308,6 +308,7 @@
 
   <div class="reels-video-wrap" id="videoWrap">
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
+    <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="center-flash" id="centerFlash">▶</div>
     <div class="video-error-overlay" id="errorOverlay">
       <div style="font-size: 32px; color: #FF3B1F;">⚠️</div>
@@ -432,6 +433,32 @@
       errorOverlay.classList.add('show');
     }
 
+    const preloadVideo = document.getElementById('preloadVideo');
+
+    function resolveItemUrl(item) {
+      if (!item || !item.url) return '';
+      let itemUrl = item.url;
+      if (item.tunnel_url && item.tunnel_url.trim()) {
+        const tBase = item.tunnel_url.trim().replace(/\/+$/, '');
+        itemUrl = itemUrl.replace(/http:\/\/[^/]+:8502/, tBase);
+      } else if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
+      } else if (location.protocol === 'http:') {
+        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
+      }
+      return itemUrl;
+    }
+
+    function preloadNext(currentIndex) {
+      if (!videoData || videoData.length <= 1) return;
+      const nextIdx = (currentIndex + 1) % videoData.length;
+      const nextItem = videoData[nextIdx];
+      if (nextItem && preloadVideo) {
+        preloadVideo.src = resolveItemUrl(nextItem);
+        preloadVideo.load();
+      }
+    }
+
     function loadVideo(index) {
       hideError();
       if (index < 0) index = videoData.length - 1;
@@ -444,17 +471,12 @@
       metaTitle.textContent = item.filename;
       metaSize.textContent = item.size || '';
 
-      let itemUrl = item.url;
-      if (item.tunnel_url && item.tunnel_url.trim()) {
-        const tBase = item.tunnel_url.trim().replace(/\/+$/, '');
-        itemUrl = itemUrl.replace(/http:\/\/[^/]+:8502/, tBase);
-      } else if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
-      } else if (location.protocol === 'http:') {
-        itemUrl = itemUrl.replace(/http:\/\/[0-9.]+:8502\//, 'http://' + location.hostname + ':8502/');
-      }
+      const itemUrl = resolveItemUrl(item);
       video.src = itemUrl;
       video.muted = isMuted;
+
+      // Preload subsequent video track in background
+      preloadNext(idx);
 
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
@@ -676,9 +698,11 @@
         onNext: nextVideo,
         onPrev: prevVideo,
         onTogglePlay: togglePlay,
+        onToggleMode: toggleMode,
         onSeek: seekRelative,
         getPlaylist: function() { return videoData; },
         getCurrentIndex: function() { return idx; },
+        getAutoNext: function() { return isAutoNext; },
       });
 
       // Always show VR button so user can test on any browser or emulator

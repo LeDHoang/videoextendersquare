@@ -90,14 +90,15 @@ const WebXRVR = (function () {
 
   // Button definitions for the UI controls panel
   const CTRL_BUTTONS = [
-    { label: '⏮',       action: 'prev',   x: 16,  w: 52 },
-    { label: '◀◀',      action: 'rew',    x: 76,  w: 52 },
-    { label: '▶',        action: 'play',   x: 136, w: 68 },
-    { label: '▶▶',      action: 'fwd',    x: 212, w: 52 },
-    { label: '⏭',       action: 'next',   x: 272, w: 52 },
-    { label: '🌙 CURVE', action: 'curve',  x: 332, w: 106 },
-    { label: '🔊',       action: 'mute',   x: 446, w: 52 },
-    { label: '✕',        action: 'exit',   x: 506, w: 52 },
+    { label: '⏮',       action: 'prev',   x: 12,  w: 46 },
+    { label: '◀◀',      action: 'rew',    x: 64,  w: 46 },
+    { label: '▶',        action: 'play',   x: 116, w: 60 },
+    { label: '▶▶',      action: 'fwd',    x: 182, w: 46 },
+    { label: '⏭',       action: 'next',   x: 234, w: 46 },
+    { label: '🔄 AUTO', action: 'mode',   x: 286, w: 84 },
+    { label: '🌙 CURVE', action: 'curve',  x: 376, w: 96 },
+    { label: '🔊',       action: 'mute',   x: 478, w: 46 },
+    { label: '✕',        action: 'exit',   x: 530, w: 46 },
   ];
 
   // ─── Quaternion & Vector Math Helpers ───────────────────────────────
@@ -280,6 +281,7 @@ const WebXRVR = (function () {
     }
 
     // Buttons Row
+    const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
     CTRL_BUTTONS.forEach((btn, i) => {
       const isHover = (hoveredButton === i);
       const y = 42;
@@ -288,6 +290,7 @@ const WebXRVR = (function () {
       if (btn.action === 'play') btn.label = isPaused ? '▶' : '⏸';
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
       if (btn.action === 'curve') btn.label = isCurved ? '🌙 CURVE' : '📺 FLAT';
+      if (btn.action === 'mode') btn.label = isAutoNext ? '🔄 AUTO' : '🔁 LOOP';
 
       if (isHover || btn.action === 'play') {
         ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 59, 31, 0.85)';
@@ -309,7 +312,7 @@ const WebXRVR = (function () {
       ctx.stroke();
 
       ctx.fillStyle = (isHover || btn.action === 'play') ? '#0A0A0A' : '#F2F3F5';
-      ctx.font = btn.action === 'curve' ? 'bold 12px sans-serif' : 'bold 18px sans-serif';
+      ctx.font = (btn.action === 'curve' || btn.action === 'mode') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(btn.label, btn.x + btn.w / 2, y + h / 2);
@@ -466,6 +469,7 @@ const WebXRVR = (function () {
       case 'play':  callbacks.onTogglePlay && callbacks.onTogglePlay(); break;
       case 'rew':   callbacks.onSeek && callbacks.onSeek(-5); break;
       case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
+      case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
       case 'curve': isCurved = !isCurved; break;
       case 'mute':
         if (videoElement) videoElement.muted = !videoElement.muted;

@@ -106,14 +106,18 @@ class _JailedHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
         try:
-            buffer_size = 64 * 1024
+            buffer_size = 256 * 1024
             remaining = length
+            is_first = True
             while remaining > 0:
                 chunk_size = min(buffer_size, remaining)
                 data = f.read(chunk_size)
                 if not data:
                     break
                 self.wfile.write(data)
+                if is_first:
+                    self.wfile.flush()
+                    is_first = False
                 remaining -= len(data)
         except (BrokenPipeError, ConnectionResetError):
             pass

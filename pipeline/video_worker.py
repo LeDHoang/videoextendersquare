@@ -346,6 +346,22 @@ def process_video(
             frames_est = int(duration * 24) if duration > 0 else 121
             mp_s = (w_s * h_s * frames_est) / 1000000.0
             upscale_cost = mp_s * 0.001
+        elif "bytedance" in upscale_lower:
+            arguments = {
+                "video_url": video_url_to_upscale,
+                "target_resolution": kwargs.get("bytedance_target_res", "1080p"),
+                "target_fps": kwargs.get("bytedance_target_fps", "30fps"),
+                "enhancement_preset": kwargs.get("bytedance_preset", "general"),
+                "enhancement_tier": kwargs.get("bytedance_tier", "standard"),
+                "fidelity": kwargs.get("bytedance_fidelity", "high"),
+            }
+            b_res = kwargs.get("bytedance_target_res", "1080p")
+            b_base_rates = {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288}
+            b_base = b_base_rates.get(b_res, 0.0072)
+            b_fps_m = 2.0 if kwargs.get("bytedance_target_fps", "30fps") == "60fps" else 1.0
+            b_tier_m = 10.0 if kwargs.get("bytedance_tier", "standard") == "pro" else 1.0
+            dur_calc = duration if duration > 0 else 5.0
+            upscale_cost = dur_calc * (b_base * b_fps_m * b_tier_m)
         else:
             arguments = {"video_url": video_url_to_upscale}
             dur_calc = duration if duration > 0 else 5.0
