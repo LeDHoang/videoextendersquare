@@ -1,0 +1,186 @@
+# Luma Ray 2 Flash Reframe
+
+> Adjust and enhance videos with Ray-2 Reframe. This advanced tool seamlessly reframes videos to your desired aspect ratio, intelligently inpainting missing regions to ensure realistic visuals and coherent motion, delivering exceptional quality and creative flexibility.
+
+
+## Overview
+
+- **Endpoint**: `https://fal.run/fal-ai/luma-dream-machine/ray-2-flash/reframe`
+- **Model ID**: `fal-ai/luma-dream-machine/ray-2-flash/reframe`
+- **Category**: video-to-video
+- **Kind**: inference
+**Tags**: reframe, outpaint, flash
+
+
+
+## Pricing
+
+- **Price**: $0.06 per seconds
+
+For more details, see [fal.ai pricing](https://fal.ai/pricing).
+
+## API Information
+
+This model can be used via our HTTP API or more conveniently via our client libraries.
+See the input and output schema below, as well as the usage examples.
+
+
+### Input Schema
+
+The API accepts the following input parameters:
+
+
+- **`video_url`** (`string`, _required_):
+  URL of the input video to reframe
+  - Examples: "https://v3.fal.media/files/zebra/9aDde3Te2kuJYHdR0Kz8R_output.mp4"
+
+- **`aspect_ratio`** (`AspectRatioEnum`, _required_):
+  The aspect ratio of the reframed video
+  - Options: `"1:1"`, `"16:9"`, `"9:16"`, `"4:3"`, `"3:4"`, `"21:9"`, `"9:21"`
+  - Examples: "9:16"
+
+- **`image_url`** (`string`, _optional_):
+  Optional URL of the first frame image for reframing
+
+- **`grid_position_x`** (`integer`, _optional_):
+  X position of the grid for reframing
+
+- **`grid_position_y`** (`integer`, _optional_):
+  Y position of the grid for reframing
+
+- **`prompt`** (`string`, _optional_):
+  Optional prompt for reframing
+
+- **`x_end`** (`integer`, _optional_):
+  End X coordinate for reframing
+
+- **`x_start`** (`integer`, _optional_):
+  Start X coordinate for reframing
+
+- **`y_end`** (`integer`, _optional_):
+  End Y coordinate for reframing
+
+- **`y_start`** (`integer`, _optional_):
+  Start Y coordinate for reframing
+
+
+
+**Required Parameters Example**:
+
+```json
+{
+  "video_url": "https://v3.fal.media/files/zebra/9aDde3Te2kuJYHdR0Kz8R_output.mp4",
+  "aspect_ratio": "9:16"
+}
+```
+
+
+### Output Schema
+
+The API returns the following output format:
+
+- **`video`** (`File`, _required_):
+  URL of the reframed video
+  - Examples: {"url":"https://v3.fal.media/files/lion/L9nkXSW1MCj2oDimeJ4w5_output.mp4"}
+
+
+
+**Example Response**:
+
+```json
+{
+  "video": {
+    "url": "https://v3.fal.media/files/lion/L9nkXSW1MCj2oDimeJ4w5_output.mp4"
+  }
+}
+```
+
+
+## Usage Examples
+
+### cURL
+
+```bash
+curl --request POST \
+  --url https://fal.run/fal-ai/luma-dream-machine/ray-2-flash/reframe \
+  --header "Authorization: Key $FAL_KEY" \
+  --header "Content-Type: application/json" \
+  --data '{
+     "video_url": "https://v3.fal.media/files/zebra/9aDde3Te2kuJYHdR0Kz8R_output.mp4",
+     "aspect_ratio": "9:16"
+   }'
+```
+
+### Python
+
+Ensure you have the Python client installed:
+
+```bash
+pip install fal-client
+```
+
+Then use the API client to make requests:
+
+```python
+import fal_client
+
+def on_queue_update(update):
+    if isinstance(update, fal_client.InProgress):
+        for log in update.logs:
+           print(log["message"])
+
+result = fal_client.subscribe(
+    "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+    arguments={
+        "video_url": "https://v3.fal.media/files/zebra/9aDde3Te2kuJYHdR0Kz8R_output.mp4",
+        "aspect_ratio": "9:16"
+    },
+    with_logs=True,
+    on_queue_update=on_queue_update,
+)
+print(result)
+```
+
+### JavaScript
+
+Ensure you have the JavaScript client installed:
+
+```bash
+npm install --save @fal-ai/client
+```
+
+Then use the API client to make requests:
+
+```javascript
+import { fal } from "@fal-ai/client";
+
+const result = await fal.subscribe("fal-ai/luma-dream-machine/ray-2-flash/reframe", {
+  input: {
+    video_url: "https://v3.fal.media/files/zebra/9aDde3Te2kuJYHdR0Kz8R_output.mp4",
+    aspect_ratio: "9:16"
+  },
+  logs: true,
+  onQueueUpdate: (update) => {
+    if (update.status === "IN_PROGRESS") {
+      update.logs.map((log) => log.message).forEach(console.log);
+    }
+  },
+});
+console.log(result.data);
+console.log(result.requestId);
+```
+
+
+## Additional Resources
+
+### Documentation
+
+- [Model Playground](https://fal.ai/models/fal-ai/luma-dream-machine/ray-2-flash/reframe)
+- [API Documentation](https://fal.ai/models/fal-ai/luma-dream-machine/ray-2-flash/reframe/api)
+- [OpenAPI Schema](https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/luma-dream-machine/ray-2-flash/reframe)
+
+### fal.ai Platform
+
+- [Platform Documentation](https://docs.fal.ai)
+- [Python Client](https://docs.fal.ai/clients/python)
+- [JavaScript Client](https://docs.fal.ai/clients/javascript)

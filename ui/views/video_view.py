@@ -124,15 +124,49 @@ def render(ctx: dict) -> None:
 
         prompt = S.get(NS, "prompt_cache") or (
             "Seamlessly extend the background environment, high details, "
-            "matching texture and lighting."
+            "matching texture and lighting. Keep the origin video aethestic and lighting"
         )
+        outpaint_model_id = ctx["models"]["outpaint_vid"]
+        ltx_resolution = "720p"
+        ltx_audio = True
+
         if not upscale_only:
+            C.eyebrow("OUTPAINT MODEL")
+            outpaint_options = {
+                "LTX 2.3 Quality": "fal-ai/ltx-2.3-quality/outpaint",
+                "Luma Ray-2 Reframe": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+                "Kling Video": "fal-ai/klingx",
+            }
+            selected_outpaint = st.segmented_control(
+                "Outpaint Model Options",
+                list(outpaint_options.keys()),
+                default="LTX 2.3 Quality",
+                label_visibility="collapsed",
+                key=S.wkey(NS, "fal_outpaint_model_opt"),
+            ) or "LTX 2.3 Quality"
+            outpaint_model_id = outpaint_options[selected_outpaint]
+
             C.eyebrow("PROMPT")
             prompt = st.text_area(
                 "Outpaint prompt", value=prompt, label_visibility="collapsed",
                 key=S.wkey(NS, "prompt"), height=100,
             )
             S.set_(NS, "prompt_cache", prompt)
+
+            if "ltx" in outpaint_model_id.lower():
+                with st.expander("▸ LTX 2.3 OUTPAINT SETTINGS", expanded=False):
+                    cl1, cl2 = st.columns(2)
+                    with cl1:
+                        ltx_resolution = st.selectbox(
+                            "Output Resolution Tier", ["720p", "1080p", "480p"],
+                            key=S.wkey(NS, "ltx_res"),
+                            help="Canvas resolution tier for LTX 2.3 Outpaint."
+                        )
+                    with cl2:
+                        ltx_audio = st.toggle(
+                            "Include Audio Track", value=True,
+                            key=S.wkey(NS, "ltx_audio")
+                        )
 
         C.eyebrow("UPSCALE ENGINE")
         engine = st.segmented_control(
@@ -143,21 +177,38 @@ def render(ctx: dict) -> None:
         fal_picked = engine == "FAL AI"
 
         fal_upscale_model = ctx["models"]["upscale_vid"]
+        seedvr_factor = 2.0
+        seedvr_target = "1080p"
         if fal_picked:
-            C.eyebrow("FAL AI UPSCALE OPTION")
+            C.eyebrow("FAL AI UPSCALE MODEL")
             fal_options = {
-                "SeedVR Video": "fal-ai/seedvr-upscale-video",
+                "SeedVR2 Video": "fal-ai/seedvr/upscale/video",
                 "Kling Video": "fal-ai/kling-video/v1.5/pro/upscale",
                 "ESRGAN Video": "fal-ai/esrgan-video",
             }
             selected_opt = st.segmented_control(
                 "FAL AI Model Options",
                 list(fal_options.keys()),
-                default="SeedVR Video",
+                default="SeedVR2 Video",
                 label_visibility="collapsed",
                 key=S.wkey(NS, "fal_vid_model"),
-            ) or "SeedVR Video"
+            ) or "SeedVR2 Video"
             fal_upscale_model = fal_options[selected_opt]
+
+            if "seedvr" in fal_upscale_model.lower():
+                with st.expander("▸ SEEDVR2 UPSCALE SETTINGS", expanded=False):
+                    cs1, cs2 = st.columns(2)
+                    with cs1:
+                        seedvr_factor = st.slider(
+                            "Upscale Factor", 1.0, 4.0, 2.0, 0.5,
+                            key=S.wkey(NS, "seedvr_factor"),
+                            help="Dimension multiplier when upscale mode is factor."
+                        )
+                    with cs2:
+                        seedvr_target = st.selectbox(
+                            "Target Resolution Tier", ["1080p", "2160p", "1440p", "720p"],
+                            key=S.wkey(NS, "seedvr_target")
+                        )
 
         if studio_picked and not studio_ok:
             missing = []
@@ -186,6 +237,40 @@ def render(ctx: dict) -> None:
                 C.gated_reason("CAS FILTER UNAVAILABLE — SHARPENING SKIPPED")
                 sharpening = 0.0
 
+        C.eyebrow("TRIM INPUT VIDEO (MAX 15 SECONDS)")
+        max_source_dur = max([item["meta"]["dur"] for item in items]) if items else 60.0
+        c_tr1, c_tr2 = st.columns([1, 2])
+        with c_tr1:
+            trim_enabled = st.toggle(
+                "Enable 15s Trimming",
+                value=False,
+                key=S.wkey(NS, "trim_enabled"),
+                help="Extracts a sub-clip of at most 15 seconds from the input video."
+            )
+        trim_start = 0.0
+        trim_duration = 15.0
+        if trim_enabled:
+            with c_tr2:
+                t1, t2 = st.columns(2)
+                with t1:
+                    trim_start = st.number_input(
+                        "Start Time (s)",
+                        min_value=0.0,
+                        max_value=max(0.0, max_source_dur - 1.0),
+                        value=0.0,
+                        step=0.5,
+                        key=S.wkey(NS, "trim_start"),
+                    )
+                with t2:
+                    trim_duration = st.slider(
+                        "Clip Length (max 15s)",
+                        min_value=1.0,
+                        max_value=15.0,
+                        value=min(15.0, max(1.0, max_source_dur - trim_start)),
+                        step=0.5,
+                        key=S.wkey(NS, "trim_duration"),
+                    )
+
         needs_key = (not upscale_only) or fal_picked
         missing_key = needs_key and not ctx["fal"].ok
         studio_blocked = studio_picked and not studio_ok
@@ -194,6 +279,7 @@ def render(ctx: dict) -> None:
 
         st.markdown("")
         btn_label = f"▶  RENDER {len(items or [])} VIDEO(S) 4K SQUARE" if items else "▶  RENDER 4K SQUARE"
+
         go = st.button(btn_label, type="primary", disabled=disabled,
                        key=S.wkey(NS, "go"), width="stretch")
 
@@ -215,11 +301,18 @@ def render(ctx: dict) -> None:
                     "video_path": item["path"],
                     "prompt": None if upscale_only else prompt,
                     "fal_key": ctx["fal_key"] if needs_key else None,
-                    "outpaint_model": None if upscale_only else ctx["models"]["outpaint_vid"],
+                    "outpaint_model": None if upscale_only else outpaint_model_id,
                     "upscale_model": fal_upscale_model if fal_picked else ctx["models"]["upscale_vid"],
                     "upscale_only": upscale_only,
                     "sharpening": sharpening,
                     "upscale_engine": "fal" if fal_picked else ("studio" if studio_picked else "fast"),
+                    "ltx_resolution": ltx_resolution,
+                    "ltx_audio": ltx_audio,
+                    "seedvr_factor": seedvr_factor,
+                    "seedvr_target": seedvr_target,
+                    "trim_enabled": trim_enabled,
+                    "trim_start": trim_start,
+                    "trim_duration": trim_duration,
                 })
 
             raw_results = R.run_batch_pipeline(NS, "video", process_video, items_kwargs)
@@ -231,11 +324,27 @@ def render(ctx: dict) -> None:
                 if err:
                     errors.append((item_info["name"], err))
                 elif out:
-                    _url, path = out
+                    if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], dict):
+                        (out_urls, path), metrics = out
+                    else:
+                        _url, path = out
+                        metrics = {}
+
                     rec = M.persist_result(path, "video", {
                         "mode": mode, "engine": engine, "sharpening": sharpening, "name": item_info["name"],
                     })
                     rec["name"] = item_info["name"]
+                    rec["metrics"] = metrics
+
+                    from pipeline.utils import log_pipeline_execution
+                    log_pipeline_execution(
+                        item_name=item_info["name"],
+                        kind="video",
+                        input_path=item_info["path"],
+                        output_path=rec["path"],
+                        metrics=metrics,
+                        params={"mode": mode, "engine": engine, "sharpening": sharpening}
+                    )
                     if probes["libx264"].ok:
                         with st.spinner(f"Building preview proxy for {item_info['name']}…"):
                             rec["preview"] = M.make_web_preview(rec["path"])
@@ -275,6 +384,30 @@ def render(ctx: dict) -> None:
         names = [f"{r.get('name', 'Item '+str(idx+1))} ({M.human_bytes(r['bytes'])})" for idx, r in enumerate(results)]
         sel_idx = st.selectbox("Select Result Item", list(range(len(names))), format_func=lambda i: names[i], key=S.wkey(NS, "item_sel"))
         selected_result = results[sel_idx]
+
+    metrics = selected_result.get("metrics")
+    if metrics:
+        total_time = metrics.get("total_time", 0.0)
+        total_cost = metrics.get("total_cost", 0.0)
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: 700; font-size: 13px; letter-spacing: 0.05em; color: #fff;">⚡ PERFORMANCE & CLOUD COST LOG</span>
+                    <span style="font-family: monospace; font-size: 13px; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 4px 10px; border-radius: 4px;">
+                        ⏱ {total_time}s &nbsp;•&nbsp; 💰 Est. ${total_cost:.4f} USD
+                    </span>
+                </div>
+                <div style="font-family: monospace; font-size: 12px; line-height: 1.7; color: #a1a1aa;">
+                    <div>• <b>Upload to CDN:</b> {metrics.get('upload_time', 0.0)}s &nbsp;(Cost: $0.00)</div>
+                    <div>• <b>Outpaint ({metrics.get('outpaint_model')}):</b> {metrics.get('outpaint_time', 0.0)}s &nbsp;(Cost: ${metrics.get('outpaint_cost', 0.0):.4f})</div>
+                    <div>• <b>Upscale ({metrics.get('upscale_model')}):</b> {metrics.get('upscale_time', 0.0)}s &nbsp;(Cost: ${metrics.get('upscale_cost', 0.0):.4f})</div>
+                    <div>• <b>4K HEVC Master Encode:</b> {metrics.get('master_time', 0.0)}s &nbsp;(Cost: $0.00 Local)</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     if selected_result.get("preview"):
         st.video(selected_result["preview"])
