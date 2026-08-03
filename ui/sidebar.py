@@ -77,10 +77,10 @@ def render() -> dict:
                     "Image upscale", value="fal-ai/clarity-upscaler",
                     key="sx.w.m_upscale_img"),
                 "outpaint_vid": st.text_input(
-                    "Video outpaint", value="fal-ai/klingx",
+                    "Video outpaint", value="fal-ai/ltx-2.3-quality/outpaint",
                     key="sx.w.m_outpaint_vid"),
                 "upscale_vid": st.text_input(
-                    "Video upscale", value="fal-ai/seedvr-upscale-video",
+                    "Video upscale", value="fal-ai/seedvr/upscale/video",
                     key="sx.w.m_upscale_vid"),
             }
 

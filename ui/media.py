@@ -239,11 +239,11 @@ def has_web_preview(src: str) -> bool:
     return dest.exists() and dest.stat().st_size > 0
 
 
-def make_web_preview(src: str, height: int = 1080) -> str | None:
+def make_web_preview(src: str, height: int | None = 3840) -> str | None:
     """Transcode an H.264 proxy for in-browser playback.
 
     If source is already H.264, returns source untouched.
-    Otherwise transcodes a fast 1080p H.264 proxy.
+    Otherwise transcodes a high-quality H.264 proxy (default 4K 3840p).
     """
 
     if get_video_codec(src) in {"h264", "avc1"}:
@@ -253,13 +253,16 @@ def make_web_preview(src: str, height: int = 1080) -> str | None:
     if dest.exists() and dest.stat().st_size > 0:
         return str(dest)
 
+    target_h = min(height or 2160, 2160)
+    vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
+
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
-        "-vf", f"scale=-2:{height}",
-        "-c:v", "libx264", "-crf", "26", "-preset", "superfast",
+        *vf_args,
+        "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-an",
+        "-c:a", "aac", "-b:a", "192k",
         str(dest),
     ]
     try:

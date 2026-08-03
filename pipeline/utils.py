@@ -83,3 +83,67 @@ def calculate_square_padding(width, height):
         top = bottom = left = right = 0
         
     return top, bottom, left, right
+
+def has_audio_stream(video_path):
+    """
+    Checks if a video file contains at least one audio stream using ffprobe.
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+             "stream=codec_name", "-of", "json", video_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        data = json.loads(result.stdout)
+        return len(data.get("streams", [])) > 0
+    except Exception:
+        return False
+
+def log_pipeline_execution(item_name, kind, input_path, output_path, metrics, params=None):
+    """
+    Appends execution metrics, input/output paths, timing breakdown, 
+    and estimated cost to persistent log files inside output/.
+    """
+    import datetime
+    from pathlib import Path
+    
+    out_dir = Path("output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    
+    log_entry = {
+        "timestamp": timestamp,
+        "item_name": item_name,
+        "kind": kind,
+        "input_path": str(input_path) if input_path else None,
+        "output_path": str(output_path),
+        "metrics": metrics or {},
+        "params": params or {},
+    }
+    
+    # 1. JSON Lines log (output/pipeline_log.jsonl)
+    jsonl_path = out_dir / "pipeline_log.jsonl"
+    with open(jsonl_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry) + "\n")
+        
+    # 2. Human-readable text log (output/pipeline.log)
+    txt_path = out_dir / "pipeline.log"
+    total_t = metrics.get("total_time", 0.0) if metrics else 0.0
+    total_c = metrics.get("total_cost", 0.0) if metrics else 0.0
+    op_model = metrics.get("outpaint_model", "N/A") if metrics else "N/A"
+    up_model = metrics.get("upscale_model", "N/A") if metrics else "N/A"
+    
+    with open(txt_path, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] [{kind.upper()}] {item_name}\n")
+        f.write(f"  Input File : {input_path}\n")
+        f.write(f"  Out File   : {output_path}\n")
+        f.write(f"  Total Time : {total_t}s | Est. Cost: ${total_c:.4f} USD\n")
+        if metrics:
+            f.write(f"  - Upload   : {metrics.get('upload_time', 0.0)}s\n")
+            f.write(f"  - Outpaint : {metrics.get('outpaint_time', 0.0)}s | {op_model} | Cost: ${metrics.get('outpaint_cost', 0.0):.4f}\n")
+            f.write(f"  - Upscale  : {metrics.get('upscale_time', 0.0)}s | {up_model} | Cost: ${metrics.get('upscale_cost', 0.0):.4f}\n")
+            f.write(f"  - Master   : {metrics.get('master_time', 0.0)}s (Local Encode)\n")
+        f.write("-" * 75 + "\n")
