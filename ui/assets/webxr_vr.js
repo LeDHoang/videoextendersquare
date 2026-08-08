@@ -49,7 +49,7 @@ const WebXRVR = (function () {
   let activeIsHovering = false;
 
   // Screen transform
-  const DEFAULT_POS = { x: 0, y: 1.6, z: -2.8 };
+  const DEFAULT_POS = { x: 0, y: 1.52, z: -2.24 };
   const DEFAULT_SCALE = 4.0;
   const MIN_SCALE = 1.0;
   const MAX_SCALE = 10.0;
@@ -58,6 +58,8 @@ const WebXRVR = (function () {
   let screenPos = { ...DEFAULT_POS };
   let screenQuat = { x: 0, y: 0, z: 0, w: 1 };
   let screenScale = DEFAULT_SCALE;
+  let currentHeadPos = { x: 0, y: 1.52, z: 0 };
+  let isInitialPoseSet = false;
 
   // 6DOF Grab state (DeoVR / Skybox style)
   let isGrabbing = false;
@@ -71,6 +73,7 @@ const WebXRVR = (function () {
   let controlsCtx = null;
   const CONTROLS_W = 640;
   const CONTROLS_H = 150;
+  const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge (5% higher than 0.28m)
   let hoveredButton = -1;
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
@@ -155,7 +158,7 @@ const WebXRVR = (function () {
   }
 
   function quatFaceViewerLevel(screenPos, headPos) {
-    const head = headPos || { x: 0, y: 1.6, z: 0 };
+    const head = headPos || currentHeadPos || { x: 0, y: 1.52, z: 0 };
     const dx = head.x - screenPos.x;
     const dy = head.y - screenPos.y;
     const dz = head.z - screenPos.z;
@@ -403,12 +406,14 @@ const WebXRVR = (function () {
     }
   }
 
+  function getControlsCenter() {
+    const offsetLocal = { x: 0, y: -screenScale / 2 - CONTROLS_Y_OFFSET, z: 0 };
+    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
+    return vecAdd(screenPos, offsetWorld);
+  }
+
   function getHitDistControls(rayOrigin, rayDir) {
-    const ctrlCenter = {
-      x: screenPos.x,
-      y: screenPos.y - screenScale / 2 - 0.28,
-      z: screenPos.z,
-    };
+    const ctrlCenter = getControlsCenter();
     const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
     const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
     if (Math.abs(denom) < 0.0001) return -1;
@@ -419,11 +424,7 @@ const WebXRVR = (function () {
   }
 
   function hitTestControls(rayOrigin, rayDir) {
-    const ctrlCenter = {
-      x: screenPos.x,
-      y: screenPos.y - screenScale / 2 - 0.28,
-      z: screenPos.z,
-    };
+    const ctrlCenter = getControlsCenter();
     const ctrlWidth = screenScale * 0.8;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
 
@@ -472,7 +473,10 @@ const WebXRVR = (function () {
       case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
       case 'curve': isCurved = !isCurved; break;
       case 'mute':
-        if (videoElement) videoElement.muted = !videoElement.muted;
+        if (videoElement) {
+          videoElement.muted = !videoElement.muted;
+          if (callbacks.onMuteChange) callbacks.onMuteChange(videoElement.muted);
+        }
         break;
       case 'exit':  exitVR(); break;
     }
@@ -794,6 +798,20 @@ const WebXRVR = (function () {
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
 
+    if (pose.transform) {
+      currentHeadPos = {
+        x: pose.transform.position.x,
+        y: pose.transform.position.y,
+        z: pose.transform.position.z,
+      };
+
+      if (!isInitialPoseSet) {
+        isInitialPoseSet = true;
+        screenPos.y = currentHeadPos.y;
+        screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
+      }
+    }
+
     processInput(frame);
 
     if (videoElement && videoElement.paused && !controlsVisible) {
@@ -832,10 +850,7 @@ const WebXRVR = (function () {
       drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, isCurved);
 
       if (controlsVisible) {
-        const offsetLocal = { x: 0, y: -screenScale / 2 - 0.28, z: 0 };
-        const offsetWorld = quatRotVec(screenQuat, offsetLocal);
-        const ctrlPos = vecAdd(screenPos, offsetWorld);
-
+        const ctrlPos = getControlsCenter();
         const ctrlW = screenScale * 0.8;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
         drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, screenQuat, ctrlW, ctrlH, 0.96, false);
@@ -887,7 +902,7 @@ const WebXRVR = (function () {
           screenPos = vecAdd(controllerPos, rotatedRel);
 
           // Rotate screen tangent to viewer POV (facing head, 100% horizontally level)
-          screenQuat = quatFaceViewerLevel(screenPos, { x: 0, y: 1.6, z: 0 });
+          screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
         }
       } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
                                  (hand === 'left' && grabControllerIdx === 0))) {
@@ -1015,6 +1030,8 @@ const WebXRVR = (function () {
     screenPos = { ...DEFAULT_POS };
     screenQuat = { x: 0, y: 0, z: 0, w: 1 };
     screenScale = DEFAULT_SCALE;
+    currentHeadPos = { x: 0, y: 1.52, z: 0 };
+    isInitialPoseSet = false;
     controlsVisible = false;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
@@ -1052,8 +1069,12 @@ const WebXRVR = (function () {
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.add('vr-active');
 
-    if (videoElement && videoElement.paused) {
-      videoElement.play().catch(() => {});
+    if (videoElement) {
+      videoElement.muted = false;
+      if (callbacks.onUnmute) callbacks.onUnmute();
+      if (videoElement.paused) {
+        videoElement.play().catch(() => {});
+      }
     }
 
     xrSession.requestAnimationFrame(onXRFrame);

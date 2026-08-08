@@ -700,6 +700,22 @@
         onTogglePlay: togglePlay,
         onToggleMode: toggleMode,
         onSeek: seekRelative,
+        onUnmute: function() {
+          isMuted = false;
+          if (soundBtn) {
+            soundBtn.textContent = '🔊';
+            soundBtn.classList.add('active');
+          }
+        },
+        onMuteChange: function(muted) {
+          isMuted = muted;
+          if (soundBtn) {
+            soundBtn.textContent = isMuted ? '🔇' : '🔊';
+            if (isMuted) soundBtn.classList.remove('active');
+            else soundBtn.classList.add('active');
+          }
+          showFlash(isMuted ? '🔇' : '🔊');
+        },
         getPlaylist: function() { return videoData; },
         getCurrentIndex: function() { return idx; },
         getAutoNext: function() { return isAutoNext; },
@@ -712,6 +728,12 @@
 
       if (vrBtn) {
         vrBtn.addEventListener('click', function() {
+          isMuted = false;
+          if (video) video.muted = false;
+          if (soundBtn) {
+            soundBtn.textContent = '🔊';
+            soundBtn.classList.add('active');
+          }
           WebXRVR.enterVR();
         });
       }

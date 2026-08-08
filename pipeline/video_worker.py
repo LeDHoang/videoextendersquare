@@ -64,10 +64,10 @@ def poll_job_status(handler, status_prefix, status_callback=None):
 _ENCODER_CACHE = None
 
 _HEVC_CANDIDATES = [
-    ("hevc_videotoolbox", ["-q:v", "65", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]),
-    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-cq", "28"]),
-    ("hevc_qsv", ["-global_quality", "28"]),
-    ("libx265", ["-crf", "28", "-preset", "slow", "-tag:v", "hvc1"]),
+    ("hevc_videotoolbox", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
+    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
+    ("hevc_qsv", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
+    ("libx265", ["-crf", "24", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
 ]
 
 def _find_ffms2_plugin() -> str | None:
@@ -285,17 +285,22 @@ def process_video(
                 frames_est = int(duration * 24) if duration > 0 else 121
                 mp = (w_ltx * h_ltx * frames_est) / 1000000.0
                 outpaint_cost = mp * 0.0024075
+            elif "wan" in model_lower or "vace" in model_lower:
+                arguments = {
+                    "video_url": video_url,
+                    "prompt": prompt or "Seamlessly extend the background environment beyond the original frame",
+                    "aspect_ratio": kwargs.get("wan_aspect_ratio", "1:1"),
+                }
+                dur_calc = duration if duration > 0 else 5.0
+                outpaint_cost = dur_calc * 0.08
             else:
                 arguments = {
                     "video_url": video_url,
-                    "top": top,
-                    "bottom": bottom,
-                    "left": left,
-                    "right": right,
-                    "prompt": prompt
+                    "prompt": prompt or "Seamlessly extend environment context",
+                    "aspect_ratio": "1:1",
                 }
                 dur_calc = duration if duration > 0 else 5.0
-                outpaint_cost = max(0.10, dur_calc * 0.025)
+                outpaint_cost = dur_calc * 0.06
             
             handler = fal_client.submit(outpaint_model, arguments=arguments)
             result = poll_job_status(handler, "Outpainting", status_callback)
@@ -349,17 +354,17 @@ def process_video(
         elif "bytedance" in upscale_lower:
             arguments = {
                 "video_url": video_url_to_upscale,
-                "target_resolution": kwargs.get("bytedance_target_res", "1080p"),
+                "target_resolution": kwargs.get("bytedance_target_res", "4k"),
                 "target_fps": kwargs.get("bytedance_target_fps", "30fps"),
                 "enhancement_preset": kwargs.get("bytedance_preset", "general"),
-                "enhancement_tier": kwargs.get("bytedance_tier", "standard"),
-                "fidelity": kwargs.get("bytedance_fidelity", "high"),
+                "enhancement_tier": kwargs.get("bytedance_tier", "fast"),
+                "fidelity": kwargs.get("bytedance_fidelity", "medium"),
             }
-            b_res = kwargs.get("bytedance_target_res", "1080p")
+            b_res = kwargs.get("bytedance_target_res", "4k")
             b_base_rates = {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288}
-            b_base = b_base_rates.get(b_res, 0.0072)
+            b_base = b_base_rates.get(b_res, 0.0288)
             b_fps_m = 2.0 if kwargs.get("bytedance_target_fps", "30fps") == "60fps" else 1.0
-            b_tier_m = 10.0 if kwargs.get("bytedance_tier", "standard") == "pro" else 1.0
+            b_tier_m = 10.0 if kwargs.get("bytedance_tier", "fast") == "pro" else 1.0
             dur_calc = duration if duration > 0 else 5.0
             upscale_cost = dur_calc * (b_base * b_fps_m * b_tier_m)
         else:
