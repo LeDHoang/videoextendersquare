@@ -16,3 +16,6 @@ ENV/
 # macOS
 .DS_Store
 .env
+
+# Untracked notes
+current-issue.md
