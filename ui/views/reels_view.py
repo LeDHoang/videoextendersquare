@@ -237,7 +237,12 @@ def render(ctx: dict) -> None:
         return
 
     # Render HTML5 1:1 Square Reels Component with 4K Master URLs
+    # Stable cache buster: uses webxr_vr.js file modification time.
+    # Only changes when the JS file itself is updated → no unnecessary iframe reloads.
+    vr_js_path = Path(__file__).parent.parent / "assets" / "webxr_vr.js"
+    js_mtime = int(vr_js_path.stat().st_mtime) if vr_js_path.exists() else 0
     html = _template().replace("__VIDEO_DATA_JSON__", json.dumps(video_payload))
+    html = html.replace("</head>", f"<script>const _VR_MTIME={js_mtime};</script></head>", 1)
     components.html(html, height=750)
 
     # Info footer / list view

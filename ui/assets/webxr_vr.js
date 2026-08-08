@@ -11,7 +11,7 @@ const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.1-20260803';
+  const VR_VERSION = 'v4.4-20260809-scale27';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -29,6 +29,7 @@ const WebXRVR = (function () {
   let glProgram = null;
   let glVideoTexture = null;
   let glControlsTexture = null;
+  let glGuideTexture = null;
   let glReticleTexture = null;
   let glGridBuf = null;
   let glGridVertCount = 0;
@@ -74,6 +75,12 @@ const WebXRVR = (function () {
   const CONTROLS_W = 640;
   const CONTROLS_H = 150;
   const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge (5% higher than 0.28m)
+
+  // Meta Quest Guide Panel State
+  let guideCanvas = null;
+  let guideCtx = null;
+  const GUIDE_W = 420;
+  const GUIDE_H = 700;
   let hoveredButton = -1;
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
@@ -350,6 +357,263 @@ const WebXRVR = (function () {
     ctx.fillText(formatTime(currentTime) + ' / ' + formatTime(duration), CONTROLS_W - 16, CONTROLS_H - 16);
   }
 
+  // ─── Meta Quest 3 Controller Guide Panel Canvas Rendering ───────────
+
+  function initGuideCanvas() {
+    guideCanvas = document.createElement('canvas');
+    guideCanvas.width = GUIDE_W;
+    guideCanvas.height = GUIDE_H;
+    guideCtx = guideCanvas.getContext('2d');
+    renderGuideCanvas();
+  }
+
+  // Helper: Draw a Meta Quest 3 Touch Plus right controller silhouette
+  function drawQuestController(ctx, cx, cy, scale) {
+    const s = scale || 1.0;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+
+    // ── Controller Handle (ergonomic curved grip) ──
+    ctx.fillStyle = '#1A1B1F';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-16, 20);
+    ctx.bezierCurveTo(-18, 55, -20, 100, -16, 140);
+    ctx.bezierCurveTo(-14, 155, 14, 155, 16, 140);
+    ctx.bezierCurveTo(20, 100, 18, 55, 16, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Handle texture lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 6; i++) {
+      const ly = 50 + i * 16;
+      ctx.beginPath();
+      ctx.moveTo(-12, ly);
+      ctx.lineTo(12, ly);
+      ctx.stroke();
+    }
+
+    // ── Tracking Ring (circular halo around top) ──
+    ctx.strokeStyle = '#2A2C32';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 52, 42, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Ring inner highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 50, 40, 0, Math.PI * 0.9, Math.PI * 1.9);
+    ctx.stroke();
+
+    // ── Top Face Plate ──
+    ctx.fillStyle = '#222428';
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 38, 28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#333640';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // ── Thumbstick (left position on face) ──
+    // Thumbstick base
+    ctx.fillStyle = '#0D0E11';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 14, 0, Math.PI * 2);
+    ctx.fill();
+    // Thumbstick cap
+    ctx.fillStyle = '#18191D';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 10, 0, Math.PI * 2);
+    ctx.fill();
+    // Concentric grip ring on cap
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(-14, -12, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    // Directional dot at center
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── A Button (lower right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.5)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(14, -2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('A', 14, -2);
+
+    // ── B Button (upper right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.35)';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(20, -22, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('B', 20, -22);
+
+    // ── Index Trigger (front curved) ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = '#FF3B1F';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, 18);
+    ctx.bezierCurveTo(-14, 28, -10, 36, -2, 38);
+    ctx.bezierCurveTo(4, 36, 8, 28, 6, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Side Grip Button ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(-24, 55, 8, 30, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function renderGuideCanvas() {
+    const ctx = guideCtx;
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
+
+    // Dark Glass Container Background (matches site: rgba(8, 9, 10, 0.94))
+    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 16);
+    ctx.fill();
+
+    // Signature Red Glow Border (matches controls panel)
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 16);
+    ctx.stroke();
+
+    // Header Badge (#FF3B1F on-brand)
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    ctx.roundRect(16, 14, 130, 22, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#0A0A0A';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CONTROLLER GUIDE', 81, 25);
+
+    ctx.fillStyle = 'rgba(255, 59, 31, 0.85)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('META QUEST 3', GUIDE_W - 16, 25);
+
+    // ── Draw the right Touch Plus controller ──
+    drawQuestController(ctx, 100, 220, 1.8);
+
+    // ── Callout labels connecting to controller parts ──
+    const accentColor = '#FF3B1F';
+    const dimText = 'rgba(242, 243, 245, 0.85)';
+    const cards = [
+      {
+        title: 'THUMBSTICK',
+        desc: 'Up/Down → Next/Prev Reel\nLeft/Right → Seek ±5s',
+      },
+      {
+        title: 'A BUTTON',
+        desc: 'Toggle Play / Pause',
+      },
+      {
+        title: 'B BUTTON',
+        desc: 'Toggle Guide & Controls',
+      },
+      {
+        title: 'INDEX TRIGGER',
+        desc: 'Laser Aim & Click\nTap Video → Play/Pause',
+      },
+      {
+        title: 'SIDE GRIP (Hold)',
+        desc: '6DOF Drag & Reposition\nHorizon auto-level',
+      },
+      {
+        title: 'GRIP + STICK ↕',
+        desc: 'Zoom Screen In / Out',
+      },
+    ];
+
+    const rx = 220;
+    const rw = GUIDE_W - rx - 12;
+    let startY = 52;
+    const cardH = 86;
+    const gap = 10;
+
+    cards.forEach((card, i) => {
+      const cy = startY + i * (cardH + gap);
+
+      // Card background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.beginPath();
+      ctx.roundRect(rx, cy, rw, cardH, 8);
+      ctx.fill();
+
+      // Left accent bar
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.roundRect(rx, cy, 3, cardH, 2);
+      ctx.fill();
+
+      // Card border
+      ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(rx, cy, rw, cardH, 8);
+      ctx.stroke();
+
+      // Title
+      ctx.fillStyle = accentColor;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(card.title, rx + 12, cy + 10);
+
+      // Desc lines
+      ctx.fillStyle = dimText;
+      ctx.font = '10px sans-serif';
+      const lines = card.desc.split('\n');
+      lines.forEach((line, li) => {
+        ctx.fillText(line, rx + 12, cy + 30 + li * 16);
+      });
+    });
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(155, 161, 168, 0.6)';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 12);
+  }
+
   // ─── YouTube VR Curved Screen Arc Geometry Math ─────────────────────
   // ARC_ANGLE = 0.6 rad (~34.4° arc angle for authentic YouTube VR curve)
   // R_CURVE = 1.0 / 0.6 = 1.6667 (Arc length == 1.0, perfect 1:1 square ratio)
@@ -408,6 +672,13 @@ const WebXRVR = (function () {
 
   function getControlsCenter() {
     const offsetLocal = { x: 0, y: -screenScale / 2 - CONTROLS_Y_OFFSET, z: 0 };
+    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
+    return vecAdd(screenPos, offsetWorld);
+  }
+
+  function getGuideCenter() {
+    const guideW = screenScale * 0.27;
+    const offsetLocal = { x: screenScale / 2 + guideW / 2 + 0.32, y: 0, z: -0.15 };
     const offsetWorld = quatRotVec(screenQuat, offsetLocal);
     return vecAdd(screenPos, offsetWorld);
   }
@@ -675,6 +946,13 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    glGuideTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     initReticleTexture();
 
     gl.enable(gl.BLEND);
@@ -838,6 +1116,12 @@ const WebXRVR = (function () {
       renderControlsCanvas();
       gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+
+      if (guideCanvas && glGuideTexture) {
+        renderGuideCanvas();
+        gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
+      }
     }
 
     for (const view of pose.views) {
@@ -854,6 +1138,16 @@ const WebXRVR = (function () {
         const ctrlW = screenScale * 0.8;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
         drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, screenQuat, ctrlW, ctrlH, 0.96, false);
+
+        // Draw Meta Quest 3 Controller Guide Panel to the right of screen
+        // Face the guide panel toward the viewer so it's readable from their POV
+        if (glGuideTexture) {
+          const guidePos = getGuideCenter();
+          const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
+          const guideW = screenScale * 0.27;
+          const guideH = guideW * (GUIDE_H / GUIDE_W);
+          drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, false);
+        }
       }
 
       drawLaserPointer(viewMat, projMat);
@@ -987,8 +1281,11 @@ const WebXRVR = (function () {
       }
       prevBtnState.rightA = aPressed;
 
-      // ── 4. B Button: Disabled (no-op) ──
+      // ── 4. B Button: Toggle Guide & UI Controls Panel ──
       const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
+      if (bPressed && !prevBtnState.rightB) {
+        toggleControls();
+      }
       prevBtnState.rightB = bPressed;
     }
   }
@@ -1043,6 +1340,7 @@ const WebXRVR = (function () {
     flickedY = false;
 
     initControlsCanvas();
+    // Note: initGuideCanvas() is called after initGL() since it needs glGuideTexture
 
     try {
       xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
@@ -1055,6 +1353,9 @@ const WebXRVR = (function () {
       xrSession = null;
       return;
     }
+
+    // Init guide canvas AFTER initGL so glGuideTexture exists
+    initGuideCanvas();
 
     setupVideoFrameTracking();
 
