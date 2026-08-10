@@ -304,6 +304,7 @@
   <div class="reels-top-bar">
     <div class="reels-badge">4K MASTER REELS v4.2</div>
     <div class="reels-counter" id="counter">0 / 0</div>
+    <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:rgba(0,255,136,0.15); padding:3px 8px; border-radius:4px; border:1px solid rgba(0,255,136,0.3);">⚡ 0/0</div>
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
@@ -342,6 +343,10 @@
     <div>
       <button class="action-btn" id="nextBtn" title="Next Video (S / Down)">⬇</button>
       <div class="action-btn-label">NEXT (S)</div>
+    </div>
+    <div>
+      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels for Smooth Quest Playback (L)">⚡</button>
+      <div class="action-btn-label" id="preloadLabel">PRELOAD</div>
     </div>
     <div>
       <button class="action-btn" id="fullBtn" title="Fullscreen">⛶</button>
@@ -400,6 +405,90 @@
     const errorOverlay = document.getElementById('errorOverlay');
     const skipErrorBtn = document.getElementById('skipErrorBtn');
 
+    const preloadBtn = document.getElementById('preloadBtn');
+    const preloadLabel = document.getElementById('preloadLabel');
+    const preloadStatus = document.getElementById('preloadStatus');
+
+    const blobUrlMap = {};
+    let isPreloading = false;
+    let preloadedCount = 0;
+
+    async function preloadAllVideos() {
+      if (isPreloading) {
+        showFlash('⚡ PRELOADING');
+        return;
+      }
+      if (!videoData || videoData.length === 0) return;
+
+      isPreloading = true;
+      if (preloadBtn) preloadBtn.classList.add('active');
+      if (preloadStatus) preloadStatus.style.display = 'block';
+      showFlash('⚡ PRELOAD STARTED');
+
+      let loadedBytes = 0;
+      const totalCount = videoData.length;
+
+      function updatePreloadUI() {
+        const pct = Math.round((preloadedCount / totalCount) * 100);
+        if (preloadLabel) preloadLabel.textContent = preloadedCount === totalCount ? 'DONE' : preloadedCount + '/' + totalCount;
+        const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
+        if (preloadStatus) preloadStatus.textContent = '⚡ PRELOADED ' + preloadedCount + '/' + totalCount + ' (' + mb + ' MB)';
+      }
+
+      updatePreloadUI();
+
+      const queue = videoData.map((item, i) => i);
+      const concurrency = 2;
+
+      async function worker() {
+        while (queue.length > 0) {
+          const i = queue.shift();
+          if (blobUrlMap[i]) {
+            preloadedCount++;
+            updatePreloadUI();
+            continue;
+          }
+          const item = videoData[i];
+          const itemUrl = resolveItemUrl(item);
+          try {
+            const resp = await fetch(itemUrl, { mode: 'cors' });
+            if (resp.ok) {
+              const blob = await resp.blob();
+              blobUrlMap[i] = URL.createObjectURL(blob);
+              loadedBytes += blob.size;
+            }
+          } catch (err) {
+            console.warn('[Preload] Failed for video', i, itemUrl, err);
+          }
+          preloadedCount++;
+          updatePreloadUI();
+        }
+      }
+
+      const workers = [];
+      for (let c = 0; c < Math.min(concurrency, totalCount); c++) {
+        workers.push(worker());
+      }
+      await Promise.all(workers);
+
+      isPreloading = false;
+      showFlash('✅ ALL PRELOADED');
+      if (preloadLabel) preloadLabel.textContent = 'DONE';
+      if (preloadStatus) {
+        preloadStatus.style.background = 'rgba(0,255,136,0.3)';
+        const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
+        preloadStatus.textContent = '✅ ' + totalCount + '/' + totalCount + ' PRELOADED (' + mb + ' MB)';
+      }
+
+      if (blobUrlMap[idx] && video.src !== blobUrlMap[idx]) {
+        const curTime = video.currentTime;
+        const wasPaused = video.paused;
+        video.src = blobUrlMap[idx];
+        video.currentTime = curTime;
+        if (!wasPaused) video.play().catch(() => {});
+      }
+    }
+
     if (!videoData || videoData.length === 0) {
       document.getElementById('videoWrap').innerHTML = `
         <div class="empty-feed">
@@ -454,7 +543,7 @@
       const nextIdx = (currentIndex + 1) % videoData.length;
       const nextItem = videoData[nextIdx];
       if (nextItem && preloadVideo) {
-        preloadVideo.src = resolveItemUrl(nextItem);
+        preloadVideo.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
         preloadVideo.load();
       }
     }
@@ -471,7 +560,7 @@
       metaTitle.textContent = item.filename;
       metaSize.textContent = item.size || '';
 
-      const itemUrl = resolveItemUrl(item);
+      const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
       video.src = itemUrl;
       video.muted = isMuted;
 
@@ -584,6 +673,7 @@
     modeBtn.addEventListener('click', toggleMode);
     nextBtn.addEventListener('click', nextVideo);
     prevBtn.addEventListener('click', prevVideo);
+    if (preloadBtn) preloadBtn.addEventListener('click', preloadAllVideos);
 
     fullBtn.addEventListener('click', () => {
       if (!document.fullscreenElement) {
@@ -683,6 +773,9 @@
       } else if (key === 'm') {
         e.preventDefault();
         toggleSound();
+      } else if (key === 'l') {
+        e.preventDefault();
+        preloadAllVideos();
       }
     });
 
