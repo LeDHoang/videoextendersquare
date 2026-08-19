@@ -60,7 +60,13 @@ const WebXRVR = (function () {
   let screenQuat = { x: 0, y: 0, z: 0, w: 1 };
   let screenScale = DEFAULT_SCALE;
   let currentHeadPos = { x: 0, y: 1.52, z: 0 };
+  let currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
   let isInitialPoseSet = false;
+
+  // Head-locked default: the screen stays perpendicular to the user's view and
+  // centered in it, so the user always looks at the middle of the screen.
+  // Toggle off via the 🎯 LOCK control to restore free 6DOF placement.
+  let lockToViewer = true;
 
   // 6DOF Grab state (DeoVR / Skybox style)
   let isGrabbing = false;
@@ -103,15 +109,16 @@ const WebXRVR = (function () {
 
   // Button definitions for the UI controls panel
   const CTRL_BUTTONS = [
-    { label: '⏮',       action: 'prev',   x: 12,  w: 46 },
-    { label: '◀◀',      action: 'rew',    x: 64,  w: 46 },
-    { label: '▶',        action: 'play',   x: 116, w: 60 },
-    { label: '▶▶',      action: 'fwd',    x: 182, w: 46 },
-    { label: '⏭',       action: 'next',   x: 234, w: 46 },
-    { label: '🔄 AUTO', action: 'mode',   x: 286, w: 84 },
-    { label: '🌙 CURVE', action: 'curve',  x: 376, w: 96 },
-    { label: '🔊',       action: 'mute',   x: 478, w: 46 },
-    { label: '✕',        action: 'exit',   x: 530, w: 46 },
+    { label: '⏮',       action: 'prev',   x: 12,  w: 40 },
+    { label: '◀◀',      action: 'rew',    x: 56,  w: 40 },
+    { label: '▶',        action: 'play',   x: 100, w: 52 },
+    { label: '▶▶',      action: 'fwd',    x: 156, w: 40 },
+    { label: '⏭',       action: 'next',   x: 200, w: 40 },
+    { label: '🔄 AUTO', action: 'mode',   x: 244, w: 78 },
+    { label: '🌙 CURVE', action: 'curve',  x: 326, w: 88 },
+    { label: '🎯 LOCK',  action: 'lock',   x: 418, w: 88 },
+    { label: '🔊',       action: 'mute',   x: 510, w: 44 },
+    { label: '✕',        action: 'exit',   x: 558, w: 44 },
   ];
 
   // ─── Quaternion & Vector Math Helpers ───────────────────────────────
@@ -231,6 +238,22 @@ const WebXRVR = (function () {
     return { x: qx, y: qy, z: qz, w: qw };
   }
 
+  // ─── Head-Locked Screen Mode ──────────────────────────────────────────
+  // Keeps the screen at a fixed distance in front of the user's face,
+  // perpendicular to the view direction, so the user always looks into the
+  // center of the screen. Screen local axes follow the head exactly:
+  // +Z faces back toward the viewer, +Y up, +X right.
+  function applyLockToViewer() {
+    const dist = -DEFAULT_POS.z;
+    const fwd = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
+    screenPos = {
+      x: currentHeadPos.x + fwd.x * dist,
+      y: currentHeadPos.y + fwd.y * dist,
+      z: currentHeadPos.z + fwd.z * dist,
+    };
+    screenQuat = currentHeadQuat;
+  }
+
   // ─── Premium UI Controls Canvas Rendering ────────────────────────────
 
   function initControlsCanvas() {
@@ -293,6 +316,12 @@ const WebXRVR = (function () {
       ctx.fillText(`${idx + 1} / ${playlist.length}`, CONTROLS_W - 16, 21);
     }
 
+    // Lock state indicator (always visible next to the counter)
+    ctx.fillStyle = lockToViewer ? '#4ADE80' : '#9BA1A8';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(lockToViewer ? '● LOCKED' : '○ FREE', CONTROLS_W - 64, 21);
+
     // Buttons Row
     const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
     CTRL_BUTTONS.forEach((btn, i) => {
@@ -304,6 +333,7 @@ const WebXRVR = (function () {
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
       if (btn.action === 'curve') btn.label = isCurved ? '🌙 CURVE' : '📺 FLAT';
       if (btn.action === 'mode') btn.label = isAutoNext ? '🔄 AUTO' : '🔁 LOOP';
+      if (btn.action === 'lock') btn.label = lockToViewer ? '🎯 LOCK' : '🔓 FREE';
 
       if (isHover || btn.action === 'play') {
         ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 59, 31, 0.85)';
@@ -325,7 +355,7 @@ const WebXRVR = (function () {
       ctx.stroke();
 
       ctx.fillStyle = (isHover || btn.action === 'play') ? '#0A0A0A' : '#F2F3F5';
-      ctx.font = (btn.action === 'curve' || btn.action === 'mode') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
+      ctx.font = (btn.action === 'curve' || btn.action === 'mode' || btn.action === 'lock') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(btn.label, btn.x + btn.w / 2, y + h / 2);
@@ -567,7 +597,7 @@ const WebXRVR = (function () {
       { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
       { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
       { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
-      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Horizon auto-level' },
+      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED (🎯)' },
       { title: 'GRIP + STICK ↕', desc: 'Zoom Screen In / Out|Smooth Scale Control' }
     ];const colW = 198;
     const cardH = 88;
@@ -681,21 +711,46 @@ const WebXRVR = (function () {
   }
 
   function getControlsCenter() {
+    if (lockToViewer) {
+      // Decoupled from the head-locked screen block: the transport panel stays
+      // fixed and level in the room at the default screen spot.
+      const offsetLocal = { x: 0, y: -DEFAULT_SCALE / 2 - CONTROLS_Y_OFFSET, z: 0 };
+      return vecAdd({ ...DEFAULT_POS }, offsetLocal);
+    }
     const offsetLocal = { x: 0, y: -screenScale / 2 - CONTROLS_Y_OFFSET, z: 0 };
     const offsetWorld = quatRotVec(screenQuat, offsetLocal);
     return vecAdd(screenPos, offsetWorld);
   }
 
   function getGuideCenter() {
+    if (lockToViewer) {
+      const guideW = DEFAULT_SCALE * 0.351;
+      return {
+        x: DEFAULT_POS.x + DEFAULT_SCALE / 2 + guideW / 2 + 0.384,
+        y: DEFAULT_POS.y,
+        z: DEFAULT_POS.z - 0.15,
+      };
+    }
     const guideW = screenScale * 0.351;
     const offsetLocal = { x: screenScale / 2 + guideW / 2 + 0.384, y: 0, z: -0.15 };
     const offsetWorld = quatRotVec(screenQuat, offsetLocal);
     return vecAdd(screenPos, offsetWorld);
   }
 
+  function getControlsQuat() {
+    if (lockToViewer) {
+      return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
+    }
+    return screenQuat;
+  }
+
+  function getControlsScale() {
+    return lockToViewer ? DEFAULT_SCALE : screenScale;
+  }
+
   function getHitDistControls(rayOrigin, rayDir) {
     const ctrlCenter = getControlsCenter();
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
+    const normal = quatRotVec(getControlsQuat(), { x: 0, y: 0, z: 1 });
     const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
     if (Math.abs(denom) < 0.0001) return -1;
     const t = ((ctrlCenter.x - rayOrigin.x) * normal.x +
@@ -706,10 +761,11 @@ const WebXRVR = (function () {
 
   function hitTestControls(rayOrigin, rayDir) {
     const ctrlCenter = getControlsCenter();
-    const ctrlWidth = screenScale * 0.8;
+    const ctrlWidth = getControlsScale() * 0.8;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
 
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
+    const ctrlQuat = getControlsQuat();
+    const normal = quatRotVec(ctrlQuat, { x: 0, y: 0, z: 1 });
     const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
 
     if (Math.abs(denom) < 0.0001) return -1;
@@ -719,7 +775,7 @@ const WebXRVR = (function () {
     if (t < 0 || t > 20) return -1;
 
     const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
-    const invQ = quatInvert(screenQuat);
+    const invQ = quatInvert(ctrlQuat);
     const localP = quatRotVec(invQ, vecSub(hitP, ctrlCenter));
 
     const halfW = ctrlWidth / 2;
@@ -753,6 +809,13 @@ const WebXRVR = (function () {
       case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
       case 'curve': isCurved = !isCurved; break;
+      case 'lock':
+        lockToViewer = !lockToViewer;
+        if (lockToViewer) {
+          isGrabbing = false;
+          grabControllerIdx = -1;
+        }
+        break;
       case 'mute':
         if (videoElement) {
           videoElement.muted = !videoElement.muted;
@@ -1092,11 +1155,21 @@ const WebXRVR = (function () {
         y: pose.transform.position.y,
         z: pose.transform.position.z,
       };
+      currentHeadQuat = {
+        x: pose.transform.orientation.x,
+        y: pose.transform.orientation.y,
+        z: pose.transform.orientation.z,
+        w: pose.transform.orientation.w,
+      };
 
       if (!isInitialPoseSet) {
         isInitialPoseSet = true;
         screenPos.y = currentHeadPos.y;
         screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
+      }
+
+      if (lockToViewer) {
+        applyLockToViewer();
       }
     }
 
@@ -1145,16 +1218,18 @@ const WebXRVR = (function () {
 
       if (controlsVisible) {
         const ctrlPos = getControlsCenter();
-        const ctrlW = screenScale * 0.8;
+        const ctrlScale = lockToViewer ? DEFAULT_SCALE : screenScale;
+        const ctrlW = ctrlScale * 0.8;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
-        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, screenQuat, ctrlW, ctrlH, 0.96, false);
+        const ctrlQuat = lockToViewer ? quatFaceViewerLevel(ctrlPos, currentHeadPos) : screenQuat;
+        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, false);
 
         // Draw Meta Quest 3 Controller Guide Panel to the right of screen
         // Face the guide panel toward the viewer so it's readable from their POV
         if (glGuideTexture) {
           const guidePos = getGuideCenter();
           const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
-          const guideW = screenScale * 0.351;
+          const guideW = ctrlScale * 0.351;
           const guideH = guideW * (GUIDE_H / GUIDE_W);
           drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, false);
         }
@@ -1192,7 +1267,10 @@ const WebXRVR = (function () {
 
       // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
       const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
-      if (gripPressed && controllerPos && controllerDir) {
+      if (lockToViewer) {
+        isGrabbing = false;
+        grabControllerIdx = -1;
+      } else if (gripPressed && controllerPos && controllerDir) {
         if (!isGrabbing) {
           isGrabbing = true;
           grabControllerIdx = hand === 'right' ? 1 : 0;
@@ -1338,7 +1416,9 @@ const WebXRVR = (function () {
     screenQuat = { x: 0, y: 0, z: 0, w: 1 };
     screenScale = DEFAULT_SCALE;
     currentHeadPos = { x: 0, y: 1.52, z: 0 };
+    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     isInitialPoseSet = false;
+    lockToViewer = true;
     controlsVisible = false;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
@@ -1471,6 +1551,7 @@ const WebXRVR = (function () {
     loc_uCurved = null;
     controlsVisible = false;
     isGrabbing = false;
+    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     hoveredButton = -1;
