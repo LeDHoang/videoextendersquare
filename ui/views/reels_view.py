@@ -30,6 +30,10 @@ OUTPUT_DIR = Path("output")
 def _template() -> str:
     assets = Path(__file__).parent.parent / "assets"
     html = (assets / "reels.html").read_text(encoding="utf-8")
+    # Inline the Quest controller guide image (data URL) so the VR module stays readable
+    img_js_path = assets / "quest_controller_img.js"
+    img_js = img_js_path.read_text(encoding="utf-8") if img_js_path.exists() else ""
+    html = html.replace("__QUEST_CONTROLLER_IMG_JS__", img_js)
     # Inline the WebXR VR module so it's available inside the Streamlit iframe
     vr_js_path = assets / "webxr_vr.js"
     vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""
