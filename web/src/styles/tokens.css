@@ -1,0 +1,43 @@
+/* Square Extender 4K — design tokens (ported from ui/tokens.py / app.css) */
+:root {
+  /* Color palette */
+  --sx-bg: #08090a;
+  --sx-surface: #101214;
+  --sx-surface-2: #16191c;
+  --sx-rule: #24282d;
+  --sx-rule-strong: #3a4047;
+  --sx-ink: #f2f3f5;
+  --sx-ink-2: #9ba1a8;
+  --sx-ink-3: #5f666d;
+  --sx-accent: #ff3b1f;
+  --sx-accent-hi: #ff5c42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-on-accent: #0a0a0a;
+  --sx-warn: #f2c744;
+
+  /* Type scale */
+  --sx-t-hero: clamp(2.75rem, 7vw, 5.25rem);
+  --sx-t-display: 3rem;
+  --sx-t-numeral: 4.5rem;
+  --sx-t-stat: 2.25rem;
+  --sx-t-h2: 1.4rem;
+  --sx-t-body: 0.9375rem;
+  --sx-t-eyebrow: 0.6875rem;
+  --sx-t-mono: 0.8125rem;
+
+  /* Spacing (4px base) */
+  --sx-1: 4px;
+  --sx-2: 8px;
+  --sx-3: 12px;
+  --sx-4: 16px;
+  --sx-5: 24px;
+  --sx-6: 32px;
+  --sx-7: 48px;
+  --sx-8: 64px;
+  --sx-9: 96px;
+
+  /* Rule weights */
+  --sx-rule-hairline: 1px solid var(--sx-rule);
+  --sx-rule-heavy: 3px solid var(--sx-ink);
+  --sx-rule-accent: 6px solid var(--sx-accent);
+}
