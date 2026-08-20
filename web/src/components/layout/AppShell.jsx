@@ -2,11 +2,11 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { HealthProvider, useHealthContext } from '../../hooks/HealthContext.jsx';
-import { useConfig } from '../../hooks/useConfig.js';
+import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx';
 
 function Shell() {
   const health = useHealthContext();
-  const { config, setFalKey, setModels } = useConfig();
+  const { config, setFalKey, setModels } = useConfigContext();
   const location = useLocation();
 
   return (
@@ -24,7 +24,9 @@ function Shell() {
 export default function AppShell() {
   return (
     <HealthProvider>
-      <Shell />
+      <ConfigProvider>
+        <Shell />
+      </ConfigProvider>
     </HealthProvider>
   );
 }

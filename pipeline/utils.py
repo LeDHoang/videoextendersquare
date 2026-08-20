@@ -133,6 +133,19 @@ def has_audio_stream(video_path):
     except Exception:
         return False
 
+
+def get_video_codec(video_path):
+    """Return the video stream codec name (e.g. 'hevc', 'h264') via ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip().lower() or "unknown"
+    except Exception:
+        return "unknown"
+
 def log_pipeline_execution(item_name, kind, input_path, output_path, metrics, params=None):
     """
     Appends execution metrics, input/output paths, timing breakdown,

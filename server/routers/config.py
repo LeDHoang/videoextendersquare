@@ -4,14 +4,17 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from core import models as _models
+
 router = APIRouter(prefix="/api/config", tags=["config"])
 
-# In-memory model endpoints config
+# In-memory model endpoints config. The static catalogs (labels + pricing)
+# live in core/models.py — this dict holds only the user-editable overrides.
 DEFAULT_MODELS = {
-    "outpaint_img": "fal-ai/flux/outpaint",
-    "upscale_img": "fal-ai/clarity-upscaler",
-    "outpaint_vid": "fal-ai/ltx-2.3-quality/outpaint",
-    "upscale_vid": "fal-ai/seedvr/upscale/video",
+    "outpaint_img": _models.IMAGE_MODELS["outpaint_img"],
+    "upscale_img": _models.IMAGE_MODELS["upscale_img"],
+    "outpaint_vid": _models.DEFAULT_VIDEO_MODELS["outpaint_vid"],
+    "upscale_vid": _models.DEFAULT_VIDEO_MODELS["upscale_vid"],
 }
 
 _model_config = dict(DEFAULT_MODELS)
@@ -30,13 +33,14 @@ class ModelsUpdate(BaseModel):
 
 @router.get("")
 def get_config():
-    """Return current configuration state (masked FAL key & model endpoints)."""
+    """Return current configuration state (masked FAL key, model overrides,
+    and the full model/pricing catalog the frontend renders from)."""
     key = os.environ.get("FAL_KEY", "")
     masked = f"****{key[-4:]}" if len(key) >= 4 else ("set" if key else "")
     return {
         "fal_key_set": bool(key),
         "fal_key_masked": masked,
-        "models": _model_config,
+        "models": _models.config_payload(_model_config),
     }
 
 
@@ -60,4 +64,4 @@ def update_models(body: ModelsUpdate):
     for k, v in updates.items():
         if v and k in _model_config:
             _model_config[k] = v.strip()
-    return {"status": "ok", "models": _model_config}
+    return {"status": "ok", "models": _models.config_payload(_model_config)}

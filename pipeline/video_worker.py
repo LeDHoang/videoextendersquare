@@ -1,14 +1,18 @@
 import os
-import sys
 import time
 import tempfile
-import threading
 import uuid
-import platform
 import subprocess
 import fal_client
+from core import models as _models
+from core.tooling import (
+    find_ffms2_plugin,
+    find_vspipe,
+    pick_encoder,
+)
 from pipeline.utils import (
     get_video_dimensions_and_duration,
+    get_video_codec,
     calculate_square_padding,
     has_audio_stream,
     fetch_fal_result,
@@ -79,123 +83,6 @@ def poll_job_status(handler, status_prefix, status_callback=None, timeout_s=1800
 
     return handler.get()
 
-_ENCODER_CACHE = None
-_ENCODER_LOCK = threading.Lock()
-
-_HEVC_CANDIDATES = [
-    ("hevc_videotoolbox", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
-    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
-    ("hevc_qsv", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
-    # CRF is the rate-control mode here — no -b:v/-maxrate/-bufsize, since
-    # pairing a bitrate cap with -crf gives ffmpeg contradictory instructions
-    # (CRF wins; the cap is mostly inert but was misleading in logs/docs).
-    ("libx265", ["-crf", "24", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
-]
-
-def _find_ffms2_plugin() -> str | None:
-    """Return explicit path to ffms2 plugin if not automatically loaded into core."""
-    try:
-        import vapoursynth as _vs
-        if hasattr(_vs.core, "ffms2"):
-            return None
-    except Exception:
-        pass
-    candidates = []
-    try:
-        import vapoursynth as _vs, os as _os
-        venv_plugins = _os.path.join(_os.path.dirname(_vs.__file__), "plugins")
-        for root, _, files in _os.walk(venv_plugins):
-            for f in files:
-                if "ffms2" in f.lower():
-                    candidates.append(_os.path.join(root, f))
-    except Exception:
-        pass
-    sysname = platform.system()
-    if sysname == "Darwin":
-        candidates.extend([
-            "/opt/homebrew/lib/libffms2.dylib",
-            "/opt/homebrew/lib/python3.14/site-packages/vapoursynth/plugins/libffms2.dylib",
-            "/opt/homebrew/lib/vapoursynth/libffms2.dylib",
-            "/usr/local/lib/libffms2.dylib",
-        ])
-    elif sysname == "Windows":
-        candidates.extend([
-            r"C:\Program Files\VapourSynth\plugins64\ffms2.dll",
-            r"C:\Program Files (x86)\VapourSynth\plugins32\ffms2.dll",
-        ])
-    else:
-        candidates.extend([
-            "/usr/lib/x86_64-linux-gnu/vapoursynth/libffms2.so",
-            "/usr/lib/vapoursynth/libffms2.so",
-            "/usr/local/lib/vapoursynth/libffms2.so",
-        ])
-    return next((p for p in candidates if os.path.isfile(p)), None)
-
-def _find_vspipe() -> str:
-    """Locate vspipe, checking active venv's bin/ or Scripts/ before system PATH."""
-    import shutil as _shutil, pathlib as _pl, sys as _sys
-    try:
-        import vapoursynth as _vs
-        prefix = _pl.Path(_sys.prefix)
-        candidates = [
-            prefix / "bin" / "vspipe",
-            prefix / "Scripts" / "vspipe.exe",
-            prefix / "Scripts" / "vspipe",
-            prefix / "bin" / "vspipe.exe",
-            _pl.Path(_vs.__file__).parent.parent.parent.parent / "Scripts" / "vspipe.exe",
-            _pl.Path(_vs.__file__).parent.parent.parent.parent / "bin" / "vspipe",
-        ]
-        for cand in candidates:
-            if cand.exists():
-                return str(cand)
-    except Exception:
-        pass
-    found = _shutil.which("vspipe")
-    if found:
-        return found
-    raise RuntimeError(
-        "vspipe not found. Install VapourSynth or add it to PATH."
-    )
-
-def _pick_encoder():
-    """Probe for an HEVC encoder that actually works. Cached per process.
-
-    Guarded by a lock so concurrent jobs (now that the global run lock is
-    gone) can't both spawn the ffmpeg smoke-test at once; in the common case
-    this is pre-warmed once at startup (see server/app.py's lifespan) so the
-    lock is rarely contended.
-    """
-    global _ENCODER_CACHE
-    if _ENCODER_CACHE:
-        return _ENCODER_CACHE
-
-    with _ENCODER_LOCK:
-        if _ENCODER_CACHE:
-            return _ENCODER_CACHE
-
-        no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        listed = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True, text=True, creationflags=no_window,
-        ).stdout or ""
-
-        for name, opts in _HEVC_CANDIDATES:
-            if name not in listed:
-                continue
-            probe = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-v", "error",
-                 "-f", "lavfi", "-i", "testsrc=d=0.1:s=64x64",
-                 "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-"],
-                capture_output=True, creationflags=no_window,
-            )
-            if probe.returncode == 0:
-                _ENCODER_CACHE = (name, opts)
-                return _ENCODER_CACHE
-
-        raise RuntimeError(
-            "No working HEVC encoder found (tried: "
-            + ", ".join(n for n, _ in _HEVC_CANDIDATES) + ")"
-        )
 
 def _is_already_square(path: str, target: int = 3840) -> bool:
     """True if *path* already probes as target x target (skip a no-op scale)."""
@@ -204,6 +91,28 @@ def _is_already_square(path: str, target: int = 3840) -> bool:
         return w == target and h == target
     except Exception:
         return False
+
+
+def _is_already_hevc(path: str) -> bool:
+    """True if *path*'s video stream is already HEVC (h265/hevc)."""
+    try:
+        return get_video_codec(path) in ("hevc", "h265")
+    except Exception:
+        return False
+
+
+def _master_can_stream_copy(path: str, sharpening: float, target: int = 3840) -> bool:
+    """True if *path* is already the deliverable 4K-square HEVC master, so the
+    final encode can be replaced by a lossless stream copy.
+
+    All of these must hold or a re-encode is still needed: already target
+    dimensions (else scale), already HEVC (else codec conversion), and no
+    sharpening (else the cas filter needs a decode+encode)."""
+    return (
+        sharpening <= 0.0
+        and _is_already_square(path, target)
+        and _is_already_hevc(path)
+    )
 
 
 def process_video(
@@ -294,23 +203,62 @@ def _process_video_impl(
         uid_trim = uuid.uuid4().hex[:8]
         temp_trimmed_path = os.path.join(tempfile.gettempdir(), f"trimmed_source_{uid_trim}.mp4")
         temp_paths.append(temp_trimmed_path)
-        
-        trim_cmd = [
-            "ffmpeg", "-y",
-            "-ss", str(trim_start),
-            "-i", video_path,
-            "-t", str(trim_duration),
-            "-c:v", "libx264", "-preset", "fast", "-crf", "17",
-            "-c:a", "copy",
-            temp_trimmed_path
-        ]
+
+        # Stream-copy the trim when the source codec is copyable into mp4
+        # (h264/hevc are the overwhelmingly common upload codecs) instead of
+        # always re-encoding with libx264. This removes one redundant encode
+        # from the pipeline. Input `-ss` seeks fast to the nearest keyframe
+        # before the requested start; that keeps the operation lossless and
+        # near-instant. Re-encode is the fallback for non-copyable codecs or
+        # if the stream-copy produces an invalid file.
+        codec = get_video_codec(video_path)
+        copyable = codec in ("h264", "avc1", "hevc", "h265")
+        if copyable:
+            trim_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(trim_start),
+                "-i", video_path,
+                "-t", str(trim_duration),
+                "-c", "copy",
+                "-movflags", "+faststart",
+                temp_trimmed_path
+            ]
+        else:
+            trim_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(trim_start),
+                "-i", video_path,
+                "-t", str(trim_duration),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "17",
+                "-c:a", "copy",
+                temp_trimmed_path
+            ]
         try:
             subprocess.run(trim_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if os.path.exists(temp_trimmed_path) and os.path.getsize(temp_trimmed_path) > 0:
                 video_to_process = temp_trimmed_path
+            else:
+                raise OSError("stream-copy produced an empty file")
         except Exception as e:
+            # Fall back to a frame-accurate re-encode for any failure.
             if status_callback:
                 status_callback(f"Trimming fallback: {e}")
+            try:
+                trim_cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(trim_start),
+                    "-i", video_path,
+                    "-t", str(trim_duration),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "17",
+                    "-c:a", "copy",
+                    temp_trimmed_path
+                ]
+                subprocess.run(trim_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if os.path.exists(temp_trimmed_path) and os.path.getsize(temp_trimmed_path) > 0:
+                    video_to_process = temp_trimmed_path
+            except Exception as e2:
+                if status_callback:
+                    status_callback(f"Trimming failed: {e2}")
 
     if status_callback:
         status_callback("Analyzing video dimensions and duration...")
@@ -351,8 +299,7 @@ def _process_video_impl(
                 }
                 if prompt and prompt.strip():
                     arguments["prompt"] = prompt.strip()
-                dur_calc = duration if duration > 0 else 5.0
-                outpaint_cost = dur_calc * 0.06
+                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             elif "ltx" in model_lower:
                 arguments = {
                     "video_url": video_url,
@@ -365,27 +312,24 @@ def _process_video_impl(
                     "guidance_scale": float(kwargs.get("ltx_guidance", 1.0)),
                     "generate_audio": bool(kwargs.get("ltx_audio", True)),
                 }
-                res_tier = kwargs.get("ltx_resolution", "720p")
-                w_ltx, h_ltx = (720, 720) if res_tier == "720p" else ((1080, 1080) if res_tier == "1080p" else (480, 480))
-                frames_est = int(duration * 24) if duration > 0 else 121
-                mp = (w_ltx * h_ltx * frames_est) / 1000000.0
-                outpaint_cost = mp * 0.0024075
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration,
+                    resolution=kwargs.get("ltx_resolution", "720p"),
+                )
             elif "wan" in model_lower or "vace" in model_lower:
                 arguments = {
                     "video_url": video_url,
                     "prompt": prompt or "Seamlessly extend the background environment beyond the original frame",
                     "aspect_ratio": kwargs.get("wan_aspect_ratio", "1:1"),
                 }
-                dur_calc = duration if duration > 0 else 5.0
-                outpaint_cost = dur_calc * 0.08
+                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             else:
                 arguments = {
                     "video_url": video_url,
                     "prompt": prompt or "Seamlessly extend environment context",
                     "aspect_ratio": "1:1",
                 }
-                dur_calc = duration if duration > 0 else 5.0
-                outpaint_cost = dur_calc * 0.06
+                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             
             handler = fal.submit(outpaint_model, arguments=arguments)
             result = poll_job_status(handler, "Outpainting", status_callback)
@@ -432,11 +376,10 @@ def _process_video_impl(
                 "output_quality": kwargs.get("seedvr_quality", "high"),
                 "output_write_mode": "balanced",
             }
-            res_tier_s = kwargs.get("seedvr_target", "1080p")
-            w_s, h_s = (1080, 1080) if res_tier_s == "1080p" else ((2160, 2160) if res_tier_s == "2160p" else (720, 720))
-            frames_est = int(duration * 24) if duration > 0 else 121
-            mp_s = (w_s * h_s * frames_est) / 1000000.0
-            upscale_cost = mp_s * 0.001
+            _, upscale_cost = _models.estimate_upscale_cost(
+                upscale_model, duration=duration,
+                seedvr_target=kwargs.get("seedvr_target", "1080p"),
+            )
         elif "bytedance" in upscale_lower:
             arguments = {
                 "video_url": video_url_to_upscale,
@@ -446,17 +389,15 @@ def _process_video_impl(
                 "enhancement_tier": kwargs.get("bytedance_tier", "fast"),
                 "fidelity": kwargs.get("bytedance_fidelity", "medium"),
             }
-            b_res = kwargs.get("bytedance_target_res", "4k")
-            b_base_rates = {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288}
-            b_base = b_base_rates.get(b_res, 0.0288)
-            b_fps_m = 2.0 if kwargs.get("bytedance_target_fps", "30fps") == "60fps" else 1.0
-            b_tier_m = 10.0 if kwargs.get("bytedance_tier", "fast") == "pro" else 1.0
-            dur_calc = duration if duration > 0 else 5.0
-            upscale_cost = dur_calc * (b_base * b_fps_m * b_tier_m)
+            _, upscale_cost = _models.estimate_upscale_cost(
+                upscale_model, duration=duration,
+                bytedance_res=kwargs.get("bytedance_target_res", "4k"),
+                bytedance_fps=kwargs.get("bytedance_target_fps", "30fps"),
+                bytedance_tier=kwargs.get("bytedance_tier", "fast"),
+            )
         else:
             arguments = {"video_url": video_url_to_upscale}
-            dur_calc = duration if duration > 0 else 5.0
-            upscale_cost = max(0.08, dur_calc * 0.02)
+            _, upscale_cost = _models.estimate_upscale_cost(upscale_model, duration=duration)
 
         handler = fal.submit(upscale_model, arguments=arguments)
         result = poll_job_status(handler, "Video Upscaling (FAL AI)", status_callback)
@@ -470,7 +411,7 @@ def _process_video_impl(
         fetch_fal_result(upscaled_video_url, temp_fal_vid)
 
         # Probe for a working encoder
-        encoder, encoder_opts = _pick_encoder()
+        encoder, encoder_opts = pick_encoder()
 
         # Determine best audio source stream
         audio_src = None
@@ -514,9 +455,38 @@ def _process_video_impl(
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
-        t_master_start = time.time()
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        master_time = time.time() - t_master_start
+        # If the fal result is already the deliverable 4K-square HEVC master,
+        # a lossless stream copy replaces the redundant re-encode entirely.
+        if _master_can_stream_copy(temp_fal_vid, sharpening):
+            if status_callback:
+                status_callback("FAL result is already 4K-square HEVC — stream-copying master (no re-encode).")
+            copy_cmd = ["ffmpeg", "-y", "-i", temp_fal_vid]
+            if audio_src and audio_src != temp_fal_vid:
+                copy_cmd += ["-i", audio_src,
+                             "-map", "0:v:0", "-map", "1:a:0",
+                             "-c:v", "copy", "-c:a", "copy",
+                             "-movflags", "+faststart", "-tag:v", "hvc1",
+                             "-shortest", output_video_path]
+            else:
+                copy_cmd += ["-map", "0:v:0", "-c:v", "copy"]
+                if audio_src:  # audio_src == temp_fal_vid, already an input
+                    copy_cmd += ["-map", "0:a:0", "-c:a", "copy"]
+                copy_cmd += ["-movflags", "+faststart", "-tag:v", "hvc1",
+                             output_video_path]
+            t_master_start = time.time()
+            try:
+                subprocess.run(copy_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                master_time = time.time() - t_master_start
+            except Exception:
+                if status_callback:
+                    status_callback("Stream-copy failed; falling back to re-encode.")
+                t_master_start = time.time()
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                master_time = time.time() - t_master_start
+        else:
+            t_master_start = time.time()
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            master_time = time.time() - t_master_start
 
         if os.path.exists(temp_fal_vid):
             os.unlink(temp_fal_vid)
@@ -527,7 +497,7 @@ def _process_video_impl(
 
         vpy_path = os.path.join(tempfile.gettempdir(), f"upscale_{uid}.vpy")
 
-        ffms2_plugin = _find_ffms2_plugin()
+        ffms2_plugin = find_ffms2_plugin()
         load_ffms2 = f"core.std.LoadPlugin(r'{os.path.abspath(ffms2_plugin)}')\n" if ffms2_plugin else ""
 
         with open(vpy_path, "w") as f:
@@ -542,8 +512,8 @@ clip = core.resize.Spline36(clip, width=3840, height=3840)
 clip.set_output()
 ''')
 
-        encoder, encoder_opts = _pick_encoder()
-        vspipe = _find_vspipe()
+        encoder, encoder_opts = pick_encoder()
+        vspipe = find_vspipe()
 
         audio_src = video_path if has_audio_stream(video_path) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
 
@@ -616,7 +586,7 @@ clip.set_output()
         vf_filter = ",".join(vf_parts)
         vf_args = ["-vf", vf_filter] if vf_filter else []
 
-        encoder, encoder_opts = _pick_encoder()
+        encoder, encoder_opts = pick_encoder()
 
         audio_src = video_path if has_audio_stream(video_path) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
         if audio_src and audio_src != temp_outpaint_path:
@@ -644,9 +614,38 @@ clip.set_output()
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
-        t_master_start = time.time()
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        master_time = time.time() - t_master_start
+        # If the source is already the deliverable 4K-square HEVC master, a
+        # lossless stream copy replaces the redundant re-encode.
+        if _master_can_stream_copy(temp_outpaint_path, sharpening):
+            if status_callback:
+                status_callback("Source is already 4K-square HEVC — stream-copying master (no re-encode).")
+            copy_cmd = ["ffmpeg", "-y", "-i", temp_outpaint_path]
+            if audio_src and audio_src != temp_outpaint_path:
+                copy_cmd += ["-i", audio_src,
+                             "-map", "0:v:0", "-map", "1:a:0",
+                             "-c:v", "copy", "-c:a", "copy",
+                             "-movflags", "+faststart", "-tag:v", "hvc1",
+                             "-shortest", output_video_path]
+            else:
+                copy_cmd += ["-map", "0:v:0", "-c:v", "copy"]
+                if audio_src:
+                    copy_cmd += ["-map", "0:a:0", "-c:a", "copy"]
+                copy_cmd += ["-movflags", "+faststart", "-tag:v", "hvc1",
+                             output_video_path]
+            t_master_start = time.time()
+            try:
+                subprocess.run(copy_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                master_time = time.time() - t_master_start
+            except Exception:
+                if status_callback:
+                    status_callback("Stream-copy failed; falling back to re-encode.")
+                t_master_start = time.time()
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                master_time = time.time() - t_master_start
+        else:
+            t_master_start = time.time()
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            master_time = time.time() - t_master_start
         upscale_time = time.time() - t_up_stage_start
     
     # Clean up intermediate video

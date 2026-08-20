@@ -28,7 +28,15 @@ Companion to the review/plan at `C:\Users\hleduc\.claude\plans\i-have-rework-thi
 - Deleted `web/src/hooks/useHealth.js` (dead code, superseded by `HealthContext.jsx`; confirmed unreferenced before deleting).
 - `.gitignore` now covers `web/node_modules/`, `web/dist/`, `server/static/`, `.streamlit/credentials.toml`, and (new) `logs/`; those paths were `git rm --cached`'d so they're untracked but still present on disk.
 
-## 0.2. This session's addition (item 8 — code-review-verified only)
+## 0.2. This session's additions (items 1b, 5, 7 — verified by running)
+
+- **Item 1b — redundant re-encodes, remainder.** Two sub-fixes, both verified with real clips on a Mac (Python 3.14, ffmpeg 8.1.2, encoder `hevc_videotoolbox`):
+  - **Trim stream-copies when the codec allows.** `pipeline/utils.py` gained `get_video_codec()`. The trim step in `pipeline/video_worker.py` now uses `-c copy -movflags +faststart` when the input codec is h264/avc1/hevc/h265; otherwise it falls back to the libx264 re-encode. Verified: a real mp4 trims with stream-copy; a non-copyable case still re-encodes.
+  - **Master-encode stream-copies already-final HEVC.** New `_is_already_hevc()` + `_master_can_stream_copy()` helpers. Both the FAL and FAST master-encode paths now stream-copy when the input is already a 4K-square HEVC file **and** sharpening ≤ 0 (the only remaining reason to touch pixels). Verified: a 3840×3840 HEVC clip renders via stream-copy (output hevc 3840×3840), a 1280×720 H.264 clip still scales to 4K.
+- **Item 5 — Streamlit/FastAPI duplication extraction.** New `core/` package (`core/phases.py`, `core/tooling.py`, `core/probes.py`, `core/models.py` — no streamlit imports). `ui/health.py` is now a thin wrapper that re-exports the core helpers (keeping its `@st.cache_resource`), and the import direction is inverted: `server/routers/health.py`, `server/jobs.py`, `ui/runner.py`, `pipeline/video_worker.py`, and `server/app.py`'s lifespan now all import from `core/` instead of duplicating `PHASES`/`_classify`/`HEVC_CANDIDATES`/`_pick_encoder`/`find_ffms2_plugin`/`find_vspipe`/`fmt_elapsed`/`format_error`/`default_pool_sizes`. Verified: `import server.app` and the whole app boot; `/api/health` still returns all probes; streamlit app imports fine.
+- **Item 7 — single source of truth for models/pricing.** New `core/models.py` holds the video outpaint/upscale catalogs (model IDs, labels, pricing kind/rates/multipliers) plus `estimate_outpaint_cost()` / `estimate_upscale_cost()`. `server/routers/config.py` serves the catalogs via `/api/config`; `pipeline/video_worker.py`'s cost math now calls the `core.models` estimators for both outpaint and upscale (values verified identical to the old inline math: Bytedance 4k/fast 10s = 0.288, pro = 2.88, SeedVR 1080p 10s ≈ 0.27994, Kling = 0.14, ESRGAN = 0.03). Frontend: new `web/src/hooks/ConfigContext.jsx` (mounted in `AppShell`, alongside `HealthProvider`); `web/src/pages/VideoPage.jsx` now renders the model dropdowns and the cost panel from the catalog entries instead of the hardcoded `OUTPAINT_OPTIONS`/`FAL_UPSCALE_OPTIONS` maps — so the sidebar's model-endpoint editor now actually changes what gets submitted. Verified: `npm run build` clean, `/api/config` returns the catalogs, root + `/api/health` + Vite all 200.
+
+## 0.3. Earlier session (item 8 — code-review-verified only)
 
 - `web/src/App.jsx`: the four page imports are now `React.lazy(() => import(...))`, wrapped in `<Suspense fallback={null}>`. **Could not be build- or browser-verified** — see the environment note above (Node v14, too old for this project's Vite version). Re-verify with `npm run build` (check for separate chunks per page under `web/dist/assets/`) and `npm run dev` (confirm navigating between `/image`, `/video`, `/compare`, `/reels` still works with no console errors) on a machine with a current Node LTS before trusting this is correct.
 
@@ -84,16 +92,13 @@ Companion to the review/plan at `C:\Users\hleduc\.claude\plans\i-have-rework-thi
 
 ## 2. What's still open
 
-Items 1-4, 6, 8, 10, 11 from the original list are addressed (§0-§0.2) — item 1 only partially (see its note above). Remaining, ordered roughly by value:
+Items 1-8, 10, 11 from the original list are addressed (§0-§0.2) — item 1 fully now (its 1b remainder was completed in the §0.2 session). Remaining:
 
 | # | Item | Files |
 |---|---|---|
-| 1b | **Redundant re-encodes, remainder.** FAST-path videos still get re-encoded 2-3× total (fal result → 4K master → H.264 proxy) even when no step needed it; trim re-encodes via libx264 instead of stream-copying (stream-copy would need frame-accurate seek handling — not attempted). Only the unconditional `scale=3840:3840` mid-pipeline was fixed this session. | `pipeline/video_worker.py` |
-| 5 | **Streamlit/FastAPI duplication extraction** into a shared module (`PHASES`/`_classify`, health probes, `HEVC_CANDIDATES` — which have already drifted between `video_worker.py` and `ui/health.py` — ffms2/vspipe path discovery) and inverting the `server/app.py` → `ui.health` import direction | new `core/` (or similar), `ui/health.py`, `ui/runner.py`, `server/routers/health.py` |
-| 7 | **Single source of truth for models/pricing.** `VideoPage.jsx` hardcodes model IDs and pricing that duplicate the backend's `_model_config`, so the sidebar's model-endpoint editor has no effect on what's actually submitted | `web/src/pages/VideoPage.jsx`, `server/routers/config.py` |
 | 9 | **Full visual rework** (Phase 9 of the plan) — expanded design tokens (semantic colors, fonts, motion, z-index scale, corrected `--sx-ink-3` contrast), layout/hierarchy rework, a real mobile pattern, motion + reduced-motion, accessibility (focus-visible, keyboard-reachable upload zone, ARIA on the dropdown/progress bar/labels, skip link) | `web/src/styles/*.css`, most of `web/src/components/` and `web/src/pages/` |
 
-Items 5, 7, 9 were explicitly deferred this session (need separate scoping/sign-off) rather than attempted and abandoned.
+Item 9 was explicitly deferred — it needs its own scoping/sign-off before touching two dozen files.
 
 ---
 
@@ -187,7 +192,9 @@ Since the intent throughout was zero functional regressions, also re-walk the ba
 
 ## 5. Suggested order for the next session
 
+Current environment (this Mac): Python 3.14 in `.venv`, node 26.7.0, ffmpeg 8.1.2 — the §0.2 items (1b/5/7) were implemented and verified here. Remaining work:
+
 1. Get it running and walk §4.4 first — confirm nothing broke before trusting any of the "fixed" claims above.
 2. Work through §4.3 and §4.5 to actually confirm each fix behaves as intended (not just "doesn't crash").
-3. On a machine with current Node LTS, do the item 8 (code splitting) build/browser check from §4.5 — this session couldn't.
-4. Then continue down the "still open" list in §2 — item 1b (the redundant-encode remainder) and item 5 (arch extraction) are independent and moderate scope; item 7 (single source of truth for pricing) is scoped and self-contained; item 9 (visual rework) is the largest and most subjective, so probably last and worth pausing for your sign-off on direction (colors, mobile pattern) before touching two dozen files.
+3. The item 8 (code splitting) build/browser check from §4.5 can now be done here (node 26): `npm run build` confirmed separate page chunks already exist under `web/dist/assets/`; do a browser click-through of all four routes with DevTools open to close it out.
+4. That leaves item 9 (visual rework) — the largest and most subjective, and worth pausing for your sign-off on direction (colors, mobile pattern) before touching two dozen files.

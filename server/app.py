@@ -44,7 +44,7 @@ async def _cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from ui.health import ensure_ffmpeg_on_path
+    from core.tooling import ensure_ffmpeg_on_path, pick_encoder
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
@@ -54,9 +54,7 @@ async def lifespan(app: FastAPI):
     # concurrently (see server/jobs.py), so doing this lazily would mean the
     # first few concurrent jobs all block on the same probe lock.
     try:
-        from pipeline.video_worker import _pick_encoder
-
-        _pick_encoder()
+        pick_encoder()
     except Exception:
         pass  # health checks / job errors surface this properly later
 
