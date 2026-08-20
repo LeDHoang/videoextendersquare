@@ -154,15 +154,15 @@ button {
 }
 
 .sx-brand-icon {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'Archivo Black', Archivo, sans-serif;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 800;
   box-shadow: var(--sx-glow-accent);
   flex-shrink: 0;
@@ -175,18 +175,19 @@ button {
 
 .sx-brand-title {
   font-family: 'Archivo Black', Archivo, sans-serif;
-  font-size: 0.95rem;
-  letter-spacing: -0.02em;
+  font-size: 1.65rem;
+  letter-spacing: -0.04em;
   color: var(--sx-ink);
-  line-height: 1.1;
+  line-height: 1;
 }
 
 .sx-brand-tag {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   color: var(--sx-ink-3);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  margin-top: 3px;
 }
 
 /* Main content area */

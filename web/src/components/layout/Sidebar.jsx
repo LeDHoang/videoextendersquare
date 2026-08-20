@@ -55,10 +55,10 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
     <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
       {/* Brand Identity */}
       <div className="sx-brand">
-        <div className="sx-brand-icon">4K</div>
+        <div className="sx-brand-icon">E</div>
         <div className="sx-brand-text">
-          <span className="sx-brand-title">SQUARE EXTENDER</span>
-          <span className="sx-brand-tag">v2.0 · FAST + FAL + VR</span>
+          <span className="sx-brand-title">ECHO</span>
+          <span className="sx-brand-tag">4K EXTENDER · v2.0</span>
         </div>
         {isOpen ? (
           <button

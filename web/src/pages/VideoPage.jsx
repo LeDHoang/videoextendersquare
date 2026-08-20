@@ -165,7 +165,7 @@ export default function VideoPage() {
 
   return (
     <div>
-      <Hero title="Square Extender 4K" kicker="VIDEO PIPELINE · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE · HEVC MASTER" />
+      <Hero title="VIDEO EXTENDER" kicker="ECHO · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE · HEVC MASTER" />
 
       {blocked.length ? (
         <BlockingBanner

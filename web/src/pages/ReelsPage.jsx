@@ -96,7 +96,7 @@ export default function ReelsPage() {
 
   return (
     <div>
-      <Hero title="Reels / VR Player" kicker="LIBRARY BROWSER · 1:1 SQUARE · VR HEADSET PLAYER · H.264 PROXIES" />
+      <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES" />
 
       <SpecRow
         cells={[

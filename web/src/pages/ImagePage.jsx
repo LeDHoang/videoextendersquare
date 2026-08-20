@@ -82,7 +82,7 @@ export default function ImagePage() {
 
   return (
     <div>
-      <Hero title="Square Extender 4K" kicker="IMAGE PIPELINE · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE" />
+      <Hero title="IMAGE EXTENDER" kicker="ECHO · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE PIPELINE" />
 
       {blocked.length ? (
         <BlockingBanner

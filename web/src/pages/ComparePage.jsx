@@ -54,7 +54,7 @@ export default function ComparePage() {
 
   return (
     <div>
-      <Hero title="FAST vs STUDIO" kicker="A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL" />
+      <Hero title="FAST vs STUDIO" kicker="ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL" />
 
       <SpecRow
         cells={[

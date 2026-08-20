@@ -8,7 +8,7 @@ import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx'
 const ROUTE_NAMES = {
   '/image': 'IMAGE EXTENDER',
   '/video': 'VIDEO EXTENDER',
-  '/compare': 'A/B COMPARE',
+  '/compare': 'FAST vs STUDIO',
   '/reels': 'REELS / VR',
 };
 
@@ -18,7 +18,7 @@ function Shell() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const currentTitle = ROUTE_NAMES[location.pathname] || 'EXTENDER';
+  const currentTitle = ROUTE_NAMES[location.pathname] || 'ECHO';
   const falOk = health?.fal_key?.ok;
   const probes = Object.values(health?.probes || {});
   const systemOk = probes.length > 0 && probes.every((p) => p.ok);
@@ -33,7 +33,7 @@ function Shell() {
       {/* Mobile Top App Bar (only shown on screens < 900px) */}
       <header className="sx-mobile-header">
         <Link to="/image" className="sx-mobile-brand" onClick={() => setMobileOpen(false)}>
-          <div className="sx-brand-icon">4K</div>
+          <div className="sx-brand-icon">E</div>
           <span className="sx-brand-title" style={{ fontSize: '0.85rem' }}>
             {currentTitle}
           </span>
