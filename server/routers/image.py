@@ -1,10 +1,10 @@
 """Image processing router — upload, job creation, SSE progress, and downloads."""
 
-import asyncio
 import os
+import time
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -13,10 +13,26 @@ from pipeline.utils import calculate_square_padding, get_image_dimensions
 from server import media as SM
 from server import output
 from server.jobs import JobStatus, job_manager
+from server.sse import job_progress_stream
 
 router = APIRouter(prefix="/api/image", tags=["image"])
 
-STAGED_UPLOADS: dict[str, str] = {}
+# stage_id -> (path, staged_at). See video.py's identical pattern.
+STAGED_UPLOADS: dict[str, tuple[str, float]] = {}
+STAGE_TTL_S = 6 * 3600
+
+
+def cleanup_stale_uploads() -> int:
+    now = time.time()
+    stale = [sid for sid, (_, ts) in STAGED_UPLOADS.items() if now - ts > STAGE_TTL_S]
+    for sid in stale:
+        path, _ = STAGED_UPLOADS.pop(sid, (None, None))
+        if path and os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    return len(stale)
 
 
 @router.post("/upload")
@@ -26,7 +42,7 @@ async def upload_image(file: UploadFile = File(...)):
     stage_id = uuid.uuid4().hex[:10]
     dest_path = SM.stage_upload(file.filename or "upload.png", content)
 
-    STAGED_UPLOADS[stage_id] = dest_path
+    STAGED_UPLOADS[stage_id] = (dest_path, time.time())
 
     w, h = get_image_dimensions(content)
     top, bottom, left, right = calculate_square_padding(w, h)
@@ -53,7 +69,8 @@ def start_image_process(
     upscale_model: str = Form("fal-ai/clarity-upscaler"),
 ):
     """Start image processing job in background worker pool."""
-    src_path = STAGED_UPLOADS.get(stage_id)
+    staged = STAGED_UPLOADS.get(stage_id)
+    src_path = staged[0] if staged else None
     if not src_path or not os.path.exists(src_path):
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
 
@@ -102,45 +119,13 @@ def get_job_status(job_id: str):
 
 
 @router.get("/jobs/{job_id}/stream")
-async def stream_job_progress(job_id: str):
+async def stream_job_progress(job_id: str, request: Request):
     """SSE endpoint streaming job progress in real time."""
     rec = job_manager.get_job(job_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    async def event_generator():
-        last_msg_count = 0
-        while True:
-            with rec._lock:
-                status = rec.status.value
-                phase = rec.phase
-                progress = rec.progress
-                elapsed = rec.elapsed
-                msgs = list(rec.messages)
-                err = rec.error
-                res = rec.result
-
-            new_msgs = msgs[last_msg_count:]
-            last_msg_count = len(msgs)
-
-            data = {
-                "status": status,
-                "phase": phase,
-                "progress": progress,
-                "elapsed": elapsed,
-                "new_messages": new_msgs,
-                "result": res,
-                "error": err,
-            }
-
-            yield {"event": "progress", "data": data}
-
-            if status in ("complete", "failed"):
-                break
-
-            await asyncio.sleep(0.5)
-
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(job_progress_stream(request, rec))
 
 
 @router.get("/jobs/{job_id}/download")

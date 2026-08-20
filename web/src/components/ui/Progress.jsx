@@ -12,7 +12,7 @@ export default function Progress({ job, name }) {
           {name}
         </span>
         <span className={`sx-job-status ${cls}`}>
-          {status.toUpperCase()} · {elapsed}
+          {(status || 'queued').toUpperCase()} · {elapsed}
         </span>
       </div>
       <div className="sx-progress-track">

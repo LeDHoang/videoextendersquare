@@ -41,7 +41,7 @@ def main():
         if not os.path.exists(fast_out):
             print("  -> Running Fast (Lanczos4+CAS) Upscale...")
             try:
-                _, upscaled_local = process_video(
+                (_, upscaled_local), _metrics = process_video(
                     video_path=file_path,
                     prompt=None,
                     upscale_only=True,
@@ -60,7 +60,7 @@ def main():
         if not os.path.exists(studio_out):
             print("  -> Running Studio (znedi3+FineSharp) Upscale...")
             try:
-                _, upscaled_local = process_video(
+                (_, upscaled_local), _metrics = process_video(
                     video_path=file_path,
                     prompt=None,
                     upscale_only=True,

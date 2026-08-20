@@ -4,7 +4,8 @@ import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReaso
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
-import { useHealth } from '../hooks/useHealth.js';
+import { useHealthContext } from '../hooks/HealthContext.jsx';
+import { useObjectUrl } from '../hooks/useObjectUrl.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
@@ -27,7 +28,7 @@ function fmtBytes(n) {
 }
 
 export default function VideoPage() {
-  const health = useHealth();
+  const health = useHealthContext();
   const probes = health?.probes || {};
   const blocked = ['ffmpeg', 'ffprobe', 'encoder']
     .filter((id) => probes[id] && !probes[id].ok)
@@ -169,6 +170,7 @@ export default function VideoPage() {
   };
 
   const maxSourceDur = items.length ? Math.max(...items.map((i) => i.duration)) : 60;
+  const previewUrl = useObjectUrl(items.length === 1 ? items[0].file : null);
 
   return (
     <div>
@@ -197,7 +199,7 @@ export default function VideoPage() {
                 lines={['Cloud outpainting is billed per second and the video model throttles long clips, so render time grows faster than duration.']}
               />
             ) : null}
-            <video className="sx-video" src={URL.createObjectURL(items[0].file)} controls playsInline />
+            <video className="sx-video" src={previewUrl} controls playsInline />
           </>
         ) : items.length > 1 ? (
           <SpecRow

@@ -1,13 +1,16 @@
 import { useState } from 'react';
-import { api } from '../../api/client.js';
 import Nav from './Nav.jsx';
-import { HealthDot, Rule } from '../ui/primitives.jsx';
+import { HealthDot } from '../ui/primitives.jsx';
 import { Button, Field } from '../ui/controls.jsx';
 
-export default function Sidebar({ health, config, onConfigChange }) {
+// setFalKey/setModels come from useConfig() (lifted to AppShell) so this
+// writes through the same config state everything else reads — previously
+// Sidebar called api.put(...) directly, bypassing useConfig's state and
+// letting the two copies of "the fal key is set" desync.
+export default function Sidebar({ health, config, setFalKey, setModels }) {
   const [keyVal, setKeyVal] = useState('');
   const [keyMsg, setKeyMsg] = useState('');
-  const [models, setModels] = useState({});
+  const [modelDraft, setModelDraft] = useState({});
   const [saving, setSaving] = useState(false);
 
   const probes = health?.probes || {};
@@ -17,10 +20,10 @@ export default function Sidebar({ health, config, onConfigChange }) {
   const saveKey = async () => {
     setKeyMsg('');
     try {
-      const res = await api.put('/api/config/fal-key', { fal_key: keyVal });
+      const res = await setFalKey(keyVal);
       setKeyMsg(res.fal_key_set ? 'KEY SET' : 'KEY REMOVED');
       setKeyVal('');
-      onConfigChange?.();
+      health?.refresh?.();
     } catch (e) {
       setKeyMsg(String(e.message || e));
     }
@@ -29,7 +32,7 @@ export default function Sidebar({ health, config, onConfigChange }) {
   const saveModels = async () => {
     setSaving(true);
     try {
-      await api.put('/api/config/models', models);
+      await setModels(modelDraft);
     } finally {
       setSaving(false);
     }
@@ -41,7 +44,7 @@ export default function Sidebar({ health, config, onConfigChange }) {
     <aside className="sx-sidebar">
       <Nav />
       <div className="sx-eyebrow">FAL.AI KEY</div>
-      <Field label="">
+      <Field label="FAL.AI API KEY">
         <input
           className="sx-input"
           type="password"
@@ -62,7 +65,7 @@ export default function Sidebar({ health, config, onConfigChange }) {
       ))}
 
       <div style={{ marginTop: 8 }}>
-        <Button onClick={() => health?.refresh()}>↻ Recheck</Button>
+        <Button onClick={() => health?.refresh?.()}>↻ Recheck</Button>
       </div>
 
       {degraded.length ? (
@@ -86,8 +89,8 @@ export default function Sidebar({ health, config, onConfigChange }) {
             <Field key={key} label={key}>
               <input
                 className="sx-input"
-                value={models[key] ?? modelDefaults[key] ?? ''}
-                onChange={(e) => setModels((m) => ({ ...m, [key]: e.target.value }))}
+                value={modelDraft[key] ?? modelDefaults[key] ?? ''}
+                onChange={(e) => setModelDraft((m) => ({ ...m, [key]: e.target.value }))}
               />
             </Field>
           ))}

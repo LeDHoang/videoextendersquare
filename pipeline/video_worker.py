@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import tempfile
+import threading
 import uuid
 import platform
 import subprocess
@@ -32,13 +33,19 @@ def extract_video_url(result):
             
     raise ValueError(f"Could not find output video URL in result: {result}")
 
-def poll_job_status(handler, status_prefix, status_callback=None):
+def poll_job_status(handler, status_prefix, status_callback=None, timeout_s=1800.0):
     """
-    Polls the status of an asynchronous fal-client job until it completes or fails.
+    Polls the status of an asynchronous fal-client job until it completes,
+    fails, or exceeds *timeout_s* (default 30 minutes) — a stuck remote job
+    used to hang this loop (and, with it, a whole worker thread) forever.
     """
+    start = time.time()
     while True:
+        if time.time() - start > timeout_s:
+            raise TimeoutError(f"{status_prefix}: timed out after {timeout_s:.0f}s waiting on fal.ai")
+
         status = handler.status(with_logs=True)
-        
+
         if isinstance(status, fal_client.Queued):
             pos = getattr(status, "position", 0)
             if status_callback:
@@ -56,18 +63,29 @@ def poll_job_status(handler, status_prefix, status_callback=None):
             if status_callback:
                 status_callback(f"{status_prefix}: Completed!")
             break
-            
+        else:
+            # Some other terminal/error status class — don't spin forever on it.
+            status_name = type(status).__name__
+            if status_callback:
+                status_callback(f"{status_prefix}: {status_name}")
+            if status_name.lower() in ("failed", "error"):
+                raise RuntimeError(f"{status_prefix}: fal.ai job {status_name.lower()}")
+
         time.sleep(2.0)
-        
+
     return handler.get()
 
 _ENCODER_CACHE = None
+_ENCODER_LOCK = threading.Lock()
 
 _HEVC_CANDIDATES = [
     ("hevc_videotoolbox", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
     ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
     ("hevc_qsv", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
-    ("libx265", ["-crf", "24", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
+    # CRF is the rate-control mode here — no -b:v/-maxrate/-bufsize, since
+    # pairing a bitrate cap with -crf gives ffmpeg contradictory instructions
+    # (CRF wins; the cap is mostly inert but was misleading in logs/docs).
+    ("libx265", ["-crf", "24", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
 ]
 
 def _find_ffms2_plugin() -> str | None:
@@ -136,34 +154,44 @@ def _find_vspipe() -> str:
     )
 
 def _pick_encoder():
-    """Probe for an HEVC encoder that actually works. Cached per process."""
+    """Probe for an HEVC encoder that actually works. Cached per process.
+
+    Guarded by a lock so concurrent jobs (now that the global run lock is
+    gone) can't both spawn the ffmpeg smoke-test at once; in the common case
+    this is pre-warmed once at startup (see server/app.py's lifespan) so the
+    lock is rarely contended.
+    """
     global _ENCODER_CACHE
     if _ENCODER_CACHE:
         return _ENCODER_CACHE
 
-    no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    listed = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-encoders"],
-        capture_output=True, text=True, creationflags=no_window,
-    ).stdout or ""
-
-    for name, opts in _HEVC_CANDIDATES:
-        if name not in listed:
-            continue
-        probe = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-v", "error",
-             "-f", "lavfi", "-i", "testsrc=d=0.1:s=64x64",
-             "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-"],
-            capture_output=True, creationflags=no_window,
-        )
-        if probe.returncode == 0:
-            _ENCODER_CACHE = (name, opts)
+    with _ENCODER_LOCK:
+        if _ENCODER_CACHE:
             return _ENCODER_CACHE
 
-    raise RuntimeError(
-        "No working HEVC encoder found (tried: "
-        + ", ".join(n for n, _ in _HEVC_CANDIDATES) + ")"
-    )
+        no_window = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        listed = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, creationflags=no_window,
+        ).stdout or ""
+
+        for name, opts in _HEVC_CANDIDATES:
+            if name not in listed:
+                continue
+            probe = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-v", "error",
+                 "-f", "lavfi", "-i", "testsrc=d=0.1:s=64x64",
+                 "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-"],
+                capture_output=True, creationflags=no_window,
+            )
+            if probe.returncode == 0:
+                _ENCODER_CACHE = (name, opts)
+                return _ENCODER_CACHE
+
+        raise RuntimeError(
+            "No working HEVC encoder found (tried: "
+            + ", ".join(n for n, _ in _HEVC_CANDIDATES) + ")"
+        )
 
 def process_video(
     video_path,
@@ -190,11 +218,13 @@ def process_video(
     master_time = 0.0
 
     if (not upscale_only) or (upscale_engine == "fal"):
-        if fal_key:
-            os.environ["FAL_KEY"] = fal_key
-            
-        if not os.environ.get("FAL_KEY"):
+        if not fal_key and not os.environ.get("FAL_KEY"):
             raise ValueError("FAL_KEY must be set in the environment or passed as an argument.")
+
+    # Use a per-call client instead of mutating the shared os.environ / the
+    # module-level fal_client singleton — both are process-global state and
+    # would race across concurrently running jobs with different keys.
+    fal = fal_client.SyncClient(key=fal_key) if fal_key else fal_client.sync_client
 
     trim_enabled = bool(kwargs.get("trim_enabled", False))
     trim_start = float(kwargs.get("trim_start", 0.0))
@@ -245,7 +275,7 @@ def process_video(
         if status_callback:
             status_callback("Uploading video file to fal.ai CDN...")
         t_up_start = time.time()
-        video_url = fal_client.upload_file(video_to_process)
+        video_url = fal.upload_file(video_to_process)
         upload_time = time.time() - t_up_start
         
         # 3. Outpainting (if not already square)
@@ -302,7 +332,7 @@ def process_video(
                 dur_calc = duration if duration > 0 else 5.0
                 outpaint_cost = dur_calc * 0.06
             
-            handler = fal_client.submit(outpaint_model, arguments=arguments)
+            handler = fal.submit(outpaint_model, arguments=arguments)
             result = poll_job_status(handler, "Outpainting", status_callback)
             outpaint_url = extract_video_url(result)
             outpaint_time = time.time() - t_op_start
@@ -327,7 +357,7 @@ def process_video(
             status_callback("Uploading video file to fal.ai CDN for cloud upscale...")
 
         if upscale_only or not outpaint_url:
-            video_url_to_upscale = fal_client.upload_file(temp_outpaint_path)
+            video_url_to_upscale = fal.upload_file(temp_outpaint_path)
         else:
             video_url_to_upscale = outpaint_url
 
@@ -372,7 +402,7 @@ def process_video(
             dur_calc = duration if duration > 0 else 5.0
             upscale_cost = max(0.08, dur_calc * 0.02)
 
-        handler = fal_client.submit(upscale_model, arguments=arguments)
+        handler = fal.submit(upscale_model, arguments=arguments)
         result = poll_job_status(handler, "Video Upscaling (FAL AI)", status_callback)
         upscaled_video_url = extract_video_url(result)
 
@@ -455,26 +485,63 @@ clip.set_output()
         vspipe = _find_vspipe()
 
         audio_src = video_path if has_audio_stream(video_path) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
-        if audio_src:
-            cmd = [
-                "sh", "-c",
-                f"'{vspipe}' -c y4m '{vpy_path}' - | ffmpeg -y -i - -i '{audio_src}' -vf 'cas=0.5' -map 0:v:0 -map 1:a:0 -c:v {encoder} {' '.join(encoder_opts)} -c:a copy -shortest '{output_video_path}'"
-            ]
-        else:
-            cmd = [
-                "sh", "-c",
-                f"'{vspipe}' -c y4m '{vpy_path}' - | ffmpeg -y -i - -vf 'cas=0.5' -c:v {encoder} {' '.join(encoder_opts)} '{output_video_path}'"
-            ]
 
+        # Honour the user's sharpening slider instead of a hardcoded cas=0.5.
+        vf_filter = f"cas={sharpening}" if sharpening > 0.0 else None
+
+        ffmpeg_cmd = ["ffmpeg", "-y", "-i", "-"]
+        if audio_src:
+            ffmpeg_cmd += ["-i", audio_src]
+        if vf_filter:
+            ffmpeg_cmd += ["-vf", vf_filter]
+        if audio_src:
+            ffmpeg_cmd += ["-map", "0:v:0", "-map", "1:a:0", "-c:v", encoder, *encoder_opts, "-c:a", "copy", "-shortest"]
+        else:
+            ffmpeg_cmd += ["-c:v", encoder, *encoder_opts]
+        ffmpeg_cmd += [output_video_path]
+
+        # Piped directly (no shell, no string interpolation of paths into a
+        # shell command) so this runs on Windows without Git Bash and isn't
+        # vulnerable to a filename/path containing a quote character.
+        stderr_log_path = os.path.join(tempfile.gettempdir(), f"studio_ffmpeg_stderr_{uid}.log")
+        vspipe_proc = None
+        ffmpeg_proc = None
         try:
             t_master_start = time.time()
-            subprocess.run(cmd, check=True, capture_output=True)
+            with open(stderr_log_path, "wb") as stderr_log:
+                vspipe_proc = subprocess.Popen(
+                    [vspipe, "-c", "y4m", vpy_path, "-"],
+                    stdout=subprocess.PIPE,
+                )
+                ffmpeg_proc = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdin=vspipe_proc.stdout,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_log,
+                )
+                vspipe_proc.stdout.close()  # let ffmpeg own the read end (SIGPIPE-safe)
+                ffmpeg_rc = ffmpeg_proc.wait()
+                vspipe_rc = vspipe_proc.wait()
             master_time = time.time() - t_master_start
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"FFmpeg pipeline crashed with error:\n{e.stderr.decode()}")
+
+            if ffmpeg_rc != 0 or vspipe_rc != 0:
+                tail = ""
+                try:
+                    with open(stderr_log_path, "r", errors="replace") as f:
+                        tail = "\n".join(f.read().strip().splitlines()[-20:])
+                except OSError:
+                    pass
+                raise RuntimeError(
+                    f"Studio pipeline failed (vspipe rc={vspipe_rc}, ffmpeg rc={ffmpeg_rc}):\n{tail}"
+                )
         finally:
+            for proc in (vspipe_proc, ffmpeg_proc):
+                if proc and proc.poll() is None:
+                    proc.kill()
             if os.path.exists(vpy_path):
                 os.unlink(vpy_path)
+            if os.path.exists(stderr_log_path):
+                os.unlink(stderr_log_path)
         upscale_time = time.time() - t_up_stage_start
     else:
         if status_callback:

@@ -7,14 +7,39 @@ Serves:
   /*            — built React app (production); nothing if web/dist is absent
 """
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+
+# Only the Streamlit entrypoint (app.py) called this before; the FastAPI
+# stack never did, so FAL_KEY in .env was invisible to `uvicorn server.app:app`
+# unless it was also exported in the shell or set via the (unauthenticated)
+# /api/config/fal-key endpoint.
+load_dotenv()
+
+_CLEANUP_INTERVAL_S = 15 * 60
+
+
+async def _cleanup_loop():
+    """Periodically reclaim finished job records and expired staged uploads."""
+    from server.jobs import job_manager
+    from server.routers import image, video
+
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_S)
+        try:
+            job_manager.cleanup_old()
+            image.cleanup_stale_uploads()
+            video.cleanup_stale_uploads()
+        except Exception:
+            pass  # best-effort housekeeping must never crash the loop
 
 
 @asynccontextmanager
@@ -23,7 +48,23 @@ async def lifespan(app: FastAPI):
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
-    yield
+
+    # Pre-warm the HEVC encoder probe at startup rather than inside the first
+    # job — it spawns up to 4 ffmpeg smoke-tests, and jobs can now run
+    # concurrently (see server/jobs.py), so doing this lazily would mean the
+    # first few concurrent jobs all block on the same probe lock.
+    try:
+        from pipeline.video_worker import _pick_encoder
+
+        _pick_encoder()
+    except Exception:
+        pass  # health checks / job errors surface this properly later
+
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
 
 
 def create_app() -> FastAPI:

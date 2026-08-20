@@ -5,6 +5,7 @@ and stream progress via SSE.  Jobs are keyed by UUID and hold status,
 progress messages, and the final result or error.
 """
 
+import os
 import threading
 import time
 import uuid
@@ -82,23 +83,37 @@ def _format_error(ex: Exception) -> tuple[str, str]:
     return (f"{name.upper()}", msg)
 
 
-# Process-wide lock serializing pipeline runs.
-#
-# Both workers write to a FIXED shared temp path and unlink it at run start, so
-# two concurrent runs corrupt each other inside the worker's own execution
-# window — the same failure the Streamlit app's ui/runner._run_lock() exists to
-# prevent. Jobs wait in QUEUED state until the lock frees up.
-_RUN_LOCK = threading.Lock()
+# Cap retained progress messages per job so a long-running job (or a client
+# that never polls) can't grow a record's memory unboundedly. Mirrors
+# ui/runner.py's MAX_LOG_LINES.
+MAX_LOG_LINES = 200
+
+
+# NOTE: pipeline runs used to be serialized process-wide behind a lock,
+# justified by both workers writing to a "fixed shared temp path". That is no
+# longer true — every intermediate file worker-side is uuid4()-suffixed (see
+# pipeline/video_worker.py and pipeline/image_worker.py), and the fal.ai key
+# is now passed via a per-call client instead of mutating os.environ. So jobs
+# can run concurrently; the pool sizes below are the only concurrency cap.
+
+
+def _default_pool_sizes() -> tuple[int, int]:
+    """CPU-aware worker counts, mirroring the clamp in ui/runner.py."""
+    cpus = os.cpu_count() or 2
+    max_video = max(1, min(2, cpus // 2))
+    max_image = max(1, min(4, cpus))
+    return max_image, max_video
 
 
 class JobManager:
     """Process-wide singleton managing background pipeline jobs."""
 
-    def __init__(self, max_image_workers: int = 4, max_video_workers: int = 2):
+    def __init__(self, max_image_workers: int | None = None, max_video_workers: int | None = None):
+        default_image, default_video = _default_pool_sizes()
         self._jobs: dict[str, JobRecord] = {}
         self._lock = threading.Lock()
-        self._image_pool = ThreadPoolExecutor(max_workers=max_image_workers)
-        self._video_pool = ThreadPoolExecutor(max_workers=max_video_workers)
+        self._image_pool = ThreadPoolExecutor(max_workers=max_image_workers or default_image)
+        self._video_pool = ThreadPoolExecutor(max_workers=max_video_workers or default_video)
 
     def create_job(self, kind: str) -> str:
         job_id = uuid.uuid4().hex[:12]
@@ -138,8 +153,7 @@ class JobManager:
         """Submit a pipeline function for background execution.
 
         *postprocess* (optional) transforms the worker's raw result before it
-        is stored on the record. It runs under the process-wide run lock, so
-        persisting the output file there is safe.
+        is stored on the record.
         """
         record = self.get_job(job_id)
         if not record:
@@ -165,13 +179,13 @@ class JobManager:
                     record.progress = highest_w
                     record.elapsed = elapsed
                     record.messages.append(msg)
+                    if len(record.messages) > MAX_LOG_LINES:
+                        del record.messages[: len(record.messages) - MAX_LOG_LINES]
 
             try:
-                # Serialize pipeline execution process-wide (shared temp path)
-                with _RUN_LOCK:
-                    result = fn(status_callback=status_callback, **kwargs)
-                    if postprocess is not None:
-                        result = postprocess(result)
+                result = fn(status_callback=status_callback, **kwargs)
+                if postprocess is not None:
+                    result = postprocess(result)
                 with record._lock:
                     record.status = JobStatus.COMPLETE
                     record.phase = "COMPLETE"

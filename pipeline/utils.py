@@ -37,7 +37,8 @@ def get_video_dimensions_and_duration(video_path):
              "stream=width,height,duration", "-of", "json", video_path],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=15,
         )
         data = json.loads(result.stdout)
         stream = data["streams"][0]
@@ -49,7 +50,7 @@ def get_video_dimensions_and_duration(video_path):
             raise ValueError(f"Could not determine video dimensions for {video_path}")
 
         return width, height, duration
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, IndexError) as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError) as e:
         raise ValueError(f"Could not read video metadata from {video_path}: {e}")
 
 def calculate_square_padding(width, height):
@@ -94,7 +95,8 @@ def has_audio_stream(video_path):
              "stream=codec_name", "-of", "json", video_path],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=15,
         )
         data = json.loads(result.stdout)
         return len(data.get("streams", [])) > 0

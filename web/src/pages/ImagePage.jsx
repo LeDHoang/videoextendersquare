@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono } from '../components/ui/primitives.jsx';
-import { Segmented, Button, Field } from '../components/ui/controls.jsx';
+import { Segmented, Button } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
-import { useHealth } from '../hooks/useHealth.js';
+import { useHealthContext } from '../hooks/HealthContext.jsx';
+import { useObjectUrl } from '../hooks/useObjectUrl.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -17,7 +18,7 @@ const FAL_MODEL_IDS = {
 };
 
 export default function ImagePage() {
-  const health = useHealth();
+  const health = useHealthContext();
   const probes = health?.probes || {};
   const blocked = ['ffmpeg', 'ffprobe'].filter((id) => probes[id] && !probes[id].ok).map((id) => probes[id]);
   const falOk = health?.fal_key?.ok ?? false;
@@ -36,6 +37,7 @@ export default function ImagePage() {
   const falPicked = engine === 'FAL AI';
   const needsKey = !upscaleOnly || falPicked;
   const disabled = blocked.length > 0 || (needsKey && !falOk) || busy;
+  const previewUrl = useObjectUrl(items.length === 1 ? items[0].file : null);
 
   const onFiles = async (files) => {
     setError('');
@@ -101,7 +103,7 @@ export default function ImagePage() {
                 ['PAD', `L ${items[0].padding.left}  R ${items[0].padding.right}`, `T ${items[0].padding.top}  B ${items[0].padding.bottom}`],
               ]}
             />
-            <img className="sx-img" style={{ maxHeight: 300 }} src={URL.createObjectURL(items[0].file)} alt={items[0].name} />
+            <img className="sx-img" style={{ maxHeight: 300 }} src={previewUrl} alt={items[0].name} />
           </>
         ) : items.length > 1 ? (
           <SpecRow

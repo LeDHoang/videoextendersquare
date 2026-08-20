@@ -11,6 +11,8 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.venv2/
+venv2/
 ENV/
 
 # macOS

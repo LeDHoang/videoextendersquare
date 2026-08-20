@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import Emoji from './Emoji.jsx';
 
 export default function UploadZone({ accept, multiple = true, onFiles, caption }) {
   const inputRef = useRef(null);

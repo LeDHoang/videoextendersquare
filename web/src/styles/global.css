@@ -33,14 +33,6 @@ button {
   font-family: inherit;
 }
 
-/* Twemoji sizing/alignment */
-.emoji {
-  height: 1.2em;
-  width: auto;
-  vertical-align: -0.2em;
-  display: inline-block;
-}
-
 /* ─── Layout ─────────────────────────────────────────────── */
 
 .sx-shell {
