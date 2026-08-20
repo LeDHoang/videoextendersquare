@@ -96,141 +96,139 @@ export default function ReelsPage() {
 
   return (
     <div>
-      <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES" />
+      <div className="sx-compact-header">
+        <div>
+          <h1 className="sx-compact-title">REELS / VR PLAYER</h1>
+          <div className="sx-compact-kicker">
+            ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES
+          </div>
+        </div>
+        <div className="sx-stats-pill">
+          <span>VIDEOS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
+          <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
+          <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
+          <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
+        </div>
+      </div>
 
-      <SpecRow
-        cells={[
-          ['VIDEO FILES', String(data?.count ?? '—'), `of ${String(data?.total ?? '—')} in library`],
-          ['FOLDERS', String((folders || []).length), 'OUTPUT DIRECTORIES'],
-          ['CODEC VIEW', codecParam.toUpperCase(), codecParam === 'hevc' ? 'RAW MASTER' : 'BROWSER READY'],
-          ['PLAYBACK READY', needsProxy ? `${needsProxy} NEED PROXY` : 'ALL COMPATIBLE', ''],
-        ]}
-      />
-
-      <Section num={1} title="Filter Library" active>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
-          <div className="sx-cols sx-cols-2">
-            <div>
-              <div className="sx-label">TARGET FOLDER</div>
-              <Pills options={folderOpts} value={folder} onChange={setFolder} />
-            </div>
-            <div>
-              <div className="sx-label">CODEC FILTER</div>
-              <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 'var(--sx-2)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sx-2)' }}>
+        <div style={{ display: 'flex', gap: 'var(--sx-2)', flexWrap: 'wrap', alignItems: 'center', flex: '1 1 auto' }}>
+          <div style={{ width: '170px' }}>
+            <Dropdown
+              value={folder}
+              options={folderOpts}
+              onChange={setFolder}
+              placeholder="Target folder…"
+            />
+          </div>
+          <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
+          <div style={{ width: '160px' }}>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <input
+                ref={searchRef}
+                className="sx-input"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search ? (
+                <button
+                  type="button"
+                  className="sx-btn"
+                  style={{ padding: '0 8px' }}
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search filter"
+                >
+                  ✕
+                </button>
+              ) : null}
             </div>
           </div>
-
-          <div className="sx-cols sx-cols-2">
-            <Field label="SEARCH FILENAMES">
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <input
-                  ref={searchRef}
-                  className="sx-input"
-                  placeholder="Filter by keyword / filename…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                {search ? (
-                  <button
-                    type="button"
-                    className="sx-btn"
-                    style={{ padding: '0 12px' }}
-                    onClick={() => setSearch('')}
-                    aria-label="Clear search filter"
-                  >
-                    ✕
-                  </button>
-                ) : null}
-              </div>
-            </Field>
-            <div>
-              <div className="sx-label">SORT ORDER</div>
-              <Pills options={SORTS} value={sort} onChange={setSort} />
-            </div>
+          <div style={{ width: '120px' }}>
+            <Dropdown
+              value={sort}
+              options={SORTS}
+              onChange={setSort}
+              placeholder="Sort by…"
+            />
           </div>
-
-          <div style={{ display: 'flex', gap: 'var(--sx-3)', flexWrap: 'wrap', alignItems: 'center' }}>
-            <Button onClick={() => setRefreshKey((k) => k + 1)}>↻ Rescan Library</Button>
-            <Button onClick={() => setShowTunnel((s) => !s)}>
-              {showTunnel ? '▾ HIDE TUNNEL' : '▸ QUEST HTTPS TUNNEL'}
-            </Button>
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sx-2)', alignItems: 'center' }}>
+          <Button onClick={() => setRefreshKey((k) => k + 1)}>↻</Button>
+          <Button onClick={() => setShowTunnel((s) => !s)}>
+            {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
+          </Button>
+          {needsProxy ? (
             <Button
               primary
-              disabled={proxyBusy || !needsProxy}
+              disabled={proxyBusy}
               loading={proxyBusy}
               onClick={generateProxy}
             >
-              {proxyBusy ? 'Generating H.264 Proxies…' : `▶ GENERATE ${needsProxy || ''} H.264 PROXY(IES)`}
+              {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
             </Button>
-          </div>
-
-          {proxyMsg ? <Mono>{proxyMsg}</Mono> : null}
-
-          {showTunnel ? (
-            <AccentBlock
-              title="META QUEST 3 / VR HTTPS TUNNEL"
-              lines={[
-                'To view 4K Square reels in Meta Quest 3 Browser over Wi-Fi, pass your secure HTTPS tunnel URL below.',
-              ]}
-              code={['npx localtunnel --port 8000', '# or: ngrok http 8000']}
-            >
-              <div style={{ marginTop: 'var(--sx-3)' }}>
-                <Field label="TUNNEL URL (e.g. https://your-tunnel.loca.lt)">
-                  <input
-                    className="sx-input"
-                    placeholder="https://your-tunnel.dev"
-                    value={tunnel}
-                    onChange={(e) => setTunnel(e.target.value)}
-                  />
-                </Field>
-              </div>
-            </AccentBlock>
           ) : null}
         </div>
-      </Section>
+      </div>
 
-      <Section num={2} title="Video Library" active={data !== null}>
-        {data === null ? (
-          <div className="sx-mono">SCANNING OUTPUT MEDIA REPOSITORY…</div>
-        ) : videos.length === 0 ? (
-          <EmptyState
-            title="NO VIDEOS MATCH CURRENT FILTERS"
-            text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-            hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}"`}
-          />
-        ) : (
-          <div>
-            <Dropdown
-              label={`MATCHING PLAYLIST (${videos.length} VIDEOS)`}
-              value={videoOpts[0]?.value ?? ''}
-              options={videoOpts}
-              onChange={() => {}}
-              placeholder={`${videos.length} video(s) in playlist — inspect files`}
-            />
-            <p className="sx-body" style={{ marginTop: 'var(--sx-2)', fontSize: '0.85rem' }}>
-              {needsProxy
-                ? `⚠ ${needsProxy} video(s) in this list require an H.264 proxy for inline browser playback.`
-                : '✓ All files are compatible with standard HTML5 browser & VR playback.'}
-            </p>
-          </div>
-        )}
-      </Section>
+      {proxyMsg ? <Mono>{proxyMsg}</Mono> : null}
 
-      <Section num={3} title="VR & Inline Reels Player" active={videos.length > 0}>
-        {!videos.length ? (
-          <EmptyState
-            title="AWAITING VIDEO PLAYLIST"
-            text="The Reels player will automatically mount once videos match your active filter criteria."
-          />
-        ) : (
-          <div>
-            <ReelsPlayer params={playerParams} />
-            {videos.some((v) => v.tunnel_url) ? (
-              <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
-            ) : null}
+      {showTunnel ? (
+        <AccentBlock
+          title="META QUEST 3 / VR HTTPS TUNNEL"
+          lines={[
+            'To view 4K Square reels in Meta Quest 3 Browser over Wi-Fi, pass your secure HTTPS tunnel URL below.',
+          ]}
+          code={['npx localtunnel --port 8000', '# or: ngrok http 8000']}
+        >
+          <div style={{ marginTop: 'var(--sx-3)' }}>
+            <Field label="TUNNEL URL (e.g. https://your-tunnel.loca.lt)">
+              <input
+                className="sx-input"
+                placeholder="https://your-tunnel.dev"
+                value={tunnel}
+                onChange={(e) => setTunnel(e.target.value)}
+              />
+            </Field>
           </div>
-        )}
-      </Section>
+        </AccentBlock>
+      ) : null}
+
+      {/* Player Mount */}
+      {data === null ? (
+        <div className="sx-mono">SCANNING OUTPUT MEDIA REPOSITORY…</div>
+      ) : !videos.length ? (
+        <EmptyState
+          title="NO VIDEOS MATCH CURRENT FILTERS"
+          text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
+          hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}"`}
+        />
+      ) : (
+        <div>
+          <ReelsPlayer params={playerParams} />
+          {videos.some((v) => v.tunnel_url) ? (
+            <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
+          ) : null}
+        </div>
+      )}
+
+      {videos.length > 0 ? (
+        <Section num={2} title="Video Playlist" active>
+          <Dropdown
+            label={`MATCHING PLAYLIST (${videos.length} VIDEOS)`}
+            value={videoOpts[0]?.value ?? ''}
+            options={videoOpts}
+            onChange={() => {}}
+            placeholder={`${videos.length} video(s) in playlist — inspect files`}
+          />
+          <p className="sx-body" style={{ marginTop: 'var(--sx-2)', fontSize: '0.85rem' }}>
+            {needsProxy
+              ? `⚠ ${needsProxy} video(s) in this list require an H.264 proxy for inline browser playback.`
+              : '✓ All files are compatible with standard HTML5 browser & VR playback.'}
+          </p>
+        </Section>
+      ) : null}
     </div>
   );
 }

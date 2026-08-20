@@ -54,17 +54,21 @@ export default function ComparePage() {
 
   return (
     <div>
-      <Hero title="FAST vs STUDIO" kicker="ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL" />
+      <div className="sx-compact-header">
+        <div>
+          <h1 className="sx-compact-title">FAST vs STUDIO</h1>
+          <div className="sx-compact-kicker">
+            ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL
+          </div>
+        </div>
+        <div className="sx-stats-pill">
+          <span>PAIRED: <strong>{data?.total ?? '—'}</strong></span>
+          <span>A/B READY: <strong style={{ color: 'var(--sx-success)' }}>{complete.length}</strong></span>
+          <span>PARTIAL: <strong style={{ color: partial.length ? 'var(--sx-warn)' : 'var(--sx-ink-3)' }}>{partial.length}</strong></span>
+        </div>
+      </div>
 
-      <SpecRow
-        cells={[
-          ['PAIRED RENDERS', String(data?.total ?? '—'), 'AUTOMATIC PAIRING'],
-          ['COMPLETE A/B', String(complete.length), 'DUAL ENGINES READY'],
-          ['PARTIAL PAIRS', String(partial.length), 'MISSING ONE SIDE'],
-        ]}
-      />
-
-      <Section num={1} title="Select Pair & View" active={data !== null}>
+      <div>
         {data === null ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Spinner />
@@ -78,7 +82,7 @@ export default function ComparePage() {
           />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
-            <div style={{ display: 'flex', gap: 'var(--sx-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 'var(--sx-4)', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between' }}>
               <div style={{ flex: '1 1 320px' }}>
                 <Dropdown
                   label="RENDER PAIR"
@@ -99,7 +103,7 @@ export default function ComparePage() {
                   ]}
                 />
               </div>
-              <div style={{ flex: '1 1 300px' }}>
+              <div style={{ flex: '0 0 auto' }}>
                 <div className="sx-label">COMPARISON MODE</div>
                 <Segmented options={VIEWS} value={view} onChange={setView} ariaLabel="Comparison Mode" />
               </div>
@@ -163,7 +167,7 @@ export default function ComparePage() {
             ) : null}
           </div>
         )}
-      </Section>
+      </div>
     </div>
   );
 }

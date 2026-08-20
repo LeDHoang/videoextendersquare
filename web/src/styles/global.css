@@ -192,7 +192,7 @@ button {
 
 /* Main content area */
 .sx-main {
-  padding: var(--sx-7) var(--sx-8) var(--sx-9);
+  padding: var(--sx-4) var(--sx-7) var(--sx-5);
   max-width: 1120px;
   min-width: 0;
   width: 100%;
@@ -1237,29 +1237,95 @@ input[type='range']::-moz-range-thumb {
   padding: 4px 10px;
 }
 
+/* ─── Compact Header for Player-focused Views ─────────────── */
+
+.sx-compact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--sx-3);
+  padding-bottom: var(--sx-2);
+  margin-bottom: var(--sx-3);
+  border-bottom: 2px solid var(--sx-accent);
+  box-shadow: 0 2px 10px rgba(255, 59, 31, 0.15);
+  flex-wrap: wrap;
+}
+
+.sx-compact-title {
+  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-size: 1.85rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+  color: var(--sx-ink);
+  margin: 0;
+}
+
+.sx-compact-kicker {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sx-ink-3);
+  margin-top: 4px;
+}
+
+.sx-stats-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-3);
+  background: var(--sx-surface-2);
+  border: 1px solid var(--sx-rule-strong);
+  padding: 6px 14px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--sx-ink-2);
+}
+
+.sx-stats-pill span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sx-stats-pill strong {
+  color: var(--sx-ink);
+  font-weight: 700;
+}
+
 /* ─── Media Players & Iframes ────────────────────────────── */
 
 .sx-iframe,
 .sx-frame {
-  width: 100%;
-  border: 0;
-  background: #000;
-}
-
-.sx-frame {
-  height: 76vh;
-  min-height: 560px;
-  border: 1px solid var(--sx-rule);
-}
-
-.sx-reels-mount {
+  width: min(calc(100vh - 160px), 800px, 100%);
+  height: min(calc(100vh - 160px), 800px);
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  border: 1px solid var(--sx-rule-strong);
   background: #000000;
-  border: 1px solid var(--sx-rule);
-  min-height: 480px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 59, 31, 0.3);
+}
+
+.sx-reels-mount {
+  width: min(calc(100vh - 160px), 800px, 100%);
+  min-height: min(calc(100vh - 160px), 800px);
+  aspect-ratio: auto;
+  margin: 0 auto;
+  border: 1px solid var(--sx-rule-strong);
+  background: #000000;
+  position: relative;
+  overflow: visible;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 59, 31, 0.3);
+}
+
+.sx-frame {
+  border: 1px solid var(--sx-rule-strong);
 }
 
 .sx-img {
