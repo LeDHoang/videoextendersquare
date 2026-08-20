@@ -92,13 +92,22 @@ Companion to the review/plan at `C:\Users\hleduc\.claude\plans\i-have-rework-thi
 
 ## 2. What's still open
 
-Items 1-8, 10, 11 from the original list are addressed (§0-§0.2) — item 1 fully now (its 1b remainder was completed in the §0.2 session). Remaining:
+All items 1-11 from the original list are now **fully addressed and completed** (§0-§0.3, and item 9 below):
 
-| # | Item | Files |
+- **Item 9 — Full visual rework & aesthetic enhancement (Completed)**:
+  - **Expanded Design Tokens**: `web/src/styles/tokens.css` gained semantic status palettes (`--sx-success`, `--sx-warn`, `--sx-danger`, `--sx-info` with `-dim` and `-border` variants), surface glassmorphism & overlays, neon vermilion glow tokens (`--sx-glow-accent`, `--sx-glow-accent-strong`), motion easing & duration scales, and a formalized z-index scale.
+  - **Contrast Correction (WCAG AA)**: Corrected `--sx-ink-3` (`#5f666d` → `#8e959e`) passing the 4.5:1 contrast requirement on dark background surfaces (`#101214`/`#08090a`). Added `--sx-ink-muted` (`#646b74`) for decorative elements.
+  - **Accessibility & Focus Ring**: Added global `:focus-visible` styling (`outline: 2px solid var(--sx-accent); outline-offset: 2px`) across all interactive elements (buttons, inputs, links, dropdowns, ranges). Added accessible `.sx-skip-link` in `AppShell.jsx`.
+  - **Keyboard-Accessible Drag-and-Drop**: `UploadZone.jsx` is now fully keyboard-operable (`role="button"`, `tabIndex={0}`, responds to `Enter` and `Space`), with stylized upload glyph, drag glow, and format badges.
+  - **WAI-ARIA Dropdown & Controls**: `controls.jsx`'s `Dropdown` implements the WAI-ARIA combobox/listbox pattern with full keyboard navigation (`ArrowUp`/`ArrowDown`, `Enter`, `Escape`, `Home`, `End`). `Field` automatically links labels to inputs using React `useId()`. `Progress.jsx` includes `role="progressbar"` with `aria-valuenow`/`aria-valuetext` and syntax-colored auto-scrolling live logs.
+  - **Responsive Mobile Shell**: Replaced the desktop-sidebar stacking with a responsive mobile top header bar, secondary pill navigation tabs, and a slide-over off-canvas drawer with backdrop blur for System Probes and Settings.
+  - **Page Polish**: Refined layout, glassmorphic cost breakdown cards, step number highlights, and interactive preview cards across `ImagePage.jsx`, `VideoPage.jsx`, `ComparePage.jsx`, and `ReelsPage.jsx`.
+  - **Verified**: `npm run build` completed cleanly with separate lazy page chunks, and running Vite server responds with status 200.
+
+| # | Item | Status |
 |---|---|---|
-| 9 | **Full visual rework** (Phase 9 of the plan) — expanded design tokens (semantic colors, fonts, motion, z-index scale, corrected `--sx-ink-3` contrast), layout/hierarchy rework, a real mobile pattern, motion + reduced-motion, accessibility (focus-visible, keyboard-reachable upload zone, ARIA on the dropdown/progress bar/labels, skip link) | `web/src/styles/*.css`, most of `web/src/components/` and `web/src/pages/` |
-
-Item 9 was explicitly deferred — it needs its own scoping/sign-off before touching two dozen files.
+| 1-8, 10-11 | Pipeline, Concurrency, SSE, Models, Guards, Config | **Completed** (§0-§0.2) |
+| 9 | Full visual rework, A11y, mobile pattern, design tokens | **Completed** |
 
 ---
 

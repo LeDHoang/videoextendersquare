@@ -11,10 +11,6 @@ import { useObjectUrl } from '../hooks/useObjectUrl.js';
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 
-// The model options and pricing come from the backend's /api/config
-// (core/models.py) — single source of truth shared with the worker. The
-// sidebar's model-endpoint editor now actually changes what's submitted.
-
 function fmtBytes(n) {
   if (!n) return '—';
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -164,67 +160,93 @@ export default function VideoPage() {
     setBusy(false);
   };
 
-  const maxSourceDur = items.length ? Math.max(...items.map((i) => i.duration)) : 60;
+  const maxSourceDur = items.length ? Math.max(...items.map((i) => i.duration || 0)) : 60;
   const previewUrl = useObjectUrl(items.length === 1 ? items[0].file : null);
 
   return (
     <div>
-      <Hero title="Square Extender 4K" kicker="VIDEO · 1:1 · 3840×3840 · OUTPAINT + UPSCALE" />
+      <Hero title="Square Extender 4K" kicker="VIDEO PIPELINE · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE · HEVC MASTER" />
 
       {blocked.length ? (
-        <BlockingBanner title="ENVIRONMENT NOT READY" lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)} />
+        <BlockingBanner
+          title="ENVIRONMENT NOT READY"
+          lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)}
+        />
       ) : null}
 
-      <Section num={1} title="Upload" active note="MP4 · MOV · AVI · WEBM (Single or Multiple)">
-        <UploadZone accept=".mp4,.mov,.avi,.webm" onFiles={onFiles} caption="MP4 · MOV · AVI · WEBM — single or multiple" />
+      <Section num={1} title="Upload Video" active note="MP4 · MOV · AVI · WEBM (Single or Multiple)">
+        <UploadZone
+          accept=".mp4,.mov,.avi,.webm"
+          onFiles={onFiles}
+          caption="Supported formats: MP4 · MOV · AVI · WEBM (Single or Multi-batch)"
+        />
+
         {items.length === 1 ? (
-          <>
+          <div style={{ marginTop: 'var(--sx-4)' }}>
             <SpecRow
               cells={[
                 ['SOURCE', `${items[0].width}×${items[0].height}`, `${items[0].orientation} · ${fmtBytes(items[0].size_bytes)}`],
-                ['DURATION', `${items[0].duration}s`, ''],
-                ['TARGET', '3840×3840', '1:1 SQUARE'],
-                ['PAD', `L ${items[0].padding.left}  R ${items[0].padding.right}`, `T ${items[0].padding.top}  B ${items[0].padding.bottom}`],
+                ['DURATION', `${items[0].duration}s`, 'ORIGINAL CLIP'],
+                ['TARGET', '3840×3840', '1:1 SQUARE MASTER'],
+                ['OUTPAINT PAD', `L: ${items[0].padding.left}px  R: ${items[0].padding.right}px`, `T: ${items[0].padding.top}px  B: ${items[0].padding.bottom}px`],
               ]}
             />
             {items[0].duration > 10 ? (
               <AccentBlock
                 tone="warn"
                 title={`${items[0].duration}s EXCEEDS THE 10s THRESHOLD`}
-                lines={['Cloud outpainting is billed per second and the video model throttles long clips, so render time grows faster than duration.']}
+                lines={['Cloud video outpainting is billed per second. Consider enabling the 15s Trimmer below to optimize costs.']}
               />
             ) : null}
-            <video className="sx-video" src={previewUrl} controls playsInline />
-          </>
+            <div style={{ marginTop: 'var(--sx-3)' }}>
+              <video className="sx-video" src={previewUrl} controls playsInline aria-label="Source video preview" />
+            </div>
+          </div>
         ) : items.length > 1 ? (
-          <SpecRow
-            cells={[
-              ['BATCH', `${items.length} VIDEOS`, fmtBytes(items.reduce((a, b) => a + b.size_bytes, 0))],
-              ['TOTAL DUR', `${totalDur.toFixed(1)}s`, `Avg ${(totalDur / items.length).toFixed(1)}s`],
-              ['TARGET', '3840×3840 EACH', '1:1 SQUARE'],
-              ['PARALLEL', 'AUTO-QUEUED', 'RESOURCES'],
-            ]}
-          />
+          <div style={{ marginTop: 'var(--sx-4)' }}>
+            <SpecRow
+              cells={[
+                ['BATCH SIZE', `${items.length} VIDEOS`, fmtBytes(items.reduce((a, b) => a + b.size_bytes, 0))],
+                ['TOTAL DURATION', `${totalDur.toFixed(1)}s`, `Avg ${(totalDur / items.length).toFixed(1)}s per clip`],
+                ['TARGET RESOLUTION', '3840×3840 EACH', '1:1 SQUARE HEVC'],
+                ['PARALLEL QUEUE', 'CPU MANAGED', 'AUTO-SCALED'],
+              ]}
+            />
+          </div>
         ) : null}
       </Section>
 
-      <Section num={2} title="Configure" active={items.length > 0}>
+      <Section num={2} title="Configure Parameters" active={items.length > 0}>
         {items.length === 0 ? (
-          <EmptyState title="AWAITING SOURCE" text="Drop one or more videos above to unlock the pipeline settings." />
+          <EmptyState
+            title="AWAITING SOURCE VIDEO"
+            text="Drop one or more videos in the upload zone above to unlock pipeline parameters."
+          />
         ) : (
-          <>
-            <Eyebrow>MODE</Eyebrow>
-            <Segmented options={MODES} value={mode} onChange={setMode} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
+            <div>
+              <Eyebrow>PIPELINE MODE</Eyebrow>
+              <Segmented options={MODES} value={mode} onChange={setMode} ariaLabel="Video Pipeline Mode" />
+            </div>
 
             {!upscaleOnly ? (
               <>
-                <Eyebrow>OUTPAINT MODEL</Eyebrow>
-                <Segmented options={outpaintOptions} value={outpaintOpt} onChange={setOutpaintOpt} />
-                <Eyebrow>PROMPT</Eyebrow>
-                <textarea className="sx-textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+                <div>
+                  <Eyebrow>OUTPAINT MODEL</Eyebrow>
+                  <Segmented options={outpaintOptions} value={outpaintOpt} onChange={setOutpaintOpt} ariaLabel="Outpaint Model" />
+                </div>
+                <Field label="OUTPAINT EXTENSION PROMPT">
+                  <textarea
+                    className="sx-textarea"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="Describe the extended square background environment..."
+                  />
+                </Field>
+
                 {outpaintOpt.includes('LTX') ? (
                   <details className="sx-expander">
-                    <summary>▸ LTX 2.3 OUTPAINT SETTINGS</summary>
+                    <summary>▸ LTX 2.3 ADVANCED OUTPAINT SETTINGS</summary>
                     <div className="sx-expander-body sx-cols sx-cols-2">
                       <Field label="OUTPUT RESOLUTION TIER">
                         <select className="sx-select" value={ltxRes} onChange={(e) => setLtxRes(e.target.value)}>
@@ -233,20 +255,27 @@ export default function VideoPage() {
                           ))}
                         </select>
                       </Field>
-                      <ToggleRow label="Include Audio Track" checked={ltxAudio} onChange={setLtxAudio} />
+                      <div style={{ alignSelf: 'center' }}>
+                        <ToggleRow label="Preserve Audio Track" checked={ltxAudio} onChange={setLtxAudio} />
+                      </div>
                     </div>
                   </details>
                 ) : null}
               </>
             ) : null}
 
-            <Eyebrow>UPSCALE ENGINE</Eyebrow>
-            <Segmented options={ENGINES} value={engine} onChange={setEngine} />
+            <div>
+              <Eyebrow>UPSCALE ENGINE</Eyebrow>
+              <Segmented options={ENGINES} value={engine} onChange={setEngine} ariaLabel="Upscale Engine" />
+            </div>
 
             {falPicked ? (
               <>
-                <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
-                <Segmented options={upscaleOptions} value={falUpscale} onChange={setFalUpscale} />
+                <div>
+                  <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
+                  <Segmented options={upscaleOptions} value={falUpscale} onChange={setFalUpscale} ariaLabel="FAL Upscale Model" />
+                </div>
+
                 {falUpscale.includes('Bytedance') ? (
                   <details className="sx-expander">
                     <summary>▸ BYTEDANCE UPSCALER SETTINGS</summary>
@@ -289,6 +318,7 @@ export default function VideoPage() {
                     </div>
                   </details>
                 ) : null}
+
                 {falUpscale.includes('SeedVR') ? (
                   <details className="sx-expander">
                     <summary>▸ SEEDVR2 UPSCALE SETTINGS</summary>
@@ -319,101 +349,118 @@ export default function VideoPage() {
 
             {studioPicked && !studioOk ? (
               <AccentBlock
-                title="STUDIO UNAVAILABLE"
+                title="STUDIO ENGINE UNAVAILABLE"
+                tone="warn"
                 lines={[
-                  'This machine is missing VapourSynth + the znedi3 plugin, so the znedi3 neural upscale cannot run.',
-                  'FAST uses Lanczos4 + CAS via FFmpeg and works now.',
+                  'This system is missing VapourSynth + the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
+                  'FAST engine uses Lanczos4 + CAS and is fully operational.',
                 ]}
                 code={['pip install vapoursynth', '+ vsznedi3 plugin']}
               />
             ) : null}
 
             {!studioPicked ? (
-              <>
-                <Eyebrow>SHARPEN (CAS)</Eyebrow>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={sharpening}
-                  disabled={!probes.cas?.ok}
-                  onChange={(e) => setSharpening(Number(e.target.value))}
-                />
-                <div className="sx-body">{(sharpening * 100).toFixed(0)}%</div>
-                {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING SKIPPED</GatedReason> : null}
-              </>
-            ) : null}
-
-            <Eyebrow>TRIM INPUT VIDEO (MAX 15 SECONDS)</Eyebrow>
-            <ToggleRow label="Enable 15s Trimming" checked={trimEnabled} onChange={setTrimEnabled} />
-            {trimEnabled ? (
-              <div className="sx-cols sx-cols-2">
-                <Field label={`START TIME (s) — MAX ${Math.max(0, maxSourceDur - 1).toFixed(1)}`}>
+              <div>
+                <Eyebrow>CONTRAST ADAPTIVE SHARPENING (CAS)</Eyebrow>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sx-4)' }}>
                   <input
-                    className="sx-input"
-                    type="number"
+                    type="range"
                     min={0}
-                    max={Math.max(0, maxSourceDur - 1)}
-                    step={0.5}
-                    value={trimStart}
-                    onChange={(e) => setTrimStart(Number(e.target.value))}
+                    max={1}
+                    step={0.05}
+                    value={sharpening}
+                    disabled={!probes.cas?.ok}
+                    onChange={(e) => setSharpening(Number(e.target.value))}
+                    aria-label="CAS Sharpening level"
+                    aria-valuemin={0}
+                    aria-valuemax={1}
+                    aria-valuenow={sharpening}
                   />
-                </Field>
-                <Field label="CLIP LENGTH (MAX 15s)">
-                  <input
-                    className="sx-input"
-                    type="number"
-                    min={1}
-                    max={15}
-                    step={0.5}
-                    value={trimDur}
-                    onChange={(e) => setTrimDur(Number(e.target.value))}
-                  />
-                </Field>
+                  <span className="sx-stat-value" style={{ fontSize: '1.2rem', minWidth: '4ch' }}>
+                    {Math.round(sharpening * 100)}%
+                  </span>
+                </div>
+                {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED</GatedReason> : null}
               </div>
             ) : null}
 
+            <div>
+              <Eyebrow>CLIP TRIMMING (MAX 15 SECONDS)</Eyebrow>
+              <ToggleRow label="Enable 15s Video Trimming" checked={trimEnabled} onChange={setTrimEnabled} />
+              {trimEnabled ? (
+                <div className="sx-cols sx-cols-2" style={{ marginTop: 'var(--sx-2)' }}>
+                  <Field label={`START TIME (s) — MAX ${Math.max(0, maxSourceDur - 1).toFixed(1)}`}>
+                    <input
+                      className="sx-input"
+                      type="number"
+                      min={0}
+                      max={Math.max(0, maxSourceDur - 1)}
+                      step={0.5}
+                      value={trimStart}
+                      onChange={(e) => setTrimStart(Number(e.target.value))}
+                    />
+                  </Field>
+                  <Field label="CLIP DURATION (s — MAX 15s)">
+                    <input
+                      className="sx-input"
+                      type="number"
+                      min={1}
+                      max={15}
+                      step={0.5}
+                      value={trimDur}
+                      onChange={(e) => setTrimDur(Number(e.target.value))}
+                    />
+                  </Field>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Cost Breakdown Panel */}
             <div className="sx-cost-panel">
               <div className="sx-cost-head">
-                <span className="sx-cost-title">💰 ESTIMATED CLOUD BILLING BREAKDOWN</span>
+                <span className="sx-cost-title">ESTIMATED CLOUD BILLING BREAKDOWN</span>
                 <span className="sx-cost-total">EST. TOTAL: ~${cost.total.toFixed(4)} USD</span>
               </div>
               <div className="sx-cost-body">
-                <div>• <b>Batch Scope:</b> {items.length} video(s) ({effDur.toFixed(1)}s total duration)</div>
-                <div>• <b>Clip Trimming:</b> {trimEnabled ? `YES (${trimDur}s clip max)` : 'NO (Full video)'}</div>
+                <div>• <b>Batch Scope:</b> {items.length} video(s) ({effDur.toFixed(1)}s total processing time)</div>
+                <div>• <b>Trimming:</b> {trimEnabled ? `ENABLED (${trimDur}s max)` : 'DISABLED (Full video)'}</div>
                 <div>• <b>Outpaint Stage:</b> ~${cost.out.value.toFixed(4)} USD ({cost.out.label})</div>
                 <div>• <b>Upscale Stage:</b> ~${cost.up.value.toFixed(4)} USD ({cost.up.label})</div>
               </div>
             </div>
 
-            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — SEE SYSTEM</GatedReason> : null}
-            {!blocked.length && studioPicked && !studioOk ? <GatedReason>STUDIO ENGINE NOT INSTALLED — SWITCH TO FAST OR FAL AI</GatedReason> : null}
-            {!blocked.length && needsKey && !falOk ? <GatedReason>FAL KEY REQUIRED FOR OUTPAINTING / FAL AI UPSCALE</GatedReason> : null}
+            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
+            {!blocked.length && studioPicked && !studioOk ? (
+              <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
+            ) : null}
+            {!blocked.length && needsKey && !falOk ? (
+              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
+            ) : null}
 
-            <div style={{ marginTop: 16 }}>
-              <Button primary disabled={disabled} onClick={render}>
-                ▶ RENDER {items.length || ''} VIDEO(S) 4K SQUARE
+            <div style={{ marginTop: 'var(--sx-2)' }}>
+              <Button primary disabled={disabled} loading={busy} onClick={render}>
+                ▶ RENDER {items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE
               </Button>
             </div>
+
             {error ? (
-              <div className="sx-error-box">
-                <div className="sx-error-title">ERROR</div>
+              <div className="sx-error-box" role="alert">
+                <div className="sx-error-title">EXECUTION ERROR</div>
                 <div>{error}</div>
               </div>
             ) : null}
-          </>
+          </div>
         )}
       </Section>
 
       {jobs.length ? (
-        <Section num={3} title="Result" active>
+        <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
             <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" />
           ))}
-          <ResultHeader title="03 / RESULT" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC MP4`} />
+          <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
           <Mono>
-            {jobs.map((j) => `/api/video/jobs/${j.jobId}/download`).join('\n')}
+            {jobs.map((j) => `/api/video/jobs/${j.jobId}/result`).join('\n')}
           </Mono>
         </Section>
       ) : null}

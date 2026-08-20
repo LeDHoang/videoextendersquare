@@ -1,31 +1,67 @@
-/* Square Extender 4K — design tokens (ported from ui/tokens.py / app.css) */
+/* Square Extender 4K — Design Tokens
+   Bold editorial precision theme: Archivo Black, JetBrains Mono, matte-black surfaces, vivid vermilion accents.
+*/
 :root {
-  /* Color palette */
+  /* ─── Color Palette ─────────────────────────────────────── */
   --sx-bg: #08090a;
   --sx-surface: #101214;
   --sx-surface-2: #16191c;
+  --sx-surface-3: #1d2126;
+  --sx-surface-hover: #1b1e22;
+  --sx-surface-glass: rgba(16, 18, 20, 0.82);
+  --sx-surface-glass-border: rgba(255, 255, 255, 0.08);
+  --sx-surface-overlay: rgba(8, 9, 10, 0.75);
+
   --sx-rule: #24282d;
   --sx-rule-strong: #3a4047;
+  --sx-rule-subtle: rgba(255, 255, 255, 0.06);
+
+  /* Typography / Ink — Contrast corrected for WCAG AA */
   --sx-ink: #f2f3f5;
-  --sx-ink-2: #9ba1a8;
-  --sx-ink-3: #5f666d;
+  --sx-ink-2: #a4abb3;
+  --sx-ink-3: #8e959e; /* corrected from #5f666d to pass 4.5:1 on dark surfaces */
+  --sx-ink-muted: #646b74;
+
+  /* Accent (International Klein / Leica Vermilion) */
   --sx-accent: #ff3b1f;
   --sx-accent-hi: #ff5c42;
   --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-accent-glow: rgba(255, 59, 31, 0.35);
   --sx-on-accent: #0a0a0a;
-  --sx-warn: #f2c744;
 
-  /* Type scale */
-  --sx-t-hero: clamp(2.75rem, 7vw, 5.25rem);
-  --sx-t-display: 3rem;
-  --sx-t-numeral: 4.5rem;
-  --sx-t-stat: 2.25rem;
-  --sx-t-h2: 1.4rem;
+  /* Semantic Status Colors */
+  --sx-success: #22c55e;
+  --sx-success-hi: #4ade80;
+  --sx-success-dim: rgba(34, 197, 94, 0.12);
+  --sx-success-border: rgba(34, 197, 94, 0.35);
+
+  --sx-warn: #f2c744;
+  --sx-warn-hi: #fde047;
+  --sx-warn-dim: rgba(242, 199, 68, 0.12);
+  --sx-warn-border: rgba(242, 199, 68, 0.35);
+
+  --sx-danger: #ef4444;
+  --sx-danger-hi: #f87171;
+  --sx-danger-dim: rgba(239, 68, 68, 0.12);
+  --sx-danger-border: rgba(239, 68, 68, 0.35);
+
+  --sx-info: #3b82f6;
+  --sx-info-hi: #60a5fa;
+  --sx-info-dim: rgba(59, 130, 246, 0.12);
+  --sx-info-border: rgba(59, 130, 246, 0.35);
+
+  /* ─── Type Scale ─────────────────────────────────────────── */
+  --sx-t-hero: clamp(2.5rem, 6.5vw, 5rem);
+  --sx-t-display: clamp(1.75rem, 4vw, 2.75rem);
+  --sx-t-numeral: clamp(3rem, 6vw, 4.5rem);
+  --sx-t-stat: clamp(1.5rem, 3vw, 2.25rem);
+  --sx-t-h2: clamp(1.15rem, 2vw, 1.4rem);
+  --sx-t-h3: 1.05rem;
   --sx-t-body: 0.9375rem;
   --sx-t-eyebrow: 0.6875rem;
   --sx-t-mono: 0.8125rem;
 
-  /* Spacing (4px base) */
+  /* ─── Spacing (4px base) ─────────────────────────────────── */
   --sx-1: 4px;
   --sx-2: 8px;
   --sx-3: 12px;
@@ -36,8 +72,35 @@
   --sx-8: 64px;
   --sx-9: 96px;
 
-  /* Rule weights */
+  /* ─── Rule Weights ───────────────────────────────────────── */
   --sx-rule-hairline: 1px solid var(--sx-rule);
   --sx-rule-heavy: 3px solid var(--sx-ink);
-  --sx-rule-accent: 6px solid var(--sx-accent);
+  --sx-rule-accent: 5px solid var(--sx-accent);
+
+  /* ─── Elevation & Shadows ────────────────────────────────── */
+  --sx-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --sx-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.55);
+  --sx-shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.75);
+  --sx-glow-accent: 0 0 24px var(--sx-accent-glow);
+  --sx-glow-accent-strong: 0 0 36px rgba(255, 59, 31, 0.55);
+
+  /* ─── Transitions & Motion ───────────────────────────────── */
+  --sx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --sx-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --sx-duration-fast: 150ms;
+  --sx-duration-normal: 240ms;
+  --sx-duration-slow: 380ms;
+
+  /* ─── Z-Index Scale ──────────────────────────────────────── */
+  --sx-z-base: 1;
+  --sx-z-sticky: 10;
+  --sx-z-drawer-backdrop: 40;
+  --sx-z-drawer: 45;
+  --sx-z-dropdown: 50;
+  --sx-z-modal: 100;
+  --sx-z-skip-link: 999;
+
+  /* ─── Focus System ───────────────────────────────────────── */
+  --sx-focus-ring: 2px solid var(--sx-accent);
+  --sx-focus-offset: 2px;
 }

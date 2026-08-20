@@ -54,34 +54,37 @@ export default function ComparePage() {
 
   return (
     <div>
-      <Hero title="FAST vs STUDIO" kicker="A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3" />
+      <Hero title="FAST vs STUDIO" kicker="A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL" />
 
       <SpecRow
         cells={[
-          ['PAIRS', String(data?.total ?? '—'), ''],
-          ['COMPLETE', String(complete.length), 'A/B READY'],
-          ['PARTIAL', String(partial.length), 'MISSING SIDE'],
+          ['PAIRED RENDERS', String(data?.total ?? '—'), 'AUTOMATIC PAIRING'],
+          ['COMPLETE A/B', String(complete.length), 'DUAL ENGINES READY'],
+          ['PARTIAL PAIRS', String(partial.length), 'MISSING ONE SIDE'],
         ]}
       />
 
-      <Section num={1} title="Select Pair" active={data !== null}>
+      <Section num={1} title="Select Pair & View" active={data !== null}>
         {data === null ? (
-          <Spinner />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner />
+            <span className="sx-mono">SCANNING OUTPUT DIRECTORY FOR RENDER PAIRS…</span>
+          </div>
         ) : !allPairs.length ? (
           <EmptyState
-            title="NO PAIRS YET"
-            text="Run a FAST and a STUDIO render of the same video — matching filenames are paired automatically in output/pairs."
-            hint="output/pairs/NAME_fast.mp4 · NAME_studio.mp4"
+            title="NO RENDER PAIRS FOUND"
+            text="Run both a FAST and a STUDIO render of the same video — matching filenames are automatically paired in output/pairs."
+            hint="Expected format: output/pairs/NAME_fast.mp4 & NAME_studio.mp4"
           />
         ) : (
-          <>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
+            <div style={{ display: 'flex', gap: 'var(--sx-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ flex: '1 1 320px' }}>
                 <Dropdown
-                  label="PAIR"
+                  label="RENDER PAIR"
                   value={selected}
                   onChange={setSelected}
-                  placeholder="— SELECT PAIR —"
+                  placeholder="— SELECT PAIR TO INSPECT —"
                   options={[
                     ...complete.map((p) => ({
                       value: p.name,
@@ -96,60 +99,69 @@ export default function ComparePage() {
                   ]}
                 />
               </div>
-              <div style={{ flex: '1 1 320px' }}>
-                <div className="sx-label">VIEW</div>
-                <Segmented options={VIEWS} value={view} onChange={setView} />
+              <div style={{ flex: '1 1 300px' }}>
+                <div className="sx-label">COMPARISON MODE</div>
+                <Segmented options={VIEWS} value={view} onChange={setView} ariaLabel="Comparison Mode" />
               </div>
-              <Button onClick={() => setRefreshKey((k) => k + 1)}>↻ Rescan</Button>
+              <Button onClick={() => setRefreshKey((k) => k + 1)}>↻ Rescan Pairs</Button>
             </div>
 
             {pair ? (
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 'var(--sx-2)' }}>
                 {view === '◐ SLIDER' ? (
-                  <iframe className="sx-frame" title="compare-player" src={iframe || undefined} allow="autoplay; fullscreen" />
+                  <iframe
+                    className="sx-frame"
+                    title="A/B Video Slider Comparison"
+                    src={iframe || undefined}
+                    allow="autoplay; fullscreen"
+                  />
                 ) : prepErr ? (
-                  <div className="sx-error-box">
-                    <div className="sx-error-title">ERROR</div>
+                  <div className="sx-error-box" role="alert">
+                    <div className="sx-error-title">PREPARATION ERROR</div>
                     <div>{prepErr}</div>
                   </div>
                 ) : !prep ? (
-                  <Spinner />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 20 }}>
+                    <Spinner />
+                    <span className="sx-mono">PREPARING MEDIA FOR 2-UP COMPARISON…</span>
+                  </div>
                 ) : prep.mode === 'download' ? (
-                  <div>
-                    <Eyebrow>DOWNLOAD RENDERS</Eyebrow>
+                  <div className="sx-accent-block">
+                    <div className="sx-accent-block-title">DOWNLOAD MASTER RENDERS</div>
                     <Mono>{prep.fast_url}</Mono>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                    <div style={{ display: 'flex', gap: 'var(--sx-3)', marginTop: 'var(--sx-3)', flexWrap: 'wrap' }}>
                       <a className="sx-download" href={prep.fast_url} download>
-                        ↓ FAST · LANCZOS4 + CAS
+                        ↓ DOWNLOAD FAST · LANCZOS4 + CAS
                       </a>
                       <a className="sx-download" href={prep.studio_url} download>
-                        ↓ STUDIO · ZNEDI3
+                        ↓ DOWNLOAD STUDIO · ZNEDI3
                       </a>
                     </div>
-                    <div className="sx-body" style={{ marginTop: 12 }}>
-                      Master files live in output/pairs/. Download works for H.264 + HEVC; HEVC masters are not
-                      browser-playable, so below are the H.264 proxies when present.
-                    </div>
+                    <p className="sx-body" style={{ marginTop: 'var(--sx-3)', fontSize: '0.85rem' }}>
+                      Master 4K 1:1 files reside in <code>output/pairs/</code>. Downloads preserve original HEVC master quality.
+                    </p>
                   </div>
                 ) : (
                   <div>
-                    <Eyebrow>2-UP COMPARISON — FAST vs STUDIO</Eyebrow>
-                    <div className="sx-cols sx-cols-2">
-                      <div>
-                        <div className="sx-eyebrow">FAST · LANCZOS4 + CAS</div>
-                        <video className="sx-video" src={prep.fast_url} controls playsInline />
+                    <Eyebrow>2-UP SIDE-BY-SIDE COMPARISON</Eyebrow>
+                    <div className="sx-cols sx-cols-2" style={{ marginTop: 'var(--sx-2)' }}>
+                      <div className="sx-pair-card">
+                        <div className="sx-eyebrow" style={{ color: 'var(--sx-accent)' }}>FAST · LANCZOS4 + CAS</div>
+                        <video className="sx-video" src={prep.fast_url} controls playsInline aria-label="Fast render video" />
                       </div>
-                      <div>
-                        <div className="sx-eyebrow">STUDIO · ZNEDI3</div>
-                        <video className="sx-video" src={prep.studio_url} controls playsInline />
+                      <div className="sx-pair-card">
+                        <div className="sx-eyebrow" style={{ color: 'var(--sx-info-hi)' }}>STUDIO · ZNEDI3</div>
+                        <video className="sx-video" src={prep.studio_url} controls playsInline aria-label="Studio render video" />
                       </div>
                     </div>
                   </div>
                 )}
-                {pair.complete ? null : <GatedReason>INCOMPLETE PAIR — RE-RUN BOTH ENGINES TO ENABLE FULL A/B COMPARISON</GatedReason>}
+                {!pair.complete ? (
+                  <GatedReason>INCOMPLETE PAIR — RUN BOTH ENGINES ON THIS FILE TO UNLOCK FULL A/B SLIDER</GatedReason>
+                ) : null}
               </div>
             ) : null}
-          </>
+          </div>
         )}
       </Section>
     </div>

@@ -9,10 +9,21 @@ export default function UploadZone({ accept, multiple = true, onFiles, caption }
     if (files.length) onFiles(files);
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      inputRef.current?.click();
+    }
+  };
+
   return (
     <div
       className={`sx-upload-zone ${dragging ? 'sx-dragging' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-label="Upload media. Drop files here or press Enter to browse files."
       onClick={() => inputRef.current?.click()}
+      onKeyDown={handleKeyDown}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -35,10 +46,13 @@ export default function UploadZone({ accept, multiple = true, onFiles, caption }
           e.target.value = '';
         }}
       />
-      <p style={{ fontWeight: 700, color: 'var(--sx-ink)', fontSize: '1rem', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-        Drop files or click to browse
-      </p>
-      <p>{caption}</p>
+      <div className="sx-upload-icon" aria-hidden="true">
+        ⇪
+      </div>
+      <div className="sx-upload-title">
+        DROP SOURCE FILES OR CLICK TO BROWSE
+      </div>
+      <div className="sx-upload-caption">{caption}</div>
     </div>
   );
 }

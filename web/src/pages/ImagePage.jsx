@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono } from '../components/ui/primitives.jsx';
-import { Segmented, Button } from '../components/ui/controls.jsx';
+import { Segmented, Button, Field } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
@@ -82,106 +82,143 @@ export default function ImagePage() {
 
   return (
     <div>
-      <Hero title="Square Extender 4K" kicker="1:1 · 3840×3840 · OUTPAINT + UPSCALE" />
+      <Hero title="Square Extender 4K" kicker="IMAGE PIPELINE · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE" />
 
       {blocked.length ? (
-        <BlockingBanner title="ENVIRONMENT NOT READY" lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)} />
+        <BlockingBanner
+          title="ENVIRONMENT NOT READY"
+          lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)}
+        />
       ) : null}
 
-      <Section num={1} title="Upload" active note="PNG · JPG · WEBP (Single or Multiple)">
+      <Section num={1} title="Upload Source" active note="PNG · JPG · WEBP (Single or Multiple)">
         <UploadZone
           accept=".png,.jpg,.jpeg,.webp"
           onFiles={onFiles}
-          caption="PNG · JPG · WEBP — single or multiple"
+          caption="Supported formats: PNG · JPG · WEBP (Single or Multi-batch)"
         />
+
         {items.length === 1 ? (
-          <>
+          <div style={{ marginTop: 'var(--sx-4)' }}>
             <SpecRow
               cells={[
                 ['SOURCE', `${items[0].width}×${items[0].height}`, `${items[0].orientation} · ${(items[0].size_bytes / 1024).toFixed(1)} KB`],
-                ['TARGET', '3840×3840', '1:1 SQUARE'],
-                ['PAD', `L ${items[0].padding.left}  R ${items[0].padding.right}`, `T ${items[0].padding.top}  B ${items[0].padding.bottom}`],
+                ['TARGET', '3840×3840', '1:1 SQUARE MASTER'],
+                ['OUTPAINT PAD', `L: ${items[0].padding.left}px  R: ${items[0].padding.right}px`, `T: ${items[0].padding.top}px  B: ${items[0].padding.bottom}px`],
               ]}
             />
-            <img className="sx-img" style={{ maxHeight: 300 }} src={previewUrl} alt={items[0].name} />
-          </>
+            <div style={{ marginTop: 'var(--sx-3)' }}>
+              <img
+                className="sx-img"
+                style={{ maxHeight: 320, objectFit: 'contain' }}
+                src={previewUrl}
+                alt={items[0].name}
+              />
+            </div>
+          </div>
         ) : items.length > 1 ? (
-          <SpecRow
-            cells={[
-              ['BATCH', `${items.length} IMAGES`, `${items.reduce((a, b) => a + b.size_bytes, 0)} bytes`],
-              ['TARGET', '3840×3840 EACH', '1:1 SQUARE'],
-              ['PARALLEL', 'AUTO-SCALED', 'CPU QUEUE'],
-            ]}
-          />
+          <div style={{ marginTop: 'var(--sx-4)' }}>
+            <SpecRow
+              cells={[
+                ['BATCH SIZE', `${items.length} IMAGES`, `${(items.reduce((a, b) => a + b.size_bytes, 0) / 1024).toFixed(1)} KB TOTAL`],
+                ['TARGET RESOLUTION', '3840×3840 EACH', '1:1 SQUARE'],
+                ['PROCESSING', 'CPU CONCURRENT', 'AUTO-SCALED QUEUE'],
+              ]}
+            />
+          </div>
         ) : null}
       </Section>
 
-      <Section num={2} title="Configure" active={items.length > 0}>
+      <Section num={2} title="Configure Pipeline" active={items.length > 0}>
         {items.length === 0 ? (
-          <EmptyState title="AWAITING SOURCE" text="Drop one or more images above to unlock the pipeline settings." />
+          <EmptyState
+            title="AWAITING SOURCE IMAGE"
+            text="Drop one or more images in the upload zone above to unlock pipeline parameters."
+          />
         ) : (
-          <>
-            <Eyebrow>MODE</Eyebrow>
-            <Segmented options={MODES} value={mode} onChange={setMode} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
+            <div>
+              <Eyebrow>PIPELINE MODE</Eyebrow>
+              <Segmented options={MODES} value={mode} onChange={setMode} ariaLabel="Pipeline Mode" />
+            </div>
 
             {!upscaleOnly ? (
-              <>
-                <Eyebrow>PROMPT</Eyebrow>
-                <textarea className="sx-textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-              </>
+              <Field label="OUTPAINT EXTENSION PROMPT">
+                <textarea
+                  className="sx-textarea"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Describe the environment to generate on left/right borders..."
+                />
+              </Field>
             ) : null}
 
-            <Eyebrow>UPSCALE ENGINE</Eyebrow>
-            <Segmented options={ENGINES} value={engine} onChange={setEngine} />
+            <div>
+              <Eyebrow>UPSCALE ENGINE</Eyebrow>
+              <Segmented options={ENGINES} value={engine} onChange={setEngine} ariaLabel="Upscale Engine" />
+            </div>
 
             {falPicked ? (
-              <>
+              <div>
                 <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
-                <Segmented options={FAL_MODELS} value={falModel} onChange={setFalModel} />
-              </>
+                <Segmented options={FAL_MODELS} value={falModel} onChange={setFalModel} ariaLabel="FAL Model" />
+              </div>
             ) : null}
 
-            <Eyebrow>SHARPEN (CAS)</Eyebrow>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={sharpening}
-              disabled={!probes.cas?.ok}
-              onChange={(e) => setSharpening(Number(e.target.value))}
-            />
-            <div className="sx-body">{(sharpening * 100).toFixed(0)}%</div>
-            {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING SKIPPED</GatedReason> : null}
+            <div>
+              <Eyebrow>CONTRAST ADAPTIVE SHARPENING (CAS)</Eyebrow>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sx-4)' }}>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={sharpening}
+                  disabled={!probes.cas?.ok}
+                  onChange={(e) => setSharpening(Number(e.target.value))}
+                  aria-label="CAS Sharpening level"
+                  aria-valuemin={0}
+                  aria-valuemax={1}
+                  aria-valuenow={sharpening}
+                />
+                <span className="sx-stat-value" style={{ fontSize: '1.2rem', minWidth: '4ch' }}>
+                  {Math.round(sharpening * 100)}%
+                </span>
+              </div>
+              {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED</GatedReason> : null}
+            </div>
 
-            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — SEE SYSTEM</GatedReason> : null}
-            {!blocked.length && needsKey && !falOk ? <GatedReason>FAL KEY REQUIRED FOR OUTPAINTING / FAL AI UPSCALE</GatedReason> : null}
+            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
+            {!blocked.length && needsKey && !falOk ? (
+              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
+            ) : null}
 
-            <div style={{ marginTop: 16 }}>
-              <Button primary disabled={disabled} onClick={render}>
-                ▶ RENDER {items.length || ''} IMAGE(S) 4K SQUARE
+            <div style={{ marginTop: 'var(--sx-2)' }}>
+              <Button primary disabled={disabled} loading={busy} onClick={render}>
+                ▶ RENDER {items.length ? `${items.length} ` : ''}IMAGE(S) 4K SQUARE
               </Button>
             </div>
+
             {error ? (
-              <div className="sx-error-box">
-                <div className="sx-error-title">ERROR</div>
+              <div className="sx-error-box" role="alert">
+                <div className="sx-error-title">EXECUTION ERROR</div>
                 <div>{error}</div>
               </div>
             ) : null}
-          </>
+          </div>
         )}
       </Section>
 
       {jobs.length ? (
-        <Section num={3} title="Result" active>
+        <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
             <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="image" />
           ))}
           {hasJobs ? (
             <>
-              <ResultHeader title="03 / RESULT" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG`} />
+              <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
               <Mono>
-                {jobs.map((j) => `/api/image/jobs/${j.jobId}/download`).join('\n')}
+                {jobs.map((j) => `/api/image/jobs/${j.jobId}/result`).join('\n')}
               </Mono>
             </>
           ) : null}
