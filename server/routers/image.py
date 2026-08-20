@@ -36,22 +36,33 @@ def cleanup_stale_uploads() -> int:
 
 
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
-    """Stage an uploaded image file and return its metadata."""
-    content = await file.read()
+def upload_image(file: UploadFile = File(...)):
+    """Stage an uploaded image file and return its metadata.
+
+    Streams straight to disk in chunks (no full-body buffering in RAM) and
+    enforces the extension allowlist + size cap while doing so. Plain `def`,
+    not `async def` — see the identical note on video.py's upload_video for
+    why (blocking I/O needs FastAPI's worker-thread dispatch).
+    """
     stage_id = uuid.uuid4().hex[:10]
-    dest_path = SM.stage_upload(file.filename or "upload.png", content)
+    try:
+        dest_path, size_bytes = SM.stage_upload_stream(
+            file.filename or "upload.png", file.file,
+            SM.IMAGE_EXTS, SM.MAX_IMAGE_UPLOAD_BYTES,
+        )
+    except SM.UploadRejected as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time())
 
-    w, h = get_image_dimensions(content)
+    w, h = get_image_dimensions(dest_path)
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
 
     return {
         "stage_id": stage_id,
         "filename": file.filename,
-        "size_bytes": len(content),
+        "size_bytes": size_bytes,
         "width": w,
         "height": h,
         "orientation": orientation,

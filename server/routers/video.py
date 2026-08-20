@@ -27,6 +27,42 @@ router = APIRouter(prefix="/api/video", tags=["video"])
 STAGED_UPLOADS: dict[str, tuple[str, float]] = {}
 STAGE_TTL_S = 6 * 3600
 
+# Fields the worker branches on by exact string match (server/pipeline/video_worker.py) —
+# an unrecognized value doesn't error there, it silently falls through to a
+# default branch, so reject anything outside the known set up front instead.
+_UPSCALE_ENGINES = {"fast", "fal", "studio"}
+_LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
+_SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
+_BYTEDANCE_RES = {"1080p", "2k", "4k"}
+_BYTEDANCE_FPS = {"30fps", "60fps"}
+_BYTEDANCE_TIERS = {"fast", "pro"}
+
+
+def _validate_video_form(
+    upscale_engine, sharpening, ltx_resolution, seedvr_factor, seedvr_target,
+    bytedance_target_res, bytedance_target_fps, bytedance_tier,
+    trim_start, trim_duration,
+):
+    def check_enum(name, value, allowed):
+        if value not in allowed:
+            raise HTTPException(status_code=400, detail=f"Invalid {name}: {value!r} (expected one of {sorted(allowed)})")
+
+    check_enum("upscale_engine", upscale_engine, _UPSCALE_ENGINES)
+    check_enum("ltx_resolution", ltx_resolution, _LTX_RESOLUTIONS)
+    check_enum("seedvr_target", seedvr_target, _SEEDVR_TARGETS)
+    check_enum("bytedance_target_res", bytedance_target_res, _BYTEDANCE_RES)
+    check_enum("bytedance_target_fps", bytedance_target_fps, _BYTEDANCE_FPS)
+    check_enum("bytedance_tier", bytedance_tier, _BYTEDANCE_TIERS)
+
+    if not 0.0 <= sharpening <= 1.0:
+        raise HTTPException(status_code=400, detail="sharpening must be between 0.0 and 1.0")
+    if not 1.0 <= seedvr_factor <= 4.0:
+        raise HTTPException(status_code=400, detail="seedvr_factor must be between 1.0 and 4.0")
+    if trim_start < 0:
+        raise HTTPException(status_code=400, detail="trim_start must be >= 0")
+    if not 1.0 <= trim_duration <= 15.0:
+        raise HTTPException(status_code=400, detail="trim_duration must be between 1.0 and 15.0")
+
 
 def cleanup_stale_uploads() -> int:
     now = time.time()
@@ -45,16 +81,20 @@ def cleanup_stale_uploads() -> int:
 def upload_video(file: UploadFile = File(...)):
     """Stage an uploaded video file and return its metadata.
 
-    Plain `def`, not `async def` — this calls a blocking, un-awaitable
-    ffprobe subprocess (get_video_dimensions_and_duration). FastAPI runs sync
-    route handlers in a worker thread, so the event loop (and every other
-    request, including live SSE progress streams) no longer stalls while it
-    runs. `file.read()` on Starlette's UploadFile is fine to call
-    synchronously here since we're already off the event loop.
+    Plain `def`, not `async def` — this streams the upload to disk in chunks
+    and calls a blocking, un-awaitable ffprobe subprocess
+    (get_video_dimensions_and_duration). FastAPI runs sync route handlers in
+    a worker thread, so the event loop (and every other request, including
+    live SSE progress streams) no longer stalls while it runs.
     """
-    content = file.file.read()
     stage_id = uuid.uuid4().hex[:10]
-    dest_path = SM.stage_upload(file.filename or "upload.mp4", content)
+    try:
+        dest_path, size_bytes = SM.stage_upload_stream(
+            file.filename or "upload.mp4", file.file,
+            SM.VIDEO_EXTS, SM.MAX_VIDEO_UPLOAD_BYTES,
+        )
+    except SM.UploadRejected as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time())
 
@@ -65,7 +105,7 @@ def upload_video(file: UploadFile = File(...)):
     return {
         "stage_id": stage_id,
         "filename": file.filename,
-        "size_bytes": len(content),
+        "size_bytes": size_bytes,
         "width": w,
         "height": h,
         "duration": round(dur, 2),
@@ -97,6 +137,12 @@ def start_video_process(
     trim_duration: float = Form(15.0),
 ):
     """Start video processing job in background worker pool."""
+    _validate_video_form(
+        upscale_engine, sharpening, ltx_resolution, seedvr_factor, seedvr_target,
+        bytedance_target_res, bytedance_target_fps, bytedance_tier,
+        trim_start, trim_duration,
+    )
+
     staged = STAGED_UPLOADS.get(stage_id)
     src_path = staged[0] if staged else None
     if not src_path or not os.path.exists(src_path):

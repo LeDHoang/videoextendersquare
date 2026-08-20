@@ -2,7 +2,7 @@ import os
 import tempfile
 import uuid
 import fal_client
-from pipeline.utils import get_image_dimensions, calculate_square_padding
+from pipeline.utils import get_image_dimensions, calculate_square_padding, fetch_fal_result
 
 def extract_image_url(result):
     """
@@ -107,8 +107,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 
             uid = uuid.uuid4().hex[:8]
             temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_temp_{uid}.png")
-            import urllib.request
-            urllib.request.urlretrieve(outpaint_url, temp_outpaint_path)
+            fetch_fal_result(outpaint_url, temp_outpaint_path)
         
         # Determine output location
         uid = uuid.uuid4().hex[:8]
@@ -139,9 +138,8 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
             if status_callback:
                 status_callback("Downloading upscaled image from fal.ai...")
 
-            import urllib.request
             temp_fal_out = os.path.join(tempfile.gettempdir(), f"fal_upscaled_img_{uid}.png")
-            urllib.request.urlretrieve(upscaled_url, temp_fal_out)
+            fetch_fal_result(upscaled_url, temp_fal_out)
             temp_outpaint_path = temp_fal_out
 
         if status_callback:

@@ -107,9 +107,22 @@ def list_reels(
     }
 
 
+MAX_PROXY_PATHS = 50
+
+
 @router.post("/proxy")
 def generate_proxies(paths: list[str]):
-    """Generate H.264 preview proxies for the given output-relative paths."""
+    """Generate H.264 preview proxies for the given output-relative paths.
+
+    Each proxy is a synchronous ffmpeg transcode (server/media.py's
+    make_web_preview), so an unbounded list here is effectively an
+    unauthenticated way to queue arbitrarily many transcodes in one request.
+    """
+    if len(paths) > MAX_PROXY_PATHS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many paths in one request (max {MAX_PROXY_PATHS})",
+        )
     root = OUTPUT_DIR.resolve()
     generated = []
     failed = []
@@ -128,6 +141,17 @@ def generate_proxies(paths: list[str]):
             failed.append({"path": rel, "error": str(ex)})
     _scan_cache["at"] = 0.0
     return {"generated": generated, "failed": failed}
+
+
+def _json_for_script(payload) -> str:
+    """JSON-serialize *payload* for embedding inside an inline <script> tag.
+
+    A filename/folder containing the literal substring `</script>` would
+    otherwise close the tag early and let the rest execute as raw HTML/JS —
+    escape the one sequence that matters rather than trying to sanitize
+    every field at the source.
+    """
+    return json.dumps(payload).replace("</", "<\\/")
 
 
 @router.get("/player", response_class=HTMLResponse)
@@ -163,7 +187,7 @@ def reels_player(
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
 
-    html = html.replace("__VIDEO_DATA_JSON__", json.dumps(payload))
+    html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
     return HTMLResponse(html)
 
 
@@ -222,7 +246,7 @@ def reels_player_inline(
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))
         else:
-            scripts.append(tag.replace("__VIDEO_DATA_JSON__", json.dumps(payload)))
+            scripts.append(tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload)))
 
     if scripts:
         init = scripts[-1]

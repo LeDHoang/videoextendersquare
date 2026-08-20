@@ -15,6 +15,13 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp"}
 VIDEO_EXTS = {"mp4", "mov", "avi", "webm"}
 
+MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
+
+
+class UploadRejected(Exception):
+    """Raised when a staged upload fails an extension or size check."""
+
 
 def staging_dir() -> Path:
     d = Path(tempfile.gettempdir()) / "square_extender_api" / "uploads"
@@ -22,11 +29,48 @@ def staging_dir() -> Path:
     return d
 
 
-def stage_upload(filename: str, content: bytes) -> str:
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+def _safe_ext(filename: str, allowed_exts: set[str]) -> str:
+    # Path(...).suffix only ever returns the last dotted segment, so a
+    # filename crafted with path separators or multiple dots can't smuggle
+    # anything but a single lowercase extension into the staged filename.
+    ext = Path(filename or "").suffix.lstrip(".").lower()
+    if ext not in allowed_exts:
+        raise UploadRejected(f"Unsupported file extension: {ext or '(none)'}")
+    return ext
+
+
+def stage_upload_stream(
+    filename: str,
+    fileobj,
+    allowed_exts: set[str],
+    max_bytes: int,
+    chunk_size: int = 1 << 20,
+) -> tuple[str, int]:
+    """Stream *fileobj* to a new staged file in chunks.
+
+    Never buffers the whole upload in memory, enforces an extension
+    allowlist up front, and aborts (deleting the partial file) as soon as
+    *max_bytes* is exceeded rather than after the whole body has arrived.
+    """
+    ext = _safe_ext(filename, allowed_exts)
     dest = staging_dir() / f"{uuid.uuid4().hex[:10]}.{ext}"
-    dest.write_bytes(content)
-    return str(dest)
+    total = 0
+    try:
+        with open(dest, "wb") as out:
+            while True:
+                chunk = fileobj.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise UploadRejected(
+                        f"File exceeds the {max_bytes // (1024 * 1024)}MB upload limit"
+                    )
+                out.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+    return str(dest), total
 
 
 def human_bytes(n: int | None) -> str:
@@ -40,8 +84,28 @@ def human_bytes(n: int | None) -> str:
     return f"{n:.1f} GB"
 
 
+# (path, mtime, size) -> codec name. Keyed on mtime/size so a replaced file
+# at the same path (e.g. a re-rendered output) naturally invalidates the
+# entry instead of serving a stale codec.
+_codec_cache: dict[tuple[str, float, int], str] = {}
+
+
 def get_video_codec(src: str) -> str:
-    """Return the video stream codec name (e.g. 'hevc', 'h264') via ffprobe."""
+    """Return the video stream codec name (e.g. 'hevc', 'h264') via ffprobe.
+
+    Cached per (path, mtime, size) — /api/reels probes every video's codec on
+    every request (twice, for master + preview), and ffprobe is a subprocess
+    spawn each time, so an unbounded probe storm on every page load.
+    """
+    try:
+        stat = os.stat(src)
+        key = (src, stat.st_mtime, stat.st_size)
+    except OSError:
+        key = None
+
+    if key is not None and key in _codec_cache:
+        return _codec_cache[key]
+
     cmd = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=codec_name", "-of", "csv=p=0", src,
@@ -49,9 +113,13 @@ def get_video_codec(src: str) -> str:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=5,
                            creationflags=_NO_WINDOW)
-        return p.stdout.strip().lower()
+        codec = p.stdout.strip().lower()
     except Exception:
-        return "unknown"
+        codec = "unknown"
+
+    if key is not None:
+        _codec_cache[key] = codec
+    return codec
 
 
 def has_web_preview(src: str) -> bool:

@@ -6,9 +6,13 @@ import threading
 import uuid
 import platform
 import subprocess
-import urllib.request
 import fal_client
-from pipeline.utils import get_video_dimensions_and_duration, calculate_square_padding, has_audio_stream
+from pipeline.utils import (
+    get_video_dimensions_and_duration,
+    calculate_square_padding,
+    has_audio_stream,
+    fetch_fal_result,
+)
 
 def extract_video_url(result):
     """
@@ -193,6 +197,15 @@ def _pick_encoder():
             + ", ".join(n for n, _ in _HEVC_CANDIDATES) + ")"
         )
 
+def _is_already_square(path: str, target: int = 3840) -> bool:
+    """True if *path* already probes as target x target (skip a no-op scale)."""
+    try:
+        w, h, _ = get_video_dimensions_and_duration(path)
+        return w == target and h == target
+    except Exception:
+        return False
+
+
 def process_video(
     video_path,
     prompt,
@@ -206,9 +219,50 @@ def process_video(
     **kwargs,
 ):
     """
-    Asynchronously processes a local video file: outpainting it to a 1:1 square aspect ratio 
+    Asynchronously processes a local video file: outpainting it to a 1:1 square aspect ratio
     and then upscaling the result to 4K.
+
+    Thin wrapper around _process_video_impl that guarantees any intermediate
+    temp file created before a failure is cleaned up — the impl's own
+    end-of-function cleanup only runs on the success path, so an exception
+    raised mid-encode used to leak the trimmed/outpainted temp files.
     """
+    temp_paths: list[str] = []
+    try:
+        return _process_video_impl(
+            video_path, prompt, temp_paths,
+            fal_key=fal_key,
+            status_callback=status_callback,
+            outpaint_model=outpaint_model,
+            upscale_model=upscale_model,
+            upscale_only=upscale_only,
+            sharpening=sharpening,
+            upscale_engine=upscale_engine,
+            **kwargs,
+        )
+    except Exception:
+        for p in temp_paths:
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+        raise
+
+
+def _process_video_impl(
+    video_path,
+    prompt,
+    temp_paths,
+    fal_key=None,
+    status_callback=None,
+    outpaint_model="fal-ai/ltx-2.3-quality/outpaint",
+    upscale_model="fal-ai/seedvr/upscale/video",
+    upscale_only=False,
+    sharpening=0.0,
+    upscale_engine="fast",
+    **kwargs,
+):
     t0 = time.time()
     upload_time = 0.0
     outpaint_time = 0.0
@@ -239,6 +293,7 @@ def process_video(
             status_callback(f"Trimming input clip: start={trim_start:.1f}s, duration={trim_duration:.1f}s (max 15s)...")
         uid_trim = uuid.uuid4().hex[:8]
         temp_trimmed_path = os.path.join(tempfile.gettempdir(), f"trimmed_source_{uid_trim}.mp4")
+        temp_paths.append(temp_trimmed_path)
         
         trim_cmd = [
             "ffmpeg", "-y",
@@ -343,7 +398,8 @@ def process_video(
             
         uid = uuid.uuid4().hex[:8]
         temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_video_temp_{uid}.mp4")
-        urllib.request.urlretrieve(outpaint_url, temp_outpaint_path)
+        temp_paths.append(temp_outpaint_path)
+        fetch_fal_result(outpaint_url, temp_outpaint_path)
     
     # Determine output location
     uid = uuid.uuid4().hex[:8]
@@ -410,7 +466,8 @@ def process_video(
             status_callback("Downloading upscaled video from fal.ai...")
 
         temp_fal_vid = os.path.join(tempfile.gettempdir(), f"fal_upscaled_vid_{uid}.mp4")
-        urllib.request.urlretrieve(upscaled_video_url, temp_fal_vid)
+        temp_paths.append(temp_fal_vid)
+        fetch_fal_result(upscaled_video_url, temp_fal_vid)
 
         # Probe for a working encoder
         encoder, encoder_opts = _pick_encoder()
@@ -424,16 +481,20 @@ def process_video(
         elif has_audio_stream(video_path):
             audio_src = video_path
 
-        vf_filter = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        vf_parts = [] if _is_already_square(temp_fal_vid) else [
+            "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        ]
         if sharpening > 0.0:
-            vf_filter += f",cas={sharpening}"
+            vf_parts.append(f"cas={sharpening}")
+        vf_filter = ",".join(vf_parts)
+        vf_args = ["-vf", vf_filter] if vf_filter else []
 
         if audio_src and audio_src != temp_fal_vid:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", temp_fal_vid,
                 "-i", audio_src,
-                "-vf", vf_filter,
+                *vf_args,
                 "-map", "0:v:0",
                 "-map", "1:a:0",
                 "-c:v", encoder
@@ -442,14 +503,14 @@ def process_video(
             cmd = [
                 "ffmpeg", "-y",
                 "-i", temp_fal_vid,
-                "-vf", vf_filter,
+                *vf_args,
                 "-c:v", encoder
             ] + encoder_opts + ["-c:a", "copy", output_video_path]
         else:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", temp_fal_vid,
-                "-vf", vf_filter,
+                *vf_args,
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
@@ -547,9 +608,13 @@ clip.set_output()
         if status_callback:
             status_callback("Performing hardware-accelerated 4K upscale via FFmpeg...")
 
-        vf_filter = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        vf_parts = [] if _is_already_square(temp_outpaint_path) else [
+            "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        ]
         if sharpening > 0.0:
-            vf_filter += f",cas={sharpening}"
+            vf_parts.append(f"cas={sharpening}")
+        vf_filter = ",".join(vf_parts)
+        vf_args = ["-vf", vf_filter] if vf_filter else []
 
         encoder, encoder_opts = _pick_encoder()
 
@@ -559,7 +624,7 @@ clip.set_output()
                 "ffmpeg", "-y",
                 "-i", temp_outpaint_path,
                 "-i", audio_src,
-                "-vf", vf_filter,
+                *vf_args,
                 "-map", "0:v:0",
                 "-map", "1:a:0",
                 "-c:v", encoder
@@ -568,14 +633,14 @@ clip.set_output()
             cmd = [
                 "ffmpeg", "-y",
                 "-i", temp_outpaint_path,
-                "-vf", vf_filter,
+                *vf_args,
                 "-c:v", encoder
             ] + encoder_opts + ["-c:a", "copy", output_video_path]
         else:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", temp_outpaint_path,
-                "-vf", vf_filter,
+                *vf_args,
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
