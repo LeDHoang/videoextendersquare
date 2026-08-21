@@ -20,8 +20,11 @@ export default function ComparePage() {
       .then((d) => {
         setData(d);
         const all = [...(d.complete || []), ...(d.partial || [])];
-        if (!all.length) return;
-        setSelected((cur) => (cur && all.some((p) => p.name === cur) ? cur : all[0].name));
+        if (!all.length) {
+          setSelected('');
+          return;
+        }
+        setSelected((cur) => (cur && all.some((p) => p.name === cur) ? cur : all[0]?.name || ''));
       })
       .catch(() => setData({ total: 0, complete: [], partial: [] }));
   }, [refreshKey]);
@@ -30,24 +33,40 @@ export default function ComparePage() {
     () => [...(data?.complete || []), ...(data?.partial || [])],
     [data],
   );
-  const pair = allPairs.find((p) => p.name === selected);
+  const pair = allPairs.find((p) => p.name === selected) || allPairs[0] || null;
 
   useEffect(() => {
-    if (!pair) return;
+    if (!pair) return undefined;
+    let active = true;
     setPrep(null);
     setPrepErr('');
     if (view === '◐ SLIDER') {
       setIframe(`/api/compare/player?pair=${encodeURIComponent(pair.name)}`);
     } else if (view === '▦ 2-UP') {
       setIframe(null);
-      api.get('/api/compare/prepare', { pair: pair.name }).then(setPrep).catch((e) => setPrepErr(String(e.message || e)));
+      api
+        .get('/api/compare/prepare', { pair: pair.name })
+        .then((r) => {
+          if (active) setPrep(r);
+        })
+        .catch((e) => {
+          if (active) setPrepErr(String(e.message || e));
+        });
     } else {
       setIframe(null);
-      api.get('/api/compare/prepare', { pair: pair.name })
-        .then((r) => setPrep({ ...r, mode: 'download' }))
-        .catch((e) => setPrepErr(String(e.message || e)));
+      api
+        .get('/api/compare/prepare', { pair: pair.name })
+        .then((r) => {
+          if (active) setPrep({ ...r, mode: 'download' });
+        })
+        .catch((e) => {
+          if (active) setPrepErr(String(e.message || e));
+        });
     }
-  }, [pair, view]);
+    return () => {
+      active = false;
+    };
+  }, [pair?.name, view]);
 
   const complete = data?.complete || [];
   const partial = data?.partial || [];

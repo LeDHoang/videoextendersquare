@@ -259,11 +259,23 @@ def reels_player_inline(
             "};\n\n    // Focus frame on click for direct keyboard capture",
         )
         init += (
-            "\nwindow.__sxReelsCleanup = function () {"
-            " if (window.__sxReelsKeydown) {"
-            "  window.removeEventListener('keydown', window.__sxReelsKeydown);"
-            "  window.__sxReelsKeydown = null;"
-            " }"
+            "\nwindow.__sxReelsCleanup = function () {\n"
+            "  if (window.__sxReelsKeydown) {\n"
+            "    window.removeEventListener('keydown', window.__sxReelsKeydown);\n"
+            "    window.__sxReelsKeydown = null;\n"
+            "  }\n"
+            "  if (window.__sxGlowInterval) {\n"
+            "    clearInterval(window.__sxGlowInterval);\n"
+            "    window.__sxGlowInterval = null;\n"
+            "  }\n"
+            "  try {\n"
+            "    const v = document.getElementById('mainVideo');\n"
+            "    if (v) {\n"
+            "      v.pause();\n"
+            "      v.removeAttribute('src');\n"
+            "      v.load();\n"
+            "    }\n"
+            "  } catch (e) {}\n"
             "};"
         )
         scripts[-1] = init

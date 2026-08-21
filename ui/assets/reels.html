@@ -858,7 +858,7 @@
     const glowCtx = glowCanvas.getContext('2d', { willReadFrequently: true });
 
     function updateDesktopGlow() {
-      if (!video || video.paused || video.readyState < 2 || !glowEl) return;
+      if (!video || video.paused || video.readyState < 2 || !glowEl || document.hidden) return;
       try {
         glowCtx.drawImage(video, 0, 0, 4, 4);
         const data = glowCtx.getImageData(0, 0, 4, 4).data;
@@ -874,7 +874,8 @@
         glowEl.style.background = `radial-gradient(circle at center, rgba(${r}, ${g}, ${b}, 0.75) 0%, rgba(2, 6, 18, 0) 75%)`;
       } catch (e) {}
     }
-    setInterval(updateDesktopGlow, 140);
+    if (window.__sxGlowInterval) clearInterval(window.__sxGlowInterval);
+    window.__sxGlowInterval = setInterval(updateDesktopGlow, 140);
 
     // Initial Load
     loadVideo(0);
