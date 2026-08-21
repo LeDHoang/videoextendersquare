@@ -96,20 +96,14 @@ export default function ReelsPage() {
 
   return (
     <div>
-      <div className="sx-compact-header">
-        <div>
-          <h1 className="sx-compact-title">REELS / VR PLAYER</h1>
-          <div className="sx-compact-kicker">
-            ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES
-          </div>
-        </div>
+      <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
           <span>VIDEOS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
           <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
           <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
           <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
         </div>
-      </div>
+      </Hero>
 
       {/* Toolbar */}
       <div className="sx-toolbar">

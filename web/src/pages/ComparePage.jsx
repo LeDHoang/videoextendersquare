@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, EmptyState, Eyebrow, GatedReason, Mono } from '../components/ui/primitives.jsx';
+import { Hero, EmptyState, Mono, Eyebrow, GatedReason } from '../components/ui/primitives.jsx';
 import { Button, Spinner, Segmented, Dropdown } from '../components/ui/controls.jsx';
 
 const VIEWS = ['◐ SLIDER', '▦ 2-UP', '↓ DOWNLOAD'];
@@ -73,19 +73,13 @@ export default function ComparePage() {
 
   return (
     <div>
-      <div className="sx-compact-header">
-        <div>
-          <h1 className="sx-compact-title">FAST vs STUDIO</h1>
-          <div className="sx-compact-kicker">
-            ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL
-          </div>
-        </div>
+      <Hero title="FAST vs STUDIO" kicker="ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS vs ZNEDI3 NEURAL">
         <div className="sx-stats-pill">
           <span>PAIRED: <strong>{data?.total ?? '—'}</strong></span>
           <span>A/B READY: <strong style={{ color: 'var(--sx-success)' }}>{complete.length}</strong></span>
           <span>PARTIAL: <strong style={{ color: partial.length ? 'var(--sx-warn)' : 'var(--sx-ink-3)' }}>{partial.length}</strong></span>
         </div>
-      </div>
+      </Hero>
 
       <div>
         {data === null ? (

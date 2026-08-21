@@ -1,16 +1,17 @@
 import Emoji from './Emoji.jsx';
 
-export function Hero({ title, kicker }) {
+export function Hero({ title, kicker, children }) {
   return (
     <header style={{ marginBottom: 'var(--sx-6)' }}>
       <h1 className="sx-hero">
         <Emoji text={title} />
       </h1>
       {kicker ? (
-        <div className="sx-eyebrow" style={{ color: 'var(--sx-ink-3)', marginTop: 'var(--sx-2)' }}>
+        <div className="sx-eyebrow" style={{ color: 'var(--sx-ink-3)', marginTop: 'var(--sx-2)', marginBottom: children ? 'var(--sx-3)' : 0 }}>
           <Emoji text={kicker} />
         </div>
       ) : null}
+      {children}
     </header>
   );
 }
