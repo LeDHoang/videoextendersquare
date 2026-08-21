@@ -33,12 +33,19 @@ const WebXRVR = (function () {
   let glProgram = null;
   let glVideoTexture = null;
   let glControlsTexture = null;
+  let glOverlayTexture = null;
   let glGuideTexture = null;
   let glReticleTexture = null;
   let glGridBuf = null;
   let glGridIndexBuf = null;
   let glGridIndexCount = 0;
   let glLaserBuf = null;
+
+  // In-Screen VR Comments Overlay Canvas
+  let overlayCanvas = null;
+  let overlayCtx = null;
+  const OVERLAY_W = 1024;
+  const OVERLAY_H = 1024;
 
   // Cached GL locations
   let loc_aPos = -1;
@@ -293,6 +300,101 @@ const WebXRVR = (function () {
     controlsCtx = controlsCanvas.getContext('2d');
   }
 
+  function initOverlayCanvas() {
+    overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = OVERLAY_W;
+    overlayCanvas.height = OVERLAY_H;
+    overlayCtx = overlayCanvas.getContext('2d');
+  }
+
+  function renderOverlayCanvas() {
+    const ctx = overlayCtx;
+    if (!ctx || !videoElement) return false;
+
+    const currentTime = videoElement.currentTime || 0;
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
+
+    // Filter active time-synced comments within active window [timestamp, timestamp + 4.2s]
+    const active = comments.filter((c) => {
+      if (c.timestamp === null || c.timestamp === undefined) return false;
+      const t = Number(c.timestamp);
+      return currentTime >= t && currentTime <= (t + 4.2);
+    });
+
+    ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
+    if (active.length === 0) return false;
+
+    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
+    const maxShow = Math.min(3, active.length);
+    const itemHeight = 60;
+    const gap = 11;
+    const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
+    const startY = (OVERLAY_H / 2) - (totalH / 2);
+
+    for (let i = 0; i < maxShow; i++) {
+      const c = active[i];
+      const y = startY + i * (itemHeight + gap);
+      const x = 48; // Left edge margin inside 1:1 square canvas
+
+      // Progress fade-in / fade-out alpha
+      const elapsed = currentTime - Number(c.timestamp);
+      let alpha = 1.0;
+      if (elapsed < 0.35) {
+        alpha = Math.max(0, elapsed / 0.35);
+      } else if (elapsed > 3.6) {
+        alpha = Math.max(0, (4.2 - elapsed) / 0.6);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Shadow for high-contrast legibility over video without background box or border
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2;
+
+      // Avatar Icon / Emoji (Middle-Left)
+      const avatarX = x + 25;
+      const avatarY = y + itemHeight / 2;
+
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(c.author_avatar || '👤', avatarX, avatarY);
+
+      // Author Name
+      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      ctx.fillStyle = c.avatar_color || '#FF3B1F';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(c.author_name || 'Anonymous', x + 50, y + 11);
+
+      // Timestamp Pill
+      if (c.timestamp !== null && c.timestamp !== undefined) {
+        const timeStr = '⏱️ ' + formatTime(c.timestamp);
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#CBD5E1';
+        const nameW = ctx.measureText(c.author_name || 'Anonymous').width;
+        ctx.fillText(timeStr, x + 50 + nameW + 8, y + 13);
+      }
+
+      // Comment Text
+      ctx.font = '600 14px sans-serif';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textBaseline = 'top';
+      let dispText = c.text;
+      if (dispText.length > 46) {
+        dispText = dispText.slice(0, 44) + '…';
+      }
+      ctx.fillText(dispText, x + 50, y + 32);
+
+      ctx.restore();
+    }
+
+    return true;
+  }
+
   function renderControlsCanvas() {
     const ctx = controlsCtx;
     if (!ctx) return;
@@ -332,12 +434,19 @@ const WebXRVR = (function () {
     const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
     const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
     const item = playlist[idx];
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
 
     if (item) {
       ctx.fillStyle = 'rgba(242, 243, 245, 0.85)';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(`${item.filename}`, 134, 21);
+    }
+    if (comments.length > 0) {
+      ctx.fillStyle = '#A855F7';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`💬 ${comments.length}`, 330, 21);
     }
     if (playlist.length > 0) {
       ctx.fillStyle = '#FF3B1F';
@@ -1295,6 +1404,13 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    glOverlayTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     initReticleTexture();
     initStarfield();
     initAmbilight();
@@ -1551,6 +1667,12 @@ const WebXRVR = (function () {
       }
     }
 
+    const hasOverlayComments = renderOverlayCanvas();
+    if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
+      gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
+    }
+
     const timeSec = time * 0.001;
 
     for (const view of pose.views) {
@@ -1568,6 +1690,11 @@ const WebXRVR = (function () {
 
       // 3. Draw main video screen with all-side concave curvature
       drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode);
+
+      // 4. Draw in-screen direct time-synced comments overlay over reels screen
+      if (hasOverlayComments && glOverlayTexture) {
+        drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
+      }
 
       if (controlsVisible) {
         const ctrlPos = getControlsCenter();
@@ -1783,6 +1910,7 @@ const WebXRVR = (function () {
     flickedY = false;
 
     initControlsCanvas();
+    initOverlayCanvas();
     // Note: initGuideCanvas() is called after initGL() since it needs glGuideTexture
 
     try {
@@ -1892,7 +2020,11 @@ const WebXRVR = (function () {
     glProgram = null;
     glVideoTexture = null;
     glControlsTexture = null;
+    glOverlayTexture = null;
+    glGuideTexture = null;
     glReticleTexture = null;
+    overlayCanvas = null;
+    overlayCtx = null;
     glGridBuf = null;
     glGridIndexBuf = null;
     glGridIndexCount = 0;

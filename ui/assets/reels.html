@@ -193,7 +193,7 @@
     gap: 8px;
   }
 
-  /* Bottom Progress Bar */
+  /* Bottom Progress Bar & SoundCloud Markers */
   .reels-progress-wrap {
     position: absolute;
     bottom: 0;
@@ -215,7 +215,7 @@
     transition: height 0.15s;
   }
   .reels-progress-wrap:hover .reels-progress-bar {
-    height: 6px;
+    height: 7px;
   }
   .reels-progress-fill {
     height: 100%;
@@ -231,6 +231,369 @@
     font-weight: 700;
     color: rgba(255, 255, 255, 0.75);
     pointer-events: none;
+  }
+
+  /* SoundCloud-Style Comment Dots on Timeline */
+  .reels-comment-markers {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+  }
+  .reels-comment-dot {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #FF3B1F;
+    border: 1.5px solid #FFF;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
+    box-shadow: 0 0 6px rgba(255, 59, 31, 0.8);
+  }
+  .reels-comment-dot:hover {
+    transform: translate(-50%, -50%) scale(2.0);
+    background: #FFF;
+    border-color: #FF3B1F;
+    z-index: 10;
+  }
+  .reels-dot-tooltip {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(8, 10, 14, 0.94);
+    border: 1px solid rgba(255, 59, 31, 0.5);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 10px;
+    color: #FFF;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 12;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .reels-comment-dot:hover .reels-dot-tooltip {
+    opacity: 1;
+  }
+
+  /* Bottom-Middle Twitch-Style Comment Ticker (When Drawer Closed) */
+  .reels-twitch-ticker {
+    position: absolute;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 26;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+  .twitch-comment-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 3px 6px;
+    font-size: 12px;
+    color: #FFF;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+    animation: slideUpTicker 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes slideUpTicker {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .twitch-avatar {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    background: transparent;
+    border: none;
+    flex-shrink: 0;
+    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.9));
+  }
+  .twitch-author {
+    font-weight: 800;
+    font-size: 12px;
+    color: #FF3B1F;
+    flex-shrink: 0;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8);
+  }
+  .twitch-tag {
+    font-size: 10px;
+    font-weight: 700;
+    color: #CBD5E1;
+    background: transparent;
+    border: none;
+    padding: 0;
+    flex-shrink: 0;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  }
+  .twitch-text {
+    color: #FFFFFF;
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 360px;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 2px 8px rgba(0, 0, 0, 0.9);
+  }
+
+  /* TikTok/Instagram-Style Slide-Up Comments Drawer */
+  .reels-comments-drawer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 68%;
+    max-height: 520px;
+    background: rgba(10, 12, 16, 0.96);
+    backdrop-filter: blur(24px);
+    border-top: 1px solid rgba(255, 59, 31, 0.4);
+    border-radius: 18px 18px 0 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(105%);
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.85);
+    user-select: auto;
+  }
+  .reels-comments-drawer.open {
+    transform: translateY(0);
+  }
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(16, 18, 22, 0.7);
+  }
+  .drawer-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #FF3B1F;
+    letter-spacing: 0.08em;
+  }
+  .drawer-tabs {
+    display: flex;
+    gap: 4px;
+  }
+  .drawer-tab {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #9BA1A8;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .drawer-tab:hover, .drawer-tab.active {
+    background: rgba(255, 59, 31, 0.2);
+    color: #FFF;
+    border-color: #FF3B1F;
+  }
+  .drawer-close-btn {
+    background: transparent;
+    border: none;
+    color: #9BA1A8;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .drawer-close-btn:hover {
+    color: #FFF;
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .comment-item {
+    display: flex;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: background 0.15s ease;
+  }
+  .comment-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .comment-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    background: #080A0E;
+    border: 2px solid #FF3B1F;
+    flex-shrink: 0;
+  }
+  .comment-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .comment-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .comment-name {
+    font-size: 11px;
+    font-weight: 800;
+    color: #FF3B1F;
+  }
+  .comment-time-btn {
+    background: rgba(255, 59, 31, 0.15);
+    border: 1px solid rgba(255, 59, 31, 0.35);
+    color: #FF3B1F;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .comment-time-btn:hover {
+    background: #FF3B1F;
+    color: #0A0A0A;
+  }
+  .comment-time-gen {
+    background: rgba(255, 255, 255, 0.08);
+    color: #9BA1A8;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .comment-msg {
+    font-size: 11px;
+    color: #F2F3F5;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  .comment-like-btn {
+    background: transparent;
+    border: none;
+    color: #9BA1A8;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    padding: 4px;
+  }
+  .comment-like-btn:hover {
+    color: #FF3B1F;
+  }
+  .drawer-footer {
+    padding: 10px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(12, 14, 18, 0.9);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .input-meta-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10px;
+  }
+  .persona-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #F2F3F5;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .persona-btn:hover {
+    border-color: #FF3B1F;
+  }
+  .sync-time-toggle {
+    background: rgba(255, 59, 31, 0.15);
+    border: 1px solid rgba(255, 59, 31, 0.4);
+    color: #FF3B1F;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .sync-time-toggle.inactive {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #9BA1A8;
+  }
+  .comment-form {
+    display: flex;
+    gap: 8px;
+  }
+  .comment-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #FFF;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+  }
+  .comment-input:focus {
+    border-color: #FF3B1F;
+    box-shadow: 0 0 10px rgba(255, 59, 31, 0.3);
+  }
+  .comment-submit-btn {
+    background: #FF3B1F;
+    color: #0A0A0A;
+    border: none;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-weight: 800;
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+  }
+  .comment-submit-btn:hover {
+    background: #FF5733;
   }
 
   /* Center Flash & Error Overlay */
@@ -328,6 +691,10 @@
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="center-flash" id="centerFlash">▶</div>
+    
+    <!-- Bottom-Middle Twitch Ticker Overlay (When Drawer Closed) -->
+    <div class="reels-twitch-ticker" id="twitchCommentTicker"></div>
+
     <div class="video-error-overlay" id="errorOverlay">
       <div style="font-size: 32px; color: #FF3B1F;">⚠️</div>
       <div style="font-weight: 700; color: #FFF; font-size: 12px;">4K VIDEO DECODE ERROR</div>
@@ -348,6 +715,10 @@
     <div>
       <button class="action-btn" id="playBtn" title="Play/Pause (Space)">⏸</button>
       <div class="action-btn-label">PLAY (SPC)</div>
+    </div>
+    <div>
+      <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)">💬</button>
+      <div class="action-btn-label" id="commentBadge">COMMENTS</div>
     </div>
     <div>
       <button class="action-btn active" id="modeBtn" title="Auto-Next / Loop">🔄</button>
@@ -386,7 +757,38 @@
   <div class="reels-progress-wrap" id="progressWrap">
     <div class="reels-time-display" id="timeDisplay">0:00 / 0:00</div>
     <div class="reels-progress-bar" id="progressBar">
+      <div class="reels-comment-markers" id="commentMarkers"></div>
       <div class="reels-progress-fill" id="progressFill"></div>
+    </div>
+  </div>
+
+  <!-- TikTok/Instagram-Style Slide-Up Comments Drawer -->
+  <div class="reels-comments-drawer" id="commentsDrawer" tabindex="-1">
+    <div class="drawer-header">
+      <div class="drawer-title" id="drawerTitle">💬 COMMENTS (0)</div>
+      <div class="drawer-tabs">
+        <button type="button" class="drawer-tab active" data-tab="all" id="tabAll">ALL</button>
+        <button type="button" class="drawer-tab" data-tab="sync" id="tabSync">⏱️ TIME-SYNC</button>
+        <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral">💬 GENERAL</button>
+      </div>
+      <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)">✕</button>
+    </div>
+    <div class="drawer-body" id="commentsList">
+      <!-- Dynamic comments list -->
+    </div>
+    <div class="drawer-footer">
+      <div class="input-meta-bar">
+        <button type="button" class="persona-btn" id="personaBtn" title="Click to randomize persona">
+          🎲 <span id="personaAvatar">🦊</span> <span id="personaName">Kira_VR</span>
+        </button>
+        <button type="button" class="sync-time-toggle" id="syncTimeToggle" title="Toggle time-sync to current video playback">
+          ⏱️ SYNC: <span id="syncTimeDisplay">0:00</span>
+        </button>
+      </div>
+      <form class="comment-form" id="commentForm">
+        <input type="text" class="comment-input" id="commentInput" placeholder="Add a time-synced comment..." autocomplete="off" />
+        <button type="submit" class="comment-submit-btn" id="commentSubmitBtn">SEND</button>
+      </form>
     </div>
   </div>
 </div>
@@ -399,12 +801,29 @@
     let idx = 0;
     let isAutoNext = true;
     let isMuted = true;
+    let activeTab = 'all';
+    let isSyncTimeActive = true;
+
+    // Personas Preset Pool
+    const PERSONAS = [
+      { name: 'Kira_VR', avatar: '🦊', color: '#FF3B1F' },
+      { name: 'CyberSamurai', avatar: '⚡', color: '#00FF88' },
+      { name: 'NeonRider', avatar: '🚀', color: '#00E5FF' },
+      { name: 'AuraVibe', avatar: '🌌', color: '#A855F7' },
+      { name: 'PixelNomad', avatar: '👾', color: '#FF9900' },
+      { name: 'EchoDev', avatar: '💎', color: '#FF0055' },
+      { name: 'ShadowQuest', avatar: '🥽', color: '#38BDF8' },
+      { name: 'Solaris', avatar: '☀️', color: '#FACC15' }
+    ];
+    let currentPersona = PERSONAS[0];
 
     const frame = document.getElementById('reelsFrame');
     const video = document.getElementById('reelsVideo');
     const counter = document.getElementById('counter');
     const soundBtn = document.getElementById('soundBtn');
     const playBtn = document.getElementById('playBtn');
+    const commentBtn = document.getElementById('commentBtn');
+    const commentBadge = document.getElementById('commentBadge');
     const modeBtn = document.getElementById('modeBtn');
     const modeLabel = document.getElementById('modeLabel');
     const prevBtn = document.getElementById('prevBtn');
@@ -427,99 +846,30 @@
     const preloadLabel = document.getElementById('preloadLabel');
     const preloadStatus = document.getElementById('preloadStatus');
 
+    // Comments UI Elements
+    const commentMarkers = document.getElementById('commentMarkers');
+    const twitchCommentTicker = document.getElementById('twitchCommentTicker');
+    const commentsDrawer = document.getElementById('commentsDrawer');
+    const drawerTitle = document.getElementById('drawerTitle');
+    const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+    const commentsList = document.getElementById('commentsList');
+    const tabAll = document.getElementById('tabAll');
+    const tabSync = document.getElementById('tabSync');
+    const tabGeneral = document.getElementById('tabGeneral');
+    const personaBtn = document.getElementById('personaBtn');
+    const personaAvatar = document.getElementById('personaAvatar');
+    const personaName = document.getElementById('personaName');
+    const syncTimeToggle = document.getElementById('syncTimeToggle');
+    const syncTimeDisplay = document.getElementById('syncTimeDisplay');
+    const commentForm = document.getElementById('commentForm');
+    const commentInput = document.getElementById('commentInput');
+
     const blobUrlMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
 
-    async function preloadAllVideos() {
-      if (isPreloading) {
-        showFlash('⚡ PRELOADING');
-        return;
-      }
-      if (!videoData || videoData.length === 0) return;
-
-      isPreloading = true;
-      if (preloadBtn) preloadBtn.classList.add('active');
-      if (preloadStatus) preloadStatus.style.display = 'block';
-      showFlash('⚡ PRELOAD STARTED');
-
-      let loadedBytes = 0;
-      const totalCount = videoData.length;
-
-      function updatePreloadUI() {
-        const pct = Math.round((preloadedCount / totalCount) * 100);
-        if (preloadLabel) preloadLabel.textContent = preloadedCount === totalCount ? 'DONE' : preloadedCount + '/' + totalCount;
-        const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
-        if (preloadStatus) preloadStatus.textContent = '⚡ PRELOADED ' + preloadedCount + '/' + totalCount + ' (' + mb + ' MB)';
-      }
-
-      updatePreloadUI();
-
-      const queue = videoData.map((item, i) => i);
-      const concurrency = 2;
-
-      async function worker() {
-        while (queue.length > 0) {
-          const i = queue.shift();
-          if (blobUrlMap[i]) {
-            preloadedCount++;
-            updatePreloadUI();
-            continue;
-          }
-          const item = videoData[i];
-          const itemUrl = resolveItemUrl(item);
-          try {
-            const resp = await fetch(itemUrl, { mode: 'cors' });
-            if (resp.ok) {
-              const blob = await resp.blob();
-              blobUrlMap[i] = URL.createObjectURL(blob);
-              loadedBytes += blob.size;
-            }
-          } catch (err) {
-            console.warn('[Preload] Failed for video', i, itemUrl, err);
-          }
-          preloadedCount++;
-          updatePreloadUI();
-        }
-      }
-
-      const workers = [];
-      for (let c = 0; c < Math.min(concurrency, totalCount); c++) {
-        workers.push(worker());
-      }
-      await Promise.all(workers);
-
-      isPreloading = false;
-      showFlash('✅ ALL PRELOADED');
-      if (preloadLabel) preloadLabel.textContent = 'DONE';
-      if (preloadStatus) {
-        preloadStatus.style.background = 'rgba(0,255,136,0.3)';
-        const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
-        preloadStatus.textContent = '✅ ' + totalCount + '/' + totalCount + ' PRELOADED (' + mb + ' MB)';
-      }
-
-      if (blobUrlMap[idx] && video.src !== blobUrlMap[idx]) {
-        const curTime = video.currentTime;
-        const wasPaused = video.paused;
-        video.src = blobUrlMap[idx];
-        video.currentTime = curTime;
-        if (!wasPaused) video.play().catch(() => {});
-      }
-    }
-
-    if (!videoData || videoData.length === 0) {
-      document.getElementById('videoWrap').innerHTML = `
-        <div class="empty-feed">
-          <div style="font-size: 36px;">🎬</div>
-          <div style="font-weight: 700; color: #FFF;">NO VIDEOS FOUND</div>
-          <div style="font-size: 11px;">Add videos to the output directory to start viewing reels.</div>
-        </div>
-      `;
-      return;
-    }
-
     function formatTime(seconds) {
-      if (!seconds || isNaN(seconds)) return '0:00';
+      if (seconds === null || seconds === undefined || isNaN(seconds)) return '0:00';
       const m = Math.floor(seconds / 60);
       const s = Math.floor(seconds % 60);
       return m + ':' + (s < 10 ? '0' : '') + s;
@@ -556,6 +906,239 @@
       return itemUrl;
     }
 
+    function getCurrentComments() {
+      const item = videoData[idx];
+      return (item && item.comments) ? item.comments : [];
+    }
+
+    // ── Comments Markers on Timeline (SoundCloud Style) ──
+    function renderCommentMarkers() {
+      if (!commentMarkers) return;
+      commentMarkers.innerHTML = '';
+      const duration = video.duration;
+      if (!duration || isNaN(duration)) return;
+
+      const comments = getCurrentComments();
+      comments.forEach((c) => {
+        if (c.timestamp === null || c.timestamp === undefined) return;
+        const pct = Math.max(0, Math.min(100, (Number(c.timestamp) / duration) * 100));
+        const dot = document.createElement('div');
+        dot.className = 'reels-comment-dot';
+        dot.style.left = pct + '%';
+        dot.style.backgroundColor = c.avatar_color || '#FF3B1F';
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'reels-dot-tooltip';
+        tooltip.innerHTML = `<span>${c.author_avatar || '👤'}</span><strong>${c.author_name}</strong><span>⏱️ ${formatTime(c.timestamp)}</span>`;
+        dot.appendChild(tooltip);
+
+        dot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          video.currentTime = Number(c.timestamp);
+          showFlash('⏱️ ' + formatTime(c.timestamp));
+        });
+
+        commentMarkers.appendChild(dot);
+      });
+    }
+
+    // ── Bottom-Middle Twitch-Style Ticker (When Drawer Closed) ──
+    function updateTwitchTicker() {
+      if (!twitchCommentTicker) return;
+      if (commentsDrawer && commentsDrawer.classList.contains('open')) {
+        twitchCommentTicker.style.opacity = '0';
+        twitchCommentTicker.innerHTML = '';
+        return;
+      }
+
+      const curTime = video.currentTime || 0;
+      const comments = getCurrentComments();
+      const active = comments.filter((c) => {
+        if (c.timestamp === null || c.timestamp === undefined) return false;
+        const t = Number(c.timestamp);
+        return curTime >= t && curTime <= (t + 4.0);
+      });
+
+      if (active.length === 0) {
+        twitchCommentTicker.style.opacity = '0';
+        twitchCommentTicker.innerHTML = '';
+        return;
+      }
+
+      twitchCommentTicker.style.opacity = '1';
+      // If multiple comments at the same timestamp point, render up to 2 stacked pills
+      const showCount = Math.min(2, active.length);
+      twitchCommentTicker.innerHTML = active.slice(0, showCount).map((c) => `
+        <div class="twitch-comment-pill">
+          <div class="twitch-avatar">${c.author_avatar || '👤'}</div>
+          <span class="twitch-author" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
+          <span class="twitch-tag">⏱️ ${formatTime(c.timestamp)}</span>
+          <span class="twitch-text">${c.text}</span>
+        </div>
+      `).join('');
+    }
+
+    // ── Drawer Comments List Rendering ──
+    function renderDrawerComments() {
+      if (!commentsList) return;
+      const comments = getCurrentComments();
+      if (drawerTitle) drawerTitle.textContent = `💬 COMMENTS (${comments.length})`;
+      if (commentBadge) commentBadge.textContent = comments.length ? `(${comments.length})` : 'COMMENTS';
+
+      let filtered = comments;
+      if (activeTab === 'sync') {
+        filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
+      } else if (activeTab === 'general') {
+        filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+      }
+
+      if (filtered.length === 0) {
+        commentsList.innerHTML = `
+          <div style="text-align: center; color: #9BA1A8; font-size: 11px; padding: 32px 0;">
+            No ${activeTab === 'sync' ? 'time-synced' : activeTab === 'general' ? 'general' : ''} comments yet.<br/>Be the first to drop one below!
+          </div>
+        `;
+        return;
+      }
+
+      commentsList.innerHTML = filtered.map((c) => `
+        <div class="comment-item" id="comment-${c.id}">
+          <div class="comment-avatar" style="border-color: ${c.avatar_color || '#FF3B1F'};">${c.author_avatar || '👤'}</div>
+          <div class="comment-content">
+            <div class="comment-head">
+              <span class="comment-name" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
+              ${c.timestamp !== null && c.timestamp !== undefined
+                ? `<button type="button" class="comment-time-btn" data-seek="${c.timestamp}">⏱️ ${formatTime(c.timestamp)}</button>`
+                : `<span class="comment-time-gen">GENERAL</span>`}
+            </div>
+            <div class="comment-msg">${c.text}</div>
+          </div>
+          <button type="button" class="comment-like-btn" data-like="${c.id}" title="Like Comment">
+            ❤️ <span>${c.likes || 0}</span>
+          </button>
+        </div>
+      `).join('');
+
+      // Add click listeners to timestamp buttons
+      commentsList.querySelectorAll('.comment-time-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const t = parseFloat(btn.getAttribute('data-seek'));
+          if (!isNaN(t)) {
+            video.currentTime = t;
+            showFlash('⏱️ ' + formatTime(t));
+          }
+        });
+      });
+
+      // Add click listeners to like buttons
+      commentsList.querySelectorAll('.comment-like-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const cid = btn.getAttribute('data-like');
+          try {
+            const resp = await fetch(`/api/reels/comments/${cid}/like`, { method: 'POST' });
+            if (resp.ok) {
+              const resData = await resp.json();
+              const countSpan = btn.querySelector('span');
+              if (countSpan) countSpan.textContent = resData.likes;
+              const target = comments.find((x) => x.id === cid);
+              if (target) target.likes = resData.likes;
+            }
+          } catch (e) {}
+        });
+      });
+    }
+
+    function randomizePersona() {
+      const next = PERSONAS[Math.floor(Math.random() * PERSONAS.length)];
+      currentPersona = next;
+      if (personaAvatar) personaAvatar.textContent = next.avatar;
+      if (personaName) personaName.textContent = next.name;
+    }
+
+    function toggleDrawer(open) {
+      if (!commentsDrawer) return;
+      const willOpen = (typeof open === 'boolean') ? open : !commentsDrawer.classList.contains('open');
+      if (willOpen) {
+        commentsDrawer.classList.add('open');
+        commentBtn.classList.add('active');
+        renderDrawerComments();
+        setTimeout(() => commentInput && commentInput.focus(), 150);
+      } else {
+        commentsDrawer.classList.remove('open');
+        commentBtn.classList.remove('active');
+      }
+      updateTwitchTicker();
+    }
+
+    // Tab button listeners
+    [tabAll, tabSync, tabGeneral].forEach((tab) => {
+      if (!tab) return;
+      tab.addEventListener('click', () => {
+        [tabAll, tabSync, tabGeneral].forEach((t) => t && t.classList.remove('active'));
+        tab.classList.add('active');
+        activeTab = tab.getAttribute('data-tab');
+        renderDrawerComments();
+      });
+    });
+
+    if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));
+    if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
+    if (personaBtn) personaBtn.addEventListener('click', randomizePersona);
+
+    if (syncTimeToggle) {
+      syncTimeToggle.addEventListener('click', () => {
+        isSyncTimeActive = !isSyncTimeActive;
+        if (isSyncTimeActive) {
+          syncTimeToggle.classList.remove('inactive');
+          syncTimeToggle.classList.add('active');
+          if (commentInput) commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime)}...`;
+        } else {
+          syncTimeToggle.classList.remove('active');
+          syncTimeToggle.classList.add('inactive');
+          if (commentInput) commentInput.placeholder = 'Add a general comment...';
+        }
+      });
+    }
+
+    if (commentForm) {
+      commentForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const txt = (commentInput ? commentInput.value : '').trim();
+        if (!txt) return;
+
+        const curItem = videoData[idx];
+        if (!curItem) return;
+
+        const payload = {
+          video_path: curItem.path || curItem.filename,
+          timestamp: isSyncTimeActive ? Math.round(video.currentTime * 10) / 10 : null,
+          author_name: currentPersona.name,
+          author_avatar: currentPersona.avatar,
+          avatar_color: currentPersona.color,
+          text: txt
+        };
+
+        try {
+          const res = await fetch('/api/reels/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            const newC = await res.json();
+            if (!curItem.comments) curItem.comments = [];
+            curItem.comments.push(newC);
+            if (commentInput) commentInput.value = '';
+            renderDrawerComments();
+            renderCommentMarkers();
+            showFlash('💬 COMMENT POSTED');
+          }
+        } catch (err) {
+          console.error('[Comments] Failed to post comment:', err);
+        }
+      });
+    }
+
     function preloadNext(currentIndex) {
       if (!videoData || videoData.length <= 1) return;
       const nextIdx = (currentIndex + 1) % videoData.length;
@@ -582,6 +1165,11 @@
       video.src = itemUrl;
       video.muted = isMuted;
 
+      // Update comments display for this video
+      renderDrawerComments();
+      renderCommentMarkers();
+      updateTwitchTicker();
+
       // Preload subsequent video track in background
       preloadNext(idx);
 
@@ -603,6 +1191,10 @@
       });
     }
 
+    video.addEventListener('loadedmetadata', () => {
+      renderCommentMarkers();
+    });
+
     video.addEventListener('error', () => {
       const err = video.error;
       console.error('[ReelsPlayer] Video load error:', err, 'src:', video.src);
@@ -612,7 +1204,6 @@
       if (window.location.protocol === 'https:' && video.src.startsWith('http:')) {
         showError('HTTPS Mixed Content Blocked: Page is HTTPS but media URL is HTTP. Open app over http://localhost:8501 or use USB Chrome Remote Debugging.');
       } else if (isProxy) {
-        // H.264 proxies are guaranteed browser-playable; ignore transient load errors
         console.warn('[ReelsPlayer] Transient error on H.264 proxy stream:', video.src);
       } else if (err && err.code === 4 /* MEDIA_ERR_SRC_NOT_SUPPORTED */) {
         showError('Video format (HEVC) not supported by browser. Select "H.264 4K (Web & VR)" in the Codec filter above.');
@@ -677,6 +1268,47 @@
       }
     }
 
+    // Preload All Videos
+    function updatePreloadStatus() {
+      if (preloadStatus) {
+        preloadStatus.textContent = `⚡ ${preloadedCount}/${videoData.length}`;
+        preloadStatus.style.display = 'inline-block';
+      }
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.onPreloadProgress) {
+        WebXRVR.onPreloadProgress(preloadedCount, videoData.length);
+      }
+    }
+
+    async function preloadAllVideos() {
+      if (isPreloading) return;
+      isPreloading = true;
+      if (preloadStatus) preloadStatus.style.display = 'inline-block';
+      if (preloadLabel) preloadLabel.textContent = 'LOADING...';
+      preloadedCount = 0;
+      updatePreloadStatus();
+
+      for (let i = 0; i < videoData.length; i++) {
+        const item = videoData[i];
+        if (blobUrlMap[i]) {
+          preloadedCount++;
+          updatePreloadStatus();
+          continue;
+        }
+        try {
+          const url = resolveItemUrl(item);
+          const res = await fetch(url);
+          const blob = await res.blob();
+          blobUrlMap[i] = URL.createObjectURL(blob);
+          preloadedCount++;
+          updatePreloadStatus();
+        } catch (e) {
+          console.error('Failed to preload video at index', i, e);
+        }
+      }
+      isPreloading = false;
+      if (preloadLabel) preloadLabel.textContent = 'PRELOADED';
+    }
+
     // Navigation
     function nextVideo() {
       loadVideo(idx + 1);
@@ -701,10 +1333,14 @@
       }
     });
 
-    // Click on video area toggles play/pause
+    // Click on video area toggles play/pause (unless drawer is clicked)
     document.getElementById('videoWrap').addEventListener('click', (e) => {
       if (e.target.tagName === 'VIDEO' || e.target.id === 'videoWrap') {
-        togglePlay();
+        if (commentsDrawer && commentsDrawer.classList.contains('open')) {
+          toggleDrawer(false);
+        } else {
+          togglePlay();
+        }
       }
     });
 
@@ -718,13 +1354,18 @@
       }
     });
 
-    // Update Progress Bar
+    // Update Progress Bar & Time-Synced Overlays
     video.addEventListener('timeupdate', () => {
       if (video.duration) {
         const pct = (video.currentTime / video.duration) * 100;
         progressFill.style.width = pct + '%';
         timeDisplay.textContent = formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
+        if (syncTimeDisplay) syncTimeDisplay.textContent = formatTime(video.currentTime);
+        if (isSyncTimeActive && commentInput && !commentInput.value) {
+          commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime)}...`;
+        }
       }
+      updateTwitchTicker();
     });
 
     // Seek on progress bar click
@@ -739,6 +1380,7 @@
     // Mouse Wheel Scroll Navigation inside Frame
     let scrollTimeout;
     frame.addEventListener('wheel', (e) => {
+      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
       e.preventDefault();
       clearTimeout(scrollTimeout);
       scrollTimeout = setTimeout(() => {
@@ -759,6 +1401,7 @@
     }, { passive: true });
 
     frame.addEventListener('touchend', (e) => {
+      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
       if (e.changedTouches.length > 0) {
         const touchEndY = e.changedTouches[0].clientY;
         const diffY = touchStartY - touchEndY;
@@ -770,10 +1413,20 @@
       }
     }, { passive: true });
 
-    // WASD & Keyboard controls
+    // Keyboard controls
     window.addEventListener('keydown', (e) => {
+      // Don't capture shortcuts when typing in comment input
+      if (e.target && e.target.tagName === 'INPUT') {
+        if (e.key === 'Escape') toggleDrawer(false);
+        return;
+      }
       const key = e.key.toLowerCase();
-      if (key === 'w' || key === 'arrowup' || key === 'p') {
+      if (key === 'escape') {
+        toggleDrawer(false);
+      } else if (key === 'c') {
+        e.preventDefault();
+        toggleDrawer();
+      } else if (key === 'w' || key === 'arrowup' || key === 'p') {
         e.preventDefault();
         prevVideo();
       } else if (key === 's' || key === 'arrowdown' || key === 'n') {
@@ -830,9 +1483,9 @@
         getPlaylist: function() { return videoData; },
         getCurrentIndex: function() { return idx; },
         getAutoNext: function() { return isAutoNext; },
+        getComments: function() { return getCurrentComments(); },
       });
 
-      // Always show VR button so user can test on any browser or emulator
       if (vrBtnWrap) {
         vrBtnWrap.style.display = '';
       }
