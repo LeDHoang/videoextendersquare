@@ -1431,8 +1431,8 @@ input[type='range']::-moz-range-thumb {
 }
 
 .sx-reels-mount {
-  width: min(calc(100vh - 160px), 800px, 100%);
-  min-height: min(calc(100vh - 160px), 800px);
+  width: min(calc(100vh - 160px), 900px, 100%);
+  min-height: min(calc(100vh - 160px), 900px);
   aspect-ratio: auto;
   margin: 0 auto;
   border: 1px solid var(--sx-rule-strong);
