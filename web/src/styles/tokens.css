@@ -72,6 +72,10 @@
   --sx-8: 64px;
   --sx-9: 96px;
 
+  /* ─── Control Dimensions ─────────────────────────────────── */
+  --sx-control-h: 38px;
+  --sx-control-h-lg: 44px;
+
   /* ─── Rule Weights ───────────────────────────────────────── */
   --sx-rule-hairline: 1px solid var(--sx-rule);
   --sx-rule-heavy: 3px solid var(--sx-ink);

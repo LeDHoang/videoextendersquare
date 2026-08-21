@@ -112,9 +112,9 @@ export default function ReelsPage() {
       </div>
 
       {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 'var(--sx-2)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sx-2)' }}>
-        <div style={{ display: 'flex', gap: 'var(--sx-2)', flexWrap: 'wrap', alignItems: 'center', flex: '1 1 auto' }}>
-          <div style={{ width: '170px' }}>
+      <div className="sx-toolbar">
+        <div className="sx-toolbar-group">
+          <div style={{ width: '160px' }}>
             <Dropdown
               value={folder}
               options={folderOpts}
@@ -123,27 +123,25 @@ export default function ReelsPage() {
             />
           </div>
           <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
-          <div style={{ width: '160px' }}>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <input
-                ref={searchRef}
-                className="sx-input"
-                placeholder="Search…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search ? (
-                <button
-                  type="button"
-                  className="sx-btn"
-                  style={{ padding: '0 8px' }}
-                  onClick={() => setSearch('')}
-                  aria-label="Clear search filter"
-                >
-                  ✕
-                </button>
-              ) : null}
-            </div>
+          <div style={{ width: '150px', position: 'relative' }}>
+            <input
+              ref={searchRef}
+              className="sx-input"
+              style={{ paddingRight: search ? '28px' : undefined }}
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search ? (
+              <button
+                type="button"
+                className="sx-search-clear"
+                onClick={() => setSearch('')}
+                aria-label="Clear search filter"
+              >
+                ✕
+              </button>
+            ) : null}
           </div>
           <div style={{ width: '120px' }}>
             <Dropdown
@@ -154,7 +152,7 @@ export default function ReelsPage() {
             />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sx-2)', alignItems: 'center' }}>
+        <div className="sx-toolbar-group">
           <Button onClick={() => setRefreshKey((k) => k + 1)}>↻</Button>
           <Button onClick={() => setShowTunnel((s) => !s)}>
             {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}

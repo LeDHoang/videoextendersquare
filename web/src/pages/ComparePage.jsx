@@ -126,7 +126,10 @@ export default function ComparePage() {
                 <div className="sx-label">COMPARISON MODE</div>
                 <Segmented options={VIEWS} value={view} onChange={setView} ariaLabel="Comparison Mode" />
               </div>
-              <Button onClick={() => setRefreshKey((k) => k + 1)}>↻ Rescan Pairs</Button>
+              <div style={{ flex: '0 0 auto' }}>
+                <div className="sx-label" style={{ visibility: 'hidden', userSelect: 'none' }}>ACTIONS</div>
+                <Button onClick={() => setRefreshKey((k) => k + 1)}>↻ Rescan Pairs</Button>
+              </div>
             </div>
 
             {pair ? (

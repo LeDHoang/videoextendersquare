@@ -630,16 +630,20 @@ button {
   color: var(--sx-ink);
   font-family: 'Archivo', sans-serif;
   font-weight: 700;
-  font-size: var(--sx-t-body);
+  font-size: 0.8125rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: var(--sx-3) var(--sx-5);
+  height: var(--sx-control-h, 38px);
+  padding: 0 var(--sx-4);
+  box-sizing: border-box;
   cursor: pointer;
   border-radius: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--sx-2);
+  white-space: nowrap;
+  line-height: 1;
   transition: background-color var(--sx-duration-fast) var(--sx-ease-out),
               border-color var(--sx-duration-fast) var(--sx-ease-out),
               transform var(--sx-duration-fast) var(--sx-ease-out),
@@ -663,7 +667,8 @@ button {
   font-family: 'Archivo Black', Archivo, sans-serif;
   font-weight: 400;
   width: 100%;
-  padding: var(--sx-4);
+  height: var(--sx-control-h-lg, 44px);
+  padding: 0 var(--sx-5);
   font-size: 0.95rem;
   box-shadow: var(--sx-glow-accent);
 }
@@ -684,7 +689,9 @@ button {
 /* Segmented control */
 .sx-seg {
   display: inline-flex;
-  flex-wrap: wrap;
+  align-items: stretch;
+  height: var(--sx-control-h, 38px);
+  box-sizing: border-box;
   border: 1px solid var(--sx-rule-strong);
   background: var(--sx-surface);
 }
@@ -698,7 +705,13 @@ button {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: var(--sx-2) var(--sx-4);
+  height: 100%;
+  padding: 0 var(--sx-3);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color var(--sx-duration-fast) ease,
               color var(--sx-duration-fast) ease;
@@ -720,12 +733,16 @@ button {
 
 /* Pills */
 .sx-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sx-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-1);
+  height: var(--sx-control-h, 38px);
+  box-sizing: border-box;
 }
 
 .sx-pill {
+  height: 100%;
+  box-sizing: border-box;
   background: var(--sx-surface);
   border: 1px solid var(--sx-rule-strong);
   color: var(--sx-ink-2);
@@ -734,9 +751,13 @@ button {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: var(--sx-2) var(--sx-3);
+  padding: 0 var(--sx-3);
   cursor: pointer;
   border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   transition: all var(--sx-duration-fast) ease;
 }
 
@@ -755,8 +776,22 @@ button {
 /* ─── Form Controls ──────────────────────────────────────── */
 
 .sx-input,
-.sx-textarea,
 .sx-select {
+  width: 100%;
+  height: var(--sx-control-h, 38px);
+  box-sizing: border-box;
+  background: var(--sx-surface-2);
+  border: 1px solid var(--sx-rule-strong);
+  color: var(--sx-ink);
+  padding: 0 var(--sx-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8125rem;
+  border-radius: 0;
+  transition: border-color var(--sx-duration-fast) ease,
+              box-shadow var(--sx-duration-fast) ease;
+}
+
+.sx-textarea {
   width: 100%;
   background: var(--sx-surface-2);
   border: 1px solid var(--sx-rule-strong);
@@ -765,14 +800,11 @@ button {
   font-family: inherit;
   font-size: var(--sx-t-body);
   border-radius: 0;
-  transition: border-color var(--sx-duration-fast) ease,
-              box-shadow var(--sx-duration-fast) ease;
-}
-
-.sx-textarea {
   min-height: 90px;
   resize: vertical;
   line-height: 1.5;
+  transition: border-color var(--sx-duration-fast) ease,
+              box-shadow var(--sx-duration-fast) ease;
 }
 
 .sx-input:focus,
@@ -789,7 +821,46 @@ button {
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
   text-transform: uppercase;
-  margin: var(--sx-3) 0 var(--sx-2) 0;
+  margin: 0 0 var(--sx-2) 0;
+  line-height: 1;
+}
+
+/* ─── Unified Toolbars ───────────────────────────────────── */
+.sx-toolbar {
+  display: flex;
+  gap: var(--sx-2);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sx-2);
+}
+
+.sx-toolbar-group {
+  display: inline-flex;
+  gap: var(--sx-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.sx-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  color: var(--sx-ink-3);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sx-search-clear:hover {
+  color: var(--sx-ink);
 }
 
 /* Custom Range Slider */
@@ -836,10 +907,12 @@ input[type='range']::-moz-range-thumb {
 
 .sx-dropdown-head {
   width: 100%;
+  height: var(--sx-control-h, 38px);
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: var(--sx-3);
+  gap: var(--sx-2);
   background: var(--sx-surface-2);
   border: 1px solid var(--sx-rule-strong);
   color: var(--sx-ink);
@@ -848,7 +921,7 @@ input[type='range']::-moz-range-thumb {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: var(--sx-3) var(--sx-4);
+  padding: 0 var(--sx-3);
   cursor: pointer;
   text-align: left;
   border-radius: 0;
