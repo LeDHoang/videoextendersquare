@@ -40,12 +40,26 @@
     outline: none;
   }
 
+  /* Dynamic 2D Ambient Glow Backdrop */
+  .reels-ambient-glow {
+    position: absolute;
+    inset: -20px;
+    z-index: 1;
+    filter: blur(48px);
+    opacity: 0.65;
+    pointer-events: none;
+    border-radius: 24px;
+    transition: background 0.35s ease, opacity 0.35s ease;
+    background: radial-gradient(circle at center, rgba(18, 42, 105, 0.6) 0%, rgba(2, 6, 18, 0) 75%);
+  }
+
   .reels-video-wrap {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     background: #000;
+    z-index: 2;
   }
   .reels-video-wrap video {
     width: 100%;
@@ -303,6 +317,7 @@
 <body>
 
 <div class="reels-phone-frame" id="reelsFrame" tabindex="0">
+  <div class="reels-ambient-glow" id="reelsAmbientGlow"></div>
   <div class="reels-top-bar">
     <div class="reels-badge">4K MASTER REELS v4.2</div>
     <div class="reels-counter" id="counter">0 / 0</div>
@@ -834,6 +849,32 @@
         });
       }
     }
+
+    // ── 2D Viewport Ambient Glow Sampler ──
+    const glowEl = document.getElementById('reelsAmbientGlow');
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = 4;
+    glowCanvas.height = 4;
+    const glowCtx = glowCanvas.getContext('2d', { willReadFrequently: true });
+
+    function updateDesktopGlow() {
+      if (!video || video.paused || video.readyState < 2 || !glowEl) return;
+      try {
+        glowCtx.drawImage(video, 0, 0, 4, 4);
+        const data = glowCtx.getImageData(0, 0, 4, 4).data;
+        let r = 0, g = 0, b = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i];
+          g += data[i + 1];
+          b += data[i + 2];
+        }
+        r = Math.min(255, Math.round((r / 16) * 1.3 + 5));
+        g = Math.min(255, Math.round((g / 16) * 1.3 + 10));
+        b = Math.min(255, Math.round((b / 16) * 1.4 + 20));
+        glowEl.style.background = `radial-gradient(circle at center, rgba(${r}, ${g}, ${b}, 0.75) 0%, rgba(2, 6, 18, 0) 75%)`;
+      } catch (e) {}
+    }
+    setInterval(updateDesktopGlow, 140);
 
     // Initial Load
     loadVideo(0);

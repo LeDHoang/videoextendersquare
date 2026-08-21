@@ -11,7 +11,7 @@ const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.6-20260809-toplayout';
+  const VR_VERSION = 'v4.7-20260821-cosmic-glow';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -42,6 +42,31 @@ const WebXRVR = (function () {
   let loc_uTex = null;
   let loc_uAlpha = null;
   let loc_uCurved = null;
+
+  // Starfield Environment State
+  let glStarProgram = null;
+  let glStarBuf = null;
+  const STAR_COUNT = 1800;
+  let loc_star_aPos = -1;
+  let loc_star_aData = -1;
+  let loc_star_uVP = null;
+  let loc_star_uHeadPos = null;
+  let loc_star_uTime = null;
+
+  // Ambient Video Glow (Ambilight) State
+  let glGlowProgram = null;
+  let loc_glow_aPos = -1;
+  let loc_glow_aUV = -1;
+  let loc_glow_uMVP = null;
+  let loc_glow_uCurved = null;
+  let loc_glow_uColor = null;
+  let loc_glow_uIntensity = null;
+
+  let ambilightCanvas = null;
+  let ambilightCtx = null;
+  let curGlowColor = [0.12, 0.28, 0.65];
+  let targetGlowColor = [0.12, 0.28, 0.65];
+  let lastColorSampleTime = 0;
 
   // Pointer & Ray tracking
   let activeRayOrigin = null;
@@ -911,6 +936,97 @@ const WebXRVR = (function () {
     }
   `;
 
+  /**
+   * Celestial Starfield Shader with Organic Breathing Oscillation
+   */
+  const STAR_VERT = `
+    attribute vec3 aPos;
+    attribute vec3 aData; // x: size, y: phase, z: colorType
+    uniform mat4 uVP;
+    uniform vec3 uHeadPos;
+    uniform float uTime;
+    varying float vAlpha;
+    varying vec3 vColor;
+
+    void main() {
+      // Starfield centered around current viewer head position so it feels at infinity
+      vec3 worldPos = aPos + uHeadPos;
+      gl_Position = uVP * vec4(worldPos, 1.0);
+      
+      // Multi-frequency breathing oscillation for natural, organic twinkle
+      float breath = sin(uTime * 1.35 + aData.y) * 0.45 + sin(uTime * 0.65 + aData.y * 2.1) * 0.25;
+      float curSize = aData.x * (1.0 + breath * 0.45);
+      gl_PointSize = clamp(curSize, 1.5, 13.0);
+      
+      vAlpha = clamp(0.60 + breath * 0.45, 0.15, 1.0);
+      
+      if (aData.z < 0.5) {
+        vColor = vec3(0.92, 0.96, 1.0); // Diamond white
+      } else if (aData.z < 1.5) {
+        vColor = vec3(0.40, 0.76, 1.0); // Celestial neon cyan/blue
+      } else {
+        vColor = vec3(1.0, 0.86, 0.68); // Warm stellar amber
+      }
+    }
+  `;
+
+  const STAR_FRAG = `
+    precision mediump float;
+    varying float vAlpha;
+    varying vec3 vColor;
+
+    void main() {
+      vec2 coord = gl_PointCoord - vec2(0.5);
+      float dist = length(coord);
+      if (dist > 0.5) discard;
+      float core = smoothstep(0.5, 0.05, dist);
+      float glow = exp(-dist * 4.5);
+      float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
+      gl_FragColor = vec4(vColor, finalAlpha);
+    }
+  `;
+
+  /**
+   * Ambient Video Glow (Ambilight) Shader with Soft Radial Falloff
+   */
+  const GLOW_VERT = `
+    attribute vec3 aPos;
+    attribute vec2 aUV;
+    varying vec2 vUV;
+    uniform mat4 uMVP;
+    uniform float uCurved;
+
+    const float ARC_ANGLE = 0.6;
+    const float R = 1.6667;
+
+    void main() {
+      vUV = aUV;
+      vec3 pos = aPos;
+      if (uCurved > 0.5) {
+        float angle = aPos.x * ARC_ANGLE;
+        pos.x = R * sin(angle);
+        pos.z = R * (1.0 - cos(angle));
+      }
+      gl_Position = uMVP * vec4(pos, 1.0);
+    }
+  `;
+
+  const GLOW_FRAG = `
+    precision mediump float;
+    varying vec2 vUV;
+    uniform vec3 uColor;
+    uniform float uIntensity;
+
+    void main() {
+      vec2 d = abs(vUV - 0.5) * 2.0;
+      float edgeDist = length(max(vec2(0.0), d - vec2(0.68, 0.68)));
+      float falloff = exp(-edgeDist * 3.8);
+      float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
+      float alpha = falloff * borderMask * uIntensity;
+      gl_FragColor = vec4(uColor * 1.3, alpha);
+    }
+  `;
+
   function compileShader(type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -958,6 +1074,66 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   }
 
+  function initStarfield() {
+    const data = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+      // Random spherical distribution
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 40.0 + Math.random() * 35.0; // 40m - 75m distance
+
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta);
+      const z = r * Math.cos(phi);
+
+      const size = 2.5 + Math.random() * 4.5;
+      const phase = Math.random() * Math.PI * 2;
+      const colorType = Math.random() < 0.6 ? 0.0 : (Math.random() < 0.5 ? 1.0 : 2.0);
+
+      data.push(x, y, z, size, phase, colorType);
+    }
+    glStarBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  }
+
+  function initAmbilight() {
+    ambilightCanvas = document.createElement('canvas');
+    ambilightCanvas.width = 8;
+    ambilightCanvas.height = 8;
+    ambilightCtx = ambilightCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  function updateAmbilightColor(now) {
+    if (!videoElement || videoElement.readyState < 2 || videoElement.paused) return;
+    if (now - lastColorSampleTime < 80) return; // Sample at ~12 FPS
+    lastColorSampleTime = now;
+
+    try {
+      ambilightCtx.drawImage(videoElement, 0, 0, 8, 8);
+      const imgData = ambilightCtx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      const count = 64;
+      for (let i = 0; i < imgData.length; i += 4) {
+        r += imgData[i];
+        g += imgData[i + 1];
+        b += imgData[i + 2];
+      }
+      r = (r / count) / 255.0;
+      g = (g / count) / 255.0;
+      b = (b / count) / 255.0;
+
+      // Enhance vibrant ambient glow tone while preserving dark blue cosmos vibe
+      targetGlowColor = [
+        Math.min(1.0, r * 1.35 + 0.03),
+        Math.min(1.0, g * 1.35 + 0.05),
+        Math.min(1.0, b * 1.45 + 0.09)
+      ];
+    } catch (e) {
+      // Ignore security errors if cross-origin
+    }
+  }
+
   function initGL(session) {
     const canvas = document.createElement('canvas');
     gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false });
@@ -969,6 +1145,7 @@ const WebXRVR = (function () {
     glLayer = new XRWebGLLayer(session, gl);
     session.updateRenderState({ baseLayer: glLayer });
 
+    // Main Program
     const vs = compileShader(gl.VERTEX_SHADER, VERT);
     const fs = compileShader(gl.FRAGMENT_SHADER, FRAG);
     glProgram = gl.createProgram();
@@ -987,6 +1164,35 @@ const WebXRVR = (function () {
     loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
     loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
     loc_uCurved = gl.getUniformLocation(glProgram, 'uCurved');
+
+    // Starfield Program
+    const starVs = compileShader(gl.VERTEX_SHADER, STAR_VERT);
+    const starFs = compileShader(gl.FRAGMENT_SHADER, STAR_FRAG);
+    glStarProgram = gl.createProgram();
+    gl.attachShader(glStarProgram, starVs);
+    gl.attachShader(glStarProgram, starFs);
+    gl.linkProgram(glStarProgram);
+
+    loc_star_aPos = gl.getAttribLocation(glStarProgram, 'aPos');
+    loc_star_aData = gl.getAttribLocation(glStarProgram, 'aData');
+    loc_star_uVP = gl.getUniformLocation(glStarProgram, 'uVP');
+    loc_star_uHeadPos = gl.getUniformLocation(glStarProgram, 'uHeadPos');
+    loc_star_uTime = gl.getUniformLocation(glStarProgram, 'uTime');
+
+    // Ambient Glow Program
+    const glowVs = compileShader(gl.VERTEX_SHADER, GLOW_VERT);
+    const glowFs = compileShader(gl.FRAGMENT_SHADER, GLOW_FRAG);
+    glGlowProgram = gl.createProgram();
+    gl.attachShader(glGlowProgram, glowVs);
+    gl.attachShader(glGlowProgram, glowFs);
+    gl.linkProgram(glGlowProgram);
+
+    loc_glow_aPos = gl.getAttribLocation(glGlowProgram, 'aPos');
+    loc_glow_aUV = gl.getAttribLocation(glGlowProgram, 'aUV');
+    loc_glow_uMVP = gl.getUniformLocation(glGlowProgram, 'uMVP');
+    loc_glow_uCurved = gl.getUniformLocation(glGlowProgram, 'uCurved');
+    loc_glow_uColor = gl.getUniformLocation(glGlowProgram, 'uColor');
+    loc_glow_uIntensity = gl.getUniformLocation(glGlowProgram, 'uIntensity');
 
     const COLS = 32;
     const verts = [];
@@ -1027,11 +1233,13 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
     initReticleTexture();
+    initStarfield();
+    initAmbilight();
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    console.log('[WebXRVR] WebGL initialised OK with Deep IMAX Curve & Smooth 6DOF');
+    console.log('[WebXRVR] WebGL initialised OK with Celestial Cosmos & Dynamic Ambilight Glow');
     return true;
   }
 
@@ -1103,6 +1311,61 @@ const WebXRVR = (function () {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, glGridVertCount);
   }
 
+  // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
+
+  function drawStarfield(viewMat, projMat, timeSec) {
+    if (!glStarProgram || !glStarBuf) return;
+    gl.useProgram(glStarProgram);
+
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending for stars
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
+    gl.enableVertexAttribArray(loc_star_aPos);
+    gl.enableVertexAttribArray(loc_star_aData);
+    gl.vertexAttribPointer(loc_star_aPos, 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(loc_star_aData, 3, gl.FLOAT, false, 24, 12);
+
+    const vp = mat4Mul(projMat, viewMat);
+    gl.uniformMatrix4fv(loc_star_uVP, false, vp);
+    gl.uniform3f(loc_star_uHeadPos, currentHeadPos.x, currentHeadPos.y, currentHeadPos.z);
+    gl.uniform1f(loc_star_uTime, timeSec);
+
+    gl.drawArrays(gl.POINTS, 0, STAR_COUNT);
+
+    gl.depthMask(true);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  function drawAmbientGlow(viewMat, projMat, pos, quat, scaleW, scaleH, curved) {
+    if (!glGlowProgram || !glGridBuf) return;
+    gl.useProgram(glGlowProgram);
+
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive glow against dark blue sky
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+    gl.enableVertexAttribArray(loc_glow_aPos);
+    gl.enableVertexAttribArray(loc_glow_aUV);
+    gl.vertexAttribPointer(loc_glow_aPos, 3, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(loc_glow_aUV, 2, gl.FLOAT, false, 20, 12);
+
+    const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
+    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
+
+    gl.uniformMatrix4fv(loc_glow_uMVP, false, mvp);
+    gl.uniform1f(loc_glow_uCurved, curved ? 1.0 : 0.0);
+    gl.uniform3f(loc_glow_uColor, curGlowColor[0], curGlowColor[1], curGlowColor[2]);
+    gl.uniform1f(loc_glow_uIntensity, 0.78);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, glGridVertCount);
+
+    gl.depthMask(true);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
   // ─── Draw Laser Pointer Beam & Target Reticle Dot ────────────────────
 
   function drawLaserPointer(viewMat, projMat) {
@@ -1163,9 +1426,16 @@ const WebXRVR = (function () {
       };
 
       if (!isInitialPoseSet) {
+        if (!lockToViewer) {
+          const initDir = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
+          screenQuat = quatLevelFromDir(initDir);
+          screenPos = {
+            x: currentHeadPos.x + initDir.x * 2.24,
+            y: currentHeadPos.y,
+            z: currentHeadPos.z + initDir.z * 2.24,
+          };
+        }
         isInitialPoseSet = true;
-        screenPos.y = currentHeadPos.y;
-        screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
       }
 
       if (lockToViewer) {
@@ -1181,8 +1451,15 @@ const WebXRVR = (function () {
 
     if (!glLayer || !gl) return;
 
+    // Update real-time Ambilight video color extraction and smooth interpolation
+    updateAmbilightColor(time);
+    curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
+    curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
+    curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-    gl.clearColor(0.03, 0.03, 0.04, 1);
+    // Deep midnight blue celestial background (20% darker for enhanced contrast)
+    gl.clearColor(0.0095, 0.0175, 0.052, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     if (videoElement && videoElement.readyState >= 2) {
@@ -1207,6 +1484,8 @@ const WebXRVR = (function () {
       }
     }
 
+    const timeSec = time * 0.001;
+
     for (const view of pose.views) {
       const vp = glLayer.getViewport(view);
       gl.viewport(vp.x, vp.y, vp.width, vp.height);
@@ -1214,6 +1493,13 @@ const WebXRVR = (function () {
       const viewMat = view.transform.inverse.matrix;
       const projMat = view.projectionMatrix;
 
+      // 1. Draw breathing celestial starfield
+      drawStarfield(viewMat, projMat, timeSec);
+
+      // 2. Draw dynamic ambient video glow (Ambilight) behind video screen
+      drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, isCurved);
+
+      // 3. Draw main video screen
       drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, isCurved);
 
       if (controlsVisible) {
@@ -1549,6 +1835,11 @@ const WebXRVR = (function () {
     loc_uTex = null;
     loc_uAlpha = null;
     loc_uCurved = null;
+    glStarProgram = null;
+    glStarBuf = null;
+    glGlowProgram = null;
+    ambilightCanvas = null;
+    ambilightCtx = null;
     controlsVisible = false;
     isGrabbing = false;
     currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
