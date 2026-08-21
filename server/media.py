@@ -197,22 +197,36 @@ def scan_output_videos(root: str = "output") -> list[dict]:
 
 
 def scan_pairs(root: str = "output/pairs") -> list[dict]:
-    """Find *_fast.mp4 files and note whether the _studio sibling exists."""
+    """Find *_fast.mp4 files strictly within output/ directory."""
     out = []
     seen = set()
-    dirs_to_scan = [Path(root), Path("input/1:1"), Path("input"),
-                    Path("output"), Path("output/FAL Playground test 4K")]
+    output_root = Path("output").resolve()
+    dirs_to_scan = [Path(root), Path("output"), Path("output/FAL Playground test 4K")]
 
     Path(root).mkdir(parents=True, exist_ok=True)
 
     for base in dirs_to_scan:
         if not base.is_dir():
             continue
+        try:
+            if not base.resolve().is_relative_to(output_root):
+                continue
+        except (OSError, ValueError):
+            continue
+
         fast_files = sorted(list(base.glob("*_fast.mp4")) + list(base.glob("*_fast_4k.mp4")))
         for fast in fast_files:
+            if fast.name.endswith("-preview.mp4"):
+                continue
             fast_suffix = "_fast_4k.mp4" if fast.name.endswith("_fast_4k.mp4") else "_fast.mp4"
             stem = fast.name[: -len(fast_suffix)]
             if stem in seen:
+                continue
+
+            try:
+                if not fast.resolve().is_relative_to(output_root):
+                    continue
+            except (OSError, ValueError):
                 continue
 
             studio_candidates = [

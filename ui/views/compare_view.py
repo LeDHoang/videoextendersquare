@@ -22,8 +22,6 @@ STUDIO_SUFFIX = "_studio.mp4"
 
 CANDIDATE_DIRS = [
     Path("output/pairs"),
-    Path("input/1:1"),
-    Path("input"),
     Path("output"),
     Path("output/FAL Playground test 4K"),
 ]
