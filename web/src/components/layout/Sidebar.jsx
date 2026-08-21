@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import Nav from './Nav.jsx';
 import { HealthDot } from '../ui/primitives.jsx';
 import { Button, Field } from '../ui/controls.jsx';
@@ -55,11 +56,13 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
     <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
       {/* Brand Identity */}
       <div className="sx-brand">
-        <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo" />
-        <div className="sx-brand-text">
-          <span className="sx-brand-title">ECHO</span>
-          <span className="sx-brand-tag">4K EXTENDER · v2.0</span>
-        </div>
+        <Link to="/reels" className="sx-brand-link" onClick={() => onClose?.()} title="Go to Reels / VR Player">
+          <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo" />
+          <div className="sx-brand-text">
+            <span className="sx-brand-title">ECHO</span>
+            <span className="sx-brand-tag">4K EXTENDER · v2.0</span>
+          </div>
+        </Link>
         {isOpen ? (
           <button
             type="button"

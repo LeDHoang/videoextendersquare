@@ -153,6 +153,20 @@ button {
   border-bottom: var(--sx-rule-hairline);
 }
 
+.sx-brand-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sx-3);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: opacity var(--sx-duration-fast) var(--sx-ease-out);
+}
+
+.sx-brand-link:hover {
+  opacity: 0.9;
+}
+
 .sx-brand-icon {
   width: 36px;
   height: 36px;
@@ -245,9 +259,10 @@ button {
   padding: var(--sx-3) var(--sx-4);
   color: var(--sx-ink-2);
   text-decoration: none;
-  font-size: var(--sx-t-body);
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   border-left: 2px solid transparent;
   background: transparent;
@@ -349,10 +364,10 @@ button {
 
 .sx-hero {
   font-size: var(--sx-t-hero);
-  font-family: 'Archivo Black', Archivo, sans-serif;
-  font-weight: 400;
-  line-height: 0.9;
-  letter-spacing: -0.045em;
+  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
   text-transform: uppercase;
   color: var(--sx-ink);
   margin: 0 0 var(--sx-3) 0;
@@ -395,9 +410,10 @@ button {
 
 .sx-display {
   font-size: var(--sx-t-display);
-  font-family: 'Archivo Black', Archivo, sans-serif;
-  line-height: 0.95;
-  letter-spacing: -0.03em;
+  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
   text-transform: uppercase;
   margin: 0;
 }

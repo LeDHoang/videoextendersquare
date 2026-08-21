@@ -32,7 +32,7 @@ function Shell() {
 
       {/* Mobile Top App Bar (only shown on screens < 900px) */}
       <header className="sx-mobile-header">
-        <Link to="/image" className="sx-mobile-brand" onClick={() => setMobileOpen(false)}>
+        <Link to="/reels" className="sx-mobile-brand" onClick={() => setMobileOpen(false)}>
           <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo sx-brand-logo-sm" />
           <span className="sx-brand-title" style={{ fontSize: '0.85rem' }}>
             {currentTitle}
