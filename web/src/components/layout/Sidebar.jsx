@@ -55,7 +55,7 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
     <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
       {/* Brand Identity */}
       <div className="sx-brand">
-        <div className="sx-brand-icon">E</div>
+        <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo" />
         <div className="sx-brand-text">
           <span className="sx-brand-title">ECHO</span>
           <span className="sx-brand-tag">4K EXTENDER · v2.0</span>

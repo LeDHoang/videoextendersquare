@@ -12,5 +12,21 @@
 // React children array comma-joins it, e.g. the RENDER button used to read
 // "▶ RENDER ,3, VIDEO(S) 4K SQUARE". Rendering children directly fixes that.
 export default function Emoji({ text, className }) {
+  if (typeof text === 'string' && text.includes('ECHO')) {
+    const parts = text.split(/(ECHO)/g);
+    return (
+      <span className={className}>
+        {parts.map((part, i) =>
+          part === 'ECHO' ? (
+            <span key={i} className="sx-echo-text">
+              ECHO
+            </span>
+          ) : (
+            part
+          )
+        )}
+      </span>
+    );
+  }
   return <span className={className}>{text}</span>;
 }

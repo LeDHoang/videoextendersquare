@@ -168,17 +168,39 @@ button {
   flex-shrink: 0;
 }
 
+.sx-brand-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(255, 59, 31, 0.65));
+  flex-shrink: 0;
+  transition: transform var(--sx-duration-fast) var(--sx-ease-out),
+              filter var(--sx-duration-fast) var(--sx-ease-out);
+}
+
+.sx-brand-logo:hover {
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 22px rgba(255, 59, 31, 0.95));
+}
+
+.sx-brand-logo-sm {
+  width: 34px;
+  height: 34px;
+}
+
 .sx-brand-text {
   display: flex;
   flex-direction: column;
 }
 
 .sx-brand-title {
-  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-family: 'Orbitron', 'Archivo Black', sans-serif;
   font-size: 1.65rem;
-  letter-spacing: -0.04em;
-  color: var(--sx-ink);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: var(--sx-accent);
   line-height: 1;
+  text-shadow: 0 0 16px var(--sx-accent-glow);
 }
 
 .sx-brand-tag {
@@ -188,6 +210,13 @@ button {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   margin-top: 3px;
+}
+
+.sx-echo-text {
+  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--sx-accent);
 }
 
 /* Main content area */
