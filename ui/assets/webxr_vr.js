@@ -11,7 +11,7 @@ const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.7-20260821-cosmic-glow';
+  const VR_VERSION = 'v4.8-20260821-stereo-scale-fix';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -20,8 +20,12 @@ const WebXRVR = (function () {
   let videoElement = null;
   let callbacks = {};
 
-  // Display Settings
-  let isCurved = true;         // Default to Deep IMAX Curved Screen
+  // Curvature Settings
+  // 1: Concave Hemisphere (Radial Dome, Default - Center is focal point, curves on all sides)
+  // 2: Concave Square (Biaxial Pillow Curve - Symmetrical curve maintaining square format)
+  // 0: Flat
+  let curvatureMode = 1;
+  let isCurved = true; // backward compat
 
   // WebGL state
   let gl = null;
@@ -32,7 +36,8 @@ const WebXRVR = (function () {
   let glGuideTexture = null;
   let glReticleTexture = null;
   let glGridBuf = null;
-  let glGridVertCount = 0;
+  let glGridIndexBuf = null;
+  let glGridIndexCount = 0;
   let glLaserBuf = null;
 
   // Cached GL locations
@@ -41,7 +46,7 @@ const WebXRVR = (function () {
   let loc_uMVP = null;
   let loc_uTex = null;
   let loc_uAlpha = null;
-  let loc_uCurved = null;
+  let loc_uCurvatureMode = null;
 
   // Starfield Environment State
   let glStarProgram = null;
@@ -58,7 +63,7 @@ const WebXRVR = (function () {
   let loc_glow_aPos = -1;
   let loc_glow_aUV = -1;
   let loc_glow_uMVP = null;
-  let loc_glow_uCurved = null;
+  let loc_glow_uCurvatureMode = null;
   let loc_glow_uColor = null;
   let loc_glow_uIntensity = null;
 
@@ -140,8 +145,8 @@ const WebXRVR = (function () {
     { label: '▶▶',      action: 'fwd',    x: 156, w: 40 },
     { label: '⏭',       action: 'next',   x: 200, w: 40 },
     { label: '🔄 AUTO', action: 'mode',   x: 244, w: 78 },
-    { label: '🌙 CURVE', action: 'curve',  x: 326, w: 88 },
-    { label: '🎯 LOCK',  action: 'lock',   x: 418, w: 88 },
+    { label: '🌐 DOME', action: 'curve',  x: 326, w: 92 },
+    { label: '🎯 LOCK',  action: 'lock',   x: 422, w: 84 },
     { label: '🔊',       action: 'mute',   x: 510, w: 44 },
     { label: '✕',        action: 'exit',   x: 558, w: 44 },
   ];
@@ -356,7 +361,9 @@ const WebXRVR = (function () {
 
       if (btn.action === 'play') btn.label = isPaused ? '▶' : '⏸';
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
-      if (btn.action === 'curve') btn.label = isCurved ? '🌙 CURVE' : '📺 FLAT';
+      if (btn.action === 'curve') {
+        btn.label = curvatureMode === 1 ? '🌐 DOME' : (curvatureMode === 2 ? '🔲 SQ CURVE' : '📺 FLAT');
+      }
       if (btn.action === 'mode') btn.label = isAutoNext ? '🔄 AUTO' : '🔁 LOOP';
       if (btn.action === 'lock') btn.label = lockToViewer ? '🎯 LOCK' : '🔓 FREE';
 
@@ -679,12 +686,12 @@ const WebXRVR = (function () {
     ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
   }
 
-  // ─── YouTube VR Curved Screen Arc Geometry Math ─────────────────────
-  // ARC_ANGLE = 0.6 rad (~34.4° arc angle for authentic YouTube VR curve)
-  // R_CURVE = 1.0 / 0.6 = 1.6667 (Arc length == 1.0, perfect 1:1 square ratio)
+  // ─── All-Side Concave Screen Arc Geometry Math ─────────────────────
+  // ARC_ANGLE = 0.65 rad (~37.2° arc angle for immersive concave curvature)
+  // R_CURVE = 1.0 / 0.65 = 1.5385 (Direct center view is the center focal point)
 
-  const ARC_ANGLE = 0.6;
-  const R_CURVE = 1.6667;
+  const ARC_ANGLE = 0.65;
+  const R_CURVE = 1.5385;
 
   function hitTestCurvedScreen(rayOrigin, rayDir) {
     const halfW = screenScale / 2;
@@ -694,16 +701,16 @@ const WebXRVR = (function () {
     const O_loc = quatRotVec(invQ, vecSub(rayOrigin, screenPos));
     const D_loc = quatRotVec(invQ, rayDir);
 
-    if (isCurved) {
+    if (curvatureMode === 1 || curvatureMode === 2) {
       const R_world = R_CURVE * screenScale;
-      const Ox = O_loc.x, Oz = O_loc.z - R_world;
-      const Dx = D_loc.x, Dz = D_loc.z;
+      const Ox = O_loc.x, Oy = O_loc.y, Oz = O_loc.z - R_world;
+      const Dx = D_loc.x, Dy = D_loc.y, Dz = D_loc.z;
 
-      const A = Dx * Dx + Dz * Dz;
+      const A = Dx * Dx + Dy * Dy + Dz * Dz;
       if (A < 0.00001) return { hit: false, dist: -1 };
 
-      const B = 2 * (Ox * Dx + Oz * Dz);
-      const C = Ox * Ox + Oz * Oz - R_world * R_world;
+      const B = 2 * (Ox * Dx + Oy * Dy + Oz * Dz);
+      const C = Ox * Ox + Oy * Oy + Oz * Oz - R_world * R_world;
 
       const disc = B * B - 4 * A * C;
       if (disc < 0) return { hit: false, dist: -1 };
@@ -713,10 +720,7 @@ const WebXRVR = (function () {
       if (t < 0 || t > 20) return { hit: false, dist: -1 };
 
       const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
-      const angle = Math.atan2(hitLocal.x, R_world - hitLocal.z);
-      const halfArc = (ARC_ANGLE * 0.5);
-
-      if (Math.abs(angle) <= halfArc && Math.abs(hitLocal.y) <= halfH) {
+      if (Math.abs(hitLocal.x) <= halfW && Math.abs(hitLocal.y) <= halfH) {
         return { hit: true, dist: t, hitLocal };
       }
       return { hit: false, dist: -1 };
@@ -833,7 +837,10 @@ const WebXRVR = (function () {
       case 'rew':   callbacks.onSeek && callbacks.onSeek(-5); break;
       case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
-      case 'curve': isCurved = !isCurved; break;
+      case 'curve':
+        curvatureMode = (curvatureMode + 1) % 3;
+        isCurved = (curvatureMode !== 0);
+        break;
       case 'lock':
         lockToViewer = !lockToViewer;
         if (lockToViewer) {
@@ -900,27 +907,48 @@ const WebXRVR = (function () {
   // ─── WebGL Setup & Shaders ──────────────────────────────────────────
 
   /**
-   * YouTube VR Curved Arc Shader (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
-   * Arc length = R * ARC_ANGLE = 1.0 → perfect 1:1 square video ratio preserved.
+   * Multi-Side Concave Screen Shader
+   * Curvature modes:
+   *  1.0: Concave Hemisphere (3D Spherical Dome Cap - All sides wrap towards viewer from direct center)
+   *  2.0: Concave Square (Biaxial Pillow Curve - Symmetrical horizontal & vertical amphitheater curve)
+   *  0.0: Flat Screen
    */
   const VERT = `
     attribute vec3 aPos;
     attribute vec2 aUV;
     varying vec2 vUV;
     uniform mat4 uMVP;
-    uniform float uCurved;
+    uniform float uCurvatureMode;
 
-    const float ARC_ANGLE = 0.6;
-    const float R = 1.6667;
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385; // 1.0 / ARC_ANGLE
 
     void main() {
       vUV = aUV;
       vec3 pos = aPos;
-      if (uCurved > 0.5) {
-        float angle = aPos.x * ARC_ANGLE;
-        pos.x = R * sin(angle);
-        pos.z = R * (1.0 - cos(angle)); // YouTube VR style subtle curve towards viewer
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        // Mode 1: Concave Hemisphere (Radial Spherical Dome)
+        // Direct center (0,0) is apex / focal center; all edges curve inward toward viewer (+Z)
+        // Uses true arc length so screen dimension is identical to square & flat modes
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        // Mode 2: Concave Square (Biaxial Pillow Curve)
+        // All four sides curve inward while maintaining square boundary alignment
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
       }
+
       gl_Position = uMVP * vec4(pos, 1.0);
     }
   `;
@@ -987,26 +1015,39 @@ const WebXRVR = (function () {
   `;
 
   /**
-   * Ambient Video Glow (Ambilight) Shader with Soft Radial Falloff
+   * Ambient Video Glow (Ambilight) Shader with Soft Radial Falloff matching multi-side curvature
    */
   const GLOW_VERT = `
     attribute vec3 aPos;
     attribute vec2 aUV;
     varying vec2 vUV;
     uniform mat4 uMVP;
-    uniform float uCurved;
+    uniform float uCurvatureMode;
 
-    const float ARC_ANGLE = 0.6;
-    const float R = 1.6667;
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385;
 
     void main() {
       vUV = aUV;
       vec3 pos = aPos;
-      if (uCurved > 0.5) {
-        float angle = aPos.x * ARC_ANGLE;
-        pos.x = R * sin(angle);
-        pos.z = R * (1.0 - cos(angle));
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
       }
+
       gl_Position = uMVP * vec4(pos, 1.0);
     }
   `;
@@ -1163,7 +1204,7 @@ const WebXRVR = (function () {
     loc_uMVP = gl.getUniformLocation(glProgram, 'uMVP');
     loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
     loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
-    loc_uCurved = gl.getUniformLocation(glProgram, 'uCurved');
+    loc_uCurvatureMode = gl.getUniformLocation(glProgram, 'uCurvatureMode');
 
     // Starfield Program
     const starVs = compileShader(gl.VERTEX_SHADER, STAR_VERT);
@@ -1190,22 +1231,44 @@ const WebXRVR = (function () {
     loc_glow_aPos = gl.getAttribLocation(glGlowProgram, 'aPos');
     loc_glow_aUV = gl.getAttribLocation(glGlowProgram, 'aUV');
     loc_glow_uMVP = gl.getUniformLocation(glGlowProgram, 'uMVP');
-    loc_glow_uCurved = gl.getUniformLocation(glGlowProgram, 'uCurved');
+    loc_glow_uCurvatureMode = gl.getUniformLocation(glGlowProgram, 'uCurvatureMode');
     loc_glow_uColor = gl.getUniformLocation(glGlowProgram, 'uColor');
     loc_glow_uIntensity = gl.getUniformLocation(glGlowProgram, 'uIntensity');
 
+    // Generate 2D Multi-Side Curvature Mesh Grid (32x32 Quads)
     const COLS = 32;
+    const ROWS = 32;
     const verts = [];
-    for (let col = 0; col <= COLS; col++) {
-      const u = col / COLS;
-      const x = u - 0.5;
-      verts.push(x, 0.5, 0.0, u, 0);
-      verts.push(x, -0.5, 0.0, u, 1);
+    const indices = [];
+
+    for (let r = 0; r <= ROWS; r++) {
+      const v = r / ROWS;
+      const y = 0.5 - v;
+      for (let c = 0; c <= COLS; c++) {
+        const u = c / COLS;
+        const x = u - 0.5;
+        verts.push(x, y, 0.0, u, v);
+      }
     }
-    glGridVertCount = (COLS + 1) * 2;
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i0 = r * (COLS + 1) + c;
+        const i1 = i0 + 1;
+        const i2 = (r + 1) * (COLS + 1) + c;
+        const i3 = i2 + 1;
+        indices.push(i0, i2, i1, i1, i2, i3);
+      }
+    }
+
+    glGridIndexCount = indices.length;
     glGridBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+
+    glGridIndexBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
     glLaserBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, glLaserBuf);
@@ -1288,10 +1351,11 @@ const WebXRVR = (function () {
 
   // ─── Draw Mesh Grid ──────────────────────────────────────────────────
 
-  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curved) {
+  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode) {
     gl.useProgram(glProgram);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
     gl.enableVertexAttribArray(loc_aPos);
     gl.enableVertexAttribArray(loc_aUV);
     gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
@@ -1300,15 +1364,16 @@ const WebXRVR = (function () {
     const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
     const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
 
+    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
     gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurved, curved ? 1.0 : 0.0);
+    gl.uniform1f(loc_uCurvatureMode, modeVal);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.uniform1i(loc_uTex, 0);
     gl.uniform1f(loc_uAlpha, alpha);
 
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, glGridVertCount);
+    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
   }
 
   // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
@@ -1338,8 +1403,8 @@ const WebXRVR = (function () {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
 
-  function drawAmbientGlow(viewMat, projMat, pos, quat, scaleW, scaleH, curved) {
-    if (!glGlowProgram || !glGridBuf) return;
+  function drawAmbientGlow(viewMat, projMat, pos, quat, scaleW, scaleH, curveMode) {
+    if (!glGlowProgram || !glGridBuf || !glGridIndexBuf) return;
     gl.useProgram(glGlowProgram);
 
     gl.depthMask(false);
@@ -1347,6 +1412,7 @@ const WebXRVR = (function () {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive glow against dark blue sky
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
     gl.enableVertexAttribArray(loc_glow_aPos);
     gl.enableVertexAttribArray(loc_glow_aUV);
     gl.vertexAttribPointer(loc_glow_aPos, 3, gl.FLOAT, false, 20, 0);
@@ -1355,12 +1421,13 @@ const WebXRVR = (function () {
     const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
     const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
 
+    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
     gl.uniformMatrix4fv(loc_glow_uMVP, false, mvp);
-    gl.uniform1f(loc_glow_uCurved, curved ? 1.0 : 0.0);
+    gl.uniform1f(loc_glow_uCurvatureMode, modeVal);
     gl.uniform3f(loc_glow_uColor, curGlowColor[0], curGlowColor[1], curGlowColor[2]);
     gl.uniform1f(loc_glow_uIntensity, 0.78);
 
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, glGridVertCount);
+    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
 
     gl.depthMask(true);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -1390,7 +1457,7 @@ const WebXRVR = (function () {
 
     const mvp = mat4Mul(projMat, viewMat);
     gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurved, 0.0);
+    gl.uniform1f(loc_uCurvatureMode, 0.0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, glReticleTexture);
@@ -1496,11 +1563,11 @@ const WebXRVR = (function () {
       // 1. Draw breathing celestial starfield
       drawStarfield(viewMat, projMat, timeSec);
 
-      // 2. Draw dynamic ambient video glow (Ambilight) behind video screen
-      drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, isCurved);
+      // 2. Draw dynamic ambient video glow (Ambilight) behind video screen with matching curvature
+      drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
 
-      // 3. Draw main video screen
-      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, isCurved);
+      // 3. Draw main video screen with all-side concave curvature
+      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode);
 
       if (controlsVisible) {
         const ctrlPos = getControlsCenter();
@@ -1508,7 +1575,7 @@ const WebXRVR = (function () {
         const ctrlW = ctrlScale * 0.8;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
         const ctrlQuat = lockToViewer ? quatFaceViewerLevel(ctrlPos, currentHeadPos) : screenQuat;
-        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, false);
+        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0.0);
 
         // Draw Meta Quest 3 Controller Guide Panel to the right of screen
         // Face the guide panel toward the viewer so it's readable from their POV
@@ -1517,7 +1584,7 @@ const WebXRVR = (function () {
           const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
           const guideW = ctrlScale * 0.351;
           const guideH = guideW * (GUIDE_H / GUIDE_W);
-          drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, false);
+          drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0.0);
         }
       }
 
@@ -1827,14 +1894,15 @@ const WebXRVR = (function () {
     glControlsTexture = null;
     glReticleTexture = null;
     glGridBuf = null;
+    glGridIndexBuf = null;
+    glGridIndexCount = 0;
     glLaserBuf = null;
-    glGridVertCount = 0;
     loc_aPos = -1;
     loc_aUV = -1;
     loc_uMVP = null;
     loc_uTex = null;
     loc_uAlpha = null;
-    loc_uCurved = null;
+    loc_uCurvatureMode = null;
     glStarProgram = null;
     glStarBuf = null;
     glGlowProgram = null;
