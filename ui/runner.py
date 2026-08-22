@@ -15,23 +15,8 @@ import time
 
 import streamlit as st
 
+from core.phases import MAX_LOG_LINES, classify, default_pool_sizes, fmt_elapsed, format_error
 from ui import state as S
-
-# (substring matched against the callback message, display label, entry weight)
-PHASES: list[tuple[str, str, float]] = [
-    ("Analyzing", "ANALYZE SOURCE", 0.05),
-    ("Uploading", "UPLOAD TO CDN", 0.10),
-    ("Submitting", "SUBMIT JOB", 0.15),
-    ("Queued", "QUEUED AT FAL", 0.20),
-    ("already square", "SKIP OUTPAINT", 0.55),
-    ("Outpainting: Completed", "OUTPAINT COMPLETE", 0.60),
-    ("Outpainting", "OUTPAINTING", 0.40),
-    ("Downloading", "DOWNLOAD RESULT", 0.70),
-    ("Performing studio-quality", "STUDIO UPSCALE", 0.80),
-    ("Performing", "LOCAL 4K UPSCALE", 0.85),
-]
-
-MAX_LOG_LINES = 200
 
 
 @st.cache_resource(show_spinner=False)
@@ -44,44 +29,6 @@ def _run_lock() -> threading.Lock:
     the right behavior for a local single-user tool anyway.
     """
     return threading.Lock()
-
-
-def classify(msg: str) -> tuple[str, float]:
-    for needle, label, weight in PHASES:
-        if needle.lower() in msg.lower():
-            return label, weight
-    return "WORKING", 0.0
-
-
-def fmt_elapsed(seconds: float) -> str:
-    s = int(seconds)
-    return f"{s // 60}:{s % 60:02d}"
-
-
-def format_error(ex: Exception) -> tuple[str, str]:
-    """(headline, detail) for the three known failure families."""
-    msg = str(ex)
-    name = type(ex).__name__
-
-    if isinstance(ex, ValueError) and "FAL_KEY" in msg:
-        return (
-            "API KEY MISSING",
-            "Cloud outpainting needs a fal.ai key. Enter one in the sidebar, "
-            "or switch to UPSCALE ONLY to run entirely locally.",
-        )
-    if isinstance(ex, FileNotFoundError) or "WinError 2" in msg:
-        return (
-            "FFMPEG NOT FOUND",
-            f"{msg}\n\nSee SYSTEM in the sidebar. Set FFMPEG_DIR in .env to the "
-            "folder containing ffmpeg.exe.",
-        )
-    if name == "CalledProcessError":
-        stderr = getattr(ex, "stderr", None)
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", "replace")
-        tail = "\n".join((stderr or "").strip().splitlines()[-12:])
-        return ("FFMPEG FAILED", tail or msg)
-    return (f"{name.upper()}", msg)
 
 
 def run_batch_pipeline(ns: str, kind: str, fn, items_kwargs: list[dict]):
@@ -100,11 +47,8 @@ def run_batch_pipeline(ns: str, kind: str, fn, items_kwargs: list[dict]):
         return []
 
     # Auto-scale concurrency pool based on CPU resources and task type
-    cpus = os.cpu_count() or 2
-    if kind == "video":
-        max_workers = max(1, min(2, cpus // 2))
-    else:
-        max_workers = max(1, min(4, cpus))
+    max_image, max_video = default_pool_sizes()
+    max_workers = max_video if kind == "video" else max_image
 
     # Thread safety for session state & delta emissions
     try:

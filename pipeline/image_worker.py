@@ -2,7 +2,7 @@ import os
 import tempfile
 import uuid
 import fal_client
-from pipeline.utils import get_image_dimensions, calculate_square_padding
+from pipeline.utils import get_image_dimensions, calculate_square_padding, fetch_fal_result
 
 def extract_image_url(result):
     """
@@ -46,11 +46,13 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
         tuple: (outpaint_url, upscaled_url)
     """
     if (not upscale_only) or (upscale_engine == "fal"):
-        if fal_key:
-            os.environ["FAL_KEY"] = fal_key
-            
-        if not os.environ.get("FAL_KEY"):
+        if not fal_key and not os.environ.get("FAL_KEY"):
             raise ValueError("FAL_KEY must be set in the environment or passed as an argument.")
+
+    # Use a per-call client instead of mutating the shared os.environ / the
+    # module-level fal_client singleton — both are process-global state and
+    # would race across concurrently running jobs with different keys.
+    fal = fal_client.SyncClient(key=fal_key) if fal_key else fal_client.sync_client
 
     # 1. Write source image to a temporary file if it's bytes
     temp_path = None
@@ -74,7 +76,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
             # 3. Upload to fal.ai CDN
             if status_callback:
                 status_callback("Uploading image to fal.ai CDN...")
-            image_url = fal_client.upload_file(image_to_process)
+            image_url = fal.upload_file(image_to_process)
 
             # 4. Outpainting
             # If the image is already square, we can skip the outpainting phase and proceed directly to upscaling.
@@ -92,7 +94,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                     "prompt": prompt
                 }
                 
-                result = fal_client.subscribe(
+                result = fal.subscribe(
                     "fal-ai/flux/outpaint",
                     arguments=arguments,
                     with_logs=True
@@ -105,8 +107,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 
             uid = uuid.uuid4().hex[:8]
             temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_temp_{uid}.png")
-            import urllib.request
-            urllib.request.urlretrieve(outpaint_url, temp_outpaint_path)
+            fetch_fal_result(outpaint_url, temp_outpaint_path)
         
         # Determine output location
         uid = uuid.uuid4().hex[:8]
@@ -119,7 +120,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 status_callback("Uploading image to fal.ai CDN for upscale...")
             
             if upscale_only or not outpaint_url:
-                image_url_to_upscale = fal_client.upload_file(temp_outpaint_path)
+                image_url_to_upscale = fal.upload_file(temp_outpaint_path)
             else:
                 image_url_to_upscale = outpaint_url
 
@@ -127,7 +128,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 status_callback(f"Submitting image upscaling job to {upscale_model}...")
 
             arguments = {"image_url": image_url_to_upscale}
-            result = fal_client.subscribe(
+            result = fal.subscribe(
                 upscale_model,
                 arguments=arguments,
                 with_logs=True
@@ -137,9 +138,8 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
             if status_callback:
                 status_callback("Downloading upscaled image from fal.ai...")
 
-            import urllib.request
             temp_fal_out = os.path.join(tempfile.gettempdir(), f"fal_upscaled_img_{uid}.png")
-            urllib.request.urlretrieve(upscaled_url, temp_fal_out)
+            fetch_fal_result(upscaled_url, temp_fal_out)
             temp_outpaint_path = temp_fal_out
 
         if status_callback:

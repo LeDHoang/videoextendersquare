@@ -135,7 +135,7 @@ def render(ctx: dict) -> None:
             outpaint_options = {
                 "LTX 2.3 Quality": "fal-ai/ltx-2.3-quality/outpaint",
                 "Luma Ray-2 Reframe": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
-                "Kling Video": "fal-ai/klingx",
+                "Wan VACE 14B": "fal-ai/wan-vace-14b/video-to-video",
             }
             selected_outpaint = st.segmented_control(
                 "Outpaint Model Options",
@@ -179,11 +179,11 @@ def render(ctx: dict) -> None:
         fal_upscale_model = ctx["models"]["upscale_vid"]
         seedvr_factor = 2.0
         seedvr_target = "1080p"
-        bytedance_target_res = "1080p"
+        bytedance_target_res = "4k"
         bytedance_target_fps = "30fps"
-        bytedance_tier = "standard"
+        bytedance_tier = "fast"
         bytedance_preset = "general"
-        bytedance_fidelity = "high"
+        bytedance_fidelity = "medium"
 
         if fal_picked:
             C.eyebrow("FAL AI UPSCALE MODEL")
@@ -207,27 +207,27 @@ def render(ctx: dict) -> None:
                     bc1, bc2 = st.columns(2)
                     with bc1:
                         bytedance_target_res = st.selectbox(
-                            "Target Resolution", ["1080p", "2k", "4k"],
+                            "Target Resolution", ["4k", "2k", "1080p"], index=0,
                             key=S.wkey(NS, "bytedance_res"),
-                            help="1080p ($0.0072/s), 2K ($0.0144/s), 4K ($0.0288/s) @ 30fps"
+                            help="4K ($0.0288/s), 2K ($0.0144/s), 1080p ($0.0072/s) @ 30fps"
                         )
                         bytedance_target_fps = st.selectbox(
-                            "Target FPS", ["30fps", "60fps"],
+                            "Target FPS", ["30fps", "60fps"], index=0,
                             key=S.wkey(NS, "bytedance_fps"),
                             help="60fps doubles the processing cost for any resolution."
                         )
                         bytedance_fidelity = st.selectbox(
-                            "Fidelity Intensity", ["high", "medium"],
+                            "Fidelity Intensity", ["medium", "high"], index=0,
                             key=S.wkey(NS, "bytedance_fidelity")
                         )
                     with bc2:
                         bytedance_tier = st.selectbox(
-                            "Quality Tier", ["standard", "fast", "pro"],
+                            "Quality Tier", ["fast", "standard", "pro"], index=0,
                             key=S.wkey(NS, "bytedance_tier"),
                             help="'pro' tier uses large-model restoration at 10× the cost."
                         )
                         bytedance_preset = st.selectbox(
-                            "Scenario Preset", ["general", "ugc", "short_series", "aigc", "old_film"],
+                            "Scenario Preset", ["general", "ugc", "short_series", "aigc", "old_film"], index=0,
                             key=S.wkey(NS, "bytedance_preset")
                         )
 
@@ -334,9 +334,12 @@ def render(ctx: dict) -> None:
                 mp = (w_ltx * h_ltx * frames_est) / 1000000.0
                 est_outpaint_cost = mp * 0.0024075
                 outpaint_label = f"LTX 2.3 Quality ({ltx_resolution}) (~$0.0024/MP)"
+            elif "wan" in outpaint_lower or "vace" in outpaint_lower:
+                est_outpaint_cost = total_effective_dur * 0.08
+                outpaint_label = "Wan VACE 14B ($0.08/s @ 720p)"
             else:
-                est_outpaint_cost = max(0.10 * len(items or []), total_effective_dur * 0.025)
-                outpaint_label = "Kling Outpaint (~$0.025/s)"
+                est_outpaint_cost = total_effective_dur * 0.06
+                outpaint_label = "Video Outpaint ($0.06/s)"
 
         est_upscale_cost = 0.0
         upscale_label = f"Local ({engine} Engine — $0.00)"

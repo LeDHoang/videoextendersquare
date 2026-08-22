@@ -11,7 +11,7 @@ const WebXRVR = (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.1-20260803';
+  const VR_VERSION = 'v4.8-20260821-stereo-scale-fix';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -20,8 +20,12 @@ const WebXRVR = (function () {
   let videoElement = null;
   let callbacks = {};
 
-  // Display Settings
-  let isCurved = true;         // Default to Deep IMAX Curved Screen
+  // Curvature Settings
+  // 1: Concave Hemisphere (Radial Dome, Default - Center is focal point, curves on all sides)
+  // 2: Concave Square (Biaxial Pillow Curve - Symmetrical curve maintaining square format)
+  // 0: Flat
+  let curvatureMode = 1;
+  let isCurved = true; // backward compat
 
   // WebGL state
   let gl = null;
@@ -29,10 +33,19 @@ const WebXRVR = (function () {
   let glProgram = null;
   let glVideoTexture = null;
   let glControlsTexture = null;
+  let glOverlayTexture = null;
+  let glGuideTexture = null;
   let glReticleTexture = null;
   let glGridBuf = null;
-  let glGridVertCount = 0;
+  let glGridIndexBuf = null;
+  let glGridIndexCount = 0;
   let glLaserBuf = null;
+
+  // In-Screen VR Comments Overlay Canvas
+  let overlayCanvas = null;
+  let overlayCtx = null;
+  const OVERLAY_W = 1024;
+  const OVERLAY_H = 1024;
 
   // Cached GL locations
   let loc_aPos = -1;
@@ -40,7 +53,32 @@ const WebXRVR = (function () {
   let loc_uMVP = null;
   let loc_uTex = null;
   let loc_uAlpha = null;
-  let loc_uCurved = null;
+  let loc_uCurvatureMode = null;
+
+  // Starfield Environment State
+  let glStarProgram = null;
+  let glStarBuf = null;
+  const STAR_COUNT = 1800;
+  let loc_star_aPos = -1;
+  let loc_star_aData = -1;
+  let loc_star_uVP = null;
+  let loc_star_uHeadPos = null;
+  let loc_star_uTime = null;
+
+  // Ambient Video Glow (Ambilight) State
+  let glGlowProgram = null;
+  let loc_glow_aPos = -1;
+  let loc_glow_aUV = -1;
+  let loc_glow_uMVP = null;
+  let loc_glow_uCurvatureMode = null;
+  let loc_glow_uColor = null;
+  let loc_glow_uIntensity = null;
+
+  let ambilightCanvas = null;
+  let ambilightCtx = null;
+  let curGlowColor = [0.12, 0.28, 0.65];
+  let targetGlowColor = [0.12, 0.28, 0.65];
+  let lastColorSampleTime = 0;
 
   // Pointer & Ray tracking
   let activeRayOrigin = null;
@@ -49,7 +87,7 @@ const WebXRVR = (function () {
   let activeIsHovering = false;
 
   // Screen transform
-  const DEFAULT_POS = { x: 0, y: 1.6, z: -2.8 };
+  const DEFAULT_POS = { x: 0, y: 1.52, z: -2.24 };
   const DEFAULT_SCALE = 4.0;
   const MIN_SCALE = 1.0;
   const MAX_SCALE = 10.0;
@@ -58,6 +96,14 @@ const WebXRVR = (function () {
   let screenPos = { ...DEFAULT_POS };
   let screenQuat = { x: 0, y: 0, z: 0, w: 1 };
   let screenScale = DEFAULT_SCALE;
+  let currentHeadPos = { x: 0, y: 1.52, z: 0 };
+  let currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
+  let isInitialPoseSet = false;
+
+  // Head-locked default: the screen stays perpendicular to the user's view and
+  // centered in it, so the user always looks at the middle of the screen.
+  // Toggle off via the 🎯 LOCK control to restore free 6DOF placement.
+  let lockToViewer = true;
 
   // 6DOF Grab state (DeoVR / Skybox style)
   let isGrabbing = false;
@@ -71,6 +117,16 @@ const WebXRVR = (function () {
   let controlsCtx = null;
   const CONTROLS_W = 640;
   const CONTROLS_H = 150;
+  const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge (5% higher than 0.28m)
+
+  // Meta Quest Guide Panel State
+  let guideCanvas = null;
+  let guideCtx = null;
+  let questControllerImg = null;
+  let isQuestControllerImgLoaded = false;
+  const QUEST_CONTROLLER_B64 = window.QUEST_CONTROLLER_B64;
+  const GUIDE_W = 440;
+  const GUIDE_H = 760;
   let hoveredButton = -1;
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
@@ -90,15 +146,16 @@ const WebXRVR = (function () {
 
   // Button definitions for the UI controls panel
   const CTRL_BUTTONS = [
-    { label: '⏮',       action: 'prev',   x: 12,  w: 46 },
-    { label: '◀◀',      action: 'rew',    x: 64,  w: 46 },
-    { label: '▶',        action: 'play',   x: 116, w: 60 },
-    { label: '▶▶',      action: 'fwd',    x: 182, w: 46 },
-    { label: '⏭',       action: 'next',   x: 234, w: 46 },
-    { label: '🔄 AUTO', action: 'mode',   x: 286, w: 84 },
-    { label: '🌙 CURVE', action: 'curve',  x: 376, w: 96 },
-    { label: '🔊',       action: 'mute',   x: 478, w: 46 },
-    { label: '✕',        action: 'exit',   x: 530, w: 46 },
+    { label: '⏮',       action: 'prev',   x: 12,  w: 40 },
+    { label: '◀◀',      action: 'rew',    x: 56,  w: 40 },
+    { label: '▶',        action: 'play',   x: 100, w: 52 },
+    { label: '▶▶',      action: 'fwd',    x: 156, w: 40 },
+    { label: '⏭',       action: 'next',   x: 200, w: 40 },
+    { label: '🔄 AUTO', action: 'mode',   x: 244, w: 78 },
+    { label: '🌐 DOME', action: 'curve',  x: 326, w: 92 },
+    { label: '🎯 LOCK',  action: 'lock',   x: 422, w: 84 },
+    { label: '🔊',       action: 'mute',   x: 510, w: 44 },
+    { label: '✕',        action: 'exit',   x: 558, w: 44 },
   ];
 
   // ─── Quaternion & Vector Math Helpers ───────────────────────────────
@@ -155,7 +212,7 @@ const WebXRVR = (function () {
   }
 
   function quatFaceViewerLevel(screenPos, headPos) {
-    const head = headPos || { x: 0, y: 1.6, z: 0 };
+    const head = headPos || currentHeadPos || { x: 0, y: 1.52, z: 0 };
     const dx = head.x - screenPos.x;
     const dy = head.y - screenPos.y;
     const dz = head.z - screenPos.z;
@@ -218,6 +275,22 @@ const WebXRVR = (function () {
     return { x: qx, y: qy, z: qz, w: qw };
   }
 
+  // ─── Head-Locked Screen Mode ──────────────────────────────────────────
+  // Keeps the screen at a fixed distance in front of the user's face,
+  // perpendicular to the view direction, so the user always looks into the
+  // center of the screen. Screen local axes follow the head exactly:
+  // +Z faces back toward the viewer, +Y up, +X right.
+  function applyLockToViewer() {
+    const dist = -DEFAULT_POS.z;
+    const fwd = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
+    screenPos = {
+      x: currentHeadPos.x + fwd.x * dist,
+      y: currentHeadPos.y + fwd.y * dist,
+      z: currentHeadPos.z + fwd.z * dist,
+    };
+    screenQuat = currentHeadQuat;
+  }
+
   // ─── Premium UI Controls Canvas Rendering ────────────────────────────
 
   function initControlsCanvas() {
@@ -225,6 +298,101 @@ const WebXRVR = (function () {
     controlsCanvas.width = CONTROLS_W;
     controlsCanvas.height = CONTROLS_H;
     controlsCtx = controlsCanvas.getContext('2d');
+  }
+
+  function initOverlayCanvas() {
+    overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = OVERLAY_W;
+    overlayCanvas.height = OVERLAY_H;
+    overlayCtx = overlayCanvas.getContext('2d');
+  }
+
+  function renderOverlayCanvas() {
+    const ctx = overlayCtx;
+    if (!ctx || !videoElement) return false;
+
+    const currentTime = videoElement.currentTime || 0;
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
+
+    // Filter active time-synced comments within active window [timestamp, timestamp + 4.2s]
+    const active = comments.filter((c) => {
+      if (c.timestamp === null || c.timestamp === undefined) return false;
+      const t = Number(c.timestamp);
+      return currentTime >= t && currentTime <= (t + 4.2);
+    });
+
+    ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
+    if (active.length === 0) return false;
+
+    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
+    const maxShow = Math.min(3, active.length);
+    const itemHeight = 60;
+    const gap = 11;
+    const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
+    const startY = (OVERLAY_H / 2) - (totalH / 2);
+
+    for (let i = 0; i < maxShow; i++) {
+      const c = active[i];
+      const y = startY + i * (itemHeight + gap);
+      const x = 48; // Left edge margin inside 1:1 square canvas
+
+      // Progress fade-in / fade-out alpha
+      const elapsed = currentTime - Number(c.timestamp);
+      let alpha = 1.0;
+      if (elapsed < 0.35) {
+        alpha = Math.max(0, elapsed / 0.35);
+      } else if (elapsed > 3.6) {
+        alpha = Math.max(0, (4.2 - elapsed) / 0.6);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Shadow for high-contrast legibility over video without background box or border
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2;
+
+      // Avatar Icon / Emoji (Middle-Left)
+      const avatarX = x + 25;
+      const avatarY = y + itemHeight / 2;
+
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(c.author_avatar || '👤', avatarX, avatarY);
+
+      // Author Name
+      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      ctx.fillStyle = c.avatar_color || '#FF3B1F';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(c.author_name || 'Anonymous', x + 50, y + 11);
+
+      // Timestamp Pill
+      if (c.timestamp !== null && c.timestamp !== undefined) {
+        const timeStr = '⏱️ ' + formatTime(c.timestamp);
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#CBD5E1';
+        const nameW = ctx.measureText(c.author_name || 'Anonymous').width;
+        ctx.fillText(timeStr, x + 50 + nameW + 8, y + 13);
+      }
+
+      // Comment Text
+      ctx.font = '600 14px sans-serif';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textBaseline = 'top';
+      let dispText = c.text;
+      if (dispText.length > 46) {
+        dispText = dispText.slice(0, 44) + '…';
+      }
+      ctx.fillText(dispText, x + 50, y + 32);
+
+      ctx.restore();
+    }
+
+    return true;
   }
 
   function renderControlsCanvas() {
@@ -266,6 +434,7 @@ const WebXRVR = (function () {
     const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
     const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
     const item = playlist[idx];
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
 
     if (item) {
       ctx.fillStyle = 'rgba(242, 243, 245, 0.85)';
@@ -273,12 +442,24 @@ const WebXRVR = (function () {
       ctx.textAlign = 'left';
       ctx.fillText(`${item.filename}`, 134, 21);
     }
+    if (comments.length > 0) {
+      ctx.fillStyle = '#A855F7';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`💬 ${comments.length}`, 330, 21);
+    }
     if (playlist.length > 0) {
       ctx.fillStyle = '#FF3B1F';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'right';
       ctx.fillText(`${idx + 1} / ${playlist.length}`, CONTROLS_W - 16, 21);
     }
+
+    // Lock state indicator (always visible next to the counter)
+    ctx.fillStyle = lockToViewer ? '#4ADE80' : '#9BA1A8';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(lockToViewer ? '● LOCKED' : '○ FREE', CONTROLS_W - 64, 21);
 
     // Buttons Row
     const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
@@ -289,8 +470,11 @@ const WebXRVR = (function () {
 
       if (btn.action === 'play') btn.label = isPaused ? '▶' : '⏸';
       if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
-      if (btn.action === 'curve') btn.label = isCurved ? '🌙 CURVE' : '📺 FLAT';
+      if (btn.action === 'curve') {
+        btn.label = curvatureMode === 1 ? '🌐 DOME' : (curvatureMode === 2 ? '🔲 SQ CURVE' : '📺 FLAT');
+      }
       if (btn.action === 'mode') btn.label = isAutoNext ? '🔄 AUTO' : '🔁 LOOP';
+      if (btn.action === 'lock') btn.label = lockToViewer ? '🎯 LOCK' : '🔓 FREE';
 
       if (isHover || btn.action === 'play') {
         ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 59, 31, 0.85)';
@@ -312,7 +496,7 @@ const WebXRVR = (function () {
       ctx.stroke();
 
       ctx.fillStyle = (isHover || btn.action === 'play') ? '#0A0A0A' : '#F2F3F5';
-      ctx.font = (btn.action === 'curve' || btn.action === 'mode') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
+      ctx.font = (btn.action === 'curve' || btn.action === 'mode' || btn.action === 'lock') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(btn.label, btn.x + btn.w / 2, y + h / 2);
@@ -347,12 +531,276 @@ const WebXRVR = (function () {
     ctx.fillText(formatTime(currentTime) + ' / ' + formatTime(duration), CONTROLS_W - 16, CONTROLS_H - 16);
   }
 
-  // ─── YouTube VR Curved Screen Arc Geometry Math ─────────────────────
-  // ARC_ANGLE = 0.6 rad (~34.4° arc angle for authentic YouTube VR curve)
-  // R_CURVE = 1.0 / 0.6 = 1.6667 (Arc length == 1.0, perfect 1:1 square ratio)
+  // ─── Meta Quest 3 Controller Guide Panel Canvas Rendering ───────────
 
-  const ARC_ANGLE = 0.6;
-  const R_CURVE = 1.6667;
+  function initGuideCanvas() {
+    guideCanvas = document.createElement('canvas');
+    guideCanvas.width = GUIDE_W;
+    guideCanvas.height = GUIDE_H;
+    guideCtx = guideCanvas.getContext('2d');
+    if (!questControllerImg) {
+      questControllerImg = new Image();
+      questControllerImg.onload = () => {
+        isQuestControllerImgLoaded = true;
+        renderGuideCanvas();
+      };
+      questControllerImg.src = QUEST_CONTROLLER_B64;
+    }
+    renderGuideCanvas();
+  }
+
+  // Helper: Draw a Meta Quest 3 Touch Plus right controller silhouette
+  function drawQuestController(ctx, cx, cy, scale) {
+    const s = scale || 1.0;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+
+    // ── Controller Handle (ergonomic curved grip) ──
+    ctx.fillStyle = '#1A1B1F';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-16, 20);
+    ctx.bezierCurveTo(-18, 55, -20, 100, -16, 140);
+    ctx.bezierCurveTo(-14, 155, 14, 155, 16, 140);
+    ctx.bezierCurveTo(20, 100, 18, 55, 16, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Handle texture lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 6; i++) {
+      const ly = 50 + i * 16;
+      ctx.beginPath();
+      ctx.moveTo(-12, ly);
+      ctx.lineTo(12, ly);
+      ctx.stroke();
+    }
+
+    // ── Tracking Ring (circular halo around top) ──
+    ctx.strokeStyle = '#2A2C32';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 52, 42, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Ring inner highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 50, 40, 0, Math.PI * 0.9, Math.PI * 1.9);
+    ctx.stroke();
+
+    // ── Top Face Plate ──
+    ctx.fillStyle = '#222428';
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 38, 28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#333640';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // ── Thumbstick (left position on face) ──
+    // Thumbstick base
+    ctx.fillStyle = '#0D0E11';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 14, 0, Math.PI * 2);
+    ctx.fill();
+    // Thumbstick cap
+    ctx.fillStyle = '#18191D';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 10, 0, Math.PI * 2);
+    ctx.fill();
+    // Concentric grip ring on cap
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(-14, -12, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    // Directional dot at center
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── A Button (lower right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.5)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(14, -2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('A', 14, -2);
+
+    // ── B Button (upper right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.35)';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(20, -22, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('B', 20, -22);
+
+    // ── Index Trigger (front curved) ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = '#FF3B1F';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, 18);
+    ctx.bezierCurveTo(-14, 28, -10, 36, -2, 38);
+    ctx.bezierCurveTo(4, 36, 8, 28, 6, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Side Grip Button ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(-24, 55, 8, 30, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function renderGuideCanvas() {
+    const ctx = guideCtx;
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
+
+    // Dark Glass Container Background
+    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    ctx.fill();
+
+    // Signature Red Glow Border
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    ctx.stroke();
+
+    // Header Badge
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    ctx.roundRect(16, 14, 140, 24, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#0A0A0A';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CONTROLLER GUIDE', 86, 26);
+
+    ctx.fillStyle = 'rgba(255, 59, 31, 0.85)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('META QUEST 3', GUIDE_W - 16, 26);
+
+    // ── TOP SECTION: Centered Controller Graphic ──
+    if (isQuestControllerImgLoaded && questControllerImg) {
+      const imgW = 210;
+      const imgH = imgW * (questControllerImg.height / questControllerImg.width);
+      const imgX = (GUIDE_W - imgW) / 2;
+      ctx.drawImage(questControllerImg, imgX, 46, imgW, imgH);
+    } else {
+      drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
+    }
+
+    // Divider Line
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(20, 405);
+    ctx.lineTo(GUIDE_W - 20, 405);
+    ctx.stroke();
+
+    // ── BOTTOM SECTION: 2-Column Cards Grid ──
+    const accentColor = '#FF3B1F';
+    const dimText = 'rgba(242, 243, 245, 0.85)';
+        const cards = [
+      { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Left/Right → Seek ±5s' },
+      { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
+      { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
+      { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
+      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED (🎯)' },
+      { title: 'GRIP + STICK ↕', desc: 'Zoom Screen In / Out|Smooth Scale Control' }
+    ];const colW = 198;
+    const cardH = 88;
+    const gapX = 12;
+    const gapY = 10;
+    const startX = 16;
+    const startY = 418;
+
+    cards.forEach((card, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const cx = startX + col * (colW + gapX);
+      const cy = startY + row * (cardH + gapY);
+
+      // Card background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.beginPath();
+      ctx.roundRect(cx, cy, colW, cardH, 8);
+      ctx.fill();
+
+      // Left accent bar
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.roundRect(cx, cy, 3, cardH, 2);
+      ctx.fill();
+
+      // Card border
+      ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(cx, cy, colW, cardH, 8);
+      ctx.stroke();
+
+      // Title
+      ctx.fillStyle = accentColor;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(card.title, cx + 10, cy + 10);
+
+      // Desc lines
+      ctx.fillStyle = dimText;
+      ctx.font = '10px sans-serif';
+      const lines = card.desc.split('|');
+      lines.forEach((line, li) => {
+        ctx.fillText(line, cx + 10, cy + 30 + li * 16);
+      });
+    });
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(155, 161, 168, 0.6)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
+  }
+
+  // ─── All-Side Concave Screen Arc Geometry Math ─────────────────────
+  // ARC_ANGLE = 0.65 rad (~37.2° arc angle for immersive concave curvature)
+  // R_CURVE = 1.0 / 0.65 = 1.5385 (Direct center view is the center focal point)
+
+  const ARC_ANGLE = 0.65;
+  const R_CURVE = 1.5385;
 
   function hitTestCurvedScreen(rayOrigin, rayDir) {
     const halfW = screenScale / 2;
@@ -362,16 +810,16 @@ const WebXRVR = (function () {
     const O_loc = quatRotVec(invQ, vecSub(rayOrigin, screenPos));
     const D_loc = quatRotVec(invQ, rayDir);
 
-    if (isCurved) {
+    if (curvatureMode === 1 || curvatureMode === 2) {
       const R_world = R_CURVE * screenScale;
-      const Ox = O_loc.x, Oz = O_loc.z - R_world;
-      const Dx = D_loc.x, Dz = D_loc.z;
+      const Ox = O_loc.x, Oy = O_loc.y, Oz = O_loc.z - R_world;
+      const Dx = D_loc.x, Dy = D_loc.y, Dz = D_loc.z;
 
-      const A = Dx * Dx + Dz * Dz;
+      const A = Dx * Dx + Dy * Dy + Dz * Dz;
       if (A < 0.00001) return { hit: false, dist: -1 };
 
-      const B = 2 * (Ox * Dx + Oz * Dz);
-      const C = Ox * Ox + Oz * Oz - R_world * R_world;
+      const B = 2 * (Ox * Dx + Oy * Dy + Oz * Dz);
+      const C = Ox * Ox + Oy * Oy + Oz * Oz - R_world * R_world;
 
       const disc = B * B - 4 * A * C;
       if (disc < 0) return { hit: false, dist: -1 };
@@ -381,10 +829,7 @@ const WebXRVR = (function () {
       if (t < 0 || t > 20) return { hit: false, dist: -1 };
 
       const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
-      const angle = Math.atan2(hitLocal.x, R_world - hitLocal.z);
-      const halfArc = (ARC_ANGLE * 0.5);
-
-      if (Math.abs(angle) <= halfArc && Math.abs(hitLocal.y) <= halfH) {
+      if (Math.abs(hitLocal.x) <= halfW && Math.abs(hitLocal.y) <= halfH) {
         return { hit: true, dist: t, hitLocal };
       }
       return { hit: false, dist: -1 };
@@ -403,13 +848,47 @@ const WebXRVR = (function () {
     }
   }
 
+  function getControlsCenter() {
+    if (lockToViewer) {
+      // Decoupled from the head-locked screen block: the transport panel stays
+      // fixed and level in the room at the default screen spot.
+      const offsetLocal = { x: 0, y: -DEFAULT_SCALE / 2 - CONTROLS_Y_OFFSET, z: 0 };
+      return vecAdd({ ...DEFAULT_POS }, offsetLocal);
+    }
+    const offsetLocal = { x: 0, y: -screenScale / 2 - CONTROLS_Y_OFFSET, z: 0 };
+    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
+    return vecAdd(screenPos, offsetWorld);
+  }
+
+  function getGuideCenter() {
+    if (lockToViewer) {
+      const guideW = DEFAULT_SCALE * 0.351;
+      return {
+        x: DEFAULT_POS.x + DEFAULT_SCALE / 2 + guideW / 2 + 0.384,
+        y: DEFAULT_POS.y,
+        z: DEFAULT_POS.z - 0.15,
+      };
+    }
+    const guideW = screenScale * 0.351;
+    const offsetLocal = { x: screenScale / 2 + guideW / 2 + 0.384, y: 0, z: -0.15 };
+    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
+    return vecAdd(screenPos, offsetWorld);
+  }
+
+  function getControlsQuat() {
+    if (lockToViewer) {
+      return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
+    }
+    return screenQuat;
+  }
+
+  function getControlsScale() {
+    return lockToViewer ? DEFAULT_SCALE : screenScale;
+  }
+
   function getHitDistControls(rayOrigin, rayDir) {
-    const ctrlCenter = {
-      x: screenPos.x,
-      y: screenPos.y - screenScale / 2 - 0.28,
-      z: screenPos.z,
-    };
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
+    const ctrlCenter = getControlsCenter();
+    const normal = quatRotVec(getControlsQuat(), { x: 0, y: 0, z: 1 });
     const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
     if (Math.abs(denom) < 0.0001) return -1;
     const t = ((ctrlCenter.x - rayOrigin.x) * normal.x +
@@ -419,15 +898,12 @@ const WebXRVR = (function () {
   }
 
   function hitTestControls(rayOrigin, rayDir) {
-    const ctrlCenter = {
-      x: screenPos.x,
-      y: screenPos.y - screenScale / 2 - 0.28,
-      z: screenPos.z,
-    };
-    const ctrlWidth = screenScale * 0.8;
+    const ctrlCenter = getControlsCenter();
+    const ctrlWidth = getControlsScale() * 0.8;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
 
-    const normal = quatRotVec(screenQuat, { x: 0, y: 0, z: 1 });
+    const ctrlQuat = getControlsQuat();
+    const normal = quatRotVec(ctrlQuat, { x: 0, y: 0, z: 1 });
     const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
 
     if (Math.abs(denom) < 0.0001) return -1;
@@ -437,7 +913,7 @@ const WebXRVR = (function () {
     if (t < 0 || t > 20) return -1;
 
     const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
-    const invQ = quatInvert(screenQuat);
+    const invQ = quatInvert(ctrlQuat);
     const localP = quatRotVec(invQ, vecSub(hitP, ctrlCenter));
 
     const halfW = ctrlWidth / 2;
@@ -470,9 +946,22 @@ const WebXRVR = (function () {
       case 'rew':   callbacks.onSeek && callbacks.onSeek(-5); break;
       case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
-      case 'curve': isCurved = !isCurved; break;
+      case 'curve':
+        curvatureMode = (curvatureMode + 1) % 3;
+        isCurved = (curvatureMode !== 0);
+        break;
+      case 'lock':
+        lockToViewer = !lockToViewer;
+        if (lockToViewer) {
+          isGrabbing = false;
+          grabControllerIdx = -1;
+        }
+        break;
       case 'mute':
-        if (videoElement) videoElement.muted = !videoElement.muted;
+        if (videoElement) {
+          videoElement.muted = !videoElement.muted;
+          if (callbacks.onMuteChange) callbacks.onMuteChange(videoElement.muted);
+        }
         break;
       case 'exit':  exitVR(); break;
     }
@@ -527,27 +1016,48 @@ const WebXRVR = (function () {
   // ─── WebGL Setup & Shaders ──────────────────────────────────────────
 
   /**
-   * YouTube VR Curved Arc Shader (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
-   * Arc length = R * ARC_ANGLE = 1.0 → perfect 1:1 square video ratio preserved.
+   * Multi-Side Concave Screen Shader
+   * Curvature modes:
+   *  1.0: Concave Hemisphere (3D Spherical Dome Cap - All sides wrap towards viewer from direct center)
+   *  2.0: Concave Square (Biaxial Pillow Curve - Symmetrical horizontal & vertical amphitheater curve)
+   *  0.0: Flat Screen
    */
   const VERT = `
     attribute vec3 aPos;
     attribute vec2 aUV;
     varying vec2 vUV;
     uniform mat4 uMVP;
-    uniform float uCurved;
+    uniform float uCurvatureMode;
 
-    const float ARC_ANGLE = 0.6;
-    const float R = 1.6667;
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385; // 1.0 / ARC_ANGLE
 
     void main() {
       vUV = aUV;
       vec3 pos = aPos;
-      if (uCurved > 0.5) {
-        float angle = aPos.x * ARC_ANGLE;
-        pos.x = R * sin(angle);
-        pos.z = R * (1.0 - cos(angle)); // YouTube VR style subtle curve towards viewer
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        // Mode 1: Concave Hemisphere (Radial Spherical Dome)
+        // Direct center (0,0) is apex / focal center; all edges curve inward toward viewer (+Z)
+        // Uses true arc length so screen dimension is identical to square & flat modes
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        // Mode 2: Concave Square (Biaxial Pillow Curve)
+        // All four sides curve inward while maintaining square boundary alignment
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
       }
+
       gl_Position = uMVP * vec4(pos, 1.0);
     }
   `;
@@ -560,6 +1070,110 @@ const WebXRVR = (function () {
     void main() {
       vec4 c = texture2D(uTex, vUV);
       gl_FragColor = vec4(c.rgb, c.a * uAlpha);
+    }
+  `;
+
+  /**
+   * Celestial Starfield Shader with Organic Breathing Oscillation
+   */
+  const STAR_VERT = `
+    attribute vec3 aPos;
+    attribute vec3 aData; // x: size, y: phase, z: colorType
+    uniform mat4 uVP;
+    uniform vec3 uHeadPos;
+    uniform float uTime;
+    varying float vAlpha;
+    varying vec3 vColor;
+
+    void main() {
+      // Starfield centered around current viewer head position so it feels at infinity
+      vec3 worldPos = aPos + uHeadPos;
+      gl_Position = uVP * vec4(worldPos, 1.0);
+      
+      // Multi-frequency breathing oscillation for natural, organic twinkle
+      float breath = sin(uTime * 1.35 + aData.y) * 0.45 + sin(uTime * 0.65 + aData.y * 2.1) * 0.25;
+      float curSize = aData.x * (1.0 + breath * 0.45);
+      gl_PointSize = clamp(curSize, 1.5, 13.0);
+      
+      vAlpha = clamp(0.60 + breath * 0.45, 0.15, 1.0);
+      
+      if (aData.z < 0.5) {
+        vColor = vec3(0.92, 0.96, 1.0); // Diamond white
+      } else if (aData.z < 1.5) {
+        vColor = vec3(0.40, 0.76, 1.0); // Celestial neon cyan/blue
+      } else {
+        vColor = vec3(1.0, 0.86, 0.68); // Warm stellar amber
+      }
+    }
+  `;
+
+  const STAR_FRAG = `
+    precision mediump float;
+    varying float vAlpha;
+    varying vec3 vColor;
+
+    void main() {
+      vec2 coord = gl_PointCoord - vec2(0.5);
+      float dist = length(coord);
+      if (dist > 0.5) discard;
+      float core = smoothstep(0.5, 0.05, dist);
+      float glow = exp(-dist * 4.5);
+      float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
+      gl_FragColor = vec4(vColor, finalAlpha);
+    }
+  `;
+
+  /**
+   * Ambient Video Glow (Ambilight) Shader with Soft Radial Falloff matching multi-side curvature
+   */
+  const GLOW_VERT = `
+    attribute vec3 aPos;
+    attribute vec2 aUV;
+    varying vec2 vUV;
+    uniform mat4 uMVP;
+    uniform float uCurvatureMode;
+
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385;
+
+    void main() {
+      vUV = aUV;
+      vec3 pos = aPos;
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
+      }
+
+      gl_Position = uMVP * vec4(pos, 1.0);
+    }
+  `;
+
+  const GLOW_FRAG = `
+    precision mediump float;
+    varying vec2 vUV;
+    uniform vec3 uColor;
+    uniform float uIntensity;
+
+    void main() {
+      vec2 d = abs(vUV - 0.5) * 2.0;
+      float edgeDist = length(max(vec2(0.0), d - vec2(0.68, 0.68)));
+      float falloff = exp(-edgeDist * 3.8);
+      float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
+      float alpha = falloff * borderMask * uIntensity;
+      gl_FragColor = vec4(uColor * 1.3, alpha);
     }
   `;
 
@@ -610,6 +1224,66 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   }
 
+  function initStarfield() {
+    const data = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+      // Random spherical distribution
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 40.0 + Math.random() * 35.0; // 40m - 75m distance
+
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta);
+      const z = r * Math.cos(phi);
+
+      const size = 2.5 + Math.random() * 4.5;
+      const phase = Math.random() * Math.PI * 2;
+      const colorType = Math.random() < 0.6 ? 0.0 : (Math.random() < 0.5 ? 1.0 : 2.0);
+
+      data.push(x, y, z, size, phase, colorType);
+    }
+    glStarBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  }
+
+  function initAmbilight() {
+    ambilightCanvas = document.createElement('canvas');
+    ambilightCanvas.width = 8;
+    ambilightCanvas.height = 8;
+    ambilightCtx = ambilightCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  function updateAmbilightColor(now) {
+    if (!videoElement || videoElement.readyState < 2 || videoElement.paused) return;
+    if (now - lastColorSampleTime < 80) return; // Sample at ~12 FPS
+    lastColorSampleTime = now;
+
+    try {
+      ambilightCtx.drawImage(videoElement, 0, 0, 8, 8);
+      const imgData = ambilightCtx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      const count = 64;
+      for (let i = 0; i < imgData.length; i += 4) {
+        r += imgData[i];
+        g += imgData[i + 1];
+        b += imgData[i + 2];
+      }
+      r = (r / count) / 255.0;
+      g = (g / count) / 255.0;
+      b = (b / count) / 255.0;
+
+      // Enhance vibrant ambient glow tone while preserving dark blue cosmos vibe
+      targetGlowColor = [
+        Math.min(1.0, r * 1.35 + 0.03),
+        Math.min(1.0, g * 1.35 + 0.05),
+        Math.min(1.0, b * 1.45 + 0.09)
+      ];
+    } catch (e) {
+      // Ignore security errors if cross-origin
+    }
+  }
+
   function initGL(session) {
     const canvas = document.createElement('canvas');
     gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false });
@@ -621,6 +1295,7 @@ const WebXRVR = (function () {
     glLayer = new XRWebGLLayer(session, gl);
     session.updateRenderState({ baseLayer: glLayer });
 
+    // Main Program
     const vs = compileShader(gl.VERTEX_SHADER, VERT);
     const fs = compileShader(gl.FRAGMENT_SHADER, FRAG);
     glProgram = gl.createProgram();
@@ -638,20 +1313,71 @@ const WebXRVR = (function () {
     loc_uMVP = gl.getUniformLocation(glProgram, 'uMVP');
     loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
     loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
-    loc_uCurved = gl.getUniformLocation(glProgram, 'uCurved');
+    loc_uCurvatureMode = gl.getUniformLocation(glProgram, 'uCurvatureMode');
 
+    // Starfield Program
+    const starVs = compileShader(gl.VERTEX_SHADER, STAR_VERT);
+    const starFs = compileShader(gl.FRAGMENT_SHADER, STAR_FRAG);
+    glStarProgram = gl.createProgram();
+    gl.attachShader(glStarProgram, starVs);
+    gl.attachShader(glStarProgram, starFs);
+    gl.linkProgram(glStarProgram);
+
+    loc_star_aPos = gl.getAttribLocation(glStarProgram, 'aPos');
+    loc_star_aData = gl.getAttribLocation(glStarProgram, 'aData');
+    loc_star_uVP = gl.getUniformLocation(glStarProgram, 'uVP');
+    loc_star_uHeadPos = gl.getUniformLocation(glStarProgram, 'uHeadPos');
+    loc_star_uTime = gl.getUniformLocation(glStarProgram, 'uTime');
+
+    // Ambient Glow Program
+    const glowVs = compileShader(gl.VERTEX_SHADER, GLOW_VERT);
+    const glowFs = compileShader(gl.FRAGMENT_SHADER, GLOW_FRAG);
+    glGlowProgram = gl.createProgram();
+    gl.attachShader(glGlowProgram, glowVs);
+    gl.attachShader(glGlowProgram, glowFs);
+    gl.linkProgram(glGlowProgram);
+
+    loc_glow_aPos = gl.getAttribLocation(glGlowProgram, 'aPos');
+    loc_glow_aUV = gl.getAttribLocation(glGlowProgram, 'aUV');
+    loc_glow_uMVP = gl.getUniformLocation(glGlowProgram, 'uMVP');
+    loc_glow_uCurvatureMode = gl.getUniformLocation(glGlowProgram, 'uCurvatureMode');
+    loc_glow_uColor = gl.getUniformLocation(glGlowProgram, 'uColor');
+    loc_glow_uIntensity = gl.getUniformLocation(glGlowProgram, 'uIntensity');
+
+    // Generate 2D Multi-Side Curvature Mesh Grid (32x32 Quads)
     const COLS = 32;
+    const ROWS = 32;
     const verts = [];
-    for (let col = 0; col <= COLS; col++) {
-      const u = col / COLS;
-      const x = u - 0.5;
-      verts.push(x, 0.5, 0.0, u, 0);
-      verts.push(x, -0.5, 0.0, u, 1);
+    const indices = [];
+
+    for (let r = 0; r <= ROWS; r++) {
+      const v = r / ROWS;
+      const y = 0.5 - v;
+      for (let c = 0; c <= COLS; c++) {
+        const u = c / COLS;
+        const x = u - 0.5;
+        verts.push(x, y, 0.0, u, v);
+      }
     }
-    glGridVertCount = (COLS + 1) * 2;
+
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i0 = r * (COLS + 1) + c;
+        const i1 = i0 + 1;
+        const i2 = (r + 1) * (COLS + 1) + c;
+        const i3 = i2 + 1;
+        indices.push(i0, i2, i1, i1, i2, i3);
+      }
+    }
+
+    glGridIndexCount = indices.length;
     glGridBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+
+    glGridIndexBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
     glLaserBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, glLaserBuf);
@@ -671,12 +1397,28 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    glGuideTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    glOverlayTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     initReticleTexture();
+    initStarfield();
+    initAmbilight();
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    console.log('[WebXRVR] WebGL initialised OK with Deep IMAX Curve & Smooth 6DOF');
+    console.log('[WebXRVR] WebGL initialised OK with Celestial Cosmos & Dynamic Ambilight Glow');
     return true;
   }
 
@@ -725,10 +1467,11 @@ const WebXRVR = (function () {
 
   // ─── Draw Mesh Grid ──────────────────────────────────────────────────
 
-  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curved) {
+  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode) {
     gl.useProgram(glProgram);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
     gl.enableVertexAttribArray(loc_aPos);
     gl.enableVertexAttribArray(loc_aUV);
     gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
@@ -737,15 +1480,73 @@ const WebXRVR = (function () {
     const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
     const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
 
+    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
     gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurved, curved ? 1.0 : 0.0);
+    gl.uniform1f(loc_uCurvatureMode, modeVal);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.uniform1i(loc_uTex, 0);
     gl.uniform1f(loc_uAlpha, alpha);
 
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, glGridVertCount);
+    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
+  }
+
+  // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
+
+  function drawStarfield(viewMat, projMat, timeSec) {
+    if (!glStarProgram || !glStarBuf) return;
+    gl.useProgram(glStarProgram);
+
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending for stars
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
+    gl.enableVertexAttribArray(loc_star_aPos);
+    gl.enableVertexAttribArray(loc_star_aData);
+    gl.vertexAttribPointer(loc_star_aPos, 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(loc_star_aData, 3, gl.FLOAT, false, 24, 12);
+
+    const vp = mat4Mul(projMat, viewMat);
+    gl.uniformMatrix4fv(loc_star_uVP, false, vp);
+    gl.uniform3f(loc_star_uHeadPos, currentHeadPos.x, currentHeadPos.y, currentHeadPos.z);
+    gl.uniform1f(loc_star_uTime, timeSec);
+
+    gl.drawArrays(gl.POINTS, 0, STAR_COUNT);
+
+    gl.depthMask(true);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  function drawAmbientGlow(viewMat, projMat, pos, quat, scaleW, scaleH, curveMode) {
+    if (!glGlowProgram || !glGridBuf || !glGridIndexBuf) return;
+    gl.useProgram(glGlowProgram);
+
+    gl.depthMask(false);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive glow against dark blue sky
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
+    gl.enableVertexAttribArray(loc_glow_aPos);
+    gl.enableVertexAttribArray(loc_glow_aUV);
+    gl.vertexAttribPointer(loc_glow_aPos, 3, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(loc_glow_aUV, 2, gl.FLOAT, false, 20, 12);
+
+    const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
+    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
+
+    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
+    gl.uniformMatrix4fv(loc_glow_uMVP, false, mvp);
+    gl.uniform1f(loc_glow_uCurvatureMode, modeVal);
+    gl.uniform3f(loc_glow_uColor, curGlowColor[0], curGlowColor[1], curGlowColor[2]);
+    gl.uniform1f(loc_glow_uIntensity, 0.78);
+
+    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
+
+    gl.depthMask(true);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   // ─── Draw Laser Pointer Beam & Target Reticle Dot ────────────────────
@@ -772,7 +1573,7 @@ const WebXRVR = (function () {
 
     const mvp = mat4Mul(projMat, viewMat);
     gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurved, 0.0);
+    gl.uniform1f(loc_uCurvatureMode, 0.0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, glReticleTexture);
@@ -794,6 +1595,37 @@ const WebXRVR = (function () {
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
 
+    if (pose.transform) {
+      currentHeadPos = {
+        x: pose.transform.position.x,
+        y: pose.transform.position.y,
+        z: pose.transform.position.z,
+      };
+      currentHeadQuat = {
+        x: pose.transform.orientation.x,
+        y: pose.transform.orientation.y,
+        z: pose.transform.orientation.z,
+        w: pose.transform.orientation.w,
+      };
+
+      if (!isInitialPoseSet) {
+        if (!lockToViewer) {
+          const initDir = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
+          screenQuat = quatLevelFromDir(initDir);
+          screenPos = {
+            x: currentHeadPos.x + initDir.x * 2.24,
+            y: currentHeadPos.y,
+            z: currentHeadPos.z + initDir.z * 2.24,
+          };
+        }
+        isInitialPoseSet = true;
+      }
+
+      if (lockToViewer) {
+        applyLockToViewer();
+      }
+    }
+
     processInput(frame);
 
     if (videoElement && videoElement.paused && !controlsVisible) {
@@ -802,8 +1634,15 @@ const WebXRVR = (function () {
 
     if (!glLayer || !gl) return;
 
+    // Update real-time Ambilight video color extraction and smooth interpolation
+    updateAmbilightColor(time);
+    curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
+    curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
+    curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-    gl.clearColor(0.03, 0.03, 0.04, 1);
+    // Deep midnight blue celestial background (20% darker for enhanced contrast)
+    gl.clearColor(0.0095, 0.0175, 0.052, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     if (videoElement && videoElement.readyState >= 2) {
@@ -820,7 +1659,21 @@ const WebXRVR = (function () {
       renderControlsCanvas();
       gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+
+      if (guideCanvas && glGuideTexture) {
+        renderGuideCanvas();
+        gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
+      }
     }
+
+    const hasOverlayComments = renderOverlayCanvas();
+    if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
+      gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
+    }
+
+    const timeSec = time * 0.001;
 
     for (const view of pose.views) {
       const vp = glLayer.getViewport(view);
@@ -829,16 +1682,37 @@ const WebXRVR = (function () {
       const viewMat = view.transform.inverse.matrix;
       const projMat = view.projectionMatrix;
 
-      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, isCurved);
+      // 1. Draw breathing celestial starfield
+      drawStarfield(viewMat, projMat, timeSec);
+
+      // 2. Draw dynamic ambient video glow (Ambilight) behind video screen with matching curvature
+      drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
+
+      // 3. Draw main video screen with all-side concave curvature
+      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode);
+
+      // 4. Draw in-screen direct time-synced comments overlay over reels screen
+      if (hasOverlayComments && glOverlayTexture) {
+        drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
+      }
 
       if (controlsVisible) {
-        const offsetLocal = { x: 0, y: -screenScale / 2 - 0.28, z: 0 };
-        const offsetWorld = quatRotVec(screenQuat, offsetLocal);
-        const ctrlPos = vecAdd(screenPos, offsetWorld);
-
-        const ctrlW = screenScale * 0.8;
+        const ctrlPos = getControlsCenter();
+        const ctrlScale = lockToViewer ? DEFAULT_SCALE : screenScale;
+        const ctrlW = ctrlScale * 0.8;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
-        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, screenQuat, ctrlW, ctrlH, 0.96, false);
+        const ctrlQuat = lockToViewer ? quatFaceViewerLevel(ctrlPos, currentHeadPos) : screenQuat;
+        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0.0);
+
+        // Draw Meta Quest 3 Controller Guide Panel to the right of screen
+        // Face the guide panel toward the viewer so it's readable from their POV
+        if (glGuideTexture) {
+          const guidePos = getGuideCenter();
+          const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
+          const guideW = ctrlScale * 0.351;
+          const guideH = guideW * (GUIDE_H / GUIDE_W);
+          drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0.0);
+        }
       }
 
       drawLaserPointer(viewMat, projMat);
@@ -873,7 +1747,10 @@ const WebXRVR = (function () {
 
       // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
       const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
-      if (gripPressed && controllerPos && controllerDir) {
+      if (lockToViewer) {
+        isGrabbing = false;
+        grabControllerIdx = -1;
+      } else if (gripPressed && controllerPos && controllerDir) {
         if (!isGrabbing) {
           isGrabbing = true;
           grabControllerIdx = hand === 'right' ? 1 : 0;
@@ -887,7 +1764,7 @@ const WebXRVR = (function () {
           screenPos = vecAdd(controllerPos, rotatedRel);
 
           // Rotate screen tangent to viewer POV (facing head, 100% horizontally level)
-          screenQuat = quatFaceViewerLevel(screenPos, { x: 0, y: 1.6, z: 0 });
+          screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
         }
       } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
                                  (hand === 'left' && grabControllerIdx === 0))) {
@@ -972,8 +1849,11 @@ const WebXRVR = (function () {
       }
       prevBtnState.rightA = aPressed;
 
-      // ── 4. B Button: Disabled (no-op) ──
+      // ── 4. B Button: Toggle Guide & UI Controls Panel ──
       const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
+      if (bPressed && !prevBtnState.rightB) {
+        toggleControls();
+      }
       prevBtnState.rightB = bPressed;
     }
   }
@@ -1015,6 +1895,10 @@ const WebXRVR = (function () {
     screenPos = { ...DEFAULT_POS };
     screenQuat = { x: 0, y: 0, z: 0, w: 1 };
     screenScale = DEFAULT_SCALE;
+    currentHeadPos = { x: 0, y: 1.52, z: 0 };
+    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
+    isInitialPoseSet = false;
+    lockToViewer = true;
     controlsVisible = false;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
@@ -1026,6 +1910,8 @@ const WebXRVR = (function () {
     flickedY = false;
 
     initControlsCanvas();
+    initOverlayCanvas();
+    // Note: initGuideCanvas() is called after initGL() since it needs glGuideTexture
 
     try {
       xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
@@ -1038,6 +1924,9 @@ const WebXRVR = (function () {
       xrSession = null;
       return;
     }
+
+    // Init guide canvas AFTER initGL so glGuideTexture exists
+    initGuideCanvas();
 
     setupVideoFrameTracking();
 
@@ -1052,8 +1941,12 @@ const WebXRVR = (function () {
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.add('vr-active');
 
-    if (videoElement && videoElement.paused) {
-      videoElement.play().catch(() => {});
+    if (videoElement) {
+      videoElement.muted = false;
+      if (callbacks.onUnmute) callbacks.onUnmute();
+      if (videoElement.paused) {
+        videoElement.play().catch(() => {});
+      }
     }
 
     xrSession.requestAnimationFrame(onXRFrame);
@@ -1127,18 +2020,29 @@ const WebXRVR = (function () {
     glProgram = null;
     glVideoTexture = null;
     glControlsTexture = null;
+    glOverlayTexture = null;
+    glGuideTexture = null;
     glReticleTexture = null;
+    overlayCanvas = null;
+    overlayCtx = null;
     glGridBuf = null;
+    glGridIndexBuf = null;
+    glGridIndexCount = 0;
     glLaserBuf = null;
-    glGridVertCount = 0;
     loc_aPos = -1;
     loc_aUV = -1;
     loc_uMVP = null;
     loc_uTex = null;
     loc_uAlpha = null;
-    loc_uCurved = null;
+    loc_uCurvatureMode = null;
+    glStarProgram = null;
+    glStarBuf = null;
+    glGlowProgram = null;
+    ambilightCanvas = null;
+    ambilightCtx = null;
     controlsVisible = false;
     isGrabbing = false;
+    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     hoveredButton = -1;

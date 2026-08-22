@@ -1,7 +1,37 @@
 import io
 import json
 import subprocess
+import urllib.request
 from PIL import Image
+
+MAX_FAL_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB — generous ceiling for a 4K master
+
+
+def fetch_fal_result(url: str, dest_path: str, timeout: float = 120.0,
+                      max_bytes: int = MAX_FAL_DOWNLOAD_BYTES) -> None:
+    """Download a fal.ai result URL to *dest_path*.
+
+    Replaces bare `urllib.request.urlretrieve` calls, which have no timeout
+    and no size cap and will follow any scheme/redirect. fal.ai result URLs
+    are always https, so anything else is treated as unexpected.
+    """
+    if not url.lower().startswith("https://"):
+        raise ValueError(f"Refusing to fetch non-https URL: {url!r}")
+
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        total = 0
+        with open(dest_path, "wb") as out:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError(
+                        f"fal.ai result exceeded {max_bytes // (1024 * 1024)}MB cap: {url!r}"
+                    )
+                out.write(chunk)
 
 def get_image_dimensions(image_path_or_bytes):
     """
@@ -37,7 +67,8 @@ def get_video_dimensions_and_duration(video_path):
              "stream=width,height,duration", "-of", "json", video_path],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=15,
         )
         data = json.loads(result.stdout)
         stream = data["streams"][0]
@@ -49,7 +80,7 @@ def get_video_dimensions_and_duration(video_path):
             raise ValueError(f"Could not determine video dimensions for {video_path}")
 
         return width, height, duration
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, IndexError) as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError) as e:
         raise ValueError(f"Could not read video metadata from {video_path}: {e}")
 
 def calculate_square_padding(width, height):
@@ -94,22 +125,42 @@ def has_audio_stream(video_path):
              "stream=codec_name", "-of", "json", video_path],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=15,
         )
         data = json.loads(result.stdout)
         return len(data.get("streams", [])) > 0
     except Exception:
         return False
 
+
+def get_video_codec(video_path):
+    """Return the video stream codec name (e.g. 'hevc', 'h264') via ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip().lower() or "unknown"
+    except Exception:
+        return "unknown"
+
 def log_pipeline_execution(item_name, kind, input_path, output_path, metrics, params=None):
     """
-    Appends execution metrics, input/output paths, timing breakdown, 
-    and estimated cost to persistent log files inside output/.
+    Appends execution metrics, input/output paths, timing breakdown,
+    and estimated cost to persistent log files inside logs/.
+
+    Deliberately NOT inside output/ — output/ is mounted at /media by
+    server/app.py (Range-capable static serving for the Reels/Compare
+    players), so a log living there was silently public at
+    /media/pipeline.log, leaking internal filesystem paths and per-job cost
+    estimates to anyone who could reach the app.
     """
     import datetime
     from pathlib import Path
-    
-    out_dir = Path("output")
+
+    out_dir = Path("logs")
     out_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -124,12 +175,12 @@ def log_pipeline_execution(item_name, kind, input_path, output_path, metrics, pa
         "params": params or {},
     }
     
-    # 1. JSON Lines log (output/pipeline_log.jsonl)
+    # 1. JSON Lines log (logs/pipeline_log.jsonl)
     jsonl_path = out_dir / "pipeline_log.jsonl"
     with open(jsonl_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_entry) + "\n")
-        
-    # 2. Human-readable text log (output/pipeline.log)
+
+    # 2. Human-readable text log (logs/pipeline.log)
     txt_path = out_dir / "pipeline.log"
     total_t = metrics.get("total_time", 0.0) if metrics else 0.0
     total_c = metrics.get("total_cost", 0.0) if metrics else 0.0

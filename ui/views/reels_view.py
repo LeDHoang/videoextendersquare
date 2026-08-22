@@ -30,6 +30,10 @@ OUTPUT_DIR = Path("output")
 def _template() -> str:
     assets = Path(__file__).parent.parent / "assets"
     html = (assets / "reels.html").read_text(encoding="utf-8")
+    # Inline the Quest controller guide image (data URL) so the VR module stays readable
+    img_js_path = assets / "quest_controller_img.js"
+    img_js = img_js_path.read_text(encoding="utf-8") if img_js_path.exists() else ""
+    html = html.replace("__QUEST_CONTROLLER_IMG_JS__", img_js)
     # Inline the WebXR VR module so it's available inside the Streamlit iframe
     vr_js_path = assets / "webxr_vr.js"
     vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""
@@ -71,11 +75,13 @@ def render(ctx: dict) -> None:
     ]
 
     st.caption("FILTER REELS BY OUTPUT FOLDER")
+    default_folder = "testpipeline" if "testpipeline" in folder_options else "ALL FOLDERS"
+    default_label = folder_labels[folder_options.index(default_folder)]
     selected_label = st.pills(
         "Folder Filter",
         options=folder_labels,
         selection_mode="single",
-        default=folder_labels[0],
+        default=default_label,
         key="sx.reels.folder_pills",
         label_visibility="collapsed",
     )
@@ -85,30 +91,31 @@ def render(ctx: dict) -> None:
         idx = folder_labels.index(selected_label)
         selected_folder = folder_options[idx]
 
-    c1, c2, c3, c4 = st.columns([2, 2, 3, 1])
+    codec_mode = st.segmented_control(
+        "Codec",
+        ["HEVC 4K (Raw Master)", "H.264 4K (Web & VR)", "ALL CODECS"],
+        default="HEVC 4K (Raw Master)",
+        key="sx.reels.codec",
+        label_visibility="collapsed",
+        help="Meta Quest 3 Browser features native 4K HEVC hardware decoding for zero-lag playback.",
+    )
+
+    c1, c2, c3 = st.columns([3, 4, 1])
     with c1:
-        codec_mode = st.selectbox(
-            "Codec",
-            ["HEVC 4K (Raw Master)", "H.264 4K (Web & VR)", "ALL CODECS"],
-            key="sx.reels.codec_mode",
-            label_visibility="collapsed",
-            help="Meta Quest 3 Browser features native 4K HEVC hardware decoding for zero-lag playback.",
-        )
-    with c2:
         sort_order = st.selectbox(
             "Sort",
             ["NEWEST FIRST", "OLDEST FIRST", "ALPHABETICAL", "SHUFFLE"],
             key="sx.reels.sort",
             label_visibility="collapsed",
         )
-    with c3:
+    with c2:
         search_query = st.text_input(
             "Search",
             placeholder="Search filename…",
             key="sx.reels.search",
             label_visibility="collapsed",
         )
-    with c4:
+    with c3:
         if st.button("↻ RESCAN", key="sx.reels.rescan", use_container_width=True):
             st.session_state["sx.reels_nonce"] = nonce + 1
             scan_output_videos.clear()
@@ -237,7 +244,12 @@ def render(ctx: dict) -> None:
         return
 
     # Render HTML5 1:1 Square Reels Component with 4K Master URLs
+    # Stable cache buster: uses webxr_vr.js file modification time.
+    # Only changes when the JS file itself is updated → no unnecessary iframe reloads.
+    vr_js_path = Path(__file__).parent.parent / "assets" / "webxr_vr.js"
+    js_mtime = int(vr_js_path.stat().st_mtime) if vr_js_path.exists() else 0
     html = _template().replace("__VIDEO_DATA_JSON__", json.dumps(video_payload))
+    html = html.replace("</head>", f"<script>const _VR_MTIME={js_mtime};</script></head>", 1)
     components.html(html, height=750)
 
     # Info footer / list view

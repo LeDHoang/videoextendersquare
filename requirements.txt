@@ -3,3 +3,7 @@ fal-client>=1.0
 Pillow>=10
 python-dotenv>=1.0
 vapoursynth==78
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+sse-starlette>=2.0

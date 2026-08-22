@@ -1,6 +1,7 @@
 # Application media directories
 input/
 output/
+logs/
 
 # VapourSynth cache files
 *.ffindex
@@ -11,8 +12,21 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.venv2/
+venv2/
 ENV/
 
 # macOS
 .DS_Store
 .env
+.streamlit/credentials.toml
+
+# Node / built frontend
+web/node_modules/
+web/dist/
+server/static/
+
+# Untracked notes
+current-issue.md
+reports/
+antigravityskill/

@@ -1,90 +1,117 @@
-# Square Extender 4K
+# ECHO — 4K Square Spatial Video Extender & WebXR VR Player (v2.0)
 
-Converts images and videos into a **1:1 square 4K master (3840×3840)** by generatively outpainting padding via [fal.ai](https://fal.ai) and upscaling locally with hardware-accelerated **FFmpeg** or **VapourSynth**, featuring an integrated **WebXR 4K Reels Player** optimized for **Meta Quest 3**.
+<p align="center">
+  <img src="web/public/logo.png" alt="ECHO Logo" width="120" />
+</p>
 
-```
-UPLOAD (Single / Batch)  →  CONFIGURE (Outpaint & Upscale)  →  ESTIMATE COST  →  RESULT (4K Master)  →  REELS (WebVR)
-```
+<p align="center">
+  <strong>Generative 1:1 Square Outpainting · 4K HEVC Spatial Master Encoding · WebXR Immersive Cosmic VR Reels</strong>
+</p>
 
 ---
 
 ## Visual Showcase
 
-### Image Processing & Multi-File Batch Mode
+### 1. Image Extender & Multi-File Batch Mode
+Generatively extend canvas borders to 1:1 square (3840×3840) with instant padding metrics and multi-model cloud / offline upscalers.
 ![Image Processing Interface](docs/images/image_extender.png)
 
-### Video Processing, Bytedance Upscaler & Live Cost Breakdown
+### 2. Video Extender & Live Cost Breakdown
+Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Luma Ray-2, local HEVC master encoding, and live pre-render billing estimator.
 ![Video Processing Interface](docs/images/video_extender.png)
 
-### WebXR 4K Master Reels Player (Meta Quest 3 / WebVR)
+### 3. WebXR 4K Reels Player (Desktop Viewport with Dynamic Glow)
+Ultra-smooth 1:1 square reels player with synchronized dynamic ambient glow (Ambilight), instant folder / codec switching, and search filtering.
 ![Reels Player Interface](docs/images/reels_player.png)
 
-### Interactive Render Comparison
+### 4. WebXR Immersive Cosmic VR Mode (Meta Quest 3 / Vision Pro)
+Step inside an atmospheric midnight-blue cosmos with 1,800 breathing stars, real-time radiant video glow, 6DOF natural grab-and-drag, and 3D floating spatial transport panel.
+![WebXR VR Mode Simulation](docs/images/reels_vr_mode.png)
+
+### 5. Fast vs Studio Render Comparison Inspector
+Interactive side-by-side A/B slider comparing Lanczos4+CAS against ZNEDI3 neural interpolation with automatic proxy streaming.
 ![Compare Page Interface](docs/images/compare_slider.png)
 
 ---
 
 ## Key Features
 
-- ⚡ **Multi-Item Batch Upload**: Drop single or multiple images (`PNG`, `JPG`, `WEBP`) or videos (`MP4`, `MOV`, `AVI`, `WEBM`) at once.
-- 🥽 **WebXR 4K Master Reels Player (Meta Quest 3)**:
-  - **Hardware HEVC Acceleration**: Native 4K HEVC playback on Quest 3 Snapdragon XR2 Gen 2.
-  - **IMAX Curved Screen Arc**: Authentic YouTube VR-style curved 3D quad geometry (`ARC_ANGLE = 0.6 rad`).
-  - **6DOF Natural Grab & Level Horizon**: Hold grip button to drag/reposition video screen; screen auto-aligns level to viewer POV with 0 sideways roll.
-  - **Interactive 3D Transport Panel**: Floating 2D canvas controls panel in 3D VR space with Play/Pause, Seek, Mute, Curve, and `🔄 AUTO` / `🔁 LOOP` playback mode toggles.
-  - **Background Preloader**: Pre-buffers next track for zero-latency reel transitions.
-- 💰 **Live Pre-Render Cloud Cost Estimator**: Real-time billing breakdown panel displayed before render, calculating effective video duration, outpaint stage costs, and upscale stage costs.
-- 🚀 **Bytedance Video Upscaler Cloud Model**:
-  - Model ID: `fal-ai/bytedance-upscaler/upscale/video`
-  - Configurable target resolution (`1080p`, `2k`, `4k`), FPS (`30fps`, `60fps`), quality tier (`fast`, `standard`, `pro`), scenario presets (`general`, `ugc`, `short_series`, `aigc`, `old_film`), and fidelity (`medium`, `high`).
-- 🎬 **Optimized 4K HEVC Master Video Encoding**:
-  - Hardware-accelerated local HEVC encoding (`hevc_videotoolbox` / `hevc_nvenc` / `libx265`).
-  - Capped 14M/16M VBR bitrate ceiling to prevent network buffer starvation on VR headsets.
-  - `-movflags +faststart` MOOV header placement for instant frame 1 pre-roll streaming.
-- 🎨 **Dual Pipeline Modes**:
-  - **OUTPAINT + UPSCALE**: Generatively extends short edges via `fal.ai` cloud models (LTX 2.3 Quality, Luma Ray-2 Reframe, Kling Video) before upscaling.
+### 🥽 WebXR 4K Master Reels Player (Meta Quest 3 & Apple Vision Pro)
+- **Deep Midnight-Blue Cosmic Skybox**: Surrounds the viewer with 1,800 procedurally placed stars with multi-harmonic harmonic twinkling and additive alpha blending.
+- **Dynamic Real-Time Ambilight Aura**: Synchronized Gaussian glow backing on 2D desktop browsers and GLSL fragment glow shader in WebXR stereo VR.
+- **All-Side 3D Curvature Screen Modes**:
+  - **`🌐 DOME` (Concave Hemisphere)**: Curves symmetrically toward the viewer in a true 3D spherical dome cap with direct center focal apex $(0,0,0)$.
+  - **`🔲 SQ CURVE` (Concave Square)**: Dual-axis curvature along both $X$ and $Y$ dimensions while preserving sharp rectangular framing.
+  - **`📺 FLAT`**: Planar display mode.
+- **6DOF Natural Grab & Level Horizon**: Hold the Quest grip button to freely drag and position the video screen anywhere in 3D space with zero roll disorientation.
+- **Floating 3D Spatial Transport Panel**: Seek, Play/Pause, Mute, Volume, Curvature Toggle, and `🔄 AUTO` / `🔁 LOOP` modes rendered in 3D space.
+- **Zero-Latency Video Preloader**: Proactively pre-buffers the next track for instantaneous reel transitions.
+
+### 🎨 Generative 1:1 Square Outpainting & 4K Encoding
+- **Dual Pipeline Modes**:
+  - **OUTPAINT + UPSCALE**: Generatively extends portrait/landscape videos to 1:1 square via `fal.ai` models (LTX 2.3, Luma Ray-2, Kling Video) before upscaling.
   - **UPSCALE ONLY**: Runs 100% locally with zero cloud API keys required.
-- 🔍 **System Diagnostic & Self-Healing**: Auto-locates `ffmpeg`, `ffprobe`, `vspipe`, and HEVC hardware encoders across system PATHs and virtual environments.
+- **Bytedance Video Upscaler Integration**:
+  - Model ID: `fal-ai/bytedance-upscaler/upscale/video`
+  - Custom target resolution (`1080p`, `2k`, `4k`), frame rate (`30fps`, `60fps`), quality tier, scenario presets, and fidelity settings.
+- **Local Hardware HEVC Master Encoding**:
+  - Hardware acceleration (`hevc_videotoolbox` on macOS / `hevc_nvenc` on NVIDIA / `libx265`).
+  - Bitrate ceiling optimization to guarantee smooth Quest 3 decoding without buffer drops.
+  - `-movflags +faststart` MOOV header atom placement for instant frame-1 streaming.
+
+### ⚡ Modern Single Page Application Architecture (v2.0)
+- **React 19 + Vite 6 Frontend**: Cyberpunk brutalist dark mode design system with Tron-inspired **Orbitron** typography, unified 38px controls, and glassmorphism.
+- **FastAPI Asynchronous Backend**: Non-blocking REST endpoints, Server-Sent Events (SSE) live job progress streaming, and HTTP 206 Partial Content video range serving.
 
 ---
 
 ## Quick Start
 
-### 1. Requirements
-
+### 1. Prerequisites
+- **Node.js 18+** & **npm**
 - **Python 3.10 to 3.12+**
-- **FFmpeg & FFprobe** (installed on system or PATH)
+- **FFmpeg & FFprobe** installed and available in your PATH
 
-### 2. Environment Setup
+### 2. Installation
 
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/LeDHoang/videoextendersquare.git
 cd videoextendersquare
 
-# Create virtual environment & install dependencies
+# Set up Python virtual environment
 python -m venv .venv
-source .venv/bin/activate      # On Windows: .venv\Scripts\activate
+source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+# Install frontend dependencies
+cd web
+npm install
+cd ..
 ```
 
-### 3. API Key Configuration
-
-Create a `.env` file from `.env.example`:
+### 3. Configuration
+Create a `.env` file in the project root:
 
 ```env
 FAL_KEY=your_fal_ai_api_key_here
 ```
+*(Note: `FAL_KEY` is only required for generative outpainting and cloud upscaling. Local FAST/STUDIO modes run completely offline.)*
 
-> **Note**: `FAL_KEY` is only required for generative outpainting and cloud upscaling. **UPSCALE ONLY (FAST / STUDIO)** mode runs entirely offline.
+### 4. Running the Application
 
-### 4. Launch Web Application
-
+In terminal 1 (FastAPI Backend):
 ```bash
-streamlit run app.py
+.venv/bin/uvicorn server.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open **http://localhost:8501** in your browser.
+In terminal 2 (Vite Frontend):
+```bash
+cd web
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
 
 ---
 
@@ -92,37 +119,42 @@ Open **http://localhost:8501** in your browser.
 
 WebXR requires a **Secure Context** (`https://` or `localhost`).
 
-1. Connect Meta Quest 3 to your Mac via USB-C.
-2. Open Chrome on Mac and go to `chrome://inspect/#devices`.
+1. Connect your Meta Quest 3 to your Mac / PC via USB-C cable.
+2. Open Chrome and navigate to `chrome://inspect/#devices`.
 3. Click **Port forwarding...** and add:
-   - `8501` → `localhost:8501` (Streamlit Web App)
-   - `8502` → `localhost:8502` (Media Server)
-4. On Meta Quest 3 Browser, navigate to: `http://localhost:8501/reels`.
-5. Click **"Enter VR 🥽"** to launch the immersive 4K VR Reels session!
+   - `5173` → `localhost:5173` (Vite Frontend)
+   - `8000` → `localhost:8000` (FastAPI Server)
+4. On your Meta Quest Browser, navigate to: `http://localhost:5173/reels`.
+5. Click **"VR MODE 🥽"** on screen to enter the cosmic WebXR immersive player!
 
 ---
 
-## Architecture
+## Project Structure
 
 ```
-app.py                  Streamlit entrypoint: layout, navigation, environment setup
-.streamlit/config.toml  Native dark theme tokens & web fonts
-docs/images/            Documentation UI screenshots
-pipeline/               Core processing workers (thread-isolated)
-├─ image_worker.py      fal.ai flux outpaint + FFmpeg Lanczos4 upscale
-├─ video_worker.py      fal.ai (LTX / Luma / Kling outpaint + Bytedance / SeedVR2 upscale) + local HEVC master
-└─ utils.py             Geometry, padding math & execution logger
-ui/                     Editorial UI & state engine
-├─ views/               image_view, video_view, reels_view, compare_view
-├─ assets/              reels.html, webxr_vr.js, app.css
-├─ runner.py            Thread pool manager with live progress streaming & queuing
-├─ health.py            System PATH self-heal & hardware probes
-├─ media.py             Session staging, web proxies & result persistence
-└─ mediaserver.py       High-performance HTTP 206 range server (port 8502)
+videoextendersquare/
+├── web/                    # Modern React 19 + Vite 6 SPA
+│   ├── src/
+│   │   ├── pages/          # ImagePage, VideoPage, ReelsPage, ComparePage
+│   │   ├── components/     # UI primitives, controls, Sidebar, Nav, ReelsPlayer
+│   │   ├── styles/         # Design tokens (tokens.css) & global styles (global.css)
+│   │   └── api/            # REST & SSE streaming client
+│   └── public/             # Logo emblem, icons, and static assets
+├── server/                 # High-performance FastAPI backend
+│   ├── app.py              # Application lifecycle & middleware
+│   ├── routers/            # image.py, video.py, reels.py, compare.py, config.py
+│   ├── media.py            # H.264 proxy transcoding & pair scanning
+│   └── jobs.py             # Asynchronous task runner with SSE broadcast
+├── pipeline/               # Core media transformation workers
+│   ├── image_worker.py     # Flux outpainting & Lanczos4 / FAL upscaling
+│   ├── video_worker.py     # Video outpainting (LTX/Luma/Kling) & HEVC encoding
+│   └── utils.py            # Geometric padding math & FFmpeg probing
+├── ui/assets/              # WebGL & WebXR shaders (webxr_vr.js, reels.html, compare.html)
+└── docs/images/            # High-resolution documentation screenshots
 ```
 
 ---
 
 ## License
 
-MIT License. Built for high-performance video and image transformation workflows.
+MIT License. Designed and built for high-performance generative spatial video transformation and immersive WebXR playback.
