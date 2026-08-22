@@ -122,6 +122,7 @@
     align-items: center;
     justify-content: flex-start;
     width: 56px;
+    overflow: hidden;
   }
   .action-btn {
     width: 34px;
@@ -161,10 +162,11 @@
     font-weight: 700;
     text-align: center;
     letter-spacing: 0.04em;
-    width: 100%;
-    display: block;
+    max-width: 56px;
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Bottom Left Overlay */
