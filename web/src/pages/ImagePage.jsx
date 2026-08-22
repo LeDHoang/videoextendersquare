@@ -6,6 +6,7 @@ import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
+import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -131,10 +132,7 @@ export default function ImagePage() {
 
       <Section num={2} title="Configure Pipeline" active={items.length > 0}>
         {items.length === 0 ? (
-          <EmptyState
-            title="AWAITING SOURCE IMAGE"
-            text="Drop one or more images in the upload zone above to unlock pipeline parameters."
-          />
+          <StudioLoading title="STUDIO" subtitle="AWAITING SOURCE IMAGE INITIATION…" compact />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div>

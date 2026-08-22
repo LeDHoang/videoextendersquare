@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import { EmptyState, Mono, GatedReason } from '../components/ui/primitives.jsx';
+import { EmptyState, Mono, GatedReason, Hero } from '../components/ui/primitives.jsx';
 import { Spinner } from '../components/ui/controls.jsx';
 import Emoji from '../components/ui/Emoji.jsx';
+
+import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const MODES = ['SPLIT', '2-UP', 'HEATMAP'];
 const ZOOMS = ['1x', '2x', '4x'];
@@ -69,16 +71,10 @@ export default function ComparePage() {
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', minWidth: 0 }}>
       {/* ─── Header ────────────────────────────────────────── */}
-      <header className="sx-compare-header">
-        <h1 className="sx-compare-title">
-          <Emoji text="FAST VS STUDIO" />
-        </h1>
-        <div className="sx-compare-kicker">
-          <span style={{ color: 'var(--sx-accent)', fontFamily: 'Orbitron, sans-serif', fontWeight: 900, letterSpacing: '0.15em' }}>
-            ECHO
-          </span>{' '}
-          · A/B RENDER COMPARISON · LANCZOS4+CAS VS ZNEDI3 NEURAL
-        </div>
+      <Hero
+        title="FAST VS STUDIO"
+        kicker="ECHO · A/B RENDER COMPARISON · LANCZOS4+CAS VS ZNEDI3 NEURAL"
+      >
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sx-3)', alignItems: 'center' }}>
           <div className="sx-stats-pill">
             <span>
@@ -103,14 +99,11 @@ export default function ComparePage() {
             </div>
           ) : null}
         </div>
-      </header>
+      </Hero>
 
       {/* ─── Main Content ──────────────────────────────────── */}
       {data === null ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 30 }}>
-          <Spinner />
-          <span className="sx-mono">SCANNING OUTPUT DIRECTORY FOR RENDER PAIRS…</span>
-        </div>
+        <StudioLoading title="COMPARE" subtitle="SCANNING DIRECTORY FOR RENDER PAIRS…" />
       ) : !allPairs.length ? (
         <EmptyState
           title="NO RENDER PAIRS FOUND"
@@ -254,10 +247,7 @@ export default function ComparePage() {
                     <div>{prepErr}</div>
                   </div>
                 ) : !prep ? (
-                  <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                    <Spinner />
-                    <span className="sx-mono">PREPARING MEDIA VIEWPORT…</span>
-                  </div>
+                  <StudioLoading title="VIEWPORT" subtitle="PREPARING MASTER 4K VIEWPORT…" compact />
                 ) : mode === '2-UP' ? (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%', height: '100%', background: '#000' }}>
                     <div style={{ borderRight: '1px solid var(--sx-rule-strong)', position: 'relative' }}>

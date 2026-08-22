@@ -7,6 +7,7 @@ import JobRunner from '../components/ui/JobRunner.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
+import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
@@ -218,10 +219,7 @@ export default function VideoPage() {
 
       <Section num={2} title="Configure Parameters" active={items.length > 0}>
         {items.length === 0 ? (
-          <EmptyState
-            title="AWAITING SOURCE VIDEO"
-            text="Drop one or more videos in the upload zone above to unlock pipeline parameters."
-          />
+          <StudioLoading title="EXTENDER" subtitle="AWAITING SOURCE VIDEO INITIATION…" compact />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div>

@@ -3,6 +3,7 @@ import { api } from '../api/client.js';
 import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
+import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const SORTS = [
   { label: 'NEWEST', value: 'newest' },
@@ -248,7 +249,7 @@ export default function ReelsPage() {
 
       {/* Player Mount */}
       {data === null ? (
-        <div className="sx-mono">SCANNING OUTPUT MEDIA REPOSITORY…</div>
+        <StudioLoading title="REELS" subtitle="AWAITING SEQUENCE INITIATION…" />
       ) : !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
