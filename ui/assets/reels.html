@@ -178,6 +178,13 @@
     flex-direction: column;
     gap: 4px;
     pointer-events: none;
+    transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: opacity, transform;
+  }
+  /* TikTok-style mutual exclusion: the meta block yields while comment pills are visible */
+  .reels-meta.ticker-active {
+    opacity: 0;
+    transform: translateY(8px);
   }
   .meta-folder {
     display: inline-flex;
@@ -312,7 +319,8 @@
     flex-direction: column;
     gap: 4px;
     pointer-events: none;
-    transition: opacity 0.22s ease, transform 0.22s ease;
+    transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: opacity, transform;
   }
   .twitch-comment-pill {
     display: inline-flex;
@@ -325,7 +333,7 @@
     font-size: 12px;
     color: #FFF;
     filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
-    animation: slideUpTicker 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: slideUpTicker 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   }
   @keyframes slideUpTicker {
     from { opacity: 0; transform: translateY(6px); }
@@ -764,7 +772,7 @@
     </div>
   </div>
 
-  <div class="reels-meta">
+  <div class="reels-meta" id="reelsMeta">
     <div class="meta-folder" id="metaFolder">📁 root</div>
     <div class="meta-title" id="metaTitle">Loading video…</div>
     <div class="meta-sub" id="metaSub">
@@ -867,6 +875,7 @@
     // Comments UI Elements
     const commentMarkers = document.getElementById('commentMarkers');
     const twitchCommentTicker = document.getElementById('twitchCommentTicker');
+    const reelsMeta = document.getElementById('reelsMeta');
     const commentsDrawer = document.getElementById('commentsDrawer');
     const drawerTitle = document.getElementById('drawerTitle');
     const closeDrawerBtn = document.getElementById('closeDrawerBtn');
@@ -961,11 +970,32 @@
     }
 
     // ── Bottom-Middle Twitch-Style Ticker (When Drawer Closed) ──
+    let tickerHideTimer = null;
+    let tickerSignature = '';
+    function showTicker() {
+      if (tickerHideTimer) { clearTimeout(tickerHideTimer); tickerHideTimer = null; }
+      twitchCommentTicker.style.opacity = '1';
+      twitchCommentTicker.style.transform = 'translateX(-50%) translateY(0)';
+      // Yield the bottom-left corner to the ticker so the two never overlap
+      if (reelsMeta) reelsMeta.classList.add('ticker-active');
+    }
+    function hideTicker() {
+      twitchCommentTicker.style.opacity = '0';
+      twitchCommentTicker.style.transform = 'translateX(-50%) translateY(8px)';
+      if (reelsMeta) reelsMeta.classList.remove('ticker-active');
+      // Keep pills mounted while they fade out; clear after the transition ends
+      if (!tickerHideTimer && twitchCommentTicker.innerHTML) {
+        tickerHideTimer = setTimeout(() => {
+          twitchCommentTicker.innerHTML = '';
+          tickerSignature = '';
+          tickerHideTimer = null;
+        }, 160);
+      }
+    }
     function updateTwitchTicker() {
       if (!twitchCommentTicker) return;
       if (commentsDrawer && commentsDrawer.classList.contains('open')) {
-        twitchCommentTicker.style.opacity = '0';
-        twitchCommentTicker.innerHTML = '';
+        hideTicker();
         return;
       }
 
@@ -974,25 +1004,29 @@
       const active = comments.filter((c) => {
         if (c.timestamp === null || c.timestamp === undefined) return false;
         const t = Number(c.timestamp);
-        return curTime >= t && curTime <= (t + 4.0);
+        return curTime >= t && curTime <= (t + 3.2);
       });
 
       if (active.length === 0) {
-        twitchCommentTicker.style.opacity = '0';
-        twitchCommentTicker.innerHTML = '';
+        hideTicker();
         return;
       }
 
-      twitchCommentTicker.style.opacity = '1';
-      // If multiple comments at the same timestamp point, render up to 2 stacked pills
-      const showCount = Math.min(2, active.length);
-      twitchCommentTicker.innerHTML = active.slice(0, showCount).map((c) => `
-        <div class="twitch-comment-pill">
-          <div class="twitch-avatar">${c.author_avatar || '👤'}</div>
-          <span class="twitch-author" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
-          <span class="twitch-text"><span class="twitch-tag">⏱️${formatTime(c.timestamp)} </span>${c.text}</span>
-        </div>
-      `).join('');
+      showTicker();
+      // Only rebuild the DOM when the visible comment set actually changes,
+      // so the slide-up entrance animation doesn't restart every timeupdate.
+      const sig = active.slice(0, 2).map((c) => c.id).join(',');
+      if (sig !== tickerSignature) {
+        tickerSignature = sig;
+        // If multiple comments at the same timestamp point, render up to 2 stacked pills
+        twitchCommentTicker.innerHTML = active.slice(0, Math.min(2, active.length)).map((c) => `
+          <div class="twitch-comment-pill">
+            <div class="twitch-avatar">${c.author_avatar || '👤'}</div>
+            <span class="twitch-author" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
+            <span class="twitch-text"><span class="twitch-tag">⏱️${formatTime(c.timestamp)} </span>${c.text}</span>
+          </div>
+        `).join('');
+      }
     }
 
     // ── Drawer Comments List Rendering ──
