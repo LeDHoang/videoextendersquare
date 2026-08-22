@@ -1224,6 +1224,15 @@
       // Preload subsequent video track in background
       preloadNext(idx);
 
+      // SBS stereo detection: enable per-eye half-frame sampling in VR mode for
+      // spatialized reels (e.g. folder "testpipeline-3d" or *_sbs/_3d filenames).
+      const isSbs =
+        /(^|[\s_\-.])(sbs|3d)([\s_\-.]|$)/i.test(item.filename || '') ||
+        /3d/i.test(item.folder || '');
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
+        WebXRVR.setStereo(isSbs);
+      }
+
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
       }

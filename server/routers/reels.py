@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from server import media as SM
+from server.jobs import job_manager
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
 
@@ -350,6 +351,93 @@ def generate_proxies(paths: list[str]):
             failed.append({"path": rel, "error": str(ex)})
     _scan_cache["at"] = 0.0
     return {"generated": generated, "failed": failed}
+
+
+# ─── LOCAL 2D -> SBS SPATIALIZATION ──────────────────────────────────────
+
+SPATIALIZE_SRC_DIR = "output/testpipeline"
+SPATIALIZE_OUT_DIR = "output/testpipeline-3d"
+
+
+class SpatializeRequest(BaseModel):
+    paths: list[str] | None = None  # output-relative; defaults to all HEVC masters in testpipeline
+    strength: float = 1.0
+    half_sbs: bool = False
+
+
+@router.post("/spatialize")
+def spatialize(req: SpatializeRequest):
+    """Queue local depth-based SBS conversion of HEVC masters as a background job."""
+    from pipeline.spatial_worker import SpatializeError, discover_hevc_sources
+
+    if req.paths:
+        root = Path(SPATIALIZE_SRC_DIR).resolve()
+        sources = []
+        for rel in req.paths[:MAX_PROXY_PATHS]:
+            p = (root / rel).resolve()
+            if p.is_relative_to(root) and p.is_file():
+                sources.append(str(p))
+        if not sources:
+            raise HTTPException(status_code=400, detail="No valid HEVC sources under testpipeline")
+    else:
+        sources = discover_hevc_sources(SPATIALIZE_SRC_DIR)
+        if not sources:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No HEVC masters found in {SPATIALIZE_SRC_DIR}",
+            )
+
+    def _run(status_callback=None, _sources=tuple(sources)):
+        from pipeline.spatial_worker import process_video_spatial
+
+        out_root = Path(SPATIALIZE_OUT_DIR)
+        out_root.mkdir(parents=True, exist_ok=True)
+        done, failed = [], []
+        total = len(_sources)
+        for i, src in enumerate(_sources, 1):
+            dest = out_root / Path(src).name
+
+            def per_file(msg, _i=i, _n=total, _name=Path(src).name):
+                status_callback(f"[{_i}/{_n}] {_name}: {msg}")
+
+            try:
+                _, metrics = process_video_spatial(
+                    src, str(dest),
+                    status_callback=per_file,
+                    strength=req.strength,
+                    half_sbs=req.half_sbs,
+                )
+                done.append({"path": dest.as_posix(), **metrics})
+            except Exception as ex:  # noqa: BLE001
+                if isinstance(ex, SpatializeError):
+                    failed.append({"path": Path(src).name, "error": str(ex)})
+                else:
+                    failed.append({"path": Path(src).name, "error": f"{type(ex).__name__}: {ex}"})
+        _scan_cache["at"] = 0.0
+        return {"generated": [d["path"] for d in done], "failed": failed}
+
+    job_id = job_manager.create_job("video")
+    job_manager.submit(job_id, _run, {})
+    return {
+        "job_id": job_id,
+        "queued": [Path(s).name for s in sources],
+        "out_dir": SPATIALIZE_OUT_DIR,
+    }
+
+
+@router.get("/spatialize/jobs/{job_id}")
+def spatialize_status(job_id: str):
+    rec = job_manager.get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    return {
+        "status": rec.status.value,
+        "phase": rec.phase,
+        "elapsed": rec.elapsed,
+        "messages": rec.messages[-8:],
+        "result": rec.result,
+        "error": rec.error,
+    }
 
 
 def _json_for_script(payload) -> str:

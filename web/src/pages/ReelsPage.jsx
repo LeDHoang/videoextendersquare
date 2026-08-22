@@ -27,6 +27,8 @@ export default function ReelsPage() {
   const [showTunnel, setShowTunnel] = useState(false);
   const [proxyBusy, setProxyBusy] = useState(false);
   const [proxyMsg, setProxyMsg] = useState('');
+  const [spatJob, setSpatJob] = useState(null);
+  const [spatMsg, setSpatMsg] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const searchRef = useRef(null);
@@ -91,6 +93,45 @@ export default function ReelsPage() {
   };
 
   const folders = data?.folders || [];
+  const has3d = folders.includes('testpipeline-3d');
+
+  const spatialize = async () => {
+    if (spatJob) return;
+    setSpatMsg('QUEUING LOCAL SPATIALIZATION…');
+    try {
+      const r = await api.post('/api/reels/spatialize', {});
+      setSpatJob(r.job_id);
+      setSpatMsg(`SPATIALIZING ${r.queued.length} CLIP(S) — DEPTH + STEREO WARP (LOCAL)…`);
+    } catch (e) {
+      setSpatMsg(`✗ ${String(e.message || e)}`);
+    }
+  };
+
+  useEffect(() => {
+    if (!spatJob) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const r = await api.get(`/api/reels/spatialize/jobs/${spatJob}`);
+        if (r.messages?.length) setSpatMsg(r.messages[r.messages.length - 1]);
+        if (r.status === 'complete') {
+          clearInterval(t);
+          setSpatJob(null);
+          const n = r.result?.generated?.length || 0;
+          const f = r.result?.failed?.length || 0;
+          setSpatMsg(`✓ ${n} SBS MASTER(S) IN testpipeline-3d${f ? ` — ${f} failed` : ''}`);
+          setRefreshKey((k) => k + 1);
+        } else if (r.status === 'failed') {
+          clearInterval(t);
+          setSpatJob(null);
+          setSpatMsg(`✗ SPATIALIZATION FAILED: ${r.error?.[0] || 'unknown error'}`);
+        }
+      } catch {
+        /* transient poll error — keep polling */
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [spatJob]);
+
   const folderOpts = [{ label: 'ALL FOLDERS', value: 'ALL FOLDERS' }, ...folders.map((f) => ({ label: f, value: f }))];
   const needsProxy = videos.filter((v) => codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
 
@@ -161,10 +202,16 @@ export default function ReelsPage() {
               {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
             </Button>
           ) : null}
+          {folder === 'testpipeline' && !has3d ? (
+            <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
+              🥽 Spatialize (2D→3D)
+            </Button>
+          ) : null}
         </div>
       </div>
 
       {proxyMsg ? <Mono>{proxyMsg}</Mono> : null}
+      {spatMsg ? <Mono>{spatMsg}</Mono> : null}
 
       {showTunnel ? (
         <AccentBlock

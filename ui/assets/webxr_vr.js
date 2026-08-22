@@ -54,6 +54,12 @@ const WebXRVR = (function () {
   let loc_uTex = null;
   let loc_uAlpha = null;
   let loc_uCurvatureMode = null;
+  let loc_uStereo = null;
+  let loc_uEyeOff = null;
+
+  // SBS stereoscopic playback: when true, each XR eye samples its half of the
+  // video frame (left half = left eye, right half = right eye).
+  let stereoMode = false;
 
   // Starfield Environment State
   let glStarProgram = null;
@@ -1067,8 +1073,15 @@ const WebXRVR = (function () {
     varying vec2 vUV;
     uniform sampler2D uTex;
     uniform float uAlpha;
+    uniform float uStereo;
+    uniform float uEyeOff;
     void main() {
-      vec4 c = texture2D(uTex, vUV);
+      vec2 uv = vUV;
+      // SBS stereo: sample only this eye's half of the source frame
+      if (uStereo > 0.5) {
+        uv.x = uv.x * 0.5 + uEyeOff;
+      }
+      vec4 c = texture2D(uTex, uv);
       gl_FragColor = vec4(c.rgb, c.a * uAlpha);
     }
   `;
@@ -1314,6 +1327,8 @@ const WebXRVR = (function () {
     loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
     loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
     loc_uCurvatureMode = gl.getUniformLocation(glProgram, 'uCurvatureMode');
+    loc_uStereo = gl.getUniformLocation(glProgram, 'uStereo');
+    loc_uEyeOff = gl.getUniformLocation(glProgram, 'uEyeOff');
 
     // Starfield Program
     const starVs = compileShader(gl.VERTEX_SHADER, STAR_VERT);
@@ -1467,7 +1482,7 @@ const WebXRVR = (function () {
 
   // ─── Draw Mesh Grid ──────────────────────────────────────────────────
 
-  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode) {
+  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
     gl.useProgram(glProgram);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
@@ -1483,6 +1498,10 @@ const WebXRVR = (function () {
     const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
     gl.uniformMatrix4fv(loc_uMVP, false, mvp);
     gl.uniform1f(loc_uCurvatureMode, modeVal);
+
+    const isStereo = typeof eyeOff === 'number';
+    gl.uniform1f(loc_uStereo, isStereo && stereoMode ? 1.0 : 0.0);
+    gl.uniform1f(loc_uEyeOff, isStereo ? eyeOff : 0.0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -1688,8 +1707,10 @@ const WebXRVR = (function () {
       // 2. Draw dynamic ambient video glow (Ambilight) behind video screen with matching curvature
       drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
 
-      // 3. Draw main video screen with all-side concave curvature
-      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode);
+      // 3. Draw main video screen with all-side concave curvature.
+      // In SBS stereo mode each eye samples its own half of the frame.
+      const videoEye = stereoMode ? (view.eye === 'right' ? 0.5 : 0.0) : undefined;
+      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode, videoEye);
 
       // 4. Draw in-screen direct time-synced comments overlay over reels screen
       if (hasOverlayComments && glOverlayTexture) {
@@ -2079,5 +2100,11 @@ const WebXRVR = (function () {
     enterVR,
     exitVR,
     onVideoChange,
+
+    /** Enable/disable SBS stereoscopic sampling of the video frame. */
+    setStereo(enabled) {
+      stereoMode = !!enabled;
+      console.log('[WebXRVR] Stereo (SBS) mode:', stereoMode ? 'ON' : 'OFF');
+    },
   };
 })();
