@@ -146,67 +146,79 @@ export default function ReelsPage() {
         </div>
       </Hero>
 
-      {/* Toolbar */}
-      <div className="sx-toolbar">
-        <div className="sx-toolbar-group">
-          <div style={{ width: '160px' }}>
-            <Dropdown
-              value={folder}
-              options={folderOpts}
-              onChange={setFolder}
-              placeholder="Target folder…"
-            />
-          </div>
-          <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
-          <div style={{ width: '150px', position: 'relative' }}>
-            <input
-              ref={searchRef}
-              className="sx-input"
-              style={{ paddingRight: search ? '28px' : undefined }}
-              placeholder="Search…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search ? (
-              <button
-                type="button"
-                className="sx-search-clear"
-                onClick={() => setSearch('')}
-                aria-label="Clear search filter"
-              >
-                ✕
-              </button>
-            ) : null}
-          </div>
-          <div style={{ width: '120px' }}>
-            <Dropdown
-              value={sort}
-              options={SORTS}
-              onChange={setSort}
-              placeholder="Sort by…"
-            />
+      {/* ─── Control Section (2 Rows: Filters + Utilities) ── */}
+      <div className="sx-control-rail-stacked">
+        {/* Row 1: Filters (Folder, Codec, Search, Sort) */}
+        <div className="sx-control-rail-row">
+          <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
+            <div style={{ width: '180px', flexShrink: 0 }}>
+              <Dropdown
+                value={folder}
+                options={folderOpts}
+                onChange={setFolder}
+                placeholder="Target folder…"
+              />
+            </div>
+            <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
+            <div style={{ flex: 1, minWidth: '160px', position: 'relative' }}>
+              <input
+                ref={searchRef}
+                className="sx-input"
+                style={{ paddingRight: search ? '28px' : undefined }}
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search ? (
+                <button
+                  type="button"
+                  className="sx-search-clear"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search filter"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+            <div style={{ width: '140px', flexShrink: 0 }}>
+              <Dropdown
+                value={sort}
+                options={SORTS}
+                onChange={setSort}
+                placeholder="Sort by…"
+              />
+            </div>
           </div>
         </div>
-        <div className="sx-toolbar-group">
-          <Button onClick={() => setRefreshKey((k) => k + 1)}>↻</Button>
-          <Button onClick={() => setShowTunnel((s) => !s)}>
-            {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
-          </Button>
-          {needsProxy ? (
+
+        {/* Row 2: Actions & Utilities (Reset, Quest & Tools, Proxy, Spatialize) */}
+        <div className="sx-control-rail-row">
+          <div className="sx-control-group">
+            <Button onClick={() => setRefreshKey((k) => k + 1)} title="Rescan video library">
+              ↻
+            </Button>
             <Button
-              primary
-              disabled={proxyBusy}
-              loading={proxyBusy}
-              onClick={generateProxy}
+              primary={showTunnel}
+              onClick={() => setShowTunnel((s) => !s)}
             >
-              {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+              {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
             </Button>
-          ) : null}
-          {folder === 'testpipeline' && !has3d ? (
-            <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
-              🥽 Spatialize (2D→3D)
-            </Button>
-          ) : null}
+            {needsProxy ? (
+              <Button
+                primary
+                disabled={proxyBusy}
+                loading={proxyBusy}
+                onClick={generateProxy}
+              >
+                {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+              </Button>
+            ) : null}
+            {folder === 'testpipeline' && !has3d ? (
+              <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
+                🥽 Spatialize (2D→3D)
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 

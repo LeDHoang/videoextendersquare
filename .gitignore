@@ -15,6 +15,9 @@ venv/
 .venv2/
 venv2/
 ENV/
+stitch/
+.stitch/
+*.pth
 
 # macOS
 .DS_Store
