@@ -18,7 +18,7 @@ ENV/
 stitch/
 .stitch/
 *.pth
-
+*.zip 
 # macOS
 .DS_Store
 .env

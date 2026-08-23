@@ -1,8 +1,20 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import Nav from './Nav.jsx';
-import { HealthDot } from '../ui/primitives.jsx';
+import { NavLink } from 'react-router-dom';
+import Emoji from '../ui/Emoji.jsx';
 import { Button, Field } from '../ui/controls.jsx';
+import {
+  IndustrialImageIcon,
+  IndustrialVideoIcon,
+  IndustrialCompareIcon,
+  IndustrialReelsIcon,
+} from '../ui/StitchIcons.jsx';
+
+const NAV_ITEMS = [
+  { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
+  { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
+  { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
+  { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
+];
 
 export default function Sidebar({ health, config, setFalKey, setModels, isOpen, onClose }) {
   const [keyVal, setKeyVal] = useState('');
@@ -41,6 +53,12 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
     }
   };
 
+  const clearKey = async () => {
+    await setFalKey('');
+    health?.refresh?.();
+    setKeyMsg('KEY CLEARED');
+  };
+
   const saveModels = async () => {
     setSaving(true);
     try {
@@ -50,109 +68,164 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
     }
   };
 
-  const degraded = Object.values(probes).filter((p) => !p.ok);
+  const probeList = Object.values(probes);
+  const okCount = probeList.filter((p) => p.ok).length;
+  const degraded = probeList.filter((p) => !p.ok);
 
   return (
     <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
-      {/* Brand Identity */}
-      <div className="sx-brand">
-        <Link to="/reels" className="sx-brand-link" onClick={() => onClose?.()} title="Go to Reels / VR Player">
-          <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo" />
-          <div className="sx-brand-text">
-            <span className="sx-brand-title">ECHO</span>
-            <span className="sx-brand-tag">4K EXTENDER · v2.0</span>
-          </div>
-        </Link>
+      {/* ─── Command Center Header ──────────────────────────── */}
+      <div className="sx-sidebar-header">
         {isOpen ? (
           <button
             type="button"
-            className="sx-btn"
-            style={{ marginLeft: 'auto', padding: '4px 8px', fontSize: '0.9rem' }}
+            className="sx-sidebar-close-btn"
             onClick={onClose}
             aria-label="Close Settings Drawer"
+            title="Close Settings"
           >
             ✕
           </button>
         ) : null}
+        <div className="sx-sidebar-brand-block">
+          <h2 className="sx-sidebar-hero-title">ECHO</h2>
+          <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div>
+        </div>
       </div>
 
-      {/* Main Navigation */}
-      <Nav onSelect={() => onClose?.()} />
+      {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
+      <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
+        {NAV_ITEMS.map(({ to, label, Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            onClick={() => onClose?.()}
+            className={({ isActive }) =>
+              `sx-sidebar-nav-card ${isActive ? 'sx-active' : ''}`
+            }
+          >
+            <Icon className="sx-sidebar-icon-svg" />
+            <span className="sx-sidebar-nav-label">
+              {label}
+            </span>
+          </NavLink>
+        ))}
+      </nav>
 
-      {/* FAL.AI API Key Section */}
-      <div style={{ marginTop: 'var(--sx-3)' }}>
-        <div className="sx-eyebrow">FAL.AI CLOUD KEY</div>
-        <Field label="API KEY">
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <input
-              className="sx-input"
-              type={showKey ? 'text' : 'password'}
-              placeholder="fal_…"
-              value={keyVal}
-              onChange={(e) => setKeyVal(e.target.value)}
-              autoComplete="off"
+      {/* ─── FAL.AI Auth Module ─────────────────────────────── */}
+      <div className="sx-sidebar-card">
+        <div className="sx-sidebar-card-head">
+          <span className="sx-sidebar-card-title">FAL.AI AUTH</span>
+          <div className="sx-sidebar-status-pill">
+            <span
+              className={`sx-status-dot ${fal.ok ? 'sx-dot-online' : 'sx-dot-offline'}`}
             />
-            <button
-              type="button"
-              className="sx-btn"
-              style={{ padding: '0 10px', fontSize: '0.8rem' }}
-              onClick={() => setShowKey((s) => !s)}
-              title={showKey ? 'Hide key' : 'Show key'}
-              aria-label={showKey ? 'Hide key' : 'Show key'}
-            >
-              {showKey ? '🔒' : '👁'}
-            </button>
+            <span className="sx-sidebar-status-text">
+              {fal.ok ? 'ONLINE' : 'OFFLINE'}
+            </span>
           </div>
-        </Field>
-
-        <div style={{ marginTop: 'var(--sx-2)' }}>
-          <HealthDot ok={fal.ok} severity="block" label="KEY" detail={fal.detail || 'not set'} />
         </div>
 
+        <div className="sx-sidebar-key-input-wrap">
+          <input
+            className="sx-input sx-sidebar-key-input"
+            type={showKey ? 'text' : 'password'}
+            placeholder="Enter FAL key..."
+            value={keyVal}
+            onChange={(e) => setKeyVal(e.target.value)}
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            className="sx-sidebar-key-toggle-btn"
+            onClick={() => setShowKey((s) => !s)}
+            title={showKey ? 'Hide key' : 'Show key'}
+            aria-label={showKey ? 'Hide key' : 'Show key'}
+          >
+            {showKey ? '🔒' : '👁'}
+          </button>
+        </div>
+
+        {fal.detail ? (
+          <div className="sx-sidebar-key-preview">
+            <span className="sx-sidebar-key-badge">KEY</span>
+            <span className="sx-sidebar-key-val">{fal.detail}</span>
+          </div>
+        ) : null}
+
         {keyMsg ? (
-          <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)', marginTop: 4 }}>
+          <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)', fontSize: '0.72rem' }}>
             {keyMsg}
           </div>
         ) : null}
 
-        <div style={{ marginTop: 'var(--sx-2)', display: 'flex', gap: '8px' }}>
-          <Button onClick={saveKey} disabled={keySaving || !keyVal.trim()}>
-            {keySaving ? 'Saving…' : 'Save Key'}
-          </Button>
-          {fal.ok ? (
-            <Button
-              onClick={async () => {
-                await setFalKey('');
-                health?.refresh?.();
-                setKeyMsg('KEY CLEARED');
-              }}
-              style={{ padding: 'var(--sx-2) var(--sx-3)' }}
-            >
-              Clear
-            </Button>
-          ) : null}
+        <div className="sx-sidebar-btn-grid">
+          <button
+            type="button"
+            className="sx-sidebar-btn-secondary"
+            onClick={clearKey}
+            disabled={!fal.ok && !keyVal}
+          >
+            CLEAR
+          </button>
+          <button
+            type="button"
+            className="sx-sidebar-btn-primary"
+            onClick={saveKey}
+            disabled={keySaving || !keyVal.trim()}
+          >
+            {keySaving ? 'SAVING…' : 'SAVE'}
+          </button>
         </div>
       </div>
 
-      {/* System Health Section */}
-      <div style={{ marginTop: 'var(--sx-3)' }}>
-        <div className="sx-eyebrow">SYSTEM PROBES</div>
-        {Object.values(probes).map((p) => (
-          <HealthDot key={p.id} ok={p.ok} severity={p.severity} label={p.label} detail={p.detail} />
-        ))}
-
-        <div style={{ marginTop: 'var(--sx-2)' }}>
-          <Button onClick={() => health?.refresh?.()}>↻ Recheck Probes</Button>
+      {/* ─── System Probes Module ───────────────────────────── */}
+      <div className="sx-sidebar-card">
+        <div className="sx-sidebar-card-head">
+          <span className="sx-sidebar-card-title">LIVE STATUS / PROBES</span>
+          <span className="sx-sidebar-status-count">
+            {okCount}/{probeList.length || '—'} OK
+          </span>
         </div>
 
-        {degraded.length ? (
+        <div className="sx-sidebar-status-board">
+          {probeList.map((p) => (
+            <div key={p.id} className="sx-sidebar-probe-row">
+              <span className="sx-sidebar-probe-label">{p.label}</span>
+              <span
+                className={`sx-sidebar-probe-val ${
+                  p.ok ? 'sx-val-ok' : p.severity === 'block' ? 'sx-val-err' : 'sx-val-warn'
+                }`}
+              >
+                {p.detail || (p.ok ? 'OK' : 'FAIL')}
+              </span>
+            </div>
+          ))}
+          <div className="sx-sidebar-probe-footer">
+            <span className="sx-sidebar-probe-sub">
+              {degraded.length === 0 ? '✓ ALL ENGINES OPERATIONAL' : `⚠ ${degraded.length} ISSUE(S)`}
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="sx-sidebar-btn-recheck"
+          onClick={() => health?.refresh?.()}
+        >
+          ↻ RECHECK PROBES
+        </button>
+
+        {degraded.length > 0 ? (
           <details className="sx-expander" open={false}>
             <summary>▸ {degraded.length} DEGRADED ISSUE(S)</summary>
             <div className="sx-expander-body">
               {degraded.map((p) => (
-                <div key={p.id} className="sx-body" style={{ marginBottom: 10 }}>
+                <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
                   <b style={{ color: 'var(--sx-ink)' }}>{p.label}</b> — {p.detail}
-                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.78rem', marginTop: 2 }}>{p.fix}</div>
+                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.75rem', marginTop: 2 }}>
+                    {p.fix}
+                  </div>
                 </div>
               ))}
             </div>
@@ -160,26 +233,45 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
         ) : null}
       </div>
 
-      {/* Model Endpoints Customizer */}
-      <details className="sx-expander" style={{ marginTop: 'auto' }}>
-        <summary>▸ MODEL ENDPOINTS</summary>
-        <div className="sx-expander-body">
+      {/* ─── Model Endpoints Customizer ─────────────────────── */}
+      <details className="sx-sidebar-card sx-expander">
+        <summary className="sx-sidebar-card-title" style={{ cursor: 'pointer', outline: 'none' }}>
+          ▸ MODEL ENDPOINTS
+        </summary>
+        <div className="sx-expander-body" style={{ marginTop: 12 }}>
           {Object.keys(modelDefaults).map((key) => (
             <Field key={key} label={key}>
               <input
                 className="sx-input"
+                style={{ fontSize: '0.75rem', padding: '6px 10px' }}
                 value={modelDraft[key] ?? modelDefaults[key] ?? ''}
                 onChange={(e) => setModelDraft((m) => ({ ...m, [key]: e.target.value }))}
               />
             </Field>
           ))}
-          <div style={{ marginTop: 'var(--sx-3)' }}>
-            <Button onClick={saveModels} disabled={saving}>
+          <div style={{ marginTop: 12 }}>
+            <Button onClick={saveModels} disabled={saving} style={{ width: '100%' }}>
               {saving ? 'Saving…' : 'Save Overrides'}
             </Button>
           </div>
         </div>
       </details>
+
+      {/* ─── Telemetry Bottom Bar ───────────────────────────── */}
+      <div className="sx-sidebar-telemetry-bottom">
+        <div className="sx-telemetry-col">
+          <span className="sx-telemetry-key">PROBES_OK</span>
+          <span className="sx-telemetry-val" style={{ color: 'var(--sx-ink)' }}>
+            {okCount}/{probeList.length}
+          </span>
+        </div>
+        <div className="sx-telemetry-col">
+          <span className="sx-telemetry-key">ENGINE_STATUS</span>
+          <span className="sx-telemetry-val" style={{ color: 'var(--sx-accent)' }}>
+            {fal.ok ? 'ONLINE' : 'LOCAL'}
+          </span>
+        </div>
+      </div>
     </aside>
   );
 }
