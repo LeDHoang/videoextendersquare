@@ -21,7 +21,7 @@
     overflow: hidden;
   }
 
-  /* Fully Responsive Dynamic 1:1 Square Frame - Zero Clipping */
+  /* Fully Responsive Dynamic 1:1 Square Frame - Industrial Obsidian Chassis */
   .reels-phone-frame {
     position: relative;
     width: 100%;
@@ -29,10 +29,10 @@
     max-width: 100%;
     max-height: 100%;
     aspect-ratio: 1 / 1;
-    background: #000;
-    border-radius: 0;
-    border: none;
-    box-shadow: none;
+    background: #101214;
+    border-radius: 0px;
+    border: 1px solid #24282D;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 59, 31, 0.35);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -48,9 +48,9 @@
     filter: blur(48px);
     opacity: 0.65;
     pointer-events: none;
-    border-radius: 24px;
+    border-radius: 0px;
     transition: background 0.35s ease, opacity 0.35s ease;
-    background: radial-gradient(circle at center, rgba(18, 42, 105, 0.6) 0%, rgba(2, 6, 18, 0) 75%);
+    background: radial-gradient(circle at center, rgba(18, 42, 105, 0.5) 0%, rgba(2, 6, 18, 0) 75%);
   }
 
   .reels-video-wrap {
@@ -76,105 +76,129 @@
     left: 0;
     right: 0;
     height: 48px;
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+    background: linear-gradient(180deg, rgba(8, 9, 10, 0.92) 0%, rgba(8, 9, 10, 0) 100%);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding: 12px 16px;
     z-index: 20;
     pointer-events: none;
   }
   .reels-badge {
     background: #FF3B1F;
     color: #0A0A0A;
-    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.12em;
-    padding: 4px 8px;
-    border-radius: 4px;
+    letter-spacing: 0.14em;
+    padding: 3px 10px;
+    border-radius: 0px;
     text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(255, 59, 31, 0.4);
   }
   .reels-counter {
+    font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     font-weight: 700;
     color: #F2F3F5;
-    background: rgba(16, 18, 20, 0.75);
-    padding: 4px 10px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(8px);
+    background: #16191C;
+    border: 1px solid #24282D;
+    padding: 3px 10px;
+    border-radius: 0px;
+    letter-spacing: 0.08em;
   }
 
-  /* Right Action Bar */
+  /* Right Floating Command Grid (Tactile Industrial Clusters) */
   .reels-actions {
     position: absolute;
     right: 14px;
-    bottom: 40px;
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     align-items: center;
     z-index: 25;
   }
-  .reels-actions > div {
+  .reels-cluster {
+    background: #08090A;
+    border: 1px solid #24282D;
+    padding: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .reels-cluster-divider {
+    width: 100%;
+    height: 1px;
+    background: #24282D;
+    margin: 2px 0;
+  }
+  .action-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 0px;
+    background: #16191C;
+    border: 1px solid #24282D;
+    color: #A4ABB3;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    width: 56px;
-    overflow: hidden;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+    text-decoration: none;
   }
-  .action-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background: rgba(16, 18, 20, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    color: #F2F3F5;
+  .action-btn:hover {
+    background: #1D2126;
+    color: #FF3B1F;
+    border-color: #FF3B1F;
+  }
+  .action-btn:active, .action-btn.flash-click {
+    background: #FF3B1F !important;
+    color: #0A0A0A !important;
+    border-color: #FF3B1F !important;
+    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45) !important;
+    transform: scale(0.96);
+  }
+  .action-btn:active .action-btn-label, .action-btn.flash-click .action-btn-label {
+    color: #0A0A0A !important;
+  }
+  .action-btn .btn-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    width: 18px;
+    height: 18px;
     line-height: 1;
-    padding: 0;
-    text-align: center;
-    flex-shrink: 0;
-    cursor: pointer;
-    backdrop-filter: blur(8px);
-    transition: all 0.2s ease;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   }
-  .action-btn:hover {
-    background: #FF3B1F;
-    color: #0A0A0A;
-    border-color: #FF3B1F;
-    transform: scale(1.08);
-  }
-  .action-btn.active {
-    background: #FF3B1F;
-    color: #0A0A0A;
-    border-color: #FF3B1F;
+  .action-btn .btn-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
   }
   .action-btn-label {
-    font-size: 7px;
-    color: #9BA1A8;
-    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
     font-weight: 700;
-    text-align: center;
-    letter-spacing: 0.04em;
-    max-width: 56px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: inherit;
     line-height: 1;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  }
+  .action-btn.active .action-btn-label {
+    color: #0A0A0A;
   }
 
   /* Bottom Left Overlay */
   .reels-meta {
     position: absolute;
     left: 16px;
-    bottom: 28px;
-    right: 68px;
+    bottom: 24px;
+    right: 80px;
     z-index: 20;
     display: flex;
     flex-direction: column;
@@ -196,8 +220,9 @@
     font-weight: 700;
     color: #FF3B1F;
     background: rgba(255, 59, 31, 0.14);
+    border: 1px solid rgba(255, 59, 31, 0.3);
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: 0px;
     width: fit-content;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -217,14 +242,13 @@
     gap: 8px;
   }
 
-  /* Bottom Progress Bar & SoundCloud Markers */
+  /* Bottom Progress Bar & Scrubber */
   .reels-progress-wrap {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 24px;
-    background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%);
+    height: 20px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -233,13 +257,13 @@
   .reels-progress-bar {
     width: 100%;
     height: 4px;
-    background: rgba(255, 255, 255, 0.2);
+    background: #24282D;
     cursor: pointer;
     position: relative;
     transition: height 0.15s;
   }
   .reels-progress-wrap:hover .reels-progress-bar {
-    height: 7px;
+    height: 6px;
   }
   .reels-progress-fill {
     height: 100%;
@@ -249,12 +273,14 @@
   }
   .reels-time-display {
     position: absolute;
-    bottom: 8px;
+    bottom: 6px;
     right: 14px;
-    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
     font-weight: 700;
-    color: rgba(255, 255, 255, 0.75);
+    color: #A4ABB3;
     pointer-events: none;
+    letter-spacing: 0.05em;
   }
 
   /* SoundCloud-Style Comment Dots on Timeline */
@@ -268,11 +294,11 @@
     position: absolute;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 0px;
     background: #FF3B1F;
-    border: 1.5px solid #FFF;
+    border: 1px solid #FFF;
     pointer-events: auto;
     cursor: pointer;
     transition: transform 0.15s ease, background 0.15s ease;
@@ -289,9 +315,9 @@
     bottom: 18px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(8, 10, 14, 0.94);
-    border: 1px solid rgba(255, 59, 31, 0.5);
-    border-radius: 8px;
+    background: #101214;
+    border: 1px solid #FF3B1F;
+    border-radius: 0px;
     padding: 4px 8px;
     font-size: 10px;
     color: #FFF;
@@ -309,32 +335,38 @@
     opacity: 1;
   }
 
-  /* Bottom-Middle Twitch-Style Comment Ticker (When Drawer Closed) */
+  /* Chat/Annotations Overlay (Bottom) */
   .reels-twitch-ticker {
     position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
+    bottom: 24px;
+    left: 16px;
+    right: 80px;
     z-index: 26;
-    max-width: 90%;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: flex-start;
+    gap: 6px;
     pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
     transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
     will-change: opacity, transform;
   }
   .twitch-comment-pill {
     display: inline-flex;
     align-items: center;
-    gap: 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 3px 6px;
-    font-size: 12px;
+    gap: 8px;
+    background: rgba(16, 18, 20, 0.95);
+    border: 1px solid #24282D;
+    border-left: 3px solid #FF3B1F;
+    backdrop-filter: blur(12px);
+    padding: 6px 12px;
+    font-size: 11px;
     color: #FFF;
-    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95));
+    border-radius: 0px;
+    width: fit-content;
+    max-width: 100%;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.85);
     animation: slideUpTicker 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   }
   @keyframes slideUpTicker {
@@ -342,49 +374,35 @@
     to { opacity: 1; transform: translateY(0); }
   }
   .twitch-avatar {
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-    background: transparent;
-    border: none;
+    font-size: 14px;
+    margin-right: 2px;
     flex-shrink: 0;
-    margin-right: 6px;
-    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.9));
   }
   .twitch-author {
+    font-family: Archivo, sans-serif;
     font-weight: 800;
-    font-size: 12px;
+    font-size: 11px;
     color: #FF3B1F;
     flex-shrink: 0;
-    margin-right: 5px;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8);
   }
   .twitch-tag {
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     font-weight: 700;
-    color: #CBD5E1;
-    background: transparent;
-    border: none;
-    padding: 0;
+    color: #A4ABB3;
     flex-shrink: 0;
-    margin-right: 0;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
   }
   .twitch-text {
-    color: #FFFFFF;
+    color: #F2F3F5;
+    font-family: Archivo, sans-serif;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 360px;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 2px 8px rgba(0, 0, 0, 0.9);
   }
 
-  /* TikTok/Instagram-Style Slide-Up Comments Drawer */
+  /* Brutalist Slide-Up Comments Drawer */
   .reels-comments-drawer {
     position: absolute;
     bottom: 0;
@@ -392,16 +410,15 @@
     right: 0;
     height: 68%;
     max-height: 520px;
-    background: rgba(10, 12, 16, 0.96);
-    backdrop-filter: blur(24px);
-    border-top: 1px solid rgba(255, 59, 31, 0.4);
-    border-radius: 18px 18px 0 0;
+    background: #101214;
+    border-top: 2px solid #FF3B1F;
+    border-radius: 0px;
     z-index: 50;
     display: flex;
     flex-direction: column;
     transform: translateY(105%);
     transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.85);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.95);
     user-select: auto;
   }
   .reels-comments-drawer.open {
@@ -412,47 +429,51 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(16, 18, 22, 0.7);
+    border-bottom: 1px solid #24282D;
+    background: #16191C;
   }
   .drawer-title {
-    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
     font-weight: 800;
     color: #FF3B1F;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
   .drawer-tabs {
     display: flex;
     gap: 4px;
   }
   .drawer-tab {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #9BA1A8;
+    background: #101214;
+    border: 1px solid #24282D;
+    color: #A4ABB3;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 9px;
     font-weight: 700;
     padding: 4px 8px;
-    border-radius: 12px;
+    border-radius: 0px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
   .drawer-tab:hover, .drawer-tab.active {
-    background: rgba(255, 59, 31, 0.2);
-    color: #FFF;
+    background: #FF3B1F;
+    color: #0A0A0A;
     border-color: #FF3B1F;
   }
   .drawer-close-btn {
-    background: transparent;
-    border: none;
-    color: #9BA1A8;
-    font-size: 16px;
+    background: #101214;
+    border: 1px solid #24282D;
+    color: #A4ABB3;
+    font-size: 12px;
     cursor: pointer;
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: 0px;
+    transition: all 0.15s ease;
   }
   .drawer-close-btn:hover {
-    color: #FFF;
-    background: rgba(255, 255, 255, 0.1);
+    color: #FF3B1F;
+    border-color: #FF3B1F;
   }
   .drawer-body {
     flex: 1;
@@ -460,30 +481,30 @@
     padding: 12px 16px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
   .comment-item {
     display: flex;
     gap: 10px;
     padding: 8px 10px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0px;
+    background: #16191C;
+    border: 1px solid #24282D;
     transition: background 0.15s ease;
   }
   .comment-item:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: #1D2126;
   }
   .comment-avatar {
     width: 28px;
     height: 28px;
-    border-radius: 50%;
+    border-radius: 0px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    background: #080A0E;
-    border: 2px solid #FF3B1F;
+    background: #08090A;
+    border: 1px solid #FF3B1F;
     flex-shrink: 0;
   }
   .comment-content {
@@ -498,6 +519,7 @@
     gap: 8px;
   }
   .comment-name {
+    font-family: Archivo, sans-serif;
     font-size: 11px;
     font-weight: 800;
     color: #FF3B1F;
@@ -506,10 +528,11 @@
     background: rgba(255, 59, 31, 0.15);
     border: 1px solid rgba(255, 59, 31, 0.35);
     color: #FF3B1F;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 9px;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: 0px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -518,12 +541,13 @@
     color: #0A0A0A;
   }
   .comment-time-gen {
-    background: rgba(255, 255, 255, 0.08);
-    color: #9BA1A8;
+    background: #24282D;
+    color: #A4ABB3;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 9px;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: 0px;
   }
   .comment-msg {
     font-size: 11px;
@@ -534,7 +558,8 @@
   .comment-like-btn {
     background: transparent;
     border: none;
-    color: #9BA1A8;
+    color: #A4ABB3;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     cursor: pointer;
     display: flex;
@@ -548,8 +573,8 @@
   }
   .drawer-footer {
     padding: 10px 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(12, 14, 18, 0.9);
+    border-top: 1px solid #24282D;
+    background: #16191C;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -561,12 +586,13 @@
     font-size: 10px;
   }
   .persona-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: #101214;
+    border: 1px solid #24282D;
     color: #F2F3F5;
     padding: 3px 8px;
-    border-radius: 6px;
+    border-radius: 0px;
     cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     display: inline-flex;
     align-items: center;
@@ -580,15 +606,16 @@
     border: 1px solid rgba(255, 59, 31, 0.4);
     color: #FF3B1F;
     padding: 3px 8px;
-    border-radius: 6px;
+    border-radius: 0px;
     cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     font-weight: 700;
   }
   .sync-time-toggle.inactive {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #9BA1A8;
+    background: #101214;
+    border-color: #24282D;
+    color: #A4ABB3;
   }
   .comment-form {
     display: flex;
@@ -596,9 +623,9 @@
   }
   .comment-input {
     flex: 1;
-    background: rgba(0, 0, 0, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
+    background: #08090A;
+    border: 1px solid #24282D;
+    border-radius: 0px;
     padding: 8px 12px;
     color: #FFF;
     font-size: 11px;
@@ -614,14 +641,15 @@
     color: #0A0A0A;
     border: none;
     padding: 0 14px;
-    border-radius: 6px;
+    border-radius: 0px;
+    font-family: 'JetBrains Mono', monospace;
     font-weight: 800;
     font-size: 11px;
     cursor: pointer;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
   }
   .comment-submit-btn:hover {
-    background: #FF5733;
+    background: #FFF;
   }
 
   /* Center Flash & Error Overlay */
@@ -631,20 +659,20 @@
     left: 50%;
     transform: translate(-50%, -50%) scale(0.8);
     padding: 10px 20px;
-    border-radius: 30px;
-    background: rgba(0, 0, 0, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0px;
+    background: #101214;
+    border: 1px solid #FF3B1F;
     color: #FFF;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 800;
     opacity: 0;
     pointer-events: none;
     transition: all 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 40;
-    backdrop-filter: blur(8px);
+    box-shadow: 0 0 20px rgba(255, 59, 31, 0.4);
   }
   .center-flash.show {
     opacity: 1;
@@ -688,14 +716,12 @@
 
   /* VR Button */
   #vrBtn {
-    background: rgba(88, 28, 135, 0.8);
-    border-color: rgba(168, 85, 247, 0.5);
+    border-color: rgba(168, 85, 247, 0.4);
   }
   #vrBtn:hover {
-    background: #7C3AED;
+    background: #1D2126;
     border-color: #A855F7;
-    box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
-    transform: scale(1.08);
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.35);
   }
   .vr-active .reels-badge {
     background: #7C3AED;
@@ -712,7 +738,7 @@
   <div class="reels-top-bar">
     <div class="reels-badge">4K MASTER REELS v4.2</div>
     <div class="reels-counter" id="counter">0 / 0</div>
-    <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:rgba(0,255,136,0.15); padding:3px 8px; border-radius:4px; border:1px solid rgba(0,255,136,0.3);">⚡ 0/0</div>
+    <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:#16191C; padding:3px 8px; border-radius:0px; border:1px solid #00FF88;">⚡ 0/0</div>
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
@@ -720,7 +746,7 @@
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="center-flash" id="centerFlash">▶</div>
     
-    <!-- Bottom-Middle Twitch Ticker Overlay (When Drawer Closed) -->
+    <!-- Chat/Annotations Overlay (Bottom) -->
     <div class="reels-twitch-ticker" id="twitchCommentTicker"></div>
 
     <div class="video-error-overlay" id="errorOverlay">
@@ -729,48 +755,108 @@
       <div style="font-size: 10px; color: #9BA1A8; max-width: 260px;" id="errorText">
         Unable to decode this 4K HEVC video stream on your browser.
       </div>
-      <button style="margin-top: 6px; background: #FF3B1F; border: none; color: #0A0A0A; padding: 5px 14px; font-weight: 800; border-radius: 4px; cursor: pointer; font-size: 11px;" id="skipErrorBtn">
+      <button style="margin-top: 6px; background: #FF3B1F; border: none; color: #0A0A0A; padding: 5px 14px; font-weight: 800; border-radius: 0px; cursor: pointer; font-size: 11px;" id="skipErrorBtn">
         SKIP TO NEXT ⬇ (S)
       </button>
     </div>
   </div>
 
+  <!-- Floating Command Grid (Right Side) -->
   <div class="reels-actions">
-    <div>
-      <button class="action-btn" id="soundBtn" title="Toggle Sound (M)">🔇</button>
-      <div class="action-btn-label">SOUND (M)</div>
+    <!-- AUDIO Cluster -->
+    <div class="reels-cluster">
+      <button class="action-btn" id="soundBtn" title="Toggle Sound (M)">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#a4abb3" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M17 9L21 15M21 9L17 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+          </svg>
+        </span>
+        <span class="action-btn-label">MUTE</span>
+      </button>
     </div>
-    <div>
-      <button class="action-btn" id="playBtn" title="Play/Pause (Space)">⏸</button>
-      <div class="action-btn-label">PLAY (SPC)</div>
+
+    <!-- PLAYBACK Cluster -->
+    <div class="reels-cluster">
+      <button class="action-btn" id="playBtn" title="Play/Pause (Space)">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9 8V16M15 8V16" stroke="#ff3b1f" stroke-width="2.5" stroke-linecap="square"/>
+            <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+          </svg>
+        </span>
+        <span class="action-btn-label">PAUSE</span>
+      </button>
+      <button class="action-btn" id="modeBtn" title="Auto-Next / Loop">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M13 5L18 10L13 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M6 10H18" stroke="#f2f3f5" stroke-width="1.5" stroke-linecap="square"/>
+            <path d="M21 5V15" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
+            <path d="M3 19H21" stroke="#f2f3f5" stroke-width="0.5" stroke-dasharray="2 2"/>
+          </svg>
+        </span>
+        <span class="action-btn-label" id="modeLabel">AUTO</span>
+      </button>
+      <div class="reels-cluster-divider"></div>
+      <button class="action-btn" id="prevBtn" title="Previous Video (W / Up)">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 5V19M12 5L7 10M12 5L17 10" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M5 3H19" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
+          </svg>
+        </span>
+        <span class="action-btn-label">PREV</span>
+      </button>
+      <button class="action-btn" id="nextBtn" title="Next Video (S / Down)">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 19V5M12 19L7 14M12 19L17 14" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M5 21H19" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
+          </svg>
+        </span>
+        <span class="action-btn-label">NEXT</span>
+      </button>
+      <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)" style="position: relative;">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <circle cx="17" cy="7" r="2" fill="#ff3b1f"/>
+          </svg>
+        </span>
+        <span class="action-btn-label" id="commentBadge">ANNO</span>
+      </button>
+      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M13 3L5 14H12L11 21L19 10H12L13 3Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M13 3L5 14H12L11 21L19 10H12L13 3Z" fill="#ff3b1f" fill-opacity="0.2"/>
+            <path d="M11 21L19 10H12L13 3" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+          </svg>
+        </span>
+        <span class="action-btn-label" id="preloadLabel">CACHE</span>
+      </button>
     </div>
-    <div>
-      <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)">💬</button>
-      <div class="action-btn-label" id="commentBadge">COMMENTS</div>
-    </div>
-    <div>
-      <button class="action-btn active" id="modeBtn" title="Auto-Next / Loop">🔄</button>
-      <div class="action-btn-label" id="modeLabel">AUTO</div>
-    </div>
-    <div>
-      <button class="action-btn" id="prevBtn" title="Previous Video (W / Up)">⬆</button>
-      <div class="action-btn-label">PREV (W)</div>
-    </div>
-    <div>
-      <button class="action-btn" id="nextBtn" title="Next Video (S / Down)">⬇</button>
-      <div class="action-btn-label">NEXT (S)</div>
-    </div>
-    <div>
-      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels for Smooth Quest Playback (L)">⚡</button>
-      <div class="action-btn-label" id="preloadLabel">PRELOAD</div>
-    </div>
-    <div>
-      <button class="action-btn" id="fullBtn" title="Fullscreen">⛶</button>
-      <div class="action-btn-label">FULL</div>
-    </div>
-    <div id="vrBtnWrap" style="display:none;">
-      <button class="action-btn" id="vrBtn" title="Enter VR Mode">🥽</button>
-      <div class="action-btn-label">VR</div>
+
+    <!-- VIEW Cluster -->
+    <div class="reels-cluster">
+      <button class="action-btn" id="fullBtn" title="Fullscreen">
+        <span class="btn-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 3H3V7M17 3H21V7M7 21H3V17M17 21H21V17" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            <path d="M10 10L3 3M14 10L21 3M10 14L3 21M14 14L21 21" stroke="#ff3b1f" stroke-width="1.5"/>
+          </svg>
+        </span>
+        <span class="action-btn-label">FULL</span>
+      </button>
+      <div id="vrBtnWrap" style="display:none;">
+        <button class="action-btn" id="vrBtn" title="Enter VR Mode">
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8L5 6H19L21 8V16L19 18H5L3 16V8Z" stroke="#A855F7" stroke-width="1.5" stroke-linejoin="bevel"/><path d="M7 10H9V14H7V10ZM15 10H17V14H15V10Z" fill="#A855F7"/><path d="M10 18L12 16L14 18" stroke="#A855F7" stroke-width="1.5" stroke-linejoin="bevel"/></svg>
+          </span>
+          <span class="action-btn-label" style="color: #A855F7;">VR</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -790,10 +876,10 @@
     </div>
   </div>
 
-  <!-- TikTok/Instagram-Style Slide-Up Comments Drawer -->
+  <!-- Brutalist Slide-Up Comments Drawer -->
   <div class="reels-comments-drawer" id="commentsDrawer" tabindex="-1">
     <div class="drawer-header">
-      <div class="drawer-title" id="drawerTitle">💬 COMMENTS (0)</div>
+      <div class="drawer-title" id="drawerTitle">COMMENTS (0)</div>
       <div class="drawer-tabs">
         <button type="button" class="drawer-tab active" data-tab="all" id="tabAll">ALL</button>
         <button type="button" class="drawer-tab" data-tab="sync" id="tabSync">⏱️ TIME-SYNC</button>
@@ -977,13 +1063,13 @@
     function showTicker() {
       if (tickerHideTimer) { clearTimeout(tickerHideTimer); tickerHideTimer = null; }
       twitchCommentTicker.style.opacity = '1';
-      twitchCommentTicker.style.transform = 'translateX(-50%) translateY(0)';
+      twitchCommentTicker.style.transform = 'translateY(0)';
       // Yield the bottom-left corner to the ticker so the two never overlap
       if (reelsMeta) reelsMeta.classList.add('ticker-active');
     }
     function hideTicker() {
       twitchCommentTicker.style.opacity = '0';
-      twitchCommentTicker.style.transform = 'translateX(-50%) translateY(8px)';
+      twitchCommentTicker.style.transform = 'translateY(8px)';
       if (reelsMeta) reelsMeta.classList.remove('ticker-active');
       // Keep pills mounted while they fade out; clear after the transition ends
       if (!tickerHideTimer && twitchCommentTicker.innerHTML) {
@@ -1036,7 +1122,7 @@
       if (!commentsList) return;
       const comments = getCurrentComments();
       if (drawerTitle) drawerTitle.textContent = `💬 COMMENTS (${comments.length})`;
-      if (commentBadge) commentBadge.textContent = comments.length ? `(${comments.length})` : 'COMMENTS';
+      if (commentBadge) commentBadge.textContent = comments.length ? `ANNO (${comments.length})` : 'ANNO';
 
       let filtered = comments;
       if (activeTab === 'sync') {
@@ -1238,20 +1324,102 @@
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
       }
+
       video.play().then(() => {
-        playBtn.textContent = '⏸';
+        updatePlayBtnUI(true);
       }).catch((err) => {
         video.muted = true;
         isMuted = true;
-        soundBtn.textContent = '🔇';
-        soundBtn.classList.remove('active');
+        updateSoundBtnUI(true);
         video.play().then(() => {
-          playBtn.textContent = '⏸';
+          updatePlayBtnUI(true);
         }).catch(() => {
-          playBtn.textContent = '▶';
+          updatePlayBtnUI(false);
         });
       });
     }
+
+    function updatePlayBtnUI(isPlaying) {
+      if (!playBtn) return;
+      if (isPlaying) {
+        playBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 8V16M15 8V16" stroke="#ff3b1f" stroke-width="2.5" stroke-linecap="square"/>
+              <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            </svg>
+          </span>
+          <span class="action-btn-label">PAUSE</span>
+        `;
+      } else {
+        playBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 8L15 12L10 16V8Z" fill="#ff3b1f"/>
+              <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            </svg>
+          </span>
+          <span class="action-btn-label">PLAY</span>
+        `;
+      }
+    }
+
+    function updateSoundBtnUI(muted) {
+      if (!soundBtn) return;
+      if (muted) {
+        soundBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#a4abb3" stroke-width="1.5" stroke-linejoin="bevel"/>
+              <path d="M17 9L21 15M21 9L17 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+            </svg>
+          </span>
+          <span class="action-btn-label">MUTE</span>
+        `;
+      } else {
+        soundBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+              <path d="M15 9C16.1046 9 17 9.89543 17 11V13C17 14.1046 16.1046 15 15 15" stroke="#f2f3f5" stroke-width="1.5"/>
+              <path d="M19 7C20.6569 7 22 8.34315 22 10V14C22 15.6569 20.6569 17 19 17" stroke="#ff3b1f" stroke-width="1.5"/>
+            </svg>
+          </span>
+          <span class="action-btn-label">AUDIO</span>
+        `;
+      }
+    }
+
+    function updateModeBtnUI(auto) {
+      if (!modeBtn) return;
+      if (auto) {
+        modeBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M13 5L18 10L13 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+              <path d="M6 10H18" stroke="#f2f3f5" stroke-width="1.5" stroke-linecap="square"/>
+              <path d="M21 5V15" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
+              <path d="M3 19H21" stroke="#f2f3f5" stroke-width="0.5" stroke-dasharray="2 2"/>
+            </svg>
+          </span>
+          <span class="action-btn-label" id="modeLabel">AUTO</span>
+        `;
+      } else {
+        modeBtn.innerHTML = `
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M17 1L19 3L17 5" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+              <path d="M7 23L5 21L7 19" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
+              <path d="M19 3V11C19 12.6569 17.6569 14 16 14H5M5 21V13C5 11.3431 6.34315 10 8 10H19" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
+            </svg>
+          </span>
+          <span class="action-btn-label" id="modeLabel">LOOP</span>
+        `;
+      }
+    }
+
+    video.addEventListener('play', () => updatePlayBtnUI(true));
+    video.addEventListener('pause', () => updatePlayBtnUI(false));
 
     video.addEventListener('loadedmetadata', () => {
       renderCommentMarkers();
@@ -1287,47 +1455,42 @@
       }
     }
 
+    function flashBtn(btn) {
+      if (!btn) return;
+      btn.classList.add('flash-click');
+      setTimeout(() => btn.classList.remove('flash-click'), 180);
+    }
+
     // Toggle Play/Pause
     function togglePlay() {
+      flashBtn(playBtn);
       if (video.paused) {
         video.play().then(() => {
-          playBtn.textContent = '⏸';
-          showFlash('▶');
+          updatePlayBtnUI(true);
+          showFlash('▶ PLAY');
         }).catch(() => {});
       } else {
         video.pause();
-        playBtn.textContent = '▶';
-        showFlash('⏸');
+        updatePlayBtnUI(false);
+        showFlash('⏸ PAUSE');
       }
     }
 
     // Toggle Sound
     function toggleSound() {
+      flashBtn(soundBtn);
       isMuted = !isMuted;
       video.muted = isMuted;
-      soundBtn.textContent = isMuted ? '🔇' : '🔊';
-      if (isMuted) {
-        soundBtn.classList.remove('active');
-      } else {
-        soundBtn.classList.add('active');
-      }
-      showFlash(isMuted ? '🔇' : '🔊');
+      updateSoundBtnUI(isMuted);
+      showFlash(isMuted ? '🔇 MUTED' : '🔊 AUDIO');
     }
 
     // Toggle Mode
     function toggleMode() {
+      flashBtn(modeBtn);
       isAutoNext = !isAutoNext;
-      if (isAutoNext) {
-        modeBtn.textContent = '🔄';
-        modeLabel.textContent = 'AUTO';
-        modeBtn.classList.add('active');
-        showFlash('🔄 AUTO');
-      } else {
-        modeBtn.textContent = '🔁';
-        modeLabel.textContent = 'LOOP';
-        modeBtn.classList.remove('active');
-        showFlash('🔁 LOOP');
-      }
+      updateModeBtnUI(isAutoNext);
+      showFlash(isAutoNext ? '🔄 AUTO' : '🔁 LOOP');
     }
 
     // Preload All Videos
