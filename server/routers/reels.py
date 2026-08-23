@@ -481,8 +481,13 @@ def reels_player(
 def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
     """Scope the player's page-level CSS to the mount root so it can be
     embedded directly in the SPA without clobbering the app's own styles."""
+    # Preserve @import statements (e.g. Google Fonts / Material Symbols).
+    # URLs contain `;` (font-weight ranges) so match `url(...)` not bare `;`.
+    imports = re.findall(r"@import\s+url\([^)]+\)\s*;", css)
     out = []
-    for rule in css.split("}"):
+    # Remove imports before block parsing so they don't get split on '}'
+    css_no_imports = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
+    for rule in css_no_imports.split("}"):
         rule = rule.strip()
         if "{" not in rule:
             continue
@@ -495,6 +500,9 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
         parts = [p.strip() for p in sel.split(",") if p.strip()]
         scoped = ", ".join(f"{root} *" if p == "*" else f"{root} {p}" for p in parts)
         out.append(f"{scoped} {{ {body.strip()} }}")
+    # Keep imports at top so font loads before scoped rules
+    if imports:
+        return "\n".join(imports) + "\n" + "\n".join(out)
     return "\n".join(out)
 
 
@@ -569,6 +577,10 @@ def reels_player_inline(
 
     style_match = re.search(r"<style>(.*?)</style>", html, re.S)
     css = _scope_css(style_match.group(1)) if style_match else ""
+    # Also forward any <link rel="stylesheet"> (Google Fonts / Material Symbols) as @import for the SPA mount.
+    for href in re.findall(r'<link[^>]+href="([^"]+)"[^>]*>', html):
+        if ("fonts.googleapis" in href or "material" in href.lower() or "gstatic" in href) and href not in css:
+            css = f'@import url("{href}");\n' + css
     css += (
         "\n#sxReelsRoot .reels-phone-frame {"
         " width: min(92vw, 84vh, 860px);"

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useHealthContext } from '../../hooks/HealthContext.jsx';
 
-export default function HeaderBar({ onOpenSettings }) {
+export default function HeaderBar({ onOpenSettings, hidden = false }) {
   const health = useHealthContext();
   const location = useLocation();
   const navigate = useNavigate();
@@ -43,7 +43,11 @@ export default function HeaderBar({ onOpenSettings }) {
   const falOk = health?.fal_key?.ok;
 
   return (
-    <header className="sx-top-bar">
+    <header
+      className={`sx-top-bar ${hidden ? 'sx-top-bar--hidden' : ''}`}
+      aria-hidden={hidden ? 'true' : undefined}
+      style={hidden ? { pointerEvents: 'none' } : undefined}
+    >
       {/* ─── Left: Branding & Routes ──────────────────────── */}
       <div className="sx-top-left">
         <NavLink to="/image" className="sx-top-brand" title="ECHO 4K Engine">

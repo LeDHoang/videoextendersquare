@@ -2361,6 +2361,43 @@ input[type='range']::-moz-range-thumb {
   align-items: center;
   padding: 0 var(--sx-4);
   box-sizing: border-box;
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 280ms ease, visibility 280ms ease;
+  will-change: transform, opacity;
+}
+
+.sx-top-bar.sx-top-bar--hidden {
+  transform: translateY(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Pure-CSS fallback: when immersive class is on <html>/<body> (toggled by WebXR / fullscreen handlers) */
+html.sx-vr-active .sx-top-bar,
+body.sx-vr-active .sx-top-bar {
+  transform: translateY(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+html.sx-vr-active .sx-shell,
+body.sx-vr-active .sx-shell,
+.sx-shell.sx-immersive {
+  min-height: 100vh !important;
+}
+
+/* Keep Reels mount size stable when header hides — don't enlarge the 1:1 viewport (header space is just reclaimed as breathing room) */
+html.sx-vr-active .sx-reels-mount,
+body.sx-vr-active .sx-reels-mount,
+.sx-shell.sx-immersive .sx-reels-mount {
+  width: min(calc(100vh - 160px), 900px, 100%);
+  min-height: min(calc(100vh - 160px), 900px);
+}
+
+/* Remove top shell offset that assumed 64px header when immersive */
+.sx-shell.sx-immersive {
+  transition: min-height 320ms ease;
 }
 
 .sx-top-left {

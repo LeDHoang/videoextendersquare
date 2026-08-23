@@ -121,9 +121,9 @@ const WebXRVR = (function () {
   let controlsVisible = false;
   let controlsCanvas = null;
   let controlsCtx = null;
-  const CONTROLS_W = 640;
-  const CONTROLS_H = 150;
-  const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge (5% higher than 0.28m)
+  const CONTROLS_W = 800;
+  const CONTROLS_H = 260;
+  const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge
 
   // Meta Quest Guide Panel State
   let guideCanvas = null;
@@ -134,6 +134,8 @@ const WebXRVR = (function () {
   const GUIDE_W = 440;
   const GUIDE_H = 760;
   let hoveredButton = -1;
+  let lastControlsCanvasX = 0;
+  let lastControlsCanvasY = 0;
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
 
@@ -150,18 +152,48 @@ const WebXRVR = (function () {
   // External button state tracking
   const prevBtnState = { rightA: false, rightB: false, leftA: false, leftB: false };
 
-  // Button definitions for the UI controls panel
+  // ── VR site-chrome helpers — notify the host page so the global header can hide ──
+  function notifyVrEnter() {
+    try {
+      window.dispatchEvent(new CustomEvent('echo:vr-enter', { detail: { inVR: true } }));
+      window.dispatchEvent(new CustomEvent('echo:vrchange', { detail: { inVR: true } }));
+      try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:vr-enter', { detail: { inVR: true } })); } catch (e2) {}
+      document.documentElement.classList.add('sx-vr-active');
+      if (document.body) document.body.classList.add('sx-vr-active');
+    } catch (e) {}
+  }
+  function notifyVrExit() {
+    try {
+      window.dispatchEvent(new CustomEvent('echo:vr-exit', { detail: { inVR: false } }));
+      window.dispatchEvent(new CustomEvent('echo:vrchange', { detail: { inVR: false } }));
+      try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:vr-exit', { detail: { inVR: false } })); } catch (e2) {}
+      document.documentElement.classList.remove('sx-vr-active');
+      if (document.body) document.body.classList.remove('sx-vr-active');
+    } catch (e) {}
+  }
+
+  // Button definitions for the UI controls panel (WebXR HUD Media Control Dock)
   const CTRL_BUTTONS = [
-    { label: '⏮',       action: 'prev',   x: 12,  w: 40 },
-    { label: '◀◀',      action: 'rew',    x: 56,  w: 40 },
-    { label: '▶',        action: 'play',   x: 100, w: 52 },
-    { label: '▶▶',      action: 'fwd',    x: 156, w: 40 },
-    { label: '⏭',       action: 'next',   x: 200, w: 40 },
-    { label: '🔄 AUTO', action: 'mode',   x: 244, w: 78 },
-    { label: '🌐 DOME', action: 'curve',  x: 326, w: 92 },
-    { label: '🎯 LOCK',  action: 'lock',   x: 422, w: 84 },
-    { label: '🔊',       action: 'mute',   x: 510, w: 44 },
-    { label: '✕',        action: 'exit',   x: 558, w: 44 },
+    // Left secondary column (Pills)
+    { label: 'AUTO',  action: 'mode',  x: 24,  y: 66,  w: 156, h: 44 },
+    { label: 'DOME',  action: 'curve', x: 24,  y: 120, w: 156, h: 44 },
+
+    // Center primary transport controls
+    { label: '◀◀',   action: 'rew',   x: 228, y: 92,  w: 48,  h: 48 },
+    { label: '⏮',    action: 'prev',  x: 290, y: 88,  w: 56,  h: 56 },
+    { label: '▶',     action: 'play',  x: 360, y: 76,  w: 80,  h: 80 },
+    { label: '⏭',    action: 'next',  x: 454, y: 88,  w: 56,  h: 56 },
+    { label: '▶▶',   action: 'fwd',   x: 524, y: 92,  w: 48,  h: 48 },
+
+    // Right secondary column (Pills)
+    { label: 'LOCK',  action: 'lock',  x: 620, y: 66,  w: 156, h: 44 },
+    { label: 'AUDIO', action: 'mute',  x: 620, y: 120, w: 156, h: 44 },
+
+    // Header exit button
+    { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
+
+    // Bottom progress scrub track
+    { label: 'TRACK', action: 'seek',  x: 24,  y: 202, w: 752, h: 32 },
   ];
 
   // ─── Quaternion & Vector Math Helpers ───────────────────────────────
@@ -409,132 +441,262 @@ const WebXRVR = (function () {
     const isMuted = videoElement ? videoElement.muted : true;
     const currentTime = videoElement ? videoElement.currentTime : 0;
     const duration = videoElement ? videoElement.duration : 0;
+    const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
 
-    ctx.clearRect(0, 0, CONTROLS_W, CONTROLS_H);
-
-    // Dark Glass Container Background
-    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 16);
-    ctx.fill();
-
-    // Glowing Border
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 16);
-    ctx.stroke();
-
-    // Header Metadata & Badge Row
-    ctx.fillStyle = '#FF3B1F';
-    ctx.beginPath();
-    ctx.roundRect(16, 12, 108, 18, 4);
-    ctx.fill();
-
-    ctx.fillStyle = '#0A0A0A';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('4K VR REELS', 70, 21);
-
+    const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
     const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
     const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
     const item = playlist[idx];
     const comments = callbacks.getComments ? callbacks.getComments() : [];
 
-    if (item) {
-      ctx.fillStyle = 'rgba(242, 243, 245, 0.85)';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(`${item.filename}`, 134, 21);
-    }
-    if (comments.length > 0) {
-      ctx.fillStyle = '#A855F7';
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`💬 ${comments.length}`, 330, 21);
-    }
-    if (playlist.length > 0) {
-      ctx.fillStyle = '#FF3B1F';
-      ctx.font = 'bold 12px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(`${idx + 1} / ${playlist.length}`, CONTROLS_W - 16, 21);
-    }
+    ctx.clearRect(0, 0, CONTROLS_W, CONTROLS_H);
 
-    // Lock state indicator (always visible next to the counter)
-    ctx.fillStyle = lockToViewer ? '#4ADE80' : '#9BA1A8';
-    ctx.font = 'bold 9px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(lockToViewer ? '● LOCKED' : '○ FREE', CONTROLS_W - 64, 21);
-
-    // Buttons Row
-    const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
-    CTRL_BUTTONS.forEach((btn, i) => {
-      const isHover = (hoveredButton === i);
-      const y = 42;
-      const h = 42;
-
-      if (btn.action === 'play') btn.label = isPaused ? '▶' : '⏸';
-      if (btn.action === 'mute') btn.label = isMuted ? '🔇' : '🔊';
-      if (btn.action === 'curve') {
-        btn.label = curvatureMode === 1 ? '🌐 DOME' : (curvatureMode === 2 ? '🔲 SQ CURVE' : '📺 FLAT');
-      }
-      if (btn.action === 'mode') btn.label = isAutoNext ? '🔄 AUTO' : '🔁 LOOP';
-      if (btn.action === 'lock') btn.label = lockToViewer ? '🎯 LOCK' : '🔓 FREE';
-
-      if (isHover || btn.action === 'play') {
-        ctx.fillStyle = isHover ? '#FF3B1F' : 'rgba(255, 59, 31, 0.85)';
-        ctx.shadowColor = 'rgba(255, 59, 31, 0.6)';
-        ctx.shadowBlur = 10;
-      } else {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.shadowBlur = 0;
-      }
-      ctx.beginPath();
-      ctx.roundRect(btn.x, y, btn.w, h, 8);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      ctx.strokeStyle = isHover ? '#FF3B1F' : 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(btn.x, y, btn.w, h, 8);
-      ctx.stroke();
-
-      ctx.fillStyle = (isHover || btn.action === 'play') ? '#0A0A0A' : '#F2F3F5';
-      ctx.font = (btn.action === 'curve' || btn.action === 'mode' || btn.action === 'lock') ? 'bold 11px sans-serif' : 'bold 18px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(btn.label, btn.x + btn.w / 2, y + h / 2);
-    });
-
-    // Progress Bar Track
-    const barX = 16, barY = 98;
-    const barW = CONTROLS_W - 32, barH = 8;
-    const progress = duration > 0 ? currentTime / duration : 0;
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    // 1. Dark Glass Container Background
+    ctx.fillStyle = 'rgba(12, 14, 17, 0.96)';
     ctx.beginPath();
-    ctx.roundRect(barX, barY, barW, barH, 4);
+    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
     ctx.fill();
 
-    // Progress Fill
-    ctx.fillStyle = '#FF3B1F';
-    ctx.shadowColor = '#FF3B1F';
-    ctx.shadowBlur = 8;
+    // 2. Vermilion Glow Outer Border
+    ctx.strokeStyle = '#FF3B1F';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.25)';
+    ctx.shadowBlur = 14;
     ctx.beginPath();
-    ctx.roundRect(barX, barY, Math.max(2, barW * progress), barH, 4);
+    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 3. Top Telemetry Header
+    // Accent Block (Left)
+    ctx.fillStyle = '#FF3B1F';
+    ctx.fillRect(24, 14, 4, 20);
+
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('4K VR REELS', 36, 24);
+
+    // Filename
+    let dispName = item ? item.filename : 'SYS_RENDER_004.mp4';
+    if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
+    ctx.fillStyle = '#E3E2E3';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.fillText(dispName, 144, 24);
+
+    // Pill Badges & Status (Right)
+    // Comment pill
+    ctx.fillStyle = '#101214';
+    ctx.strokeStyle = '#3A4047';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(476, 13, 64, 22, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#E7BDB5';
+    ctx.font = '11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`💬 ${comments.length || 0}`, 508, 24);
+
+    // Index pill
+    ctx.fillStyle = '#101214';
+    ctx.strokeStyle = '#3A4047';
+    ctx.beginPath();
+    ctx.roundRect(548, 13, 72, 22, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#E7BDB5';
+    ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, 584, 24);
+
+    // Status Indicator Dot + Text
+    const isLocked = lockToViewer;
+    ctx.fillStyle = isLocked ? '#22C55E' : '#9BA1A8';
+    if (isLocked) {
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.7)';
+      ctx.shadowBlur = 8;
+    }
+    ctx.beginPath();
+    ctx.arc(640, 24, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Time Indicator Text
-    ctx.fillStyle = 'rgba(242, 243, 245, 0.8)';
-    ctx.font = 'bold 11px monospace';
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('PROGRESS', 16, CONTROLS_H - 16);
+    ctx.fillText(isLocked ? 'LOCKED' : 'FREE', 650, 24);
+
+    // Exit Button
+    const isExitHover = (hoveredButton === 9);
+    ctx.fillStyle = isExitHover ? '#1D2126' : '#101214';
+    ctx.strokeStyle = isExitHover ? '#FF3B1F' : '#3A4047';
+    ctx.beginPath();
+    ctx.roundRect(746, 13, 30, 22, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = isExitHover ? '#FF3B1F' : '#E7BDB5';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('✕', 761, 24);
+
+    // Divider Line below Header
+    ctx.strokeStyle = '#24282D';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(24, 48);
+    ctx.lineTo(776, 48);
+    ctx.stroke();
+
+    // 4. Main Controls Cluster
+    CTRL_BUTTONS.forEach((btn, i) => {
+      if (btn.action === 'exit' || btn.action === 'seek') return;
+
+      const isHover = (hoveredButton === i);
+
+      // Left Column Pill Buttons (AUTO / DOME)
+      if (btn.action === 'mode' || btn.action === 'curve') {
+        ctx.fillStyle = isHover ? '#1D2126' : '#101214';
+        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = isHover ? '#FFFFFF' : '#E7BDB5';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const label = btn.action === 'mode'
+          ? (isAutoNext ? 'AUTO' : 'LOOP')
+          : (curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT'));
+        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
+
+        ctx.font = '15px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = isHover ? '#FF3B1F' : '#C5C6C8';
+        const icon = btn.action === 'mode' ? '⟳' : '🌐';
+        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+      }
+
+      // Right Column Pill Buttons (LOCK / AUDIO)
+      else if (btn.action === 'lock' || btn.action === 'mute') {
+        const isLockActive = (btn.action === 'lock' && lockToViewer);
+        ctx.fillStyle = (isLockActive || isHover) ? '#1D2126' : '#101214';
+        ctx.strokeStyle = (isLockActive || isHover) ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = (isLockActive || isHover) ? '#FFFFFF' : '#E7BDB5';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const label = btn.action === 'lock'
+          ? (lockToViewer ? 'LOCK' : 'FREE')
+          : (isMuted ? 'MUTED' : 'AUDIO');
+        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
+
+        ctx.font = '15px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = (isLockActive || isHover) ? '#FF3B1F' : '#C5C6C8';
+        const icon = btn.action === 'lock'
+          ? (lockToViewer ? '🔒' : '🔓')
+          : (isMuted ? '🔇' : '🔊');
+        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+      }
+
+      // Center Secondary Buttons (rew, prev, next, fwd)
+      else if (btn.action !== 'play') {
+        ctx.fillStyle = isHover ? '#1D2126' : '#101214';
+        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isHover ? '#FFFFFF' : '#E3E2E3';
+        ctx.font = (btn.action === 'prev' || btn.action === 'next') ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let lbl = btn.label;
+        if (btn.action === 'rew') lbl = '◀◀';
+        if (btn.action === 'fwd') lbl = '▶▶';
+        if (btn.action === 'prev') lbl = '⏮';
+        if (btn.action === 'next') lbl = '⏭';
+        ctx.fillText(lbl, btn.x + btn.w / 2, btn.y + btn.h / 2);
+      }
+
+      // Center Primary Play/Pause Glow Button
+      else if (btn.action === 'play') {
+        ctx.fillStyle = '#FF3B1F';
+        ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
+        ctx.shadowBlur = isHover ? 28 : 20;
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#0A0A0A';
+        ctx.font = 'bold 30px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isPaused ? '▶' : '⏸', btn.x + btn.w / 2, btn.y + btn.h / 2);
+      }
+    });
+
+    // 5. Bottom Progress Track
+    // Divider Line above Progress
+    ctx.strokeStyle = '#24282D';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(24, 184);
+    ctx.lineTo(776, 184);
+    ctx.stroke();
+
+    // Time Indicators
+    ctx.font = 'bold 12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FF3B1F';
+    ctx.fillText(formatTime(currentTime), 24, 198);
 
     ctx.textAlign = 'right';
-    ctx.fillText(formatTime(currentTime) + ' / ' + formatTime(duration), CONTROLS_W - 16, CONTROLS_H - 16);
+    ctx.fillStyle = '#9BA1A8';
+    ctx.fillText(formatTime(duration), 776, 198);
+
+    // Track Bar
+    const trackX = 24, trackY = 214, trackW = 752, trackH = 6;
+    ctx.fillStyle = '#101214';
+    ctx.strokeStyle = '#3A4047';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(trackX, trackY, trackW, trackH, 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Progress Fill
+    const fillW = Math.max(0, Math.min(trackW, trackW * progress));
+    if (fillW > 0) {
+      ctx.fillStyle = '#FF3B1F';
+      ctx.shadowColor = 'rgba(255, 59, 31, 0.6)';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.roundRect(trackX, trackY, fillW, trackH, 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Scrubber Thumb / Playhead
+      const thumbX = Math.max(trackX, Math.min(trackX + trackW - 8, trackX + fillW - 4));
+      ctx.fillStyle = '#FF3B1F';
+      ctx.shadowColor = 'rgba(255, 59, 31, 0.7)';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.roundRect(thumbX, trackY - 5, 8, 16, 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
   }
 
   // ─── Meta Quest 3 Controller Guide Panel Canvas Rendering ───────────
@@ -905,7 +1067,7 @@ const WebXRVR = (function () {
 
   function hitTestControls(rayOrigin, rayDir) {
     const ctrlCenter = getControlsCenter();
-    const ctrlWidth = getControlsScale() * 0.8;
+    const ctrlWidth = getControlsScale() * 0.82;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
 
     const ctrlQuat = getControlsQuat();
@@ -932,9 +1094,13 @@ const WebXRVR = (function () {
     const canvasX = u * CONTROLS_W;
     const canvasY = v * CONTROLS_H;
 
+    lastControlsCanvasX = canvasX;
+    lastControlsCanvasY = canvasY;
+
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
-      if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= 42 && canvasY <= 84) {
+      if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
+          canvasY >= btn.y && canvasY <= btn.y + btn.h) {
         return i;
       }
     }
@@ -967,6 +1133,12 @@ const WebXRVR = (function () {
         if (videoElement) {
           videoElement.muted = !videoElement.muted;
           if (callbacks.onMuteChange) callbacks.onMuteChange(videoElement.muted);
+        }
+        break;
+      case 'seek':
+        if (videoElement && videoElement.duration) {
+          const ratio = Math.max(0, Math.min(1, (lastControlsCanvasX - 24) / 752));
+          videoElement.currentTime = ratio * videoElement.duration;
         }
         break;
       case 'exit':  exitVR(); break;
@@ -1720,7 +1892,7 @@ const WebXRVR = (function () {
       if (controlsVisible) {
         const ctrlPos = getControlsCenter();
         const ctrlScale = lockToViewer ? DEFAULT_SCALE : screenScale;
-        const ctrlW = ctrlScale * 0.8;
+        const ctrlW = ctrlScale * 0.82;
         const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
         const ctrlQuat = lockToViewer ? quatFaceViewerLevel(ctrlPos, currentHeadPos) : screenQuat;
         drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0.0);
@@ -1970,6 +2142,9 @@ const WebXRVR = (function () {
       }
     }
 
+    // Notify host SPA so the global Top Bar can auto-hide for immersive Reels
+    notifyVrEnter();
+
     xrSession.requestAnimationFrame(onXRFrame);
   }
 
@@ -2074,6 +2249,8 @@ const WebXRVR = (function () {
 
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.remove('vr-active');
+
+    notifyVrExit();
   }
 
   function onVideoChange() {
