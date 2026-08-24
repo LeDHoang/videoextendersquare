@@ -1147,6 +1147,59 @@
       return (item && item.comments) ? item.comments : [];
     }
 
+    // Shared like/post helpers — used by both the 2D drawer and the VR comments panel
+    async function likeComment(cid) {
+      try {
+        const resp = await fetch(`/api/reels/comments/${cid}/like`, { method: 'POST' });
+        if (resp.ok) {
+          const resData = await resp.json();
+          const target = getCurrentComments().find((x) => x.id === cid);
+          if (target) target.likes = resData.likes;
+          const listEl = commentsList ? commentsList.querySelector(`.comment-like-btn[data-like="${cid}"]`) : null;
+          if (listEl) {
+            const spans = listEl.querySelectorAll('span');
+            const countSpan = spans.length > 1 ? spans[spans.length - 1] : listEl.querySelector('span');
+            if (countSpan) countSpan.textContent = resData.likes;
+          }
+          return resData.likes;
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    async function postComment(text, timestamp, persona) {
+      const curItem = videoData[idx];
+      if (!curItem) return null;
+      const p = persona || currentPersona;
+      const payload = {
+        video_path: curItem.path || curItem.filename,
+        timestamp: timestamp !== null && timestamp !== undefined ? Math.round(timestamp * 10) / 10 : null,
+        author_name: p.name,
+        author_avatar: p.avatar,
+        avatar_color: p.color,
+        text: text
+      };
+      try {
+        const res = await fetch('/api/reels/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const newC = await res.json();
+          if (!curItem.comments) curItem.comments = [];
+          curItem.comments.push(newC);
+          renderDrawerComments();
+          renderCommentMarkers();
+          showFlash('💬 COMMENT POSTED');
+          return newC;
+        }
+      } catch (err) {
+        console.error('[Comments] Failed to post comment:', err);
+      }
+      return null;
+    }
+
     // ── Comments Markers on Timeline (SoundCloud Style) ──
     function renderCommentMarkers() {
       if (!commentMarkers) return;
@@ -1309,20 +1362,9 @@
 
       // Add click listeners to like buttons
       commentsList.querySelectorAll('.comment-like-btn').forEach((btn) => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const cid = btn.getAttribute('data-like');
-          try {
-            const resp = await fetch(`/api/reels/comments/${cid}/like`, { method: 'POST' });
-            if (resp.ok) {
-              const resData = await resp.json();
-              // second span holds the numeric count (first is the icon)
-              const spans = btn.querySelectorAll('span');
-              const countSpan = spans.length > 1 ? spans[spans.length - 1] : btn.querySelector('span');
-              if (countSpan) countSpan.textContent = resData.likes;
-              const target = comments.find((x) => x.id === cid);
-              if (target) target.likes = resData.likes;
-            }
-          } catch (e) {}
+          likeComment(cid);
         });
       });
     }
@@ -1384,37 +1426,8 @@
         e.preventDefault();
         const txt = (commentInput ? commentInput.value : '').trim();
         if (!txt) return;
-
-        const curItem = videoData[idx];
-        if (!curItem) return;
-
-        const payload = {
-          video_path: curItem.path || curItem.filename,
-          timestamp: isSyncTimeActive ? Math.round(video.currentTime * 10) / 10 : null,
-          author_name: currentPersona.name,
-          author_avatar: currentPersona.avatar,
-          avatar_color: currentPersona.color,
-          text: txt
-        };
-
-        try {
-          const res = await fetch('/api/reels/comments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (res.ok) {
-            const newC = await res.json();
-            if (!curItem.comments) curItem.comments = [];
-            curItem.comments.push(newC);
-            if (commentInput) commentInput.value = '';
-            renderDrawerComments();
-            renderCommentMarkers();
-            showFlash('💬 COMMENT POSTED');
-          }
-        } catch (err) {
-          console.error('[Comments] Failed to post comment:', err);
-        }
+        const posted = await postComment(txt, isSyncTimeActive ? video.currentTime : null, currentPersona);
+        if (posted && commentInput) commentInput.value = '';
       });
     }
 
@@ -1879,6 +1892,17 @@
         getCurrentIndex: function() { return idx; },
         getAutoNext: function() { return isAutoNext; },
         getComments: function() { return getCurrentComments(); },
+        getPersona: function() { return currentPersona; },
+        onRandomizePersona: function() { randomizePersona(); },
+        onSeekTo: function(t) {
+          if (video && video.duration && !isNaN(t)) {
+            const target = Math.max(0, Math.min(video.duration, t));
+            video.currentTime = target;
+            showFlash('⏱️ ' + formatTime(target));
+          }
+        },
+        onLikeComment: function(id) { return likeComment(id); },
+        onPostComment: function(text, timestamp) { return postComment(text, timestamp, currentPersona); },
       });
 
       if (vrBtnWrap) {

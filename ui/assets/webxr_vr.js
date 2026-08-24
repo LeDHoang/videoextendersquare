@@ -35,6 +35,7 @@ const WebXRVR = (function () {
   let glControlsTexture = null;
   let glOverlayTexture = null;
   let glGuideTexture = null;
+  let glCommentsTexture = null;
   let glReticleTexture = null;
   let glGridBuf = null;
   let glGridIndexBuf = null;
@@ -139,6 +140,36 @@ const WebXRVR = (function () {
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
 
+  // ── VR Comments Panel (world-space, symmetric to the right-side guide) ──
+  let commentsPanelVisible = false;
+  let commentsPanelCanvas = null;
+  let commentsPanelCtx = null;
+  const CPANEL_W = 560;
+  const CPANEL_H = 860;
+  const CP_HEADER_H = 60;
+  const CP_LIST_TOP = 66;
+  const CP_LIST_BOTTOM = 748;
+  const CP_LIST_X = 16;
+  const CP_LIST_W = 498; // 560 - 16 - 46 (right scrollbar column)
+  const CP_ITEM_H = 96;
+  const CP_ITEM_GAP = 10;
+  const CP_SCROLL_X = 516;
+  const CP_SCROLL_W = 30;
+  let cPanelTab = 'all';
+  let cPanelScrollY = 0;
+  let cPanelMaxScroll = 0;
+  let cPanelHover = null;
+  let cPanelDrag = false;
+  let cPanelDragStartCanvasY = 0;
+  let cPanelDragStartScroll = 0;
+  let lastCommentsCanvasX = 0;
+  let lastCommentsCanvasY = 0;
+
+  // Quest DOM-Overlay virtual keyboard for posting comments from VR
+  let domOverlayRoot = null;
+  let domOverlayInput = null;
+  let pendingSyncTime = null;
+
   // Video frame tracking
   let hasNewVideoFrame = true;
   let lastVideoTime = -1;
@@ -188,6 +219,9 @@ const WebXRVR = (function () {
     // Right secondary column (Pills)
     { label: 'LOCK',  action: 'lock',  x: 620, y: 66,  w: 156, h: 44 },
     { label: 'AUDIO', action: 'mute',  x: 620, y: 120, w: 156, h: 44 },
+
+    // Header comment pill → toggles the VR comments panel
+    { label: '💬',    action: 'comments', x: 476, y: 13, w: 64, h: 22 },
 
     // Header exit button
     { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
@@ -501,15 +535,17 @@ const WebXRVR = (function () {
     ctx.fillText(dispName, 144, 24);
 
     // Pill Badges & Status (Right)
-    // Comment pill
-    ctx.fillStyle = '#101214';
-    ctx.strokeStyle = '#3A4047';
+    // Comment pill — also the VR comments panel toggle
+    const commentBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'comments');
+    const isCommentHover = (hoveredButton === commentBtnIdx);
+    ctx.fillStyle = isCommentHover ? '#1D2126' : '#101214';
+    ctx.strokeStyle = isCommentHover ? '#FF3B1F' : '#3A4047';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect(476, 13, 64, 22, 3);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#E7BDB5';
+    ctx.fillStyle = isCommentHover ? '#FFFFFF' : '#E7BDB5';
     ctx.font = '11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(`💬 ${comments.length || 0}`, 508, 24);
@@ -541,7 +577,7 @@ const WebXRVR = (function () {
     ctx.fillText(isLocked ? 'LOCKED' : 'FREE', 650, 24);
 
     // Exit Button
-    const isExitHover = (hoveredButton === 9);
+    const isExitHover = (hoveredButton === 10);
     ctx.fillStyle = isExitHover ? '#1D2126' : '#101214';
     ctx.strokeStyle = isExitHover ? '#FF3B1F' : '#3A4047';
     ctx.beginPath();
@@ -563,7 +599,7 @@ const WebXRVR = (function () {
 
     // 4. Main Controls Cluster
     CTRL_BUTTONS.forEach((btn, i) => {
-      if (btn.action === 'exit' || btn.action === 'seek') return;
+      if (btn.action === 'exit' || btn.action === 'seek' || btn.action === 'comments') return;
 
       const isHover = (hoveredButton === i);
 
@@ -979,6 +1015,558 @@ const WebXRVR = (function () {
     ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
   }
 
+  // ─── VR Comments Panel (world-space) ────────────────────────────────
+
+  function initCommentsPanelCanvas() {
+    commentsPanelCanvas = document.createElement('canvas');
+    commentsPanelCanvas.width = CPANEL_W;
+    commentsPanelCanvas.height = CPANEL_H;
+    commentsPanelCtx = commentsPanelCanvas.getContext('2d');
+  }
+
+  function getInitials(name) {
+    if (!name) return '??';
+    const parts = name.split(/[_\s]+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  }
+
+  function wrapTextLines(ctx, text, maxWidth, maxLines) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const test = cur ? cur + ' ' + w : w;
+      if (cur && ctx.measureText(test).width > maxWidth) {
+        lines.push(cur);
+        cur = w;
+        if (lines.length >= maxLines) break;
+      } else {
+        cur = test;
+      }
+    }
+    if (cur && lines.length < maxLines) lines.push(cur);
+    return lines;
+  }
+
+  function getPanelFilteredComments() {
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
+    if (cPanelTab === 'sync') return comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
+    if (cPanelTab === 'general') return comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+    return comments;
+  }
+
+  function clampPanelScroll(v) {
+    return Math.max(0, Math.min(cPanelMaxScroll, v));
+  }
+
+  // ── Panel geometry (mirrors getGuideCenter on the LEFT side) ──
+  function getCommentsPanelSize() {
+    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const w = base * 0.432; // 0.36 * 1.2 → 20% larger world-space panel
+    const h = w * (CPANEL_H / CPANEL_W);
+    return { w, h };
+  }
+
+  function getCommentsPanelCenter() {
+    const { w } = getCommentsPanelSize();
+    if (lockToViewer) {
+      return {
+        x: DEFAULT_POS.x - DEFAULT_SCALE / 2 - w / 2 - 0.384,
+        y: DEFAULT_POS.y,
+        z: DEFAULT_POS.z - 0.15,
+      };
+    }
+    const offsetLocal = { x: -screenScale / 2 - w / 2 - 0.384, y: 0, z: -0.15 };
+    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
+    return vecAdd(screenPos, offsetWorld);
+  }
+
+  function getCommentsPanelQuat() {
+    return quatFaceViewerLevel(getCommentsPanelCenter(), currentHeadPos);
+  }
+
+  function getHitDistCommentsPanel(rayOrigin, rayDir) {
+    const center = getCommentsPanelCenter();
+    const normal = quatRotVec(getCommentsPanelQuat(), { x: 0, y: 0, z: 1 });
+    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
+    if (Math.abs(denom) < 0.0001) return -1;
+    const t = ((center.x - rayOrigin.x) * normal.x +
+               (center.y - rayOrigin.y) * normal.y +
+               (center.z - rayOrigin.z) * normal.z) / denom;
+    return t > 0 ? t : -1;
+  }
+
+  // ── Panel hit testing → canvas region descriptor ──
+  function resolveCommentsPanelRegion(canvasX, canvasY) {
+    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
+    const filtered = getPanelFilteredComments();
+    const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
+
+    // Header
+    if (canvasY < CP_HEADER_H) {
+      if (canvasX >= 296 && canvasX < 344 && canvasY >= 16 && canvasY < 46) return 'tab:all';
+      if (canvasX >= 352 && canvasX < 416 && canvasY >= 16 && canvasY < 46) return 'tab:sync';
+      if (canvasX >= 424 && canvasX < 502 && canvasY >= 16 && canvasY < 46) return 'tab:general';
+      if (canvasX >= 522 && canvasX < 548 && canvasY >= 16 && canvasY < 46) return 'close';
+      return 'panel';
+    }
+
+    // Footer
+    if (canvasY > CP_LIST_BOTTOM) {
+      if (canvasY >= CP_LIST_BOTTOM + 10 && canvasY < CP_LIST_BOTTOM + 44 && canvasX >= 16 && canvasX < 216) return 'persona';
+      if (canvasY >= CP_LIST_BOTTOM + 54 && canvasY < CP_LIST_BOTTOM + 98 && canvasX >= 16 && canvasX < CPANEL_W - 16) return 'add';
+      return 'panel';
+    }
+
+    // Scrollbar column
+    if (canvasX >= CP_SCROLL_X) {
+      if (canvasY >= CP_LIST_TOP && canvasY < CP_LIST_TOP + 26) return 'scrollup';
+      if (canvasY >= CP_LIST_BOTTOM - 26 && canvasY < CP_LIST_BOTTOM) return 'scrolldown';
+      const trackTop = CP_LIST_TOP + 30;
+      const trackBot = CP_LIST_BOTTOM - 30;
+      if (cPanelMaxScroll > 0) {
+        const handleH = Math.max(40, (trackBot - trackTop) * (listH / contentH));
+        const frac = cPanelScrollY / cPanelMaxScroll;
+        const handleY = trackTop + frac * ((trackBot - trackTop) - handleH);
+        if (canvasY >= handleY && canvasY < handleY + handleH) return 'scrollbar';
+      }
+      return 'list';
+    }
+
+    // List content items
+    const relY = canvasY - CP_LIST_TOP + cPanelScrollY;
+    const idx = Math.floor(relY / (CP_ITEM_H + CP_ITEM_GAP));
+    if (idx >= 0 && idx < filtered.length) {
+      const c = filtered[idx];
+      const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+      const itemX = CP_LIST_X + 10;
+      const itemW = CP_LIST_W - 20;
+      if (canvasY >= y + 8 && canvasY < y + 36) {
+        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+        if (hasTime && canvasX >= itemX + 180 && canvasX < itemX + 280) return 'seek:' + c.id;
+        if (canvasX >= itemX + itemW - 46 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
+      }
+    }
+    return 'list';
+  }
+
+  function hitTestCommentsPanel(rayOrigin, rayDir) {
+    const center = getCommentsPanelCenter();
+    const quat = getCommentsPanelQuat();
+    const { w, h } = getCommentsPanelSize();
+    const normal = quatRotVec(quat, { x: 0, y: 0, z: 1 });
+    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
+    if (Math.abs(denom) < 0.0001) return null;
+
+    const t = ((center.x - rayOrigin.x) * normal.x +
+               (center.y - rayOrigin.y) * normal.y +
+               (center.z - rayOrigin.z) * normal.z) / denom;
+    if (t < 0 || t > 20) return null;
+
+    const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
+    const invQ = quatInvert(quat);
+    const localP = quatRotVec(invQ, vecSub(hitP, center));
+    const halfW = w / 2, halfH = h / 2;
+    if (Math.abs(localP.x) > halfW || Math.abs(localP.y) > halfH) return null;
+
+    lastCommentsCanvasX = ((localP.x + halfW) / w) * CPANEL_W;
+    lastCommentsCanvasY = ((halfH - localP.y) / h) * CPANEL_H;
+    return resolveCommentsPanelRegion(lastCommentsCanvasX, lastCommentsCanvasY);
+  }
+
+  // ── Panel rendering ──
+  function renderCommentsPanelCanvas() {
+    const ctx = commentsPanelCtx;
+    if (!ctx) return;
+
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
+    let filtered = comments;
+    if (cPanelTab === 'sync') filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
+    else if (cPanelTab === 'general') filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+
+    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
+    const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
+    cPanelMaxScroll = Math.max(0, contentH - listH);
+    if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
+
+    const persona = callbacks.getPersona ? callbacks.getPersona() : null;
+    const accent = '#FF3B1F';
+
+    ctx.clearRect(0, 0, CPANEL_W, CPANEL_H);
+
+    // Container
+    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#343536';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
+    ctx.stroke();
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 0, CPANEL_W, 3);
+
+    // Header
+    ctx.fillStyle = '#0d0e0f';
+    ctx.fillRect(0, 3, CPANEL_W, CP_HEADER_H - 3);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = accent;
+    ctx.fillText('💬', 18, 33);
+    ctx.font = '700 11px "JetBrains Mono", monospace';
+    ctx.fillText('COMMENTS', 40, 33);
+    ctx.fillStyle = 'rgba(255,85,58,0.7)';
+    const titleW = ctx.measureText('COMMENTS').width;
+    ctx.fillText('(' + comments.length + ')', 40 + titleW + 10, 33);
+
+    const tabs = [
+      { key: 'all', label: 'ALL', x: 296, w: 48 },
+      { key: 'sync', label: 'SYNC', x: 352, w: 64 },
+      { key: 'general', label: 'GENERAL', x: 424, w: 78 },
+    ];
+    tabs.forEach((tab) => {
+      const active = cPanelTab === tab.key;
+      const hover = cPanelHover === ('tab:' + tab.key);
+      ctx.fillStyle = active ? accent : (hover ? '#1D2126' : '#1f2021');
+      ctx.strokeStyle = active ? accent : (hover ? accent : '#343536');
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(tab.x, 16, tab.w, 30, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = active ? '#5a0600' : (hover ? '#FFFFFF' : '#ff553a');
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(tab.label, tab.x + tab.w / 2, 31);
+    });
+
+    const closeHover = cPanelHover === 'close';
+    ctx.fillStyle = closeHover ? '#292a2b' : '#1f2021';
+    ctx.strokeStyle = closeHover ? accent : '#343536';
+    ctx.beginPath();
+    ctx.roundRect(522, 16, 26, 30, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = closeHover ? '#FFFFFF' : accent;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('✕', 535, 31);
+
+    ctx.strokeStyle = '#343536';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, CP_HEADER_H);
+    ctx.lineTo(CPANEL_W, CP_HEADER_H);
+    ctx.stroke();
+
+    // List viewport
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, CP_LIST_TOP, CP_LIST_X + CP_LIST_W, listH);
+    ctx.clip();
+
+    if (filtered.length === 0) {
+      ctx.fillStyle = accent;
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        cPanelTab === 'general' ? 'NO GENERAL COMMENTS' : cPanelTab === 'sync' ? 'NO TIME-SYNCED COMMENTS' : 'NO COMMENTS YET',
+        CPANEL_W / 2, CP_LIST_TOP + 40
+      );
+      ctx.fillStyle = 'rgba(155,161,168,0.6)';
+      ctx.fillText('Tap ADD COMMENT below to drop one', CPANEL_W / 2, CP_LIST_TOP + 60);
+    } else {
+      filtered.forEach((c, i) => {
+        const y = CP_LIST_TOP + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+        if (y + CP_ITEM_H < CP_LIST_TOP || y > CP_LIST_BOTTOM) return;
+
+        const itemX = CP_LIST_X + 10;
+        const itemW = CP_LIST_W - 20;
+        const border = c.avatar_color || accent;
+        const hoveredLike = cPanelHover === ('like:' + c.id);
+        const hoveredSeek = cPanelHover === ('seek:' + c.id);
+
+        ctx.fillStyle = '#121315';
+        ctx.beginPath();
+        ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
+        ctx.fill();
+        ctx.strokeStyle = (hoveredSeek || hoveredLike) ? 'rgba(255,85,58,0.6)' : '#343536';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = border;
+        ctx.fillRect(itemX, y, 3, CP_ITEM_H);
+
+        const isEmojiAvatar = c.author_avatar && c.author_avatar.length <= 2 && /\p{Emoji}/u.test(c.author_avatar);
+        ctx.fillStyle = '#1f2021';
+        ctx.beginPath();
+        ctx.roundRect(itemX + 8, y + 12, 40, 40, 4);
+        ctx.fill();
+        ctx.strokeStyle = border;
+        ctx.stroke();
+        if (isEmojiAvatar) {
+          ctx.font = '20px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(c.author_avatar, itemX + 28, y + 33);
+        } else {
+          ctx.fillStyle = border;
+          ctx.font = '700 11px "JetBrains Mono", monospace';
+          ctx.fillText(getInitials(c.author_name), itemX + 28, y + 33);
+        }
+
+        ctx.fillStyle = border;
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        let name = c.author_name || 'Anonymous';
+        if (name.length > 16) name = name.slice(0, 15) + '…';
+        ctx.fillText(name, itemX + 56, y + 14);
+
+        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+        const pillX = itemX + 180;
+        ctx.fillStyle = hoveredSeek ? accent : '#292a2b';
+        ctx.strokeStyle = accent;
+        ctx.beginPath();
+        ctx.roundRect(pillX, y + 10, 100, 24, 3);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = hoveredSeek ? '#5a0600' : accent;
+        ctx.font = '700 10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(hasTime ? ('⏱ ' + formatTime(c.timestamp)) : 'GENERAL', pillX + 50, y + 23);
+
+        const likeX = itemX + itemW - 46;
+        if (hoveredLike) {
+          ctx.fillStyle = '#1D2126';
+          ctx.beginPath();
+          ctx.roundRect(likeX, y + 10, 40, 24, 3);
+          ctx.fill();
+        }
+        ctx.fillStyle = accent;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('♥ ' + (c.likes || 0), likeX + 38, y + 23);
+
+        ctx.fillStyle = '#e3e2e3';
+        ctx.font = '500 13px Archivo, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        const lines = wrapTextLines(ctx, c.text || '', itemW - 70, 2);
+        lines.forEach((line, li) => {
+          ctx.fillText(line, itemX + 56, y + 48 + li * 18);
+        });
+      });
+    }
+    ctx.restore();
+
+    // Scrollbar column
+    const upHover = cPanelHover === 'scrollup';
+    ctx.fillStyle = upHover ? '#1D2126' : '#1f2021';
+    ctx.strokeStyle = upHover ? accent : '#343536';
+    ctx.beginPath();
+    ctx.roundRect(CP_SCROLL_X, CP_LIST_TOP, CP_SCROLL_W, 26, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = upHover ? '#FFFFFF' : accent;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('▲', CP_SCROLL_X + CP_SCROLL_W / 2, CP_LIST_TOP + 14);
+
+    const downHover = cPanelHover === 'scrolldown';
+    ctx.fillStyle = downHover ? '#1D2126' : '#1f2021';
+    ctx.strokeStyle = downHover ? accent : '#343536';
+    ctx.beginPath();
+    ctx.roundRect(CP_SCROLL_X, CP_LIST_BOTTOM - 26, CP_SCROLL_W, 26, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = downHover ? '#FFFFFF' : accent;
+    ctx.fillText('▼', CP_SCROLL_X + CP_SCROLL_W / 2, CP_LIST_BOTTOM - 12);
+
+    const trackTop = CP_LIST_TOP + 30;
+    const trackBot = CP_LIST_BOTTOM - 30;
+    ctx.strokeStyle = '#343536';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(CP_SCROLL_X + CP_SCROLL_W / 2, trackTop);
+    ctx.lineTo(CP_SCROLL_X + CP_SCROLL_W / 2, trackBot);
+    ctx.stroke();
+
+    if (cPanelMaxScroll > 0) {
+      const handleH = Math.max(40, (trackBot - trackTop) * (listH / contentH));
+      const frac = cPanelScrollY / cPanelMaxScroll;
+      const handleY = trackTop + frac * ((trackBot - trackTop) - handleH);
+      const handleHover = cPanelHover === 'scrollbar';
+      ctx.fillStyle = handleHover ? accent : '#5d3f3a';
+      ctx.beginPath();
+      ctx.roundRect(CP_SCROLL_X + CP_SCROLL_W / 2 - 4, handleY, 8, handleH, 4);
+      ctx.fill();
+    }
+
+    // Footer
+    const footerY = CP_LIST_BOTTOM + 4;
+    ctx.fillStyle = '#0d0e0f';
+    ctx.fillRect(0, footerY, CPANEL_W, CPANEL_H - footerY);
+
+    const personaHover = cPanelHover === 'persona';
+    ctx.fillStyle = personaHover ? '#292a2b' : '#1f2021';
+    ctx.strokeStyle = personaHover ? accent : '#343536';
+    ctx.beginPath();
+    ctx.roundRect(16, footerY + 10, 200, 34, 3);
+    ctx.fill();
+    ctx.stroke();
+    if (persona) {
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(persona.avatar || '👤', 28, footerY + 28);
+      ctx.fillStyle = '#e3e2e3';
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.fillText(persona.name || 'Anonymous', 52, footerY + 28);
+    }
+
+    ctx.fillStyle = 'rgba(155,161,168,0.8)';
+    ctx.font = '700 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('SYNC: ' + formatTime(videoElement ? videoElement.currentTime : 0), CPANEL_W - 16, footerY + 28);
+
+    const addHover = cPanelHover === 'add';
+    ctx.fillStyle = addHover ? '#ff6a52' : accent;
+    ctx.strokeStyle = accent;
+    ctx.beginPath();
+    ctx.roundRect(16, footerY + 54, CPANEL_W - 32, 44, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#5a0600';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('+ ADD COMMENT', CPANEL_W / 2, footerY + 77);
+  }
+
+  // ── Panel actions ──
+  function executeCommentAction(desc) {
+    if (!desc) return false;
+    if (desc === 'panel') return true; // consume non-interactive panel presses
+    if (desc === 'list' || desc === 'scrollbar') {
+      cPanelDrag = true;
+      cPanelDragStartCanvasY = lastCommentsCanvasY;
+      cPanelDragStartScroll = cPanelScrollY;
+      return true;
+    }
+    if (desc.indexOf('tab:') === 0) {
+      cPanelTab = desc.slice(4);
+      cPanelScrollY = 0;
+      return true;
+    }
+    if (desc === 'close') {
+      commentsPanelVisible = false;
+      cPanelHover = null;
+      return true;
+    }
+    if (desc === 'add') {
+      openVrKeyboard();
+      return true;
+    }
+    if (desc === 'scrollup') {
+      cPanelScrollY = clampPanelScroll(cPanelScrollY - (CP_ITEM_H + CP_ITEM_GAP));
+      return true;
+    }
+    if (desc === 'scrolldown') {
+      cPanelScrollY = clampPanelScroll(cPanelScrollY + (CP_ITEM_H + CP_ITEM_GAP));
+      return true;
+    }
+    if (desc.indexOf('seek:') === 0) {
+      const id = desc.slice(5);
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      const c = comments.find((x) => x.id === id);
+      if (c && c.timestamp !== null && c.timestamp !== undefined && callbacks.onSeekTo) {
+        callbacks.onSeekTo(Number(c.timestamp));
+      }
+      return true;
+    }
+    if (desc.indexOf('like:') === 0) {
+      const id = desc.slice(5);
+      if (callbacks.onLikeComment) callbacks.onLikeComment(id);
+      return true;
+    }
+    if (desc === 'persona') {
+      if (callbacks.onRandomizePersona) callbacks.onRandomizePersona();
+      return true;
+    }
+    return false;
+  }
+
+  function toggleCommentsPanel() {
+    commentsPanelVisible = !commentsPanelVisible;
+    if (!commentsPanelVisible) {
+      cPanelDrag = false;
+      cPanelHover = null;
+      closeVrKeyboard();
+    }
+  }
+
+  // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
+  function initDomOverlay() {
+    if (domOverlayRoot) return;
+    domOverlayRoot = document.createElement('div');
+    domOverlayRoot.id = 'vrCommentDomOverlay';
+    domOverlayRoot.style.cssText = 'position:fixed;left:0;right:0;bottom:0;top:auto;height:360px;z-index:2147483646;pointer-events:none;';
+    domOverlayInput = document.createElement('input');
+    domOverlayInput.type = 'text';
+    domOverlayInput.autocomplete = 'off';
+    domOverlayInput.setAttribute('enterkeyhint', 'send');
+    domOverlayInput.placeholder = 'Type a VR comment…';
+    domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#e3e2e3;background:rgba(13,14,15,0.97);border:2px solid #ff553a;border-radius:8px;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+    domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
+    domOverlayInput.addEventListener('blur', onCommentInputBlur);
+    domOverlayRoot.appendChild(domOverlayInput);
+    (document.body || document.documentElement).appendChild(domOverlayRoot);
+  }
+
+  function openVrKeyboard() {
+    initDomOverlay();
+    if (!domOverlayInput) return;
+    pendingSyncTime = videoElement ? Math.round(videoElement.currentTime * 10) / 10 : null;
+    domOverlayInput.value = '';
+    domOverlayInput.style.display = 'block';
+    try { domOverlayInput.focus(); } catch (e) {}
+  }
+
+  function closeVrKeyboard() {
+    if (domOverlayInput) {
+      domOverlayInput.style.display = 'none';
+      try { domOverlayInput.blur(); } catch (e) {}
+    }
+  }
+
+  function onCommentInputKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const text = domOverlayInput ? domOverlayInput.value.trim() : '';
+      closeVrKeyboard();
+      if (text && callbacks.onPostComment) {
+        callbacks.onPostComment(text, pendingSyncTime);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeVrKeyboard();
+    }
+  }
+
+  function onCommentInputBlur() {
+    setTimeout(() => {
+      if (domOverlayInput && document.activeElement !== domOverlayInput) {
+        domOverlayInput.style.display = 'none';
+      }
+    }, 150);
+  }
+
   // ─── All-Side Concave Screen Arc Geometry Math ─────────────────────
   // ARC_ANGLE = 0.65 rad (~37.2° arc angle for immersive concave curvature)
   // R_CURVE = 1.0 / 0.65 = 1.5385 (Direct center view is the center focal point)
@@ -1046,14 +1634,14 @@ const WebXRVR = (function () {
 
   function getGuideCenter() {
     if (lockToViewer) {
-      const guideW = DEFAULT_SCALE * 0.351;
+      const guideW = DEFAULT_SCALE * 0.4212; // 0.351 * 1.2 → 20% larger (symmetric with comments panel)
       return {
         x: DEFAULT_POS.x + DEFAULT_SCALE / 2 + guideW / 2 + 0.384,
         y: DEFAULT_POS.y,
         z: DEFAULT_POS.z - 0.15,
       };
     }
-    const guideW = screenScale * 0.351;
+    const guideW = screenScale * 0.4212; // 0.351 * 1.2 → 20% larger (symmetric with comments panel)
     const offsetLocal = { x: screenScale / 2 + guideW / 2 + 0.384, y: 0, z: -0.15 };
     const offsetWorld = quatRotVec(screenQuat, offsetLocal);
     return vecAdd(screenPos, offsetWorld);
@@ -1157,6 +1745,7 @@ const WebXRVR = (function () {
           videoElement.currentTime = ratio * videoElement.duration;
         }
         break;
+      case 'comments': toggleCommentsPanel(); break;
       case 'exit':  exitVR(); break;
     }
   }
@@ -1614,6 +2203,13 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    glCommentsTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     initReticleTexture();
     initStarfield();
     initAmbilight();
@@ -1874,10 +2470,18 @@ const WebXRVR = (function () {
       }
     }
 
-    const hasOverlayComments = renderOverlayCanvas();
+    // Suppress the live in-screen time-synced overlay while the comments panel is open
+    const hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
     if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
       gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
+    }
+
+    // Upload VR comments panel texture
+    if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture) {
+      renderCommentsPanelCanvas();
+      gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
     }
 
     const timeSec = time * 0.001;
@@ -1918,10 +2522,18 @@ const WebXRVR = (function () {
         if (glGuideTexture) {
           const guidePos = getGuideCenter();
           const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
-          const guideW = ctrlScale * 0.351;
+          const guideW = ctrlScale * 0.4212;
           const guideH = guideW * (GUIDE_H / GUIDE_W);
           drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0.0);
         }
+      }
+
+      // Draw VR Comments Panel to the left of screen (symmetric to the guide)
+      if (commentsPanelVisible && glCommentsTexture) {
+        const cpPos = getCommentsPanelCenter();
+        const cpQuat = getCommentsPanelQuat();
+        const cpSize = getCommentsPanelSize();
+        drawGrid(viewMat, projMat, glCommentsTexture, cpPos, cpQuat, cpSize.w, cpSize.h, 0.96, 0.0);
       }
 
       drawLaserPointer(viewMat, projMat);
@@ -1992,7 +2604,20 @@ const WebXRVR = (function () {
         let hitDist = -1;
         let isHover = false;
 
-        if (controlsVisible) {
+        // Comments panel has ray priority over controls & screen
+        if (commentsPanelVisible) {
+          const cpHit = hitTestCommentsPanel(controllerPos, controllerDir);
+          if (cpHit) {
+            cPanelHover = cpHit;
+            hoveredButton = -1;
+            hitDist = getHitDistCommentsPanel(controllerPos, controllerDir);
+            isHover = true;
+          } else {
+            cPanelHover = null;
+          }
+        }
+
+        if (!isHover && controlsVisible) {
           const btnIdx = hitTestControls(controllerPos, controllerDir);
           if (btnIdx >= 0) {
             hoveredButton = btnIdx;
@@ -2013,11 +2638,23 @@ const WebXRVR = (function () {
 
         activeHitDist = (hitDist > 0) ? hitDist : 3.0;
         activeIsHovering = isHover;
+
+        // Continue a trigger-drag scroll on the comments list (content follows the hand)
+        if (cPanelDrag) {
+          const trigNow = gp.buttons.length > 0 && gp.buttons[0].pressed;
+          if (trigNow) {
+            const dy = lastCommentsCanvasY - cPanelDragStartCanvasY;
+            cPanelScrollY = clampPanelScroll(cPanelDragStartScroll - dy);
+          } else {
+            cPanelDrag = false;
+          }
+        }
       }
 
       // ── 2. Right Joystick Handling ──
       const thumbY = gp.axes[3] || 0;
       const thumbX = gp.axes[2] || 0;
+      const pointerOverPanel = commentsPanelVisible && cPanelHover;
 
       if (gripPressed) {
         // A) GRIP HELD + Joystick Y Up/Down -> Scale Screen Larger / Smaller
@@ -2026,8 +2663,14 @@ const WebXRVR = (function () {
             screenScale + (-thumbY) * SCALE_SPEED
           ));
         }
+      } else if (pointerOverPanel) {
+        // B1) Pointing at the comments panel -> scroll the list with Y
+        if (Math.abs(thumbY) > 0.18) {
+          cPanelScrollY = clampPanelScroll(cPanelScrollY + thumbY * 6);
+          flickedY = false;
+        }
       } else {
-        // B) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation
+        // B2) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation
         if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
           flickedY = true;
           if (thumbY > 0) {
@@ -2087,10 +2730,17 @@ const WebXRVR = (function () {
       return;
     }
 
+    // DOM overlay root must exist before the session request so the Quest
+    // virtual keyboard can be summoned for VR comment posting.
+    initDomOverlay();
+
+    const sessionOpts = {
+      optionalFeatures: ['local-floor', 'local', 'dom-overlay'],
+    };
+    if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
+
     try {
-      xrSession = await xr.requestSession('immersive-vr', {
-        optionalFeatures: ['local-floor', 'local'],
-      });
+      xrSession = await xr.requestSession('immersive-vr', sessionOpts);
     } catch (e) {
       try {
         xrSession = await xr.requestSession('immersive-vr');
@@ -2109,6 +2759,12 @@ const WebXRVR = (function () {
     isInitialPoseSet = false;
     lockToViewer = true;
     controlsVisible = false;
+    commentsPanelVisible = false;
+    cPanelScrollY = 0;
+    cPanelTab = 'all';
+    cPanelMaxScroll = 0;
+    cPanelHover = null;
+    cPanelDrag = false;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     hoveredButton = -1;
@@ -2120,6 +2776,7 @@ const WebXRVR = (function () {
 
     initControlsCanvas();
     initOverlayCanvas();
+    initCommentsPanelCanvas();
     // Note: initGuideCanvas() is called after initGL() since it needs glGuideTexture
 
     try {
@@ -2191,7 +2848,13 @@ const WebXRVR = (function () {
       }
     }
 
-    // 1. Check UI Controls Button Click
+    // 1. VR Comments Panel — highest priority
+    if (commentsPanelVisible && cPanelHover) {
+      executeCommentAction(cPanelHover);
+      return;
+    }
+
+    // 2. Check UI Controls Button Click
     if (controlsVisible && hoveredButton >= 0) {
       executeControlButton(hoveredButton);
       return;
@@ -2234,9 +2897,18 @@ const WebXRVR = (function () {
     glControlsTexture = null;
     glOverlayTexture = null;
     glGuideTexture = null;
+    glCommentsTexture = null;
     glReticleTexture = null;
     overlayCanvas = null;
     overlayCtx = null;
+    commentsPanelVisible = false;
+    commentsPanelCanvas = null;
+    commentsPanelCtx = null;
+    cPanelScrollY = 0;
+    cPanelTab = 'all';
+    cPanelMaxScroll = 0;
+    cPanelHover = null;
+    cPanelDrag = false;
     glGridBuf = null;
     glGridIndexBuf = null;
     glGridIndexCount = 0;
@@ -2272,6 +2944,8 @@ const WebXRVR = (function () {
   function onVideoChange() {
     hasNewVideoFrame = true;
     lastVideoTime = -1;
+    cPanelScrollY = 0;
+    cPanelMaxScroll = 0;
     console.log('[WebXRVR] Video source changed — picking up new frame');
   }
 
