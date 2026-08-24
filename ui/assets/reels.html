@@ -366,6 +366,9 @@
     font-size: 11px;
     color: #FFF;
     border-radius: 0px;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
     width: fit-content;
     max-width: 100%;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.85);
@@ -374,6 +377,12 @@
   @keyframes slideUpTicker {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  .twitch-comment-pill:hover {
+    border-color: #ff553a;
+    border-left-color: #FF3B1F;
+    transform: translateX(3px);
+    box-shadow: 0 0 18px rgba(255, 85, 58, 0.3);
   }
   .twitch-avatar {
     font-size: 14px;
@@ -547,6 +556,16 @@
     transition: border-color 0.15s ease, background 0.15s ease;
   }
   .comment-item:hover { border-color: #5d3f3a; background: #121315; }
+  .comment-item.comment-highlight {
+    border-color: #ff553a;
+    background: #1f2021;
+    box-shadow: 0 0 0 1px #ff553a, 0 0 24px rgba(255, 85, 58, 0.35);
+    animation: commentPulse 0.9s ease-in-out infinite alternate;
+  }
+  @keyframes commentPulse {
+    from { box-shadow: 0 0 0 1px #ff553a, 0 0 8px rgba(255, 85, 58, 0.25); }
+    to { box-shadow: 0 0 0 1px #ff553a, 0 0 28px rgba(255, 85, 58, 0.55); }
+  }
   .comment-item-head {
     display: flex;
     align-items: center;
@@ -1281,14 +1300,51 @@
       if (sig !== tickerSignature) {
         tickerSignature = sig;
         // If multiple comments at the same timestamp point, render up to 2 stacked pills
-        twitchCommentTicker.innerHTML = active.slice(0, Math.min(2, active.length)).map((c) => `
-          <div class="twitch-comment-pill">
+        const pills = active.slice(0, Math.min(2, active.length)).map((c) => `
+          <div class="twitch-comment-pill" data-cid="${c.id}" title="Open comment in panel">
             <div class="twitch-avatar">${c.author_avatar || '👤'}</div>
             <span class="twitch-author" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
             <span class="twitch-text"><span class="twitch-tag">⏱️${formatTime(c.timestamp)} </span>${c.text}</span>
           </div>
         `).join('');
+        twitchCommentTicker.innerHTML = pills;
+        twitchCommentTicker.querySelectorAll('.twitch-comment-pill').forEach((pill) => {
+          pill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openDrawerToComment(pill.getAttribute('data-cid'));
+          });
+        });
       }
+    }
+
+    // ── Jump to a specific comment in the drawer (from a pop-up pill) ──
+    function openDrawerToComment(commentId) {
+      if (!commentId) return;
+      toggleDrawer(true);
+      setActiveTab('all');
+      // Wait for the drawer slide-up (0.34s) so scroll offsets are correct
+      setTimeout(() => {
+        if (!commentsList) return;
+        const target = commentsList.querySelector('#comment-' + commentId);
+        if (target) {
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          target.classList.remove('comment-highlight');
+          // force reflow so the highlight animation restarts each jump
+          void target.offsetWidth;
+          target.classList.add('comment-highlight');
+          setTimeout(() => target.classList.remove('comment-highlight'), 2400);
+        }
+      }, 380);
+    }
+
+    // ── Active tab control helpers ──
+    function setActiveTab(key) {
+      const map = { all: tabAll, sync: tabSync, general: tabGeneral };
+      const activeEl = map[key] || tabAll;
+      [tabAll, tabSync, tabGeneral].forEach((t) => t && t.classList.remove('active'));
+      if (activeEl) activeEl.classList.add('active');
+      activeTab = (activeEl && activeEl.getAttribute('data-tab')) || 'all';
+      renderDrawerComments();
     }
 
     // ── Drawer Comments List Rendering (Aesthetic Refresh) ──
@@ -1394,12 +1450,7 @@
     // Tab button listeners
     [tabAll, tabSync, tabGeneral].forEach((tab) => {
       if (!tab) return;
-      tab.addEventListener('click', () => {
-        [tabAll, tabSync, tabGeneral].forEach((t) => t && t.classList.remove('active'));
-        tab.classList.add('active');
-        activeTab = tab.getAttribute('data-tab');
-        renderDrawerComments();
-      });
+      tab.addEventListener('click', () => setActiveTab(tab.getAttribute('data-tab')));
     });
 
     if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));

@@ -47,6 +47,13 @@ const WebXRVR = (function () {
   let overlayCtx = null;
   const OVERLAY_W = 1024;
   const OVERLAY_H = 1024;
+  // Hitboxes for the currently rendered pop-up overlay comments (canvas coords),
+  // used to detect a laser trigger on a pop-up so the panel can jump to it.
+  let activeOverlayRegions = [];
+  let activeOverlayHoverId = null;
+  // Comment to highlight in the VR panel (from a pop-up click)
+  let cPanelHighlightId = null;
+  let cPanelHighlightTimer = null;
 
   // Cached GL locations
   let loc_aPos = -1;
@@ -394,7 +401,14 @@ const WebXRVR = (function () {
     });
 
     ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
-    if (active.length === 0) return false;
+    activeOverlayRegions = [];
+    if (active.length === 0) {
+      activeOverlayHoverId = null;
+      return false;
+    }
+    if (activeOverlayHoverId && !active.some((c) => c.id === activeOverlayHoverId)) {
+      activeOverlayHoverId = null;
+    }
 
     // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
     const maxShow = Math.min(3, active.length);
@@ -407,6 +421,7 @@ const WebXRVR = (function () {
       const c = active[i];
       const y = startY + i * (itemHeight + gap);
       const x = 48; // Left edge margin inside 1:1 square canvas
+      const isHovered = (c.id === activeOverlayHoverId);
 
       // Progress fade-in / fade-out alpha
       const elapsed = currentTime - Number(c.timestamp);
@@ -435,6 +450,30 @@ const WebXRVR = (function () {
       // Vertical accent line (mirrors the 3px border-left of .twitch-comment-pill)
       const barW = 3;
       const contentX = x + barW + 10; // gap like pill border-left + padding
+
+      // Prepare display text early so the hover pill can be sized and drawn
+      // FIRST (behind) so it never covers the accent bar, avatar or name.
+      ctx.font = '500 14px "Archivo", sans-serif';
+      let dispText = c.text;
+      if (dispText.length > 46) {
+        dispText = dispText.slice(0, 44) + '…';
+      }
+      const textW = ctx.measureText(dispText).width;
+      const regionW = Math.max(260, textW + 90);
+      const regionX = x - 12;
+      const regionY = y - 6;
+      const regionH = itemHeight + 12;
+
+      // Hover / click affordance background — drawn behind all pill content
+      if (isHovered) {
+        ctx.fillStyle = 'rgba(18, 19, 21, 0.78)';
+        ctx.strokeStyle = '#FF3B1F';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(regionX, regionY, regionW, regionH, 4);
+        ctx.fill();
+        ctx.stroke();
+      }
 
       ctx.fillStyle = authorColor;
       ctx.fillRect(x, y + 8, barW, itemHeight - 16);
@@ -471,16 +510,28 @@ const WebXRVR = (function () {
       ctx.font = '500 14px "Archivo", sans-serif';
       ctx.fillStyle = '#F2F3F5';
       ctx.textBaseline = 'top';
-      let dispText = c.text;
-      if (dispText.length > 46) {
-        dispText = dispText.slice(0, 44) + '…';
-      }
       ctx.fillText(dispText, textX, textY);
+
+      // Record the clickable hitbox for this pop-up comment
+      activeOverlayRegions.push({ id: c.id, x: regionX, y: regionY, w: regionW, h: regionH });
 
       ctx.restore();
     }
 
     return true;
+  }
+
+  // Map a screen-local hit point to an overlay pop-up comment id, if any.
+  function overlayCommentAtHit(hitLocal) {
+    if (activeOverlayRegions.length === 0 || !hitLocal) return null;
+    const u = (hitLocal.x / screenScale) + 0.5;
+    const v = 0.5 - (hitLocal.y / screenScale);
+    const cx = u * OVERLAY_W;
+    const cy = v * OVERLAY_H;
+    for (const r of activeOverlayRegions) {
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) return r.id;
+    }
+    return null;
   }
 
   function renderControlsCanvas() {
@@ -1288,14 +1339,31 @@ const WebXRVR = (function () {
         const border = c.avatar_color || accent;
         const hoveredLike = cPanelHover === ('like:' + c.id);
         const hoveredSeek = cPanelHover === ('seek:' + c.id);
+        const highlighted = c.id === cPanelHighlightId;
 
-        ctx.fillStyle = '#121315';
+        ctx.fillStyle = highlighted ? '#1c1d1f' : '#121315';
         ctx.beginPath();
         ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
         ctx.fill();
-        ctx.strokeStyle = (hoveredSeek || hoveredLike) ? 'rgba(255,85,58,0.6)' : '#343536';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = highlighted ? accent : ((hoveredSeek || hoveredLike) ? 'rgba(255,85,58,0.6)' : '#343536');
+        ctx.lineWidth = highlighted ? 2.5 : 1;
         ctx.stroke();
+        if (highlighted) {
+          ctx.shadowColor = 'rgba(255, 85, 58, 0.45)';
+          ctx.shadowBlur = 16;
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          // "jump marker" on the right edge
+          ctx.fillStyle = accent;
+          ctx.font = 'bold 14px sans-serif';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('◀', itemX + itemW - 10, y + CP_ITEM_H / 2);
+        }
 
         ctx.fillStyle = border;
         ctx.fillRect(itemX, y, 3, CP_ITEM_H);
@@ -1462,6 +1530,7 @@ const WebXRVR = (function () {
     if (desc.indexOf('tab:') === 0) {
       cPanelTab = desc.slice(4);
       cPanelScrollY = 0;
+      clearPanelHighlight();
       return true;
     }
     if (desc === 'close') {
@@ -1507,8 +1576,41 @@ const WebXRVR = (function () {
     if (!commentsPanelVisible) {
       cPanelDrag = false;
       cPanelHover = null;
+      clearPanelHighlight();
       closeVrKeyboard();
     }
+  }
+
+  // Open the VR comments panel, scroll to and highlight a specific comment
+  // (usually triggered by clicking a pop-up overlay comment).
+  function openCommentsPanelToComment(commentId) {
+    commentsPanelVisible = true;
+    cPanelTab = 'all';
+    const filtered = getPanelFilteredComments();
+    const idx = filtered.findIndex((c) => c.id === commentId);
+    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
+    if (idx >= 0) {
+      const itemTop = idx * (CP_ITEM_H + CP_ITEM_GAP);
+      cPanelScrollY = Math.max(0, itemTop - (listH - CP_ITEM_H) / 2);
+    }
+    setPanelHighlight(commentId);
+  }
+
+  function setPanelHighlight(commentId) {
+    clearPanelHighlight();
+    cPanelHighlightId = commentId;
+    cPanelHighlightTimer = setTimeout(() => {
+      cPanelHighlightId = null;
+      cPanelHighlightTimer = null;
+    }, 4000);
+  }
+
+  function clearPanelHighlight() {
+    if (cPanelHighlightTimer) {
+      clearTimeout(cPanelHighlightTimer);
+      cPanelHighlightTimer = null;
+    }
+    cPanelHighlightId = null;
   }
 
   // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
@@ -2639,6 +2741,13 @@ const WebXRVR = (function () {
         activeHitDist = (hitDist > 0) ? hitDist : 3.0;
         activeIsHovering = isHover;
 
+        // Track hover over a pop-up comment on the reels screen (only when panel closed)
+        activeOverlayHoverId = null;
+        if (!commentsPanelVisible) {
+          const ovHit = hitTestCurvedScreen(controllerPos, controllerDir);
+          if (ovHit.hit) activeOverlayHoverId = overlayCommentAtHit(ovHit.hitLocal);
+        }
+
         // Continue a trigger-drag scroll on the comments list (content follows the hand)
         if (cPanelDrag) {
           const trigNow = gp.buttons.length > 0 && gp.buttons[0].pressed;
@@ -2765,6 +2874,9 @@ const WebXRVR = (function () {
     cPanelMaxScroll = 0;
     cPanelHover = null;
     cPanelDrag = false;
+    clearPanelHighlight();
+    activeOverlayRegions = [];
+    activeOverlayHoverId = null;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     hoveredButton = -1;
@@ -2864,6 +2976,14 @@ const WebXRVR = (function () {
     if (rayOrigin && rayDir) {
       const mainHit = hitTestCurvedScreen(rayOrigin, rayDir);
       if (mainHit.hit) {
+        // Clicking a pop-up comment opens the panel and jumps to it
+        if (!commentsPanelVisible) {
+          const cid = overlayCommentAtHit(mainHit.hitLocal);
+          if (cid) {
+            openCommentsPanelToComment(cid);
+            return;
+          }
+        }
         callbacks.onTogglePlay && callbacks.onTogglePlay();
         toggleControls();
         return;
@@ -2909,6 +3029,9 @@ const WebXRVR = (function () {
     cPanelMaxScroll = 0;
     cPanelHover = null;
     cPanelDrag = false;
+    clearPanelHighlight();
+    activeOverlayRegions = [];
+    activeOverlayHoverId = null;
     glGridBuf = null;
     glGridIndexBuf = null;
     glGridIndexCount = 0;
@@ -2946,6 +3069,9 @@ const WebXRVR = (function () {
     lastVideoTime = -1;
     cPanelScrollY = 0;
     cPanelMaxScroll = 0;
+    clearPanelHighlight();
+    activeOverlayRegions = [];
+    activeOverlayHoverId = null;
     console.log('[WebXRVR] Video source changed — picking up new frame');
   }
 
