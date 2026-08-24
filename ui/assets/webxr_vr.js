@@ -386,46 +386,62 @@ const WebXRVR = (function () {
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      // Shadow for high-contrast legibility over video without background box or border
+      // Shadow for high-contrast legibility over video — no background box,
+      // but with the 2D twitch-comment-pill typography AND its left accent line.
       ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
       ctx.shadowBlur = 12;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 2;
 
-      // Avatar Icon / Emoji (Middle-Left)
-      const avatarX = x + 25;
-      const avatarY = y + itemHeight / 2;
+      const authorColor = c.avatar_color || '#FF3B1F';
+      const authorName = c.author_name || 'Anonymous';
+      const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+      const timeStr = hasTime ? '⏱️ ' + formatTime(c.timestamp) : '';
 
+      // Vertical accent line (mirrors the 3px border-left of .twitch-comment-pill)
+      const barW = 3;
+      const contentX = x + barW + 10; // gap like pill border-left + padding
+
+      ctx.fillStyle = authorColor;
+      ctx.fillRect(x, y + 8, barW, itemHeight - 16);
+
+      const avatarX = contentX + 25;
+      const nameX = contentX + 50;
+      const textX = contentX + 50;
+      const nameY = y + 11;
+      const timeY = y + 14;
+      const textY = y + 32;
+
+      // Avatar Icon / Emoji (Middle-Left, like .twitch-avatar)
       ctx.font = '22px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(c.author_avatar || '👤', avatarX, avatarY);
+      ctx.fillText(c.author_avatar || '👤', avatarX, y + itemHeight / 2);
 
-      // Author Name
-      ctx.font = 'bold 11px "JetBrains Mono", monospace';
-      ctx.fillStyle = c.avatar_color || '#FF3B1F';
+      // Author Name — bold colored like .twitch-author
+      ctx.font = '800 13px "Archivo", sans-serif';
+      ctx.fillStyle = authorColor;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(c.author_name || 'Anonymous', x + 50, y + 11);
+      ctx.fillText(authorName, nameX, nameY);
+      const nameW = ctx.measureText(authorName).width;
 
-      // Timestamp Pill
-      if (c.timestamp !== null && c.timestamp !== undefined) {
-        const timeStr = '⏱️ ' + formatTime(c.timestamp);
-        ctx.font = 'bold 9px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#CBD5E1';
-        const nameW = ctx.measureText(c.author_name || 'Anonymous').width;
-        ctx.fillText(timeStr, x + 50 + nameW + 8, y + 13);
+      // Timestamp tag — muted monospace like .twitch-tag
+      if (hasTime) {
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#A4ABB3';
+        ctx.fillText(timeStr, nameX + nameW + 8, timeY);
       }
 
-      // Comment Text
-      ctx.font = '600 14px sans-serif';
-      ctx.fillStyle = '#FFFFFF';
+      // Comment Text — light Archivo like .twitch-text
+      ctx.font = '500 14px "Archivo", sans-serif';
+      ctx.fillStyle = '#F2F3F5';
       ctx.textBaseline = 'top';
       let dispText = c.text;
       if (dispText.length > 46) {
         dispText = dispText.slice(0, 44) + '…';
       }
-      ctx.fillText(dispText, x + 50, y + 32);
+      ctx.fillText(dispText, textX, textY);
 
       ctx.restore();
     }

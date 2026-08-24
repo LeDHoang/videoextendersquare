@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from server import media as SM
@@ -475,7 +475,11 @@ def reels_player(
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
 
     html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
-    return HTMLResponse(html)
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
@@ -593,9 +597,12 @@ def reels_player_inline(
     # Strip <script> tags from body_html so innerHTML gets clean markup without unparsed placeholders
     body_html = re.sub(r"<script.*?>.*?</script>", "", body_html, flags=re.S)
 
-    return {
-        "count": len(videos),
-        "css": css,
-        "html": body_html,
-        "scripts": scripts,
-    }
+    return JSONResponse(
+        {
+            "count": len(videos),
+            "css": css,
+            "html": body_html,
+            "scripts": scripts,
+        },
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
