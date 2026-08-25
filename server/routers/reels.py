@@ -27,6 +27,10 @@ ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "ui" / "assets"
 _scan_cache: dict = {"at": 0.0, "data": []}
 _SCAN_TTL = 10.0
 
+# Latest VR telemetry snapshot pushed by the in-headset WebXR render loop.
+# CDP can't see the Quest tab during immersive VR, so the page POSTs here ~1Hz.
+_diag: dict = {}
+
 
 # ─── COMMENTS PERSISTENCE & SEED ENGINE ─────────────────────────────────
 
@@ -250,6 +254,25 @@ def list_reels(
         "folders": sorted({v["folder"] for v in raw}),
         "videos": _build_payload(videos, codec),
     }
+
+
+# ─── VR TELEMETRY (in-headset diagnostics) ──────────────────────────────
+
+@router.post("/diag")
+def post_diag(payload: dict):
+    """Receive a live VR telemetry snapshot from the WebXR render loop."""
+    _diag.clear()
+    _diag.update(payload)
+    _diag["server_ts"] = time.time()
+    return {"ok": True}
+
+
+@router.get("/diag")
+def get_diag():
+    """Return the most recent VR telemetry snapshot (empty until first POST)."""
+    if not _diag:
+        return {"empty": True}
+    return _diag
 
 
 # ─── COMMENTS ENDPOINTS ──────────────────────────────────────────────────

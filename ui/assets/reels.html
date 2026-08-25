@@ -1699,32 +1699,40 @@
 
     // Preload All Videos
     function updatePreloadStatus() {
+      const total = Math.min(2, (videoData && videoData.length) || 0);
       if (preloadStatus) {
-        preloadStatus.textContent = `⚡ ${preloadedCount}/${videoData.length}`;
+        preloadStatus.textContent = `⚡ ${preloadedCount}/${total}`;
         preloadStatus.style.display = 'inline-block';
       }
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onPreloadProgress) {
-        WebXRVR.onPreloadProgress(preloadedCount, videoData.length);
+        WebXRVR.onPreloadProgress(preloadedCount, total);
       }
     }
 
+    // Preload only a sliding window of the next 2 reels (current + 1 ahead),
+    // NOT every reel. Preloading ALL filtered reels (~210 MiB of blobs on a
+    // ~8GB Quest 3S) triggered blob eviction → the active video re-fetched byte
+    // ranges over the slow adb-over-USB tunnel mid-playback → stalls. Keeping
+    // the resident set to ≤3 blobs sidesteps the eviction entirely. The window
+    // is refetched each call so navigating updates the cache.
     async function preloadAllVideos() {
-      if (isPreloading) return;
+      if (isPreloading || !videoData || videoData.length === 0) return;
       isPreloading = true;
       if (preloadStatus) preloadStatus.style.display = 'inline-block';
       if (preloadLabel) preloadLabel.textContent = 'LOADING...';
       preloadedCount = 0;
+      const total = Math.min(2, videoData.length);
       updatePreloadStatus();
 
-      for (let i = 0; i < videoData.length; i++) {
-        const item = videoData[i];
+      for (let off = 1; off <= total; off++) {
+        const i = (idx + off) % videoData.length;
         if (blobUrlMap[i]) {
           preloadedCount++;
           updatePreloadStatus();
           continue;
         }
         try {
-          const url = resolveItemUrl(item);
+          const url = resolveItemUrl(videoData[i]);
           const res = await fetch(url);
           const blob = await res.blob();
           blobUrlMap[i] = URL.createObjectURL(blob);
@@ -1735,7 +1743,7 @@
         }
       }
       isPreloading = false;
-      if (preloadLabel) preloadLabel.textContent = 'PRELOADED';
+      if (preloadLabel) preloadLabel.textContent = 'NEXT 2';
     }
 
     // Navigation

@@ -32,6 +32,7 @@ const WebXRVR = (function () {
   let glLayer = null;
   let glProgram = null;
   let glVideoTexture = null;
+  let glVideoTextureExt = null; // OES_texture_external target (zero-copy video bind)
   let glControlsTexture = null;
   let glOverlayTexture = null;
   let glGuideTexture = null;
@@ -47,6 +48,28 @@ const WebXRVR = (function () {
   let overlayCtx = null;
   const OVERLAY_W = 1024;
   const OVERLAY_H = 1024;
+
+  // VR video-texture cap. The Adreno 740 cannot sustain a 56 MiB (3840² RGBA)
+  // texImage2D per decoded frame — each upload stalls ~45-110ms and drops the
+  // XR rate to ~22fps (telemetry-confirmed). The Quest 3S panel is ~1832px/eye,
+  // so 3840 is ~2× oversampled anyway. Drawing the video into a 2048² proxy
+  // canvas (GPU-side drawImage, cheap) then uploading THAT cuts each upload to
+  // 16 MiB → ~13ms → ~72fps, with no visible quality loss on the headset.
+  // Masters on disk stay 4K; only the in-VR texture is capped. Tunable.
+  const VR_TEX_CAP = 2048;
+  // Video-texture binding path override. 'auto' arms the OES external-texture
+  // zero-copy path when the GPU exposes it (recommended); '2d' forces today's
+  // TEXTURE_2D texImage2D path (used if a device regresses on external bind).
+  const VR_TEX_MODE = 'auto';
+  // GL context preference. 'auto' prefers WebGL1: on Quest Browser, a WebGL2
+// context fails to establish a valid XR compositor client (uid/pid -1, no
+// presenting → runtime auto-exits the session ~0.7s after enter; logcat
+// confirmed). WebGL2 works as a plain context but its XR layer is unreliable
+// here, so it is only used when forced with '2'. '1' forces WebGL1.
+  const VR_GL_MODE = 'auto';
+  let vrProxyCanvas = null;
+  let vrProxyCtx = null;
+  let videoTexAllocated = false; // first upload allocates; later ones texSubImage2D (no re-spec → no GPU pipeline flush)
   // Hitboxes for the currently rendered pop-up overlay comments (canvas coords),
   // used to detect a laser trigger on a pop-up so the panel can jump to it.
   let activeOverlayRegions = [];
@@ -64,6 +87,21 @@ const WebXRVR = (function () {
   let loc_uCurvatureMode = null;
   let loc_uStereo = null;
   let loc_uEyeOff = null;
+
+  // OES external-texture video path (zero-copy decoder-surface bind).
+  // Mirrors the main program locs but samples a samplerExternalOES from a
+  // TEXTURE_EXTERNAL_OES target, so per-frame binding avoids re-specifying a
+  // sampled 2D texture (the ~100ms GPU pipeline flush that caused ~22fps).
+  let glVideoProgram = null;
+  let loc2_aPos = -1;
+  let loc2_aUV = -1;
+  let loc2_uMVP = null;
+  let loc2_uTex = null;
+  let loc2_uAlpha = null;
+  let loc2_uCurvatureMode = null;
+  let loc2_uStereo = null;
+  let loc2_uEyeOff = null;
+  let videoTexMode = '2d'; // '2d' | 'external' — set at initGL via feature detection
 
   // SBS stereoscopic playback: when true, each XR eye samples its half of the
   // video frame (left half = left eye, right half = right eye).
@@ -180,6 +218,21 @@ const WebXRVR = (function () {
   // Video frame tracking
   let hasNewVideoFrame = true;
   let lastVideoTime = -1;
+  let lastVideoFrameCount = -1; // decoded-frame counter (getVideoPlaybackQuality)
+
+  // ── In-headset VR telemetry (POSTed to /api/reels/diag ~1Hz) ──
+  // CDP can't see the Quest tab during immersive VR, so the render loop
+  // self-reports XR frame timing + texture-upload count + decode drops.
+  let _diagLastT = null;
+  let _diagLastPost = 0;
+  let _diagFrames = 0;
+  let _diagDtMin = Infinity, _diagDtMax = 0, _diagDtSum = 0, _diagOver20 = 0;
+  let _diagLastPqTotal = -1;
+  let _diagTexUploads = 0;
+  let _diagUploadMaxMs = 0;
+  let _diagDrawMaxMs = 0;
+  let _diagGLInfo = null;
+  let _diagForce = false; // emit a snapshot immediately (bypasses 1s throttle)
 
   // Thumbstick flick debounces
   let flickedX = false;
@@ -420,7 +473,7 @@ const WebXRVR = (function () {
     for (let i = 0; i < maxShow; i++) {
       const c = active[i];
       const y = startY + i * (itemHeight + gap);
-      const x = 48; // Left edge margin inside 1:1 square canvas
+      const x = 0.10 * OVERLAY_W; // 10% gap from the left side of the reels
       const isHovered = (c.id === activeOverlayHoverId);
 
       // Progress fade-in / fade-out alpha
@@ -1898,6 +1951,80 @@ const WebXRVR = (function () {
     }
   }
 
+  // ─── VR Telemetry: self-report XR frame timing + texture uploads ───
+  function _postDiag(time) {
+    if (_diagLastT !== null) {
+      const dt = time - _diagLastT;
+      _diagFrames++;
+      _diagDtMin = Math.min(_diagDtMin, dt);
+      _diagDtMax = Math.max(_diagDtMax, dt);
+      _diagDtSum += dt;
+      if (dt > 20) _diagOver20++;
+    }
+    _diagLastT = time;
+
+    if (!_diagForce && time - _diagLastPost < 1000) return; // throttle to ~1 Hz
+    _diagLastPost = time;
+    _diagForce = false;
+
+    const pq = (videoElement && videoElement.getVideoPlaybackQuality)
+      ? videoElement.getVideoPlaybackQuality() : null;
+    const pqTotal = pq ? pq.totalVideoFrames : 0;
+    const pqDropped = pq ? pq.droppedVideoFrames : 0;
+    if (_diagLastPqTotal < 0) _diagLastPqTotal = pqTotal;
+    const newDecoded = Math.max(0, pqTotal - _diagLastPqTotal);
+    _diagLastPqTotal = pqTotal;
+
+    if (!_diagGLInfo && gl) {
+      try {
+        const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        _diagGLInfo = {
+          renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+          maxTex: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+          glVersion: String(gl.getParameter(gl.VERSION)),
+          extOES: !!gl.getExtension('OES_texture_external'),
+          texTarget: videoTexMode,
+        };
+      } catch (e) { _diagGLInfo = { err: String(e) }; }
+    }
+
+    const n = Math.max(1, _diagFrames);
+    const payload = {
+      t_ms: Math.round(time),
+      xrFrames: _diagFrames,
+      dtMedMs: +((_diagDtSum / n)).toFixed(2),
+      dtMinMs: +(_diagDtMin === Infinity ? 0 : _diagDtMin).toFixed(2),
+      dtMaxMs: +(_diagDtMax).toFixed(2),
+      over20: _diagOver20,
+      texUploads: _diagTexUploads,
+      uploadMaxMs: +_diagUploadMaxMs.toFixed(2),
+      drawMaxMs: +_diagDrawMaxMs.toFixed(2),
+      proxyW: vrProxyCanvas ? vrProxyCanvas.width : 0,
+      newDecoded: newDecoded,
+      pqTotal: pqTotal,
+      pqDropped: pqDropped,
+      texTarget: videoTexMode,
+      videoW: videoElement ? videoElement.videoWidth : 0,
+      videoH: videoElement ? videoElement.videoHeight : 0,
+      ct: videoElement ? +(videoElement.currentTime).toFixed(2) : 0,
+      ready: videoElement ? videoElement.readyState : 0,
+      gl: _diagGLInfo,
+    };
+    try {
+      const body = JSON.stringify(payload);
+      // keepalive so the POST survives even if the tab is backgrounded mid-XR
+      fetch('/api/reels/diag', { method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
+    } catch (e) {}
+
+    // reset window accumulators
+    _diagFrames = 0;
+    _diagDtMin = Infinity; _diagDtMax = 0; _diagDtSum = 0; _diagOver20 = 0;
+    _diagTexUploads = 0;
+    _diagUploadMaxMs = 0;
+    _diagDrawMaxMs = 0;
+  }
+
   // ─── WebGL Setup & Shaders ──────────────────────────────────────────
 
   /**
@@ -1947,6 +2074,45 @@ const WebXRVR = (function () {
     }
   `;
 
+  // WebGL2 (GLSL ES 3.00) variants — required because Quest's WebGL1 context
+  // does NOT expose OES_texture_external and forbids texSubImage2D from a video,
+  // so the zero-copy / in-place update paths need a WebGL2 context.
+  const VERT_V2 = `
+    #version 300 es
+    in vec3 aPos;
+    in vec2 aUV;
+    out vec2 vUV;
+    uniform mat4 uMVP;
+    uniform float uCurvatureMode;
+
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385; // 1.0 / ARC_ANGLE
+
+    void main() {
+      vUV = aUV;
+      vec3 pos = aPos;
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
+      }
+
+      gl_Position = uMVP * vec4(pos, 1.0);
+    }
+  `;
+
   const FRAG = `
     precision mediump float;
     varying vec2 vUV;
@@ -1962,6 +2128,71 @@ const WebXRVR = (function () {
       }
       vec4 c = texture2D(uTex, uv);
       gl_FragColor = vec4(c.rgb, c.a * uAlpha);
+    }
+  `;
+
+  const FRAG_V2 = `
+    #version 300 es
+    precision mediump float;
+    in vec2 vUV;
+    uniform sampler2D uTex;
+    uniform float uAlpha;
+    uniform float uStereo;
+    uniform float uEyeOff;
+    out vec4 fragColor;
+    void main() {
+      vec2 uv = vUV;
+      // SBS stereo: sample only this eye's half of the source frame
+      if (uStereo > 0.5) {
+        uv.x = uv.x * 0.5 + uEyeOff;
+      }
+      vec4 c = texture(uTex, uv);
+      fragColor = vec4(c.rgb, c.a * uAlpha);
+    }
+  `;
+
+  // External-texture variant of FRAG for the zero-copy video screen. Same
+  // geometry + SBS stereo math, but samples the decoder surface directly via
+  // samplerExternalOES (TEXTURE_EXTERNAL_OES) — no texImage2D re-spec.
+  const EXT_FRAG = `
+    #extension GL_OES_EGL_image_external : require
+    precision mediump float;
+    precision mediump samplerExternalOES;
+    varying vec2 vUV;
+    uniform samplerExternalOES uTex;
+    uniform float uAlpha;
+    uniform float uStereo;
+    uniform float uEyeOff;
+    void main() {
+      vec2 uv = vUV;
+      // SBS stereo: sample only this eye's half of the source frame
+      if (uStereo > 0.5) {
+        uv.x = uv.x * 0.5 + uEyeOff;
+      }
+      vec4 c = texture2D(uTex, uv);
+      gl_FragColor = vec4(c.rgb, c.a * uAlpha);
+    }
+  `;
+
+  const EXT_FRAG_V2 = `
+    #version 300 es
+    #extension GL_OES_EGL_image_external : require
+    precision mediump float;
+    precision mediump samplerExternalOES;
+    in vec2 vUV;
+    uniform samplerExternalOES uTex;
+    uniform float uAlpha;
+    uniform float uStereo;
+    uniform float uEyeOff;
+    out vec4 fragColor;
+    void main() {
+      vec2 uv = vUV;
+      // SBS stereo: sample only this eye's half of the source frame
+      if (uStereo > 0.5) {
+        uv.x = uv.x * 0.5 + uEyeOff;
+      }
+      vec4 c = texture(uTex, uv);
+      fragColor = vec4(c.rgb, c.a * uAlpha);
     }
   `;
 
@@ -2012,6 +2243,56 @@ const WebXRVR = (function () {
       float glow = exp(-dist * 4.5);
       float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
       gl_FragColor = vec4(vColor, finalAlpha);
+    }
+  `;
+
+  const STAR_VERT_V2 = `
+    #version 300 es
+    in vec3 aPos;
+    in vec3 aData; // x: size, y: phase, z: colorType
+    uniform mat4 uVP;
+    uniform vec3 uHeadPos;
+    uniform float uTime;
+    out float vAlpha;
+    out vec3 vColor;
+
+    void main() {
+      // Starfield centered around current viewer head position so it feels at infinity
+      vec3 worldPos = aPos + uHeadPos;
+      gl_Position = uVP * vec4(worldPos, 1.0);
+
+      // Multi-frequency breathing oscillation for natural, organic twinkle
+      float breath = sin(uTime * 1.35 + aData.y) * 0.45 + sin(uTime * 0.65 + aData.y * 2.1) * 0.25;
+      float curSize = aData.x * (1.0 + breath * 0.45);
+      gl_PointSize = clamp(curSize, 1.5, 13.0);
+
+      vAlpha = clamp(0.60 + breath * 0.45, 0.15, 1.0);
+
+      if (aData.z < 0.5) {
+        vColor = vec3(0.92, 0.96, 1.0); // Diamond white
+      } else if (aData.z < 1.5) {
+        vColor = vec3(0.40, 0.76, 1.0); // Celestial neon cyan/blue
+      } else {
+        vColor = vec3(1.0, 0.86, 0.68); // Warm stellar amber
+      }
+    }
+  `;
+
+  const STAR_FRAG_V2 = `
+    #version 300 es
+    precision mediump float;
+    in float vAlpha;
+    in vec3 vColor;
+    out vec4 fragColor;
+
+    void main() {
+      vec2 coord = gl_PointCoord - vec2(0.5);
+      float dist = length(coord);
+      if (dist > 0.5) discard;
+      float core = smoothstep(0.5, 0.05, dist);
+      float glow = exp(-dist * 4.5);
+      float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
+      fragColor = vec4(vColor, finalAlpha);
     }
   `;
 
@@ -2066,6 +2347,60 @@ const WebXRVR = (function () {
       float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
       float alpha = falloff * borderMask * uIntensity;
       gl_FragColor = vec4(uColor * 1.3, alpha);
+    }
+  `;
+
+  const GLOW_VERT_V2 = `
+    #version 300 es
+    in vec3 aPos;
+    in vec2 aUV;
+    out vec2 vUV;
+    uniform mat4 uMVP;
+    uniform float uCurvatureMode;
+
+    const float ARC_ANGLE = 0.65;
+    const float R = 1.5385;
+
+    void main() {
+      vUV = aUV;
+      vec3 pos = aPos;
+
+      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
+        float r = length(aPos.xy);
+        if (r > 0.0001) {
+          float phi = r * ARC_ANGLE;
+          float rProj = R * sin(phi);
+          vec2 dir = aPos.xy / r;
+          pos.xy = dir * rProj;
+          pos.z = R * (1.0 - cos(phi));
+        }
+      } else if (uCurvatureMode > 1.5) {
+        float angX = aPos.x * ARC_ANGLE;
+        float angY = aPos.y * ARC_ANGLE;
+        pos.x = R * sin(angX);
+        pos.y = R * sin(angY);
+        pos.z = R * (1.0 - cos(angX) * cos(angY));
+      }
+
+      gl_Position = uMVP * vec4(pos, 1.0);
+    }
+  `;
+
+  const GLOW_FRAG_V2 = `
+    #version 300 es
+    precision mediump float;
+    in vec2 vUV;
+    uniform vec3 uColor;
+    uniform float uIntensity;
+    out vec4 fragColor;
+
+    void main() {
+      vec2 d = abs(vUV - 0.5) * 2.0;
+      float edgeDist = length(max(vec2(0.0), d - vec2(0.68, 0.68)));
+      float falloff = exp(-edgeDist * 3.8);
+      float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
+      float alpha = falloff * borderMask * uIntensity;
+      fragColor = vec4(uColor * 1.3, alpha);
     }
   `;
 
@@ -2177,19 +2512,59 @@ const WebXRVR = (function () {
   }
 
   function initGL(session) {
-    const canvas = document.createElement('canvas');
-    gl = canvas.getContext('webgl', { xrCompatible: true, alpha: false });
-    if (!gl) {
-      console.error('[WebXRVR] Failed to create WebGL context');
+    // WebGL2 first: the Quest WebGL1 context does NOT expose OES_texture_external
+    // and forbids texSubImage2D from a video source — both needed for the
+    // zero-copy / in-place update paths. Falls back to WebGL1 + GLSL ES 1.00
+    // (non-Quest devices / contexts the XR layer rejects) which keeps today's
+    // texImage2D behavior. Each candidate uses a FRESH canvas (a canvas can only
+    // ever bind one context type), and XRWebGLLayer construction is guarded so a
+    // rejection here returns false instead of throwing → enterVR ends the session.
+    let isGL2 = true;
+    let layerOk = false;
+    // Quest Browser: WebGL1 XR layers work, WebGL2 XR layers do not register a
+    // compositor client → auto-exit. Prefer WebGL1; WebGL2 only when forced.
+    const GL_TRY = VR_GL_MODE === '2' ? [['webgl2', true]]
+                 : VR_GL_MODE === '1' ? [['webgl', false]]
+                 : [['webgl', false], ['webgl2', true]];
+    for (const [ctxt, is2] of GL_TRY) {
+      let c = null;
+      try { c = document.createElement('canvas').getContext(ctxt, { xrCompatible: true, alpha: false }); } catch (e) { window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(e); }
+      if (!c) continue;
+      try {
+        const layer = new XRWebGLLayer(session, c);
+        if (layer) {
+          gl = c;
+          isGL2 = is2;
+          glLayer = layer;
+          layerOk = true;
+          break;
+        }
+      } catch (e) {
+        console.warn('[WebXRVR] XRWebGLLayer rejected ' + ctxt + ' context:', e);
+        window.__xrErr = 'XRWebGLLayer rejected ' + ctxt + ': ' + String(e);
+      }
+    }
+    if (!layerOk) {
+      console.error('[WebXRVR] No compatible XR WebGL context — aborting VR setup');
+      window.__xrErr = 'no compatible XR WebGL context (tried: ' + GL_TRY.map(x => x[0]).join(',') + ')';
       return false;
     }
-
-    glLayer = new XRWebGLLayer(session, gl);
+    window.__xrGL = (isGL2 ? 'webgl2' : 'webgl1') + ':' + (isGL2 ? 'glsl300' : 'glsl100');
+    console.log('[WebXRVR] GL context:', isGL2 ? 'WebGL 2.0' : 'WebGL 1.0');
     session.updateRenderState({ baseLayer: glLayer });
 
+    // GLSL ES 3.00 shaders for WebGL2, GLSL ES 1.00 for the WebGL1 fallback.
+    const VS = isGL2 ? VERT_V2 : VERT;
+    const FS = isGL2 ? FRAG_V2 : FRAG;
+    const EXTF = isGL2 ? EXT_FRAG_V2 : EXT_FRAG;
+    const STARV = isGL2 ? STAR_VERT_V2 : STAR_VERT;
+    const STARF = isGL2 ? STAR_FRAG_V2 : STAR_FRAG;
+    const GLOWV = isGL2 ? GLOW_VERT_V2 : GLOW_VERT;
+    const GLOWF = isGL2 ? GLOW_FRAG_V2 : GLOW_FRAG;
+
     // Main Program
-    const vs = compileShader(gl.VERTEX_SHADER, VERT);
-    const fs = compileShader(gl.FRAGMENT_SHADER, FRAG);
+    const vs = compileShader(gl.VERTEX_SHADER, VS);
+    const fs = compileShader(gl.FRAGMENT_SHADER, FS);
     glProgram = gl.createProgram();
     gl.attachShader(glProgram, vs);
     gl.attachShader(glProgram, fs);
@@ -2209,9 +2584,54 @@ const WebXRVR = (function () {
     loc_uStereo = gl.getUniformLocation(glProgram, 'uStereo');
     loc_uEyeOff = gl.getUniformLocation(glProgram, 'uEyeOff');
 
+    // Video texture path selection. Priority:
+    //  1) external — OES_texture_external (zero-copy decoder-surface bind).
+    //     Re-binding each decoded frame does NOT re-specify the texture, so the
+    //     ~100ms GPU pipeline flush that caused ~22fps never fires.
+    //  2) subimage — WebGL2 only: allocate the 4K texture once, then
+    //     texSubImage2D in place per decoded frame (also avoids the re-spec).
+    //     WebGL1 forbids uploading video via texSubImage2D, hence path 3 there.
+    //  3) 2d — original texImage2D per frame (fallback, no gain expected).
+    let extOES = null;
+    if (VR_TEX_MODE !== '2d') {
+      try { extOES = gl.getExtension('OES_texture_external'); } catch (e) {}
+    }
+    if (extOES) {
+      const extVs = compileShader(gl.VERTEX_SHADER, VS);
+      const extFs = compileShader(gl.FRAGMENT_SHADER, EXTF);
+      glVideoProgram = gl.createProgram();
+      gl.attachShader(glVideoProgram, extVs);
+      gl.attachShader(glVideoProgram, extFs);
+      gl.linkProgram(glVideoProgram);
+
+      if (gl.getProgramParameter(glVideoProgram, gl.LINK_STATUS)) {
+        loc2_aPos = gl.getAttribLocation(glVideoProgram, 'aPos');
+        loc2_aUV = gl.getAttribLocation(glVideoProgram, 'aUV');
+        loc2_uMVP = gl.getUniformLocation(glVideoProgram, 'uMVP');
+        loc2_uTex = gl.getUniformLocation(glVideoProgram, 'uTex');
+        loc2_uAlpha = gl.getUniformLocation(glVideoProgram, 'uAlpha');
+        loc2_uCurvatureMode = gl.getUniformLocation(glVideoProgram, 'uCurvatureMode');
+        loc2_uStereo = gl.getUniformLocation(glVideoProgram, 'uStereo');
+        loc2_uEyeOff = gl.getUniformLocation(glVideoProgram, 'uEyeOff');
+        videoTexMode = 'external';
+        window.__xrGL += ':external';
+        console.log('[WebXRVR] OES_texture_external armed — zero-copy video path active');
+      } else {
+        console.error('[WebXRVR] External shader link error:', gl.getProgramInfoLog(glVideoProgram));
+        glVideoProgram = null;
+      }
+    } else if (isGL2) {
+      videoTexMode = 'subimage';
+      window.__xrGL += ':subimage';
+      console.log('[WebXRVR] OES_texture_external unavailable — WebGL2 in-place texSubImage2D path armed');
+    } else {
+      window.__xrGL += ':2d';
+      console.log('[WebXRVR] OES_texture_external unavailable on WebGL1 — using per-frame texImage2D');
+    }
+
     // Starfield Program
-    const starVs = compileShader(gl.VERTEX_SHADER, STAR_VERT);
-    const starFs = compileShader(gl.FRAGMENT_SHADER, STAR_FRAG);
+    const starVs = compileShader(gl.VERTEX_SHADER, STARV);
+    const starFs = compileShader(gl.FRAGMENT_SHADER, STARF);
     glStarProgram = gl.createProgram();
     gl.attachShader(glStarProgram, starVs);
     gl.attachShader(glStarProgram, starFs);
@@ -2224,8 +2644,8 @@ const WebXRVR = (function () {
     loc_star_uTime = gl.getUniformLocation(glStarProgram, 'uTime');
 
     // Ambient Glow Program
-    const glowVs = compileShader(gl.VERTEX_SHADER, GLOW_VERT);
-    const glowFs = compileShader(gl.FRAGMENT_SHADER, GLOW_FRAG);
+    const glowVs = compileShader(gl.VERTEX_SHADER, GLOWV);
+    const glowFs = compileShader(gl.FRAGMENT_SHADER, GLOWF);
     glGlowProgram = gl.createProgram();
     gl.attachShader(glGlowProgram, glowVs);
     gl.attachShader(glGlowProgram, glowFs);
@@ -2283,6 +2703,15 @@ const WebXRVR = (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    if (videoTexMode === 'external') {
+      glVideoTextureExt = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
 
     glControlsTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
@@ -2397,6 +2826,41 @@ const WebXRVR = (function () {
     gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
   }
 
+  // Video-screen draw. Uses the OES external-texture program + target when the
+  // zero-copy path is armed; otherwise delegates to the standard 2D path.
+  function drawVideoGrid(viewMat, projMat, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
+    if (videoTexMode === 'external' && glVideoProgram && glVideoTextureExt) {
+      gl.useProgram(glVideoProgram);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
+      gl.enableVertexAttribArray(loc2_aPos);
+      gl.enableVertexAttribArray(loc2_aUV);
+      gl.vertexAttribPointer(loc2_aPos, 3, gl.FLOAT, false, 20, 0);
+      gl.vertexAttribPointer(loc2_aUV, 2, gl.FLOAT, false, 20, 12);
+
+      const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
+      const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
+
+      const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
+      gl.uniformMatrix4fv(loc2_uMVP, false, mvp);
+      gl.uniform1f(loc2_uCurvatureMode, modeVal);
+
+      const isStereo = typeof eyeOff === 'number';
+      gl.uniform1f(loc2_uStereo, isStereo && stereoMode ? 1.0 : 0.0);
+      gl.uniform1f(loc2_uEyeOff, isStereo ? eyeOff : 0.0);
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
+      gl.uniform1i(loc2_uTex, 0);
+      gl.uniform1f(loc2_uAlpha, alpha);
+
+      gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
+      return;
+    }
+    drawGrid(viewMat, projMat, glVideoTexture, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff);
+  }
+
   // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
 
   function drawStarfield(viewMat, projMat, timeSec) {
@@ -2495,7 +2959,10 @@ const WebXRVR = (function () {
 
   function onXRFrame(time, frame) {
     if (!xrSession) return;
+    window.__xrPresented = window.__xrPresented || 1;
     xrSession.requestAnimationFrame(onXRFrame);
+    try {
+      _postDiag(time);
 
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
@@ -2551,12 +3018,39 @@ const WebXRVR = (function () {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     if (videoElement && videoElement.readyState >= 2) {
-      const vt = videoElement.currentTime;
-      if (hasNewVideoFrame || vt !== lastVideoTime) {
-        gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+      // Only re-upload the video texture when a NEW decoded frame is available.
+      // getVideoPlaybackQuality().totalVideoFrames ticks once per decoded frame
+      // (~video fps), unlike currentTime which updates continuously and would
+      // force a full 4K texture upload every XR frame (~90Hz) → VR choppy.
+      const vf = (videoElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1);
+      if (hasNewVideoFrame || vf !== lastVideoFrameCount) {
+        const _u0 = performance.now();
+        if (videoTexMode === 'external' && glVideoTextureExt) {
+          // Zero-copy bind: points the external texture at the decoder surface.
+          // No re-spec of a sampled 2D texture → no GPU pipeline flush.
+          gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
+          gl.texImage2D(gl.TEXTURE_EXTERNAL_OES, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+        } else {
+          gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+          if (videoTexMode === 'subimage') {
+            // Allocate the 4K storage ONCE, then update in place per decoded
+            // frame. texSubImage2D (valid only in WebGL2 for video sources)
+            // avoids re-specifying the sampled texture → no pipeline flush.
+            if (!videoTexAllocated) {
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+              videoTexAllocated = true;
+            } else {
+              gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+            }
+          } else {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+          }
+        }
+        _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
+        _diagTexUploads++;
         hasNewVideoFrame = false;
-        lastVideoTime = vt;
+        lastVideoTime = videoElement.currentTime;
+        lastVideoFrameCount = vf;
       }
     }
 
@@ -2604,7 +3098,7 @@ const WebXRVR = (function () {
       // 3. Draw main video screen with all-side concave curvature.
       // In SBS stereo mode each eye samples its own half of the frame.
       const videoEye = stereoMode ? (view.eye === 'right' ? 0.5 : 0.0) : undefined;
-      drawGrid(viewMat, projMat, glVideoTexture, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode, videoEye);
+      drawVideoGrid(viewMat, projMat, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode, videoEye);
 
       // 4. Draw in-screen direct time-synced comments overlay over reels screen
       if (hasOverlayComments && glOverlayTexture) {
@@ -2639,6 +3133,15 @@ const WebXRVR = (function () {
       }
 
       drawLaserPointer(viewMat, projMat);
+    }
+    } catch (err) {
+      // Record the first render-loop error so post-abort CDP can read WHY the
+      // session died (runtime abort vs our exception). Loop stays alive — the
+      // next frame was already scheduled at the top of this callback.
+      if (!window.__xrErr) {
+        window.__xrErr = 'onXRFrame: ' + String(err);
+        console.error('[WebXRVR] onXRFrame error:', err);
+      }
     }
   }
 
@@ -2831,6 +3334,9 @@ const WebXRVR = (function () {
 
   async function enterVR() {
     if (xrSession) return;
+    window.__xrErr = null;
+    window.__xrGL = null;
+    window.__xrPresented = 0;
     console.log('[WebXRVR] enterVR() called —', VR_VERSION);
 
     const xr = getXR();
@@ -2879,6 +3385,8 @@ const WebXRVR = (function () {
     activeOverlayHoverId = null;
     hasNewVideoFrame = true;
     lastVideoTime = -1;
+    lastVideoFrameCount = -1;
+    videoTexAllocated = false;
     hoveredButton = -1;
     isGrabbing = false;
     activeRayOrigin = null;
@@ -2897,40 +3405,62 @@ const WebXRVR = (function () {
       xrRefSpace = await xrSession.requestReferenceSpace('local');
     }
 
-    if (!initGL(xrSession)) {
-      xrSession.end().catch(() => {});
+    let glOk = false;
+    try {
+      glOk = !!initGL(xrSession);
+    } catch (err) {
+      console.error('[WebXRVR] initGL threw — ending session:', err);
+      window.__xrErr = 'initGL threw: ' + String(err);
+      glOk = false;
+    }
+    if (!glOk) {
+      console.error('[WebXRVR] VR GL setup failed — releasing session');
+      window.__xrErr = window.__xrErr || 'initGL returned false';
+      try { xrSession.end().catch(() => {}); } catch (e) {}
       xrSession = null;
       return;
     }
 
     // Init guide canvas AFTER initGL so glGuideTexture exists
-    initGuideCanvas();
+    try {
+      initGuideCanvas();
+      setupVideoFrameTracking();
 
-    setupVideoFrameTracking();
+      xrSession.addEventListener('selectstart', onSelectStart);
+      xrSession.addEventListener('end', onSessionEnd);
 
-    xrSession.addEventListener('selectstart', onSelectStart);
-    xrSession.addEventListener('end', onSessionEnd);
-
-    if (videoElement) {
-      videoElement.addEventListener('pause', onVideoPause);
-      videoElement.addEventListener('play', onVideoPlay);
-    }
-
-    const frameEl = document.getElementById('reelsFrame');
-    if (frameEl) frameEl.classList.add('vr-active');
-
-    if (videoElement) {
-      videoElement.muted = false;
-      if (callbacks.onUnmute) callbacks.onUnmute();
-      if (videoElement.paused) {
-        videoElement.play().catch(() => {});
+      if (videoElement) {
+        videoElement.addEventListener('pause', onVideoPause);
+        videoElement.addEventListener('play', onVideoPlay);
       }
+
+      const frameEl = document.getElementById('reelsFrame');
+      if (frameEl) frameEl.classList.add('vr-active');
+
+      if (videoElement) {
+        videoElement.muted = false;
+        if (callbacks.onUnmute) callbacks.onUnmute();
+        if (videoElement.paused) {
+          videoElement.play().catch(() => {});
+        }
+      }
+
+      // Notify host SPA so the global Top Bar can auto-hide for immersive Reels
+      notifyVrEnter();
+
+      // Force an immediate telemetry snapshot on the first XR frame so we catch
+      // the armed GL path + GL version even if the runtime aborts within seconds.
+      _diagForce = true;
+      xrSession.requestAnimationFrame(onXRFrame);
+    } catch (err) {
+      // Never leave an immersive session half-set-up — end it so the runtime
+      // doesn't keep reporting "an active immersive XRSession" on retry.
+      console.error('[WebXRVR] VR setup threw — releasing session:', err);
+      window.__xrErr = 'post-GL setup threw: ' + String(err);
+      try { xrSession.end().catch(() => {}); } catch (e) {}
+      xrSession = null;
+      cleanup();
     }
-
-    // Notify host SPA so the global Top Bar can auto-hide for immersive Reels
-    notifyVrEnter();
-
-    xrSession.requestAnimationFrame(onXRFrame);
   }
 
   function onVideoPause() {
@@ -3014,6 +3544,20 @@ const WebXRVR = (function () {
     glLayer = null;
     glProgram = null;
     glVideoTexture = null;
+    glVideoTextureExt = null;
+    glVideoProgram = null;
+    loc2_aPos = -1;
+    loc2_aUV = -1;
+    loc2_uMVP = null;
+    loc2_uTex = null;
+    loc2_uAlpha = null;
+    loc2_uCurvatureMode = null;
+    loc2_uStereo = null;
+    loc2_uEyeOff = null;
+    videoTexMode = '2d';
+    videoTexAllocated = false;
+    vrProxyCanvas = null;
+    vrProxyCtx = null;
     glControlsTexture = null;
     glOverlayTexture = null;
     glGuideTexture = null;
@@ -3052,14 +3596,28 @@ const WebXRVR = (function () {
     currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     hasNewVideoFrame = true;
     lastVideoTime = -1;
+    lastVideoFrameCount = -1;
     hoveredButton = -1;
     activeRayOrigin = null;
     activeRayDir = null;
     flickedX = false;
     flickedY = false;
+    _diagGLInfo = null;
 
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.remove('vr-active');
+
+    // Final telemetry: record why the session ended, best-effort before teardown.
+    try {
+      fetch('/api/reels/diag', { method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'session_end',
+          xrErr: window.__xrErr || null,
+          glPath: window.__xrGL || null,
+          presented: window.__xrPresented || 0,
+        }) }).catch(() => {});
+    } catch (e) {}
 
     notifyVrExit();
   }
@@ -3067,6 +3625,8 @@ const WebXRVR = (function () {
   function onVideoChange() {
     hasNewVideoFrame = true;
     lastVideoTime = -1;
+    lastVideoFrameCount = -1;
+    videoTexAllocated = false;
     cPanelScrollY = 0;
     cPanelMaxScroll = 0;
     clearPanelHighlight();

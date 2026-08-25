@@ -22,13 +22,17 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # HEVC encoder candidates, best-first. Single source of truth — the pipeline
 # (video_worker) encodes with the winner, and the health probes smoke-test the
 # same list so the reported encoder always matches what a render will use.
+# Bitrate raised to 24 Mbps for VR-grade crispness on a ~4m Quest 3S screen —
+# the previous 14 Mbps target left 4K masters (e.g. Travis 5.8, Tron 11.4)
+# visibly soft/banded when viewed up-close in immersive WebXR. Quest 3S panel
+# is ~1832px/eye so 4K is ~2× oversampled; the gains here are bitrate, not px.
 # NOTE: libx265 uses CRF rate-control; pairing a bitrate cap with -crf gives
 # ffmpeg contradictory instructions (CRF wins), so none is set here.
 HEVC_CANDIDATES: list[tuple[str, list[str]]] = [
-    ("hevc_videotoolbox", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
-    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
-    ("hevc_qsv", ["-b:v", "14M", "-maxrate", "16M", "-bufsize", "32M", "-movflags", "+faststart"]),
-    ("libx265", ["-crf", "24", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
+    ("hevc_videotoolbox", ["-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
+    ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-movflags", "+faststart"]),
+    ("hevc_qsv", ["-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-movflags", "+faststart"]),
+    ("libx265", ["-crf", "20", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
 ]
 
 
