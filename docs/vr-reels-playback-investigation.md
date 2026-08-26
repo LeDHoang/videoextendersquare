@@ -114,37 +114,50 @@ ranges over the slow adb-over-USB tunnel mid-playback (why streaming felt
 smoother than preloading). Changed `preloadAllVideos` to fetch only a **sliding
 window of the next 2 reels** (resident set ≤3 blobs).
 
-### ⚙️ Fix #5 — OES external video texture (zero-copy) — ON-DEVICE: ext unavailable in WebGL1 → WebGL2 upgrade added
-The only path that can eliminate the per-frame GPU sync is **zero-copy**: bind the
-`<video>` decoder surface directly as a `TEXTURE_EXTERNAL_OES` and sample it with
-`samplerExternalOES` in the shader — no `texImage2D`, no re-spec, no DMA, no sync.
+### ❌ Fix #5 — OES external video texture (zero-copy) — BLOCKED on this device, REVERTED to WebGL1
+The only web-side path that can eliminate the per-frame GPU sync is **zero-copy**:
+bind the `<video>` decoder surface directly as a `TEXTURE_EXTERNAL_OES` and sample
+it with `samplerExternalOES` in the shader — no `texImage2D`, no re-spec, no DMA,
+no sync. Implemented in `webxr_vr.js` as a dual-path, feature-detected change
+with GLSL ES 3.00 shader variants + an in-place `subimage` (`texSubImage2D`) path
+for WebGL2. It does not work in *this* browser build, on both prongs:
 
-Implemented in `webxr_vr.js` as a **dual-path, feature-detected** change:
-- **On-device finding (logcat-confirmed):** the Quest Browser's **WebGL2 context
-  cannot establish an XR compositor client**. On entering, the system logs
-  `ImmersiveAppChangedCallback: com.oculus.browser, -1` and
-  `OnForegroundVrAppClient: uid -1 pid -1 hasImmersiveApp 0`, then auto-exits the
-  session ~0.7s later (`ImmerseApp -> InHomeVr`) — the "flash then thrown out."
-  (WebGL1 `extOES:false` too — see above.) So neither the OES external nor the
-  WebGL2 in-place path can run in *this* browser build. `VR_GL_MODE='auto'`
-  therefore **prefers WebGL1** to restore a working session; WebGL2 remains
-  available only when forced with `VR_GL_MODE='2'`.
-- **WebGL2 upgrade (in code):** `initGL` now requests `webgl2` first (falls back
-  to `webgl` for non-Quest devices) and selects **GLSL ES 3.00 variants of all 7
-  shaders** (`VERT_V2/FRAG_V2/EXT_FRAG_V2/STAR_{VERT,FRAG}_V2/GLOW_{VERT,FRAG}_V2`).
-  On WebGL2, `OES_texture_external` may be exposed → external path; else it arms
-  the **`subimage`** path: allocate the 4K texture once, then `texSubImage2D`
-  in place per decoded frame (valid API on WebGL2, same avoid-the-re-spec goal).
-  `texTarget` now reports `'external' | 'subimage' | '2d'`.
-- Telemetry reports `texTarget`, `gl.extOES`, `gl.glVersion`. Kill switch:
-  `VR_TEX_MODE='2d'` forces the old path.
+- **WebGL1 (`glVersion: "WebGL 1.0 (OpenGL ES 2.0 Chromium)"`):**
+  `OES_texture_external` is **not exposed** (`gl.extOES: false`) → external path
+  unavailable. (WebGL1 also forbids `texSubImage2D` from video/canvas sources —
+  only `ArrayBufferView` — the source of the earlier black-screen regression.)
+- **WebGL2:** creating a WebGL2 `XRWebGLLayer` **regressed** (reproduced, then
+  logcat-confirmed): on entry the system logs
+  `ImmersiveAppChangedCallback: com.oculus.browser, -1` /
+  `OnForegroundVrAppClient: uid -1 pid -1 hasImmersiveApp 0` (the browser never
+  registers a valid compositor client), then auto-exits the session ~0.7 s later
+  (`ImmerseApp -> InHomeVr`) — the "flash then thrown out." A WebGL2 context can
+  run fine as a 2D canvas, but its **XR layer cannot establish a compositor
+  client** on Quest Browser.
 
-**Verify on-device** (`curl -s localhost:8000/api/reels/diag`): expect
-`gl.glVersion` → `"WebGL 2.0 …"` and `texTarget` → `'external'` (best) or
-`'subimage'`. Success = `dtMaxMs` collapses to ≈`dtMedMs` (~11–14ms, not 73–115ms)
-on upload frames, `xrFrames` → 60+, `pqDropped` ≈ 0, video visible. If black →
-set `VR_TEX_MODE='2d'` and retest; if `subimage` still stalls → the re-spec
-hypothesis is wrong and the remaining lever is `VR_TEX_CAP` (2048²) size-cap.
+**Resolution:** `VR_GL_MODE='auto'` now **prefers WebGL1** (restores a working VR
+session — confirmed on-device), and WebGL2 remains available only when forced
+with `VR_GL_MODE='2'`. Per `hz-iwsdk-webxr`, "Quest Browser is Chromium, not
+desktop Chrome — SharedArrayBuffer, certain WebGL2 extensions, and
+OffscreenCanvas may behave differently or be unavailable" — the compositor-layer
+failure is browser-runtime behavior, not a code bug. **Conclusion: the zero-copy
+path is unreachable in Quest Browser's WebXR; it requires a native/APK approach.**
+
+### ⚙️ Fix #6 — Request 90 Hz (`webxr_vr.js`)
+`hz-iwsdk-webxr`: "Quest Browser defaults to 72 Hz for WebXR sessions; you must
+explicitly request a higher framerate via `xrSession.updateTargetFrameRate(90)`
+after session start." Not previously done. Added now (best-effort, try/catch).
+**Note on expectations:** it does not remove the ~100 ms per-upload stall (that
+is GPU pipeline sync, size-independent), so it changes frame *density* between
+stalls, not the stall itself. Verdict pending on-device telemetry.
+
+Per the skill's other guidance:
+- **Texture memory ceiling ~256 MB** — we're ~56 MB per video texture; 4K blobs
+  are within budget; no headroom for larger sources.
+- **Draw-call budget <100-120** — our scene is ~7 shaders / a handful of draws;
+  geometry is not the bottleneck.
+- Telemetry (`gl.glVersion`, `gl.extOES`, `gl.texTarget`) still reports armor:
+  current live reading: `WebGL 1.0`, `extOES:false`, `texTarget:'2d'`.
 
 ---
 

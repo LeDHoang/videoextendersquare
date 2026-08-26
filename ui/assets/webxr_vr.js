@@ -2553,6 +2553,12 @@ const WebXRVR = (function () {
     console.log('[WebXRVR] GL context:', isGL2 ? 'WebGL 2.0' : 'WebGL 1.0');
     session.updateRenderState({ baseLayer: glLayer });
 
+    // Quest Browser defaults WebXR to 72 Hz. Request 90 Hz explicitly — the
+    // single most-cited "sluggish vs native" fix for Quest WebXR sessions.
+    if (typeof session.updateTargetFrameRate === 'function') {
+      try { session.updateTargetFrameRate(90); } catch (e) { /* void */ }
+    }
+
     // GLSL ES 3.00 shaders for WebGL2, GLSL ES 1.00 for the WebGL1 fallback.
     const VS = isGL2 ? VERT_V2 : VERT;
     const FS = isGL2 ? FRAG_V2 : FRAG;
