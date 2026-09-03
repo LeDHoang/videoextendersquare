@@ -18,6 +18,7 @@ ENV/
 stitch/
 .stitch/
 *.pth
+.cache/
 
 # macOS
 .DS_Store
