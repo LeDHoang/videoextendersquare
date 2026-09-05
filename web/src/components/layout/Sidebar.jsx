@@ -7,7 +7,7 @@ import {
   IndustrialCompareIcon,
   IndustrialReelsIcon,
   IndustrialExploreIcon,
-} from '../ui/StitchIcons.jsx';
+} from '../icons/index.jsx';
 
 const NAV_ITEMS = [
   { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },

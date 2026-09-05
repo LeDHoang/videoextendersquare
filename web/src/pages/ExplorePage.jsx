@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Hero, EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { Button, Dropdown, Pills } from '../components/ui/controls.jsx';
+import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../components/icons/index.jsx';
 import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const PREVIEW_BATCH = 24;
@@ -129,41 +130,22 @@ function ExploreTile({ video, onOpen }) {
       <span className="sx-explore-badge" aria-hidden="true">▶</span>
       {city ? (
         <span className="sx-explore-loc" title={place}>
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="sx-explore-stat-icon" aria-hidden="true">
-            <path d="M12 3.5L18 9.5L12 19.5L6 9.5L12 3.5Z" stroke="#f2f3f5" strokeWidth="1.6" strokeLinejoin="bevel" />
-            <circle cx="12" cy="9.5" r="2.2" fill="#ff3b1f" />
-            <circle cx="12" cy="9.5" r="0.8" fill="#f2f3f5" />
-            <line x1="8" y1="21" x2="16" y2="21" stroke="#ff3b1f" strokeWidth="1.8" strokeLinecap="square" />
-          </svg>
+          <LocationIcon />
           {city}
         </span>
       ) : null}
       <span className="sx-explore-stats">
         <span aria-label={`${video.likes || 0} likes`}>
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="sx-explore-stat-icon" aria-hidden="true">
-            <path d="M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z" stroke={liked ? '#ff3b1f' : '#f2f3f5'} strokeWidth="1.6" strokeLinejoin="bevel" fill={liked ? '#ff3b1f' : 'none'} />
-            <path d="M5.5 11.5H18.5" stroke="#f2f3f5" strokeWidth="1.2" strokeOpacity="0.25" />
-            <line x1="12" y1="8.5" x2="12" y2="18.5" stroke="#f2f3f5" strokeWidth="1.2" strokeOpacity="0.25" />
-            <polygon points="12,9.8 15.2,13 12,16.2 8.8,13" fill="#ff3b1f" />
-            <circle cx="12" cy="13" r="0.9" fill="#f2f3f5" />
-          </svg>
+          <LikeIcon filled={liked} />
           {fmtCount(video.likes)}
         </span>
         <span aria-label={`${video.views || 0} views`}>
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="sx-explore-stat-icon" aria-hidden="true">
-            <line x1="2" y1="12" x2="22" y2="12" stroke="#ff3b1f" strokeWidth="1.8" strokeLinecap="square" />
-            <polygon points="4.5,12 8,7.5 16,7.5 19.5,12 16,16.5 8,16.5" stroke="#ff3b1f" strokeWidth="1.8" strokeLinejoin="bevel" fill="#121315" />
-            <polygon points="12,9.2 14.8,12 12,14.8 9.2,12" fill="#ff3b1f" />
-            <circle cx="12" cy="12" r="0.9" fill="#f2f3f5" />
-          </svg>
+          <ViewIcon />
           {fmtCount(video.views)}
         </span>
         {commentCount ? (
           <span aria-label={`${commentCount} comments`}>
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="sx-explore-stat-icon" aria-hidden="true">
-              <path d="M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z" stroke="#f2f3f5" strokeWidth="1.5" strokeLinejoin="bevel" />
-              <circle cx="17" cy="7" r="2" fill="#ff3b1f" />
-            </svg>
+            <CommentIcon />
             {commentCount}
           </span>
         ) : null}

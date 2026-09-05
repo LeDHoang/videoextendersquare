@@ -4,7 +4,7 @@ import {
   IndustrialVideoIcon,
   IndustrialCompareIcon,
   IndustrialReelsIcon,
-} from '../ui/StitchIcons.jsx';
+} from '../icons/index.jsx';
 
 const LINKS = [
   { to: '/reels', label: 'Reels / VR', Icon: IndustrialReelsIcon },

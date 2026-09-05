@@ -21,7 +21,57 @@ router = APIRouter(prefix="/api/reels", tags=["reels"])
 
 OUTPUT_DIR = Path("output")
 COMMENTS_FILE = OUTPUT_DIR / "reels_comments.json"
+META_FILE = OUTPUT_DIR / "reels_meta.json"
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "ui" / "assets"
+# Canonical frontend icon artwork — single source for both the React app
+# (imported as components) and this player template (injected below).
+ICON_DIR = (
+    Path(__file__).resolve().parent.parent.parent
+    / "web" / "src" / "components" / "icons" / "svg"
+)
+
+# Tiny mtime-checked cache for icon snippets (14 one-KB files; re-read only
+# when something on disk actually changed).
+_icon_cache: dict = {"sigs": {}, "snippets": {}}
+
+
+def _icon_snippets() -> dict[str, str]:
+    """Load {TOKEN_NAME: svg_markup} from the shared icons folder."""
+    try:
+        files = sorted(ICON_DIR.glob("*.svg"))
+    except OSError:
+        return {}
+    sigs = {}
+    for f in files:
+        try:
+            sigs[f.name] = f.stat().st_mtime
+        except OSError:
+            continue
+    if sigs != _icon_cache["sigs"]:
+        snippets = {}
+        for f in files:
+            try:
+                # Collapse to one line: tokens also land inside single-quoted
+                # JS strings (e.g. VIEW_SVG), where raw newlines would be a
+                # syntax error. SVG is whitespace-insensitive.
+                one_line = " ".join(f.read_text(encoding="utf-8").split())
+                snippets[f.stem.upper().replace("-", "_")] = one_line
+            except OSError:
+                continue
+        _icon_cache.update(sigs=sigs, snippets=snippets)
+    return _icon_cache["snippets"]
+
+
+def _inject_icons(html: str) -> str:
+    """Replace __ICON_<NAME>__ tokens with shared SVG artwork.
+
+    Runs on the raw template before script extraction so tokens in both the
+    markup and the inline player JS resolve from the one icons folder.
+    Unknown tokens are left untouched (fail-soft, never break the player).
+    """
+    for name, svg in _icon_snippets().items():
+        html = html.replace(f"__ICON_{name}__", svg)
+    return html
 
 # Tiny in-process TTL cache for the output scan (rglob over output/ is cheap
 # enough to re-run, but not on every keystroke of a search box).
@@ -791,6 +841,8 @@ def reels_player(
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
 
+    html = _inject_icons(html)
+
     img_js = ASSETS_DIR / "quest_controller_img.js"
     if img_js.exists():
         html = html.replace("__QUEST_CONTROLLER_IMG_JS__",
@@ -863,6 +915,10 @@ def reels_player_inline(
         html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
+
+    # Resolve shared icon tokens before script extraction so both markup
+    # and inline player JS get artwork from the one icons folder.
+    html = _inject_icons(html)
 
     img_js = ASSETS_DIR / "quest_controller_img.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"

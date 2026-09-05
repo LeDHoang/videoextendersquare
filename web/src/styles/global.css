@@ -2832,6 +2832,12 @@ body.sx-vr-active .sx-reels-mount,
   flex-shrink: 0;
 }
 
+/* Liked/filled variant for shared icons (targets the #edge path in like.svg). */
+.sx-icon-filled #edge {
+  fill: #ff3b1f;
+  stroke: #ff3b1f;
+}
+
 /* Location tag, top-left (play badge owns top-right). */
 .sx-explore-loc {
   position: absolute;

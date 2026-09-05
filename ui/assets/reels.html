@@ -202,7 +202,7 @@
   #likeBtn.active .btn-icon svg {
     filter: drop-shadow(0 0 4px rgba(255, 59, 31, 0.8));
   }
-  #likeBtn.active .btn-icon svg > path:first-child {
+  #likeBtn.active .btn-icon svg #edge {
     fill: #ff3b1f;
     stroke: #ff3b1f;
   }
@@ -917,10 +917,7 @@
     <div class="reels-cluster">
       <button class="action-btn" id="soundBtn" title="Toggle Sound (M)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#a4abb3" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M17 9L21 15M21 9L17 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-          </svg>
+          __ICON_SOUND_MUTE__
         </span>
         <span class="action-btn-label">MUTE</span>
       </button>
@@ -930,71 +927,44 @@
     <div class="reels-cluster">
       <button class="action-btn" id="playBtn" title="Play/Pause (Space)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M9 8V16M15 8V16" stroke="#ff3b1f" stroke-width="2.5" stroke-linecap="square"/>
-            <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-          </svg>
+          __ICON_PAUSE__
         </span>
         <span class="action-btn-label">PAUSE</span>
       </button>
       <button class="action-btn" id="modeBtn" title="Auto-Next / Loop">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M13 5L18 10L13 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M6 10H18" stroke="#f2f3f5" stroke-width="1.5" stroke-linecap="square"/>
-            <path d="M21 5V15" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
-            <path d="M3 19H21" stroke="#f2f3f5" stroke-width="0.5" stroke-dasharray="2 2"/>
-          </svg>
+          __ICON_MODE_AUTO__
         </span>
         <span class="action-btn-label" id="modeLabel">AUTO</span>
       </button>
       <div class="reels-cluster-divider"></div>
       <button class="action-btn" id="prevBtn" title="Previous Video (W / Up)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 5V19M12 5L7 10M12 5L17 10" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M5 3H19" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
-          </svg>
+          __ICON_PREV__
         </span>
         <span class="action-btn-label">PREV</span>
       </button>
       <button class="action-btn" id="nextBtn" title="Next Video (S / Down)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 19V5M12 19L7 14M12 19L17 14" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M5 21H19" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
-          </svg>
+          __ICON_NEXT__
         </span>
         <span class="action-btn-label">NEXT</span>
       </button>
       <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)" style="position: relative;">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <circle cx="17" cy="7" r="2" fill="#ff3b1f"/>
-          </svg>
+          __ICON_COMMENT__
         </span>
         <span class="action-btn-label" id="commentBadge">ANNO</span>
       </button>
       <button class="action-btn" id="likeBtn" title="Like / Unlike (F)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel"/>
-            <path d="M5.5 11.5H18.5" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.25"/>
-            <line x1="12" y1="8.5" x2="12" y2="18.5" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.25"/>
-            <polygon points="12,9.8 15.2,13 12,16.2 8.8,13" fill="#ff3b1f"/>
-            <circle cx="12" cy="13" r="0.9" fill="#f2f3f5"/>
-          </svg>
+          __ICON_LIKE__
         </span>
         <span class="action-btn-label" id="likeCount">0</span>
       </button>
       <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M13 3L5 14H12L11 21L19 10H12L13 3Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M13 3L5 14H12L11 21L19 10H12L13 3Z" fill="#ff3b1f" fill-opacity="0.2"/>
-            <path d="M11 21L19 10H12L13 3" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-          </svg>
+          __ICON_PRELOAD__
         </span>
         <span class="action-btn-label" id="preloadLabel">CACHE</span>
       </button>
@@ -1004,17 +974,14 @@
     <div class="reels-cluster">
       <button class="action-btn" id="fullBtn" title="Fullscreen">
         <span class="btn-icon">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M7 3H3V7M17 3H21V7M7 21H3V17M17 21H21V17" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            <path d="M10 10L3 3M14 10L21 3M10 14L3 21M14 14L21 21" stroke="#ff3b1f" stroke-width="1.5"/>
-          </svg>
+          __ICON_FULLSCREEN__
         </span>
         <span class="action-btn-label">FULL</span>
       </button>
       <div id="vrBtnWrap" style="display:none;">
         <button class="action-btn" id="vrBtn" title="Enter VR Mode">
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8L5 6H19L21 8V16L19 18H5L3 16V8Z" stroke="#A855F7" stroke-width="1.5" stroke-linejoin="bevel"/><path d="M7 10H9V14H7V10ZM15 10H17V14H15V10Z" fill="#A855F7"/><path d="M10 18L12 16L14 18" stroke="#A855F7" stroke-width="1.5" stroke-linejoin="bevel"/></svg>
+            __ICON_VR__
           </span>
           <span class="action-btn-label" style="color: #A855F7;">VR</span>
         </button>
@@ -1216,14 +1183,9 @@
       return String(n);
     }
 
-    // Architectural ocular-aperture view icon (matches tile badges).
-    const VIEW_SVG = ''
-      + '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
-      + '<line x1="2" y1="12" x2="22" y2="12" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>'
-      + '<polygon points="4.5,12 8,7.5 16,7.5 19.5,12 16,16.5 8,16.5" stroke="#ff3b1f" stroke-width="1.8" stroke-linejoin="bevel" fill="#121315"/>'
-      + '<polygon points="12,9.2 14.8,12 12,14.8 9.2,12" fill="#ff3b1f"/>'
-      + '<circle cx="12" cy="12" r="0.9" fill="#f2f3f5"/>'
-      + '</svg>';
+    // Architectural ocular-aperture view icon — injected server-side from
+    // the shared icons folder (see __ICON_VIEW__ token).
+    const VIEW_SVG = '__ICON_VIEW__';
 
     function refreshEngagementUI() {
       const item = videoData[idx];
@@ -1669,20 +1631,14 @@
       if (isPlaying) {
         playBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M9 8V16M15 8V16" stroke="#ff3b1f" stroke-width="2.5" stroke-linecap="square"/>
-              <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            </svg>
+            __ICON_PAUSE__
           </span>
           <span class="action-btn-label">PAUSE</span>
         `;
       } else {
         playBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 8L15 12L10 16V8Z" fill="#ff3b1f"/>
-              <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            </svg>
+            __ICON_PLAY__
           </span>
           <span class="action-btn-label">PLAY</span>
         `;
@@ -1694,21 +1650,14 @@
       if (muted) {
         soundBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#a4abb3" stroke-width="1.5" stroke-linejoin="bevel"/>
-              <path d="M17 9L21 15M21 9L17 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-            </svg>
+            __ICON_SOUND_MUTE__
           </span>
           <span class="action-btn-label">MUTE</span>
         `;
       } else {
         soundBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M11 5L6 9H3V15H6L11 19V5Z" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-              <path d="M15 9C16.1046 9 17 9.89543 17 11V13C17 14.1046 16.1046 15 15 15" stroke="#f2f3f5" stroke-width="1.5"/>
-              <path d="M19 7C20.6569 7 22 8.34315 22 10V14C22 15.6569 20.6569 17 19 17" stroke="#ff3b1f" stroke-width="1.5"/>
-            </svg>
+            __ICON_SOUND_AUDIO__
           </span>
           <span class="action-btn-label">AUDIO</span>
         `;
@@ -1720,23 +1669,14 @@
       if (auto) {
         modeBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M13 5L18 10L13 15" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-              <path d="M6 10H18" stroke="#f2f3f5" stroke-width="1.5" stroke-linecap="square"/>
-              <path d="M21 5V15" stroke="#ff3b1f" stroke-width="1.5" stroke-linecap="square"/>
-              <path d="M3 19H21" stroke="#f2f3f5" stroke-width="0.5" stroke-dasharray="2 2"/>
-            </svg>
+            __ICON_MODE_AUTO__
           </span>
           <span class="action-btn-label" id="modeLabel">AUTO</span>
         `;
       } else {
         modeBtn.innerHTML = `
           <span class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M17 1L19 3L17 5" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-              <path d="M7 23L5 21L7 19" stroke="#ff3b1f" stroke-width="1.5" stroke-linejoin="bevel"/>
-              <path d="M19 3V11C19 12.6569 17.6569 14 16 14H5M5 21V13C5 11.3431 6.34315 10 8 10H19" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel"/>
-            </svg>
+            __ICON_MODE_LOOP__
           </span>
           <span class="action-btn-label" id="modeLabel">LOOP</span>
         `;
