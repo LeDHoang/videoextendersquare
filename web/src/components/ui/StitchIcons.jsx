@@ -39,6 +39,15 @@ export function IndustrialReelsIcon({ className = 'sx-sidebar-icon-svg', ...prop
   );
 }
 
+export function IndustrialExploreIcon({ className = 'sx-sidebar-icon-svg', ...props }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} {...props}>
+      <path d="M3 5L5 3H19L21 5V19L19 21H5L3 19V5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="bevel" />
+      <path d="M3 9H9V3M15 3V9H21M21 15H15V21M9 21V15H3" stroke="var(--sx-accent, #ff3b1f)" strokeWidth="1.5" strokeLinejoin="bevel" />
+    </svg>
+  );
+}
+
 export function EchoLogo({ className = 'sx-logo-svg', ...props }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} {...props}>

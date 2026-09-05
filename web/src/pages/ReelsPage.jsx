@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
@@ -19,11 +20,39 @@ const CODEC_OPTS = [
 ];
 
 export default function ReelsPage() {
+  // Deep-link support (Explore → Reels): ?folder&codec(h264|hevc|all)
+  // &search&sort&play=<video path> preselects filters and starts the
+  // player at that exact reel. `deepPlay` is consumed (cleared) as soon as
+  // the user touches any filter so later refetches start at index 0.
+  const [searchParams] = useSearchParams();
+  const paramSort = searchParams.get('sort');
+  const paramCodec = (searchParams.get('codec') || '').toLowerCase();
   const [data, setData] = useState(null);
-  const [folder, setFolder] = useState('testpipeline');
-  const [codec, setCodec] = useState(CODEC_DEFAULT);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('newest');
+  const [folder, setFolder] = useState(searchParams.get('folder') || 'testpipeline');
+  const [codec, setCodec] = useState(
+    paramCodec === 'h264' ? 'H264 (Browser/VR)' : paramCodec === 'all' ? 'ALL CODECS' : CODEC_DEFAULT,
+  );
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [sort, setSort] = useState(
+    ['newest', 'oldest', 'alphabetical', 'shuffle'].includes(paramSort) ? paramSort : 'newest',
+  );
+  const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
+
+  // Re-sync when navigating Explore → Reels while already mounted (same
+  // route, new query string — state initializers above don't re-run).
+  useEffect(() => {
+    const play = searchParams.get('play');
+    if (play) {
+      const f = searchParams.get('folder');
+      if (f) setFolder(f);
+      const c = (searchParams.get('codec') || '').toLowerCase();
+      setCodec(c === 'h264' ? 'H264 (Browser/VR)' : c === 'all' ? 'ALL CODECS' : CODEC_DEFAULT);
+      setSearch(searchParams.get('search') || '');
+      const s = searchParams.get('sort');
+      if (['newest', 'oldest', 'alphabetical', 'shuffle'].includes(s)) setSort(s);
+      setDeepPlay(play);
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const [tunnel, setTunnel] = useState('');
   const [showTunnel, setShowTunnel] = useState(false);
   const [proxyBusy, setProxyBusy] = useState(false);
@@ -53,7 +82,7 @@ export default function ReelsPage() {
       })
       .then((r) => {
         setData(r);
-        if (!r.folders.includes(folder)) {
+        if (folder !== 'ALL FOLDERS' && !r.folders.includes(folder)) {
           setFolder(r.folders.includes('testpipeline') ? 'testpipeline' : r.folders[0] || 'ALL FOLDERS');
         }
       })
@@ -61,6 +90,8 @@ export default function ReelsPage() {
   }, [folder, codecParam, debouncedSearch, sort, refreshKey]);
 
   const videos = data?.videos || [];
+  const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
+  const initialIndex = deepIndex >= 0 ? deepIndex : 0;
   const playerParams = {
     folder,
     codec: codecParam,
@@ -156,11 +187,11 @@ export default function ReelsPage() {
               <Dropdown
                 value={folder}
                 options={folderOpts}
-                onChange={setFolder}
+                onChange={(v) => { setDeepPlay(null); setFolder(v); }}
                 placeholder="Target folder…"
               />
             </div>
-            <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
+            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { setDeepPlay(null); setCodec(v); }} />
             <div style={{ flex: 1, minWidth: '160px', position: 'relative' }}>
               <input
                 ref={searchRef}
@@ -168,7 +199,7 @@ export default function ReelsPage() {
                 style={{ paddingRight: search ? '28px' : undefined }}
                 placeholder="Search…"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setDeepPlay(null); setSearch(e.target.value); }}
               />
               {search ? (
                 <button
@@ -185,7 +216,7 @@ export default function ReelsPage() {
               <Dropdown
                 value={sort}
                 options={SORTS}
-                onChange={setSort}
+                onChange={(v) => { setDeepPlay(null); setSort(v); }}
                 placeholder="Sort by…"
               />
             </div>
@@ -258,7 +289,10 @@ export default function ReelsPage() {
         />
       ) : (
         <div>
-          <ReelsPlayer params={playerParams} />
+          {deepIndex >= 0 ? (
+            <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
+          ) : null}
+          <ReelsPlayer params={playerParams} initialIndex={initialIndex} />
           {videos.some((v) => v.tunnel_url) ? (
             <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
           ) : null}

@@ -26,6 +26,8 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
       const q = searchVal.trim().toLowerCase();
       if (q.includes('comp') || q.includes('ab') || q.includes('diff')) {
         navigate('/compare');
+      } else if (q.includes('explor') || q.includes('galler') || q.includes('browse')) {
+        navigate('/explore');
       } else if (q.includes('reel') || q.includes('vr') || q.includes('quest') || q.includes('3d')) {
         navigate('/reels');
       } else if (q.includes('vid') || q.includes('ext')) {
@@ -89,6 +91,12 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
           >
             REELS/VR
+          </NavLink>
+          <NavLink
+            to="/explore"
+            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
+          >
+            EXPLORE
           </NavLink>
           <NavLink
             to="/image"

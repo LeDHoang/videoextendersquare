@@ -160,6 +160,118 @@ def make_web_preview(src: str, height: int | None = 3840) -> str | None:
     return str(dest)
 
 
+def explore_preview_path(src: str) -> Path:
+    """Sibling path for the lightweight Explore-grid preview (<stem>-explore.mp4)."""
+    return Path(src).with_name(Path(src).stem + "-explore.mp4")
+
+
+def explore_poster_path(src: str) -> Path:
+    """Sibling path for the Explore-grid poster thumbnail (<stem>-poster.jpg)."""
+    return Path(src).with_name(Path(src).stem + "-poster.jpg")
+
+
+def _sibling_is_fresh(sibling: Path, src: str) -> bool:
+    try:
+        return sibling.stat().st_mtime >= Path(src).stat().st_mtime
+    except OSError:
+        return True
+
+
+def _sibling_matches_height(sibling: Path, height: int) -> bool:
+    """Check a cached sibling asset matches the target height (ffprobe).
+
+    Guarantees stale assets from an older resolution setting regenerate
+    instead of being served forever.
+    """
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=height", "-of", "csv=p=0", str(sibling),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                           creationflags=_NO_WINDOW)
+        return int(p.stdout.strip()) == height
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return True  # unreadable — let the normal flow decide
+
+
+def make_explore_preview(src: str, height: int = 720) -> str | None:
+    """Transcode a tiny muted H.264 preview for the Explore gallery grid.
+
+    720p, no audio, faststart — cheap enough to autoplay several tiles at
+    once. Cached on disk next to the source; regenerates when the source is
+    newer than the cached preview or the height setting changed.
+    """
+    try:
+        dest = explore_preview_path(src)
+        if dest.exists() and dest.stat().st_size > 0:
+            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
+                return str(dest)
+    except OSError:
+        return None
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error",
+        "-i", src,
+        "-vf", f"scale=-2:{height}",
+        "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-an",
+        str(dest),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=300,
+                           creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+        return None
+    return str(dest)
+
+
+def make_explore_poster(src: str, height: int = 720) -> str | None:
+    """Extract a single-frame JPEG poster for the Explore gallery grid.
+
+    Tens of KB and ~10x faster to produce than a preview transcode (one
+    decoded frame, no full re-encode), so the grid can paint instantly while
+    preview videos generate in the background. Cached on disk next to the
+    source; regenerates when the source is newer than the cached poster or
+    the height setting changed.
+    """
+    try:
+        dest = explore_poster_path(src)
+        if dest.exists() and dest.stat().st_size > 0:
+            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
+                return str(dest)
+    except OSError:
+        return None
+
+    vf = f"scale=-2:{height}"
+    # Keyframe-only fast path first (input seek + nokey ≈ 1 core, so parallel
+    # batches don't oversubscribe the CPU), then accurate seeks as fallback
+    # for very short clips where the seek point lands past EOF.
+    variants = [
+        ["ffmpeg", "-y", "-hide_banner", "-v", "error",
+         "-ss", "1", "-skip_frame", "nokey", "-i", src,
+         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+        ["ffmpeg", "-y", "-hide_banner", "-v", "error",
+         "-ss", "1", "-i", src,
+         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+        ["ffmpeg", "-y", "-hide_banner", "-v", "error",
+         "-i", src,
+         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+    ]
+    for cmd in variants:
+        try:
+            p = subprocess.run(cmd, capture_output=True, timeout=120,
+                               creationflags=_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if p.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
+            return str(dest)
+    return None
+
+
 def scan_output_videos(root: str = "output") -> list[dict]:
     """Recursively scan root directory for video files, excluding preview proxies."""
     base = Path(root)
@@ -170,7 +282,7 @@ def scan_output_videos(root: str = "output") -> list[dict]:
     for file in base.rglob("*"):
         if not file.is_file():
             continue
-        if file.name.startswith(".") or file.name.endswith("-preview.mp4"):
+        if file.name.startswith(".") or file.name.endswith("-preview.mp4") or file.name.endswith("-explore.mp4"):
             continue
         ext = file.suffix.lstrip(".").lower()
         if ext not in VIDEO_EXTS:
@@ -216,7 +328,7 @@ def scan_pairs(root: str = "output/pairs") -> list[dict]:
 
         fast_files = sorted(list(base.glob("*_fast.mp4")) + list(base.glob("*_fast_4k.mp4")))
         for fast in fast_files:
-            if fast.name.endswith("-preview.mp4"):
+            if fast.name.endswith("-preview.mp4") or fast.name.endswith("-explore.mp4"):
                 continue
             fast_suffix = "_fast_4k.mp4" if fast.name.endswith("_fast_4k.mp4") else "_fast.mp4"
             stem = fast.name[: -len(fast_suffix)]

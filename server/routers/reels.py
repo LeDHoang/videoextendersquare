@@ -196,6 +196,23 @@ def _codec_key(codec: str | None) -> str:
     return (codec or "hevc").lower()
 
 
+def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
+    """Reference a cached sibling file (<stem>-explore.mp4 / -poster.jpg) as
+    a /media/ URL if present and fresh, else None."""
+    try:
+        if sibling.exists() and sibling.stat().st_size > 0:
+            try:
+                fresh = sibling.stat().st_mtime >= Path(play_path).stat().st_mtime
+            except OSError:
+                fresh = True
+            if fresh:
+                prel = sibling.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+                return f"/media/{prel}"
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> list[dict]:
     """Map scanned videos to the reels player payload (relative /media/ URLs),
     including embedded time-synced and general comments."""
@@ -216,12 +233,20 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
 
         rel = Path(play_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
         play_codec = SM.get_video_codec(play_path)
-        
+
+        # Lightweight Explore-grid assets: reference the cached
+        # <stem>-explore.mp4 / <stem>-poster.jpg if present and fresh, else
+        # None (the grid generates them via POST /explore-preview).
+        preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path))
+        poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path))
+
         # Load comments for this reel
         comments = _get_comments_for_video(item["rel_path"], item["filename"])
 
         payload.append({
             "url": f"/media/{rel}",
+            "preview_url": preview_url,
+            "poster_url": poster_url,
             "filename": item["filename"],
             "folder": item["folder"],
             "size": item["size_human"],
@@ -254,6 +279,74 @@ def list_reels(
         "folders": sorted({v["folder"] for v in raw}),
         "videos": _build_payload(videos, codec),
     }
+
+
+# ─── EXPLORE PREVIEWS (lightweight 720p muted tiles + posters) ─────────
+
+MAX_EXPLORE_PATHS = 24
+EXPLORE_GEN_WORKERS = 4
+
+
+def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | None]:
+    """Generate one video's Explore assets. Returns
+    (rel, preview_url, poster_url, error). Posters are cheap single frames;
+    previews are full re-encodes — both run in parallel across videos."""
+    root = OUTPUT_DIR.resolve()
+    p = (root / rel).resolve()
+    if not p.is_relative_to(root) or not p.is_file():
+        return rel, None, None, "not found"
+    try:
+        prev = SM.make_explore_preview(str(p))
+    except Exception as ex:  # noqa: BLE001
+        return rel, None, None, str(ex)
+    try:
+        poster = SM.make_explore_poster(str(p))
+    except Exception:  # noqa: BLE001
+        poster = None  # poster is best-effort; the tile still works
+
+    def _url(local: str | None) -> str | None:
+        if not local:
+            return None
+        try:
+            return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+        except ValueError:
+            return None
+
+    preview_url, poster_url = _url(prev), _url(poster)
+    if not preview_url:
+        return rel, None, poster_url, "transcode failed"
+    return rel, preview_url, poster_url, None
+
+
+@router.post("/explore-preview")
+def generate_explore_previews(paths: list[str]):
+    """Generate tiny muted H.264 previews + JPEG posters for Explore tiles.
+
+    Capped per request and fanned out over worker threads so a fresh grid
+    visit warms up in seconds, not minutes. Posters generate ~10x faster
+    than previews, so tiles paint instantly and upgrade to video as each
+    transcode lands. Returns {generated: {rel: preview_url},
+    posters: {rel: poster_url}, failed: [...]}.
+    """
+    if len(paths) > MAX_EXPLORE_PATHS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many paths in one request (max {MAX_EXPLORE_PATHS})",
+        )
+    from concurrent.futures import ThreadPoolExecutor
+
+    generated: dict[str, str] = {}
+    posters: dict[str, str] = {}
+    failed = []
+    with ThreadPoolExecutor(max_workers=EXPLORE_GEN_WORKERS) as ex:
+        for rel, preview_url, poster_url, err in ex.map(_gen_explore_assets, list(paths)):
+            if preview_url:
+                generated[rel] = preview_url
+            if poster_url:
+                posters[rel] = poster_url
+            if err:
+                failed.append({"path": rel, "error": err})
+    return {"generated": generated, "posters": posters, "failed": failed}
 
 
 # ─── VR TELEMETRY (in-headset diagnostics) ──────────────────────────────
@@ -476,6 +569,7 @@ def reels_player(
     sort: str = "newest",
     tunnel: str = "",
     refresh: bool = False,
+    start: int = 0,
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
     if refresh:
@@ -483,6 +577,10 @@ def reels_player(
     raw = _scan_cached()
     videos = _apply_filters(raw, folder, search, sort)
     payload = _build_payload(videos, codec, tunnel=tunnel)
+    try:
+        start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
+    except (TypeError, ValueError):
+        start_idx = 0
 
     try:
         html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
@@ -498,6 +596,8 @@ def reels_player(
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
 
     html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
+    html = html.replace("loadVideo(0);", f"loadVideo(__SX_START_INDEX__);")
+    html = html.replace("__SX_START_INDEX__", str(start_idx))
     return Response(
         content=html,
         media_type="text/html; charset=utf-8",
@@ -541,6 +641,7 @@ def reels_player_inline(
     sort: str = "newest",
     tunnel: str = "",
     refresh: bool = False,
+    start: int = 0,
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
@@ -549,6 +650,10 @@ def reels_player_inline(
     raw = _scan_cached()
     videos = _apply_filters(raw, folder, search, sort)
     payload = _build_payload(videos, codec, tunnel=tunnel)
+    try:
+        start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
+    except (TypeError, ValueError):
+        start_idx = 0
 
     try:
         html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
@@ -580,6 +685,9 @@ def reels_player_inline(
             "});\n\n    // Focus frame on click for direct keyboard capture",
             "};\n\n    // Focus frame on click for direct keyboard capture",
         )
+        # Deep-link start index (Explore → Reels): replace the hard-coded
+        # initial loadVideo(0) with the clamped start offset.
+        init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
             "\nwindow.__sxReelsCleanup = function () {\n"
             "  if (window.__sxReelsKeydown) {\n"
@@ -623,6 +731,7 @@ def reels_player_inline(
     return JSONResponse(
         {
             "count": len(videos),
+            "start": start_idx,
             "css": css,
             "html": body_html,
             "scripts": scripts,

@@ -4,18 +4,19 @@ import { api } from '../../api/client.js';
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
 // player scripts; we re-inject them in order and clean up on change.
-export default function ReelsPlayer({ params }) {
+export default function ReelsPlayer({ params, initialIndex = 0 }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
-  const sig = JSON.stringify(params);
+  const start = Math.max(0, initialIndex | 0);
+  const sig = JSON.stringify({ ...params, start });
 
   useEffect(() => {
     let alive = true;
     setData(null);
     setErr('');
     api
-      .get('/api/reels/player-inline', params)
+      .get('/api/reels/player-inline', { ...params, start })
       .then((d) => {
         if (alive) setData(d);
       })

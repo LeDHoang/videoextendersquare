@@ -7,6 +7,7 @@ const ImagePage = lazy(() => import('./pages/ImagePage.jsx'));
 const VideoPage = lazy(() => import('./pages/VideoPage.jsx'));
 const ComparePage = lazy(() => import('./pages/ComparePage.jsx'));
 const ReelsPage = lazy(() => import('./pages/ReelsPage.jsx'));
+const ExplorePage = lazy(() => import('./pages/ExplorePage.jsx'));
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/video" element={<VideoPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/reels" element={<ReelsPage />} />
+          <Route path="/explore" element={<ExplorePage />} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>
       </Routes>
