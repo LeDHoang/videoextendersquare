@@ -2774,21 +2774,6 @@ body.sx-vr-active .sx-reels-mount,
   word-break: break-all;
 }
 
-.sx-explore-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 0.7rem;
-  pointer-events: none;
-}
-
 .sx-explore-comments {
   position: absolute;
   left: 8px;
@@ -2838,12 +2823,12 @@ body.sx-vr-active .sx-reels-mount,
   stroke: #ff3b1f;
 }
 
-/* Location tag, top-left (play badge owns top-right). */
+/* Location tag, top-left. */
 .sx-explore-loc {
   position: absolute;
   left: 8px;
   top: 8px;
-  max-width: calc(100% - 48px);
+  max-width: calc(100% - 16px);
   display: inline-flex;
   align-items: center;
   gap: 4px;

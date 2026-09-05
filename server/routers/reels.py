@@ -242,34 +242,35 @@ TAG_HINTS = [
     ("remix", ["remix", "music-video"]),
 ]
 
-# Global city/county pool (county field holds the region equivalent where
-# the concept differs — e.g. Greater London, Tokyo Metropolis).
+# Global city/country pool.
 LOCATION_POOL = [
-    {"city": "Austin", "county": "Travis County"},
-    {"city": "Los Angeles", "county": "Los Angeles County"},
-    {"city": "New York", "county": "New York County"},
-    {"city": "Miami", "county": "Miami-Dade County"},
-    {"city": "Chicago", "county": "Cook County"},
-    {"city": "Seattle", "county": "King County"},
-    {"city": "London", "county": "Greater London"},
-    {"city": "Manchester", "county": "Greater Manchester"},
-    {"city": "Paris", "county": "Île-de-France"},
-    {"city": "Berlin", "county": "Berlin State"},
-    {"city": "Tokyo", "county": "Tokyo Metropolis"},
-    {"city": "Osaka", "county": "Osaka Prefecture"},
-    {"city": "Seoul", "county": "Gyeonggi"},
-    {"city": "Bangkok", "county": "Central Thailand"},
-    {"city": "Singapore", "county": "Central Region"},
-    {"city": "Mumbai", "county": "Maharashtra"},
-    {"city": "Sydney", "county": "New South Wales"},
-    {"city": "Toronto", "county": "Ontario"},
-    {"city": "Mexico City", "county": "CDMX"},
-    {"city": "São Paulo", "county": "São Paulo State"},
-    {"city": "Lagos", "county": "Lagos State"},
-    {"city": "Cairo", "county": "Giza Governorate"},
-    {"city": "Nairobi", "county": "Nairobi County"},
-    {"city": "Auckland", "county": "Auckland Region"},
+    {"city": "Austin", "country": "USA"},
+    {"city": "Los Angeles", "country": "USA"},
+    {"city": "New York", "country": "USA"},
+    {"city": "Miami", "country": "USA"},
+    {"city": "Chicago", "country": "USA"},
+    {"city": "Seattle", "country": "USA"},
+    {"city": "London", "country": "UK"},
+    {"city": "Manchester", "country": "UK"},
+    {"city": "Paris", "country": "France"},
+    {"city": "Berlin", "country": "Germany"},
+    {"city": "Tokyo", "country": "Japan"},
+    {"city": "Osaka", "country": "Japan"},
+    {"city": "Seoul", "country": "South Korea"},
+    {"city": "Bangkok", "country": "Thailand"},
+    {"city": "Singapore", "country": "Singapore"},
+    {"city": "Mumbai", "country": "India"},
+    {"city": "Sydney", "country": "Australia"},
+    {"city": "Toronto", "country": "Canada"},
+    {"city": "Mexico City", "country": "Mexico"},
+    {"city": "São Paulo", "country": "Brazil"},
+    {"city": "Lagos", "country": "Nigeria"},
+    {"city": "Cairo", "country": "Egypt"},
+    {"city": "Nairobi", "country": "Kenya"},
+    {"city": "Auckland", "country": "New Zealand"},
 ]
+
+_CITY_TO_COUNTRY = {loc["city"]: loc["country"] for loc in LOCATION_POOL}
 
 
 def _load_meta_raw() -> dict[str, dict]:
@@ -293,7 +294,7 @@ def _save_meta_raw(data: dict[str, dict]) -> None:
 
 def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
     """Generate fake metadata: 2–4 tags (filename hints + random fill),
-    one global city/county location, and plausible engagement numbers."""
+    one global city/country location, and plausible engagement numbers."""
     lowered = (filename or "").lower()
     tags: list[str] = []
     for keyword, hinted in TAG_HINTS:
@@ -314,7 +315,7 @@ def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
     loc = rng.choice(LOCATION_POOL)
     return {
         "tags": tags[:4],
-        "location": {"city": loc["city"], "county": loc["county"]},
+        "location": {"city": loc["city"], "country": loc["country"]},
         "likes": likes,
         "views": views,
         "liked_by_me": False,
@@ -333,7 +334,15 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
     if key in all_meta and isinstance(all_meta[key], dict):
         entry = all_meta[key]
         entry.setdefault("tags", [])
-        entry.setdefault("location", {"city": "", "county": ""})
+        loc = entry.get("location")
+        if not isinstance(loc, dict):
+            loc = {}
+            entry["location"] = loc
+        loc.setdefault("city", "")
+        if not loc.get("country"):
+            # Migrate pre-country entries: look up by city, drop the county.
+            loc["country"] = _CITY_TO_COUNTRY.get(loc.get("city", ""), "")
+        loc.pop("county", None)
         entry.setdefault("likes", 0)
         entry.setdefault("views", 0)
         entry.setdefault("liked_by_me", False)
@@ -441,7 +450,7 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
             "preview_url": preview_url,
             "poster_url": poster_url,
             "tags": meta.get("tags", []),
-            "location": meta.get("location", {"city": "", "county": ""}),
+            "location": meta.get("location", {"city": "", "country": ""}),
             "likes": meta.get("likes", 0),
             "views": meta.get("views", 0),
             "liked_by_me": bool(meta.get("liked_by_me", False)),

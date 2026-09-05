@@ -88,9 +88,7 @@ function ExploreTile({ video, onOpen }) {
   }, [video.preview_url, video.url]);
 
   const commentCount = video.comments?.length || 0;
-  const city = video.location?.city || '';
-  const county = video.location?.county || '';
-  const place = [city, county].filter(Boolean).join(', ');
+  const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
   const tagHint = (video.tags || []).map((t) => `#${t}`).join(' ');
   const liked = !!video.liked_by_me;
 
@@ -127,11 +125,10 @@ function ExploreTile({ video, onOpen }) {
           }}
         />
       )}
-      <span className="sx-explore-badge" aria-hidden="true">▶</span>
-      {city ? (
+      {place ? (
         <span className="sx-explore-loc" title={place}>
           <LocationIcon />
-          {city}
+          {place}
         </span>
       ) : null}
       <span className="sx-explore-stats">
