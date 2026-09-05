@@ -129,6 +129,15 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
   const probeList = Object.values(probes);
   const okCount = probeList.filter((p) => p.ok).length;
   const degraded = probeList.filter((p) => !p.ok);
+  // Same severity priority as the header ENG pill: all ok → green; a blocking
+  // probe down or half+ down → red; 1–2 degraded → yellow.
+  const probesCritical = degraded.some((p) => p.severity === 'block');
+  const probesColor =
+    degraded.length === 0
+      ? 'var(--sx-success)'
+      : probesCritical || degraded.length * 2 >= probeList.length
+        ? 'var(--sx-danger)'
+        : 'var(--sx-warn)';
   const refreshing = health?.refreshing ?? false;
   const probing = !health || !health.probes;
   const refreshedAt = health?.refreshed_at;
@@ -247,8 +256,8 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
       {/* ─── System Probes Module ───────────────────────────── */}
       <div className="sx-sidebar-card">
         <div className="sx-sidebar-card-head">
-          <span className="sx-sidebar-card-title">LIVE STATUS / PROBES</span>
-          <span className="sx-sidebar-status-count">
+          <span className="sx-sidebar-card-title">LIVE STATUS / ENG PROBES</span>
+          <span className="sx-sidebar-status-count" style={{ color: probing ? undefined : probesColor }}>
             {probing ? 'PROBING…' : `${okCount}/${probeList.length || '—'} OK`}
           </span>
         </div>

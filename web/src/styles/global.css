@@ -274,21 +274,20 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--sx-bg);
-  border: 1px solid var(--sx-rule-strong);
-  color: var(--sx-ink-3);
+  background: var(--sx-accent);
+  border: none;
+  color: #000000;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 180ms ease;
-  font-family: 'JetBrains Mono', monospace;
+  border-radius: 0;
+  box-shadow: 0 0 16px var(--sx-accent-glow);
+  transition: opacity 150ms ease;
+  font-family: 'Archivo Black', Archivo, sans-serif;
   font-size: 14px;
+  font-weight: 900;
 }
 
 .sx-sidebar-close-btn:hover {
-  color: var(--sx-accent);
-  border-color: var(--sx-accent);
-  background: var(--sx-surface-hover);
-  box-shadow: 0 0 10px rgba(255, 59, 31, 0.3);
+  opacity: 0.85;
 }
 
 .sx-sidebar-brand-block {
@@ -2596,7 +2595,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-k {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
+  font-size: 0.73rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
@@ -2606,7 +2605,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-v {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   font-weight: 700;
   color: var(--sx-ink);
 }

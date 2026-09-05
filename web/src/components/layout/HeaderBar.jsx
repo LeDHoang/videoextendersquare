@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useHealthContext } from '../../hooks/HealthContext.jsx';
 
-export default function HeaderBar({ onOpenSettings, hidden = false }) {
+export default function HeaderBar({ onToggleSidebar, hidden = false }) {
   const health = useHealthContext();
   const location = useLocation();
   const navigate = useNavigate();
@@ -39,8 +39,27 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
   };
 
   const probes = Object.values(health?.probes || {});
-  const systemOk = probes.length > 0 && probes.every((p) => p.ok);
+  const okCount = probes.filter((p) => p.ok).length;
+  const missing = probes.filter((p) => !p.ok);
+  // Severity priority: all ok → green; a blocking (render-gating) probe down
+  // or half+ down → red; anything else (1–2 degraded) → yellow.
+  const critical = missing.some((p) => p.severity === 'block');
+  const engColor = !probes.length
+    ? 'var(--sx-ink)'
+    : missing.length === 0
+      ? 'var(--sx-success)'
+      : critical || missing.length * 2 >= probes.length
+        ? 'var(--sx-danger)'
+        : 'var(--sx-warn)';
+  const falMissing = health?.fal_key == null;
   const falOk = health?.fal_key?.ok;
+  const sys = health?.system || {};
+  const memVal =
+    sys.total_gb != null && sys.used_gb != null
+      ? `${sys.used_gb}/${sys.total_gb}GB`
+      : sys.total_gb != null
+        ? `${sys.total_gb}GB`
+        : '—';
 
   return (
     <header
@@ -48,8 +67,17 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
       aria-hidden={hidden ? 'true' : undefined}
       style={hidden ? { pointerEvents: 'none' } : undefined}
     >
-      {/* ─── Left: Branding & Routes ──────────────────────── */}
+      {/* ─── Left: Sidebar Toggle, Branding & Routes ─────── */}
       <div className="sx-top-left">
+        <button
+          type="button"
+          className="sx-icon-btn"
+          onClick={onToggleSidebar}
+          title="Open/Close Sidebar"
+          aria-label="Toggle Sidebar"
+        >
+          ☰
+        </button>
         <NavLink to="/image" className="sx-top-brand" title="ECHO 4K Engine">
           <img src="/logo.png" alt="ECHO Logo" className="sx-top-logo" />
           <span>ECHO</span>
@@ -111,23 +139,26 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
         {/* Telemetry Pill */}
         <div className="sx-top-telemetry">
           <div className="sx-telemetry-item">
-            <span className="sx-tel-k">FPS</span>
-            <span className="sx-tel-v" style={{ color: 'var(--sx-accent)' }}>
-              120
+            <span className="sx-tel-k">FAL</span>
+            <span
+              className="sx-tel-v"
+              style={{ color: falMissing ? 'var(--sx-ink)' : falOk ? 'var(--sx-success)' : 'var(--sx-danger)' }}
+            >
+              {falMissing ? '…' : falOk ? 'AUTHED' : 'UNAUTHED'}
             </span>
           </div>
           <div className="sx-telemetry-item">
             <span className="sx-tel-k">ENG</span>
             <span
               className="sx-tel-v"
-              style={{ color: systemOk ? 'var(--sx-ink)' : 'var(--sx-danger)' }}
+              style={{ color: engColor }}
             >
-              {systemOk ? 'ONLINE' : 'ALERT'}
+              {probes.length ? `${okCount}/${probes.length} OK` : '…'}
             </span>
           </div>
-          <div className="sx-telemetry-item">
-            <span className="sx-tel-k">VRAM</span>
-            <span className="sx-tel-v">14.2GB</span>
+          <div className="sx-telemetry-item" title={sys.gpu || undefined}>
+            <span className="sx-tel-k">{sys.label || 'VRAM'}</span>
+            <span className="sx-tel-v">{memVal}</span>
           </div>
         </div>
 
@@ -146,38 +177,8 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
           }}
           title="Trigger Pipeline Process / Execution"
         >
-          PROCESS
+          UPLOAD
         </button>
-
-        {/* Settings / Config Drawer Toggle */}
-        <div className="sx-top-icons">
-          <button
-            type="button"
-            className="sx-icon-btn"
-            onClick={onOpenSettings}
-            title="System Settings & Hardware Diagnostics"
-            aria-label="Open Hardware Diagnostics & Configuration"
-          >
-            ⚙
-          </button>
-          <button
-            type="button"
-            className="sx-icon-btn"
-            onClick={onOpenSettings}
-            title={falOk ? 'FAL.AI Connected' : 'FAL.AI Key Required'}
-            aria-label="Account and Cloud Status"
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: falOk ? 'var(--sx-success)' : 'var(--sx-warn)',
-                display: 'inline-block',
-              }}
-            />
-          </button>
-        </div>
       </div>
     </header>
   );

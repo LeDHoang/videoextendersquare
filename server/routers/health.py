@@ -67,4 +67,7 @@ def get_health(refresh: bool = False):
         "fal_key": _probe_to_dict(fal),
         "from_cache": from_cache,
         "refreshed_at": _cached_at,
+        # Live every request (fast local calls) — informational only, never
+        # part of the ENG ok-count.
+        "system": _probes.system_memory(),
     }
