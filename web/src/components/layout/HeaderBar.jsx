@@ -57,16 +57,16 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
 
         <nav className="sx-top-nav" aria-label="Global Routes">
           <NavLink
-            to="/video"
-            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
-          >
-            EXTENDER
-          </NavLink>
-          <NavLink
             to="/image"
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
           >
-            STUDIO
+            IMAGE
+          </NavLink>
+          <NavLink
+            to="/video"
+            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
+          >
+            VIDEO
           </NavLink>
           <NavLink
             to="/compare"
@@ -78,7 +78,7 @@ export default function HeaderBar({ onOpenSettings, hidden = false }) {
             to="/reels"
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
           >
-            REELS
+            REELS/VR
           </NavLink>
         </nav>
       </div>

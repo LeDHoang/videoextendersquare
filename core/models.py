@@ -29,6 +29,14 @@ VIDEO_OUTPAINT = [
         "default_resolution": "720p",
     },
     {
+        "label": "LTX 2.3 Quality + LoRA",
+        "model": "fal-ai/ltx-2.3-quality/outpaint/lora",
+        "pricing_kind": "per_mp",
+        "price": 0.0024075,
+        "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
+        "default_resolution": "720p",
+    },
+    {
         "label": "Luma Ray-2 Reframe",
         "model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
         "pricing_kind": "per_second",

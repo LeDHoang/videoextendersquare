@@ -39,12 +39,16 @@ export default function VideoPage() {
   const [items, setItems] = useState([]);
   const [mode, setMode] = useState(MODES[0]);
   const [outpaintOpt, setOutpaintOpt] = useState(defaultOutpaint);
-  const [prompt, setPrompt] = useState('Seamlessly extend the background environment, high details, matching texture and lighting. Keep the origin video aethestic and lighting');
+  const [prompt, setPrompt] = useState('Seamlessly extend the background environment, cool lighting, neutral color temperature, matching original white balance and color palette.');
   const [engine, setEngine] = useState('FAST');
   const [falUpscale, setFalUpscale] = useState(defaultUpscale);
   const [sharpening, setSharpening] = useState(0.5);
   const [ltxRes, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
+  const [ltxGuidance, setLtxGuidance] = useState(1.0);
+  const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
+  const [ltxNegativePrompt, setLtxNegativePrompt] = useState('yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated');
+  const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
   const [seedvrTarget, setSeedvrTarget] = useState('1080p');
   const [btdRes, setBtdRes] = useState('4k');
@@ -122,6 +126,9 @@ export default function VideoPage() {
     setItems(staged);
   };
 
+  const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
+  const loraList = loraPicked ? ltxLoras.map((l, i) => ({ ...l, path: (l.path || '').trim() })).filter((l) => l.path) : [];
+
   const render = async () => {
     setError('');
     setBusy(true);
@@ -138,6 +145,10 @@ export default function VideoPage() {
         upscale_model: upscaleModel,
         ltx_resolution: ltxRes,
         ltx_audio: String(ltxAudio),
+        ltx_guidance: String(ltxGuidance),
+        ltx_prompt_expansion: String(ltxPromptExpansion),
+        ltx_negative_prompt: ltxNegativePrompt,
+        ltx_loras: JSON.stringify(loraList),
         seedvr_factor: String(seedvrFactor),
         seedvr_target: seedvrTarget,
         bytedance_target_res: btdRes,
@@ -253,9 +264,111 @@ export default function VideoPage() {
                           ))}
                         </select>
                       </Field>
+                      <Field label="GUIDANCE SCALE (CFG)">
+                        <input
+                          className="sx-input"
+                          type="number"
+                          min={1.0}
+                          max={20.0}
+                          step={0.1}
+                          value={ltxGuidance}
+                          onChange={(e) => setLtxGuidance(Number(e.target.value))}
+                        />
+                      </Field>
+                      <Field label="NEGATIVE PROMPT" style={{ gridColumn: '1 / -1' }}>
+                        <input
+                          className="sx-input"
+                          type="text"
+                          value={ltxNegativePrompt}
+                          onChange={(e) => setLtxNegativePrompt(e.target.value)}
+                          placeholder="yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
+                        />
+                      </Field>
                       <div style={{ alignSelf: 'center' }}>
                         <ToggleRow label="Preserve Audio Track" checked={ltxAudio} onChange={setLtxAudio} />
                       </div>
+                      <div style={{ alignSelf: 'center' }}>
+                        <ToggleRow label="Enable Prompt Expansion (LLM Enrich)" checked={ltxPromptExpansion} onChange={setLtxPromptExpansion} />
+                      </div>
+                    </div>
+                  </details>
+                ) : null}
+
+                {loraPicked ? (
+                  <details className="sx-expander" open>
+                    <summary>▸ CUSTOM LoRA STACK (MAX 3)</summary>
+                    <div className="sx-expander-body sx-cols sx-cols-2">
+                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-muted)', marginBottom: 'var(--sx-2)' }}>
+                        Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot. Civitai: paste the plain https://civitai.com/api/download/models/&lt;versionId&gt; link (optionally with ?fileId=&lt;id&gt;) — the server auto-appends your CIVITAI_KEY, so never include your token yourself.
+                      </div>
+                      {ltxLoras.map((lora, i) => (
+                        <div key={i} className="sx-cols sx-cols-2" style={{ gridColumn: '1 / -1', gap: 'var(--sx-3)' }}>
+                          <Field label={`LoRA #${i + 1} — SAFETENSORS URL`}>
+                            <input
+                              className="sx-input"
+                              type="url"
+                              placeholder="https://example.com/path/to/lora.safetensors"
+                              value={lora.path}
+                              onChange={(e) => {
+                                const next = [...ltxLoras];
+                                next[i] = { ...next[i], path: e.target.value };
+                                setLtxLoras(next);
+                              }}
+                            />
+                          </Field>
+                          <div className="sx-cols sx-cols-2" style={{ gap: 'var(--sx-3)' }}>
+                            <Field label="SCALE">
+                              <input
+                                className="sx-input"
+                                type="number"
+                                min={0}
+                                max={2}
+                                step={0.05}
+                                value={lora.scale}
+                                onChange={(e) => {
+                                  const next = [...ltxLoras];
+                                  next[i] = { ...next[i], scale: Number(e.target.value) };
+                                  setLtxLoras(next);
+                                }}
+                              />
+                            </Field>
+                            <Field label="TRANSFORMER">
+                              <select
+                                className="sx-select"
+                                value={lora.transformer}
+                                onChange={(e) => {
+                                  const next = [...ltxLoras];
+                                  next[i] = { ...next[i], transformer: e.target.value };
+                                  setLtxLoras(next);
+                                }}
+                              >
+                                {['both', 'high', 'low'].map((o) => (
+                                  <option key={o}>{o}</option>
+                                ))}
+                              </select>
+                            </Field>
+                          </div>
+                          {i > 0 ? (
+                            <button
+                              type="button"
+                              className="sx-link-danger"
+                              onClick={() => setLtxLoras(ltxLoras.filter((_, j) => j !== i))}
+                            >
+                              REMOVE LoRA #{i + 1}
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                      {ltxLoras.length < 3 ? (
+                        <button
+                          type="button"
+                          className="sx-link"
+                          style={{ gridColumn: '1 / -1', alignSelf: 'start' }}
+                          onClick={() => setLtxLoras([...ltxLoras, { path: '', scale: 1, transformer: 'both' }])}
+                        >
+                          + ADD LoRA
+                        </button>
+                      ) : null}
                     </div>
                   </details>
                 ) : null}

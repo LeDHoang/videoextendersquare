@@ -1,5 +1,6 @@
 """Video processing router — upload, job creation, SSE progress, and downloads."""
 
+import json
 import os
 import time
 import uuid
@@ -32,16 +33,54 @@ STAGE_TTL_S = 6 * 3600
 # default branch, so reject anything outside the known set up front instead.
 _UPSCALE_ENGINES = {"fast", "fal", "studio"}
 _LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
+_LTX_TRANSFORMERS = {"high", "low", "both"}
 _SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
 _BYTEDANCE_RES = {"1080p", "2k", "4k"}
 _BYTEDANCE_FPS = {"30fps", "60fps"}
 _BYTEDANCE_TIERS = {"fast", "pro"}
 
 
+def _parse_ltx_loras(raw: str) -> list[dict]:
+    """Parse the JSON-encoded ``ltx_loras`` form field into a validated list
+    of LoRA dicts ({path, scale, transformer}), at most 3 entries. The worker
+    passes these straight through to the fal.ai endpoint, so URLs are only
+    sanity-checked here (http/https), not fetched."""
+    raw = (raw or "").strip() if isinstance(raw, str) else raw
+    if not raw:
+        return []
+    try:
+        loras = json.loads(raw)
+    except (TypeError, ValueError) as ex:
+        raise HTTPException(status_code=400, detail=f"ltx_loras must be a JSON array: {ex}")
+    if not isinstance(loras, list):
+        raise HTTPException(status_code=400, detail="ltx_loras must be a JSON array of LoRA objects")
+    if len(loras) > 3:
+        raise HTTPException(status_code=400, detail="ltx_loras accepts at most 3 LoRAs")
+
+    cleaned = []
+    for i, lora in enumerate(loras):
+        if not isinstance(lora, dict):
+            raise HTTPException(status_code=400, detail=f"ltx_loras[{i}] must be an object")
+        path = str(lora.get("path", "")).strip()
+        if not path.startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail=f"ltx_loras[{i}].path must be an http(s) URL to a .safetensors file")
+        try:
+            scale = float(lora.get("scale", 1.0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"ltx_loras[{i}].scale must be a number")
+        if not 0.0 <= scale <= 2.0:
+            raise HTTPException(status_code=400, detail=f"ltx_loras[{i}].scale must be between 0.0 and 2.0")
+        transformer = str(lora.get("transformer", "both"))
+        if transformer not in _LTX_TRANSFORMERS:
+            raise HTTPException(status_code=400, detail=f"ltx_loras[{i}].transformer must be one of {sorted(_LTX_TRANSFORMERS)}")
+        cleaned.append({"path": path, "scale": scale, "transformer": transformer})
+    return cleaned
+
+
 def _validate_video_form(
     upscale_engine, sharpening, ltx_resolution, seedvr_factor, seedvr_target,
     bytedance_target_res, bytedance_target_fps, bytedance_tier,
-    trim_start, trim_duration,
+    trim_start, trim_duration, ltx_guidance=1.0,
 ):
     def check_enum(name, value, allowed):
         if value not in allowed:
@@ -58,6 +97,8 @@ def _validate_video_form(
         raise HTTPException(status_code=400, detail="sharpening must be between 0.0 and 1.0")
     if not 1.0 <= seedvr_factor <= 4.0:
         raise HTTPException(status_code=400, detail="seedvr_factor must be between 1.0 and 4.0")
+    if not 1.0 <= ltx_guidance <= 20.0:
+        raise HTTPException(status_code=400, detail="ltx_guidance must be between 1.0 and 20.0")
     if trim_start < 0:
         raise HTTPException(status_code=400, detail="trim_start must be >= 0")
     if not 1.0 <= trim_duration <= 15.0:
@@ -125,6 +166,10 @@ def start_video_process(
     upscale_model: str = Form("fal-ai/seedvr/upscale/video"),
     ltx_resolution: str = Form("720p"),
     ltx_audio: bool = Form(True),
+    ltx_guidance: float = Form(1.0),
+    ltx_prompt_expansion: bool = Form(False),
+    ltx_negative_prompt: str = Form("yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"),
+    ltx_loras: str = Form(""),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
     bytedance_target_res: str = Form("4k"),
@@ -140,8 +185,9 @@ def start_video_process(
     _validate_video_form(
         upscale_engine, sharpening, ltx_resolution, seedvr_factor, seedvr_target,
         bytedance_target_res, bytedance_target_fps, bytedance_tier,
-        trim_start, trim_duration,
+        trim_start, trim_duration, ltx_guidance,
     )
+    ltx_loras = _parse_ltx_loras(ltx_loras)
 
     staged = STAGED_UPLOADS.get(stage_id)
     src_path = staged[0] if staged else None
@@ -161,6 +207,10 @@ def start_video_process(
         "upscale_engine": upscale_engine,
         "ltx_resolution": ltx_resolution,
         "ltx_audio": ltx_audio,
+        "ltx_guidance": ltx_guidance,
+        "ltx_prompt_expansion": ltx_prompt_expansion,
+        "ltx_negative_prompt": ltx_negative_prompt,
+        "ltx_loras": ltx_loras,
         "seedvr_factor": seedvr_factor,
         "seedvr_target": seedvr_target,
         "bytedance_target_res": bytedance_target_res,
@@ -246,6 +296,23 @@ async def stream_job_progress(job_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Job not found")
 
     return EventSourceResponse(job_progress_stream(request, rec))
+
+
+@router.get("/jobs/{job_id}/result")
+def get_job_result(job_id: str):
+    """Get the completed job's result metadata and download URLs."""
+    rec = job_manager.get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": rec.job_id,
+        "kind": rec.kind,
+        "status": rec.status.value,
+        "phase": rec.phase,
+        "elapsed": rec.elapsed,
+        "result": rec.result,
+        "error": rec.error,
+    }
 
 
 @router.get("/jobs/{job_id}/download")

@@ -123,17 +123,21 @@ def render(ctx: dict) -> None:
         upscale_only = mode == "UPSCALE ONLY"
 
         prompt = S.get(NS, "prompt_cache") or (
-            "Seamlessly extend the background environment, high details, "
-            "matching texture and lighting. Keep the origin video aethestic and lighting"
+            "Seamlessly extend the background environment, cool lighting, "
+            "neutral color temperature, matching original white balance and color palette."
         )
         outpaint_model_id = ctx["models"]["outpaint_vid"]
         ltx_resolution = "720p"
         ltx_audio = True
+        ltx_guidance = 1.0
+        ltx_prompt_expansion = False
+        ltx_negative_prompt = "yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
 
         if not upscale_only:
             C.eyebrow("OUTPAINT MODEL")
             outpaint_options = {
                 "LTX 2.3 Quality": "fal-ai/ltx-2.3-quality/outpaint",
+                "LTX 2.3 Quality + LoRA": "fal-ai/ltx-2.3-quality/outpaint/lora",
                 "Luma Ray-2 Reframe": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
                 "Wan VACE 14B": "fal-ai/wan-vace-14b/video-to-video",
             }
@@ -163,10 +167,68 @@ def render(ctx: dict) -> None:
                             help="Canvas resolution tier for LTX 2.3 Outpaint."
                         )
                     with cl2:
+                        ltx_guidance = st.slider(
+                            "Guidance Scale (CFG)", 1.0, 10.0, 1.0, 0.1,
+                            key=S.wkey(NS, "ltx_guidance"),
+                            help="CFG scale for LTX (1.0 recommended to prevent yellow tint)."
+                        )
+                    cl3, cl4 = st.columns(2)
+                    with cl3:
                         ltx_audio = st.toggle(
                             "Include Audio Track", value=True,
                             key=S.wkey(NS, "ltx_audio")
                         )
+                    with cl4:
+                        ltx_prompt_expansion = st.toggle(
+                            "Enable Prompt Expansion", value=False,
+                            key=S.wkey(NS, "ltx_prompt_expansion"),
+                            help="Disabled by default to prevent LLM from adding warm lighting tokens."
+                        )
+                    ltx_negative_prompt = st.text_input(
+                        "Negative Prompt",
+                        value="yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated",
+                        key=S.wkey(NS, "ltx_neg_prompt"),
+                        help="Steer LTX away from unwanted color casts."
+                    )
+
+            ltx_loras = []
+            if "/lora" in outpaint_model_id.lower():
+                C.eyebrow("LTX 2.3 LoRA STACK (MAX 3)")
+                with st.expander("▸ CUSTOM LoRA WEIGHTS", expanded=True):
+                    st.caption(
+                        "Apply your own LoRA weights on top of LTX-2.3. Each LoRA "
+                        "must be a direct http(s) URL to a .safetensors file "
+                        "(max 3 GB each). Leave a path empty to skip that slot. "
+                        "Civitai: paste the plain "
+                        "https://civitai.com/api/download/models/<versionId> link "
+                        "(optionally with ?fileId=<id>) — the server auto-appends "
+                        "your CIVITAI_KEY, so never include your token yourself."
+                    )
+                    for slot in range(3):
+                        lk = S.wkey(NS, f"ltx_lora_{slot}")
+                        path = st.text_input(
+                            f"LoRA #{slot + 1} — safetensors URL",
+                            key=lk,
+                            placeholder="https://example.com/path/to/lora.safetensors",
+                        )
+                        if path and path.strip():
+                            s1, s2 = st.columns([1, 1])
+                            with s1:
+                                scale = st.slider(
+                                    f"#{slot + 1} scale", 0.0, 2.0, 1.0, 0.05,
+                                    key=S.wkey(NS, f"ltx_lora_{slot}_scale"),
+                                )
+                            with s2:
+                                transformer = st.selectbox(
+                                    f"#{slot + 1} transformer",
+                                    ["both", "high", "low"], index=0,
+                                    key=S.wkey(NS, f"ltx_lora_{slot}_transformer"),
+                                )
+                            ltx_loras.append({
+                                "path": path.strip(),
+                                "scale": scale,
+                                "transformer": transformer,
+                            })
 
         C.eyebrow("UPSCALE ENGINE")
         engine = st.segmented_control(
@@ -333,7 +395,8 @@ def render(ctx: dict) -> None:
                 frames_est = int(total_effective_dur * 24) if total_effective_dur > 0 else 121
                 mp = (w_ltx * h_ltx * frames_est) / 1000000.0
                 est_outpaint_cost = mp * 0.0024075
-                outpaint_label = f"LTX 2.3 Quality ({ltx_resolution}) (~$0.0024/MP)"
+                lora_suffix = " + LoRA" if "/lora" in outpaint_lower else ""
+                outpaint_label = f"LTX 2.3 Quality{lora_suffix} ({ltx_resolution}) (~$0.0024/MP)"
             elif "wan" in outpaint_lower or "vace" in outpaint_lower:
                 est_outpaint_cost = total_effective_dur * 0.08
                 outpaint_label = "Wan VACE 14B ($0.08/s @ 720p)"
@@ -422,6 +485,10 @@ def render(ctx: dict) -> None:
                     "upscale_engine": "fal" if fal_picked else ("studio" if studio_picked else "fast"),
                     "ltx_resolution": ltx_resolution,
                     "ltx_audio": ltx_audio,
+                    "ltx_guidance": ltx_guidance,
+                    "ltx_prompt_expansion": ltx_prompt_expansion,
+                    "ltx_negative_prompt": ltx_negative_prompt,
+                    "ltx_loras": ltx_loras,
                     "seedvr_factor": seedvr_factor,
                     "seedvr_target": seedvr_target,
                     "bytedance_target_res": bytedance_target_res,

@@ -71,6 +71,13 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
   const probeList = Object.values(probes);
   const okCount = probeList.filter((p) => p.ok).length;
   const degraded = probeList.filter((p) => !p.ok);
+  const refreshing = health?.refreshing ?? false;
+  const probing = !health || !health.probes;
+  const refreshedAt = health?.refreshed_at;
+  const fromCache = health?.from_cache;
+  const refreshedLabel = refreshedAt
+    ? `UPDATED ${new Date(refreshedAt * 1000).toLocaleTimeString()}${fromCache ? ' · CACHED' : ' · LIVE'}`
+    : null;
 
   return (
     <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
@@ -184,27 +191,53 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">LIVE STATUS / PROBES</span>
           <span className="sx-sidebar-status-count">
-            {okCount}/{probeList.length || '—'} OK
+            {probing ? 'PROBING…' : `${okCount}/${probeList.length || '—'} OK`}
           </span>
         </div>
 
         <div className="sx-sidebar-status-board">
-          {probeList.map((p) => (
-            <div key={p.id} className="sx-sidebar-probe-row">
-              <span className="sx-sidebar-probe-label">{p.label}</span>
-              <span
-                className={`sx-sidebar-probe-val ${
-                  p.ok ? 'sx-val-ok' : p.severity === 'block' ? 'sx-val-err' : 'sx-val-warn'
-                }`}
-              >
-                {p.detail || (p.ok ? 'OK' : 'FAIL')}
-              </span>
+          {probing ? (
+            <div className="sx-sidebar-probe-row">
+              <span className="sx-sidebar-probe-label">ENVIRONMENT</span>
+              <span className="sx-sidebar-probe-val sx-val-warn">PROBING…</span>
             </div>
-          ))}
+          ) : probeList.length === 0 ? (
+            <div className="sx-sidebar-probe-row">
+              <span className="sx-sidebar-probe-label">BACKEND</span>
+              <span className="sx-sidebar-probe-val sx-val-err">UNREACHABLE</span>
+            </div>
+          ) : (
+            probeList.map((p) => (
+              <div key={p.id} className="sx-sidebar-probe-row">
+                <span className="sx-sidebar-probe-label">{p.label}</span>
+                <span
+                  className={`sx-sidebar-probe-val ${
+                    p.ok ? 'sx-val-ok' : p.severity === 'block' ? 'sx-val-err' : 'sx-val-warn'
+                  }`}
+                >
+                  {p.detail || (p.ok ? 'OK' : 'FAIL')}
+                </span>
+              </div>
+            ))
+          )}
           <div className="sx-sidebar-probe-footer">
             <span className="sx-sidebar-probe-sub">
-              {degraded.length === 0 ? '✓ ALL ENGINES OPERATIONAL' : `⚠ ${degraded.length} ISSUE(S)`}
+              {probing
+                ? '○ PROBING ENVIRONMENT…'
+                : probeList.length === 0
+                  ? '⚠ HEALTH ENDPOINT UNREACHABLE'
+                  : degraded.length === 0
+                    ? '✓ ALL ENGINES OPERATIONAL'
+                    : `⚠ ${degraded.length} ISSUE(S)`}
             </span>
+            {refreshedLabel ? (
+              <span
+                className="sx-sidebar-probe-sub"
+                style={{ display: 'block', marginTop: 2, opacity: 0.7 }}
+              >
+                {refreshing ? '↻ RE-PROBING NOW…' : refreshedLabel}
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -212,8 +245,9 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
           type="button"
           className="sx-sidebar-btn-recheck"
           onClick={() => health?.refresh?.()}
+          disabled={refreshing || probing}
         >
-          ↻ RECHECK PROBES
+          {refreshing ? '↻ RE-PROBING…' : '↻ RECHECK PROBES'}
         </button>
 
         {degraded.length > 0 ? (
@@ -262,7 +296,7 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
         <div className="sx-telemetry-col">
           <span className="sx-telemetry-key">PROBES_OK</span>
           <span className="sx-telemetry-val" style={{ color: 'var(--sx-ink)' }}>
-            {okCount}/{probeList.length}
+            {probing ? '…' : `${okCount}/${probeList.length}`}
           </span>
         </div>
         <div className="sx-telemetry-col">

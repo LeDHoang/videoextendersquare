@@ -139,6 +139,23 @@ async def stream_job_progress(job_id: str, request: Request):
     return EventSourceResponse(job_progress_stream(request, rec))
 
 
+@router.get("/jobs/{job_id}/result")
+def get_job_result(job_id: str):
+    """Get the completed job's result metadata and download URLs."""
+    rec = job_manager.get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": rec.job_id,
+        "kind": rec.kind,
+        "status": rec.status.value,
+        "phase": rec.phase,
+        "elapsed": rec.elapsed,
+        "result": rec.result,
+        "error": rec.error,
+    }
+
+
 @router.get("/jobs/{job_id}/download")
 def download_image(job_id: str):
     """Download the completed job's result (jailed to the job directory)."""

@@ -16,6 +16,7 @@ from pipeline.utils import (
     calculate_square_padding,
     has_audio_stream,
     fetch_fal_result,
+    attach_civitai_token,
 )
 
 def extract_video_url(result):
@@ -291,6 +292,10 @@ def _process_video_impl(
                 status_callback(f"Submitting video outpainting job to {outpaint_model}...")
             
             t_op_start = time.time()
+            default_prompt = (
+                "Seamlessly extend the background environment, cool lighting, "
+                "neutral color temperature, matching original white balance and color palette."
+            )
             model_lower = (outpaint_model or "").lower()
             if "luma" in model_lower or "reframe" in model_lower:
                 arguments = {
@@ -301,9 +306,15 @@ def _process_video_impl(
                     arguments["prompt"] = prompt.strip()
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             elif "ltx" in model_lower:
+                neg_prompt = kwargs.get("ltx_negative_prompt")
+                if neg_prompt is None or not str(neg_prompt).strip():
+                    neg_prompt = "yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
+
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend the background environment, high details, matching texture and lighting. Keep the origin video aethestic and lighting",
+                    "prompt": prompt or default_prompt,
+                    "negative_prompt": str(neg_prompt).strip(),
+                    "enable_prompt_expansion": bool(kwargs.get("ltx_prompt_expansion", kwargs.get("ltx_enable_prompt_expansion", False))),
                     "aspect_ratio": kwargs.get("ltx_aspect_ratio", "1:1"),
                     "output_resolution": kwargs.get("ltx_resolution", "720p"),
                     "source_scale": float(kwargs.get("ltx_source_scale", 1.0)),
@@ -312,6 +323,22 @@ def _process_video_impl(
                     "guidance_scale": float(kwargs.get("ltx_guidance", 1.0)),
                     "generate_audio": bool(kwargs.get("ltx_audio", True)),
                 }
+                if "/lora" in model_lower:
+                    loras = kwargs.get("ltx_loras") or []
+                    loras = [
+                        l for l in loras
+                        if isinstance(l, dict)
+                        and isinstance(l.get("path"), str)
+                        and l["path"].strip()
+                    ]
+                    if loras:
+                        if len(loras) > 3:
+                            raise ValueError("LTX outpaint accepts at most 3 LoRAs.")
+                        arguments["loras"] = [{
+                            "path": attach_civitai_token(str(l["path"]).strip()),
+                            "scale": float(l.get("scale", 1.0)),
+                            "transformer": str(l.get("transformer", "both")),
+                        } for l in loras]
                 _, outpaint_cost = _models.estimate_outpaint_cost(
                     outpaint_model, duration=duration,
                     resolution=kwargs.get("ltx_resolution", "720p"),
@@ -319,14 +346,14 @@ def _process_video_impl(
             elif "wan" in model_lower or "vace" in model_lower:
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend the background environment beyond the original frame",
+                    "prompt": prompt or default_prompt,
                     "aspect_ratio": kwargs.get("wan_aspect_ratio", "1:1"),
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             else:
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend environment context",
+                    "prompt": prompt or default_prompt,
                     "aspect_ratio": "1:1",
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)

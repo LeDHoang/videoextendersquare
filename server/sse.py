@@ -44,7 +44,7 @@ async def job_progress_stream(request: Request, rec: JobRecord) -> AsyncIterator
                 "error": rec.error,
             }
 
-        yield {"event": "progress", "data": data}
+        yield {"data": data}
 
         if status in ("complete", "failed"):
             break

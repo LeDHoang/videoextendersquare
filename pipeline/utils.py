@@ -1,10 +1,36 @@
 import io
 import json
+import os
 import subprocess
 import urllib.request
 from PIL import Image
 
 MAX_FAL_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB — generous ceiling for a 4K master
+
+
+def attach_civitai_token(url: str, api_key: str | None = None) -> str:
+    """Auto-complete a Civitai model-download URL with the user's API token.
+
+    Civitai's direct-download endpoint (civitai.com/api/download/models/<id>)
+    needs ``?token=`` for restricted/authenticated models. Rather than having
+    users paste their key in the browser UI, we keep ``CIVITAI_KEY`` server-side
+    and splice it in right before the URL is handed to fal.ai.
+
+    Only touches URL host+path that look like Civitai model downloads; never
+    overwrites an existing ``token`` param; uses ``&`` when the URL already
+    carries a query string (e.g. ``?fileId=123``).
+    """
+    if not api_key:
+        api_key = os.environ.get("CIVITAI_KEY")
+    if not api_key or not url:
+        return url
+    if "civitai.com/api/download/models" not in url.lower():
+        return url
+    if "token=" in url.lower():
+        return url
+    if "?" in url:
+        return f"{url}&token={api_key}"
+    return f"{url}?token={api_key}"
 
 
 def fetch_fal_result(url: str, dest_path: str, timeout: float = 120.0,
