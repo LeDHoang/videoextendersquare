@@ -2,6 +2,7 @@ import os
 import tempfile
 import uuid
 import fal_client
+from core import models as _models
 from pipeline.utils import get_image_dimensions, calculate_square_padding, fetch_fal_result
 
 def extract_image_url(result):
@@ -27,7 +28,7 @@ def extract_image_url(result):
             
     raise ValueError(f"Could not find output URL in result: {result}")
 
-def process_image(image_source, prompt, fal_key=None, status_callback=None, upscale_only=False, sharpening=0.0, upscale_engine="fast", upscale_model="fal-ai/clarity-upscaler"):
+def process_image(image_source, prompt, fal_key=None, status_callback=None, upscale_only=False, sharpening=0.0, upscale_engine="fast", upscale_model="fal-ai/clarity-upscaler", outpaint_model="fal-ai/flux/outpaint", custom_outpaint_args=None, custom_upscale_args=None):
     """
     Saves image, uploads to fal, calculates padding, calls flux/outpaint, 
     and upscales the output using local FFmpeg or fal.ai cloud upscale.
@@ -53,6 +54,22 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
     # module-level fal_client singleton — both are process-global state and
     # would race across concurrently running jobs with different keys.
     fal = fal_client.SyncClient(key=fal_key) if fal_key else fal_client.sync_client
+
+    # Extra fal.ai arguments for CUSTOM(...) models (flat scalars only; media
+    # URLs stay pipeline-managed). Applied only to non-stock models.
+    def _extras(raw) -> dict:
+        try:
+            d = _models.parse_custom_args(raw)
+        except ValueError:
+            d = {}
+        d.pop("video_url", None)
+        d.pop("image_url", None)
+        return d
+
+    outpaint_custom = "flux/outpaint" not in (outpaint_model or "").lower()
+    upscale_custom = not _models.is_stock_image_upscale_model(upscale_model or "")
+    use_extra_out = _extras(custom_outpaint_args) if outpaint_custom else {}
+    use_extra_up = _extras(custom_upscale_args) if upscale_custom else {}
 
     # 1. Write source image to a temporary file if it's bytes
     temp_path = None
@@ -84,18 +101,32 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 outpaint_url = image_url
             else:
                 if status_callback:
-                    status_callback("Submitting image outpainting job...")
-                arguments = {
-                    "image_url": image_url,
-                    "top": top,
-                    "bottom": bottom,
-                    "left": left,
-                    "right": right,
-                    "prompt": prompt
-                }
-                
+                    status_callback(f"Submitting image outpainting job to {outpaint_model}...")
+                if "flux/outpaint" in (outpaint_model or "").lower():
+                    arguments = {
+                        "image_url": image_url,
+                        "top": top,
+                        "bottom": bottom,
+                        "left": left,
+                        "right": right,
+                        "prompt": prompt
+                    }
+                else:
+                    # Custom outpaint model: padded flux args won't match its
+                    # schema, so send the generic image+prompt shape instead.
+                    # The UI's MODEL INFO panel warns when a custom model has
+                    # no image_url input.
+                    arguments = {
+                        "image_url": image_url,
+                        "prompt": prompt,
+                    }
+                if use_extra_out:
+                    arguments.update(use_extra_out)
+                    if status_callback:
+                        status_callback(f"Custom outpaint args applied: {sorted(use_extra_out)}")
+
                 result = fal.subscribe(
-                    "fal-ai/flux/outpaint",
+                    outpaint_model,
                     arguments=arguments,
                     with_logs=True
                 )
@@ -128,6 +159,10 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
                 status_callback(f"Submitting image upscaling job to {upscale_model}...")
 
             arguments = {"image_url": image_url_to_upscale}
+            if use_extra_up:
+                arguments.update(use_extra_up)
+                if status_callback:
+                    status_callback(f"Custom upscale args applied: {sorted(use_extra_up)}")
             result = fal.subscribe(
                 upscale_model,
                 arguments=arguments,

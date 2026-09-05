@@ -1189,8 +1189,10 @@ button {
 /* Segmented control */
 .sx-seg {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  height: var(--sx-control-h, 38px);
+  height: auto;
+  min-height: var(--sx-control-h, 38px);
   box-sizing: border-box;
   border: 1px solid var(--sx-rule-strong);
   background: var(--sx-surface);
@@ -1205,7 +1207,7 @@ button {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  height: 100%;
+  height: var(--sx-control-h, 38px);
   padding: 0 var(--sx-3);
   box-sizing: border-box;
   display: inline-flex;

@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
+import CustomModelPanel from '../components/ui/CustomModelPanel.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
@@ -62,6 +63,8 @@ export default function VideoPage() {
   const [jobs, setJobs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
+  const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
@@ -72,6 +75,19 @@ export default function VideoPage() {
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
+
+  // If the sidebar saved a custom endpoint, the catalog gains a CUSTOM(...)
+  // entry after /api/config loads — preselect it once so the override actually
+  // takes effect instead of silently staying on the stock default.
+  const customInit = useRef(false);
+  useEffect(() => {
+    if (customInit.current || !outpaintCatalog.length || !upscaleCatalog.length) return;
+    customInit.current = true;
+    const oc = outpaintCatalog.find((e) => e.model === models.outpaint_vid);
+    if (oc?.is_custom) setOutpaintOpt(oc.label);
+    const uc = upscaleCatalog.find((e) => e.model === models.upscale_vid);
+    if (uc?.is_custom) setFalUpscale(uc.label);
+  }, [outpaintCatalog, upscaleCatalog, models]);
 
   const totalDur = useMemo(() => items.reduce((a, b) => a + (b.duration || 0), 0), [items]);
   const effDur = trimEnabled ? Math.min(items.length ? Math.max(...items.map((i) => i.duration)) : 15, trimDur) : totalDur;
@@ -131,6 +147,14 @@ export default function VideoPage() {
 
   const render = async () => {
     setError('');
+    if (!upscaleOnly && outpaintEntry?.is_custom && !outArgs.ok) {
+      setError(`Outpaint custom args: ${outArgs.error}`);
+      return;
+    }
+    if (falPicked && upscaleEntry?.is_custom && !upArgs.ok) {
+      setError(`Upscale custom args: ${upArgs.error}`);
+      return;
+    }
     setBusy(true);
     const jobList = [];
     for (const item of items) {
@@ -159,6 +183,8 @@ export default function VideoPage() {
         trim_enabled: String(trimEnabled),
         trim_start: String(trimStart),
         trim_duration: String(trimDur),
+        custom_outpaint_args: JSON.stringify(outpaintEntry?.is_custom ? outArgs.args || {} : {}),
+        custom_upscale_args: JSON.stringify(upscaleEntry?.is_custom ? upArgs.args || {} : {}),
       };
       for (const [k, v] of Object.entries(kv)) fd.append(k, v);
       try {
@@ -244,6 +270,9 @@ export default function VideoPage() {
                   <Eyebrow>OUTPAINT MODEL</Eyebrow>
                   <Segmented options={outpaintOptions} value={outpaintOpt} onChange={setOutpaintOpt} ariaLabel="Outpaint Model" />
                 </div>
+                {outpaintEntry?.is_custom ? (
+                  <CustomModelPanel model={outpaintEntry.model} kind="outpaint" entry={outpaintEntry} onArgs={setOutArgs} />
+                ) : null}
                 <Field label="OUTPAINT EXTENSION PROMPT">
                   <textarea
                     className="sx-textarea"
@@ -386,6 +415,9 @@ export default function VideoPage() {
                   <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
                   <Segmented options={upscaleOptions} value={falUpscale} onChange={setFalUpscale} ariaLabel="FAL Upscale Model" />
                 </div>
+                {upscaleEntry?.is_custom ? (
+                  <CustomModelPanel model={upscaleEntry.model} kind="upscale" entry={upscaleEntry} onArgs={setUpArgs} />
+                ) : null}
 
                 {falUpscale.includes('Bytedance') ? (
                   <details className="sx-expander">

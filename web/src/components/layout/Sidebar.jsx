@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import Emoji from '../ui/Emoji.jsx';
-import { Button, Field } from '../ui/controls.jsx';
+import { Field } from '../ui/controls.jsx';
 import {
   IndustrialImageIcon,
   IndustrialVideoIcon,
@@ -16,6 +15,13 @@ const NAV_ITEMS = [
   { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
 ];
 
+const MODEL_FIELDS = [
+  { key: 'outpaint_vid', label: 'VIDEO OUTPAINT' },
+  { key: 'upscale_vid', label: 'VIDEO UPSCALE (FAL)' },
+  { key: 'outpaint_img', label: 'IMAGE OUTPAINT' },
+  { key: 'upscale_img', label: 'IMAGE UPSCALE (FAL)' },
+];
+
 export default function Sidebar({ health, config, setFalKey, setModels, isOpen, onClose }) {
   const [keyVal, setKeyVal] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -23,6 +29,8 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
   const [keySaving, setKeySaving] = useState(false);
   const [modelDraft, setModelDraft] = useState({});
   const [saving, setSaving] = useState(false);
+  const [modelMsg, setModelMsg] = useState('');
+  const [modelErr, setModelErr] = useState('');
 
   // Close drawer on Escape
   useEffect(() => {
@@ -60,13 +68,63 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
   };
 
   const saveModels = async () => {
+    setModelErr('');
+    setModelMsg('');
+    // Validate: every non-empty id must look like owner/name.
+    for (const { key, label } of MODEL_FIELDS) {
+      const v = (modelDraft[key] ?? modelDefaults[key] ?? '').trim();
+      if (v && !v.includes('/')) {
+        setModelErr(`${label}: expected a fal.ai id like owner/model-name (got "${v}")`);
+        return;
+      }
+    }
     setSaving(true);
     try {
-      await setModels(modelDraft);
+      const updates = Object.fromEntries(
+        MODEL_FIELDS.map(({ key }) => [key, (modelDraft[key] ?? modelDefaults[key] ?? '').trim()]),
+      );
+      const res = await setModels(updates);
+      const saved = res?.models || {};
+      const customs = MODEL_FIELDS.filter(({ key }) => {
+        const val = saved[key] || '';
+        return val && (saved.video_outpaint_catalog || []).concat(
+          saved.video_upscale_catalog || [], saved.image_upscale_catalog || [],
+        ).some((e) => e.is_custom && e.model === val);
+      });
+      setModelDraft({});
+      setModelMsg(
+        customs.length
+          ? `✓ SAVED — ${customs.map(({ label }) => label).join(', ')} now show CUSTOM buttons in the extenders (open MODEL INFO there for live pricing/schema).`
+          : '✓ SAVED — extender model lists updated.',
+      );
+    } catch (e) {
+      setModelErr(String(e.message || e));
     } finally {
       setSaving(false);
     }
   };
+
+  const resetModels = async () => {
+    setModelErr('');
+    setModelMsg('');
+    setSaving(true);
+    try {
+      await setModels(Object.fromEntries(MODEL_FIELDS.map(({ key }) => [key, ''])));
+      setModelDraft({});
+      setModelMsg('✓ RESET — all four slots back to stock models.');
+    } catch (e) {
+      setModelErr(String(e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const allCatalogs = (modelDefaults.video_outpaint_catalog || []).concat(
+    modelDefaults.video_upscale_catalog || [],
+    modelDefaults.image_upscale_catalog || [],
+  );
+  const customLabelFor = (val) =>
+    (allCatalogs.find((e) => e.is_custom && e.model === val) || {}).label || '';
 
   const probeList = Object.values(probes);
   const okCount = probeList.filter((p) => p.ok).length;
@@ -273,20 +331,57 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
           ▸ MODEL ENDPOINTS
         </summary>
         <div className="sx-expander-body" style={{ marginTop: 12 }}>
-          {Object.keys(modelDefaults).map((key) => (
-            <Field key={key} label={key}>
-              <input
-                className="sx-input"
-                style={{ fontSize: '0.75rem', padding: '6px 10px' }}
-                value={modelDraft[key] ?? modelDefaults[key] ?? ''}
-                onChange={(e) => setModelDraft((m) => ({ ...m, [key]: e.target.value }))}
-              />
-            </Field>
-          ))}
-          <div style={{ marginTop: 12 }}>
-            <Button onClick={saveModels} disabled={saving} style={{ width: '100%' }}>
-              {saving ? 'Saving…' : 'Save Overrides'}
-            </Button>
+          <div className="sx-monospace-sm" style={{ fontSize: '0.72rem', marginBottom: 8 }}>
+            Optional fal.ai id per slot — blank = stock. E.g. luma/agent/ray/v3.2/reframe
+          </div>
+          {MODEL_FIELDS.map(({ key, label }) => {
+            const current = modelDraft[key] ?? modelDefaults[key] ?? '';
+            const customLabel = customLabelFor((modelDefaults[key] || '').trim());
+            return (
+              <Field key={key} label={`${label}${customLabel ? ` · ${customLabel}` : ''}`}>
+                <input
+                  className="sx-input"
+                  style={{ fontSize: '0.75rem', padding: '6px 10px' }}
+                  placeholder={modelDefaults[key] || ''}
+                  value={current}
+                  onChange={(e) => {
+                    setModelDraft((m) => ({ ...m, [key]: e.target.value }));
+                    setModelMsg('');
+                    setModelErr('');
+                  }}
+                  autoComplete="off"
+                  spellCheck="false"
+                />
+              </Field>
+            );
+          })}
+          {modelErr ? (
+            <div className="sx-monospace-sm" style={{ color: 'var(--sx-danger)', fontSize: '0.72rem' }}>
+              {modelErr}
+            </div>
+          ) : null}
+          {modelMsg ? (
+            <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)', fontSize: '0.72rem' }}>
+              {modelMsg}
+            </div>
+          ) : null}
+          <div className="sx-sidebar-btn-grid" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="sx-sidebar-btn-secondary"
+              onClick={resetModels}
+              disabled={saving}
+            >
+              RESET
+            </button>
+            <button
+              type="button"
+              className="sx-sidebar-btn-primary"
+              onClick={saveModels}
+              disabled={saving}
+            >
+              {saving ? 'SAVING…' : 'SAVE'}
+            </button>
           </div>
         </div>
       </details>

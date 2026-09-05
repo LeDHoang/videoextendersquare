@@ -14,6 +14,7 @@ from pipeline.utils import (
     get_video_dimensions_and_duration,
     log_pipeline_execution,
 )
+from core import models as _models
 from pipeline.video_worker import process_video
 from server import media as SM
 from server import output
@@ -180,6 +181,8 @@ def start_video_process(
     trim_enabled: bool = Form(False),
     trim_start: float = Form(0.0),
     trim_duration: float = Form(15.0),
+    custom_outpaint_args: str = Form("{}"),
+    custom_upscale_args: str = Form("{}"),
 ):
     """Start video processing job in background worker pool."""
     _validate_video_form(
@@ -188,6 +191,14 @@ def start_video_process(
         trim_start, trim_duration, ltx_guidance,
     )
     ltx_loras = _parse_ltx_loras(ltx_loras)
+    try:
+        custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid custom_outpaint_args: {ex}") from ex
+    try:
+        custom_upscale = _models.parse_custom_args(custom_upscale_args)
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid custom_upscale_args: {ex}") from ex
 
     staged = STAGED_UPLOADS.get(stage_id)
     src_path = staged[0] if staged else None
@@ -221,6 +232,8 @@ def start_video_process(
         "trim_enabled": trim_enabled,
         "trim_start": trim_start,
         "trim_duration": trim_duration,
+        "custom_outpaint_args": custom_outpaint,
+        "custom_upscale_args": custom_upscale,
     }
 
     def postprocess(raw):

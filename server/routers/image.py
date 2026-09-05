@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from pipeline.image_worker import process_image
+from core import models as _models
 from pipeline.utils import calculate_square_padding, get_image_dimensions
 from server import media as SM
 from server import output
@@ -78,8 +79,19 @@ def start_image_process(
     sharpening: float = Form(0.0),
     upscale_engine: str = Form("fast"),
     upscale_model: str = Form("fal-ai/clarity-upscaler"),
+    outpaint_model: str = Form("fal-ai/flux/outpaint"),
+    custom_outpaint_args: str = Form("{}"),
+    custom_upscale_args: str = Form("{}"),
 ):
     """Start image processing job in background worker pool."""
+    try:
+        custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid custom_outpaint_args: {ex}") from ex
+    try:
+        custom_upscale = _models.parse_custom_args(custom_upscale_args)
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail=f"Invalid custom_upscale_args: {ex}") from ex
     staged = STAGED_UPLOADS.get(stage_id)
     src_path = staged[0] if staged else None
     if not src_path or not os.path.exists(src_path):
@@ -95,6 +107,9 @@ def start_image_process(
         "sharpening": sharpening,
         "upscale_engine": upscale_engine,
         "upscale_model": upscale_model,
+        "outpaint_model": outpaint_model,
+        "custom_outpaint_args": custom_outpaint,
+        "custom_upscale_args": custom_upscale,
     }
 
     def postprocess(raw):

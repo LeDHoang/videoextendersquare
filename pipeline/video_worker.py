@@ -195,6 +195,22 @@ def _process_video_impl(
     trim_duration = float(kwargs.get("trim_duration", 15.0))
     trim_duration = min(15.0, max(1.0, trim_duration))
 
+    # Extra fal.ai arguments for CUSTOM(...) models (e.g. aspect_ratio,
+    # resolution). Validated flat scalars; media URLs always stay
+    # pipeline-managed. Applied only to non-stock models so the tuned stock
+    # argument shapes can never be disturbed.
+    def _extras(raw_key: str) -> dict:
+        try:
+            d = _models.parse_custom_args(kwargs.get(raw_key))
+        except ValueError:
+            d = {}
+        d.pop("video_url", None)
+        d.pop("image_url", None)
+        return d
+
+    use_extra_out = {} if _models.is_stock_outpaint_model(outpaint_model) else _extras("custom_outpaint_args")
+    use_extra_up = {} if _models.is_stock_upscale_model(upscale_model) else _extras("custom_upscale_args")
+
     video_to_process = video_path
     temp_trimmed_path = None
 
@@ -357,6 +373,11 @@ def _process_video_impl(
                     "aspect_ratio": "1:1",
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
+
+            if use_extra_out:
+                arguments.update(use_extra_out)
+                if status_callback:
+                    status_callback(f"Custom outpaint args applied: {sorted(use_extra_out)}")
             
             handler = fal.submit(outpaint_model, arguments=arguments)
             result = poll_job_status(handler, "Outpainting", status_callback)
@@ -425,6 +446,11 @@ def _process_video_impl(
         else:
             arguments = {"video_url": video_url_to_upscale}
             _, upscale_cost = _models.estimate_upscale_cost(upscale_model, duration=duration)
+
+        if use_extra_up:
+            arguments.update(use_extra_up)
+            if status_callback:
+                status_callback(f"Custom upscale args applied: {sorted(use_extra_up)}")
 
         handler = fal.submit(upscale_model, arguments=arguments)
         result = poll_job_status(handler, "Video Upscaling (FAL AI)", status_callback)
@@ -696,6 +722,8 @@ clip.set_output()
         "upscale_engine": "FAL AI" if upscale_engine == "fal" else upscale_engine.upper(),
         "upscale_model": upscale_model if upscale_engine == "fal" else f"Local {upscale_engine.upper()}",
         "master_time": round(master_time, 2),
+        "custom_outpaint_args": use_extra_out,
+        "custom_upscale_args": use_extra_up if upscale_engine == "fal" else {},
     }
         
     return (outpaint_url, output_video_path), metrics
