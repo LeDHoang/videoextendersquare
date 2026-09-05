@@ -38,3 +38,21 @@ export function IndustrialReelsIcon({ className = 'sx-sidebar-icon-svg', ...prop
     </svg>
   );
 }
+
+export function EchoLogo({ className = 'sx-logo-svg', ...props }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} {...props}>
+      <path d="M7 2.5 H17 L21 7 L14.5 11.4 L16.8 12 L14.5 12.6 L21 17 L17 21.5 H7 L3 17 L9.5 12.6 L7.2 12 L9.5 11.4 L3 7 Z" stroke="#ffffff" strokeWidth="1.5" strokeLinejoin="bevel" fill="#101214" />
+      <polygon points="8,4.5 16,4.5 12,10.4" stroke="#f2f3f5" strokeWidth="1.4" strokeLinejoin="bevel" fill="none" />
+      <polygon points="8,19.5 16,19.5 12,13.6" stroke="#f2f3f5" strokeWidth="1.4" strokeLinejoin="bevel" fill="none" />
+      <line x1="12" y1="2.5" x2="12" y2="21.5" stroke="#ff3b1f" strokeWidth="1.6" strokeLinecap="square" />
+      <path d="M8.5 12 L11 10.4 M8.5 12 L11 13.6" stroke="#ff3b1f" strokeWidth="1.4" strokeLinejoin="bevel" />
+      <path d="M15.5 12 L13 10.4 M15.5 12 L13 13.6" stroke="#ff3b1f" strokeWidth="1.4" strokeLinejoin="bevel" />
+      <polygon points="12,10.5 13.5,12 12,13.5 10.5,12" fill="#ff3b1f" />
+      <circle cx="12" cy="12" r="0.6" fill="#f2f3f5" />
+      <line x1="4.5" y1="12" x2="7" y2="12" stroke="#ff3b1f" strokeWidth="1.3" />
+      <line x1="17" y1="12" x2="19.5" y2="12" stroke="#ff3b1f" strokeWidth="1.3" />
+    </svg>
+  );
+}
+

@@ -305,6 +305,19 @@ button {
   margin: 0;
 }
 
+.sx-sidebar-hero-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sx-sidebar-hero-logo {
+  height: 2.9rem;
+  width: auto;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .sx-sidebar-hero-sub {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.6875rem;
@@ -2595,7 +2608,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-k {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.73rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
@@ -2605,7 +2618,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-v {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.73rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   color: var(--sx-ink);
 }
@@ -2643,18 +2656,20 @@ body.sx-vr-active .sx-reels-mount,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--sx-surface-2);
-  border: 1px solid var(--sx-rule-strong);
-  color: var(--sx-ink-2);
+  background: var(--sx-accent);
+  border: none;
+  border-radius: 0;
+  color: #000000;
   cursor: pointer;
+  font-family: 'Archivo Black', Archivo, sans-serif;
   font-size: 0.95rem;
-  transition: background-color 150ms ease, color 150ms ease;
+  font-weight: 900;
+  box-shadow: 0 0 16px var(--sx-accent-glow);
+  transition: opacity 150ms ease;
 }
 
 .sx-icon-btn:hover {
-  background: var(--sx-surface-3);
-  color: var(--sx-ink);
-  border-color: var(--sx-accent);
+  opacity: 0.85;
 }
 
 /* ─── Studio Loading Animations ──────────────────────────── */

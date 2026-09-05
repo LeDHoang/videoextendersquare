@@ -162,7 +162,10 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
           </button>
         ) : null}
         <div className="sx-sidebar-brand-block">
-          <h2 className="sx-sidebar-hero-title">ECHO</h2>
+          <div className="sx-sidebar-hero-row">
+            <img src="/logo.svg" alt="ECHO Logo" className="sx-sidebar-hero-logo" />
+            <h2 className="sx-sidebar-hero-title">ECHO</h2>
+          </div>
           <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div>
         </div>
       </div>

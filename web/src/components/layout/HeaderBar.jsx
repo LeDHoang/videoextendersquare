@@ -79,7 +79,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
           ☰
         </button>
         <NavLink to="/image" className="sx-top-brand" title="ECHO 4K Engine">
-          <img src="/logo.png" alt="ECHO Logo" className="sx-top-logo" />
+          <img src="/logo.svg" alt="ECHO Logo" className="sx-top-logo" />
           <span>ECHO</span>
         </NavLink>
 
