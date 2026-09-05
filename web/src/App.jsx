@@ -13,12 +13,12 @@ export default function App() {
     <Suspense fallback={<StudioLoading title="ECHO" subtitle="INITIALIZING HIGH-PERFORMANCE 4K EXTENDER…" />}>
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<Navigate to="/image" replace />} />
+          <Route index element={<Navigate to="/reels" replace />} />
           <Route path="/image" element={<ImagePage />} />
           <Route path="/video" element={<VideoPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/reels" element={<ReelsPage />} />
-          <Route path="*" element={<Navigate to="/image" replace />} />
+          <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>
       </Routes>
     </Suspense>

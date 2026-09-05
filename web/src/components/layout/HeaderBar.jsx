@@ -76,14 +76,20 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
           title="Open/Close Sidebar"
           aria-label="Toggle Sidebar"
         >
-          ☰
+          <span style={{ fontSize: '1.14rem', lineHeight: 1 }}>☰</span>
         </button>
-        <NavLink to="/image" className="sx-top-brand" title="ECHO 4K Engine">
+        <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
           <img src="/logo.svg" alt="ECHO Logo" className="sx-top-logo" />
           <span>ECHO</span>
         </NavLink>
 
         <nav className="sx-top-nav" aria-label="Global Routes">
+          <NavLink
+            to="/reels"
+            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
+          >
+            REELS/VR
+          </NavLink>
           <NavLink
             to="/image"
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
@@ -101,12 +107,6 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
           >
             COMPARE
-          </NavLink>
-          <NavLink
-            to="/reels"
-            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
-          >
-            REELS/VR
           </NavLink>
         </nav>
       </div>

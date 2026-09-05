@@ -7,10 +7,10 @@ import {
 } from '../ui/StitchIcons.jsx';
 
 const LINKS = [
+  { to: '/reels', label: 'Reels / VR', Icon: IndustrialReelsIcon },
   { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
   { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
   { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
-  { to: '/reels', label: 'Reels / VR', Icon: IndustrialReelsIcon },
 ];
 
 export default function Nav({ onSelect }) {
