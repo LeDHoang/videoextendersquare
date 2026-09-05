@@ -1,6 +1,7 @@
 """Reels router — output scan, filtering, H.264 proxy generation, time-synced comments,
 and the full Reels/VR player page (replaces the Streamlit reels_view iframe)."""
 
+import hashlib
 import json
 import random
 import re
@@ -153,6 +154,147 @@ def _get_comments_for_video(rel_path: str, filename: str = "") -> list[dict]:
     return all_comments[key]
 
 
+# ─── REEL METADATA (fake tags / location / engagement for future recsys) ──
+
+META_FILE = OUTPUT_DIR / "reels_meta.json"
+
+TAG_POOL = [
+    "sci-fi", "music-video", "cyberpunk", "gaming", "concert", "anime",
+    "cityscape", "lyric-video", "sports", "comedy", "nature", "tech",
+    "dance", "cinematic", "retro", "neon", "live", "remix", "chill", "viral",
+]
+
+# Filename keyword hints → tags, applied before random fill.
+TAG_HINTS = [
+    ("tron", ["sci-fi", "neon"]),
+    ("cyberpunk", ["cyberpunk", "neon"]),
+    ("travis", ["concert", "music-video"]),
+    ("lyric", ["lyric-video", "music-video"]),
+    ("music", ["music-video"]),
+    ("concert", ["concert", "live"]),
+    ("weeknd", ["music-video", "cinematic"]),
+    ("madonna", ["music-video", "retro"]),
+    ("carti", ["music-video", "viral"]),
+    ("king von", ["music-video", "viral"]),
+    ("durk", ["music-video"]),
+    ("drone", ["tech", "cinematic"]),
+    ("ukraine", ["tech"]),
+    ("game", ["gaming"]),
+    ("anime", ["anime"]),
+    ("dance", ["dance", "viral"]),
+    ("sport", ["sports"]),
+    ("comedy", ["comedy"]),
+    ("funny", ["comedy", "viral"]),
+    ("nature", ["nature", "chill"]),
+    ("city", ["cityscape", "neon"]),
+    ("retro", ["retro"]),
+    ("live", ["live"]),
+    ("remix", ["remix", "music-video"]),
+]
+
+# Global city/county pool (county field holds the region equivalent where
+# the concept differs — e.g. Greater London, Tokyo Metropolis).
+LOCATION_POOL = [
+    {"city": "Austin", "county": "Travis County"},
+    {"city": "Los Angeles", "county": "Los Angeles County"},
+    {"city": "New York", "county": "New York County"},
+    {"city": "Miami", "county": "Miami-Dade County"},
+    {"city": "Chicago", "county": "Cook County"},
+    {"city": "Seattle", "county": "King County"},
+    {"city": "London", "county": "Greater London"},
+    {"city": "Manchester", "county": "Greater Manchester"},
+    {"city": "Paris", "county": "Île-de-France"},
+    {"city": "Berlin", "county": "Berlin State"},
+    {"city": "Tokyo", "county": "Tokyo Metropolis"},
+    {"city": "Osaka", "county": "Osaka Prefecture"},
+    {"city": "Seoul", "county": "Gyeonggi"},
+    {"city": "Bangkok", "county": "Central Thailand"},
+    {"city": "Singapore", "county": "Central Region"},
+    {"city": "Mumbai", "county": "Maharashtra"},
+    {"city": "Sydney", "county": "New South Wales"},
+    {"city": "Toronto", "county": "Ontario"},
+    {"city": "Mexico City", "county": "CDMX"},
+    {"city": "São Paulo", "county": "São Paulo State"},
+    {"city": "Lagos", "county": "Lagos State"},
+    {"city": "Cairo", "county": "Giza Governorate"},
+    {"city": "Nairobi", "county": "Nairobi County"},
+    {"city": "Auckland", "county": "Auckland Region"},
+]
+
+
+def _load_meta_raw() -> dict[str, dict]:
+    """Load all reel metadata from output/reels_meta.json."""
+    if not META_FILE.exists():
+        return {}
+    try:
+        data = json.loads(META_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _save_meta_raw(data: dict[str, dict]) -> None:
+    """Save all reel metadata to output/reels_meta.json."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    META_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
+    """Generate fake metadata: 2–4 tags (filename hints + random fill),
+    one global city/county location, and plausible engagement numbers."""
+    lowered = (filename or "").lower()
+    tags: list[str] = []
+    for keyword, hinted in TAG_HINTS:
+        if keyword in lowered:
+            for t in hinted:
+                if t not in tags:
+                    tags.append(t)
+        if len(tags) >= 4:
+            break
+    pool = [t for t in TAG_POOL if t not in tags]
+    rng.shuffle(pool)
+    while len(tags) < 2 and pool:
+        tags.append(pool.pop())
+    while len(tags) < 4 and pool and rng.random() < 0.6:
+        tags.append(pool.pop())
+    likes = rng.randint(50, 5000)
+    views = likes * rng.randint(8, 25)
+    loc = rng.choice(LOCATION_POOL)
+    return {
+        "tags": tags[:4],
+        "location": {"city": loc["city"], "county": loc["county"]},
+        "likes": likes,
+        "views": views,
+        "liked_by_me": False,
+    }
+
+
+def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
+    """Retrieve metadata for a video, seeding fakes on first sight.
+
+    Seeding uses a path-hash RNG so each reel gets stable, varied values;
+    the result persists to reels_meta.json (user/real data can replace
+    fakes later with no API change).
+    """
+    key = rel_path.strip().replace("\\", "/")
+    all_meta = _load_meta_raw()
+    if key in all_meta and isinstance(all_meta[key], dict):
+        entry = all_meta[key]
+        entry.setdefault("tags", [])
+        entry.setdefault("location", {"city": "", "county": ""})
+        entry.setdefault("likes", 0)
+        entry.setdefault("views", 0)
+        entry.setdefault("liked_by_me", False)
+        return entry
+    seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
+    entry = _seed_meta(key, filename, random.Random(seed))
+    all_meta[key] = entry
+    _save_meta_raw(all_meta)
+    return entry
+
+
 # ─── Pydantic Models for Comments API ────────────────────────────────────
 
 class CommentCreate(BaseModel):
@@ -240,13 +382,19 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
         preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path))
         poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path))
 
-        # Load comments for this reel
+        # Load comments + metadata for this reel
         comments = _get_comments_for_video(item["rel_path"], item["filename"])
+        meta = _get_meta_for_video(item["rel_path"], item["filename"])
 
         payload.append({
             "url": f"/media/{rel}",
             "preview_url": preview_url,
             "poster_url": poster_url,
+            "tags": meta.get("tags", []),
+            "location": meta.get("location", {"city": "", "county": ""}),
+            "likes": meta.get("likes", 0),
+            "views": meta.get("views", 0),
+            "liked_by_me": bool(meta.get("liked_by_me", False)),
             "filename": item["filename"],
             "folder": item["folder"],
             "size": item["size_human"],
@@ -434,6 +582,62 @@ def delete_comment(comment_id: str):
         _save_comments_raw(all_comments)
         return {"ok": True}
     raise HTTPException(status_code=404, detail="Comment not found")
+
+
+# ─── REEL ENGAGEMENT (likes / views) ───────────────────────────────────
+
+class EngagementRequest(BaseModel):
+    video_path: str
+
+
+def _bump_meta_counter(video_path: str, field: str, delta: int = 1,
+                       liked_by_me: bool | None = None) -> dict:
+    """Change a numeric metadata counter, seeding the entry if needed.
+    Decrements floor at zero so unlikes can never drive counts negative."""
+    key = video_path.strip().replace("\\", "/")
+    all_meta = _load_meta_raw()
+    entry = all_meta.get(key)
+    if not isinstance(entry, dict):
+        seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
+        entry = _seed_meta(key, Path(key).name, random.Random(seed))
+        all_meta[key] = entry
+    entry[field] = max(0, int(entry.get(field, 0) or 0) + delta)
+    if liked_by_me is not None:
+        entry["liked_by_me"] = liked_by_me
+    _save_meta_raw(all_meta)
+    return {
+        "video_path": key,
+        "likes": entry.get("likes", 0),
+        "views": entry.get("views", 0),
+        "liked_by_me": bool(entry.get("liked_by_me", False)),
+    }
+
+
+@router.post("/like")
+def like_reel(req: EngagementRequest):
+    """Like a reel (+1, marks liked_by_me). No identity system exists yet —
+    single local user is assumed; a true per-user toggle needs user auth."""
+    if not req.video_path.strip():
+        raise HTTPException(status_code=400, detail="video_path is required")
+    return _bump_meta_counter(req.video_path, "likes", 1, liked_by_me=True)
+
+
+@router.post("/unlike")
+def unlike_reel(req: EngagementRequest):
+    """Unlike a reel (−1 floored at zero, clears liked_by_me). Pairs with
+    the player's like/unlike toggle."""
+    if not req.video_path.strip():
+        raise HTTPException(status_code=400, detail="video_path is required")
+    return _bump_meta_counter(req.video_path, "likes", -1, liked_by_me=False)
+
+
+@router.post("/view")
+def view_reel(req: EngagementRequest):
+    """Record a reel view (+1). Fire-and-forget from the player on each
+    video load; per-swipe inflation is accepted for now."""
+    if not req.video_path.strip():
+        raise HTTPException(status_code=400, detail="video_path is required")
+    return _bump_meta_counter(req.video_path, "views")
 
 
 # ─── PROXY GENERATION ────────────────────────────────────────────────────

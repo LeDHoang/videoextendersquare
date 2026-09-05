@@ -2799,3 +2799,55 @@ body.sx-vr-active .sx-reels-mount,
   padding: 2px 7px;
   pointer-events: none;
 }
+
+/* Engagement row: likes · views · comments. */
+.sx-explore-stats {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(18, 19, 21, 0.88);
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 3px 9px;
+  pointer-events: none;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.sx-explore-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1;
+}
+
+/* Comment glyph matching the reels player action-bar icon. */
+.sx-explore-stat-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Location tag, top-left (play badge owns top-right). */
+.sx-explore-loc {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  max-width: calc(100% - 48px);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(18, 19, 21, 0.88);
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 3px 9px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
