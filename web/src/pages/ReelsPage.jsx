@@ -183,7 +183,7 @@ export default function ReelsPage() {
         {/* Row 1: Filters (Folder, Codec, Search, Sort) */}
         <div className="sx-control-rail-row">
           <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
-            <div style={{ width: '180px', flexShrink: 0 }}>
+            <div style={{ flex: '1 1 150px', minWidth: 0 }}>
               <Dropdown
                 value={folder}
                 options={folderOpts}
@@ -192,7 +192,7 @@ export default function ReelsPage() {
               />
             </div>
             <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { setDeepPlay(null); setCodec(v); }} />
-            <div style={{ flex: 1, minWidth: '160px', position: 'relative' }}>
+            <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
               <input
                 ref={searchRef}
                 className="sx-input"
@@ -212,7 +212,7 @@ export default function ReelsPage() {
                 </button>
               ) : null}
             </div>
-            <div style={{ width: '140px', flexShrink: 0 }}>
+            <div style={{ flex: '1 1 120px', minWidth: 0 }}>
               <Dropdown
                 value={sort}
                 options={SORTS}
@@ -225,7 +225,7 @@ export default function ReelsPage() {
 
         {/* Row 2: Actions & Utilities (Reset, Quest & Tools, Proxy, Spatialize) */}
         <div className="sx-control-rail-row">
-          <div className="sx-control-group">
+          <div className="sx-control-group" style={{ flexWrap: 'wrap' }}>
             <Button onClick={() => setRefreshKey((k) => k + 1)} title="Rescan video library">
               ↻
             </Button>

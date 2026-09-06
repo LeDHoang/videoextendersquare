@@ -17,6 +17,16 @@ export default function ComparePage() {
   const [showDownload, setShowDownload] = useState(false);
   const [prep, setPrep] = useState(null);
   const [prepErr, setPrepErr] = useState('');
+  const [isPseudoFs, setIsPseudoFs] = useState(false);
+
+  useEffect(() => {
+    const handleMsg = (e) => {
+      if (e.data?.type === 'sx-enter-pseudo-fs') setIsPseudoFs(true);
+      if (e.data?.type === 'sx-exit-pseudo-fs') setIsPseudoFs(false);
+    };
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, []);
 
   // Fetch comparison pairs
   useEffect(() => {
@@ -118,7 +128,7 @@ export default function ComparePage() {
               <span className="sx-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>RENDER PAIR</span>
               <select
                 className="sx-select"
-                style={{ width: 'auto', minWidth: 180, height: 34, fontSize: '0.75rem', padding: '0 8px', whiteSpace: 'nowrap' }}
+                style={{ flex: '1 1 160px', minWidth: 0, maxWidth: '100%', height: 34, fontSize: '0.75rem', padding: '0 8px', whiteSpace: 'nowrap' }}
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
                 aria-label="Select render pair to inspect"
@@ -212,7 +222,7 @@ export default function ComparePage() {
 
           {/* ─── Viewport Stage ─────────────────────────────── */}
           {pair ? (
-            <div className="sx-viewport-wrapper">
+            <div className={`sx-viewport-wrapper ${isPseudoFs ? 'sx-pseudo-fullscreen' : ''}`}>
               {/* Floating Badges */}
               <div className="sx-badge-fast">
                 FAST · 3840×3840
@@ -248,7 +258,7 @@ export default function ComparePage() {
                 ) : !prep ? (
                   <SectionSkeleton label="Loading compare viewport" compact />
                 ) : mode === '2-UP' ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%', height: '100%', background: '#000' }}>
+                  <div className="sx-compare-2up" style={{ width: '100%', height: '100%', background: '#000' }}>
                     <div style={{ borderRight: '1px solid var(--sx-rule-strong)', position: 'relative' }}>
                       <video
                         src={prep.fast_url}

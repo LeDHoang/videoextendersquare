@@ -983,16 +983,10 @@ def reels_player(
     )
 
 
-def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
-    """Scope the player's page-level CSS to the mount root so it can be
-    embedded directly in the SPA without clobbering the app's own styles."""
-    # Preserve @import statements (e.g. Google Fonts / Material Symbols).
-    # URLs contain `;` (font-weight ranges) so match `url(...)` not bare `;`.
-    imports = re.findall(r"@import\s+url\([^)]+\)\s*;", css)
+def _scope_rules(css: str, root: str = "#sxReelsRoot") -> list[str]:
+    """Scope one flat level of `selector { body }` rules to *root*."""
     out = []
-    # Remove imports before block parsing so they don't get split on '}'
-    css_no_imports = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
-    for rule in css_no_imports.split("}"):
+    for rule in css.split("}"):
         rule = rule.strip()
         if "{" not in rule:
             continue
@@ -1005,6 +999,57 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
         parts = [p.strip() for p in sel.split(",") if p.strip()]
         scoped = ", ".join(f"{root} *" if p == "*" else f"{root} {p}" for p in parts)
         out.append(f"{scoped} {{ {body.strip()} }}")
+    return out
+
+
+def _extract_media_blocks(css: str) -> tuple[str, list[tuple[str, str]]]:
+    """Split out `@media cond { ... }` blocks (balanced braces).
+
+    Returns (remaining_css, [(condition, inner_css), ...]).
+    """
+    blocks = []
+    rest: list[str] = []
+    i = 0
+    while True:
+        m = re.search(r"@media[^{]*\{", css[i:])
+        if not m:
+            rest.append(css[i:])
+            break
+        start = i + m.start()
+        rest.append(css[i:start])
+        depth = 0
+        j = start
+        while j < len(css):
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        header, _, _ = css[start:].partition("{")
+        inner = css[start + len(header) + 1: j]
+        blocks.append((header.strip(), inner))
+        i = j + 1
+    return "".join(rest), blocks
+
+
+def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
+    """Scope the player's page-level CSS to the mount root so it can be
+    embedded directly in the SPA without clobbering the app's own styles."""
+    # Preserve @import statements (e.g. Google Fonts / Material Symbols).
+    # URLs contain `;` (font-weight ranges) so match `url(...)` not bare `;`.
+    imports = re.findall(r"@import\s+url\([^)]+\)\s*;", css)
+    # Remove imports before block parsing so they don't get split on '}'
+    css_no_imports = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
+    # Keep @media blocks (responsive rail/overlay rules) with scoped inners;
+    # other @-rules (e.g. @keyframes) are still dropped as before.
+    css_no_media, media_blocks = _extract_media_blocks(css_no_imports)
+    out = _scope_rules(css_no_media, root)
+    for header, inner in media_blocks:
+        scoped_inner = _scope_rules(inner, root)
+        if scoped_inner:
+            out.append(f"{header} {{ {' '.join(scoped_inner)} }}")
     # Keep imports at top so font loads before scoped rules
     if imports:
         return "\n".join(imports) + "\n" + "\n".join(out)
@@ -1105,12 +1150,29 @@ def reels_player_inline(
             css = f'@import url("{href}");\n' + css
     css += (
         "\n#sxReelsRoot .reels-phone-frame {"
-        " width: min(92vw, 84vh, 860px);"
-        " height: min(92vw, 84vh, 860px);"
+        " width: min(92vw, 84dvh, 860px, 100%);"
+        " height: auto;"
+        " aspect-ratio: 1 / 1;"
+        "}"
+        "\n#sxReelsRoot .reels-phone-frame:fullscreen,"
+        " #sxReelsRoot .reels-phone-frame:-webkit-full-screen {"
+        " width: min(100vw, 100vh);"
+        " height: min(100vw, 100vh);"
+        " max-width: none;"
+        " max-height: none;"
+        " position: absolute;"
+        " inset: 0;"
+        " margin: auto;"
+        " border: none;"
         "}"
     )
 
-    body_match = re.search(r"<body>(.*?)</body>", html, re.S)
+    # Anchor the body search after </style>: a literal "<body>" inside a
+    # head comment would otherwise hijack this naive match and leak raw
+    # CSS into the player markup.
+    _style_end = html.find("</style>")
+    _body_scope = html[_style_end:] if _style_end != -1 else html
+    body_match = re.search(r"<body>(.*?)</body>", _body_scope, re.S)
     body_html = body_match.group(1) if body_match else ""
     # Strip <script> tags from body_html so innerHTML gets clean markup without unparsed placeholders
     body_html = re.sub(r"<script.*?>.*?</script>", "", body_html, flags=re.S)

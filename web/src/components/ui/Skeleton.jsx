@@ -48,10 +48,10 @@ export function ControlRailSkeleton({ label = 'Loading controls' }) {
       <SrOnly text={`${label}…`} />
       <div className="sx-control-rail-row" aria-hidden="true">
         <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
-          <div className="sx-skel" style={{ width: 180, height: 40 }} />
-          <div className="sx-skel" style={{ width: 220, height: 40 }} />
-          <div className="sx-skel" style={{ flex: 1, minWidth: 160, height: 40 }} />
-          <div className="sx-skel" style={{ width: 140, height: 40 }} />
+          <div className="sx-skel" style={{ flex: '1 1 150px', minWidth: 0, height: 40 }} />
+          <div className="sx-skel" style={{ flex: '1 1 180px', minWidth: 0, height: 40 }} />
+          <div className="sx-skel" style={{ flex: '2 1 160px', minWidth: 0, height: 40 }} />
+          <div className="sx-skel" style={{ flex: '1 1 120px', minWidth: 0, height: 40 }} />
         </div>
       </div>
     </div>

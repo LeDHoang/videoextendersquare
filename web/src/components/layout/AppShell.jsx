@@ -89,7 +89,7 @@ function Shell() {
       {/* Main Grid Shell */}
       <div
         className={`sx-shell ${drawerOpen ? 'sx-sidebar-open' : ''} ${immersive ? 'sx-immersive' : ''}`}
-        style={{ minHeight: immersive ? '100vh' : 'calc(100vh - 64px)' }}
+        style={{ minHeight: immersive ? '100dvh' : 'calc(100dvh - 64px)' }}
       >
         {/* Backdrop for Settings Drawer on mobile */}
         <div

@@ -904,9 +904,10 @@ export default function UploadPage() {
             </Field>
             <div className="sx-monospace-sm">{caption.length}/{CAPTION_MAX}</div>
             <Field label={`TAGS (MAX ${TAGS_MAX})`}>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   className="sx-input"
+                  style={{ flex: '1 1 160px', minWidth: 0 }}
                   value={tagDraft}
                   onChange={(e) => setTagDraft(e.target.value)}
                   onKeyDown={(e) => {

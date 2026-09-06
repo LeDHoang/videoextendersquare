@@ -42,6 +42,153 @@
     outline: none;
   }
 
+  /* Fullscreen: centered max square. Without this the frame anchors
+     top-left at its capped size and the title/views/comments overlays
+     read as missing. 1:1 is preserved; overlays stay visible.
+     NOTE: Chrome forces its own box (!important) on the fullscreen
+     element itself, so the app fullscreens the frame's PARENT (host div
+     in the SPA, body standalone) and centers the frame inside it — see
+     fullBtn below. These rules stay as fallback. */
+  /* Fullscreen: Takes full height of the viewport (100dvh) with no top/bottom black bars.
+     The video maintains 1:1 square aspect ratio and can be panned horizontally left/right.
+     The top bar, action rail, timeline, and overlays remain pinned to the screen edges. */
+  .reels-phone-frame:fullscreen,
+  .reels-phone-frame:-webkit-full-screen,
+  .reels-phone-frame.sx-pseudo-fullscreen {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+    position: fixed !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+  }
+
+  /* Standalone player mode: the frame's parent is the document body. */
+  body:fullscreen,
+  body:-webkit-full-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #08090A;
+    overflow: hidden;
+  }
+
+  .reels-phone-frame:fullscreen .reels-video-wrap,
+  .reels-phone-frame:-webkit-full-screen .reels-video-wrap,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-video-wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .reels-phone-frame:fullscreen #reelsVideo,
+  .reels-phone-frame:fullscreen #reelsImage,
+  .reels-phone-frame:-webkit-full-screen #reelsVideo,
+  .reels-phone-frame:-webkit-full-screen #reelsImage,
+  .reels-phone-frame.sx-pseudo-fullscreen #reelsVideo,
+  .reels-phone-frame.sx-pseudo-fullscreen #reelsImage {
+    height: 100% !important;
+    width: auto !important;
+    aspect-ratio: 1 / 1 !important;
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    min-height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    will-change: transform;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .reels-phone-frame.panning #reelsVideo,
+  .reels-phone-frame.panning #reelsImage {
+    cursor: grabbing !important;
+  }
+
+  /* Pinned UI overlays in fullscreen: visible at screen edges, never clipped */
+  .reels-phone-frame:fullscreen .reels-top-bar,
+  .reels-phone-frame:-webkit-full-screen .reels-top-bar,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-top-bar {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding-top: max(12px, env(safe-area-inset-top)) !important;
+    padding-left: max(16px, env(safe-area-inset-left)) !important;
+    padding-right: max(16px, env(safe-area-inset-right)) !important;
+    z-index: 25 !important;
+  }
+
+  .reels-phone-frame:fullscreen .reels-actions,
+  .reels-phone-frame:-webkit-full-screen .reels-actions,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
+    position: absolute !important;
+    right: max(14px, env(safe-area-inset-right)) !important;
+    top: 50% !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: translateY(-50%) !important;
+    z-index: 25 !important;
+    max-height: calc(100% - 60px) !important;
+    overflow-y: auto !important;
+  }
+
+  @media (max-width: 480px) {
+    .reels-phone-frame:fullscreen .reels-actions,
+    .reels-phone-frame:-webkit-full-screen .reels-actions,
+    .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
+      right: max(8px, env(safe-area-inset-right)) !important;
+    }
+  }
+
+  .reels-phone-frame:fullscreen .reels-meta,
+  .reels-phone-frame:-webkit-full-screen .reels-meta,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-meta {
+    position: absolute !important;
+    left: max(16px, env(safe-area-inset-left)) !important;
+    bottom: max(24px, calc(16px + env(safe-area-inset-bottom))) !important;
+    right: max(80px, calc(72px + env(safe-area-inset-right))) !important;
+    z-index: 25 !important;
+  }
+
+  .reels-phone-frame:fullscreen .reels-progress-wrap,
+  .reels-phone-frame:-webkit-full-screen .reels-progress-wrap,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-progress-wrap {
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding-bottom: env(safe-area-inset-bottom) !important;
+    padding-left: max(12px, env(safe-area-inset-left)) !important;
+    padding-right: max(12px, env(safe-area-inset-right)) !important;
+    z-index: 26 !important;
+  }
+
+  .reels-phone-frame:fullscreen .reels-twitch-ticker,
+  .reels-phone-frame:-webkit-full-screen .reels-twitch-ticker,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-twitch-ticker {
+    position: absolute !important;
+    bottom: max(24px, calc(16px + env(safe-area-inset-bottom))) !important;
+    left: max(16px, env(safe-area-inset-left)) !important;
+    right: max(80px, calc(72px + env(safe-area-inset-right))) !important;
+    z-index: 26 !important;
+  }
+
   /* Dynamic 2D Ambient Glow Backdrop */
   .reels-ambient-glow {
     position: absolute;
@@ -90,10 +237,10 @@
     left: 0;
     right: 0;
     height: 48px;
-    background: linear-gradient(180deg, rgba(8, 9, 10, 0.92) 0%, rgba(8, 9, 10, 0) 100%);
+    background: transparent;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     padding: 12px 16px;
     z-index: 20;
     pointer-events: none;
@@ -364,14 +511,15 @@
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
+    display: none;
     transition: opacity 0.15s ease;
     z-index: 12;
     box-shadow: 0 4px 12px rgba(0,0,0,0.85);
-    display: flex;
     align-items: center;
     gap: 6px;
   }
   .reels-comment-dot:hover .reels-dot-tooltip {
+    display: flex;
     opacity: 1;
   }
 
@@ -891,6 +1039,158 @@
   .vr-active .reels-badge::after {
     content: ' · VR';
   }
+
+  /* ── Responsive: compact rail + overlays on narrow / short viewports ──
+     The action column (~500px tall at 44px buttons) overflows phone-sized
+     square frames, whose overflow:hidden guillotines it. Compact mode
+     shrinks the rail to fit instead. */
+  @media (max-width: 480px), (max-height: 600px) {
+    .reels-actions {
+      right: 8px;
+      gap: 4px;
+      /* Last-resort safety: never clip controls even if buttons are added. */
+      max-height: 100%;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .reels-actions::-webkit-scrollbar {
+      display: none;
+    }
+    .reels-cluster {
+      gap: 2px;
+      padding: 2px;
+    }
+    .action-btn {
+      width: 36px;
+      height: 36px;
+    }
+    .action-btn .btn-icon,
+    .action-btn .btn-icon svg {
+      width: 15px;
+      height: 15px;
+    }
+    .action-btn-label {
+      font-size: 7px;
+    }
+    .reels-top-bar {
+      padding: 8px 10px;
+    }
+    .reels-badge {
+      font-size: 9px;
+      padding: 2px 7px;
+    }
+    .reels-counter {
+      font-size: 9px;
+      padding: 2px 7px;
+    }
+    .reels-meta,
+    .reels-twitch-ticker {
+      left: 10px;
+      right: 56px;
+      bottom: 20px;
+    }
+    .twitch-text {
+      white-space: normal;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .reels-comment-dot .reels-dot-tooltip {
+      right: 0;
+      left: auto;
+      transform: none;
+      max-width: min(220px, 70vw);
+      white-space: normal;
+    }
+    .reels-comments-drawer {
+      height: min(68%, calc(100dvh - 48px));
+    }
+    .drawer-header {
+      padding: 10px 12px;
+      gap: 8px;
+    }
+    .drawer-tabs {
+      flex-wrap: wrap;
+    }
+    .drawer-tab {
+      padding: 0 8px;
+      font-size: 10px;
+    }
+    .comment-input-wrap {
+      min-width: 0;
+    }
+    .comment-submit-btn {
+      padding: 0 14px;
+    }
+  }
+
+  /* Phones: 10-button rail still exceeds ~331px frames at 36px, so drop
+     to 32px and park the bulk-cache utility (auto-preload keeps working). */
+  @media (max-width: 480px) {
+    .action-btn {
+      width: 32px;
+      height: 32px;
+    }
+    .action-btn .btn-icon,
+    .action-btn .btn-icon svg {
+      width: 14px;
+      height: 14px;
+    }
+    #preloadBtn {
+      display: none;
+    }
+    .reels-ambient-glow {
+      inset: 0;
+    }
+  }
+
+  /* Coarse-pointer touch target expansion (WCAG 2.5.5 / 2.5.8 target size) */
+  @media (pointer: coarse) {
+    .comment-time-btn {
+      min-height: 36px;
+      padding: 6px 10px;
+      font-size: 12px;
+      position: relative;
+    }
+    .comment-time-btn::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+    }
+    .comment-like-btn {
+      min-height: 40px;
+      padding: 8px 6px;
+      position: relative;
+    }
+    .comment-like-btn::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+    }
+    .drawer-close-btn {
+      min-width: 44px;
+      min-height: 44px;
+      position: relative;
+    }
+    .drawer-close-btn::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+    }
+    .reels-comment-dot {
+      position: relative;
+    }
+    .reels-comment-dot::after {
+      content: '';
+      position: absolute;
+      inset: -12px;
+    }
+    #skipErrorBtn {
+      min-height: 44px;
+      padding: 10px 18px;
+      font-size: 13px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -898,8 +1198,6 @@
 <div class="reels-phone-frame" id="reelsFrame" tabindex="0">
   <div class="reels-ambient-glow" id="reelsAmbientGlow"></div>
   <div class="reels-top-bar">
-    <div class="reels-badge">4K MASTER REELS v4.2</div>
-    <div class="reels-counter" id="counter">0 / 0</div>
     <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:#16191C; padding:3px 8px; border-radius:0px; border:1px solid #00FF88;">⚡ 0/0</div>
   </div>
 
@@ -1664,12 +1962,13 @@
     function loadVideo(index) {
       hideError();
       clearImageTimer();
+      if (typeof resetPan === 'function') resetPan();
       if (index < 0) index = videoData.length - 1;
       if (index >= videoData.length) index = 0;
       idx = index;
 
       const item = videoData[idx];
-      counter.textContent = (idx + 1) + ' / ' + videoData.length;
+      if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length;
       metaFolder.textContent = '📁 ' + (item.folder || 'root');
       metaTitle.textContent = item.title || item.filename;
       try {
@@ -1944,11 +2243,145 @@
     prevBtn.addEventListener('click', prevVideo);
     if (preloadBtn) preloadBtn.addEventListener('click', preloadAllVideos);
 
-    fullBtn.addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        frame.requestFullscreen().catch(() => {});
+    function togglePseudoFullscreen(enable) {
+      const fsTarget = frame.parentElement || frame;
+      if (enable) {
+        fsTarget.classList.add('sx-pseudo-fullscreen');
+        frame.classList.add('sx-pseudo-fullscreen');
+        document.documentElement.classList.add('sx-vr-active');
+        if (document.body) document.body.classList.add('sx-vr-active');
+        window.dispatchEvent(new CustomEvent('echo:fullscreen-enter'));
+        try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:fullscreen-enter')); } catch (e2) {}
       } else {
-        document.exitFullscreen();
+        resetPan();
+        fsTarget.classList.remove('sx-pseudo-fullscreen');
+        frame.classList.remove('sx-pseudo-fullscreen');
+        document.documentElement.classList.remove('sx-vr-active');
+        if (document.body) document.body.classList.remove('sx-vr-active');
+        window.dispatchEvent(new CustomEvent('echo:fullscreen-exit'));
+        try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:fullscreen-exit')); } catch (e2) {}
+      }
+    }
+
+    fullBtn.addEventListener('click', () => {
+      const fsTarget = frame.parentElement || frame;
+      if (fsTarget.classList.contains('sx-pseudo-fullscreen') || frame.classList.contains('sx-pseudo-fullscreen')) {
+        togglePseudoFullscreen(false);
+        return;
+      }
+      if (!document.fullscreenElement) {
+        // Fullscreen the frame's PARENT (host div in the SPA, body
+        // standalone): author CSS cannot size a :fullscreen element
+        // itself (browser forces its box), but it CAN center the frame
+        // inside a fullscreen parent with normal flex layout.
+        if (fsTarget.requestFullscreen) {
+          fsTarget.requestFullscreen().catch(() => {
+            togglePseudoFullscreen(true);
+          });
+        } else if (frame.requestFullscreen) {
+          frame.requestFullscreen().catch(() => {
+            togglePseudoFullscreen(true);
+          });
+        } else {
+          togglePseudoFullscreen(true);
+        }
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    // ── Fullscreen Pan & Scan Logic ──
+    let panX = 0;
+    let isPanning = false;
+    let wasPanning = false;
+    let panStartX = 0;
+    let panInitialX = 0;
+
+    function isCurrentFullscreen() {
+      const fsTarget = frame.parentElement || frame;
+      return !!document.fullscreenElement ||
+             frame.classList.contains('sx-pseudo-fullscreen') ||
+             (fsTarget && fsTarget.classList.contains('sx-pseudo-fullscreen'));
+    }
+
+    function getMaxPan() {
+      if (!isCurrentFullscreen()) return 0;
+      const activeMedia = (reelsImage && reelsImage.style.display !== 'none') ? reelsImage : video;
+      const mediaRect = activeMedia.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      if (mediaRect.width > frameRect.width) {
+        return (mediaRect.width - frameRect.width) / 2;
+      }
+      return 0;
+    }
+
+    function applyPan(x, animate) {
+      const maxPan = getMaxPan();
+      panX = Math.max(-maxPan, Math.min(maxPan, x));
+      const transformVal = `translate3d(${panX}px, 0, 0)`;
+      const transitionVal = animate ? 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)' : 'none';
+      if (video) {
+        video.style.transition = transitionVal;
+        video.style.transform = transformVal;
+      }
+      if (reelsImage) {
+        reelsImage.style.transition = transitionVal;
+        reelsImage.style.transform = transformVal;
+      }
+    }
+
+    function resetPan() {
+      panX = 0;
+      applyPan(0, true);
+    }
+
+    window.__sxReelsPan = {
+      applyPan,
+      resetPan,
+      getMaxPan,
+      getPanX: () => panX,
+      isCurrentFullscreen
+    };
+
+    window.addEventListener('resize', () => {
+      if (isCurrentFullscreen()) {
+        applyPan(panX, false);
+      } else if (panX !== 0) {
+        resetPan();
+      }
+    });
+
+    // Desktop Mouse Drag Panning
+    const vWrap = document.getElementById('videoWrap');
+    if (vWrap) {
+      vWrap.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+        if (!isCurrentFullscreen() || getMaxPan() <= 0) return;
+        isPanning = true;
+        panStartX = e.clientX;
+        panInitialX = panX;
+        frame.classList.add('panning');
+        e.preventDefault();
+      });
+    }
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStartX;
+      if (Math.abs(dx) > 4) {
+        wasPanning = true;
+      }
+      applyPan(panInitialX + dx, false);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isPanning) {
+        isPanning = false;
+        frame.classList.remove('panning');
+        setTimeout(() => {
+          wasPanning = false;
+        }, 150);
       }
     });
 
@@ -1970,6 +2403,7 @@
           if (document.body) document.body.classList.add('sx-vr-active');
         } catch (e) {}
       } else if (!isFs) {
+        resetPan();
         try {
           window.dispatchEvent(new CustomEvent('echo:fullscreen-exit'));
           try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:fullscreen-exit')); } catch (e2) {}
@@ -1982,8 +2416,9 @@
     document.addEventListener('fullscreenchange', notifyFsChange);
     document.addEventListener('webkitfullscreenchange', notifyFsChange);
 
-    // Click on video area toggles play/pause (unless drawer is clicked)
+    // Click on video area toggles play/pause (unless drawer is clicked or user just panned)
     document.getElementById('videoWrap').addEventListener('click', (e) => {
+      if (wasPanning) return;
       if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG' || e.target.id === 'videoWrap') {
         if (commentsDrawer && commentsDrawer.classList.contains('open')) {
           toggleDrawer(false);
@@ -2026,10 +2461,15 @@
       }
     });
 
-    // Mouse Wheel Scroll Navigation inside Frame
+    // Mouse Wheel Scroll: Horizontal Pan in Fullscreen or Vertical Reel Switch
     let scrollTimeout;
     frame.addEventListener('wheel', (e) => {
       if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (isCurrentFullscreen() && Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 5) {
+        e.preventDefault();
+        applyPan(panX - e.deltaX, false);
+        return;
+      }
       e.preventDefault();
       clearTimeout(scrollTimeout);
       scrollTimeout = setTimeout(() => {
@@ -2041,16 +2481,64 @@
       }, 50);
     }, { passive: false });
 
-    // Touch Swipe Gestures
+    // Touch Gestures: Horizontal Pan in Fullscreen, Vertical Swipe for Navigation
+    let touchStartX = 0;
     let touchStartY = 0;
+    let touchMode = null; // 'pan' | 'swipe' | null
+    let touchPanned = false;
+
     frame.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 0) {
+      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
+        panStartX = touchStartX;
+        panInitialX = panX;
+        touchMode = null;
+        touchPanned = false;
       }
     }, { passive: true });
 
-    frame.addEventListener('touchend', (e) => {
+    frame.addEventListener('touchmove', (e) => {
       if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (e.touches.length === 1) {
+        const curX = e.touches[0].clientX;
+        const curY = e.touches[0].clientY;
+        const dx = curX - touchStartX;
+        const dy = curY - touchStartY;
+
+        // Disambiguate axis if not locked yet
+        if (!touchMode) {
+          if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+            if (Math.abs(dx) > Math.abs(dy) && isCurrentFullscreen() && getMaxPan() > 0) {
+              touchMode = 'pan';
+              frame.classList.add('panning');
+            } else {
+              touchMode = 'swipe';
+            }
+          }
+        }
+
+        if (touchMode === 'pan') {
+          touchPanned = true;
+          const targetPan = panInitialX + (curX - panStartX);
+          applyPan(targetPan, false);
+          if (e.cancelable) e.preventDefault();
+        }
+      }
+    }, { passive: false });
+
+    frame.addEventListener('touchend', (e) => {
+      frame.classList.remove('panning');
+      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (touchMode === 'pan') {
+        if (touchPanned) {
+          wasPanning = true;
+          setTimeout(() => { wasPanning = false; }, 200);
+        }
+        touchMode = null;
+        return;
+      }
       if (e.changedTouches.length > 0) {
         const touchEndY = e.changedTouches[0].clientY;
         const diffY = touchStartY - touchEndY;
@@ -2060,6 +2548,7 @@
           prevVideo(); // Swipe Down -> Prev
         }
       }
+      touchMode = null;
     }, { passive: true });
 
     // Keyboard controls
@@ -2072,6 +2561,10 @@
       const key = e.key.toLowerCase();
       if (key === 'escape') {
         toggleDrawer(false);
+        const fsTarget = frame.parentElement || frame;
+        if (fsTarget.classList.contains('sx-pseudo-fullscreen') || frame.classList.contains('sx-pseudo-fullscreen')) {
+          togglePseudoFullscreen(false);
+        }
       } else if (key === 'c') {
         e.preventDefault();
         toggleDrawer();

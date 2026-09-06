@@ -3,11 +3,15 @@ export default function StudioLoading({
   subtitle = 'AWAITING SEQUENCE INITIATION…',
   compact = false,
 }) {
+  // dvh tracks the mobile URL bar; vh is the fallback for older browsers.
+  const supportsDvh =
+    typeof CSS !== 'undefined' && CSS.supports && CSS.supports('min-height', '100dvh');
+  const minHeight = compact ? '280px' : supportsDvh ? 'calc(100dvh - 180px)' : 'calc(100vh - 180px)';
   return (
     <div
       className="sx-studio-loading"
       style={{
-        minHeight: compact ? '280px' : 'calc(100vh - 180px)',
+        minHeight,
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',

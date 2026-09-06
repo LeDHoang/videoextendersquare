@@ -44,6 +44,7 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
     mount.appendChild(style);
 
     const host = document.createElement('div');
+    host.id = 'sxReelsHost';
     host.innerHTML = data.html;
     mount.appendChild(host);
 

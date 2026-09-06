@@ -297,7 +297,7 @@ export default function ExplorePage() {
       <div className="sx-control-rail-stacked">
         <div className="sx-control-rail-row">
           <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
-            <div style={{ width: '180px', flexShrink: 0 }}>
+            <div style={{ flex: '1 1 150px', minWidth: 0 }}>
               <Dropdown
                 value={folder}
                 options={folderOpts}
@@ -306,7 +306,7 @@ export default function ExplorePage() {
               />
             </div>
             <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
-            <div style={{ flex: 1, minWidth: '160px', position: 'relative' }}>
+            <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
               <input
                 className="sx-input"
                 style={{ paddingRight: search ? '28px' : undefined }}

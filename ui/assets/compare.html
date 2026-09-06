@@ -95,6 +95,29 @@
     transition: opacity 0.2s;
   }
   .sx-cmp-wrap:hover .sx-cmp-bar { opacity: 1; }
+  @media (hover: none), (pointer: coarse) {
+    .sx-cmp-bar {
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.85);
+    }
+    .sx-cmp-bar button {
+      min-height: 44px;
+      padding: 10px 18px;
+      font-size: 12px;
+    }
+  }
+  .sx-cmp-wrap.sx-pseudo-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    z-index: 99999 !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    background: #000 !important;
+  }
   .sx-cmp-bar button {
     background: transparent;
     border: 1px solid __INK__;
@@ -158,10 +181,34 @@
     });
 
     fullBtn.addEventListener('click', () => {
+      if (wrap.classList.contains('sx-pseudo-fullscreen')) {
+        wrap.classList.remove('sx-pseudo-fullscreen');
+        fullBtn.innerHTML = '⛶ Fullscreen';
+        try { window.parent.postMessage({ type: 'sx-exit-pseudo-fs' }, '*'); } catch (e) {}
+        return;
+      }
       if (!document.fullscreenElement) {
-        wrap.requestFullscreen().catch(() => {});
+        if (wrap.requestFullscreen) {
+          wrap.requestFullscreen().catch(() => {
+            wrap.classList.add('sx-pseudo-fullscreen');
+            fullBtn.innerHTML = '✕ Exit';
+            try { window.parent.postMessage({ type: 'sx-enter-pseudo-fs' }, '*'); } catch (e) {}
+          });
+        } else {
+          wrap.classList.add('sx-pseudo-fullscreen');
+          fullBtn.innerHTML = '✕ Exit';
+          try { window.parent.postMessage({ type: 'sx-enter-pseudo-fs' }, '*'); } catch (e) {}
+        }
       } else {
-        document.exitFullscreen();
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && !wrap.classList.contains('sx-pseudo-fullscreen')) {
+        fullBtn.innerHTML = '⛶ Fullscreen';
+      } else {
+        fullBtn.innerHTML = '✕ Exit';
       }
     });
 
