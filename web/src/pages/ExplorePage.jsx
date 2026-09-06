@@ -32,6 +32,7 @@ function fmtCount(n) {
 }
 
 function ExploreTile({ video, onOpen }) {
+  const isImage = video.media_type === 'image';
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
   const [src, setSrc] = useState(null);
@@ -44,6 +45,7 @@ function ExploreTile({ video, onOpen }) {
   //  - VISIBLE (actually in view): full preload + play immediately.
   //  - FAR (beyond 800px): poster thumbnail only, zero video traffic.
   useEffect(() => {
+    if (isImage) return undefined;
     const el = wrapRef.current;
     const vid = videoRef.current;
     if (!el || !vid) return undefined;
@@ -85,7 +87,7 @@ function ExploreTile({ video, onOpen }) {
       visIO.disconnect();
       if (!vid.paused) vid.pause();
     };
-  }, [video.preview_url, video.url]);
+  }, [isImage, video.preview_url, video.url]);
 
   const commentCount = video.comments?.length || 0;
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
@@ -98,33 +100,53 @@ function ExploreTile({ video, onOpen }) {
       type="button"
       className="sx-explore-tile"
       onClick={() => onOpen(video)}
-      title={[video.filename, place ? `📍 ${place}` : '', tagHint].filter(Boolean).join(' — ')}
-      aria-label={`Open ${video.filename} in Reels player`}
+      title={[video.title || video.filename, place ? `📍 ${place}` : '', tagHint].filter(Boolean).join(' — ')}
+      aria-label={`Open ${video.title || video.filename} in Reels player`}
     >
-      {/* Poster paints instantly (~tens of KB); the preview video loads over
-          it only when the tile scrolls into view. */}
-      {video.poster_url ? (
-        <img src={video.poster_url} className="sx-explore-poster" alt="" loading="lazy" draggable="false" />
-      ) : null}
-      {failed ? (
-        <div className="sx-explore-fallback">▶<span>{video.filename}</span></div>
-      ) : (
-        <video
-          ref={videoRef}
-          className="sx-explore-video"
-          src={src}
-          muted
-          loop
-          playsInline
-          preload={preload}
-          disablePictureInPicture
-          onError={() => {
-            // Preview missing/failed → fall back to the full stream once.
-            if (src !== video.url) setSrc(video.url);
-            else setFailed(true);
-          }}
+      {isImage ? (
+        <img
+          src={video.poster_url || video.preview_url || video.url}
+          className="sx-explore-image"
+          alt={video.title || video.filename}
+          loading="lazy"
+          draggable="false"
         />
+      ) : (
+        <>
+          {/* Poster paints instantly (~tens of KB); the preview video loads over
+              it only when the tile scrolls into view. */}
+          {video.poster_url ? (
+            <img src={video.poster_url} className="sx-explore-poster" alt="" loading="lazy" draggable="false" />
+          ) : null}
+          {failed ? (
+            <div className="sx-explore-fallback">▶<span>{video.filename}</span></div>
+          ) : (
+            <video
+              ref={videoRef}
+              className="sx-explore-video"
+              src={src}
+              muted
+              loop
+              playsInline
+              preload={preload}
+              disablePictureInPicture
+              onError={() => {
+                // Preview missing/failed → fall back to the full stream once.
+                if (src !== video.url) setSrc(video.url);
+                else setFailed(true);
+              }}
+            />
+          )}
+        </>
       )}
+      {video.title ? (
+        <span className="sx-explore-title" title={video.title}>
+          {video.title}
+        </span>
+      ) : null}
+      {video.media_type === 'image' ? (
+        <span className="sx-explore-kind" title="Image reel">IMAGE</span>
+      ) : null}
       {place ? (
         <span className="sx-explore-loc" title={place}>
           <LocationIcon />

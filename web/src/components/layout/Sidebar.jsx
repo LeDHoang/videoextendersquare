@@ -7,11 +7,13 @@ import {
   IndustrialCompareIcon,
   IndustrialReelsIcon,
   IndustrialExploreIcon,
+  IndustrialUploadIcon,
 } from '../icons/index.jsx';
 
 const NAV_ITEMS = [
   { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
   { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
+  { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
   { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
   { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
   { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },

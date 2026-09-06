@@ -334,6 +334,11 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
     if key in all_meta and isinstance(all_meta[key], dict):
         entry = all_meta[key]
         entry.setdefault("tags", [])
+        entry.setdefault("title", "")
+        entry.setdefault("caption", "")
+        entry.setdefault("author_name", "")
+        entry.setdefault("source", "")
+        entry.setdefault("created_at", "")
         loc = entry.get("location")
         if not isinstance(loc, dict):
             loc = {}
@@ -343,6 +348,10 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
             # Migrate pre-country entries: look up by city, drop the county.
             loc["country"] = _CITY_TO_COUNTRY.get(loc.get("city", ""), "")
         loc.pop("county", None)
+        loc.setdefault("display_name", "")
+        loc.setdefault("lat", None)
+        loc.setdefault("lon", None)
+        loc.setdefault("osm_id", None)
         entry.setdefault("likes", 0)
         entry.setdefault("views", 0)
         entry.setdefault("liked_by_me", False)
@@ -352,6 +361,46 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
     all_meta[key] = entry
     _save_meta_raw(all_meta)
     return entry
+
+
+def upsert_upload_meta(rel_path: str, meta: dict) -> dict:
+    """Persist real user-supplied metadata for an uploaded reel.
+
+    Unlike the fake seeding in _get_meta_for_video, this writes the user's
+    title/caption/tags/location verbatim (plus zeroed engagement counters)
+    so the new item never gets random likes/views/tags. Invalidates the
+    output scan cache so the item appears in feeds immediately.
+    """
+    key = rel_path.strip().replace("\\", "/")
+    all_meta = _load_meta_raw()
+    entry = {
+        "title": str(meta.get("title", ""))[:100],
+        "caption": str(meta.get("caption", ""))[:2200],
+        "tags": list(meta.get("tags", []))[:5],
+        "location": {
+            "city": str((meta.get("location") or {}).get("city", ""))[:120],
+            "country": str((meta.get("location") or {}).get("country", ""))[:120],
+            "display_name": str((meta.get("location") or {}).get("display_name", ""))[:300],
+            "lat": (meta.get("location") or {}).get("lat"),
+            "lon": (meta.get("location") or {}).get("lon"),
+            "osm_id": (meta.get("location") or {}).get("osm_id"),
+        },
+        "author_name": str(meta.get("author_name", "local_user"))[:60] or "local_user",
+        "source": str(meta.get("source", "upload"))[:20],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "likes": 0,
+        "views": 0,
+        "liked_by_me": False,
+    }
+    all_meta[key] = entry
+    _save_meta_raw(all_meta)
+    invalidate_scan_cache()
+    return entry
+
+
+def invalidate_scan_cache() -> None:
+    """Force the next reels query to re-scan output/ from disk."""
+    _scan_cache["at"] = 0.0
 
 
 # ─── Pydantic Models for Comments API ────────────────────────────────────
@@ -371,13 +420,23 @@ def _scan_cached() -> list[dict]:
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
-        _scan_cache["data"] = SM.scan_output_videos(str(OUTPUT_DIR))
+        _scan_cache["data"] = SM.scan_output_media(str(OUTPUT_DIR))
     return _scan_cache["data"]
 
 
+def _is_image_item(item: dict) -> bool:
+    if item.get("media_type") == "image":
+        return True
+    return Path(item.get("filename", "")).suffix.lstrip(".").lower() in SM.IMAGE_EXTS
+
+
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
-                   sort: str) -> list[dict]:
+                   sort: str, media: str | None = None) -> list[dict]:
     videos = list(raw)
+    if media in ("video", "videos"):
+        videos = [v for v in videos if not _is_image_item(v)]
+    elif media in ("image", "images"):
+        videos = [v for v in videos if _is_image_item(v)]
     if folder and folder != "ALL FOLDERS":
         videos = [v for v in videos if v["folder"] == folder]
     if search.strip():
@@ -415,12 +474,56 @@ def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
 
 
 def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> list[dict]:
-    """Map scanned videos to the reels player payload (relative /media/ URLs),
-    including embedded time-synced and general comments."""
+    """Map scanned media to the reels player payload (relative /media/ URLs),
+    including embedded time-synced and general comments.
+
+    Video items keep the codec-aware proxy logic; image items (single image
+    tiles) serve the original file directly with a lightweight poster thumb.
+    """
     mode = _codec_key(codec)
     payload = []
     for item in videos:
         src_path = item["path"]
+        comments = _get_comments_for_video(item["rel_path"], item["filename"])
+        meta = _get_meta_for_video(item["rel_path"], item["filename"])
+        loc = meta.get("location", {"city": "", "country": ""})
+        base = {
+            "tags": meta.get("tags", []),
+            "title": meta.get("title", ""),
+            "caption": meta.get("caption", ""),
+            "author_name": meta.get("author_name", ""),
+            "source": meta.get("source", ""),
+            "location": loc,
+            "likes": meta.get("likes", 0),
+            "views": meta.get("views", 0),
+            "liked_by_me": bool(meta.get("liked_by_me", False)),
+            "filename": item["filename"],
+            "folder": item["folder"],
+            "size": item["size_human"],
+            "path": item["rel_path"],
+            "tunnel_url": tunnel.strip(),
+            "comments": comments,
+        }
+
+        if _is_image_item(item):
+            # Single image tile: no codec/proxy/transcode needed.
+            try:
+                rel = Path(src_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+            except (OSError, ValueError):
+                continue
+            poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path))
+            payload.append({
+                **base,
+                "media_type": "image",
+                "url": f"/media/{rel}",
+                "preview_url": f"/media/{rel}",
+                "poster_url": poster_url or f"/media/{rel}",
+                "codec": "IMG",
+                "is_proxy": False,
+                "stream_tag": "IMAGE",
+            })
+            continue
+
         codec_name = SM.get_video_codec(src_path)
         play_path = src_path
         is_proxy = False
@@ -441,28 +544,15 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
         preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path))
         poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path))
 
-        # Load comments + metadata for this reel
-        comments = _get_comments_for_video(item["rel_path"], item["filename"])
-        meta = _get_meta_for_video(item["rel_path"], item["filename"])
-
         payload.append({
+            **base,
+            "media_type": "video",
             "url": f"/media/{rel}",
             "preview_url": preview_url,
             "poster_url": poster_url,
-            "tags": meta.get("tags", []),
-            "location": meta.get("location", {"city": "", "country": ""}),
-            "likes": meta.get("likes", 0),
-            "views": meta.get("views", 0),
-            "liked_by_me": bool(meta.get("liked_by_me", False)),
-            "filename": item["filename"],
-            "folder": item["folder"],
-            "size": item["size_human"],
-            "path": item["rel_path"],
             "codec": play_codec.upper(),
             "is_proxy": is_proxy,
             "stream_tag": "H.264 4K PROXY" if is_proxy else f"{codec_name.upper()} MASTER",
-            "tunnel_url": tunnel.strip(),
-            "comments": comments,
         })
     return payload
 
@@ -474,12 +564,16 @@ def list_reels(
     search: str = "",
     sort: str = "newest",
     refresh: bool = False,
+    media: str | None = None,
 ):
-    """Scan output dir and return the filtered, codec-aware reels list."""
+    """Scan output dir and return the filtered, codec-aware reels list.
+
+    media: all (default) | video | image — lets callers filter to one kind.
+    """
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort)
+    videos = _apply_filters(raw, folder, search, sort, media)
     return {
         "total": len(raw),
         "count": len(videos),
@@ -495,13 +589,31 @@ EXPLORE_GEN_WORKERS = 4
 
 
 def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | None]:
-    """Generate one video's Explore assets. Returns
+    """Generate one item's Explore assets. Returns
     (rel, preview_url, poster_url, error). Posters are cheap single frames;
-    previews are full re-encodes — both run in parallel across videos."""
+    previews are full re-encodes — both run in parallel across videos.
+    Image tiles only need a poster (the full image is its own preview)."""
     root = OUTPUT_DIR.resolve()
     p = (root / rel).resolve()
     if not p.is_relative_to(root) or not p.is_file():
         return rel, None, None, "not found"
+    if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+        try:
+            poster = SM.make_image_poster(str(p))
+        except Exception as ex:  # noqa: BLE001
+            return rel, None, None, str(ex)
+
+        def _img_url(local: str | None) -> str | None:
+            if not local:
+                return None
+            try:
+                return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+            except ValueError:
+                return None
+
+        poster_url = _img_url(poster)
+        # The tile uses the full image as its own preview.
+        return rel, f"/media/{rel}", poster_url, None
     try:
         prev = SM.make_explore_preview(str(p))
     except Exception as ex:  # noqa: BLE001
@@ -833,12 +945,13 @@ def reels_player(
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
+    media: str | None = None,
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort)
+    videos = _apply_filters(raw, folder, search, sort, media)
     payload = _build_payload(videos, codec, tunnel=tunnel)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
@@ -907,13 +1020,14 @@ def reels_player_inline(
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
+    media: str | None = None,
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort)
+    videos = _apply_filters(raw, folder, search, sort, media)
     payload = _build_payload(videos, codec, tunnel=tunnel)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
@@ -959,6 +1073,10 @@ def reels_player_inline(
         init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
             "\nwindow.__sxReelsCleanup = function () {\n"
+            "  if (window.__sxImageTimer) {\n"
+            "    clearTimeout(window.__sxImageTimer);\n"
+            "    window.__sxImageTimer = null;\n"
+            "  }\n"
             "  if (window.__sxReelsKeydown) {\n"
             "    window.removeEventListener('keydown', window.__sxReelsKeydown);\n"
             "    window.__sxReelsKeydown = null;\n"

@@ -38,7 +38,7 @@ _LTX_TRANSFORMERS = {"high", "low", "both"}
 _SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
 _BYTEDANCE_RES = {"1080p", "2k", "4k"}
 _BYTEDANCE_FPS = {"30fps", "60fps"}
-_BYTEDANCE_TIERS = {"fast", "pro"}
+_BYTEDANCE_TIERS = {"fast", "standard", "pro"}
 
 
 def _parse_ltx_loras(raw: str) -> list[dict]:

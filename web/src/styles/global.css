@@ -2842,3 +2842,111 @@ body.sx-vr-active .sx-reels-mount,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ─── Upload page: tags, location autocomplete, image tiles ─── */
+
+.sx-explore-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 200ms ease;
+}
+
+.sx-explore-tile:hover .sx-explore-image,
+.sx-explore-tile:focus-visible .sx-explore-image {
+  transform: scale(1.04);
+}
+
+/* Cover-title badge, bottom-left above the stats row. */
+.sx-explore-title {
+  position: absolute;
+  left: 8px;
+  bottom: 40px;
+  max-width: calc(100% - 16px);
+  background: rgba(18, 19, 21, 0.88);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.25;
+  padding: 3px 9px;
+  pointer-events: none;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Media-kind badge, top-right. */
+.sx-explore-kind {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: rgba(255, 59, 31, 0.9);
+  color: #0a0a0a;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  pointer-events: none;
+}
+
+.sx-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sx-tag-chip {
+  background: var(--sx-surface-3);
+  border: 1px solid var(--sx-accent);
+  color: var(--sx-ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.sx-tag-chip:hover {
+  background: var(--sx-surface-hover);
+}
+
+.sx-tag-chip.sx-tag-auto {
+  border-style: dashed;
+  cursor: default;
+  opacity: 0.85;
+}
+
+.sx-location-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  background: var(--sx-surface-2);
+  border: 1px solid var(--sx-rule-strong);
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.sx-location-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--sx-rule);
+  color: var(--sx-ink);
+  font-size: 0.8rem;
+  padding: 8px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sx-location-item:hover {
+  background: var(--sx-surface-hover);
+}

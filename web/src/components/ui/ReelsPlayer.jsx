@@ -51,7 +51,16 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
       s.textContent = code;
       mount.appendChild(s);
     }
-    return undefined;
+    // Tear down player timers/handlers (e.g. the image-reel dwell timer).
+    return () => {
+      if (typeof window !== 'undefined' && typeof window.__sxReelsCleanup === 'function') {
+        try {
+          window.__sxReelsCleanup();
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
   }, [data]);
 
   return (

@@ -300,12 +300,91 @@ def scan_output_videos(root: str = "output") -> list[dict]:
                 "size_bytes": stat.st_size,
                 "size_human": human_bytes(stat.st_size),
                 "mtime": stat.st_mtime,
+                "media_type": "video",
             })
         except OSError:
             continue
 
     videos.sort(key=lambda x: x["mtime"], reverse=True)
     return videos
+
+
+def scan_output_images(root: str = "output") -> list[dict]:
+    """Recursively scan root directory for image files (single image tiles).
+
+    Mirrors scan_output_videos: excludes generated poster thumbs
+    (<stem>-poster.jpg) so derived assets never appear as their own tiles.
+    """
+    base = Path(root)
+    if not base.exists():
+        return []
+
+    images = []
+    for file in base.rglob("*"):
+        if not file.is_file():
+            continue
+        if file.name.startswith(".") or file.name.endswith("-poster.jpg"):
+            continue
+        ext = file.suffix.lstrip(".").lower()
+        if ext not in IMAGE_EXTS:
+            continue
+
+        try:
+            rel = file.relative_to(base)
+            folder = str(rel.parent) if rel.parent != Path(".") else "root"
+            stat = file.stat()
+            images.append({
+                "path": str(file.resolve()),
+                "rel_path": rel.as_posix(),
+                "filename": file.name,
+                "folder": folder,
+                "size_bytes": stat.st_size,
+                "size_human": human_bytes(stat.st_size),
+                "mtime": stat.st_mtime,
+                "media_type": "image",
+            })
+        except OSError:
+            continue
+
+    images.sort(key=lambda x: x["mtime"], reverse=True)
+    return images
+
+
+def scan_output_media(root: str = "output") -> list[dict]:
+    """Combined video + image scan, newest first (backing the reels feed)."""
+    items = scan_output_videos(root) + scan_output_images(root)
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return items
+
+
+def make_image_poster(src: str, height: int = 720) -> str | None:
+    """Generate a lightweight JPEG thumb next to an image (<stem>-poster.jpg).
+
+    Lets Explore tiles paint a tens-of-KB poster instantly while the full
+    image loads. Cached on disk; regenerates when the source is newer.
+    """
+    try:
+        dest = Path(src).with_name(Path(src).stem + "-poster.jpg")
+        if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
+            return str(dest)
+    except OSError:
+        return None
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error",
+        "-i", src,
+        "-vf", f"scale=-2:{height}",
+        "-q:v", "5",
+        str(dest),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=120,
+                           creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+        return None
+    return str(dest)
 
 
 def scan_pairs(root: str = "output/pairs") -> list[dict]:

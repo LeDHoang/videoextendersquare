@@ -101,15 +101,15 @@ export default function ReelsPage() {
   };
   const videoOpts = videos.map((v) => ({
     value: v.path,
-    label: v.filename,
-    tag: `${v.size} · ${v.codec} · ${v.is_proxy ? 'PROXY' : 'MASTER'}`,
+    label: v.title || v.filename,
+    tag: `${v.size} · ${v.codec} · ${v.media_type === 'image' ? 'IMAGE' : v.is_proxy ? 'PROXY' : 'MASTER'}`,
   }));
 
   const generateProxy = async () => {
     setProxyBusy(true);
     setProxyMsg('');
     try {
-      const r = await api.post('/api/reels/proxy', videos.map((v) => v.path));
+      const r = await api.post('/api/reels/proxy', videos.filter((v) => v.media_type !== 'image').map((v) => v.path));
       const n = r.generated.length;
       setProxyMsg(
         n
@@ -165,13 +165,13 @@ export default function ReelsPage() {
   }, [spatJob]);
 
   const folderOpts = [{ label: 'ALL FOLDERS', value: 'ALL FOLDERS' }, ...folders.map((f) => ({ label: f, value: f }))];
-  const needsProxy = videos.filter((v) => codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
+  const needsProxy = videos.filter((v) => v.media_type !== 'image' && codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
 
   return (
     <div>
       <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
-          <span>VIDEOS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
+          <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
           <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
           <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
           <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>

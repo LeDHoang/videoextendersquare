@@ -26,6 +26,8 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
       const q = searchVal.trim().toLowerCase();
       if (q.includes('comp') || q.includes('ab') || q.includes('diff')) {
         navigate('/compare');
+      } else if (q.includes('upload') || q.includes('post') || q.includes('share') || q.includes('publish')) {
+        navigate('/upload');
       } else if (q.includes('explor') || q.includes('galler') || q.includes('browse')) {
         navigate('/explore');
       } else if (q.includes('reel') || q.includes('vr') || q.includes('quest') || q.includes('3d')) {
@@ -99,16 +101,10 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
             EXPLORE
           </NavLink>
           <NavLink
-            to="/image"
+            to="/upload"
             className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
           >
-            IMAGE
-          </NavLink>
-          <NavLink
-            to="/video"
-            className={({ isActive }) => `sx-top-link ${isActive ? 'sx-active' : ''}`}
-          >
-            VIDEO
+            UPLOAD
           </NavLink>
           <NavLink
             to="/compare"
@@ -170,20 +166,14 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
           </div>
         </div>
 
-        {/* Primary Action Button */}
+        {/* Primary Action Button — opens the Upload page */}
         <button
           type="button"
           className="sx-top-action-btn"
           onClick={() => {
-            if (location.pathname === '/compare') {
-              window.dispatchEvent(new CustomEvent('echo:trigger-action', { detail: 'compare' }));
-            } else if (location.pathname === '/reels') {
-              window.dispatchEvent(new CustomEvent('echo:trigger-action', { detail: 'reels' }));
-            } else {
-              window.dispatchEvent(new CustomEvent('echo:trigger-action', { detail: 'process' }));
-            }
+            if (location.pathname !== '/upload') navigate('/upload');
           }}
-          title="Trigger Pipeline Process / Execution"
+          title="Open the Upload page"
         >
           UPLOAD
         </button>

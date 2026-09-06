@@ -1,10 +1,21 @@
+import { useEffect, useRef } from 'react';
 import { useSSE } from '../../hooks/useSSE.js';
 import Progress from './Progress.jsx';
 import Emoji from './Emoji.jsx';
 
 // Tracks a single pipeline job over SSE and renders progress + result.
-export default function JobRunner({ jobId, name, kind }) {
+// onDone(result), when provided, fires exactly once when the job completes.
+export default function JobRunner({ jobId, name, kind, onDone }) {
   const { job, error } = useSSE(`/api/${kind}/jobs/${jobId}/stream`);
+  const doneRef = useRef(false);
+
+  const done = job?.status === 'complete' && job.result ? job.result : null;
+  useEffect(() => {
+    if (done && !doneRef.current) {
+      doneRef.current = true;
+      onDone?.(done);
+    }
+  }, [done, onDone]);
 
   if (!job && !error) {
     return (

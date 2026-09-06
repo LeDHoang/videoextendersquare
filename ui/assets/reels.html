@@ -70,6 +70,18 @@
     display: block;
     background: #000;
   }
+  /* Single image tiles share the 1:1 frame; the <video> hides underneath. */
+  .reels-video-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    background: #000;
+  }
+  /* Image reels have no timeline — the scrubber hides during the dwell. */
+  .reels-progress-wrap.image-hidden {
+    visibility: hidden;
+  }
 
   /* Top Bar */
   .reels-top-bar {
@@ -893,6 +905,7 @@
 
   <div class="reels-video-wrap" id="videoWrap">
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
+    <img id="reelsImage" alt="" style="display:none;" />
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="center-flash" id="centerFlash">▶</div>
     
@@ -1079,6 +1092,12 @@
 
     const frame = document.getElementById('reelsFrame');
     const video = document.getElementById('reelsVideo');
+    const reelsImage = document.getElementById('reelsImage');
+    const videoWrap = document.getElementById('videoWrap');
+    const progressWrap = document.getElementById('progressWrap');
+    // Single image tiles hold for a fixed dwell, then auto-advance.
+    const IMAGE_DWELL_S = 10;
+    let imageTimer = null;
     const counter = document.getElementById('counter');
     const soundBtn = document.getElementById('soundBtn');
     const playBtn = document.getElementById('playBtn');
@@ -1131,6 +1150,32 @@
     const blobUrlMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
+
+    function isImageItem(item) {
+      return !!item && item.media_type === 'image';
+    }
+
+    function clearImageTimer() {
+      if (imageTimer) {
+        clearTimeout(imageTimer);
+        imageTimer = null;
+      }
+      window.__sxImageTimer = null;
+    }
+
+    // Hold the still for IMAGE_DWELL_S, then auto-advance (or re-hold on LOOP).
+    function armImageTimer() {
+      clearImageTimer();
+      updatePlayBtnUI(true);
+      // timeDisplay is initialized before the first loadVideo() call below.
+      if (timeDisplay) timeDisplay.textContent = '0:00 / 0:10';
+      imageTimer = setTimeout(() => {
+        imageTimer = null;
+        if (isAutoNext) nextVideo();
+        else armImageTimer();
+      }, IMAGE_DWELL_S * 1000);
+      window.__sxImageTimer = imageTimer;
+    }
 
     function formatTime(seconds) {
       if (seconds === null || seconds === undefined || isNaN(seconds)) return '0:00';
@@ -1558,7 +1603,9 @@
         e.preventDefault();
         const txt = (commentInput ? commentInput.value : '').trim();
         if (!txt) return;
-        const posted = await postComment(txt, isSyncTimeActive ? video.currentTime : null, currentPersona);
+        // Stills have no playback clock — always post general comments.
+        const ts = (isSyncTimeActive && !isImageItem(videoData[idx])) ? video.currentTime : null;
+        const posted = await postComment(txt, ts, currentPersona);
         if (posted && commentInput) commentInput.value = '';
       });
     }
@@ -1567,14 +1614,56 @@
       if (!videoData || videoData.length <= 1) return;
       const nextIdx = (currentIndex + 1) % videoData.length;
       const nextItem = videoData[nextIdx];
-      if (nextItem && preloadVideo) {
+      if (!nextItem) return;
+      if (isImageItem(nextItem)) {
+        // Warm the browser cache for the still; the <video> preloader can't
+        // decode image files.
+        try {
+          const warmer = new Image();
+          warmer.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
+        } catch (e) {}
+        return;
+      }
+      if (preloadVideo) {
         preloadVideo.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
         preloadVideo.load();
       }
     }
 
+    // Render one image tile: still on screen, no timeline, 10s dwell.
+    function showImage(item) {
+      try { video.pause(); } catch (e) {}
+      try {
+        video.removeAttribute('src');
+        video.load();
+      } catch (e) {}
+      const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
+      video.style.display = 'none';
+      reelsImage.src = itemUrl;
+      reelsImage.alt = item.title || item.filename || 'Image reel';
+      reelsImage.style.display = 'block';
+      if (videoWrap) videoWrap.classList.add('image-mode');
+      if (progressWrap) progressWrap.classList.add('image-hidden');
+      if (commentMarkers) commentMarkers.innerHTML = '';
+      hideTicker();
+      updatePlayBtnUI(true);
+
+      // Preload subsequent track in background
+      preloadNext(idx);
+
+      // Stills carry no stereo layout; reset any SBS sampling from video reels.
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
+        WebXRVR.setStereo(false);
+      }
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
+        WebXRVR.onVideoChange();
+      }
+      armImageTimer();
+    }
+
     function loadVideo(index) {
       hideError();
+      clearImageTimer();
       if (index < 0) index = videoData.length - 1;
       if (index >= videoData.length) index = 0;
       idx = index;
@@ -1582,17 +1671,35 @@
       const item = videoData[idx];
       counter.textContent = (idx + 1) + ' / ' + videoData.length;
       metaFolder.textContent = '📁 ' + (item.folder || 'root');
-      metaTitle.textContent = item.filename;
+      metaTitle.textContent = item.title || item.filename;
+      try {
+        metaTitle.title = item.caption || item.filename;
+      } catch (e) {}
       metaSize.textContent = item.size || '';
       refreshEngagementUI();
       beaconView();
+
+      // Update comments display for this reel
+      renderDrawerComments();
+
+      if (isImageItem(item)) {
+        showImage(item);
+        return;
+      }
+
+      // Back to video mode after a still.
+      video.style.display = '';
+      if (reelsImage) {
+        reelsImage.style.display = 'none';
+        reelsImage.removeAttribute('src');
+      }
+      if (videoWrap) videoWrap.classList.remove('image-mode');
+      if (progressWrap) progressWrap.classList.remove('image-hidden');
 
       const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
       video.src = itemUrl;
       video.muted = isMuted;
 
-      // Update comments display for this video
-      renderDrawerComments();
       renderCommentMarkers();
       updateTwitchTicker();
 
@@ -1713,6 +1820,8 @@
 
     // Seek Relative (A / D controls: -5s / +5s)
     function seekRelative(sec) {
+      // No timeline on stills — nothing to seek.
+      if (isImageItem(videoData[idx])) return;
       if (video.duration) {
         const target = Math.max(0, Math.min(video.duration, video.currentTime + sec));
         video.currentTime = target;
@@ -1729,6 +1838,18 @@
     // Toggle Play/Pause
     function togglePlay() {
       flashBtn(playBtn);
+      // Stills have no media clock — play/pause gates the 10s dwell timer.
+      if (isImageItem(videoData[idx])) {
+        if (imageTimer) {
+          clearImageTimer();
+          updatePlayBtnUI(false);
+          showFlash('⏸ PAUSE');
+        } else {
+          armImageTimer();
+          showFlash('▶ PLAY');
+        }
+        return;
+      }
       if (video.paused) {
         video.play().then(() => {
           updatePlayBtnUI(true);
@@ -1863,7 +1984,7 @@
 
     // Click on video area toggles play/pause (unless drawer is clicked)
     document.getElementById('videoWrap').addEventListener('click', (e) => {
-      if (e.target.tagName === 'VIDEO' || e.target.id === 'videoWrap') {
+      if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG' || e.target.id === 'videoWrap') {
         if (commentsDrawer && commentsDrawer.classList.contains('open')) {
           toggleDrawer(false);
         } else {

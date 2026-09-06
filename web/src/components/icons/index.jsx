@@ -14,6 +14,7 @@ export { IndustrialVideoIcon } from './IndustrialVideoIcon.jsx';
 export { IndustrialCompareIcon } from './IndustrialCompareIcon.jsx';
 export { IndustrialReelsIcon } from './IndustrialReelsIcon.jsx';
 export { IndustrialExploreIcon } from './IndustrialExploreIcon.jsx';
+export { IndustrialUploadIcon } from './IndustrialUploadIcon.jsx';
 export { EchoLogo } from './EchoLogo.jsx';
 export { LocationIcon } from './LocationIcon.jsx';
 export { LikeIcon } from './LikeIcon.jsx';
