@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { EmptyState, Mono, GatedReason, Hero } from '../components/ui/primitives.jsx';
 import { Spinner } from '../components/ui/controls.jsx';
+import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import Emoji from '../components/ui/Emoji.jsx';
-
-import StudioLoading from '../components/ui/StudioLoading.jsx';
 
 const MODES = ['SPLIT', '2-UP', 'HEATMAP'];
 const ZOOMS = ['1x', '2x', '4x'];
@@ -103,7 +102,7 @@ export default function ComparePage() {
 
       {/* ─── Main Content ──────────────────────────────────── */}
       {data === null ? (
-        <StudioLoading title="COMPARE" subtitle="SCANNING DIRECTORY FOR RENDER PAIRS…" />
+        <SectionSkeleton label="Loading render pairs" />
       ) : !allPairs.length ? (
         <EmptyState
           title="NO RENDER PAIRS FOUND"
@@ -247,7 +246,7 @@ export default function ComparePage() {
                     <div>{prepErr}</div>
                   </div>
                 ) : !prep ? (
-                  <StudioLoading title="VIEWPORT" subtitle="PREPARING MASTER 4K VIEWPORT…" compact />
+                  <SectionSkeleton label="Loading compare viewport" compact />
                 ) : mode === '2-UP' ? (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', width: '100%', height: '100%', background: '#000' }}>
                     <div style={{ borderRight: '1px solid var(--sx-rule-strong)', position: 'relative' }}>

@@ -2703,6 +2703,97 @@ body.sx-vr-active .sx-reels-mount,
   animation: sx-loading-pulse 1.8s infinite ease-in-out;
 }
 
+/* ─── Skeleton Loading (shimmer = the app is working) ───
+   Subtle surface-2 → surface-3 highlight travelling left to right.
+   Idle "awaiting input" states keep the StudioLoading watermark instead. */
+
+@keyframes sx-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.sx-skel {
+  background-color: var(--sx-surface-2);
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    var(--sx-surface-3) 50%,
+    transparent 80%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: sx-shimmer 1.6s ease-in-out infinite;
+}
+
+/* Screen-reader-only label for skeleton regions. */
+.sx-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Explore skeleton viewport: caps at the visible area so the fixed tile
+   set self-adapts — phones show a few tiles, desktops a full grid. */
+.sx-skel-grid-clip {
+  max-height: calc(100vh - 320px);
+  min-height: 320px;
+  overflow: hidden;
+  margin-top: var(--sx-3);
+}
+
+.sx-skel-grid-clip .sx-explore-grid {
+  margin-top: 0;
+}
+
+/* Reels player skeleton — same square sizing as the live mount. */
+.sx-skel-player {
+  position: relative;
+  width: min(92vw, 84vh, 860px);
+  height: min(92vw, 84vh, 860px);
+  margin: 0 auto;
+}
+
+.sx-skel-player-frame {
+  position: absolute;
+  inset: 0;
+}
+
+.sx-skel-player-rail {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sx-skel-player-meta {
+  position: absolute;
+  left: 16px;
+  bottom: 24px;
+  right: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-skel {
+    animation: none;
+  }
+}
+
 /* ─── Explore Gallery (IG/TikTok-style randomized grid) ─── */
 
 .sx-explore-grid {
@@ -2949,4 +3040,26 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-location-item:hover {
   background: var(--sx-surface-hover);
+}
+
+/* Tiles pair .sx-explore-tile (whose background shorthand sorts later in
+   this file) with .sx-skel — the doubled selector wins the cascade so the
+   sweep survives on both skeleton-grid tiles and shimmering media tiles. */
+.sx-explore-tile.sx-skel {
+  background-color: var(--sx-surface-2);
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    var(--sx-surface-3) 50%,
+    transparent 80%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: sx-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-explore-tile.sx-skel {
+    animation: none;
+  }
 }

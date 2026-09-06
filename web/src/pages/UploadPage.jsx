@@ -5,6 +5,7 @@ import { Hero, Section, SpecRow, Eyebrow, BlockingBanner, GatedReason, Mono, Acc
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
+import { Skeleton } from '../components/ui/Skeleton.jsx';
 import CustomModelPanel from '../components/ui/CustomModelPanel.jsx';
 import LocationField from '../components/ui/LocationField.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
@@ -429,7 +430,12 @@ export default function UploadPage() {
           onFiles={onFiles}
           caption="Drop one image or video, or click to browse"
         />
-        {staging ? <Mono>STAGING UPLOAD…</Mono> : null}
+        {staging ? (
+          <div style={{ marginTop: 'var(--sx-3)' }} role="status" aria-busy="true" aria-label="Staging upload">
+            <Skeleton h={86} />
+            <Mono>STAGING UPLOAD…</Mono>
+          </div>
+        ) : null}
         {staged ? (
           <div style={{ marginTop: 'var(--sx-4)' }}>
             <SpecRow

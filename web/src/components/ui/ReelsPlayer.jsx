@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client.js';
+import { ReelsPlayerSkeleton } from './Skeleton.jsx';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
@@ -71,6 +72,7 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
           <div>{err}</div>
         </div>
       ) : null}
+      {!data && !err ? <ReelsPlayerSkeleton label="Loading reels player" /> : null}
       <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />
     </div>
   );

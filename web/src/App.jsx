@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
-import StudioLoading from './components/ui/StudioLoading.jsx';
+import { SectionSkeleton } from './components/ui/Skeleton.jsx';
 
 const ImagePage = lazy(() => import('./pages/ImagePage.jsx'));
 const VideoPage = lazy(() => import('./pages/VideoPage.jsx'));
@@ -12,7 +12,7 @@ const UploadPage = lazy(() => import('./pages/UploadPage.jsx'));
 
 export default function App() {
   return (
-    <Suspense fallback={<StudioLoading title="ECHO" subtitle="INITIALIZING HIGH-PERFORMANCE 4K EXTENDER…" />}>
+    <Suspense fallback={<SectionSkeleton label="Loading page" />}>
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/reels" replace />} />

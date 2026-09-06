@@ -4,7 +4,7 @@ import { api } from '../api/client.js';
 import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
-import StudioLoading from '../components/ui/StudioLoading.jsx';
+import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
 
 const SORTS = [
   { label: 'NEWEST', value: 'newest' },
@@ -280,7 +280,10 @@ export default function ReelsPage() {
 
       {/* Player Mount */}
       {data === null ? (
-        <StudioLoading title="REELS" subtitle="AWAITING SEQUENCE INITIATION…" />
+        <>
+          <ControlRailSkeleton label="Loading reels controls" />
+          <ReelsPlayerSkeleton label="Loading reels" />
+        </>
       ) : !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"

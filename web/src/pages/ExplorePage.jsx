@@ -4,7 +4,7 @@ import { api } from '../api/client.js';
 import { Hero, EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { Button, Dropdown, Pills } from '../components/ui/controls.jsx';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../components/icons/index.jsx';
-import StudioLoading from '../components/ui/StudioLoading.jsx';
+import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 
 const PREVIEW_BATCH = 24;
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
@@ -38,6 +38,8 @@ function ExploreTile({ video, onOpen }) {
   const [src, setSrc] = useState(null);
   const [preload, setPreload] = useState('metadata');
   const [failed, setFailed] = useState(false);
+  // Shimmer until first paint: poster/img onLoad or video loadeddata.
+  const [ready, setReady] = useState(false);
 
   // Two-tier loading priority:
   //  - NEAR (within 800px of viewport): set src with preload="metadata" —
@@ -98,7 +100,7 @@ function ExploreTile({ video, onOpen }) {
     <button
       ref={wrapRef}
       type="button"
-      className="sx-explore-tile"
+      className={`sx-explore-tile${ready ? '' : ' sx-skel'}`}
       onClick={() => onOpen(video)}
       title={[video.title || video.filename, place ? `📍 ${place}` : '', tagHint].filter(Boolean).join(' — ')}
       aria-label={`Open ${video.title || video.filename} in Reels player`}
@@ -110,13 +112,15 @@ function ExploreTile({ video, onOpen }) {
           alt={video.title || video.filename}
           loading="lazy"
           draggable="false"
+          onLoad={() => setReady(true)}
+          onError={() => setReady(true)}
         />
       ) : (
         <>
           {/* Poster paints instantly (~tens of KB); the preview video loads over
               it only when the tile scrolls into view. */}
           {video.poster_url ? (
-            <img src={video.poster_url} className="sx-explore-poster" alt="" loading="lazy" draggable="false" />
+            <img src={video.poster_url} className="sx-explore-poster" alt="" loading="lazy" draggable="false" onLoad={() => setReady(true)} onError={() => setReady(true)} />
           ) : null}
           {failed ? (
             <div className="sx-explore-fallback">▶<span>{video.filename}</span></div>
@@ -130,10 +134,11 @@ function ExploreTile({ video, onOpen }) {
               playsInline
               preload={preload}
               disablePictureInPicture
+              onLoadedData={() => setReady(true)}
               onError={() => {
                 // Preview missing/failed → fall back to the full stream once.
                 if (src !== video.url) setSrc(video.url);
-                else setFailed(true);
+                else { setFailed(true); setReady(true); }
               }}
             />
           )}
@@ -333,7 +338,7 @@ export default function ExplorePage() {
       {previewMsg ? <Mono>{previewMsg}</Mono> : null}
 
       {data === null ? (
-        <StudioLoading title="EXPLORE" subtitle="SHUFFLING REELS…" />
+        <ExploreGridSkeleton label="Loading explore gallery" />
       ) : !order.length ? (
         <EmptyState
           title="NO REELS MATCH CURRENT FILTERS"
