@@ -38,6 +38,7 @@
 | 14 | Reel2 H3-turbo A/B (FL2VA 8-step LoRA, chunked) | DONE 2026-09-09 | `scripts/run_reel2_turbo.py` (`logs/comfy_reel2_turbo.log`), 18 chunks, seed 7, ALLDONE 03:50:48–05:27:19 UTC (~96.5 min) vs stock TW ~158 min → **1.64× end-to-end**. `output/reels/reel2_turbofull.mp4` 1057f 1216×1248 OK. Stock-vs-turbo compare CLOSED: cNCC 0.993 both, bands slightly crisper on turbo, seams/flicker tied, stills indistinguishable → **8-step+LoRA is the new TW default**. See §Reels turbo note. |
 | 15 | Perceptual test battery (LPIPS/SSIM/PSNR full-reference) | DONE 2026-09-09 | `scripts/fidelity.py` (LPIPS-alex/SSIM/PSNR, tone-matched) + `scripts/compare_turbo.py`. Center-vs-source across 4 clips: **TW fidelity win is CONTENT-DEPENDENT** — TW ~2.9× closer on portrait (reel2/3), LTX ~2.1× closer on landscape (reel1); battlefield trim-confounded/dropped. Temporal LPIPS: LTX ~30% calmer everywhere. Ruled out timing/geometry/motion artifacts. See §Extensive perceptual test battery. |
 | 16 | reel1 LTX A/B: 2.3 vs 2.5 × dil8 vs dil15 | DONE 2026-09-09 | `scripts/run_r1_dil8.py` (`logs/comfy_r1_dil8.log`). **2.3 wins again** (5th confirm): fidelity tied but 2.5 bands softer + ~16% slower/chunk. **dil8 more faithful than dil15 at 1280² landscape** (LPIPS 0.092 vs 0.127) — blend-dilation is canvas-size dependent, not a global constant. See §reel1 LTX A/B. |
+| 17 | Burgstall VR180 front-hemisphere outpaint | DONE 2026-09-10 | 960² at 24 fps, fixed seed/FOV and overlapping temporal windows. Reel2 production measurement: 35.1 s input → 585 s ComfyUI generation, 607 s including chunk preparation/copies, plus 6.8 s stitch = **~614 s total, or 17.5 s wall time per 1 s of input**. Weighted generation across reels 1–3 was ~17.7 s/input-s. |
 
 ## Environment (verified 2026-09-03, still current 2026-09-07)
 
@@ -818,6 +819,9 @@ Cold model load: LTX +~110 s, H3/TwoAbove +~60–120 s (node unloads per run).
 | Reel2 TW-turbo (chunked 3s/1s, 8 steps + LoRA) | 1057f × 1216×1248 | 5791 s total (417 cold + 17×307–317 + stitch) = 1.64× stock |
 | reel1 LTX 2.3-dil8 (warm 6s chunk) | ~180f × 1280² | ~134 s/chunk (856 s/5-chunk wall) |
 | reel1 LTX 2.5-dil8 (warm 6s chunk) | ~180f × 1280² | ~156 s/chunk (+16%; 946 s wall, +11%) |
+| VR180 reel1 (fixed temporal, 4 overlapping windows) | 567f × 960² | 485 s generation / 23.625 s output = 20.5 s/input-s |
+| VR180 reel2 (fixed temporal, 6 overlapping windows) | 842f × 960² | 585 s generation; ~614 s incl. prep + stitch / 35.1 s input = **17.5 s/input-s** |
+| VR180 reel3 (single continuous window) | 273f × 960² | ~168 s generation / 11.375 s output = ~14.8 s/input-s |
 | CPU finishes (composites, trims) | ≤124f × ≤1280×1248 | ~1–2 min each (not precisely logged) |
 
 ### Per-input-second cost by pipeline version (the headline "how long per 1 s of source")
@@ -840,6 +844,30 @@ you actually wait. All 1×H100 80GB, seed 7.
 | **TwoAbove stock** (14-step) | 1216×1248 | **~180** (522–557 s / 3 s) | ~269 (reel2) | reels TW |
 | **TwoAbove turbo** (8-step+LoRA) | 1216×1248 | **~104** (307–317 s / 3 s) | **~164** (reel2, 1.64× faster) | reel2 turbo |
 | H3-Ref2VA (turbo 4-step, +composite) | 768² | ~10 (45 s / 4.46 s) | — | dialect2 single-clip |
+| **VR180 front hemisphere** | 960² | **~14** per processed window-second | **~17.5** (production reel2; ~14.8–20.5 generation-only range across reels) | reels 1–3, fixed temporal |
+
+### VR180 planning number (2026-09-10)
+
+Use **~18 seconds of H100 wall time per 1 second of input video** for the
+current VR180 recipe (`960×960`, 24 fps, `fov_scale=1.65`, seed 7, fixed HFOV,
+193-frame windows with about 2.04 s overlap). That projects to approximately:
+
+| Input duration | Expected VR180 pipeline time |
+|---:|---:|
+| 1 s | ~18 s |
+| 10 s | ~3 min |
+| 30 s | ~9 min |
+| 60 s | ~18 min |
+
+The reel2 measurement is the best end-to-end reference: its 35.1 s source used
+585 s inside ComfyUI, 607 s for chunk preparation + generation + copies, and
+6.8 s for the final aligned crossfade/audio stitch. Total automated work was
+about 614 s (10.2 min), or **17.5× realtime**. The six overlapping windows
+contained 45.58 s of generated footage, so the warm model itself ran at
+12.8 s per processed window-second; overlap increased that to 16.7 s per
+unique input second before preprocessing and stitching. Across the three
+validated reels, generation-only cost ranged from ~14.8 to 20.5 s/input-s and
+the duration-weighted average was ~17.7 s/input-s.
 
 Reading it: at 1280² the **full LTX→x2→TW-turbo chain ≈ 22 + 180 + 104 ≈ 306
 steady s per source-second** (~5 min per 1 s finished); swapping TW-turbo→stock
