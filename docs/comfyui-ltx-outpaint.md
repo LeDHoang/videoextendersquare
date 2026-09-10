@@ -822,6 +822,7 @@ Cold model load: LTX +~110 s, H3/TwoAbove +~60–120 s (node unloads per run).
 | VR180 reel1 (fixed temporal, 4 overlapping windows) | 567f × 960² | 485 s generation / 23.625 s output = 20.5 s/input-s |
 | VR180 reel2 (fixed temporal, 6 overlapping windows) | 842f × 960² | 585 s generation; ~614 s incl. prep + stitch / 35.1 s input = **17.5 s/input-s** |
 | VR180 reel3 (single continuous window) | 273f × 960² | ~168 s generation / 11.375 s output = ~14.8 s/input-s |
+| VR180 reel1 dil8 (4 overlapping windows) | 567f × 1280² | 936 s generation; ~945 s incl. prep + stitch / 23.625 s output = ~40.0 s/input-s |
 | CPU finishes (composites, trims) | ≤124f × ≤1280×1248 | ~1–2 min each (not precisely logged) |
 
 ### Per-input-second cost by pipeline version (the headline "how long per 1 s of source")
@@ -850,7 +851,11 @@ you actually wait. All 1×H100 80GB, seed 7.
 
 Use **~18 seconds of H100 wall time per 1 second of input video** for the
 current VR180 recipe (`960×960`, 24 fps, `fov_scale=1.65`, seed 7, fixed HFOV,
-193-frame windows with about 2.04 s overlap). That projects to approximately:
+193-frame windows with about 2.04 s overlap). The driver also accepts
+`--blend-dilation 0..15`; `0` preserves the largest original-source region, while
+`8` uses the same low-resolution mask-radius convention as the original LTX
+Laplacian blend and moves the generated blend farther into the source boundary.
+That projects to approximately:
 
 | Input duration | Expected VR180 pipeline time |
 |---:|---:|
@@ -867,7 +872,8 @@ contained 45.58 s of generated footage, so the warm model itself ran at
 12.8 s per processed window-second; overlap increased that to 16.7 s per
 unique input second before preprocessing and stitching. Across the three
 validated reels, generation-only cost ranged from ~14.8 to 20.5 s/input-s and
-the duration-weighted average was ~17.7 s/input-s.
+the duration-weighted average was ~17.7 s/input-s. The 1280² dil8 reel1 rerun
+needed about 945 s (15.8 min), or **~40.0 s/input-s**.
 
 Reading it: at 1280² the **full LTX→x2→TW-turbo chain ≈ 22 + 180 + 104 ≈ 306
 steady s per source-second** (~5 min per 1 s finished); swapping TW-turbo→stock

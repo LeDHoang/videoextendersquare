@@ -190,7 +190,8 @@ def build_prompt(args, video_name):
         feather_columns=0, start_percent=0.25)
     prompt["5177"]["inputs"].update(
         tone_match=1.0, feather_px=args.composite_feather,
-        tone_equalize=args.tone_equalize, wrap_w=not vr180)
+        tone_equalize=args.tone_equalize,
+        mask_low_res_dilation=args.blend_dilation, wrap_w=not vr180)
     prompt["5179"]["inputs"].update(
         frame_rate=float(args.fps), filename_prefix=args.prefix,
         format="video/h264-mp4", pix_fmt="yuv420p", crf=17,
@@ -237,6 +238,9 @@ def main():
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--iclora-strength", type=float, default=1.0)
     parser.add_argument("--composite-feather", type=int, default=12)
+    parser.add_argument("--blend-dilation", type=int, default=0,
+                        help="low-resolution outpaint-mask dilation before "
+                             "source compositing; 8 matches LTX dil8")
     parser.add_argument("--tone-equalize", type=float, default=0.7)
     parser.add_argument("--prefix", default="reel1_vr")
     parser.add_argument("--output")
@@ -260,6 +264,8 @@ def main():
         raise ValueError("VR180 output must use a square canvas")
     if args.fov_scale <= 0:
         raise ValueError("--fov-scale must be positive")
+    if not 0 <= args.blend_dilation <= 15:
+        raise ValueError("--blend-dilation must be between 0 and 15")
     if args.hfov_deg is not None and not 0 < args.hfov_deg < 180:
         raise ValueError("--hfov-deg must be between 0 and 180")
     if args.frames < 1:
