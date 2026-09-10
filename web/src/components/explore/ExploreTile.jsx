@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
 
 export function formatCompactCount(value) {
@@ -9,6 +10,7 @@ export function formatCompactCount(value) {
 }
 
 export default function ExploreTile({ video, onOpen, contextTag = '' }) {
+  const navigate = useNavigate();
   const isImage = video.media_type === 'image';
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -62,18 +64,25 @@ export default function ExploreTile({ video, onOpen, contextTag = '' }) {
     };
   }, [isImage, video.preview_url, video.url]);
 
-  const commentCount = video.comments?.length || 0;
+  const commentCount = video.comments_count ?? video.comments?.length ?? 0;
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename;
   const badge = contextTag ? '#' + contextTag : isImage ? 'IMAGE' : '';
 
   return (
-    <button
+    <article
       ref={wrapRef}
-      type="button"
+      role="button"
+      tabIndex={0}
       className={'sx-explore-tile' + (ready ? '' : ' sx-skel')}
       onClick={() => onOpen(video)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen(video);
+        }
+      }}
       title={[label, place ? 'Location: ' + place : '', tagHint].filter(Boolean).join(' — ')}
       aria-label={'Open ' + label + ' in Reels player'}
     >
@@ -128,6 +137,20 @@ export default function ExploreTile({ video, onOpen, contextTag = '' }) {
         </>
       )}
 
+      {video.creator ? (
+        <button
+          type="button"
+          className="sx-explore-creator"
+          onClick={(event) => {
+            event.stopPropagation();
+            navigate('/profile/' + video.creator.username);
+          }}
+          title={'Open @' + video.creator.username}
+        >
+          {video.creator.avatar_url ? <img src={video.creator.avatar_url} alt="" /> : <span style={{ backgroundColor: video.creator.avatar_color }}>{(video.creator.display_name || video.creator.username).slice(0, 1).toUpperCase()}</span>}
+          <strong>@{video.creator.username}</strong>
+        </button>
+      ) : null}
       {video.title ? (
         <span className="sx-explore-title" title={video.title}>
           {video.title}
@@ -156,6 +179,6 @@ export default function ExploreTile({ video, onOpen, contextTag = '' }) {
           </span>
         ) : null}
       </span>
-    </button>
+    </article>
   );
 }

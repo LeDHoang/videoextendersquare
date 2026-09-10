@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { SectionSkeleton } from './components/ui/Skeleton.jsx';
+import RequireAuth from './components/auth/RequireAuth.jsx';
 
 const ImagePage = lazy(() => import('./pages/ImagePage.jsx'));
 const VideoPage = lazy(() => import('./pages/VideoPage.jsx'));
@@ -10,6 +11,9 @@ const ReelsPage = lazy(() => import('./pages/ReelsPage.jsx'));
 const ExplorePage = lazy(() => import('./pages/ExplorePage.jsx'));
 const TagExplorePage = lazy(() => import('./pages/TagExplorePage.jsx'));
 const UploadPage = lazy(() => import('./pages/UploadPage.jsx'));
+const AuthPage = lazy(() => import('./pages/AuthPage.jsx'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage.jsx'));
 
 export default function App() {
   return (
@@ -23,7 +27,11 @@ export default function App() {
           <Route path="/reels" element={<ReelsPage />} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
-          <Route path="/upload" element={<UploadPage />} />
+          <Route path="/login" element={<AuthPage mode="login" />} />
+          <Route path="/signup" element={<AuthPage mode="register" />} />
+          <Route path="/profile/:username" element={<ProfilePage />} />
+          <Route path="/settings/profile" element={<RequireAuth><ProfileSettingsPage /></RequireAuth>} />
+          <Route path="/upload" element={<RequireAuth><UploadPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>
       </Routes>

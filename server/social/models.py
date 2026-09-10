@@ -1,0 +1,234 @@
+"""Relational model for ECHO accounts, media posts, and engagement."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+
+from .database import Base
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def uuid4_string() -> str:
+    return str(uuid.uuid4())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    email = Column(String(320), nullable=True)
+    email_norm = Column(String(320), nullable=True, unique=True, index=True)
+    username = Column(String(30), nullable=False)
+    username_norm = Column(String(30), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=True)
+    display_name = Column(String(60), nullable=False, default="")
+    bio = Column(String(150), nullable=False, default="")
+    website = Column(String(300), nullable=False, default="")
+    avatar_path = Column(String(500), nullable=True)
+    avatar_color = Column(String(16), nullable=False, default="#FF3B1F")
+    account_type = Column(String(16), nullable=False, default="real", index=True)
+    status = Column(String(16), nullable=False, default="active", index=True)
+    post_count = Column(Integer, nullable=False, default=0)
+    follower_count = Column(Integer, nullable=False, default=0)
+    following_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    csrf_hash = Column(String(64), nullable=False)
+    user_agent = Column(String(300), nullable=False, default="")
+    ip_hash = Column(String(64), nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+
+
+class Post(Base):
+    __tablename__ = "posts"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    owner_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    media_path = Column(String(1000), nullable=False, unique=True, index=True)
+    media_type = Column(String(16), nullable=False, index=True)
+    title = Column(String(100), nullable=False, default="")
+    caption = Column(Text, nullable=False, default="")
+    location = Column(JSON, nullable=False, default=dict)
+    source = Column(String(32), nullable=False, default="upload")
+    status = Column(String(16), nullable=False, default="published", index=True)
+    legacy_like_count = Column(Integer, nullable=False, default=0)
+    legacy_view_count = Column(Integer, nullable=False, default=0)
+    like_count = Column(Integer, nullable=False, default=0)
+    comment_count = Column(Integer, nullable=False, default=0)
+    save_count = Column(Integer, nullable=False, default=0)
+    view_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    owner = relationship("User")
+    tags = relationship("PostTag", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_posts_owner_created", "owner_id", "created_at", "id"),
+        Index("ix_posts_status_created", "status", "created_at", "id"),
+    )
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    name = Column(String(60), nullable=False)
+    slug = Column(String(60), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class PostTag(Base):
+    __tablename__ = "post_tags"
+
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    tag_id = Column(String(36), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    tag = relationship("Tag")
+
+
+class PostLike(Base):
+    __tablename__ = "post_likes"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_post_like_user_post"),
+        Index("ix_post_likes_post", "post_id", "created_at"),
+    )
+
+
+class PostSave(Base):
+    __tablename__ = "post_saves"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", name="uq_post_save_user_post"),
+        Index("ix_post_saves_user", "user_id", "created_at"),
+    )
+
+
+class Follow(Base):
+    __tablename__ = "follows"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    follower_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    followee_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("follower_id", "followee_id", name="uq_follow_pair"),
+        Index("ix_follows_followee", "followee_id", "created_at"),
+        Index("ix_follows_follower", "follower_id", "created_at"),
+    )
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id = Column(String(64), primary_key=True, default=uuid4_string)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    text = Column(String(500), nullable=False)
+    timestamp_ms = Column(Integer, nullable=True)
+    legacy_like_count = Column(Integer, nullable=False, default=0)
+    like_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    author = relationship("User")
+    post = relationship("Post")
+
+    __table_args__ = (Index("ix_comments_post_created", "post_id", "created_at", "id"),)
+
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    comment_id = Column(String(64), ForeignKey("comments.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "comment_id", name="uq_comment_like_user_comment"),)
+
+
+class ViewDedup(Base):
+    __tablename__ = "view_dedup"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    viewer_key = Column(String(80), nullable=False)
+    window_date = Column(String(10), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "viewer_key", "window_date", name="uq_view_window"),
+        Index("ix_view_dedup_created", "created_at"),
+    )
+
+
+class EngagementEvent(Base):
+    __tablename__ = "engagement_events"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    client_event_id = Column(String(64), nullable=True, unique=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = Column(String(40), nullable=False, index=True)
+    source = Column(String(40), nullable=False, default="unknown", index=True)
+    watch_ms = Column(Integer, nullable=True)
+    position_ms = Column(Integer, nullable=True)
+    completed = Column(Boolean, nullable=False, default=False)
+    context = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class DataMigration(Base):
+    __tablename__ = "data_migrations"
+
+    key = Column(String(100), primary_key=True)
+    details = Column(JSON, nullable=False, default=dict)
+    completed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

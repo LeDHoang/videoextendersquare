@@ -11,6 +11,7 @@ import LocationField from '../components/ui/LocationField.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
+import { useAuth } from '../hooks/AuthContext.jsx';
 
 // Upload wizard — single-file intake that will eventually replace the
 // standalone Image/Video extender pages (which stay mounted for now).
@@ -55,6 +56,7 @@ function kindOf(name) {
 
 export default function UploadPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const health = useHealthContext();
   const cfg = useConfigContext();
   const probes = health?.probes || {};
@@ -965,6 +967,7 @@ export default function UploadPage() {
                 ▶ PLAY IN REELS
               </Button>
               <Button onClick={() => navigate('/explore')}>EXPLORE GRID</Button>
+              <Button onClick={() => navigate('/profile/' + (published.meta?.creator?.username || user.username))}>VIEW ON PROFILE</Button>
               <Button onClick={reset}>+ NEW UPLOAD</Button>
             </div>
             <Mono>{published.media_url}</Mono>

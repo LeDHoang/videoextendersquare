@@ -16,11 +16,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import JobStatus, job_manager
+from server.social.auth import AuthContext, require_auth_csrf
+from server.social.database import get_db
+from server.social.services import create_or_update_post, post_card
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -132,8 +136,12 @@ def _resolve_source(kind: str, stage_id: str | None, job_id: str | None) -> tupl
 
 
 @router.post("/publish")
-def publish_upload(req: PublishRequest):
-    """Copy the chosen file into output/uploads/ and attach real metadata."""
+def publish_upload(
+    req: PublishRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    """Copy the chosen file into output/uploads/ and create an owned post."""
     from server.routers import reels as reels_router
 
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id)
@@ -191,23 +199,44 @@ def publish_upload(req: PublishRequest):
             tags.append(t)
 
     loc = req.location
-    entry = reels_router.upsert_upload_meta(rel, {
-        "title": req.title.strip(),
-        "caption": (req.caption or "").strip(),
-        "tags": tags,
-        "location": {
-            "city": (loc.city or "").strip(),
-            "country": (loc.country or "").strip(),
-            "display_name": (loc.display_name or "").strip(),
-            "lat": loc.lat,
-            "lon": loc.lon,
-            "osm_id": str(loc.osm_id) if loc.osm_id is not None else None,
-        },
-        "author_name": "local_user",
-        "source": "extended" if req.job_id else "upload",
-    })
+    try:
+        post = create_or_update_post(
+            db,
+            media_path=rel,
+            media_type=req.kind,
+            owner=context.user,
+            title=req.title.strip(),
+            caption=(req.caption or "").strip(),
+            tags=tags,
+            location={
+                "city": (loc.city or "").strip(),
+                "country": (loc.country or "").strip(),
+                "display_name": (loc.display_name or "").strip(),
+                "lat": loc.lat,
+                "lon": loc.lon,
+                "osm_id": str(loc.osm_id) if loc.osm_id is not None else None,
+            },
+            source="extended" if req.job_id else "upload",
+        )
+        db.commit()
+        db.refresh(post)
+    except Exception:
+        db.rollback()
+        for candidate in (
+            dest,
+            SM.explore_preview_path(str(dest)),
+            SM.explore_poster_path(str(dest)),
+        ):
+            try:
+                Path(candidate).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
 
+    reels_router.invalidate_scan_cache()
+    entry = post_card(post, db, context.user.id)
     return {
+        "post_id": post.id,
         "rel_path": rel,
         "media_url": f"/media/{rel}",
         "media_type": req.kind,

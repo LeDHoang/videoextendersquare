@@ -7,7 +7,7 @@
  *  - DeoVR/Skybox 6DOF Natural Grab & Repositioning
  *  - YouTube VR Standard Curved Screen (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
  */
-const WebXRVR = (function () {
+window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
@@ -1218,7 +1218,7 @@ const WebXRVR = (function () {
 
     // Footer
     if (canvasY > CP_LIST_BOTTOM) {
-      if (canvasY >= CP_LIST_BOTTOM + 10 && canvasY < CP_LIST_BOTTOM + 44 && canvasX >= 16 && canvasX < 216) return 'persona';
+      if (canvasY >= CP_LIST_BOTTOM + 10 && canvasY < CP_LIST_BOTTOM + 44 && canvasX >= 16 && canvasX < 216) return 'account';
       if (canvasY >= CP_LIST_BOTTOM + 54 && canvasY < CP_LIST_BOTTOM + 98 && canvasX >= 16 && canvasX < CPANEL_W - 16) return 'add';
       return 'panel';
     }
@@ -1248,6 +1248,7 @@ const WebXRVR = (function () {
       const itemW = CP_LIST_W - 20;
       if (canvasY >= y + 8 && canvasY < y + 36) {
         const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+        if (canvasX >= itemX + 8 && canvasX < itemX + 174) return 'profile:' + (c.author_name || '');
         if (hasTime && canvasX >= itemX + 180 && canvasX < itemX + 280) return 'seek:' + c.id;
         if (canvasX >= itemX + itemW - 46 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
       }
@@ -1294,7 +1295,7 @@ const WebXRVR = (function () {
     cPanelMaxScroll = Math.max(0, contentH - listH);
     if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
 
-    const persona = callbacks.getPersona ? callbacks.getPersona() : null;
+    const user = callbacks.getCurrentUser ? callbacks.getCurrentUser() : null;
     const accent = '#FF3B1F';
 
     ctx.clearRect(0, 0, CPANEL_W, CPANEL_H);
@@ -1535,21 +1536,26 @@ const WebXRVR = (function () {
     ctx.fillStyle = '#0d0e0f';
     ctx.fillRect(0, footerY, CPANEL_W, CPANEL_H - footerY);
 
-    const personaHover = cPanelHover === 'persona';
-    ctx.fillStyle = personaHover ? '#292a2b' : '#1f2021';
-    ctx.strokeStyle = personaHover ? accent : '#343536';
+    const accountHover = cPanelHover === 'account';
+    ctx.fillStyle = accountHover ? '#292a2b' : '#1f2021';
+    ctx.strokeStyle = accountHover ? accent : '#343536';
     ctx.beginPath();
     ctx.roundRect(16, footerY + 10, 200, 34, 3);
     ctx.fill();
     ctx.stroke();
-    if (persona) {
-      ctx.font = '16px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(persona.avatar || '👤', 28, footerY + 28);
+    ctx.font = '700 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    if (user) {
+      ctx.fillStyle = user.avatar_color || accent;
+      ctx.fillText((user.display_name || user.username || '?').slice(0, 1).toUpperCase(), 28, footerY + 28);
       ctx.fillStyle = '#e3e2e3';
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.fillText(persona.name || 'Anonymous', 52, footerY + 28);
+      ctx.fillText('@' + (user.username || 'account'), 52, footerY + 28);
+    } else {
+      ctx.fillStyle = accent;
+      ctx.fillText('?', 28, footerY + 28);
+      ctx.fillStyle = '#e3e2e3';
+      ctx.fillText('SIGN IN TO INTERACT', 52, footerY + 28);
     }
 
     ctx.fillStyle = 'rgba(155,161,168,0.8)';
@@ -1617,8 +1623,13 @@ const WebXRVR = (function () {
       if (callbacks.onLikeComment) callbacks.onLikeComment(id);
       return true;
     }
-    if (desc === 'persona') {
-      if (callbacks.onRandomizePersona) callbacks.onRandomizePersona();
+    if (desc.indexOf('profile:') === 0) {
+      const username = desc.slice(8);
+      if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
+      return true;
+    }
+    if (desc === 'account') {
+      if (callbacks.onOpenAccount) callbacks.onOpenAccount();
       return true;
     }
     return false;
@@ -3534,8 +3545,12 @@ const WebXRVR = (function () {
     cleanup();
   }
 
-  function exitVR() {
-    if (xrSession) xrSession.end().catch(() => {});
+  async function exitVR() {
+    const session = xrSession;
+    if (!session) return;
+    try {
+      await session.end();
+    } catch (e) {}
   }
 
   function cleanup() {

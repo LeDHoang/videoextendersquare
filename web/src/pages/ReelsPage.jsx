@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
+import { useAuth } from '../hooks/AuthContext.jsx';
 
 const SORTS = [
   { label: 'NEWEST', value: 'newest' },
@@ -24,6 +25,8 @@ const CODEC_OPTS = [
 ];
 
 export default function ReelsPage() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading, setUser } = useAuth();
   // Deep-link support (Explore → Reels): ?folder&codec(h264|hevc|all)
   // &search&tag&sort&play=<video path> preselects filters and starts the
   // player at that exact reel. `deepPlay` is consumed (cleared) as soon as
@@ -42,6 +45,8 @@ export default function ReelsPage() {
     VALID_SORTS.includes(paramSort) ? paramSort : 'newest',
   );
   const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
+  const [feedScope, setFeedScope] = useState(searchParams.get('feed') === 'following' ? 'following' : 'discover');
+  const activeAuthor = searchParams.get('author') || '';
 
   // Re-sync when navigating Explore → Reels while already mounted (same
   // route, new query string — state initializers above don't re-run).
@@ -54,6 +59,7 @@ export default function ReelsPage() {
       setCodec(c === 'h264' ? 'H264 (Browser/VR)' : c === 'all' ? 'ALL CODECS' : CODEC_DEFAULT);
       setSearch(searchParams.get('search') || '');
       setActiveTag(searchParams.get('tag') || '');
+      setFeedScope(searchParams.get('feed') === 'following' ? 'following' : 'discover');
       const s = searchParams.get('sort');
       if (VALID_SORTS.includes(s)) setSort(s);
       setDeepPlay(play);
@@ -78,12 +84,20 @@ export default function ReelsPage() {
     codec === 'ALL CODECS' ? 'all' : codec === 'H264 (Browser/VR)' ? 'h264' : 'hevc';
 
   useEffect(() => {
+    if (feedScope === 'following' && authLoading) return;
+    if (feedScope === 'following' && !user) {
+      const next = '/reels?' + searchParams.toString();
+      navigate('/login?next=' + encodeURIComponent(next), { replace: true });
+      return;
+    }
     api
       .get('/api/reels', {
         folder,
         codec: codecParam,
         search: debouncedSearch,
         tag: activeTag || undefined,
+        feed: feedScope === 'following' ? 'following' : undefined,
+        author: activeAuthor || undefined,
         sort,
         refresh: refreshKey > 0,
       })
@@ -93,8 +107,16 @@ export default function ReelsPage() {
           setFolder(r.folders.includes('testpipeline') ? 'testpipeline' : r.folders[0] || 'ALL FOLDERS');
         }
       })
-      .catch(() => setData({ total: 0, count: 0, folders: [], videos: [] }));
-  }, [folder, codecParam, debouncedSearch, activeTag, sort, refreshKey]);
+      .catch((error) => {
+        if (error?.status === 401 && feedScope === 'following') {
+          setUser(null);
+          const next = '/reels?' + searchParams.toString();
+          navigate('/login?next=' + encodeURIComponent(next), { replace: true });
+          return;
+        }
+        setData({ total: 0, count: 0, folders: [], videos: [] });
+      });
+  }, [folder, codecParam, debouncedSearch, activeTag, feedScope, activeAuthor, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
 
   const clearTagFilter = () => {
     const nextParams = new URLSearchParams(searchParams);
@@ -102,6 +124,21 @@ export default function ReelsPage() {
     nextParams.delete('play');
     setDeepPlay(null);
     setActiveTag('');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const changeFeed = (value) => {
+    if (value === 'following' && !user) {
+      navigate('/login?next=' + encodeURIComponent('/reels?feed=following'));
+      return;
+    }
+    setDeepPlay(null);
+    setFeedScope(value);
+    if (value === 'following') setFolder('ALL FOLDERS');
+    const nextParams = new URLSearchParams(searchParams);
+    if (value === 'following') nextParams.set('feed', 'following');
+    else nextParams.delete('feed');
+    nextParams.delete('play');
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -114,6 +151,8 @@ export default function ReelsPage() {
     search: debouncedSearch,
     sort,
     ...(activeTag ? { tag: activeTag } : {}),
+    ...(feedScope === 'following' ? { feed: 'following' } : {}),
+    ...(activeAuthor ? { author: activeAuthor } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
   const videoOpts = videos.map((v) => ({
@@ -191,9 +230,29 @@ export default function ReelsPage() {
           <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
           <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
           <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
+          <span>FEED: <strong>{activeAuthor ? '@' + activeAuthor : feedScope.toUpperCase()}</strong></span>
           <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
         </div>
       </Hero>
+
+      {activeAuthor ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>CREATOR FEED</span>
+          <strong>{'@' + activeAuthor}</strong>
+          <button
+            type="button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.delete('author');
+              nextParams.delete('play');
+              setDeepPlay(null);
+              setSearchParams(nextParams, { replace: true });
+            }}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
 
       {activeTag ? (
         <div className="sx-active-tag-filter" role="status">
@@ -213,6 +272,14 @@ export default function ReelsPage() {
         {/* Row 1: Filters (Folder, Codec, Search, Sort) */}
         <div className="sx-control-rail-row">
           <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
+            <Pills
+              options={[
+                { label: 'DISCOVER', value: 'discover' },
+                { label: 'FOLLOWING', value: 'following' },
+              ]}
+              value={feedScope}
+              onChange={changeFeed}
+            />
             <div style={{ flex: '1 1 150px', minWidth: 0 }}>
               <Dropdown
                 value={folder}
@@ -318,7 +385,7 @@ export default function ReelsPage() {
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-          hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}" tag="${activeTag}"`}
+          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" feed="' + feedScope + '"'}
         />
       ) : (
         <div>

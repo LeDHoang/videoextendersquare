@@ -45,6 +45,11 @@ async def _cleanup_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from core.tooling import ensure_ffmpeg_on_path, pick_encoder
+    from server.social import init_database
+    from server.social.legacy import import_legacy_social
+
+    init_database()
+    await asyncio.to_thread(import_legacy_social)
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
@@ -79,9 +84,9 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
-    from server.routers import compare, config, health, image, model_info, reels, uploads, video
+    from server.routers import compare, config, health, image, model_info, reels, social, uploads, video
 
-    for module in (health, config, model_info, image, video, reels, uploads, compare):
+    for module in (health, config, model_info, image, video, social, reels, uploads, compare):
         app.include_router(module.router)
 
     # Static media serving (replaces mediaserver.py port 8502).
@@ -90,6 +95,10 @@ def create_app() -> FastAPI:
     output_dir = Path("output").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=output_dir), name="media")
+
+    avatar_dir = Path("data/avatars").resolve()
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/avatars", StaticFiles(directory=avatar_dir), name="avatars")
 
     # Built React app (production). Mounted last so /api and /media win.
     static_dir = Path(__file__).resolve().parent / "static"

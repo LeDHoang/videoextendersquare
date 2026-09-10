@@ -33,3 +33,7 @@ server/static/
 current-issue.md
 reports/
 antigravityskill/
+
+# Local social database and uploaded avatars
+data/*
+!data/.gitkeep

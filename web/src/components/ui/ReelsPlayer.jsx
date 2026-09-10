@@ -1,16 +1,42 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
+import { useAuth } from '../../hooks/AuthContext.jsx';
 import { ReelsPlayerSkeleton } from './Skeleton.jsx';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
 // player scripts; we re-inject them in order and clean up on change.
 export default function ReelsPlayer({ params, initialIndex = 0 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, setUser } = useAuth();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
   const start = Math.max(0, initialIndex | 0);
-  const sig = JSON.stringify({ ...params, start });
+  const sig = JSON.stringify({ ...params, start, viewer: user?.id || null });
+
+  useEffect(() => {
+    const onNavigate = (event) => {
+      const path = event.detail?.path;
+      if (!path || !path.startsWith('/') || path.startsWith('//')) return;
+      event.preventDefault();
+      navigate(path);
+    };
+    const onAuthRequired = (event) => {
+      event.preventDefault();
+      setUser(null);
+      const next = event.detail?.next || location.pathname + location.search;
+      navigate('/login?next=' + encodeURIComponent(next));
+    };
+    window.addEventListener('echo:navigate', onNavigate);
+    window.addEventListener('echo:auth-required', onAuthRequired);
+    return () => {
+      window.removeEventListener('echo:navigate', onNavigate);
+      window.removeEventListener('echo:auth-required', onAuthRequired);
+    };
+  }, [navigate, location.pathname, location.search, setUser]);
 
   useEffect(() => {
     let alive = true;

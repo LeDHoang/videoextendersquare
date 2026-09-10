@@ -10,12 +10,16 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import job_manager
+from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf
+from server.social.database import get_db
+from server.social.services import get_post_by_reference, metadata_for_paths, reel_records, scoped_media_paths
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
 
@@ -182,26 +186,22 @@ def _generate_seed_comments(rel_path: str, filename: str) -> list[dict]:
 
 
 def _get_comments_for_video(rel_path: str, filename: str = "") -> list[dict]:
-    """Retrieve comments for a video, seeding default mock comments if none exist."""
-    key = rel_path.strip().replace("\\", "/")
-    all_comments = _load_comments_raw()
-    
-    if key not in all_comments or not all_comments[key]:
-        # Also try matching by filename stem
-        found = None
-        for k, v in all_comments.items():
-            if Path(k).name == Path(rel_path).name:
-                found = v
-                break
-        if found:
-            return found
-        
-        seeds = _generate_seed_comments(rel_path, filename)
-        all_comments[key] = seeds
-        _save_comments_raw(all_comments)
-        return seeds
+    """Retrieve comments from the social database with read-only JSON fallback."""
+    key = rel_path.strip().replace(chr(92), "/")
+    try:
+        record = reel_records([key]).get(key)
+        if record is not None:
+            return record.get("comments", [])
+    except Exception:
+        pass
 
-    return all_comments[key]
+    all_comments = _load_comments_raw()
+    if key in all_comments and isinstance(all_comments[key], list):
+        return all_comments[key]
+    for legacy_path, rows in all_comments.items():
+        if Path(legacy_path).name == Path(rel_path).name and isinstance(rows, list):
+            return rows
+    return []
 
 
 # ─── REEL METADATA (fake tags / location / engagement for future recsys) ──
@@ -292,17 +292,17 @@ def _safe_int(value) -> int:
 
 
 def _metadata_snapshot(raw: list[dict]) -> dict[str, dict]:
-    """Build deterministic metadata for discovery without writing seed data.
-
-    Header autocomplete can run on every few keystrokes. Reading the metadata
-    file once and deriving missing seed rows in memory keeps that interaction
-    cheap and avoids turning a search request into many small disk writes.
-    """
+    """Build metadata from the social database with legacy fallback."""
     persisted = _load_meta_raw()
+    keys = [str(item.get("rel_path", "")).strip().replace(chr(92), "/") for item in raw]
+    try:
+        database_rows = metadata_for_paths(keys)
+    except Exception:
+        database_rows = {}
     snapshot: dict[str, dict] = {}
     for item in raw:
-        key = str(item.get("rel_path", "")).strip().replace("\\", "/")
-        entry = persisted.get(key)
+        key = str(item.get("rel_path", "")).strip().replace(chr(92), "/")
+        entry = database_rows.get(key) or persisted.get(key)
         if not isinstance(entry, dict):
             seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
             entry = _seed_meta(key, item.get("filename", ""), random.Random(seed))
@@ -530,16 +530,18 @@ def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
 
 
 def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
-    """Retrieve metadata for a video, seeding fakes on first sight.
+    """Retrieve database metadata with read-only legacy JSON fallback."""
+    key = rel_path.strip().replace(chr(92), "/")
+    try:
+        record = metadata_for_paths([key]).get(key)
+        if record is not None:
+            return record
+    except Exception:
+        pass
 
-    Seeding uses a path-hash RNG so each reel gets stable, varied values;
-    the result persists to reels_meta.json (user/real data can replace
-    fakes later with no API change).
-    """
-    key = rel_path.strip().replace("\\", "/")
     all_meta = _load_meta_raw()
     if key in all_meta and isinstance(all_meta[key], dict):
-        entry = all_meta[key]
+        entry = dict(all_meta[key])
         entry.setdefault("tags", [])
         entry.setdefault("title", "")
         entry.setdefault("caption", "")
@@ -552,7 +554,6 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
             entry["location"] = loc
         loc.setdefault("city", "")
         if not loc.get("country"):
-            # Migrate pre-country entries: look up by city, drop the county.
             loc["country"] = _CITY_TO_COUNTRY.get(loc.get("city", ""), "")
         loc.pop("county", None)
         loc.setdefault("display_name", "")
@@ -561,13 +562,10 @@ def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
         loc.setdefault("osm_id", None)
         entry.setdefault("likes", 0)
         entry.setdefault("views", 0)
-        entry.setdefault("liked_by_me", False)
+        entry["liked_by_me"] = False
         return entry
     seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
-    entry = _seed_meta(key, filename, random.Random(seed))
-    all_meta[key] = entry
-    _save_meta_raw(all_meta)
-    return entry
+    return _seed_meta(key, filename, random.Random(seed))
 
 
 def upsert_upload_meta(rel_path: str, meta: dict) -> dict:
@@ -614,11 +612,12 @@ def invalidate_scan_cache() -> None:
 
 class CommentCreate(BaseModel):
     video_path: str
-    timestamp: float | None = None  # None for general / non-time-synced
-    author_name: str
+    timestamp: float | None = None
     text: str
-    author_avatar: str | None = "👤"
-    avatar_color: str | None = "#FF3B1F"
+    # Retained only for wire compatibility. Identity comes from the session.
+    author_name: str | None = None
+    author_avatar: str | None = None
+    avatar_color: str | None = None
 
 
 # ─── SCAN & FILTER ───────────────────────────────────────────────────────
@@ -718,7 +717,12 @@ def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
     return None
 
 
-def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> list[dict]:
+def _build_payload(
+    videos: list[dict],
+    codec: str | None,
+    tunnel: str = "",
+    viewer_id: str | None = None,
+) -> list[dict]:
     """Map scanned media to the reels player payload (relative /media/ URLs),
     including embedded time-synced and general comments.
 
@@ -727,21 +731,44 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
     """
     mode = _codec_key(codec)
     payload = []
+    paths = [item["rel_path"] for item in videos]
+    try:
+        social_rows = reel_records(paths, viewer_id=viewer_id)
+    except Exception:
+        social_rows = {}
     for item in videos:
         src_path = item["path"]
-        comments = _get_comments_for_video(item["rel_path"], item["filename"])
-        meta = _get_meta_for_video(item["rel_path"], item["filename"])
+        social_row = social_rows.get(item["rel_path"])
+        comments = (
+            social_row.get("comments", [])
+            if social_row is not None
+            else _get_comments_for_video(item["rel_path"], item["filename"])
+        )
+        meta = social_row or _get_meta_for_video(item["rel_path"], item["filename"])
         loc = meta.get("location", {"city": "", "country": ""})
         base = {
+            "post_id": meta.get("post_id"),
             "tags": meta.get("tags", []),
             "title": meta.get("title", ""),
             "caption": meta.get("caption", ""),
             "author_name": meta.get("author_name", ""),
+            "author_avatar": meta.get("author_avatar", "👤"),
+            "author_avatar_url": meta.get("author_avatar_url"),
+            "creator": meta.get("creator"),
+            "viewer_state": meta.get("viewer_state", {
+                "liked": False,
+                "saved": False,
+                "following_creator": False,
+                "can_edit": False,
+            }),
             "source": meta.get("source", ""),
+            "created_at": meta.get("created_at", ""),
             "location": loc,
             "likes": meta.get("likes", 0),
             "views": meta.get("views", 0),
+            "saves": meta.get("saves", 0),
             "liked_by_me": bool(meta.get("liked_by_me", False)),
+            "saved_by_me": bool(meta.get("saved_by_me", False)),
             "filename": item["filename"],
             "folder": item["folder"],
             "size": item["size_human"],
@@ -749,6 +776,7 @@ def _build_payload(videos: list[dict], codec: str | None, tunnel: str = "") -> l
             "tunnel_url": tunnel.strip(),
             "comments": comments,
         }
+
 
         if _is_image_item(item):
             # Single image tile: no codec/proxy/transcode needed.
@@ -811,6 +839,9 @@ def list_reels(
     refresh: bool = False,
     media: str | None = None,
     tag: str | None = None,
+    feed: str | None = None,
+    author: str | None = None,
+    viewer: AuthContext | None = Depends(get_optional_auth),
 ):
     """Scan output dir and return the filtered, codec-aware reels list.
 
@@ -820,12 +851,23 @@ def list_reels(
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
     videos = _apply_filters(raw, folder, search, sort, media, tag)
+    scoped_paths = scoped_media_paths(
+        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+        feed=feed,
+        author=author,
+    )
+    if feed == "following" and not isinstance(viewer, AuthContext):
+        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
+    if scoped_paths is not None:
+        positions = {value: index for index, value in enumerate(scoped_paths)}
+        videos = [video for video in videos if video["rel_path"] in positions]
+        videos.sort(key=lambda video: positions[video["rel_path"]])
     return {
         "total": len(raw),
         "count": len(videos),
         "folders": sorted({v["folder"] for v in raw}),
         "active_tag": _tag_slug(tag) if tag else None,
-        "videos": _build_payload(videos, codec),
+        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
     }
 
 
@@ -848,6 +890,7 @@ def get_reel_tag(
     sort: str = "trending",
     folder: str | None = None,
     refresh: bool = False,
+    viewer: AuthContext | None = Depends(get_optional_auth),
 ):
     """Return one exact tag feed plus stats and co-occurring tags."""
     slug = _tag_slug(tag_name)
@@ -877,7 +920,7 @@ def get_reel_tag(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_tags": _related_tag_rows(slug, catalog),
-        "videos": _build_payload(videos, codec),
+        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
     }
 
 
@@ -986,128 +1029,120 @@ def get_diag():
     return _diag
 
 
-# ─── COMMENTS ENDPOINTS ──────────────────────────────────────────────────
+# ─── COMMENTS + ENGAGEMENT COMPATIBILITY ENDPOINTS ──────────────────────
 
 @router.get("/comments")
-def get_comments(video_path: str):
-    """Get all comments (time-synced & general) for a given video."""
-    comments = _get_comments_for_video(video_path)
-    return {"video_path": video_path, "comments": comments}
+def get_comments(
+    video_path: str,
+    viewer: AuthContext | None = Depends(get_optional_auth),
+):
+    """Return database-backed comments for the legacy player route."""
+    records = reel_records(
+        [video_path.strip().replace(chr(92), "/")],
+        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+    )
+    return {"video_path": video_path, "comments": records.get(video_path, {}).get("comments", [])}
 
 
 @router.post("/comments")
-def create_comment(req: CommentCreate):
-    """Create a new time-synced or general comment."""
-    key = req.video_path.strip().replace("\\", "/")
-    all_comments = _load_comments_raw()
-    
-    if key not in all_comments:
-        all_comments[key] = _get_comments_for_video(req.video_path)
+def create_comment(
+    req: CommentCreate,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    """Create a comment using the authenticated account."""
+    from server.routers.social import CommentRequest, create_post_comment
 
-    new_comment = {
-        "id": f"c_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}",
-        "video_path": req.video_path,
-        "timestamp": round(req.timestamp, 2) if req.timestamp is not None else None,
-        "author_name": req.author_name.strip() or "Anonymous_VR",
-        "author_avatar": req.author_avatar or "👤",
-        "avatar_color": req.avatar_color or "#FF3B1F",
-        "text": req.text.strip(),
-        "likes": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    
-    if not new_comment["text"]:
-        raise HTTPException(status_code=400, detail="Comment text cannot be empty")
-
-    all_comments[key].append(new_comment)
-    _save_comments_raw(all_comments)
-    return new_comment
+    post = get_post_by_reference(db, media_path=req.video_path)
+    if not post:
+        raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Post not found."})
+    return create_post_comment(
+        post.id,
+        CommentRequest(text=req.text, timestamp=req.timestamp),
+        context,
+        db,
+    )
 
 
 @router.post("/comments/{comment_id}/like")
-def like_comment(comment_id: str):
-    """Toggle or increment like for a comment."""
-    all_comments = _load_comments_raw()
-    for video_key, c_list in all_comments.items():
-        for c in c_list:
-            if c.get("id") == comment_id:
-                c["likes"] = c.get("likes", 0) + 1
-                _save_comments_raw(all_comments)
-                return {"id": comment_id, "likes": c["likes"]}
-    raise HTTPException(status_code=404, detail="Comment not found")
+def like_comment(
+    comment_id: str,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    """Like a comment through the legacy player route."""
+    from server.routers.social import like_social_comment
+
+    return like_social_comment(comment_id, context, db)
 
 
 @router.delete("/comments/{comment_id}")
-def delete_comment(comment_id: str):
-    """Delete a comment by ID."""
-    all_comments = _load_comments_raw()
-    found = False
-    for video_key, c_list in all_comments.items():
-        original_len = len(c_list)
-        all_comments[video_key] = [c for c in c_list if c.get("id") != comment_id]
-        if len(all_comments[video_key]) != original_len:
-            found = True
-            break
-    if found:
-        _save_comments_raw(all_comments)
-        return {"ok": True}
-    raise HTTPException(status_code=404, detail="Comment not found")
+def delete_comment(
+    comment_id: str,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    from server.routers.social import delete_social_comment
 
+    return delete_social_comment(comment_id, context, db)
 
-# ─── REEL ENGAGEMENT (likes / views) ───────────────────────────────────
 
 class EngagementRequest(BaseModel):
     video_path: str
 
 
-def _bump_meta_counter(video_path: str, field: str, delta: int = 1,
-                       liked_by_me: bool | None = None) -> dict:
-    """Change a numeric metadata counter, seeding the entry if needed.
-    Decrements floor at zero so unlikes can never drive counts negative."""
-    key = video_path.strip().replace("\\", "/")
-    all_meta = _load_meta_raw()
-    entry = all_meta.get(key)
-    if not isinstance(entry, dict):
-        seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
-        entry = _seed_meta(key, Path(key).name, random.Random(seed))
-        all_meta[key] = entry
-    entry[field] = max(0, int(entry.get(field, 0) or 0) + delta)
-    if liked_by_me is not None:
-        entry["liked_by_me"] = liked_by_me
-    _save_meta_raw(all_meta)
-    return {
-        "video_path": key,
-        "likes": entry.get("likes", 0),
-        "views": entry.get("views", 0),
-        "liked_by_me": bool(entry.get("liked_by_me", False)),
-    }
-
-
 @router.post("/like")
-def like_reel(req: EngagementRequest):
-    """Like a reel (+1, marks liked_by_me). No identity system exists yet —
-    single local user is assumed; a true per-user toggle needs user auth."""
-    if not req.video_path.strip():
-        raise HTTPException(status_code=400, detail="video_path is required")
-    return _bump_meta_counter(req.video_path, "likes", 1, liked_by_me=True)
+def like_reel(
+    req: EngagementRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    from server.routers.social import set_post_like
+
+    post = get_post_by_reference(db, media_path=req.video_path)
+    if not post:
+        raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Post not found."})
+    result = set_post_like(db, post, context.user.id, True)
+    return {**result, "video_path": post.media_path}
 
 
 @router.post("/unlike")
-def unlike_reel(req: EngagementRequest):
-    """Unlike a reel (−1 floored at zero, clears liked_by_me). Pairs with
-    the player's like/unlike toggle."""
-    if not req.video_path.strip():
-        raise HTTPException(status_code=400, detail="video_path is required")
-    return _bump_meta_counter(req.video_path, "likes", -1, liked_by_me=False)
+def unlike_reel(
+    req: EngagementRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    from server.routers.social import set_post_like
+
+    post = get_post_by_reference(db, media_path=req.video_path)
+    if not post:
+        raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Post not found."})
+    result = set_post_like(db, post, context.user.id, False)
+    return {**result, "video_path": post.media_path}
 
 
 @router.post("/view")
-def view_reel(req: EngagementRequest):
-    """Record a reel view (+1). Fire-and-forget from the player on each
-    video load; per-swipe inflation is accepted for now."""
-    if not req.video_path.strip():
-        raise HTTPException(status_code=400, detail="video_path is required")
-    return _bump_meta_counter(req.video_path, "views")
+def view_reel(
+    req: EngagementRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    viewer: AuthContext | None = Depends(get_optional_auth),
+):
+    """Compatibility view route; a loaded reel qualifies as a three-second view."""
+    from server.routers.social import ViewRequest, record_view
+
+    post = get_post_by_reference(db, media_path=req.video_path)
+    if not post:
+        raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Post not found."})
+    return record_view(
+        post.id,
+        ViewRequest(watch_ms=3000, source="reels"),
+        request,
+        response,
+        db,
+        viewer,
+    )
 
 
 # ─── PROXY GENERATION ────────────────────────────────────────────────────
@@ -1246,13 +1281,27 @@ def reels_player(
     start: int = 0,
     media: str | None = None,
     tag: str | None = None,
+    feed: str | None = None,
+    author: str | None = None,
+    viewer: AuthContext | None = Depends(get_optional_auth),
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
     videos = _apply_filters(raw, folder, search, sort, media, tag)
-    payload = _build_payload(videos, codec, tunnel=tunnel)
+    scoped_paths = scoped_media_paths(
+        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+        feed=feed,
+        author=author,
+    )
+    if feed == "following" and not isinstance(viewer, AuthContext):
+        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
+    if scoped_paths is not None:
+        positions = {value: index for index, value in enumerate(scoped_paths)}
+        videos = [video for video in videos if video["rel_path"] in positions]
+        videos.sort(key=lambda video: positions[video["rel_path"]])
+    payload = _build_payload(videos, codec, tunnel=tunnel, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
@@ -1367,6 +1416,9 @@ def reels_player_inline(
     start: int = 0,
     media: str | None = None,
     tag: str | None = None,
+    feed: str | None = None,
+    author: str | None = None,
+    viewer: AuthContext | None = Depends(get_optional_auth),
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
@@ -1374,7 +1426,18 @@ def reels_player_inline(
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
     videos = _apply_filters(raw, folder, search, sort, media, tag)
-    payload = _build_payload(videos, codec, tunnel=tunnel)
+    scoped_paths = scoped_media_paths(
+        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+        feed=feed,
+        author=author,
+    )
+    if feed == "following" and not isinstance(viewer, AuthContext):
+        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
+    if scoped_paths is not None:
+        positions = {value: index for index, value in enumerate(scoped_paths)}
+        videos = [video for video in videos if video["rel_path"] in positions]
+        videos.sort(key=lambda video: positions[video["rel_path"]])
+    payload = _build_payload(videos, codec, tunnel=tunnel, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
@@ -1419,6 +1482,10 @@ def reels_player_inline(
         init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
             "\nwindow.__sxReelsCleanup = function () {\n"
+            "  if (window.__sxReelsRuntimeCleanup) {\n"
+            "    try { window.__sxReelsRuntimeCleanup(); } catch (e) {}\n"
+            "    window.__sxReelsRuntimeCleanup = null;\n"
+            "  }\n"
             "  if (window.__sxImageTimer) {\n"
             "    clearTimeout(window.__sxImageTimer);\n"
             "    window.__sxImageTimer = null;\n"
@@ -1432,7 +1499,7 @@ def reels_player_inline(
             "    window.__sxGlowInterval = null;\n"
             "  }\n"
             "  try {\n"
-            "    const v = document.getElementById('mainVideo');\n"
+            "    const v = document.getElementById('reelsVideo');\n"
             "    if (v) {\n"
             "      v.pause();\n"
             "      v.removeAttribute('src');\n"

@@ -368,8 +368,32 @@
   #likeBtn.active .action-btn-label {
     color: #FF3B1F !important;
   }
+  #saveBtn.active,
+  #followBtn.active {
+    border-color: #00E5FF !important;
+    box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+  }
+  #saveBtn.active .action-btn-label,
+  #followBtn.active .action-btn-label {
+    color: #00E5FF !important;
+  }
 
   /* Bottom Left Overlay */
+  .meta-creator {
+    width: fit-content;
+    max-width: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: #00E5FF;
+    font: 700 10px/1.2 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    pointer-events: auto;
+    text-align: left;
+  }
+  .meta-creator:hover { color: #ffffff; text-decoration: underline; }
+
   .reels-meta {
     position: absolute;
     left: 16px;
@@ -829,6 +853,22 @@
   .comment-item:hover .comment-like-btn { opacity: 1; }
   .comment-like-btn:hover { color: #ff553a; }
   .comment-like-btn .material-symbols-outlined { font-size: 14px; color: #ff553a; font-variation-settings: 'FILL' 0; }
+  .comment-like-btn.active .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+  .comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .comment-empty {
+    padding: 32px 16px;
+    border: 1px dashed #343536;
+    background: #0d0e0f;
+    color: #ff553a;
+    text-align: center;
+    font: 700 11px/1.6 'JetBrains Mono', monospace;
+    letter-spacing: 0.08em;
+  }
   /* Footer */
   .drawer-footer {
     padding: 16px;
@@ -862,7 +902,7 @@
     letter-spacing: 0.06em;
     flex-shrink: 0;
   }
-  .persona-btn {
+  .account-btn {
     background: #1f2021;
     border: 1px solid #343536;
     color: #e3e2e3;
@@ -877,7 +917,36 @@
     transition: border-color 0.15s ease, background 0.15s ease;
     white-space: nowrap;
   }
-  .persona-btn:hover { border-color: #ff553a; background: #292a2b; }
+  .account-btn:hover { border-color: #ff553a; background: #292a2b; }
+  .account-btn img {
+    width: 20px;
+    height: 20px;
+    object-fit: cover;
+    border-radius: 50%;
+  }
+  .comment-name {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+  }
+  .comment-name:hover { text-decoration: underline; }
+  .comment-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .comment-delete-btn {
+    border: 0;
+    padding: 4px 0;
+    background: transparent;
+    color: #9ba1a8;
+    cursor: pointer;
+    font: 700 9px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+  }
+  .comment-delete-btn:hover { color: #ff553a; }
   .sync-time-toggle {
     display: inline-flex; align-items: center; gap: 6px;
     background: #1f2021;
@@ -1273,6 +1342,14 @@
         </span>
         <span class="action-btn-label" id="likeCount">0</span>
       </button>
+      <button class="action-btn" id="saveBtn" title="Save / Unsave">
+        <span class="btn-icon material-symbols-outlined">bookmark</span>
+        <span class="action-btn-label">SAVE</span>
+      </button>
+      <button class="action-btn" id="followBtn" title="Follow creator">
+        <span class="btn-icon material-symbols-outlined">person_add</span>
+        <span class="action-btn-label" id="followLabel">FOLLOW</span>
+      </button>
       <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
         <span class="btn-icon">
           __ICON_PRELOAD__
@@ -1302,6 +1379,7 @@
 
   <div class="reels-meta" id="reelsMeta">
     <div class="meta-folder" id="metaFolder">📁 root</div>
+    <button type="button" class="meta-creator" id="metaCreator" hidden></button>
     <div class="meta-title" id="metaTitle">Loading video…</div>
     <div class="meta-sub" id="metaSub">
       <span id="metaSize">-- MB</span>
@@ -1340,8 +1418,8 @@
       <div class="input-meta-bar">
         <div class="input-meta-left">
           <div class="meta-sys-box">SYS</div>
-          <button type="button" class="persona-btn" id="personaBtn" title="Click to randomize persona">
-            <span id="personaAvatar">🦊</span> <span id="personaName">Kira_VR</span>
+          <button type="button" class="account-btn" id="accountBtn" title="Open your profile or sign in">
+            <span id="accountAvatar">?</span> <span id="accountName">SIGN IN</span>
           </button>
         </div>
         <button type="button" class="sync-time-toggle" id="syncTimeToggle" title="Toggle time-sync to current video playback">
@@ -1350,7 +1428,7 @@
       </div>
       <form class="comment-form" id="commentForm">
         <div class="comment-input-wrap">
-          <input type="text" class="comment-input" id="commentInput" placeholder="Add a comment at 0:00..." autocomplete="off" />
+          <input type="text" class="comment-input" id="commentInput" maxlength="500" placeholder="Add a comment at 0:00..." autocomplete="off" />
         </div>
         <button type="submit" class="comment-submit-btn" id="commentSubmitBtn">SEND</button>
       </form>
@@ -1375,18 +1453,9 @@
     let activeTab = 'all';
     let isSyncTimeActive = true;
 
-    // Personas Preset Pool
-    const PERSONAS = [
-      { name: 'Kira_VR', avatar: '🦊', color: '#FF3B1F' },
-      { name: 'CyberSamurai', avatar: '⚡', color: '#00FF88' },
-      { name: 'NeonRider', avatar: '🚀', color: '#00E5FF' },
-      { name: 'AuraVibe', avatar: '🌌', color: '#A855F7' },
-      { name: 'PixelNomad', avatar: '👾', color: '#FF9900' },
-      { name: 'EchoDev', avatar: '💎', color: '#FF0055' },
-      { name: 'ShadowQuest', avatar: '🥽', color: '#38BDF8' },
-      { name: 'Solaris', avatar: '☀️', color: '#FACC15' }
-    ];
-    let currentPersona = PERSONAS[0];
+    let currentUser = null;
+    let pendingReplayAttempted = false;
+    let viewTracker = null;
 
     const frame = document.getElementById('reelsFrame');
     const video = document.getElementById('reelsVideo');
@@ -1403,6 +1472,9 @@
     const commentBadge = document.getElementById('commentBadge');
     const likeBtn = document.getElementById('likeBtn');
     const likeCount = document.getElementById('likeCount');
+    const saveBtn = document.getElementById('saveBtn');
+    const followBtn = document.getElementById('followBtn');
+    const followLabel = document.getElementById('followLabel');
     const modeBtn = document.getElementById('modeBtn');
     const modeLabel = document.getElementById('modeLabel');
     const prevBtn = document.getElementById('prevBtn');
@@ -1414,6 +1486,7 @@
     const metaSub = document.getElementById('metaSub');
     const metaSize = document.getElementById('metaSize');
     const metaViews = document.getElementById('metaViews');
+    const metaCreator = document.getElementById('metaCreator');
 
     const progressBar = document.getElementById('progressBar');
     const progressFill = document.getElementById('progressFill');
@@ -1437,13 +1510,14 @@
     const tabAll = document.getElementById('tabAll');
     const tabSync = document.getElementById('tabSync');
     const tabGeneral = document.getElementById('tabGeneral');
-    const personaBtn = document.getElementById('personaBtn');
-    const personaAvatar = document.getElementById('personaAvatar');
-    const personaName = document.getElementById('personaName');
+    const accountBtn = document.getElementById('accountBtn');
+    const accountAvatar = document.getElementById('accountAvatar');
+    const accountName = document.getElementById('accountName');
     const syncTimeToggle = document.getElementById('syncTimeToggle');
     const syncTimeDisplay = document.getElementById('syncTimeDisplay');
     const commentForm = document.getElementById('commentForm');
     const commentInput = document.getElementById('commentInput');
+    const commentSubmitBtn = document.getElementById('commentSubmitBtn');
 
     const blobUrlMap = {};
     let isPreloading = false;
@@ -1469,8 +1543,12 @@
       if (timeDisplay) timeDisplay.textContent = '0:00 / 0:10';
       imageTimer = setTimeout(() => {
         imageTimer = null;
+        finishViewTracking('complete');
         if (isAutoNext) nextVideo();
-        else armImageTimer();
+        else {
+          startViewTracking(videoData[idx]);
+          armImageTimer();
+        }
       }, IMAGE_DWELL_S * 1000);
       window.__sxImageTimer = imageTimer;
     }
@@ -1518,6 +1596,171 @@
       return (item && item.comments) ? item.comments : [];
     }
 
+    function getCookie(name) {
+      const prefix = name + '=';
+      const row = document.cookie.split('; ').find((part) => part.startsWith(prefix));
+      return row ? decodeURIComponent(row.slice(prefix.length)) : '';
+    }
+
+    function safeColor(value, fallback) {
+      return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : (fallback || '#ff553a');
+    }
+
+    function eventId() {
+      try {
+        if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      } catch (e) {}
+      return 'evt-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+
+    async function requestJson(path, options) {
+      const requestOptions = { credentials: 'include', ...(options || {}) };
+      const method = String(requestOptions.method || 'GET').toUpperCase();
+      const headers = new Headers(requestOptions.headers || {});
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const csrf = getCookie('echo_csrf');
+        if (csrf) headers.set('X-CSRF-Token', csrf);
+      }
+      requestOptions.headers = headers;
+      const response = await fetch(path, requestOptions);
+      let body = null;
+      try { body = await response.json(); } catch (e) {}
+      if (!response.ok) {
+        const detail = body && body.detail ? body.detail : body;
+        const err = new Error(
+          (detail && typeof detail === 'object' && detail.message) ||
+          (typeof detail === 'string' && detail) ||
+          response.statusText ||
+          'Request failed'
+        );
+        err.status = response.status;
+        err.code = detail && typeof detail === 'object' ? detail.code : null;
+        throw err;
+      }
+      return body;
+    }
+
+    async function leaveImmersiveModes() {
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) {
+          await WebXRVR.exitVR();
+        }
+      } catch (e) {}
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      } catch (e) {}
+    }
+
+    function returnPathForItem(item) {
+      let path = location.pathname + location.search;
+      if (location.pathname.indexOf('/api/reels/player') === 0) path = '/reels';
+      try {
+        const url = new URL(path, location.origin);
+        if (item && item.path) url.searchParams.set('play', item.path);
+        return url.pathname + url.search;
+      } catch (e) {
+        return '/reels';
+      }
+    }
+
+    async function dispatchNavigation(path) {
+      await leaveImmersiveModes();
+      const event = new CustomEvent('echo:navigate', {
+        detail: { path: path },
+        cancelable: true,
+      });
+      const shouldFallback = window.dispatchEvent(event);
+      if (shouldFallback) location.assign(path);
+    }
+
+    async function requestAuthentication(action) {
+      const item = videoData[idx] || null;
+      const pending = {
+        ...(action || {}),
+        post_id: action && action.post_id ? action.post_id : (item && item.post_id),
+        path: item && item.path,
+        created_at: Date.now(),
+      };
+      try { sessionStorage.setItem('echo:pending-action', JSON.stringify(pending)); } catch (e) {}
+      const next = returnPathForItem(item);
+      await leaveImmersiveModes();
+      const event = new CustomEvent('echo:auth-required', {
+        detail: { next: next, action: pending.kind || 'interact' },
+        cancelable: true,
+      });
+      const shouldFallback = window.dispatchEvent(event);
+      if (shouldFallback) location.assign('/login?next=' + encodeURIComponent(next));
+    }
+
+    function openProfile(username) {
+      if (!username) return;
+      dispatchNavigation('/profile/' + encodeURIComponent(username));
+    }
+
+    function refreshAccountUI() {
+      if (!accountBtn || !accountAvatar || !accountName) return;
+      accountAvatar.textContent = '';
+      if (currentUser) {
+        if (currentUser.avatar_url) {
+          const image = document.createElement('img');
+          image.src = currentUser.avatar_url;
+          image.alt = '';
+          accountAvatar.appendChild(image);
+        } else {
+          accountAvatar.textContent = (currentUser.display_name || currentUser.username || '?').slice(0, 1).toUpperCase();
+        }
+        accountName.textContent = '@' + currentUser.username;
+        accountBtn.title = 'Open your profile';
+        if (commentSubmitBtn) commentSubmitBtn.textContent = 'SEND';
+      } else {
+        accountAvatar.textContent = '?';
+        accountName.textContent = 'SIGN IN';
+        accountBtn.title = 'Sign in to interact';
+        if (commentSubmitBtn) commentSubmitBtn.textContent = 'SIGN IN';
+      }
+    }
+
+    async function replayPendingAction() {
+      if (!currentUser || pendingReplayAttempted) return;
+      pendingReplayAttempted = true;
+      let pending = null;
+      try { pending = JSON.parse(sessionStorage.getItem('echo:pending-action') || 'null'); } catch (e) {}
+      if (!pending || !pending.kind || Date.now() - Number(pending.created_at || 0) > 10 * 60 * 1000) {
+        try { sessionStorage.removeItem('echo:pending-action'); } catch (e) {}
+        return;
+      }
+      const targetIndex = videoData.findIndex((item) =>
+        (pending.post_id && item.post_id === pending.post_id) ||
+        (pending.path && item.path === pending.path)
+      );
+      if (targetIndex < 0) return;
+      try { sessionStorage.removeItem('echo:pending-action'); } catch (e) {}
+      if (targetIndex !== idx) loadVideo(targetIndex);
+      if (pending.kind === 'like') await likeCurrentReel();
+      else if (pending.kind === 'save') await saveCurrentReel();
+      else if (pending.kind === 'follow') await followCurrentCreator();
+      else if (pending.kind === 'comment' && pending.text) {
+        const posted = await postComment(pending.text, pending.timestamp);
+        if (posted && commentInput) commentInput.value = '';
+      } else if (pending.kind === 'comment-like' && pending.comment_id) {
+        await likeComment(pending.comment_id);
+      }
+    }
+
+    async function loadCurrentUser() {
+      try {
+        const result = await requestJson('/api/auth/me');
+        currentUser = result && result.user ? result.user : null;
+      } catch (e) {
+        currentUser = null;
+      }
+      refreshAccountUI();
+      refreshEngagementUI();
+      if (currentUser) setTimeout(() => replayPendingAction(), 0);
+    }
+
     // Compact engagement counts (1250 -> "1.2K").
     function fmtCount(n) {
       n = Number(n) || 0;
@@ -1534,141 +1777,389 @@
       const item = videoData[idx];
       if (likeCount) likeCount.textContent = fmtCount(item && item.likes);
       if (metaViews) metaViews.innerHTML = VIEW_SVG + '<span>' + fmtCount(item && item.views) + '</span>';
-      // Liked highlight: session toggle wins, otherwise fall back to the
-      // persisted liked_by_me flag so likes survive reloads.
-      if (item && item._liked === undefined) item._liked = !!item.liked_by_me;
-      if (likeBtn) likeBtn.classList.toggle('active', !!(item && item._liked));
+      if (!item) return;
+
+      if (item._liked === undefined) {
+        item._liked = !!(item.viewer_state ? item.viewer_state.liked : item.liked_by_me);
+      }
+      if (item._saved === undefined) {
+        item._saved = !!(item.viewer_state ? item.viewer_state.saved : item.saved_by_me);
+      }
+      if (item._following === undefined) {
+        item._following = !!(item.viewer_state && item.viewer_state.following_creator);
+      }
+
+      if (likeBtn) likeBtn.classList.toggle('active', item._liked);
+      if (saveBtn) {
+        saveBtn.classList.toggle('active', item._saved);
+        saveBtn.title = item._saved ? 'Remove from saved posts' : 'Save post';
+      }
+
+      const creator = item.creator || null;
+      if (metaCreator) {
+        if (creator && creator.username) {
+          metaCreator.hidden = false;
+          metaCreator.textContent = '@' + creator.username + (creator.display_name ? ' · ' + creator.display_name : '');
+          metaCreator.title = 'Open @' + creator.username + ' profile';
+        } else {
+          metaCreator.hidden = true;
+          metaCreator.textContent = '';
+        }
+      }
+      if (followBtn) {
+        const isOwnPost = !!(
+          (item.viewer_state && item.viewer_state.can_edit) ||
+          (creator && currentUser && creator.id === currentUser.id)
+        );
+        followBtn.hidden = !creator || !creator.username || isOwnPost;
+        followBtn.classList.toggle('active', !!item._following);
+        followBtn.title = item._following ? 'Unfollow creator' : 'Follow creator';
+      }
+      if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
     }
 
-    // Like/unlike the current reel (toggle). Optimistic UI, reconciled
-    // with the server. Liked state is session-local (no user identity yet).
     async function likeCurrentReel() {
       const item = videoData[idx];
-      if (!item) return;
-      const liking = !item._liked;
-      item.likes = Math.max(0, (Number(item.likes) || 0) + (liking ? 1 : -1));
-      item._liked = liking;
+      if (!item || !item.post_id) return;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'like', post_id: item.post_id });
+        return;
+      }
+      const wasLiked = !!item._liked;
+      item._liked = !wasLiked;
+      item.likes = Math.max(0, (Number(item.likes) || 0) + (item._liked ? 1 : -1));
       refreshEngagementUI();
       if (likeBtn) {
         likeBtn.classList.add('flash-click');
         setTimeout(() => likeBtn.classList.remove('flash-click'), 180);
       }
       try {
-        const resp = await fetch(liking ? '/api/reels/like' : '/api/reels/unlike', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_path: item.path }),
+        const result = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/like', {
+          method: item._liked ? 'PUT' : 'DELETE',
         });
-        if (resp.ok) {
-          const resData = await resp.json();
-          item.likes = resData.likes;
-          item._liked = !!resData.liked_by_me;
-          refreshEngagementUI();
+        item.likes = result.likes;
+        item._liked = !!result.liked;
+      } catch (error) {
+        item._liked = wasLiked;
+        item.likes = Math.max(0, (Number(item.likes) || 0) + (wasLiked ? 1 : -1));
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'like', post_id: item.post_id });
+        } else {
+          showFlash('LIKE FAILED');
         }
-      } catch (e) {}
+      }
+      refreshEngagementUI();
     }
 
-    // Record a view (fire-and-forget; per-swipe inflation accepted for now).
-    function beaconView() {
+    async function saveCurrentReel() {
       const item = videoData[idx];
-      if (!item) return;
-      item.views = (Number(item.views) || 0) + 1;
+      if (!item || !item.post_id) return;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'save', post_id: item.post_id });
+        return;
+      }
+      const wasSaved = !!item._saved;
+      item._saved = !wasSaved;
       refreshEngagementUI();
       try {
-        fetch('/api/reels/view', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_path: item.path }),
-        }).then(async (resp) => {
-          if (resp.ok) {
-            const resData = await resp.json();
-            item.views = resData.views;
-            refreshEngagementUI();
-          }
-        }).catch(() => {});
-      } catch (e) {}
-    }
-
-    // Shared like/post helpers — used by both the 2D drawer and the VR comments panel
-    async function likeComment(cid) {
-      try {
-        const resp = await fetch(`/api/reels/comments/${cid}/like`, { method: 'POST' });
-        if (resp.ok) {
-          const resData = await resp.json();
-          const target = getCurrentComments().find((x) => x.id === cid);
-          if (target) target.likes = resData.likes;
-          const listEl = commentsList ? commentsList.querySelector(`.comment-like-btn[data-like="${cid}"]`) : null;
-          if (listEl) {
-            const spans = listEl.querySelectorAll('span');
-            const countSpan = spans.length > 1 ? spans[spans.length - 1] : listEl.querySelector('span');
-            if (countSpan) countSpan.textContent = resData.likes;
-          }
-          return resData.likes;
-        }
-      } catch (e) {}
-      return null;
-    }
-
-    async function postComment(text, timestamp, persona) {
-      const curItem = videoData[idx];
-      if (!curItem) return null;
-      const p = persona || currentPersona;
-      const payload = {
-        video_path: curItem.path || curItem.filename,
-        timestamp: timestamp !== null && timestamp !== undefined ? Math.round(timestamp * 10) / 10 : null,
-        author_name: p.name,
-        author_avatar: p.avatar,
-        avatar_color: p.color,
-        text: text
-      };
-      try {
-        const res = await fetch('/api/reels/comments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+        const result = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/save', {
+          method: item._saved ? 'PUT' : 'DELETE',
         });
-        if (res.ok) {
-          const newC = await res.json();
-          if (!curItem.comments) curItem.comments = [];
-          curItem.comments.push(newC);
-          renderDrawerComments();
-          renderCommentMarkers();
-          showFlash('💬 COMMENT POSTED');
-          return newC;
+        item._saved = !!result.saved;
+        item.saves = result.saves;
+      } catch (error) {
+        item._saved = wasSaved;
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'save', post_id: item.post_id });
+        } else {
+          showFlash('SAVE FAILED');
         }
-      } catch (err) {
-        console.error('[Comments] Failed to post comment:', err);
       }
-      return null;
+      refreshEngagementUI();
+    }
+
+    function setCreatorFollowing(creatorId, following) {
+      videoData.forEach((entry) => {
+        if (!entry.creator || entry.creator.id !== creatorId) return;
+        entry._following = following;
+        entry.creator.is_following = following;
+        entry.viewer_state = entry.viewer_state || {};
+        entry.viewer_state.following_creator = following;
+      });
+    }
+
+    async function followCurrentCreator() {
+      const item = videoData[idx];
+      const creator = item && item.creator;
+      if (!item || !creator || !creator.username || (currentUser && creator.id === currentUser.id)) return;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'follow', post_id: item.post_id, username: creator.username });
+        return;
+      }
+      const wasFollowing = !!item._following;
+      setCreatorFollowing(creator.id, !wasFollowing);
+      refreshEngagementUI();
+      try {
+        const result = await requestJson('/api/users/' + encodeURIComponent(creator.username) + '/follow', {
+          method: wasFollowing ? 'DELETE' : 'PUT',
+        });
+        setCreatorFollowing(creator.id, !!result.following);
+      } catch (error) {
+        setCreatorFollowing(creator.id, wasFollowing);
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'follow', post_id: item.post_id, username: creator.username });
+        } else {
+          showFlash('FOLLOW FAILED');
+        }
+      }
+      refreshEngagementUI();
+    }
+
+    function tickViewTracker() {
+      const state = viewTracker;
+      if (!state || state.finished) return;
+      const now = performance.now();
+      const active = !document.hidden && (isImageItem(state.item) || (video && !video.paused && !video.ended));
+      if (active) state.watchMs += Math.max(0, now - state.lastTick);
+      state.lastTick = now;
+      if (!state.viewSent && state.watchMs >= state.thresholdMs) {
+        state.viewSent = true;
+        requestJson('/api/posts/' + encodeURIComponent(state.item.post_id) + '/view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            watch_ms: Math.round(state.watchMs),
+            position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
+            completed: false,
+            source: 'reels',
+            client_event_id: state.viewEventId,
+            context: { media_type: state.item.media_type || 'video' },
+          }),
+        }).then((result) => {
+          state.item.views = result.views;
+          if (videoData[idx] === state.item) refreshEngagementUI();
+        }).catch(() => {});
+      }
+    }
+
+    function startViewTracking(item) {
+      finishViewTracking('skip');
+      if (!item || !item.post_id) return;
+      viewTracker = {
+        item: item,
+        watchMs: 0,
+        lastTick: performance.now(),
+        thresholdMs: isImageItem(item) ? 2000 : 3000,
+        viewSent: false,
+        viewEventId: eventId(),
+        finished: false,
+        interval: setInterval(tickViewTracker, 250),
+      };
+      requestJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'impression',
+          post_id: item.post_id,
+          source: 'reels',
+          client_event_id: eventId(),
+          context: { index: idx, media_type: item.media_type || 'video' },
+        }),
+      }).catch(() => {});
+    }
+
+    function finishViewTracking(reason) {
+      const state = viewTracker;
+      if (!state || state.finished) return;
+      tickViewTracker();
+      state.finished = true;
+      if (state.interval) clearInterval(state.interval);
+      viewTracker = null;
+      const completed = reason === 'complete';
+      if (completed && !state.viewSent) {
+        state.viewSent = true;
+        requestJson('/api/posts/' + encodeURIComponent(state.item.post_id) + '/view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            watch_ms: Math.round(state.watchMs),
+            position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
+            completed: true,
+            source: 'reels',
+            client_event_id: state.viewEventId,
+            context: { media_type: state.item.media_type || 'video' },
+          }),
+        }).then((result) => {
+          state.item.views = result.views;
+          if (videoData[idx] === state.item) refreshEngagementUI();
+        }).catch(() => {});
+        return;
+      }
+      if (state.watchMs <= 0) return;
+      requestJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: completed ? 'complete' : 'skip',
+          post_id: state.item.post_id,
+          watch_ms: Math.round(state.watchMs),
+          position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
+          completed: completed,
+          source: 'reels',
+          client_event_id: eventId(),
+          context: { qualified_view_sent: state.viewSent, media_type: state.item.media_type || 'video' },
+        }),
+      }).catch(() => {});
+    }
+
+    async function likeComment(cid) {
+      const target = getCurrentComments().find((entry) => entry.id === cid);
+      if (!target) return null;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'comment-like', comment_id: cid, post_id: target.post_id });
+        return null;
+      }
+      const wasLiked = !!target.liked_by_me;
+      const oldLikes = Number(target.likes) || 0;
+      target.liked_by_me = !wasLiked;
+      target.likes = Math.max(0, oldLikes + (target.liked_by_me ? 1 : -1));
+      renderDrawerComments();
+      try {
+        const result = await requestJson('/api/comments/' + encodeURIComponent(cid) + '/like', {
+          method: target.liked_by_me ? 'PUT' : 'DELETE',
+        });
+        target.likes = result.likes;
+        target.liked_by_me = !!result.liked;
+        renderDrawerComments();
+        return result.likes;
+      } catch (error) {
+        target.likes = oldLikes;
+        target.liked_by_me = wasLiked;
+        renderDrawerComments();
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'comment-like', comment_id: cid, post_id: target.post_id });
+        } else {
+          showFlash('COMMENT LIKE FAILED');
+        }
+        return null;
+      }
+    }
+
+    async function deleteComment(cid) {
+      const item = videoData[idx];
+      const target = getCurrentComments().find((entry) => entry.id === cid);
+      if (!item || !target || !target.can_delete) return;
+      try {
+        await requestJson('/api/comments/' + encodeURIComponent(cid), { method: 'DELETE' });
+        item.comments = getCurrentComments().filter((entry) => entry.id !== cid);
+        item.comments_count = Math.max(0, Number(item.comments_count || item.comments.length + 1) - 1);
+        renderDrawerComments();
+        renderCommentMarkers();
+        showFlash('COMMENT DELETED');
+      } catch (error) {
+        showFlash(error.status === 403 ? 'NOT ALLOWED' : 'DELETE FAILED');
+      }
+    }
+
+    async function postComment(text, timestamp) {
+      const item = videoData[idx];
+      if (!item || !item.post_id) return null;
+      const normalizedTimestamp = timestamp !== null && timestamp !== undefined
+        ? Math.round(Number(timestamp) * 10) / 10
+        : null;
+      if (!currentUser) {
+        requestAuthentication({
+          kind: 'comment',
+          post_id: item.post_id,
+          text: text,
+          timestamp: normalizedTimestamp,
+        });
+        return null;
+      }
+      try {
+        const newComment = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/comments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text, timestamp: normalizedTimestamp }),
+        });
+        if (!item.comments) item.comments = [];
+        item.comments.push(newComment);
+        item.comments_count = Number(item.comments_count || 0) + 1;
+        renderDrawerComments();
+        renderCommentMarkers();
+        showFlash('COMMENT POSTED');
+        return newComment;
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({
+            kind: 'comment',
+            post_id: item.post_id,
+            text: text,
+            timestamp: normalizedTimestamp,
+          });
+        } else {
+          showFlash('COMMENT FAILED');
+        }
+        return null;
+      }
     }
 
     // ── Comments Markers on Timeline (SoundCloud Style) ──
+    function appendCommentAvatar(container, comment) {
+      if (comment.author_avatar_url) {
+        const image = document.createElement('img');
+        image.src = comment.author_avatar_url;
+        image.alt = '';
+        container.appendChild(image);
+        return;
+      }
+      const initials = document.createElement('span');
+      initials.className = 'comment-avatar-initials';
+      initials.textContent = comment.author_avatar || getInitials(comment.author_name || 'Anonymous');
+      initials.style.color = safeColor(comment.avatar_color, '#ff553a');
+      container.appendChild(initials);
+    }
+
     function renderCommentMarkers() {
       if (!commentMarkers) return;
-      commentMarkers.innerHTML = '';
+      commentMarkers.replaceChildren();
       const duration = video.duration;
       if (!duration || isNaN(duration)) return;
 
-      const comments = getCurrentComments();
-      comments.forEach((c) => {
-        if (c.timestamp === null || c.timestamp === undefined) return;
-        const pct = Math.max(0, Math.min(100, (Number(c.timestamp) / duration) * 100));
+      getCurrentComments().forEach((comment) => {
+        if (comment.timestamp === null || comment.timestamp === undefined) return;
+        const pct = Math.max(0, Math.min(100, (Number(comment.timestamp) / duration) * 100));
         const dot = document.createElement('div');
         dot.className = 'reels-comment-dot';
         dot.style.left = pct + '%';
-        dot.style.backgroundColor = c.avatar_color || '#FF3B1F';
+        dot.style.backgroundColor = safeColor(comment.avatar_color, '#FF3B1F');
 
         const tooltip = document.createElement('div');
         tooltip.className = 'reels-dot-tooltip';
-        tooltip.innerHTML = `<span>${c.author_avatar || '👤'}</span><strong>${c.author_name}</strong><span>⏱️ ${formatTime(c.timestamp)}</span>`;
+        const avatar = document.createElement('span');
+        avatar.textContent = comment.author_avatar || '👤';
+        const author = document.createElement('strong');
+        author.textContent = comment.author_name || 'Anonymous';
+        const time = document.createElement('span');
+        time.textContent = '⏱ ' + formatTime(comment.timestamp);
+        tooltip.append(avatar, author, time);
         dot.appendChild(tooltip);
 
-        dot.addEventListener('click', (e) => {
-          e.stopPropagation();
-          video.currentTime = Number(c.timestamp);
-          showFlash('⏱️ ' + formatTime(c.timestamp));
+        dot.addEventListener('click', (event) => {
+          event.stopPropagation();
+          video.currentTime = Number(comment.timestamp);
+          showFlash('⏱ ' + formatTime(comment.timestamp));
         });
-
         commentMarkers.appendChild(dot);
       });
     }
@@ -1704,40 +2195,53 @@
       }
 
       const curTime = video.currentTime || 0;
-      const comments = getCurrentComments();
-      const active = comments.filter((c) => {
-        if (c.timestamp === null || c.timestamp === undefined) return false;
-        const t = Number(c.timestamp);
-        return curTime >= t && curTime <= (t + 3.2);
+      const active = getCurrentComments().filter((comment) => {
+        if (comment.timestamp === null || comment.timestamp === undefined) return false;
+        const timestamp = Number(comment.timestamp);
+        return curTime >= timestamp && curTime <= timestamp + 3.2;
       });
 
-      if (active.length === 0) {
+      if (!active.length) {
         hideTicker();
         return;
       }
 
       showTicker();
-      // Only rebuild the DOM when the visible comment set actually changes,
-      // so the slide-up entrance animation doesn't restart every timeupdate.
-      const sig = active.slice(0, 2).map((c) => c.id).join(',');
-      if (sig !== tickerSignature) {
-        tickerSignature = sig;
-        // If multiple comments at the same timestamp point, render up to 2 stacked pills
-        const pills = active.slice(0, Math.min(2, active.length)).map((c) => `
-          <div class="twitch-comment-pill" data-cid="${c.id}" title="Open comment in panel">
-            <div class="twitch-avatar">${c.author_avatar || '👤'}</div>
-            <span class="twitch-author" style="color: ${c.avatar_color || '#FF3B1F'};">${c.author_name}</span>
-            <span class="twitch-text"><span class="twitch-tag">⏱️${formatTime(c.timestamp)} </span>${c.text}</span>
-          </div>
-        `).join('');
-        twitchCommentTicker.innerHTML = pills;
-        twitchCommentTicker.querySelectorAll('.twitch-comment-pill').forEach((pill) => {
-          pill.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openDrawerToComment(pill.getAttribute('data-cid'));
-          });
+      const visible = active.slice(0, 2);
+      const signature = visible.map((comment) => comment.id).join(',');
+      if (signature === tickerSignature) return;
+      tickerSignature = signature;
+      twitchCommentTicker.replaceChildren();
+
+      visible.forEach((comment) => {
+        const pill = document.createElement('div');
+        pill.className = 'twitch-comment-pill';
+        pill.dataset.cid = comment.id;
+        pill.title = 'Open comment in panel';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'twitch-avatar';
+        avatar.textContent = comment.author_avatar || '👤';
+
+        const author = document.createElement('span');
+        author.className = 'twitch-author';
+        author.style.color = safeColor(comment.avatar_color, '#FF3B1F');
+        author.textContent = comment.author_name || 'Anonymous';
+
+        const body = document.createElement('span');
+        body.className = 'twitch-text';
+        const timestamp = document.createElement('span');
+        timestamp.className = 'twitch-tag';
+        timestamp.textContent = '⏱' + formatTime(comment.timestamp) + ' ';
+        body.append(timestamp, document.createTextNode(comment.text || ''));
+
+        pill.append(avatar, author, body);
+        pill.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openDrawerToComment(comment.id);
         });
-      }
+        twitchCommentTicker.appendChild(pill);
+      });
     }
 
     // ── Jump to a specific comment in the drawer (from a pop-up pill) ──
@@ -1782,77 +2286,115 @@
       if (!commentsList) return;
       const comments = getCurrentComments();
       const countEl = drawerTitle ? drawerTitle.querySelector('.drawer-title-count') : null;
-      if (countEl) countEl.textContent = `(${comments.length})`;
-      else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${comments.length})`;
-      if (commentBadge) commentBadge.textContent = comments.length ? `ANNO (${comments.length})` : 'ANNO';
+      if (countEl) countEl.textContent = '(' + comments.length + ')';
+      else if (drawerTitle) drawerTitle.textContent = 'COMMENTS (' + comments.length + ')';
+      if (commentBadge) commentBadge.textContent = comments.length ? 'ANNO (' + comments.length + ')' : 'ANNO';
 
       let filtered = comments;
       if (activeTab === 'sync') {
-        filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
+        filtered = comments.filter((comment) => comment.timestamp !== null && comment.timestamp !== undefined);
       } else if (activeTab === 'general') {
-        filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+        filtered = comments.filter((comment) => comment.timestamp === null || comment.timestamp === undefined);
       }
 
-      if (filtered.length === 0) {
-        commentsList.innerHTML = `
-          <div style="text-align:center; color:#ff553a; font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.08em; padding:32px 16px; border:1px dashed #343536; background:#0d0e0f;">
-            No ${activeTab === 'sync' ? 'time-synced' : activeTab === 'general' ? 'general' : ''} comments yet.<br/>Be the first to drop one below!
-          </div>
-        `;
+      commentsList.replaceChildren();
+      if (!filtered.length) {
+        const empty = document.createElement('div');
+        empty.className = 'comment-empty';
+        const qualifier = activeTab === 'sync' ? 'time-synced ' : activeTab === 'general' ? 'general ' : '';
+        empty.append(
+          document.createTextNode('No ' + qualifier + 'comments yet.'),
+          document.createElement('br'),
+          document.createTextNode('Be the first to drop one below!')
+        );
+        commentsList.appendChild(empty);
         return;
       }
 
-      commentsList.innerHTML = filtered.map((c) => {
-        const border = c.avatar_color || '#ff553a';
-        const initials = getInitials(c.author_name || 'Anon');
-        const isEmojiAvatar = c.author_avatar && c.author_avatar.length <= 2 && /\p{Emoji}/u.test(c.author_avatar);
-        const avatarInner = isEmojiAvatar
-          ? `${c.author_avatar}`
-          : `<span class="comment-avatar-initials" style="color:${border}">${initials}</span>`;
-        const timePill = c.timestamp !== null && c.timestamp !== undefined
-          ? `<button type="button" class="comment-time-btn" data-seek="${c.timestamp}"><span class="material-symbols-outlined">schedule</span> ${formatTime(c.timestamp)}</button>`
-          : `<span class="comment-time-gen"><span class="material-symbols-outlined" style="font-size:12px;">forum</span> GENERAL</span>`;
-        return `
-        <div class="comment-item" id="comment-${c.id}" style="--avatar-border:${border}">
-          <div class="comment-item-head">
-            <div class="comment-item-head-left">
-              <div class="comment-avatar" style="border-color:${border}">${avatarInner}</div>
-              <span class="comment-name" style="color:${border}">${c.author_name}</span>
-              ${timePill}
-            </div>
-            <button type="button" class="comment-like-btn" data-like="${c.id}" title="Like Comment">
-              <span class="material-symbols-outlined">favorite</span> <span>${c.likes || 0}</span>
-            </button>
-          </div>
-          <p class="comment-msg">${c.text}</p>
-        </div>`;
-      }).join('');
+      filtered.forEach((comment) => {
+        const border = safeColor(comment.avatar_color, '#ff553a');
+        const item = document.createElement('div');
+        item.className = 'comment-item';
+        item.id = 'comment-' + comment.id;
+        item.style.setProperty('--avatar-border', border);
 
-      // Add click listeners to timestamp buttons
-      commentsList.querySelectorAll('.comment-time-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const t = parseFloat(btn.getAttribute('data-seek'));
-          if (!isNaN(t)) {
-            video.currentTime = t;
-            showFlash('⏱️ ' + formatTime(t));
-          }
-        });
+        const head = document.createElement('div');
+        head.className = 'comment-item-head';
+        const left = document.createElement('div');
+        left.className = 'comment-item-head-left';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'comment-avatar';
+        avatar.style.borderColor = border;
+        appendCommentAvatar(avatar, comment);
+
+        const name = document.createElement('button');
+        name.type = 'button';
+        name.className = 'comment-name';
+        name.style.color = border;
+        name.textContent = comment.author_name || 'Anonymous';
+        name.title = comment.author_name ? 'Open @' + comment.author_name + ' profile' : '';
+        name.addEventListener('click', () => openProfile(comment.author_name));
+
+        let timeControl;
+        if (comment.timestamp !== null && comment.timestamp !== undefined) {
+          timeControl = document.createElement('button');
+          timeControl.type = 'button';
+          timeControl.className = 'comment-time-btn';
+          const icon = document.createElement('span');
+          icon.className = 'material-symbols-outlined';
+          icon.textContent = 'schedule';
+          timeControl.append(icon, document.createTextNode(' ' + formatTime(comment.timestamp)));
+          timeControl.addEventListener('click', () => {
+            const timestamp = Number(comment.timestamp);
+            if (!isNaN(timestamp)) {
+              video.currentTime = timestamp;
+              showFlash('⏱ ' + formatTime(timestamp));
+            }
+          });
+        } else {
+          timeControl = document.createElement('span');
+          timeControl.className = 'comment-time-gen';
+          const icon = document.createElement('span');
+          icon.className = 'material-symbols-outlined';
+          icon.style.fontSize = '12px';
+          icon.textContent = 'forum';
+          timeControl.append(icon, document.createTextNode(' GENERAL'));
+        }
+
+        left.append(avatar, name, timeControl);
+
+        const actions = document.createElement('div');
+        actions.className = 'comment-actions';
+        const like = document.createElement('button');
+        like.type = 'button';
+        like.className = 'comment-like-btn' + (comment.liked_by_me ? ' active' : '');
+        like.title = comment.liked_by_me ? 'Unlike comment' : 'Like comment';
+        const likeIcon = document.createElement('span');
+        likeIcon.className = 'material-symbols-outlined';
+        likeIcon.textContent = 'favorite';
+        const likeCountNode = document.createElement('span');
+        likeCountNode.textContent = String(comment.likes || 0);
+        like.append(likeIcon, likeCountNode);
+        like.addEventListener('click', () => likeComment(comment.id));
+        actions.appendChild(like);
+
+        if (comment.can_delete) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'comment-delete-btn';
+          remove.textContent = 'DELETE';
+          remove.addEventListener('click', () => deleteComment(comment.id));
+          actions.appendChild(remove);
+        }
+
+        head.append(left, actions);
+        const message = document.createElement('p');
+        message.className = 'comment-msg';
+        message.textContent = comment.text || '';
+        item.append(head, message);
+        commentsList.appendChild(item);
       });
-
-      // Add click listeners to like buttons
-      commentsList.querySelectorAll('.comment-like-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const cid = btn.getAttribute('data-like');
-          likeComment(cid);
-        });
-      });
-    }
-
-    function randomizePersona() {
-      const next = PERSONAS[Math.floor(Math.random() * PERSONAS.length)];
-      currentPersona = next;
-      if (personaAvatar) personaAvatar.textContent = next.avatar;
-      if (personaName) personaName.textContent = next.name;
     }
 
     function toggleDrawer(open) {
@@ -1879,7 +2421,20 @@
     if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));
     if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
     if (likeBtn) likeBtn.addEventListener('click', () => likeCurrentReel());
-    if (personaBtn) personaBtn.addEventListener('click', randomizePersona);
+    if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
+    if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
+    if (metaCreator) {
+      metaCreator.addEventListener('click', () => {
+        const creator = videoData[idx] && videoData[idx].creator;
+        if (creator && creator.username) openProfile(creator.username);
+      });
+    }
+    if (accountBtn) {
+      accountBtn.addEventListener('click', () => {
+        if (currentUser) openProfile(currentUser.username);
+        else requestAuthentication({ kind: 'account' });
+      });
+    }
 
     if (syncTimeToggle) {
       syncTimeToggle.addEventListener('click', () => {
@@ -1903,7 +2458,7 @@
         if (!txt) return;
         // Stills have no playback clock — always post general comments.
         const ts = (isSyncTimeActive && !isImageItem(videoData[idx])) ? video.currentTime : null;
-        const posted = await postComment(txt, ts, currentPersona);
+        const posted = await postComment(txt, ts);
         if (posted && commentInput) commentInput.value = '';
       });
     }
@@ -1976,7 +2531,7 @@
       } catch (e) {}
       metaSize.textContent = item.size || '';
       refreshEngagementUI();
-      beaconView();
+      startViewTracking(item);
 
       // Update comments display for this reel
       renderDrawerComments();
@@ -2430,10 +2985,12 @@
 
     // Video Ended -> Auto-advance or Loop
     video.addEventListener('ended', () => {
+      finishViewTracking('complete');
       if (isAutoNext) {
         nextVideo();
       } else {
         video.currentTime = 0;
+        startViewTracking(videoData[idx]);
         video.play().catch(() => {});
       }
     });
@@ -2629,8 +3186,12 @@
         getCurrentIndex: function() { return idx; },
         getAutoNext: function() { return isAutoNext; },
         getComments: function() { return getCurrentComments(); },
-        getPersona: function() { return currentPersona; },
-        onRandomizePersona: function() { randomizePersona(); },
+        getCurrentUser: function() { return currentUser; },
+        onOpenAccount: function() {
+          if (currentUser) openProfile(currentUser.username);
+          else requestAuthentication({ kind: 'account' });
+        },
+        onOpenProfile: function(username) { openProfile(username); },
         onSeekTo: function(t) {
           if (video && video.duration && !isNaN(t)) {
             const target = Math.max(0, Math.min(video.duration, t));
@@ -2639,7 +3200,7 @@
           }
         },
         onLikeComment: function(id) { return likeComment(id); },
-        onPostComment: function(text, timestamp) { return postComment(text, timestamp, currentPersona); },
+        onPostComment: function(text, timestamp) { return postComment(text, timestamp); },
       });
 
       if (vrBtnWrap) {
@@ -2686,8 +3247,20 @@
     if (window.__sxGlowInterval) clearInterval(window.__sxGlowInterval);
     window.__sxGlowInterval = setInterval(updateDesktopGlow, 140);
 
+    window.__sxReelsRuntimeCleanup = function () {
+      finishViewTracking('skip');
+      clearImageTimer();
+      if (tickerHideTimer) clearTimeout(tickerHideTimer);
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) WebXRVR.exitVR();
+      } catch (e) {}
+      document.removeEventListener('fullscreenchange', notifyFsChange);
+      document.removeEventListener('webkitfullscreenchange', notifyFsChange);
+    };
+
     // Initial Load
     loadVideo(0);
+    loadCurrentUser();
   })();
 </script>
 </body>
