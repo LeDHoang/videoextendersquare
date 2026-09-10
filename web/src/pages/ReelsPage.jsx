@@ -8,10 +8,14 @@ import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skele
 
 const SORTS = [
   { label: 'NEWEST', value: 'newest' },
+  { label: 'TOP', value: 'trending' },
+  { label: 'MOST VIEWED', value: 'views' },
+  { label: 'MOST LIKED', value: 'likes' },
   { label: 'OLDEST', value: 'oldest' },
   { label: 'A→Z', value: 'alphabetical' },
   { label: 'SHUFFLE', value: 'shuffle' },
 ];
+const VALID_SORTS = SORTS.map((option) => option.value);
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
   { label: CODEC_DEFAULT, value: CODEC_DEFAULT },
@@ -21,10 +25,10 @@ const CODEC_OPTS = [
 
 export default function ReelsPage() {
   // Deep-link support (Explore → Reels): ?folder&codec(h264|hevc|all)
-  // &search&sort&play=<video path> preselects filters and starts the
+  // &search&tag&sort&play=<video path> preselects filters and starts the
   // player at that exact reel. `deepPlay` is consumed (cleared) as soon as
   // the user touches any filter so later refetches start at index 0.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const paramSort = searchParams.get('sort');
   const paramCodec = (searchParams.get('codec') || '').toLowerCase();
   const [data, setData] = useState(null);
@@ -33,8 +37,9 @@ export default function ReelsPage() {
     paramCodec === 'h264' ? 'H264 (Browser/VR)' : paramCodec === 'all' ? 'ALL CODECS' : CODEC_DEFAULT,
   );
   const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [activeTag, setActiveTag] = useState(searchParams.get('tag') || '');
   const [sort, setSort] = useState(
-    ['newest', 'oldest', 'alphabetical', 'shuffle'].includes(paramSort) ? paramSort : 'newest',
+    VALID_SORTS.includes(paramSort) ? paramSort : 'newest',
   );
   const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
 
@@ -48,8 +53,9 @@ export default function ReelsPage() {
       const c = (searchParams.get('codec') || '').toLowerCase();
       setCodec(c === 'h264' ? 'H264 (Browser/VR)' : c === 'all' ? 'ALL CODECS' : CODEC_DEFAULT);
       setSearch(searchParams.get('search') || '');
+      setActiveTag(searchParams.get('tag') || '');
       const s = searchParams.get('sort');
-      if (['newest', 'oldest', 'alphabetical', 'shuffle'].includes(s)) setSort(s);
+      if (VALID_SORTS.includes(s)) setSort(s);
       setDeepPlay(play);
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,6 +83,7 @@ export default function ReelsPage() {
         folder,
         codec: codecParam,
         search: debouncedSearch,
+        tag: activeTag || undefined,
         sort,
         refresh: refreshKey > 0,
       })
@@ -87,7 +94,16 @@ export default function ReelsPage() {
         }
       })
       .catch(() => setData({ total: 0, count: 0, folders: [], videos: [] }));
-  }, [folder, codecParam, debouncedSearch, sort, refreshKey]);
+  }, [folder, codecParam, debouncedSearch, activeTag, sort, refreshKey]);
+
+  const clearTagFilter = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('tag');
+    nextParams.delete('play');
+    setDeepPlay(null);
+    setActiveTag('');
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const videos = data?.videos || [];
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
@@ -97,6 +113,7 @@ export default function ReelsPage() {
     codec: codecParam,
     search: debouncedSearch,
     sort,
+    ...(activeTag ? { tag: activeTag } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
   const videoOpts = videos.map((v) => ({
@@ -177,6 +194,19 @@ export default function ReelsPage() {
           <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
         </div>
       </Hero>
+
+      {activeTag ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>TAG FEED</span>
+          <strong>{'#' + activeTag}</strong>
+          <button
+            type="button"
+            onClick={clearTagFilter}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
 
       {/* ─── Control Section (2 Rows: Filters + Utilities) ── */}
       <div className="sx-control-rail-stacked">
@@ -288,7 +318,7 @@ export default function ReelsPage() {
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-          hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}"`}
+          hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}" tag="${activeTag}"`}
         />
       ) : (
         <div>

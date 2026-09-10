@@ -273,6 +273,213 @@ LOCATION_POOL = [
 _CITY_TO_COUNTRY = {loc["city"]: loc["country"] for loc in LOCATION_POOL}
 
 
+def _tag_slug(value: str) -> str:
+    """Return the stable URL/search key for a user-facing tag."""
+    cleaned = str(value or "").casefold().lstrip("#")
+    return re.sub(r"[^\w]+|_+", "-", cleaned, flags=re.UNICODE).strip("-")
+
+
+def _search_key(value: str) -> str:
+    """Collapse punctuation so queries like sci fi match sci-fi."""
+    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _metadata_snapshot(raw: list[dict]) -> dict[str, dict]:
+    """Build deterministic metadata for discovery without writing seed data.
+
+    Header autocomplete can run on every few keystrokes. Reading the metadata
+    file once and deriving missing seed rows in memory keeps that interaction
+    cheap and avoids turning a search request into many small disk writes.
+    """
+    persisted = _load_meta_raw()
+    snapshot: dict[str, dict] = {}
+    for item in raw:
+        key = str(item.get("rel_path", "")).strip().replace("\\", "/")
+        entry = persisted.get(key)
+        if not isinstance(entry, dict):
+            seed = int(hashlib.md5(key.encode("utf-8")).hexdigest()[:8], 16)
+            entry = _seed_meta(key, item.get("filename", ""), random.Random(seed))
+        snapshot[key] = entry
+    return snapshot
+
+
+def _item_meta(item: dict, snapshot: dict[str, dict]) -> dict:
+    key = str(item.get("rel_path", "")).strip().replace("\\", "/")
+    return snapshot.get(key, {})
+
+
+def _item_search_text(item: dict, meta: dict, include_tags: bool = True) -> str:
+    location = meta.get("location") if isinstance(meta.get("location"), dict) else {}
+    values = [
+        item.get("filename", ""),
+        item.get("folder", ""),
+        meta.get("title", ""),
+        meta.get("caption", ""),
+        meta.get("author_name", ""),
+        location.get("city", ""),
+        location.get("country", ""),
+        location.get("display_name", ""),
+    ]
+    if include_tags:
+        values.extend(meta.get("tags", []))
+    return " ".join(str(value) for value in values if value).casefold()
+
+
+def _tag_catalog(raw: list[dict]) -> tuple[dict[str, dict], list[tuple[str, str, list[str]]]]:
+    """Aggregate tag stats, co-occurrence, and searchable reel context."""
+    snapshot = _metadata_snapshot(raw)
+    catalog: dict[str, dict] = {}
+    contexts: list[tuple[str, str, list[str]]] = []
+
+    for item in raw:
+        meta = _item_meta(item, snapshot)
+        tag_pairs = []
+        seen = set()
+        for raw_tag in meta.get("tags", []):
+            slug = _tag_slug(raw_tag)
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            name = str(raw_tag).strip().lstrip("#").casefold() or slug
+            tag_pairs.append((slug, name))
+
+        if not tag_pairs:
+            continue
+
+        views = _safe_int(meta.get("views"))
+        likes = _safe_int(meta.get("likes"))
+        is_image = _is_image_item(item)
+        slugs = [slug for slug, _ in tag_pairs]
+        context_text = _item_search_text(item, meta, include_tags=False)
+        contexts.append((context_text, _search_key(context_text), slugs))
+
+        for slug, name in tag_pairs:
+            row = catalog.setdefault(slug, {
+                "name": name,
+                "slug": slug,
+                "reel_count": 0,
+                "views": 0,
+                "likes": 0,
+                "image_count": 0,
+                "video_count": 0,
+                "related": {},
+            })
+            row["reel_count"] += 1
+            row["views"] += views
+            row["likes"] += likes
+            row["image_count" if is_image else "video_count"] += 1
+            for other in slugs:
+                if other != slug:
+                    row["related"][other] = row["related"].get(other, 0) + 1
+
+    return catalog, contexts
+
+
+def _related_tag_rows(slug: str, catalog: dict[str, dict], limit: int = 5) -> list[dict]:
+    row = catalog.get(slug, {})
+    related = row.get("related", {})
+    ranked = sorted(
+        related.items(),
+        key=lambda pair: (
+            -pair[1],
+            -catalog.get(pair[0], {}).get("reel_count", 0),
+            pair[0],
+        ),
+    )[:limit]
+    return [
+        {
+            "name": catalog[other]["name"],
+            "slug": other,
+            "shared_reels": shared,
+            "reel_count": catalog[other]["reel_count"],
+        }
+        for other, shared in ranked
+        if other in catalog
+    ]
+
+
+def _rank_tag_catalog(
+    catalog: dict[str, dict],
+    contexts: list[tuple[str, str, list[str]]],
+    query: str,
+    limit: int,
+) -> list[dict]:
+    """Rank direct tag matches plus tags attached to matching reel names.
+
+    This deliberately exposes simple, inspectable signals. It is the baseline
+    that a later recommendation model can replace without changing the UI/API
+    contract.
+    """
+    query_text = str(query or "").strip().casefold().lstrip("#")
+    query_key = _search_key(query_text)
+    scores: dict[str, int] = {}
+    reasons: dict[str, str] = {}
+
+    if query_key:
+        for slug, row in catalog.items():
+            tag_key = _search_key(row["name"])
+            if query_key == tag_key:
+                scores[slug] = 1000
+                reasons[slug] = "EXACT TAG"
+            elif tag_key.startswith(query_key):
+                scores[slug] = 760
+                reasons[slug] = "TAG PREFIX"
+            elif query_key in tag_key:
+                scores[slug] = 560
+                reasons[slug] = "TAG MATCH"
+
+        if len(query_key) >= 2:
+            # Existing filename hints double as transparent name-to-tag aliases.
+            for keyword, hinted_tags in TAG_HINTS:
+                keyword_key = _search_key(keyword)
+                if query_key in keyword_key or keyword_key in query_key:
+                    for hinted in hinted_tags:
+                        slug = _tag_slug(hinted)
+                        if slug in catalog:
+                            scores[slug] = max(scores.get(slug, 0), 680)
+                            reasons.setdefault(slug, "RELATED NAME")
+
+            # A query that matches a reel title, filename, creator, or place
+            # lends relevance to every tag attached to that reel.
+            for context_text, context_key, slugs in contexts:
+                if query_text in context_text or query_key in context_key:
+                    for slug in slugs:
+                        scores[slug] = scores.get(slug, 0) + 120
+                        reasons.setdefault(slug, "RELATED CONTENT")
+    else:
+        for slug, row in catalog.items():
+            scores[slug] = row["reel_count"] * 20 + min(row["views"] // 1000, 200)
+            reasons[slug] = "POPULAR"
+
+    ranked_slugs = sorted(
+        (slug for slug, score in scores.items() if score > 0),
+        key=lambda slug: (
+            -scores[slug],
+            -catalog[slug]["reel_count"],
+            -catalog[slug]["views"],
+            slug,
+        ),
+    )[:limit]
+
+    results = []
+    for slug in ranked_slugs:
+        row = catalog[slug]
+        results.append({
+            **{key: value for key, value in row.items() if key != "related"},
+            "score": scores[slug],
+            "reason": reasons[slug],
+            "related_tags": _related_tag_rows(slug, catalog, limit=3),
+        })
+    return results
+
+
 def _load_meta_raw() -> dict[str, dict]:
     """Load all reel metadata from output/reels_meta.json."""
     if not META_FILE.exists():
@@ -431,17 +638,37 @@ def _is_image_item(item: dict) -> bool:
 
 
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
-                   sort: str, media: str | None = None) -> list[dict]:
+                   sort: str, media: str | None = None,
+                   tag: str | None = None) -> list[dict]:
     videos = list(raw)
+    metadata = None
     if media in ("video", "videos"):
         videos = [v for v in videos if not _is_image_item(v)]
     elif media in ("image", "images"):
         videos = [v for v in videos if _is_image_item(v)]
     if folder and folder != "ALL FOLDERS":
         videos = [v for v in videos if v["folder"] == folder]
+    if tag and _tag_slug(tag):
+        wanted = _tag_slug(tag)
+        metadata = _metadata_snapshot(videos)
+        videos = [
+            video
+            for video in videos
+            if wanted in {
+                _tag_slug(item_tag)
+                for item_tag in _item_meta(video, metadata).get("tags", [])
+            }
+        ]
     if search.strip():
-        q = search.strip().lower()
-        videos = [v for v in videos if q in v["filename"].lower()]
+        query_text = search.strip().casefold().lstrip("#")
+        query_key = _search_key(query_text)
+        metadata = metadata or _metadata_snapshot(videos)
+        videos = [
+            video
+            for video in videos
+            if query_text in _item_search_text(video, _item_meta(video, metadata))
+            or (query_key and query_key in _search_key(_item_search_text(video, _item_meta(video, metadata))))
+        ]
     if sort == "oldest":
         videos.sort(key=lambda x: x["mtime"])
     elif sort == "alphabetical":
@@ -449,6 +676,24 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
     elif sort == "shuffle":
         r = random.Random(int(time.time()) // 60)
         r.shuffle(videos)
+    elif sort in ("views", "likes", "trending"):
+        metadata = metadata or _metadata_snapshot(videos)
+
+        def _engagement(item: dict) -> tuple[int, float]:
+            meta = _item_meta(item, metadata)
+            views = _safe_int(meta.get("views"))
+            likes = _safe_int(meta.get("likes"))
+            if sort == "views":
+                score = views
+            elif sort == "likes":
+                score = likes
+            else:
+                score = views + likes * 20
+            return score, float(item.get("mtime", 0))
+
+        videos.sort(key=_engagement, reverse=True)
+    else:
+        videos.sort(key=lambda x: x["mtime"], reverse=True)
     return videos
 
 
@@ -565,6 +810,7 @@ def list_reels(
     sort: str = "newest",
     refresh: bool = False,
     media: str | None = None,
+    tag: str | None = None,
 ):
     """Scan output dir and return the filtered, codec-aware reels list.
 
@@ -573,11 +819,64 @@ def list_reels(
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort, media)
+    videos = _apply_filters(raw, folder, search, sort, media, tag)
     return {
         "total": len(raw),
         "count": len(videos),
         "folders": sorted({v["folder"] for v in raw}),
+        "active_tag": _tag_slug(tag) if tag else None,
+        "videos": _build_payload(videos, codec),
+    }
+
+
+@router.get("/tags")
+def list_reel_tags(q: str = "", limit: int = 8):
+    """Return ranked tag suggestions for header search and discovery UI."""
+    bounded_limit = max(1, min(int(limit), 20))
+    catalog, contexts = _tag_catalog(_scan_cached())
+    return {
+        "query": q,
+        "strategy": "metadata-v1",
+        "tags": _rank_tag_catalog(catalog, contexts, q, bounded_limit),
+    }
+
+
+@router.get("/tags/{tag_name}")
+def get_reel_tag(
+    tag_name: str,
+    codec: str | None = "hevc",
+    sort: str = "trending",
+    folder: str | None = None,
+    refresh: bool = False,
+):
+    """Return one exact tag feed plus stats and co-occurring tags."""
+    slug = _tag_slug(tag_name)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Tag cannot be empty")
+    if refresh:
+        _scan_cache["at"] = 0.0
+
+    raw = _scan_cached()
+    catalog, _ = _tag_catalog(raw)
+    videos = _apply_filters(raw, folder, "", sort, tag=slug)
+    row = catalog.get(slug, {
+        "name": slug,
+        "slug": slug,
+        "reel_count": 0,
+        "views": 0,
+        "likes": 0,
+        "image_count": 0,
+        "video_count": 0,
+        "related": {},
+    })
+    tag_summary = {key: value for key, value in row.items() if key != "related"}
+    return {
+        "strategy": "cooccurrence-v1",
+        "tag": tag_summary,
+        "count": len(videos),
+        "total": len(raw),
+        "folders": sorted({video["folder"] for video in videos}),
+        "related_tags": _related_tag_rows(slug, catalog),
         "videos": _build_payload(videos, codec),
     }
 
@@ -946,12 +1245,13 @@ def reels_player(
     refresh: bool = False,
     start: int = 0,
     media: str | None = None,
+    tag: str | None = None,
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort, media)
+    videos = _apply_filters(raw, folder, search, sort, media, tag)
     payload = _build_payload(videos, codec, tunnel=tunnel)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
@@ -1066,13 +1366,14 @@ def reels_player_inline(
     refresh: bool = False,
     start: int = 0,
     media: str | None = None,
+    tag: str | None = None,
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
     if refresh:
         _scan_cache["at"] = 0.0
     raw = _scan_cached()
-    videos = _apply_filters(raw, folder, search, sort, media)
+    videos = _apply_filters(raw, folder, search, sort, media, tag)
     payload = _build_payload(videos, codec, tunnel=tunnel)
     try:
         start_idx = max(0, min(int(start), max(0, len(payload) - 1)))

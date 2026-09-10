@@ -23,7 +23,7 @@ stitch/
 .DS_Store
 .env
 .streamlit/credentials.toml
-
+.cache/
 # Node / built frontend
 web/node_modules/
 web/dist/
