@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js';
 import ExploreTile from '../components/explore/ExploreTile.jsx';
 import { Button } from '../components/ui/controls.jsx';
-import { EmptyState, Hero } from '../components/ui/primitives.jsx';
+import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 
@@ -203,7 +203,6 @@ export default function ProfilePage() {
 
   return (
     <div>
-      <Hero title={profile ? '@' + profile.username : 'PROFILE'} kicker="ECHO · CREATOR PROFILE · POSTS · REELS · PHOTOS" />
       {profile ? (
         <>
           <section className="sx-profile-head">
