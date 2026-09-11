@@ -1334,7 +1334,7 @@
         <span class="btn-icon">
           __ICON_COMMENT__
         </span>
-        <span class="action-btn-label" id="commentBadge">ANNO</span>
+        <span class="action-btn-label" id="commentBadge">0</span>
       </button>
       <button class="action-btn" id="likeBtn" title="Like / Unlike (F)">
         <span class="btn-icon">
@@ -2286,9 +2286,9 @@
       if (!commentsList) return;
       const comments = getCurrentComments();
       const countEl = drawerTitle ? drawerTitle.querySelector('.drawer-title-count') : null;
-      if (countEl) countEl.textContent = '(' + comments.length + ')';
-      else if (drawerTitle) drawerTitle.textContent = 'COMMENTS (' + comments.length + ')';
-      if (commentBadge) commentBadge.textContent = comments.length ? 'ANNO (' + comments.length + ')' : 'ANNO';
+      if (countEl) countEl.textContent = `(${comments.length})`;
+      else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${comments.length})`;
+      if (commentBadge) commentBadge.textContent = comments.length ? `ANNO (${comments.length})` : 'ANNO';
 
       let filtered = comments;
       if (activeTab === 'sync') {

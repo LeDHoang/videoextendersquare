@@ -11,7 +11,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.8-20260821-stereo-scale-fix';
+  const VR_VERSION = 'v4.11-20260910-ambilight-throttle';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -32,6 +32,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let glLayer = null;
   let glProgram = null;
   let glVideoTexture = null;
+  let glVideoTextureB = null; // double-buffer back texture (2d re-spec path only)
+  let videoTexFront = 0; // 0 = A front / B back, 1 = B front / A back
   let glVideoTextureExt = null; // OES_texture_external target (zero-copy video bind)
   let glControlsTexture = null;
   let glOverlayTexture = null;
@@ -220,13 +222,29 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastVideoTime = -1;
   let lastVideoFrameCount = -1; // decoded-frame counter (getVideoPlaybackQuality)
 
+  // Adaptive upload stride (resolution + stall aware). Low-res files sustain
+  // stride 1 (every decoded frame → full motion); high-res / stalling sessions
+  // back off to 2-3 so the texImage2D re-spec flush fires less often.
+  // 4K masters can never hold stride 1 (telemetry: ~100ms flush vs 11ms budget).
+  let vrUploadStride = 1; // 1 = every decoded frame, 2 = every 2nd, 3 = every 3rd
+  let vrSkipCounter = 0;
+  let vrStallFrames = 0; // recent XR frames with dt > 25ms
+  let vrCalmFrames = 0; // recent XR frames with dt < 18ms
+  let vrLastFrameT = -1;
+  // UI texture throttles: controls progress looks smooth at 10Hz; the guide is
+  // static artwork uploaded once. Per-frame UI re-specs were extra flushes.
+  let vrLastUiUploadT = -1;
+  let vrLastPanelUploadT = -1;
+  let vrGuideUploaded = false;
+  const VR_UI_MIN_INTERVAL = 100; // ms between UI texture uploads
+
   // ── In-headset VR telemetry (POSTed to /api/reels/diag ~1Hz) ──
   // CDP can't see the Quest tab during immersive VR, so the render loop
   // self-reports XR frame timing + texture-upload count + decode drops.
   let _diagLastT = null;
   let _diagLastPost = 0;
   let _diagFrames = 0;
-  let _diagDtMin = Infinity, _diagDtMax = 0, _diagDtSum = 0, _diagOver20 = 0;
+  let _diagDtMin = Infinity, _diagDtMax = 0, _diagDtSum = 0, _diagOver20 = 0, _diagOver14 = 0;
   let _diagLastPqTotal = -1;
   let _diagTexUploads = 0;
   let _diagUploadMaxMs = 0;
@@ -867,6 +885,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       questControllerImg.onload = () => {
         isQuestControllerImgLoaded = true;
         renderGuideCanvas();
+        vrGuideUploaded = false; // finished artwork: re-upload once next frame
       };
       questControllerImg.src = QUEST_CONTROLLER_B64;
     }
@@ -1962,6 +1981,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // Minimum sane stride for the current file: 4K masters start at 2 because a
+  // stride-1 4K upload (~100ms flush) can never fit an 11-14ms XR budget.
+  // Low-res files (720p/1080p/1280²) start at 1 → full frame rate.
+  function vrMinStride() {
+    const w = videoElement ? (videoElement.videoWidth || 0) : 0;
+    if (w >= 3000) return 2;
+    return 1;
+  }
+
   // ─── VR Telemetry: self-report XR frame timing + texture uploads ───
   function _postDiag(time) {
     if (_diagLastT !== null) {
@@ -1971,6 +1999,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       _diagDtMax = Math.max(_diagDtMax, dt);
       _diagDtSum += dt;
       if (dt > 20) _diagOver20++;
+      if (dt > 14) _diagOver14++; // 72Hz budget is 13.9ms: 14-20ms frames miss
+                                  // vsync (flash) without tripping over20
     }
     _diagLastT = time;
 
@@ -2007,6 +2037,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       dtMinMs: +(_diagDtMin === Infinity ? 0 : _diagDtMin).toFixed(2),
       dtMaxMs: +(_diagDtMax).toFixed(2),
       over20: _diagOver20,
+      over14: _diagOver14,
       texUploads: _diagTexUploads,
       uploadMaxMs: +_diagUploadMaxMs.toFixed(2),
       drawMaxMs: +_diagDrawMaxMs.toFixed(2),
@@ -2015,6 +2046,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       pqTotal: pqTotal,
       pqDropped: pqDropped,
       texTarget: videoTexMode,
+      upStride: vrUploadStride,
       videoW: videoElement ? videoElement.videoWidth : 0,
       videoH: videoElement ? videoElement.videoHeight : 0,
       ct: videoElement ? +(videoElement.currentTime).toFixed(2) : 0,
@@ -2030,7 +2062,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     // reset window accumulators
     _diagFrames = 0;
-    _diagDtMin = Infinity; _diagDtMax = 0; _diagDtSum = 0; _diagOver20 = 0;
+    _diagDtMin = Infinity; _diagDtMax = 0; _diagDtSum = 0; _diagOver20 = 0; _diagOver14 = 0;
     _diagTexUploads = 0;
     _diagUploadMaxMs = 0;
     _diagDrawMaxMs = 0;
@@ -2494,7 +2526,13 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function updateAmbilightColor(now) {
     if (!videoElement || videoElement.readyState < 2 || videoElement.paused) return;
-    if (now - lastColorSampleTime < 80) return; // Sample at ~12 FPS
+    // In-XR the drawImage+getImageData readback below runs ON the XR thread and
+    // forces a CPU sync against the playing decoder (typically 10-20ms — a
+    // missed vsync at 72Hz that never trips the >20ms tripwire, i.e. invisible
+    // flashing). Sample at 1Hz in XR; the per-frame lerp toward the target
+    // keeps the glow transition smooth. 2D keeps 80ms.
+    const interval = xrSession ? 1000 : 80;
+    if (now - lastColorSampleTime < interval) return; // Sample at ~12 FPS
     lastColorSampleTime = now;
 
     try {
@@ -2564,10 +2602,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     console.log('[WebXRVR] GL context:', isGL2 ? 'WebGL 2.0' : 'WebGL 1.0');
     session.updateRenderState({ baseLayer: glLayer });
 
-    // Quest Browser defaults WebXR to 72 Hz. Request 90 Hz explicitly — the
-    // single most-cited "sluggish vs native" fix for Quest WebXR sessions.
+    // Video playback targets 72 Hz, not 90: live telemetry shows an ~11.1ms+
+    // baseline, leaving zero headroom at 90Hz (11.1ms budget), so the
+    // compositor invents frames (= flashing/black edge bars). At 72Hz
+    // (13.9ms budget) the baseline fits and only true upload stalls cost one.
     if (typeof session.updateTargetFrameRate === 'function') {
-      try { session.updateTargetFrameRate(90); } catch (e) { /* void */ }
+      try { session.updateTargetFrameRate(72); } catch (e) { /* void */ }
     }
 
     // GLSL ES 3.00 shaders for WebGL2, GLSL ES 1.00 for the WebGL1 fallback.
@@ -2721,6 +2761,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    // Double-buffer back texture: the 2d path re-specifies via texImage2D, and
+    // re-specifying the texture currently sampled by in-flight draws stalls
+    // ~24ms (1280²) / ~100ms (4K). Uploading into the UNSAMPLED back texture
+    // then flipping avoids the pipeline bubble. (~13MB extra at 1280².)
+    glVideoTextureB = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glVideoTextureB);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     if (videoTexMode === 'external') {
       glVideoTextureExt = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
@@ -2843,6 +2894,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
   }
 
+  // Front video texture of the double-buffer pair (the back one is being
+  // uploaded to). Falls back to A if B failed to allocate.
+  function frontVideoTexture() {
+    if (videoTexFront === 1 && glVideoTextureB) return glVideoTextureB;
+    return glVideoTexture;
+  }
+
   // Video-screen draw. Uses the OES external-texture program + target when the
   // zero-copy path is armed; otherwise delegates to the standard 2D path.
   function drawVideoGrid(viewMat, projMat, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
@@ -2875,7 +2933,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
       return;
     }
-    drawGrid(viewMat, projMat, glVideoTexture, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff);
+    drawGrid(viewMat, projMat, frontVideoTexture(), pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff);
   }
 
   // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
@@ -2981,6 +3039,24 @@ window.WebXRVR = window.WebXRVR || (function () {
     try {
       _postDiag(time);
 
+      // Adaptive stride bookkeeping: sustained frame misses → back off the
+      // video-upload rate; sustained calm → ease back toward the file's floor.
+      if (vrLastFrameT >= 0) {
+        const fdt = time - vrLastFrameT;
+        if (fdt > 25) { vrStallFrames += 1; vrCalmFrames = 0; }
+        else if (fdt < 18) { vrCalmFrames += 1; }
+        else { vrCalmFrames = 0; }
+        if (vrStallFrames >= 8) {
+          const maxStride = (videoElement && (videoElement.videoWidth || 0) >= 3000) ? 3 : 2;
+          if (vrUploadStride < maxStride) vrUploadStride += 1;
+          vrStallFrames = 0; vrCalmFrames = 0;
+        } else if (vrCalmFrames >= 240 && vrUploadStride > vrMinStride()) {
+          vrUploadStride -= 1;
+          vrCalmFrames = 0; vrStallFrames = 0;
+        }
+      }
+      vrLastFrameT = time;
+
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
 
@@ -3035,12 +3111,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     if (videoElement && videoElement.readyState >= 2) {
-      // Only re-upload the video texture when a NEW decoded frame is available.
-      // getVideoPlaybackQuality().totalVideoFrames ticks once per decoded frame
-      // (~video fps), unlike currentTime which updates continuously and would
-      // force a full 4K texture upload every XR frame (~90Hz) → VR choppy.
+      // Strict gate: upload ONLY on a newly decoded frame. totalVideoFrames
+      // ticks once per decoded frame (~video fps). The old `hasNewVideoFrame
+      // ||` bypass re-fired from rVFC with zero new decoded frames (live
+      // telemetry: 49 uploads/sec, 0 decoded) — that bypass is removed.
+      // Adaptive stride then drops intermediate frames on high-res/stalled
+      // sessions so the re-spec flush fires less often (low-res keeps every
+      // frame → full motion; 4K backs off to 1/2–1/3 rate → far fewer flashes).
       const vf = (videoElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1);
-      if (hasNewVideoFrame || vf !== lastVideoFrameCount) {
+      // Fallback: if the browser lacks getVideoPlaybackQuality, vf stays -1
+      // and we must trust the rVFC flag as before.
+      const vChanged = (vf === -1) ? hasNewVideoFrame : (vf !== lastVideoFrameCount);
+      if (vChanged) vrSkipCounter += 1;
+      if (vChanged && vrSkipCounter >= vrUploadStride) {
+        vrSkipCounter = 0;
         const _u0 = performance.now();
         if (videoTexMode === 'external' && glVideoTextureExt) {
           // Zero-copy bind: points the external texture at the decoder surface.
@@ -3059,7 +3143,16 @@ window.WebXRVR = window.WebXRVR || (function () {
             } else {
               gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
             }
+          } else if (glVideoTextureB) {
+            // Double-buffered re-spec: upload into the BACK texture (sampled
+            // by no in-flight draw) then flip, so the GPU never re-specifies
+            // the texture it is currently sampling → no pipeline bubble.
+            const backTex = (videoTexFront === 0) ? glVideoTextureB : glVideoTexture;
+            gl.bindTexture(gl.TEXTURE_2D, backTex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+            videoTexFront = (videoTexFront === 0) ? 1 : 0;
           } else {
+            gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
           }
         }
@@ -3068,19 +3161,35 @@ window.WebXRVR = window.WebXRVR || (function () {
         hasNewVideoFrame = false;
         lastVideoTime = videoElement.currentTime;
         lastVideoFrameCount = vf;
+      } else if (vChanged) {
+        // Skipped by stride: advance the counter so frames never backlog —
+        // this decoded frame is dropped from the VR texture, the next one
+        // within stride gets uploaded.
+        hasNewVideoFrame = false;
+        lastVideoTime = videoElement.currentTime;
+        lastVideoFrameCount = vf;
+      } else {
+        // Stale rVFC ping with no decoded frame: clear the flag, never upload.
+        hasNewVideoFrame = false;
       }
     }
 
-    if (controlsVisible) {
+    // Transport controls: 10Hz re-upload is visually smooth in VR and removes
+    // ~70 re-spec flushes/sec vs the old every-XR-frame upload.
+    if (controlsVisible && (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= VR_UI_MIN_INTERVAL)) {
+      vrLastUiUploadT = time;
       renderControlsCanvas();
       gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+    }
 
-      if (guideCanvas && glGuideTexture) {
-        renderGuideCanvas();
-        gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
-      }
+    // Guide panel is static artwork: render + upload once per session (and
+    // once more if the controller image finishes loading late).
+    if (controlsVisible && guideCanvas && glGuideTexture && !vrGuideUploaded) {
+      renderGuideCanvas();
+      gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
+      vrGuideUploaded = true;
     }
 
     // Suppress the live in-screen time-synced overlay while the comments panel is open
@@ -3090,8 +3199,12 @@ window.WebXRVR = window.WebXRVR || (function () {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
     }
 
-    // Upload VR comments panel texture
-    if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture) {
+    // Upload VR comments panel texture (throttled to 10Hz: keeps the SYNC
+    // clock fresh; the old per-frame re-raster was another full re-spec
+    // flush on every XR frame while the panel was open).
+    if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture &&
+        (vrLastPanelUploadT < 0 || (time - vrLastPanelUploadT) >= VR_UI_MIN_INTERVAL)) {
+      vrLastPanelUploadT = time;
       renderCommentsPanelCanvas();
       gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
@@ -3404,6 +3517,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastVideoTime = -1;
     lastVideoFrameCount = -1;
     videoTexAllocated = false;
+    vrSkipCounter = 0;
+    vrStallFrames = 0;
+    vrCalmFrames = 0;
+    vrLastFrameT = -1;
+    vrLastUiUploadT = -1;
+    vrLastPanelUploadT = -1;
+    vrGuideUploaded = false;
+    vrUploadStride = vrMinStride();
     hoveredButton = -1;
     isGrabbing = false;
     activeRayOrigin = null;
@@ -3565,6 +3686,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     glLayer = null;
     glProgram = null;
     glVideoTexture = null;
+    glVideoTextureB = null;
+    videoTexFront = 0;
     glVideoTextureExt = null;
     glVideoProgram = null;
     loc2_aPos = -1;
@@ -3577,6 +3700,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     loc2_uEyeOff = null;
     videoTexMode = '2d';
     videoTexAllocated = false;
+    vrUploadStride = 1;
+    vrSkipCounter = 0;
+    vrStallFrames = 0;
+    vrCalmFrames = 0;
+    vrLastFrameT = -1;
+    vrLastUiUploadT = -1;
+    vrLastPanelUploadT = -1;
+    vrGuideUploaded = false;
     vrProxyCanvas = null;
     vrProxyCtx = null;
     glControlsTexture = null;
@@ -3648,6 +3779,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastVideoTime = -1;
     lastVideoFrameCount = -1;
     videoTexAllocated = false;
+    // New file → re-derive stride from its resolution (guide art is static,
+    // so its uploaded flag survives across videos).
+    vrUploadStride = vrMinStride();
+    vrSkipCounter = 0;
+    vrStallFrames = 0;
+    vrCalmFrames = 0;
     cPanelScrollY = 0;
     cPanelMaxScroll = 0;
     clearPanelHighlight();
