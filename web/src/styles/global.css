@@ -3266,6 +3266,16 @@ body.sx-vr-active .sx-reels-mount,
   top: 40px;
 }
 
+button.sx-explore-loc-link {
+  pointer-events: auto;
+  cursor: pointer;
+  border: none;
+}
+
+button.sx-explore-loc-link:hover {
+  color: var(--sx-accent-hi);
+}
+
 /* ─── Upload page: tags, location autocomplete, image tiles ─── */
 
 .sx-explore-image {

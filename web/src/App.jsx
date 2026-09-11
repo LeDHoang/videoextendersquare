@@ -10,6 +10,7 @@ const ComparePage = lazy(() => import('./pages/ComparePage.jsx'));
 const ReelsPage = lazy(() => import('./pages/ReelsPage.jsx'));
 const ExplorePage = lazy(() => import('./pages/ExplorePage.jsx'));
 const TagExplorePage = lazy(() => import('./pages/TagExplorePage.jsx'));
+const LocationExplorePage = lazy(() => import('./pages/LocationExplorePage.jsx'));
 const UploadPage = lazy(() => import('./pages/UploadPage.jsx'));
 const AuthPage = lazy(() => import('./pages/AuthPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/reels" element={<ReelsPage />} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
+          <Route path="/explore/location/:key" element={<LocationExplorePage />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/signup" element={<AuthPage mode="register" />} />
           <Route path="/forgot-password" element={<PasswordResetPage requestOnly />} />

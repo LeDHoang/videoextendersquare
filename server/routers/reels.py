@@ -3,6 +3,7 @@ and the full Reels/VR player page (replaces the Streamlit reels_view iframe)."""
 
 import hashlib
 import json
+import math
 import random
 import re
 import time
@@ -406,6 +407,165 @@ def _related_tag_rows(slug: str, catalog: dict[str, dict], limit: int = 5) -> li
     ]
 
 
+# ─── LOCATION EXPLORE ───────────────────────────────────────────────────
+
+# Static coordinates for the seeded LOCATION_POOL cities so proximity
+# ranking works even when reels carry no per-reel lat/lon.
+CITY_COORDS = {
+    "austin,usa": (30.2672, -97.7431),
+    "los angeles,usa": (34.0522, -118.2437),
+    "new york,usa": (40.7128, -74.0060),
+    "miami,usa": (25.7617, -80.1918),
+    "chicago,usa": (41.8781, -87.6298),
+    "seattle,usa": (47.6062, -122.3321),
+    "london,uk": (51.5074, -0.1278),
+    "manchester,uk": (53.4808, -2.2426),
+    "paris,france": (48.8566, 2.3522),
+    "berlin,germany": (52.5200, 13.4050),
+    "tokyo,japan": (35.6762, 139.6503),
+    "osaka,japan": (34.6937, 135.5023),
+    "seoul,south korea": (37.5665, 126.9780),
+    "bangkok,thailand": (13.7563, 100.5018),
+    "singapore,singapore": (1.3521, 103.8198),
+}
+
+
+def _location_key(city: str, country: str) -> str:
+    """Return the stable URL key for a city+country place."""
+    city_slug = re.sub(r"[^\w]+|_+", "-", str(city or "").casefold()).strip("-")
+    country_slug = re.sub(r"[^\w]+|_+", "-", str(country or "").casefold()).strip("-")
+    if not city_slug:
+        return ""
+    return city_slug + ("--" + country_slug if country_slug else "")
+
+
+def _location_coords(city: str, country: str, lat=None, lon=None) -> tuple[float, float] | None:
+    """Prefer per-reel coordinates, fall back to the static city table."""
+    try:
+        if lat is not None and lon is not None:
+            return (float(lat), float(lon))
+    except (TypeError, ValueError):
+        pass
+    lookup = (str(city or "").casefold().strip() + "," + str(country or "").casefold().strip())
+    return CITY_COORDS.get(lookup)
+
+
+def _split_location_key(value: str) -> tuple[str, str]:
+    """Split a location slug back into (city, country) for key comparison."""
+    text = str(value or "")
+    if "--" in text:
+        city_part, _, country_part = text.rpartition("--")
+        return (city_part.replace("-", " "), country_part.replace("-", " "))
+    return (text.replace("-", " "), "")
+
+
+def _item_location_key(video: dict, metadata: dict) -> str:
+    meta = _item_meta(video, metadata)
+    location = meta.get("location") if isinstance(meta.get("location"), dict) else {}
+    return _location_key(location.get("city", ""), location.get("country", ""))
+
+
+def _haversine_km(first: tuple[float, float], second: tuple[float, float]) -> float:
+    lat1, lon1 = math.radians(first[0]), math.radians(first[1])
+    lat2, lon2 = math.radians(second[0]), math.radians(second[1])
+    delta_lat, delta_lon = lat2 - lat1, lon2 - lon1
+    inner = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(inner)))
+
+
+def _location_catalog(raw: list[dict]) -> dict[str, dict]:
+    """Aggregate reel stats per city+country place."""
+    snapshot = _metadata_snapshot(raw)
+    catalog: dict[str, dict] = {}
+    for item in raw:
+        meta = _item_meta(item, snapshot)
+        location = meta.get("location") if isinstance(meta.get("location"), dict) else {}
+        city = str(location.get("city") or "").strip()
+        country = str(location.get("country") or "").strip()
+        key = _location_key(city, country)
+        if not key:
+            continue
+        row = catalog.setdefault(key, {
+            "name": (city + (", " + country if country else "")),
+            "slug": key,
+            "city": city,
+            "country": country,
+            "reel_count": 0,
+            "views": 0,
+            "likes": 0,
+            "image_count": 0,
+            "video_count": 0,
+            "lat": None,
+            "lon": None,
+            "_lat_sum": 0.0,
+            "_lon_sum": 0.0,
+            "_coord_count": 0,
+        })
+        row["reel_count"] += 1
+        row["views"] += _safe_int(meta.get("views"))
+        row["likes"] += _safe_int(meta.get("likes"))
+        row["image_count" if _is_image_item(item) else "video_count"] += 1
+        coords = _location_coords(city, country, location.get("lat"), location.get("lon"))
+        if coords:
+            row["_lat_sum"] += coords[0]
+            row["_lon_sum"] += coords[1]
+            row["_coord_count"] += 1
+    for row in catalog.values():
+        if row["_coord_count"]:
+            row["lat"] = row["_lat_sum"] / row["_coord_count"]
+            row["lon"] = row["_lon_sum"] / row["_coord_count"]
+        del row["_lat_sum"]
+        del row["_lon_sum"]
+        del row["_coord_count"]
+    return catalog
+
+
+def _related_location_rows(slug: str, catalog: dict[str, dict], limit: int = 5) -> list[dict]:
+    current = catalog.get(slug, {})
+    current_country = (current.get("country") or "").casefold()
+    current_coords = (current.get("lat"), current.get("lon")) if current.get("lat") is not None else None
+
+    def distance_to(other: dict) -> float | None:
+        if not current_coords or other.get("lat") is None:
+            return None
+        return _haversine_km(current_coords, (other["lat"], other["lon"]))
+
+    ranked = sorted(
+        (row for key, row in catalog.items() if key != slug),
+        key=lambda row: (
+            0 if (row.get("country") or "").casefold() == current_country and current_country else 1,
+            distance_to(row) if distance_to(row) is not None else float("inf"),
+            -row.get("reel_count", 0),
+            row.get("slug", ""),
+        ),
+    )[:limit]
+    results = []
+    for row in ranked:
+        entry = {
+            "name": row["name"],
+            "slug": row["slug"],
+            "reel_count": row["reel_count"],
+            "same_country": bool(current_country and (row.get("country") or "").casefold() == current_country),
+        }
+        dist = distance_to(row)
+        if dist is not None:
+            entry["distance_km"] = round(dist)
+        results.append(entry)
+    return results
+
+
+def _rank_location_catalog(catalog: dict[str, dict], q: str = "", limit: int = 8) -> list[dict]:
+    query = str(q or "").casefold().strip()
+    rows = list(catalog.values())
+    if query:
+        rows = [row for row in rows if query in (row["name"] or "").casefold()]
+    rows.sort(key=lambda row: (-row["reel_count"], row["name"]))
+    return [
+        {key: row[key] for key in ("name", "slug", "city", "country", "reel_count", "views", "likes")}
+        for row in rows[:max(1, min(int(limit), 20))]
+    ]
+
+
 def _rank_tag_catalog(
     catalog: dict[str, dict],
     contexts: list[tuple[str, str, list[str]]],
@@ -639,7 +799,7 @@ def _is_image_item(item: dict) -> bool:
 
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
                    sort: str, media: str | None = None,
-                   tag: str | None = None) -> list[dict]:
+                   tag: str | None = None, location: str | None = None) -> list[dict]:
     videos = list(raw)
     metadata = None
     if media in ("video", "videos"):
@@ -659,6 +819,10 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
                 for item_tag in _item_meta(video, metadata).get("tags", [])
             }
         ]
+    if location and _location_key(*_split_location_key(location)):
+        wanted_loc = _location_key(*_split_location_key(location))
+        metadata = metadata or _metadata_snapshot(videos)
+        videos = [video for video in videos if _item_location_key(video, metadata) == wanted_loc]
     if search.strip():
         query_text = search.strip().casefold().lstrip("#")
         query_key = _search_key(query_text)
@@ -840,6 +1004,7 @@ def list_reels(
     refresh: bool = False,
     media: str | None = None,
     tag: str | None = None,
+    location: str | None = None,
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
@@ -861,7 +1026,7 @@ def list_reels(
         if not videos:
             raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
     else:
-        videos = _apply_filters(raw, folder, search, sort, media, tag)
+        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
@@ -933,6 +1098,64 @@ def get_reel_tag(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_tags": _related_tag_rows(slug, catalog),
+        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+    }
+
+
+@router.get("/locations")
+def list_reel_locations(q: str = "", limit: int = 8):
+    """Return ranked location suggestions for discovery UI."""
+    bounded_limit = max(1, min(int(limit), 20))
+    hidden_paths = unavailable_media_paths_for_viewer(None)
+    catalog = _location_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
+    return {
+        "query": q,
+        "strategy": "reel-count-v1",
+        "locations": _rank_location_catalog(catalog, q, bounded_limit),
+    }
+
+
+@router.get("/locations/{location_key}")
+def get_reel_location(
+    location_key: str,
+    codec: str | None = "hevc",
+    sort: str = "trending",
+    folder: str | None = None,
+    refresh: bool = False,
+    viewer: AuthContext | None = Depends(get_optional_auth),
+):
+    """Return one exact city+country feed plus stats and related places."""
+    slug = _location_key(*_split_location_key(location_key))
+    if not slug:
+        raise HTTPException(status_code=400, detail="Location cannot be empty")
+    if refresh:
+        _scan_cache["at"] = 0.0
+
+    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    catalog = _location_catalog(raw)
+    videos = _apply_filters(raw, folder, "", sort, location=slug)
+    row = catalog.get(slug, {
+        "name": slug,
+        "slug": slug,
+        "city": "",
+        "country": "",
+        "reel_count": 0,
+        "views": 0,
+        "likes": 0,
+        "image_count": 0,
+        "video_count": 0,
+        "lat": None,
+        "lon": None,
+    })
+    location_summary = {key: value for key, value in row.items()}
+    return {
+        "strategy": "proximity-v1",
+        "location": location_summary,
+        "count": len(videos),
+        "total": len(raw),
+        "folders": sorted({video["folder"] for video in videos}),
+        "related_locations": _related_location_rows(slug, catalog),
         "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
     }
 
@@ -1430,6 +1653,7 @@ def reels_player_inline(
     start: int = 0,
     media: str | None = None,
     tag: str | None = None,
+    location: str | None = None,
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
@@ -1448,7 +1672,7 @@ def reels_player_inline(
         if not videos:
             raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
     else:
-        videos = _apply_filters(raw, folder, search, sort, media, tag)
+        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,

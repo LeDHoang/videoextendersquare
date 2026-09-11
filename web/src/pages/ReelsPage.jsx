@@ -42,6 +42,7 @@ export default function ReelsPage() {
   );
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [activeTag, setActiveTag] = useState(searchParams.get('tag') || '');
+  const [activeLocation, setActiveLocation] = useState(searchParams.get('location') || '');
   const [sort, setSort] = useState(
     VALID_SORTS.includes(paramSort) ? paramSort : 'newest',
   );
@@ -60,6 +61,7 @@ export default function ReelsPage() {
       setCodec(c === 'h264' ? 'H264 (Browser/VR)' : c === 'all' ? 'ALL CODECS' : CODEC_DEFAULT);
       setSearch(searchParams.get('search') || '');
       setActiveTag(searchParams.get('tag') || '');
+      setActiveLocation(searchParams.get('location') || '');
       setFeedScope(searchParams.get('feed') === 'following' ? 'following' : 'discover');
       const s = searchParams.get('sort');
       if (VALID_SORTS.includes(s)) setSort(s);
@@ -97,6 +99,7 @@ export default function ReelsPage() {
         codec: codecParam,
         search: debouncedSearch,
         tag: activeTag || undefined,
+        location: activeLocation || undefined,
         feed: feedScope === 'following' ? 'following' : undefined,
         author: activeAuthor || undefined,
         post: deepPost || undefined,
@@ -118,7 +121,7 @@ export default function ReelsPage() {
         }
         setData({ total: 0, count: 0, folders: [], videos: [] });
       });
-  }, [folder, codecParam, debouncedSearch, activeTag, feedScope, activeAuthor, deepPost, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
 
   const clearDeepLink = () => {
     setDeepPlay(null);
@@ -133,10 +136,12 @@ export default function ReelsPage() {
   const clearTagFilter = () => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tag');
+    nextParams.delete('location');
     nextParams.delete('play');
     nextParams.delete('post');
     clearDeepLink();
     setActiveTag('');
+    setActiveLocation('');
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -165,6 +170,7 @@ export default function ReelsPage() {
     search: debouncedSearch,
     sort,
     ...(activeTag ? { tag: activeTag } : {}),
+    ...(activeLocation ? { location: activeLocation } : {}),
     ...(feedScope === 'following' ? { feed: 'following' } : {}),
     ...(activeAuthor ? { author: activeAuthor } : {}),
     ...(deepPost ? { post: deepPost } : {}),
@@ -274,6 +280,19 @@ export default function ReelsPage() {
         <div className="sx-active-tag-filter" role="status">
           <span>TAG FEED</span>
           <strong>{'#' + activeTag}</strong>
+          <button
+            type="button"
+            onClick={clearTagFilter}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
+
+      {activeLocation ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>LOCATION FEED</span>
+          <strong>{activeLocation.toUpperCase()}</strong>
           <button
             type="button"
             onClick={clearTagFilter}
@@ -401,7 +420,7 @@ export default function ReelsPage() {
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" feed="' + feedScope + '"'}
+          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"'}
         />
       ) : (
         <div>

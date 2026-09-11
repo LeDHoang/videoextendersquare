@@ -9,6 +9,14 @@ export function formatCompactCount(value) {
   return String(count);
 }
 
+export function locationKey(city, country) {
+  const slug = (value) => String(value || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+  const citySlug = slug(city);
+  const countrySlug = slug(country);
+  if (!citySlug) return '';
+  return citySlug + (countrySlug ? '--' + countrySlug : '');
+}
+
 export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare }) {
   const navigate = useNavigate();
   const isImage = video.media_type === 'image';
@@ -66,6 +74,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
 
   const commentCount = video.comments_count ?? video.comments?.length ?? 0;
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
+  const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename;
   const badge = contextTag ? '#' + contextTag : isImage ? 'IMAGE' : '';
@@ -200,10 +209,25 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
       ) : null}
       {badge ? <span className="sx-explore-kind">{badge}</span> : null}
       {place ? (
-        <span className="sx-explore-loc" title={place}>
-          <LocationIcon />
-          {place}
-        </span>
+        placeKey ? (
+          <button
+            type="button"
+            className="sx-explore-loc sx-explore-loc-link"
+            title={place + ' — open location feed'}
+            onClick={(event) => {
+              event.stopPropagation();
+              navigate('/explore/location/' + encodeURIComponent(placeKey));
+            }}
+          >
+            <LocationIcon />
+            {place}
+          </button>
+        ) : (
+          <span className="sx-explore-loc" title={place}>
+            <LocationIcon />
+            {place}
+          </span>
+        )
       ) : null}
       <span className="sx-explore-stats">
         <span aria-label={(video.likes || 0) + ' likes'}>
