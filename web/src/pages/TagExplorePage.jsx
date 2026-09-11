@@ -27,6 +27,15 @@ function readableTag(value) {
     .toLowerCase();
 }
 
+function shuffled(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
 export default function TagExplorePage() {
   const { tag: routeTag = '' } = useParams();
   const navigate = useNavigate();
@@ -50,7 +59,11 @@ export default function TagExplorePage() {
         refresh: refreshKey > 0,
       })
       .then((response) => {
-        if (alive) setData(response);
+        if (!alive) return;
+        // REFRESH rescans and re-randomizes the feed order, mirroring the
+        // main explore page's SHUFFLE button (Fisher-Yates over the payload).
+        const shuffleOnRefresh = refreshKey > 0 && Array.isArray(response?.videos);
+        setData(shuffleOnRefresh ? { ...response, videos: shuffled(response.videos) } : response);
       })
       .catch((requestError) => {
         if (!alive) return;
@@ -121,8 +134,8 @@ export default function TagExplorePage() {
           <Button primary disabled={!videos.length} onClick={playTagFeed}>
             ▶ PLAY TAG FEED
           </Button>
-          <Button onClick={() => setRefreshKey((key) => key + 1)} title="Rescan reel metadata">
-            ↻ REFRESH
+          <Button onClick={() => setRefreshKey((key) => key + 1)} title="Rescan reel metadata and shuffle feed order">
+            ↻ SHUFFLE
           </Button>
         </div>
       </section>

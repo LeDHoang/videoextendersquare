@@ -3555,7 +3555,16 @@ body.sx-vr-active .sx-reels-mount,
 .sx-tag-overview-actions {
   display: flex;
   flex: 0 0 auto;
+  align-items: center;
   gap: var(--sx-2);
+}
+
+.sx-tag-overview-actions .sx-btn {
+  height: var(--sx-control-h-lg, 44px);
+}
+
+.sx-tag-overview-actions .sx-btn.sx-primary {
+  width: auto;
 }
 
 .sx-related-tags {
