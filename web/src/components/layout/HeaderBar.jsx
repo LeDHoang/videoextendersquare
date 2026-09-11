@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useHealthContext } from '../../hooks/HealthContext.jsx';
+import { useMessaging } from '../../hooks/MessagingContext.jsx';
 
 function compactCount(value) {
   const count = Number(value) || 0;
@@ -34,6 +35,7 @@ function AccountAvatar({ user }) {
 export default function HeaderBar({ onToggleSidebar, hidden = false }) {
   const health = useHealthContext();
   const { user, loading: authLoading, logout } = useAuth();
+  const messaging = useMessaging();
   const location = useLocation();
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
@@ -352,6 +354,12 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
         </div>
 
         <button type="button" className="sx-top-action-btn" onClick={() => navigate('/upload')} title="Open the Upload page">UPLOAD</button>
+
+        {user ? (
+          <button type="button" className="sx-top-action-btn sx-message-nav-btn" onClick={() => navigate('/messages')} title="Open messages">
+            MESSAGES {messaging.unread.total ? <span>{messaging.unread.total}</span> : null}
+          </button>
+        ) : null}
 
         <div className="sx-account-menu" ref={accountRef}>
           {authLoading ? (

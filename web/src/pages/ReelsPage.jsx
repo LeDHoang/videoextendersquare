@@ -34,6 +34,7 @@ export default function ReelsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramSort = searchParams.get('sort');
   const paramCodec = (searchParams.get('codec') || '').toLowerCase();
+  const deepPost = searchParams.get('post');
   const [data, setData] = useState(null);
   const [folder, setFolder] = useState(searchParams.get('folder') || 'testpipeline');
   const [codec, setCodec] = useState(
@@ -52,7 +53,7 @@ export default function ReelsPage() {
   // route, new query string — state initializers above don't re-run).
   useEffect(() => {
     const play = searchParams.get('play');
-    if (play) {
+    if (play || searchParams.get('post')) {
       const f = searchParams.get('folder');
       if (f) setFolder(f);
       const c = (searchParams.get('codec') || '').toLowerCase();
@@ -98,6 +99,7 @@ export default function ReelsPage() {
         tag: activeTag || undefined,
         feed: feedScope === 'following' ? 'following' : undefined,
         author: activeAuthor || undefined,
+        post: deepPost || undefined,
         sort,
         refresh: refreshKey > 0,
       })
@@ -116,13 +118,24 @@ export default function ReelsPage() {
         }
         setData({ total: 0, count: 0, folders: [], videos: [] });
       });
-  }, [folder, codecParam, debouncedSearch, activeTag, feedScope, activeAuthor, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+  }, [folder, codecParam, debouncedSearch, activeTag, feedScope, activeAuthor, deepPost, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+
+  const clearDeepLink = () => {
+    setDeepPlay(null);
+    if (searchParams.get('play') || searchParams.get('post')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('play');
+      nextParams.delete('post');
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
 
   const clearTagFilter = () => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('tag');
     nextParams.delete('play');
-    setDeepPlay(null);
+    nextParams.delete('post');
+    clearDeepLink();
     setActiveTag('');
     setSearchParams(nextParams, { replace: true });
   };
@@ -139,6 +152,7 @@ export default function ReelsPage() {
     if (value === 'following') nextParams.set('feed', 'following');
     else nextParams.delete('feed');
     nextParams.delete('play');
+    nextParams.delete('post');
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -153,6 +167,7 @@ export default function ReelsPage() {
     ...(activeTag ? { tag: activeTag } : {}),
     ...(feedScope === 'following' ? { feed: 'following' } : {}),
     ...(activeAuthor ? { author: activeAuthor } : {}),
+    ...(deepPost ? { post: deepPost } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
   const videoOpts = videos.map((v) => ({
@@ -245,6 +260,7 @@ export default function ReelsPage() {
               const nextParams = new URLSearchParams(searchParams);
               nextParams.delete('author');
               nextParams.delete('play');
+              nextParams.delete('post');
               setDeepPlay(null);
               setSearchParams(nextParams, { replace: true });
             }}
@@ -284,11 +300,11 @@ export default function ReelsPage() {
               <Dropdown
                 value={folder}
                 options={folderOpts}
-                onChange={(v) => { setDeepPlay(null); setFolder(v); }}
+                onChange={(v) => { clearDeepLink(); setFolder(v); }}
                 placeholder="Target folder…"
               />
             </div>
-            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { setDeepPlay(null); setCodec(v); }} />
+            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} />
             <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
               <input
                 ref={searchRef}
@@ -296,7 +312,7 @@ export default function ReelsPage() {
                 style={{ paddingRight: search ? '28px' : undefined }}
                 placeholder="Search…"
                 value={search}
-                onChange={(e) => { setDeepPlay(null); setSearch(e.target.value); }}
+                onChange={(e) => { clearDeepLink(); setSearch(e.target.value); }}
               />
               {search ? (
                 <button
@@ -313,7 +329,7 @@ export default function ReelsPage() {
               <Dropdown
                 value={sort}
                 options={SORTS}
-                onChange={(v) => { setDeepPlay(null); setSort(v); }}
+                onChange={(v) => { clearDeepLink(); setSort(v); }}
                 placeholder="Sort by…"
               />
             </div>

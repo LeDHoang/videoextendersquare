@@ -842,7 +842,9 @@ def list_reels(
     tag: str | None = None,
     feed: str | None = None,
     author: str | None = None,
+    post: str | None = None,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Scan output dir and return the filtered, codec-aware reels list.
 
@@ -852,7 +854,14 @@ def list_reels(
         _scan_cache["at"] = 0.0
     hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    videos = _apply_filters(raw, folder, search, sort, media, tag)
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    if post:
+        target = get_post_by_reference(db, post_id=post)
+        videos = [item for item in raw if target and item["rel_path"] == target.media_path]
+        if not videos:
+            raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
+    else:
+        videos = _apply_filters(raw, folder, search, sort, media, tag)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
@@ -860,7 +869,7 @@ def list_reels(
     )
     if feed == "following" and not isinstance(viewer, AuthContext):
         raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
-    if scoped_paths is not None:
+    if scoped_paths is not None and not post:
         positions = {value: index for index, value in enumerate(scoped_paths)}
         videos = [video for video in videos if video["rel_path"] in positions]
         videos.sort(key=lambda video: positions[video["rel_path"]])
@@ -869,7 +878,7 @@ def list_reels(
         "count": len(videos),
         "folders": sorted({v["folder"] for v in raw}),
         "active_tag": _tag_slug(tag) if tag else None,
-        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id),
     }
 
 
@@ -1423,7 +1432,9 @@ def reels_player_inline(
     tag: str | None = None,
     feed: str | None = None,
     author: str | None = None,
+    post: str | None = None,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
@@ -1431,7 +1442,13 @@ def reels_player_inline(
         _scan_cache["at"] = 0.0
     hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    videos = _apply_filters(raw, folder, search, sort, media, tag)
+    if post:
+        target = get_post_by_reference(db, post_id=post)
+        videos = [item for item in raw if target and item["rel_path"] == target.media_path]
+        if not videos:
+            raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
+    else:
+        videos = _apply_filters(raw, folder, search, sort, media, tag)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
@@ -1439,7 +1456,7 @@ def reels_player_inline(
     )
     if feed == "following" and not isinstance(viewer, AuthContext):
         raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
-    if scoped_paths is not None:
+    if scoped_paths is not None and not post:
         positions = {value: index for index, value in enumerate(scoped_paths)}
         videos = [video for video in videos if video["rel_path"] in positions]
         videos.sort(key=lambda video: positions[video["rel_path"]])

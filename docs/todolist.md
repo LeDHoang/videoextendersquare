@@ -1,6 +1,5 @@
-- upload avatar doesnt work 
-- messaging capability with end to end encryption
-- Reels sharing both link, QR, and messaging between users
-- Review the explore page reels loading priority 
-- Review the vr immersive mode reels playback/load proper? 
-- Reduce/spread out the control on the action bar right side of player window
+- Upload avatar does not work.
+- [ ] Implement encrypted direct messaging and reel sharing. See the [plan](messaging-reels-sharing-plan.md) and [live progress tracker](messaging-reels-sharing-progress.md).
+- Review the Explore page reels loading priority.
+- Review VR immersive-mode reel playback and loading.
+- Reduce and spread out controls on the player action rail.

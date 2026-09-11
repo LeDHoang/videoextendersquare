@@ -1346,6 +1346,10 @@
         <span class="btn-icon material-symbols-outlined">bookmark</span>
         <span class="action-btn-label">SAVE</span>
       </button>
+      <button class="action-btn" id="shareBtn" title="Share reel">
+        <span class="btn-icon material-symbols-outlined">share</span>
+        <span class="action-btn-label">SHARE</span>
+      </button>
       <button class="action-btn" id="followBtn" title="Follow creator">
         <span class="btn-icon material-symbols-outlined">person_add</span>
         <span class="action-btn-label" id="followLabel">FOLLOW</span>
@@ -1477,6 +1481,7 @@
     const likeBtn = document.getElementById('likeBtn');
     const likeCount = document.getElementById('likeCount');
     const saveBtn = document.getElementById('saveBtn');
+    const shareBtn = document.getElementById('shareBtn');
     const followBtn = document.getElementById('followBtn');
     const followLabel = document.getElementById('followLabel');
     const modeBtn = document.getElementById('modeBtn');
@@ -1886,6 +1891,16 @@
         }
       }
       refreshEngagementUI();
+    }
+
+    function shareCurrentReel() {
+      const item = videoData[idx];
+      if (!item || !item.post_id) return;
+      const detail = { post_id: item.post_id, title: item.title || item.filename || 'Shared reel' };
+      window.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
+      try {
+        if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
+      } catch (e) {}
     }
 
     function setCreatorFollowing(creatorId, following) {
@@ -2462,6 +2477,7 @@
     if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
     if (likeBtn) likeBtn.addEventListener('click', () => likeCurrentReel());
     if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
+    if (shareBtn) shareBtn.addEventListener('click', () => shareCurrentReel());
     if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
     if (reportBtn) reportBtn.addEventListener('click', () => reportTarget('post', videoData[idx] && videoData[idx].post_id));
     if (metaCreator) {

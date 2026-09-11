@@ -5,6 +5,10 @@ import Sidebar from './Sidebar.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { HealthProvider, useHealthContext } from '../../hooks/HealthContext.jsx';
 import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx';
+import { MessagingProvider } from '../../hooks/MessagingContext.jsx';
+import { useAuth } from '../../hooks/AuthContext.jsx';
+import MessageDock from '../messaging/MessageDock.jsx';
+import ReelShareDialog from '../messaging/ReelShareDialog.jsx';
 
 function Shell() {
   const health = useHealthContext();
@@ -115,16 +119,21 @@ function Shell() {
           </ErrorBoundary>
         </main>
       </div>
+      {!immersive && !location.pathname.startsWith('/messages') ? <MessageDock /> : null}
+      {!immersive ? <ReelShareDialog /> : null}
     </>
   );
 }
 
 export default function AppShell() {
+  const { user } = useAuth();
   return (
-    <HealthProvider>
-      <ConfigProvider>
-        <Shell />
-      </ConfigProvider>
-    </HealthProvider>
+    <MessagingProvider key={user?.id || 'anonymous'}>
+      <HealthProvider>
+        <ConfigProvider>
+          <Shell />
+        </ConfigProvider>
+      </HealthProvider>
+    </MessagingProvider>
   );
 }

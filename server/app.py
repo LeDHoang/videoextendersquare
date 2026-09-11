@@ -30,7 +30,7 @@ _CLEANUP_INTERVAL_S = 15 * 60
 async def _cleanup_loop():
     """Periodically reclaim finished job records and expired staged uploads."""
     from server.jobs import job_manager
-    from server.routers import image, video
+    from server.routers import image, messages, video
 
     while True:
         await asyncio.sleep(_CLEANUP_INTERVAL_S)
@@ -38,6 +38,7 @@ async def _cleanup_loop():
             job_manager.cleanup_old()
             image.cleanup_stale_uploads()
             video.cleanup_stale_uploads()
+            await asyncio.to_thread(messages.cleanup_message_events)
         except Exception:
             pass  # best-effort housekeeping must never crash the loop
 
@@ -84,9 +85,9 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
-    from server.routers import account_safety, compare, config, health, image, model_info, reels, social, uploads, video
+    from server.routers import account_safety, compare, config, health, image, messages, model_info, reels, social, uploads, video
 
-    for module in (health, config, model_info, image, video, account_safety, social, reels, uploads, compare):
+    for module in (health, config, model_info, image, video, account_safety, social, messages, reels, uploads, compare):
         app.include_router(module.router)
 
     # Static media serving (replaces mediaserver.py port 8502).

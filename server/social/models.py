@@ -275,6 +275,7 @@ class Report(Base):
     status = Column(String(16), nullable=False, default="open", index=True)
     moderator_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     resolution = Column(String(500), nullable=False, default="")
+    evidence_ciphertext = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -287,3 +288,87 @@ class DataMigration(Base):
     key = Column(String(100), primary_key=True)
     details = Column(JSON, nullable=False, default=dict)
     completed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    kind = Column(String(16), nullable=False, default="direct", index=True)
+    direct_key = Column(String(80), nullable=False, unique=True, index=True)
+    requester_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    state = Column(String(16), nullable=False, default="pending", index=True)
+    latest_message_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    declined_at = Column(DateTime(timezone=True), nullable=True)
+
+    members = relationship("ConversationMember", cascade="all, delete-orphan", back_populates="conversation")
+    messages = relationship("DirectMessage", cascade="all, delete-orphan", back_populates="conversation")
+    requester = relationship("User")
+
+
+class ConversationMember(Base):
+    __tablename__ = "conversation_members"
+
+    conversation_id = Column(
+        String(36),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    joined_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_read_at = Column(DateTime(timezone=True), nullable=True)
+    last_read_message_id = Column(String(36), nullable=True)
+
+    conversation = relationship("Conversation", back_populates="members")
+    user = relationship("User")
+
+    __table_args__ = (Index("ix_conversation_members_user", "user_id", "conversation_id"),)
+
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    conversation_id = Column(
+        String(36),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sender_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, default="text", index=True)
+    payload_ciphertext = Column(Text, nullable=False, default="")
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    client_id = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    conversation = relationship("Conversation", back_populates="messages")
+    sender = relationship("User")
+    post = relationship("Post")
+
+    __table_args__ = (
+        UniqueConstraint("sender_id", "client_id", name="uq_direct_message_sender_client"),
+        Index("ix_direct_messages_conversation_created", "conversation_id", "created_at", "id"),
+    )
+
+
+class MessageEvent(Base):
+    __tablename__ = "message_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipient_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    conversation_id = Column(
+        String(36),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    message_id = Column(String(36), ForeignKey("direct_messages.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(32), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (Index("ix_message_events_recipient_id_id", "recipient_id", "id"),)

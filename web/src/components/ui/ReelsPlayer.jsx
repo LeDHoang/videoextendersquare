@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
+import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { ReelsPlayerSkeleton } from './Skeleton.jsx';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
@@ -11,6 +12,7 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, setUser } = useAuth();
+  const messaging = useMessaging();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
@@ -30,13 +32,19 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
       const next = event.detail?.next || location.pathname + location.search;
       navigate('/login?next=' + encodeURIComponent(next));
     };
+    const onShareReel = (event) => {
+      const postId = event.detail?.post_id;
+      if (postId) messaging.openShare(event.detail);
+    };
     window.addEventListener('echo:navigate', onNavigate);
     window.addEventListener('echo:auth-required', onAuthRequired);
+    window.addEventListener('echo:share-reel', onShareReel);
     return () => {
       window.removeEventListener('echo:navigate', onNavigate);
       window.removeEventListener('echo:auth-required', onAuthRequired);
+      window.removeEventListener('echo:share-reel', onShareReel);
     };
-  }, [navigate, location.pathname, location.search, setUser]);
+  }, [navigate, location.pathname, location.search, messaging, setUser]);
 
   useEffect(() => {
     let alive = true;

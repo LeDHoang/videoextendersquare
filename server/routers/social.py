@@ -686,6 +686,27 @@ def get_post(
     return {"post": media_card(post, db, viewer_id)}
 
 
+@router.get("/api/posts/{post_id}/share")
+def get_post_share(
+    post_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    context: AuthContext | None = Depends(get_optional_auth),
+):
+    viewer_id = auth_user_id(context)
+    post = get_visible_post(db, post_id, viewer_id)
+    configured = os.environ.get("SX_PUBLIC_URL", "").strip().rstrip("/")
+    public_root = configured or str(request.base_url).rstrip("/")
+    canonical_url = f"{public_root}/reels?post={post.id}"
+    title = post.title.strip() or "Watch this reel on ECHO"
+    return {
+        "post_id": post.id,
+        "canonical_url": canonical_url,
+        "title": title,
+        "share_text": f"{title} — ECHO",
+    }
+
+
 @router.patch("/api/posts/{post_id}")
 def update_post(
     post_id: str,

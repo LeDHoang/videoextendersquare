@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from server.routers import reels
@@ -67,6 +68,13 @@ class ReelDiscoveryTests(unittest.TestCase):
         self.meta_patch = patch.object(reels, "_load_meta_raw", return_value=META)
         self.meta_patch.start()
         self.addCleanup(self.meta_patch.stop)
+        self.visibility_patch = patch.object(
+            reels,
+            "unavailable_media_paths_for_viewer",
+            return_value=set(),
+        )
+        self.visibility_patch.start()
+        self.addCleanup(self.visibility_patch.stop)
 
     def test_exact_tag_filter_is_case_and_hash_insensitive(self):
         matches = reels._apply_filters(
@@ -114,7 +122,9 @@ class ReelDiscoveryTests(unittest.TestCase):
             patch.object(
                 reels,
                 "_build_payload",
-                side_effect=lambda items, codec: [item["rel_path"] for item in items],
+                side_effect=lambda items, codec, viewer_id=None: [
+                    item["rel_path"] for item in items
+                ],
             ),
         ):
             response = reels.get_reel_tag("cyberpunk", codec="hevc", sort="trending")
@@ -125,6 +135,24 @@ class ReelDiscoveryTests(unittest.TestCase):
             set(response["videos"]),
             {"uploads/night-runner.mp4", "uploads/grid-arena.mp4"},
         )
+
+    def test_post_deep_link_returns_only_the_referenced_reel(self):
+        target = SimpleNamespace(media_path="uploads/grid-arena.mp4")
+        with (
+            patch.object(reels, "_scan_cached", return_value=RAW_MEDIA),
+            patch.object(reels, "get_post_by_reference", return_value=target),
+            patch.object(
+                reels,
+                "_build_payload",
+                side_effect=lambda items, codec, viewer_id=None: [
+                    item["rel_path"] for item in items
+                ],
+            ),
+        ):
+            response = reels.list_reels(post="post-123", viewer=None, db=object())
+
+        self.assertEqual(response["count"], 1)
+        self.assertEqual(response["videos"], ["uploads/grid-arena.mp4"])
 
 
 if __name__ == "__main__":

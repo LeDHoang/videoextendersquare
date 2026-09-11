@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import uuid
 from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -32,12 +34,23 @@ from server.social.auth import (
 )
 from server.social.database import get_db
 from server.social.email import send_password_reset_email
+from server.social.message_crypto import (
+    MessageCryptoConfigurationError,
+    decrypt_payload,
+    encrypt_payload,
+    message_aad,
+    report_aad,
+)
 from server.social.models import (
     AuthSession,
     Comment,
     CommentLike,
+    Conversation,
+    ConversationMember,
+    DirectMessage,
     EngagementEvent,
     Follow,
+    MessageEvent,
     PasswordResetToken,
     Post,
     PostLike,
@@ -78,7 +91,7 @@ class AccountDeleteRequest(BaseModel):
 
 
 class ReportCreateRequest(BaseModel):
-    target_type: Literal["user", "post", "comment"]
+    target_type: Literal["user", "post", "comment", "message"]
     target_id: str
     reason: str
     details: str = ""
@@ -111,6 +124,16 @@ def serialize_report(db: Session, report: Report) -> dict:
         comment = db.get(Comment, report.target_id)
         if comment:
             target = {"text": comment.text, "author_id": comment.author_id, "deleted": comment.deleted_at is not None}
+    elif report.target_type == "message":
+        target = {"unavailable": True}
+        if report.evidence_ciphertext:
+            try:
+                target = decrypt_payload(
+                    report.evidence_ciphertext,
+                    aad=report_aad(report.id, report.target_id),
+                )
+            except (MessageCryptoConfigurationError, InvalidTag, ValueError, UnicodeDecodeError):
+                target = {"unavailable": True, "reason": "Encrypted evidence cannot be read."}
     return {
         "id": report.id,
         "reporter": reporter.username if reporter else None,
@@ -219,6 +242,18 @@ def block_user(
         remove_relationships(db, context.user.id, target.id)
         db.flush()
         recompute_follow_counts(db, {context.user.id, target.id})
+        conversation = db.query(Conversation).filter(
+            Conversation.direct_key == ":".join(sorted((context.user.id, target.id)))
+        ).first()
+        if conversation:
+            now = utcnow()
+            for recipient_id in (context.user.id, target.id):
+                db.add(MessageEvent(
+                    recipient_id=recipient_id,
+                    conversation_id=conversation.id,
+                    event_type="conversation.blocked",
+                    created_at=now,
+                ))
         db.commit()
     return {"blocked": True, "username": target.username}
 
@@ -280,12 +315,23 @@ def create_report(
         if not target or target.deleted_at is not None:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported post no longer exists.")
         target_owner_id = target.owner_id
-    else:
+    elif req.target_type == "comment":
         target = db.get(Comment, target_id)
         if not target or target.deleted_at is not None:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported comment no longer exists.")
 
         target_owner_id = target.author_id
+    else:
+        target = db.get(DirectMessage, target_id)
+        if not target or target.deleted_at is not None:
+            fail(404, "REPORT_TARGET_NOT_FOUND", "The reported message no longer exists.")
+        member = db.query(ConversationMember).filter(
+            ConversationMember.conversation_id == target.conversation_id,
+            ConversationMember.user_id == context.user.id,
+        ).first()
+        if not member:
+            fail(404, "REPORT_TARGET_NOT_FOUND", "The reported message no longer exists.")
+        target_owner_id = target.sender_id
     if target_owner_id == context.user.id:
         fail(422, "SELF_REPORT", "You cannot report your own content.")
     existing = db.query(Report).filter(
@@ -297,12 +343,38 @@ def create_report(
     if existing:
         return {"report": serialize_report(db, existing), "duplicate": True}
 
+    report_id = str(uuid.uuid4())
+    evidence_ciphertext = None
+    if req.target_type == "message":
+        try:
+            content = decrypt_payload(
+                target.payload_ciphertext,
+                aad=message_aad(target.id, target.conversation_id, target.sender_id, target.kind),
+            )
+            evidence_ciphertext = encrypt_payload(
+                {
+                    "message_id": target.id,
+                    "conversation_id": target.conversation_id,
+                    "sender_id": target.sender_id,
+                    "kind": target.kind,
+                    "content": content,
+                    "post_id": target.post_id,
+                    "created_at": target.created_at.isoformat() if target.created_at else None,
+                },
+                aad=report_aad(report_id, target.id),
+            )
+        except MessageCryptoConfigurationError:
+            fail(503, "MESSAGE_ENCRYPTION_UNAVAILABLE", "Direct messaging encryption is not configured.")
+        except (InvalidTag, ValueError, UnicodeDecodeError):
+            fail(409, "MESSAGE_EVIDENCE_UNAVAILABLE", "The message evidence could not be captured.")
     report = Report(
+        id=report_id,
         reporter_id=context.user.id,
         target_type=req.target_type,
         target_id=target_id,
         reason=reason,
         details=req.details.strip()[:500],
+        evidence_ciphertext=evidence_ciphertext,
     )
     db.add(report)
     db.commit()
@@ -359,6 +431,24 @@ def moderate_report(
             post = db.get(Post, comment.post_id)
             if post:
                 post.comment_count = max(0, int(post.comment_count or 0) - 1)
+    elif report.target_type == "message":
+        message = db.get(DirectMessage, report.target_id)
+        target_user = db.get(User, message.sender_id) if message else None
+        if req.action == "remove_content" and message and message.deleted_at is None:
+            message.deleted_at = utcnow()
+            conversation = db.get(Conversation, message.conversation_id)
+            if conversation:
+                conversation.updated_at = utcnow()
+                member_ids = db.query(ConversationMember.user_id).filter(
+                    ConversationMember.conversation_id == conversation.id,
+                ).all()
+                for (recipient_id,) in member_ids:
+                    db.add(MessageEvent(
+                        recipient_id=recipient_id,
+                        conversation_id=conversation.id,
+                        message_id=message.id,
+                        event_type="message.deleted",
+                    ))
 
     if req.action == "suspend_user":
         if not target_user:

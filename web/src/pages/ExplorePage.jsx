@@ -6,6 +6,7 @@ import { Button, Dropdown, Pills } from '../components/ui/controls.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import ExploreTile from '../components/explore/ExploreTile.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
+import { useMessaging } from '../hooks/MessagingContext.jsx';
 
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
@@ -25,6 +26,7 @@ function shuffled(items) {
 
 export default function ExplorePage() {
   const navigate = useNavigate();
+  const messaging = useMessaging();
   const [searchParams] = useSearchParams();
   const routeSearch = searchParams.get('search') || '';
   const [data, setData] = useState(null);
@@ -158,7 +160,7 @@ export default function ExplorePage() {
       ) : (
         <div className="sx-explore-grid">
           {order.map((video) => (
-            <ExploreTile key={video.path} video={video} onOpen={openReel} />
+            <ExploreTile key={video.path} video={video} onOpen={openReel} onShare={(item) => messaging.openShare(item)} />
           ))}
         </div>
       )}

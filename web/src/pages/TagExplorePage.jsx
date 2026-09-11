@@ -6,6 +6,7 @@ import { Button, Pills } from '../components/ui/controls.jsx';
 import { EmptyState, Hero, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
+import { useMessaging } from '../hooks/MessagingContext.jsx';
 
 const SORT_OPTIONS = [
   { label: 'TOP', value: 'trending' },
@@ -37,6 +38,7 @@ function shuffled(items) {
 }
 
 export default function TagExplorePage() {
+  const messaging = useMessaging();
   const { tag: routeTag = '' } = useParams();
   const navigate = useNavigate();
   const requestedTag = readableTag(routeTag);
@@ -200,6 +202,7 @@ export default function TagExplorePage() {
                 video={video}
                 contextTag={displayTag}
                 onOpen={openReel}
+                onShare={(item) => messaging.openShare(item)}
               />
             ))}
           </div>

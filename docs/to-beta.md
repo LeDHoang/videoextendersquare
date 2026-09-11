@@ -5,6 +5,8 @@ Last updated: 2026-09-11
 ## Required before launch
 
 - [ ] Generate a long random value and set `SX_SECURITY_SECRET`.
+- [ ] Generate a separate long random value for `SX_MESSAGE_ENCRYPTION_KEY`, store it in the deployment secret manager, and back it up. Do not rotate it without re-encrypting stored data.
+- [ ] If GIF search is enabled, configure `SX_TENOR_API_KEY`, `SX_TENOR_CLIENT_KEY`, and the narrowest practical `SX_TENOR_ALLOWED_HOSTS` list.
 - [ ] Set `SX_ADMIN_USERS` and/or `SX_MODERATOR_USERS` to the launch-team usernames or emails.
 - [ ] Set `SX_PUBLIC_URL` to the deployed website URL.
 - [ ] Set `SX_COOKIE_SECURE=1` when serving over HTTPS.
@@ -16,6 +18,9 @@ Last updated: 2026-09-11
 - [ ] Run `make migrate` before starting the updated backend.
 - [ ] Run `make build` and deploy the generated frontend.
 - [ ] Run `make test` in the normal project `.venv`.
+- [ ] Configure the reverse proxy to disable buffering for `/api/messages/events` and keep SSE connections open beyond the 15-second keep-alive interval.
+- [ ] With two real accounts in separate browser sessions, test request routing, accept/decline, all message types, unread/read receipts, reconnect, deletion, blocking, and ten-recipient reel sharing.
+- [ ] Open a copied or QR reel link while logged out and confirm `/reels?post=<id>` opens only the intended public reel.
 - [ ] Smoke-test registration, login, profile editing, post editing/deletion, Saved links, blocking, reporting, moderation, password reset, and account deletion.
 - [ ] Validate the reels/profile experience on a physical Quest device. Automated Quest verification is still outstanding because `metavr` is unsupported on the current Linux host.
 
@@ -32,6 +37,11 @@ Do not use this procedure for a blank database.
 
 ```env
 SX_SECURITY_SECRET=<long-random-secret>
+SX_MESSAGE_ENCRYPTION_KEY=<different-long-random-secret>
+SX_TENOR_API_KEY=
+SX_TENOR_CLIENT_KEY=echo_reels
+SX_TENOR_ALLOWED_HOSTS=media.tenor.com,media1.tenor.com
+
 SX_ADMIN_USERS=<admin-username-or-email>
 SX_MODERATOR_USERS=
 SX_PUBLIC_URL=https://your-domain.example
@@ -62,17 +72,22 @@ SX_SMTP_STARTTLS=1
 - [x] Backend profile/safety integration tests.
 - [x] Frontend Saved-link regression tests.
 - [x] Production frontend build and syntax validation.
+- [x] AES-GCM encrypted direct messages and encrypted message-report evidence.
+- [x] Message requests, durable SSE delivery, unread/read state, deletion, and blocking behavior.
+- [x] Text, emote, optional Tenor GIF, and reel messages.
+- [x] Canonical link, clipboard, native share, QR PNG, and one-to-ten-recipient reel sharing.
+- [x] Responsive messages page, compact dock, profile entry point, and immersive-mode hiding.
 
 ## Latest automated verification
 
 Run on 2026-09-11:
 
-- Backend profile/safety tests: 4 passed.
-- Frontend regression tests: 2 passed.
+- Backend website tests: 15 passed.
+- Frontend regression tests: 4 passed (2 Node tests and 2 Vitest tests).
 - React production build: passed.
 - Python compilation: passed.
 - Inline reels JavaScript parse check: passed.
-- Alembic upgrade and schema drift check: passed.
+- Fresh Alembic upgrade through `20260911_0003` and schema inspection: passed.
 - Git whitespace validation: passed.
 
-The unscoped repository-wide `pytest` command also collects the separate, user-owned `ComfyUI/` tree and hardware-specific tests with unavailable dependencies. Use `make test` for this website's beta profile/safety suite.
+The unscoped repository-wide `pytest` command also collects the separate, user-owned `ComfyUI/` tree and hardware-specific tests with unavailable dependencies. Use `make test` for this website's backend and frontend regression suite.

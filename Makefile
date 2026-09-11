@@ -38,7 +38,7 @@ migrate:
 
 ## test: run backend integration and frontend regression tests
 test:
-	$(PY) -m pytest -q tests
+	$(PY) -m pytest -q tests test_reels_discovery.py
 	cd web && npm test
 
 ## streamlit: legacy fallback on 8501 (app.py is untouched)

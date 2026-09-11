@@ -106,7 +106,11 @@ Copy the environment template and configure account security before launching:
 cp .env.example .env
 ```
 
-At minimum, replace `SX_SECURITY_SECRET`. Set `SX_COOKIE_SECURE=1` when the site is served over HTTPS. Enable `SX_TRUST_PROXY_HEADERS=1` only when a trusted reverse proxy overwrites `X-Forwarded-For`. Configure `SX_ADMIN_USERS` or `SX_MODERATOR_USERS` with comma-separated usernames/emails for the moderation queue.
+At minimum, replace both `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` with independent random values. You can generate each value with `openssl rand -base64 48`. Keep the messaging key stable and backed up: changing or losing it makes existing messages and encrypted moderation evidence unreadable. Messages are encrypted at rest on the server; they are not end-to-end encrypted.
+
+Set `SX_PUBLIC_URL` to the public site origin so copied links and QR codes use the canonical `/reels?post=<id>` URL. Set `SX_COOKIE_SECURE=1` when the site is served over HTTPS. Enable `SX_TRUST_PROXY_HEADERS=1` only when a trusted reverse proxy overwrites `X-Forwarded-For`. Configure `SX_ADMIN_USERS` or `SX_MODERATOR_USERS` with comma-separated usernames/emails for the moderation queue.
+
+Tenor GIF search is optional. Configure `SX_TENOR_API_KEY` and `SX_TENOR_CLIENT_KEY` to enable it; `SX_TENOR_ALLOWED_HOSTS` controls the HTTPS media hosts accepted in messages. Without an API key, text, emote, and reel messages remain available.
 
 Password reset email requires `SX_PUBLIC_URL`, `SX_SMTP_HOST`, `SX_SMTP_FROM`, and the matching SMTP port/credentials. `SX_PASSWORD_RESET_EXPOSE_TOKEN=1` is for local development only.
 
@@ -126,7 +130,7 @@ make migrate
 
 Do not stamp a blank or partially created database; use `make migrate` directly instead.
 
-Install and run the automated profile/safety checks with:
+Install and run the backend and frontend regression checks with:
 
 ```bash
 make install-dev

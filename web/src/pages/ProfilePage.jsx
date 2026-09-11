@@ -7,6 +7,7 @@ import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
+import { useMessaging } from '../hooks/MessagingContext.jsx';
 
 const TABS = [
   ['all', 'ALL POSTS'],
@@ -86,6 +87,7 @@ export default function ProfilePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab') || 'all';
   const { user: viewer } = useAuth();
+  const messaging = useMessaging();
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
   const [tab, setTab] = useState(['all', 'video', 'image'].includes(requestedTab) ? requestedTab : 'all');
@@ -237,7 +239,6 @@ export default function ProfilePage() {
       setProfile((current) => ({ ...current, post_count: Math.max(0, current.post_count - 1) }));
     } catch (requestError) {
       setError(requestError.message || 'Could not delete post.');
-    const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
     } finally {
       setActionBusy('');
     }
@@ -248,6 +249,7 @@ export default function ProfilePage() {
       navigate('/login?next=' + encodeURIComponent('/profile/' + username));
       return;
     }
+    const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
     if (!reason) return;
     const details = window.prompt('Optional details') || '';
     try {
@@ -255,7 +257,6 @@ export default function ProfilePage() {
       window.alert('Report submitted. Thank you.');
     } catch (requestError) {
       setError(requestError.message || 'Could not submit report.');
-    if (!window.confirm('Block @' + profile.username + '? You will no longer see each other’s content.')) return;
     }
   };
 
@@ -264,6 +265,7 @@ export default function ProfilePage() {
       navigate('/login?next=' + encodeURIComponent('/profile/' + username));
       return;
     }
+    if (!window.confirm('Block @' + profile.username + '? You will no longer see each other’s content.')) return;
     try {
       await api.put('/api/users/' + encodeURIComponent(profile.username) + '/block');
       navigate('/reels');
@@ -292,6 +294,7 @@ export default function ProfilePage() {
                   <Button onClick={() => navigate('/settings/profile')}>EDIT PROFILE</Button>
                 ) : (
                   <div className="sx-profile-actions">
+                    <Button onClick={() => navigate('/messages?user=' + encodeURIComponent(profile.username))}>MESSAGE</Button>
                     <Button primary={profile.is_following} loading={followBusy} disabled={followBusy} onClick={toggleFollow}>
                       {profile.is_following ? 'FOLLOWING' : 'FOLLOW'}
                     </Button>
@@ -330,6 +333,7 @@ export default function ProfilePage() {
                     key={post.id}
                     video={post}
                     onOpen={openPost}
+                    onShare={(post) => messaging.openShare(post)}
                     onEdit={post.viewer_state?.can_edit ? beginEditPost : undefined}
                     onDelete={post.viewer_state?.can_edit && actionBusy !== post.id ? deletePost : undefined}
                   />

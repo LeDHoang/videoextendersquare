@@ -9,7 +9,7 @@ export function formatCompactCount(value) {
   return String(count);
 }
 
-export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete }) {
+export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare }) {
   const navigate = useNavigate();
   const isImage = video.media_type === 'image';
   const wrapRef = useRef(null);
@@ -151,8 +151,20 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           <strong>@{video.creator.username}</strong>
         </button>
       ) : null}
-      {onEdit || onDelete ? (
+      {onEdit || onDelete || onShare ? (
         <span className="sx-explore-owner-actions">
+          {onShare ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onShare(video);
+              }}
+              aria-label={'Share ' + label}
+            >
+              SHARE
+            </button>
+          ) : null}
           {onEdit ? (
             <button
               type="button"
