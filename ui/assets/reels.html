@@ -1816,11 +1816,11 @@
           metaCreator.textContent = '';
         }
       }
-      if (followBtn) {
       const isOwnPost = !!(
         (item.viewer_state && item.viewer_state.can_edit) ||
         (creator && currentUser && creator.id === currentUser.id)
       );
+      if (followBtn) {
         followBtn.hidden = !creator || !creator.username || isOwnPost;
         followBtn.classList.toggle('active', !!item._following);
         followBtn.title = item._following ? 'Unfollow creator' : 'Follow creator';

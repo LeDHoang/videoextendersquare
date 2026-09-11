@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Button, Field } from '../components/ui/controls.jsx';
@@ -16,6 +16,7 @@ export default function ProfileSettingsPage() {
   const [error, setError] = useState('');
   const [blocked, setBlocked] = useState(null);
   const [deleteForm, setDeleteForm] = useState({ current_password: '', confirmation: '' });
+  const avatarInputRef = useRef(null);
 
   useEffect(() => {
     if (user) setForm({ display_name: user.display_name || '', bio: user.bio || '', website: user.website || '' });
@@ -46,17 +47,34 @@ export default function ProfileSettingsPage() {
     }
   };
 
+  const AVATAR_ERRORS = {
+    AVATAR_TOO_LARGE: 'That image is over 5 MB. Export or compress it under 5 MB and retry.',
+    AVATAR_DIMENSIONS_TOO_LARGE: 'That image has too many pixels. Shrink it (e.g. 2048 px wide) and retry.',
+    INVALID_AVATAR: 'That file is not a readable PNG, JPEG, or WebP image. iPhone HEIC photos must be exported as JPG/PNG first.',
+  };
+
   const uploadAvatar = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setBusy(true);
     setError('');
+    setMessage('');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('That image is ' + (file.size / 1048576).toFixed(1) + ' MB — avatars must be 5 MB or smaller.');
+      event.target.value = '';
+      return;
+    }
+    if (file.type && !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('That file is "' + (file.type || 'unknown type') + '" — avatars must be PNG, JPEG, or WebP. iPhone HEIC photos must be exported as JPG/PNG first.');
+      event.target.value = '';
+      return;
+    }
+    setBusy(true);
     try {
       const result = await api.upload('/api/users/me/avatar', file);
       setUser(result.user);
       setMessage('AVATAR UPDATED');
     } catch (requestError) {
-      setError(requestError.message || 'Could not update avatar.');
+      setError(AVATAR_ERRORS[requestError.code] || requestError.message || 'Could not update avatar.');
     } finally {
       setBusy(false);
       event.target.value = '';
@@ -131,10 +149,16 @@ export default function ProfileSettingsPage() {
             <span style={{ backgroundColor: user.avatar_color }}>
               {user.avatar_url ? <img src={user.avatar_url} alt="" /> : (user.display_name || user.username).slice(0, 2).toUpperCase()}
             </span>
-            <label className="sx-upload-avatar">
-              UPLOAD AVATAR
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadAvatar} disabled={busy} />
-            </label>
+            <Button onClick={() => avatarInputRef.current?.click()} disabled={busy}>UPLOAD AVATAR</Button>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={uploadAvatar}
+              disabled={busy}
+              style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+              aria-label="Choose avatar image"
+            />
             {user.avatar_url ? <Button onClick={removeAvatar} disabled={busy}>REMOVE</Button> : null}
           </div>
           <div className="sx-settings-fields">

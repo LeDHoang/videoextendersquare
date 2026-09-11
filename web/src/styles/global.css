@@ -4294,27 +4294,6 @@ body.sx-vr-active .sx-reels-mount,
   object-fit: cover;
 }
 
-.sx-upload-avatar {
-  min-height: var(--sx-control-h);
-  display: inline-flex;
-  align-items: center;
-  padding: 0 14px;
-  border: 1px solid var(--sx-accent);
-  background: var(--sx-accent);
-  color: var(--sx-on-accent);
-  cursor: pointer;
-  font: 900 0.67rem/1 'JetBrains Mono', monospace;
-  letter-spacing: 0.08em;
-}
-
-.sx-upload-avatar input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
 .sx-settings-fields {
   width: min(100%, 680px);
   display: grid;
