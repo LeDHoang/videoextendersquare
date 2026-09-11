@@ -4318,7 +4318,7 @@ body.sx-vr-active .sx-reels-mount,
   align-items: center;
   gap: 6px;
   padding: 4px 8px 4px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: none;
   background: rgba(8, 9, 10, 0.86);
   color: #fff;
   cursor: pointer;
@@ -4366,8 +4366,8 @@ body.sx-vr-active .sx-reels-mount,
 .sx-explore-owner-actions button {
   min-height: 30px;
   padding: 0 9px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(8, 9, 10, 0.9);
+  border: none;
+  background: rgba(8, 9, 10, 0.86);
   color: #fff;
   cursor: pointer;
   font: 800 0.58rem/1 'JetBrains Mono', monospace;
@@ -4375,6 +4375,23 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-explore-owner-actions button:last-child {
   color: var(--sx-accent-hi);
+}
+
+.sx-explore-share {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+}
+
+.sx-explore-share button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: none;
+  background: rgba(8, 9, 10, 0.86);
+  color: var(--sx-accent-hi);
+  cursor: pointer;
+  font: 800 0.58rem/1 'JetBrains Mono', monospace;
 }
 
 .sx-post-editor-fields {

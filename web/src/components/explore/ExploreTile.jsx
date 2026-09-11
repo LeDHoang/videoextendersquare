@@ -151,20 +151,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           <strong>@{video.creator.username}</strong>
         </button>
       ) : null}
-      {onEdit || onDelete || onShare ? (
+      {onEdit || onDelete ? (
         <span className="sx-explore-owner-actions">
-          {onShare ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onShare(video);
-              }}
-              aria-label={'Share ' + label}
-            >
-              SHARE
-            </button>
-          ) : null}
           {onEdit ? (
             <button
               type="button"
@@ -189,6 +177,20 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               DELETE
             </button>
           ) : null}
+        </span>
+      ) : null}
+      {onShare ? (
+        <span className="sx-explore-share">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onShare(video);
+            }}
+            aria-label={'Share ' + label}
+          >
+            SHARE
+          </button>
         </span>
       ) : null}
       {video.title ? (
