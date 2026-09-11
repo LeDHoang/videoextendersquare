@@ -16,7 +16,7 @@
 - [x] 7. Add user search and the Following feed.
 - [x] 8. Integrate identity into desktop and WebXR players.
 - [x] 9. Add recommendation event tracking.
-- [ ] 10. Complete migration, compatibility, security, and regression testing.
+- [x] 10. Complete migration, compatibility, security, and regression testing.
 
 ## Database migrations
 
@@ -49,6 +49,12 @@
 - Passed Python compilation for the new social modules and routers.
 - Passed isolated API smoke test for registration, cookies, current-user lookup, CSRF-protected profile editing, and logout.
 - Passed two-user API flow covering follow, like, save, comment attribution, saved posts, and Following feed.
+- [2026-09-11] Manual Meta Quest 3S browser pass completed by the user on-device: 2D player, VR mode, and social flows showed no outstanding problems. Quest connection verified from host via `metavr device list` (Quest 3S `340YC10G7J056N`); Reels URL delivered to the headset browser via ADB VIEW intent; compositor `screencap` confirmed working for future remote passes.
+- [2026-09-11] Milestone 10 re-verified against a fresh isolated SQLite database (`alembic upgrade head` → 14 tables, `alembic_version=20260910_0001`):
+  - Auth: register (auto-login) → me → CSRF-less PATCH correctly 403 → CSRF PATCH 200 → logout → me=null → login by username and by case-insensitive email.
+  - Two-user: follow (+counts, `is_following`, followers list), like, save, time-synced comment, post detail counts, saved list, `/api/feed?scope=following`; anonymous following-feed correctly 401; `/api/events` view accepted.
+  - Security: short password 422, duplicate username 409, wrong password 401, demo account (`password_hash=NULL`, `account_type=demo`) login 401, password change rotates credentials (old 401 / new 200).
+  - Regression: `compileall` on social modules OK; `/api/reels` shape intact (36 videos, 7 folders) on both isolated and dev (`:8000`) backends; `/reels` player page 200; Vite production build passes.
 
 ## Known risks and follow-up work
 

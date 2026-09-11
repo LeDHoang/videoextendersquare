@@ -3203,8 +3203,12 @@
         onPostComment: function(text, timestamp) { return postComment(text, timestamp); },
       });
 
-      if (vrBtnWrap) {
-        vrBtnWrap.style.display = '';
+      // Per Meta WebXR guidance, only offer the immersive session when the
+      // runtime reports support — don't infer it from script presence.
+      if (vrBtnWrap && typeof WebXRVR.isSupported === 'function') {
+        WebXRVR.isSupported().then((supported) => {
+          if (supported) vrBtnWrap.style.display = '';
+        }).catch(() => {});
       }
 
       if (vrBtn) {

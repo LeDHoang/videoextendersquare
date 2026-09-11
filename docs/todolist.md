@@ -1,0 +1,4 @@
+- upload avatar doesnt work 
+- messaging capability with end to end encryption
+- Reels sharing both link, QR, and messaging between users
+-
