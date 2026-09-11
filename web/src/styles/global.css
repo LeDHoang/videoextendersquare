@@ -2829,14 +2829,45 @@ body.sx-vr-active .sx-reels-mount,
   background: transparent;
   border: none;
   color: var(--sx-ink);
+  /* Match the REELS/VR · EXPLORE · UPLOAD · COMPARE nav links. */
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  /* Pin the single-line baseline to the middle of the 36px box
+     (34px content height minus the 1px top/bottom borders). */
+  line-height: 34px;
   padding: 0 8px;
   outline: none;
 }
 
 .sx-command-input::placeholder {
   color: var(--sx-ink-3);
+}
+
+/* Chrome/Safari paint autofilled inputs with a white UA background that
+   ignores `background: transparent`. Force the dark header treatment and
+   keep the text white. */
+.sx-command-input:-webkit-autofill,
+.sx-command-input:-webkit-autofill:hover,
+.sx-command-input:-webkit-autofill:focus,
+.sx-command-input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--sx-ink);
+  caret-color: var(--sx-ink);
+  -webkit-box-shadow: 0 0 0 1000px var(--sx-surface-2) inset;
+  box-shadow: 0 0 0 1000px var(--sx-surface-2) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.sx-input:-webkit-autofill,
+.sx-input:-webkit-autofill:hover,
+.sx-input:-webkit-autofill:focus,
+.sx-input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--sx-ink);
+  caret-color: var(--sx-ink);
+  -webkit-box-shadow: 0 0 0 1000px var(--sx-surface-2) inset;
+  box-shadow: 0 0 0 1000px var(--sx-surface-2) inset;
+  transition: background-color 9999s ease-in-out 0s;
 }
 
 .sx-command-kbd {
