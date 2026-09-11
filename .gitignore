@@ -31,7 +31,8 @@ server/static/
 
 # Untracked notes
 current-issue.md
-reports/
+reports/*
+!reports/to-be.md
 antigravityskill/
 
 # Local social database and uploaded avatars

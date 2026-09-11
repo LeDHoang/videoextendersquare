@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from server import media as SM
 from server.jobs import job_manager
 from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf
+from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.services import get_post_by_reference, metadata_for_paths, reel_records, scoped_media_paths
 
@@ -849,7 +850,8 @@ def list_reels(
     """
     if refresh:
         _scan_cache["at"] = 0.0
-    raw = _scan_cached()
+    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     videos = _apply_filters(raw, folder, search, sort, media, tag)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
@@ -875,7 +877,8 @@ def list_reels(
 def list_reel_tags(q: str = "", limit: int = 8):
     """Return ranked tag suggestions for header search and discovery UI."""
     bounded_limit = max(1, min(int(limit), 20))
-    catalog, contexts = _tag_catalog(_scan_cached())
+    hidden_paths = unavailable_media_paths_for_viewer(None)
+    catalog, contexts = _tag_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
     return {
         "query": q,
         "strategy": "metadata-v1",
@@ -899,7 +902,8 @@ def get_reel_tag(
     if refresh:
         _scan_cache["at"] = 0.0
 
-    raw = _scan_cached()
+    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     catalog, _ = _tag_catalog(raw)
     videos = _apply_filters(raw, folder, "", sort, tag=slug)
     row = catalog.get(slug, {
@@ -1288,7 +1292,8 @@ def reels_player(
     """Render the full Reels/VR player page for embedding in an iframe."""
     if refresh:
         _scan_cache["at"] = 0.0
-    raw = _scan_cached()
+    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     videos = _apply_filters(raw, folder, search, sort, media, tag)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
@@ -1424,7 +1429,8 @@ def reels_player_inline(
     embedding (no iframe, so the player sizes itself to the page)."""
     if refresh:
         _scan_cache["at"] = 0.0
-    raw = _scan_cached()
+    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     videos = _apply_filters(raw, folder, search, sort, media, tag)
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,

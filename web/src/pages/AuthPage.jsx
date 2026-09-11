@@ -131,6 +131,7 @@ export default function AuthPage({ mode = 'login' }) {
             {busy ? 'WORKING…' : isRegister ? 'CREATE ACCOUNT' : 'SIGN IN'}
           </button>
         </form>
+        {!isRegister ? <Link className="sx-auth-back" to="/forgot-password">FORGOT PASSWORD?</Link> : null}
 
         <div className="sx-auth-switch">
           {isRegister ? 'Already have an account? ' : 'New to ECHO? '}

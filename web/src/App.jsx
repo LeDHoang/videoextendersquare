@@ -15,6 +15,8 @@ const AuthPage = lazy(() => import('./pages/AuthPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage.jsx'));
 
+const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
+const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
 export default function App() {
   return (
     <Suspense fallback={<SectionSkeleton label="Loading page" />}>
@@ -29,9 +31,12 @@ export default function App() {
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/signup" element={<AuthPage mode="register" />} />
+          <Route path="/forgot-password" element={<PasswordResetPage requestOnly />} />
+          <Route path="/reset-password" element={<PasswordResetPage />} />
           <Route path="/profile/:username" element={<ProfilePage />} />
           <Route path="/settings/profile" element={<RequireAuth><ProfileSettingsPage /></RequireAuth>} />
           <Route path="/upload" element={<RequireAuth><UploadPage /></RequireAuth>} />
+          <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>
       </Routes>

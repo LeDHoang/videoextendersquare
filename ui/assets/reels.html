@@ -1350,6 +1350,10 @@
         <span class="btn-icon material-symbols-outlined">person_add</span>
         <span class="action-btn-label" id="followLabel">FOLLOW</span>
       </button>
+      <button class="action-btn" id="reportBtn" title="Report post">
+        <span class="btn-icon material-symbols-outlined">flag</span>
+        <span class="action-btn-label">REPORT</span>
+      </button>
       <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
         <span class="btn-icon">
           __ICON_PRELOAD__
@@ -1477,6 +1481,7 @@
     const followLabel = document.getElementById('followLabel');
     const modeBtn = document.getElementById('modeBtn');
     const modeLabel = document.getElementById('modeLabel');
+    const reportBtn = document.getElementById('reportBtn');
     const prevBtn = document.getElementById('prevBtn');
     const nextBtn = document.getElementById('nextBtn');
     const fullBtn = document.getElementById('fullBtn');
@@ -1807,14 +1812,15 @@
         }
       }
       if (followBtn) {
-        const isOwnPost = !!(
-          (item.viewer_state && item.viewer_state.can_edit) ||
-          (creator && currentUser && creator.id === currentUser.id)
-        );
+      const isOwnPost = !!(
+        (item.viewer_state && item.viewer_state.can_edit) ||
+        (creator && currentUser && creator.id === currentUser.id)
+      );
         followBtn.hidden = !creator || !creator.username || isOwnPost;
         followBtn.classList.toggle('active', !!item._following);
         followBtn.title = item._following ? 'Unfollow creator' : 'Follow creator';
       }
+      if (reportBtn) reportBtn.hidden = isOwnPost || !item.post_id;
       if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
     }
 
@@ -1918,8 +1924,34 @@
           showFlash('FOLLOW FAILED');
         }
       }
+
       refreshEngagementUI();
     }
+    async function reportTarget(targetType, targetId) {
+      if (!targetId) return;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
+        return;
+      }
+      const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
+      if (!reason) return;
+      const details = window.prompt('Optional details') || '';
+      try {
+        await requestJson('/api/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason: reason, details: details }),
+        });
+        showFlash('REPORT SUBMITTED');
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
+        } else showFlash('REPORT FAILED');
+      }
+    }
+
 
     function tickViewTracker() {
       const state = viewTracker;
@@ -2390,6 +2422,14 @@
 
         head.append(left, actions);
         const message = document.createElement('p');
+        if (!comment.can_delete) {
+          const report = document.createElement('button');
+          report.type = 'button';
+          report.className = 'comment-delete-btn';
+          report.textContent = 'REPORT';
+          report.addEventListener('click', () => reportTarget('comment', comment.id));
+          actions.appendChild(report);
+        }
         message.className = 'comment-msg';
         message.textContent = comment.text || '';
         item.append(head, message);
@@ -2423,6 +2463,7 @@
     if (likeBtn) likeBtn.addEventListener('click', () => likeCurrentReel());
     if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
     if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
+    if (reportBtn) reportBtn.addEventListener('click', () => reportTarget('post', videoData[idx] && videoData[idx].post_id));
     if (metaCreator) {
       metaCreator.addEventListener('click', () => {
         const creator = videoData[idx] && videoData[idx].creator;

@@ -173,15 +173,26 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
 
     normalized = [normalize_media_path(path) for path in paths]
     with SessionLocal() as db:
+        from .safety import blocked_user_ids
+
+        hidden_ids = blocked_user_ids(db, viewer_id)
         posts = (
             db.query(Post)
+            .join(User, User.id == Post.owner_id)
             .options(
                 joinedload(Post.owner),
                 selectinload(Post.tags).selectinload(PostTag.tag),
             )
-            .filter(Post.media_path.in_(normalized), Post.status == "published", Post.deleted_at.is_(None))
+            .filter(
+                Post.media_path.in_(normalized),
+                Post.status == "published",
+                Post.deleted_at.is_(None),
+                User.status == "active",
+            )
             .all()
         )
+        if hidden_ids:
+            posts = [post for post in posts if post.owner_id not in hidden_ids]
         post_ids = [post.id for post in posts]
         liked_posts: set[str] = set()
         saved_posts: set[str] = set()
@@ -212,11 +223,14 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
         if include_comments and post_ids:
             comments = (
                 db.query(Comment)
+                .join(User, User.id == Comment.author_id)
                 .options(joinedload(Comment.author), joinedload(Comment.post))
-                .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None))
+                .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None), User.status == "active")
                 .order_by(Comment.created_at.asc())
                 .all()
             )
+            if hidden_ids:
+                comments = [comment for comment in comments if comment.author_id not in hidden_ids]
             for comment in comments:
                 comments_by_post.setdefault(comment.post_id, []).append(comment)
             if viewer_id and comments:

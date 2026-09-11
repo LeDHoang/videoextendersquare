@@ -98,6 +98,42 @@ FAL_KEY=your_fal_ai_api_key_here
 ```
 *(Note: `FAL_KEY` is only required for generative outpainting and cloud upscaling. Local FAST/STUDIO modes run completely offline.)*
 
+### Social beta setup
+
+Copy the environment template and configure account security before launching:
+
+```bash
+cp .env.example .env
+```
+
+At minimum, replace `SX_SECURITY_SECRET`. Set `SX_COOKIE_SECURE=1` when the site is served over HTTPS. Enable `SX_TRUST_PROXY_HEADERS=1` only when a trusted reverse proxy overwrites `X-Forwarded-For`. Configure `SX_ADMIN_USERS` or `SX_MODERATOR_USERS` with comma-separated usernames/emails for the moderation queue.
+
+Password reset email requires `SX_PUBLIC_URL`, `SX_SMTP_HOST`, `SX_SMTP_FROM`, and the matching SMTP port/credentials. `SX_PASSWORD_RESET_EXPOSE_TOKEN=1` is for local development only.
+
+Apply the database schema before starting the backend:
+
+```bash
+make migrate
+```
+
+For a database created by the older automatic `create_all()` startup path, back it up first. Only when the old social tables already exist and `alembic_version` does not, mark that known baseline and then upgrade:
+
+```bash
+cp data/echo.db data/echo.db.backup
+.venv/bin/python -m alembic stamp 20260910_0001
+make migrate
+```
+
+Do not stamp a blank or partially created database; use `make migrate` directly instead.
+
+Install and run the automated profile/safety checks with:
+
+```bash
+make install-dev
+make test
+```
+
+
 ### 4. Running the Application
 
 In terminal 1 (FastAPI Backend):

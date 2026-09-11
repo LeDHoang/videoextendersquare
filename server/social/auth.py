@@ -7,9 +7,6 @@ import hmac
 import os
 import re
 import secrets
-import threading
-import time
-from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -20,7 +17,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import AuthSession, User, utcnow
+from .models import AuthSession, RateLimitEvent, User, utcnow
 
 
 SESSION_COOKIE = "echo_session"
@@ -30,6 +27,8 @@ SESSION_DAYS = max(1, int(os.environ.get("SX_SESSION_DAYS", "30")))
 COOKIE_SECURE = os.environ.get("SX_COOKIE_SECURE", "0").lower() in {"1", "true", "yes"}
 USERNAME_RE = re.compile(r"^[a-z0-9_]{3,30}$")
 PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
+TRUST_PROXY_HEADERS = os.environ.get("SX_TRUST_PROXY_HEADERS", "0").lower() in {"1", "true", "yes"}
+SECURITY_SECRET = os.environ.get("SX_SECURITY_SECRET", "echo-development-secret-change-me")
 
 
 def normalize_email(value: str) -> str:
@@ -84,6 +83,10 @@ def token_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+
+def keyed_hash(value: str) -> str:
+    return hmac.new(SECURITY_SECRET.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
 def aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -114,7 +117,12 @@ def public_user(user: User, viewer_id: str | None = None, is_following: bool = F
 
 
 def private_user(user: User) -> dict:
-    return {**public_user(user, viewer_id=user.id), "email": user.email}
+    return {
+        **public_user(user, viewer_id=user.id),
+        "email": user.email,
+        "role": user.role,
+        "can_moderate": user.role in {"moderator", "admin"},
+    }
 
 
 @dataclass
@@ -126,14 +134,13 @@ class AuthContext:
 def create_auth_session(db: Session, user: User, request: Request) -> tuple[AuthSession, str, str]:
     session_token = secrets.token_urlsafe(40)
     csrf_token = secrets.token_urlsafe(24)
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    client_ip = forwarded or (request.client.host if request.client else "")
+    client_ip = request_identity(request)
     row = AuthSession(
         user_id=user.id,
         token_hash=token_hash(session_token),
         csrf_hash=token_hash(csrf_token),
         user_agent=request.headers.get("user-agent", "")[:300],
-        ip_hash=token_hash(client_ip) if client_ip else "",
+        ip_hash=keyed_hash(client_ip) if client_ip else "",
         expires_at=utcnow() + timedelta(days=SESSION_DAYS),
     )
     db.add(row)
@@ -215,6 +222,27 @@ def require_auth_csrf(
     return context
 
 
+def require_moderator(context: AuthContext = Depends(require_auth)) -> AuthContext:
+    if context.user.role not in {"moderator", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "MODERATOR_REQUIRED", "message": "Moderator access is required."},
+        )
+    return context
+
+
+def require_moderator_csrf(
+    context: AuthContext = Depends(require_auth_csrf),
+) -> AuthContext:
+    if context.user.role not in {"moderator", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "MODERATOR_REQUIRED", "message": "Moderator access is required."},
+        )
+    return context
+
+
+
 def ensure_anonymous_cookie(request: Request, response: Response) -> str:
     value = request.cookies.get(ANON_COOKIE)
     if value:
@@ -256,27 +284,39 @@ def validate_origin(request: Request) -> None:
 
 
 class RateLimiter:
-    def __init__(self):
-        self._events: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = threading.Lock()
+    """Database-backed limiter shared by every application worker."""
 
-    def check(self, key: str, limit: int, window_seconds: int) -> None:
-        now = time.monotonic()
-        with self._lock:
-            events = self._events[key]
-            while events and events[0] <= now - window_seconds:
-                events.popleft()
-            if len(events) >= limit:
-                raise HTTPException(
-                    status_code=429,
-                    detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
-                )
-            events.append(now)
+    def check(self, db: Session, key: str, limit: int, window_seconds: int) -> None:
+        now = utcnow()
+        cutoff = now - timedelta(seconds=max(1, int(window_seconds)))
+        key_digest = keyed_hash(key)
+        db.query(RateLimitEvent).filter(
+            RateLimitEvent.created_at < now - timedelta(days=2),
+        ).delete(synchronize_session=False)
+        db.query(RateLimitEvent).filter(
+            RateLimitEvent.key_hash == key_digest,
+            RateLimitEvent.created_at < cutoff,
+        ).delete(synchronize_session=False)
+        count = db.query(RateLimitEvent.id).filter(
+            RateLimitEvent.key_hash == key_digest,
+            RateLimitEvent.created_at >= cutoff,
+        ).count()
+        if count >= limit:
+            db.commit()
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
+            )
+        db.add(RateLimitEvent(key_hash=key_digest, created_at=now))
+        db.commit()
 
 
 rate_limiter = RateLimiter()
 
 
 def request_identity(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    return forwarded or (request.client.host if request.client else "unknown")
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client else "unknown"

@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
 DEFAULT_DATABASE_URL = "sqlite:///./data/echo.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+EXPECTED_SCHEMA_REVISION = "20260911_0002"
 
 if DATABASE_URL.startswith("sqlite"):
     database_path = DATABASE_URL.removeprefix("sqlite:///")
@@ -47,11 +48,30 @@ def get_db():
 
 
 def init_database() -> None:
-    """Create a blank schema for zero-config local runs.
-
-    Alembic remains the authoritative migration path. create_all only fills
-    the gap for a fresh local checkout and never alters existing columns.
-    """
-    from . import models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
+    """Validate that the explicitly managed Alembic schema is installed."""
+    required = {
+        "users",
+        "auth_sessions",
+        "posts",
+        "password_reset_tokens",
+        "rate_limit_events",
+        "user_blocks",
+        "reports",
+        "alembic_version",
+    }
+    existing = set(inspect(engine).get_table_names())
+    missing = required - existing
+    if missing:
+        raise RuntimeError(
+            "Social database migrations are required before startup. "
+            "Run 'make migrate'. Missing tables: " + ", ".join(sorted(missing))
+        )
+    with engine.connect() as connection:
+        installed = {
+            row[0]
+            for row in connection.execute(text("SELECT version_num FROM alembic_version"))
+        }
+    if EXPECTED_SCHEMA_REVISION not in installed:
+        raise RuntimeError(
+            f"Social database schema is not current. Run 'make migrate' (expected {EXPECTED_SCHEMA_REVISION})."
+        )

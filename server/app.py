@@ -84,9 +84,9 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
-    from server.routers import compare, config, health, image, model_info, reels, social, uploads, video
+    from server.routers import account_safety, compare, config, health, image, model_info, reels, social, uploads, video
 
-    for module in (health, config, model_info, image, video, social, reels, uploads, compare):
+    for module in (health, config, model_info, image, video, account_safety, social, reels, uploads, compare):
         app.include_router(module.router)
 
     # Static media serving (replaces mediaserver.py port 8502).

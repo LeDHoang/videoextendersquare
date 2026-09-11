@@ -4366,6 +4366,78 @@ body.sx-vr-active .sx-reels-mount,
   white-space: nowrap;
 }
 
+.sx-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sx-2);
+}
+
+.sx-explore-owner-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.sx-explore-owner-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(8, 9, 10, 0.9);
+  color: #fff;
+  cursor: pointer;
+  font: 800 0.58rem/1 'JetBrains Mono', monospace;
+}
+
+.sx-explore-owner-actions button:last-child {
+  color: var(--sx-accent-hi);
+}
+
+.sx-post-editor-fields {
+  display: grid;
+  gap: var(--sx-4);
+  padding: var(--sx-4);
+  overflow-y: auto;
+}
+
+.sx-post-editor .sx-textarea {
+  min-height: 140px;
+}
+
+.sx-blocked-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sx-3);
+  padding: 12px;
+  border: 1px solid var(--sx-rule);
+  background: var(--sx-surface-2);
+}
+
+.sx-blocked-user > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sx-blocked-user small {
+  color: var(--sx-ink-3);
+}
+
+.sx-moderation-report {
+  display: grid;
+  gap: var(--sx-3);
+}
+
+.sx-success-box {
+  padding: 12px;
+  border: 1px solid var(--sx-success);
+  color: var(--sx-success);
+  background: color-mix(in srgb, var(--sx-success) 10%, transparent);
+  overflow-wrap: anywhere;
+}
 @media (max-width: 900px) {
   .sx-settings-grid {
     grid-template-columns: 1fr;

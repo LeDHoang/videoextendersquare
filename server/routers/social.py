@@ -51,9 +51,11 @@ from server.social.models import (
     PostLike,
     PostSave,
     User,
+    UserBlock,
     ViewDedup,
     utcnow,
 )
+from server.social.safety import blocked_user_ids, users_blocked
 from server.social.services import (
     apply_cursor,
     create_or_update_post,
@@ -70,6 +72,21 @@ router = APIRouter(tags=["social"])
 AVATAR_DIR = Path("data/avatars")
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 REGISTRATION_ENABLED = os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
+
+
+def configured_role(email: str, username: str) -> str:
+    identities = {email.casefold(), username.casefold()}
+    admins = {
+        value.strip().casefold()
+        for value in os.environ.get("SX_ADMIN_USERS", "").split(",")
+        if value.strip()
+    }
+    moderators = {
+        value.strip().casefold()
+        for value in os.environ.get("SX_MODERATOR_USERS", "").split(",")
+        if value.strip()
+    }
+    return "admin" if identities & admins else "moderator" if identities & moderators else "user"
 
 
 def error(status: int, code: str, message: str, field: str | None = None):
@@ -125,6 +142,9 @@ def relationship_page(
             User.status == "active",
         )
     decoded = decode_relationship_cursor(cursor)
+    hidden_ids = blocked_user_ids(db, viewer_id)
+    if hidden_ids:
+        query = query.filter(~User.id.in_(hidden_ids))
     if decoded:
         created_at, relationship_id = decoded
         query = query.filter(
@@ -179,7 +199,32 @@ def relationship_state(db: Session, viewer_id: str | None, target_id: str) -> bo
     ).first() is not None
 
 
+
+def ensure_post_interaction_allowed(db: Session, viewer_id: str | None, post: Post) -> None:
+    if post.owner.status != "active" or users_blocked(db, viewer_id, post.owner_id):
+        error(404, "POST_NOT_FOUND", "Post not found.")
+
+
+def get_visible_post(db: Session, post_id: str, viewer_id: str | None) -> Post:
+    post = get_target_post(db, post_id)
+    ensure_post_interaction_allowed(db, viewer_id, post)
+    return post
+
+
+def get_visible_comment(db: Session, comment_id: str, viewer_id: str | None) -> Comment:
+    comment = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).filter(
+        Comment.id == comment_id,
+        Comment.deleted_at.is_(None),
+    ).first()
+    if not comment:
+        error(404, "COMMENT_NOT_FOUND", "Comment not found.")
+    get_visible_post(db, comment.post_id, viewer_id)
+    if comment.author.status != "active" or users_blocked(db, viewer_id, comment.author_id):
+        error(404, "COMMENT_NOT_FOUND", "Comment not found.")
+    return comment
+
 def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
+
     card = post_card(post, db, viewer_id)
     source = Path("output") / post.media_path
     card["filename"] = source.name
@@ -281,10 +326,11 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
     validate_origin(request)
     if not REGISTRATION_ENABLED:
         error(403, "REGISTRATION_DISABLED", "New account registration is disabled.")
-    rate_limiter.check(f"register:{request_identity(request)}", 5, 60 * 60)
+    rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
+    rate_limiter.check(db, f"register-account:{email}:{username}", 3, 60 * 60)
     if db.query(User.id).filter(User.email_norm == email).first():
         error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
     if db.query(User.id).filter(User.username_norm == username).first():
@@ -297,10 +343,19 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
         password_hash=hash_password(password),
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
+        role=configured_role(email, username),
         status="active",
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.query(User.id).filter(User.email_norm == email).first():
+            error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
+        if db.query(User.id).filter(User.username_norm == username).first():
+            error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
+        error(409, "ACCOUNT_CONFLICT", "The account details are already in use.")
     db.refresh(user)
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
@@ -312,7 +367,8 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
     identity = request_identity(request)
-    rate_limiter.check(f"login:{identity}", 12, 15 * 60)
+    rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
+    rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
     user = db.query(User).filter(
         User.status == "active",
@@ -321,6 +377,9 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ).first()
     if not user or not verify_password(user.password_hash, req.password):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
+    assigned_role = configured_role(user.email or "", user.username)
+    if user.role != assigned_role:
+        user.role = assigned_role
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
@@ -372,13 +431,21 @@ def get_profile(
 ):
     user = get_target_user(db, username)
     viewer_id = auth_user_id(context)
-    return {
-        "user": public_user(
-            user,
-            viewer_id=viewer_id,
-            is_following=relationship_state(db, viewer_id, user.id),
-        )
-    }
+    if users_blocked(db, viewer_id, user.id):
+        error(404, "USER_NOT_FOUND", "Profile not found.")
+    payload = public_user(
+        user,
+        viewer_id=viewer_id,
+        is_following=relationship_state(db, viewer_id, user.id),
+    )
+    payload["is_blocked_by_me"] = bool(
+        viewer_id
+        and db.query(UserBlock.id).filter(
+            UserBlock.blocker_id == viewer_id,
+            UserBlock.blocked_id == user.id,
+        ).first()
+    )
+    return {"user": payload}
 
 
 @router.patch("/api/users/me")
@@ -418,6 +485,11 @@ async def upload_avatar(
         error(413, "AVATAR_TOO_LARGE", "Avatar must be 5 MB or smaller.")
     try:
         image = Image.open(io.BytesIO(raw))
+    except Exception:
+        error(422, "INVALID_AVATAR", "Avatar must be a valid PNG, JPEG, or WebP image.")
+    if image.width * image.height > 25_000_000:
+        error(413, "AVATAR_DIMENSIONS_TOO_LARGE", "Avatar dimensions are too large.")
+    try:
         image.load()
     except Exception:
         error(422, "INVALID_AVATAR", "Avatar must be a valid PNG, JPEG, or WebP image.")
@@ -469,6 +541,9 @@ def get_profile_posts(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     user = get_target_user(db, username)
+    viewer_id = auth_user_id(context)
+    if users_blocked(db, viewer_id, user.id):
+        error(404, "USER_NOT_FOUND", "Profile not found.")
     limit = max(1, min(int(limit), 50))
     query = post_query(db).filter(Post.owner_id == user.id)
     if media in {"video", "image"}:
@@ -477,7 +552,6 @@ def get_profile_posts(
     rows = query.limit(limit + 1).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    viewer_id = auth_user_id(context)
     return {
         "items": [media_card(post, db, viewer_id) for post in rows],
         "next_cursor": encode_cursor(rows[-1]) if has_more and rows else None,
@@ -493,11 +567,14 @@ def followers(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     user = get_target_user(db, username)
+    viewer_id = auth_user_id(context)
+    if users_blocked(db, viewer_id, user.id):
+        error(404, "USER_NOT_FOUND", "Profile not found.")
     return relationship_page(
         db,
         user=user,
         kind="followers",
-        viewer_id=auth_user_id(context),
+        viewer_id=viewer_id,
         cursor=cursor,
         limit=limit,
     )
@@ -512,11 +589,14 @@ def following(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     user = get_target_user(db, username)
+    viewer_id = auth_user_id(context)
+    if users_blocked(db, viewer_id, user.id):
+        error(404, "USER_NOT_FOUND", "Profile not found.")
     return relationship_page(
         db,
         user=user,
         kind="following",
-        viewer_id=auth_user_id(context),
+        viewer_id=viewer_id,
         cursor=cursor,
         limit=limit,
     )
@@ -528,10 +608,12 @@ def follow_user(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
-    rate_limiter.check(f"follow:{context.user.id}", 120, 60)
+    rate_limiter.check(db, f"follow:{context.user.id}", 120, 60)
     target = get_target_user(db, username)
     if target.id == context.user.id:
         error(422, "SELF_FOLLOW", "You cannot follow yourself.")
+    if users_blocked(db, context.user.id, target.id):
+        error(403, "BLOCKED_RELATIONSHIP", "Following is unavailable for this profile.")
     existing = db.query(Follow).filter(
         Follow.follower_id == context.user.id,
         Follow.followee_id == target.id,
@@ -577,7 +659,12 @@ def saved_posts(
     db: Session = Depends(get_db),
 ):
     limit = max(1, min(int(limit), 50))
-    query = post_query(db).join(PostSave, PostSave.post_id == Post.id).filter(PostSave.user_id == context.user.id)
+    hidden_ids = blocked_user_ids(db, context.user.id)
+    query = post_query(db).join(PostSave, PostSave.post_id == Post.id).join(
+        User, User.id == Post.owner_id
+    ).filter(PostSave.user_id == context.user.id, User.status == "active")
+    if hidden_ids:
+        query = query.filter(~Post.owner_id.in_(hidden_ids))
     query = apply_cursor(query, cursor).order_by(Post.created_at.desc(), Post.id.desc())
     rows = query.limit(limit + 1).all()
     has_more = len(rows) > limit
@@ -594,7 +681,9 @@ def get_post(
     db: Session = Depends(get_db),
     context: AuthContext | None = Depends(get_optional_auth),
 ):
-    return {"post": media_card(get_target_post(db, post_id), db, auth_user_id(context))}
+    viewer_id = auth_user_id(context)
+    post = get_visible_post(db, post_id, viewer_id)
+    return {"post": media_card(post, db, viewer_id)}
 
 
 @router.patch("/api/posts/{post_id}")
@@ -653,13 +742,13 @@ def set_post_like(db: Session, post: Post, user_id: str, enabled: bool) -> dict:
 
 @router.put("/api/posts/{post_id}/like")
 def like_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    rate_limiter.check(f"like:{context.user.id}", 300, 60)
-    return set_post_like(db, get_target_post(db, post_id), context.user.id, True)
+    rate_limiter.check(db, f"like:{context.user.id}", 300, 60)
+    return set_post_like(db, get_visible_post(db, post_id, context.user.id), context.user.id, True)
 
 
 @router.delete("/api/posts/{post_id}/like")
 def unlike_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_like(db, get_target_post(db, post_id), context.user.id, False)
+    return set_post_like(db, get_visible_post(db, post_id, context.user.id), context.user.id, False)
 
 
 def set_post_save(db: Session, post: Post, user_id: str, enabled: bool) -> dict:
@@ -678,12 +767,12 @@ def set_post_save(db: Session, post: Post, user_id: str, enabled: bool) -> dict:
 
 @router.put("/api/posts/{post_id}/save")
 def save_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_save(db, get_target_post(db, post_id), context.user.id, True)
+    return set_post_save(db, get_visible_post(db, post_id, context.user.id), context.user.id, True)
 
 
 @router.delete("/api/posts/{post_id}/save")
 def unsave_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_save(db, get_target_post(db, post_id), context.user.id, False)
+    return set_post_save(db, get_visible_post(db, post_id, context.user.id), context.user.id, False)
 
 
 @router.get("/api/posts/{post_id}/comments")
@@ -692,12 +781,15 @@ def list_comments(
     db: Session = Depends(get_db),
     context: AuthContext | None = Depends(get_optional_auth),
 ):
-    post = get_target_post(db, post_id)
+    post = get_visible_post(db, post_id, auth_user_id(context))
     rows = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).filter(
         Comment.post_id == post.id,
         Comment.deleted_at.is_(None),
     ).order_by(Comment.created_at.asc()).all()
     viewer_id = auth_user_id(context)
+    hidden_ids = blocked_user_ids(db, viewer_id)
+    if hidden_ids:
+        rows = [row for row in rows if row.author_id not in hidden_ids]
     liked_ids = set()
     if viewer_id and rows:
         ids = [row.id for row in rows]
@@ -717,8 +809,8 @@ def create_post_comment(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
-    rate_limiter.check(f"comment:{context.user.id}", 20, 60)
-    post = get_target_post(db, post_id)
+    rate_limiter.check(db, f"comment:{context.user.id}", 20, 60)
+    post = get_visible_post(db, post_id, context.user.id)
     text = req.text.strip()
     if not text:
         error(422, "EMPTY_COMMENT", "Comment text cannot be empty.", "text")
@@ -779,18 +871,12 @@ def set_comment_like(db: Session, comment: Comment, user_id: str, enabled: bool)
 
 @router.put("/api/comments/{comment_id}/like")
 def like_social_comment(comment_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    comment = db.query(Comment).filter(Comment.id == comment_id, Comment.deleted_at.is_(None)).first()
-    if not comment:
-        error(404, "COMMENT_NOT_FOUND", "Comment not found.")
-    return set_comment_like(db, comment, context.user.id, True)
+    return set_comment_like(db, get_visible_comment(db, comment_id, context.user.id), context.user.id, True)
 
 
 @router.delete("/api/comments/{comment_id}/like")
 def unlike_social_comment(comment_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    comment = db.query(Comment).filter(Comment.id == comment_id, Comment.deleted_at.is_(None)).first()
-    if not comment:
-        error(404, "COMMENT_NOT_FOUND", "Comment not found.")
-    return set_comment_like(db, comment, context.user.id, False)
+    return set_comment_like(db, get_visible_comment(db, comment_id, context.user.id), context.user.id, False)
 
 
 @router.post("/api/posts/{post_id}/view")
@@ -803,8 +889,8 @@ def record_view(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     validate_origin(request)
-    post = get_target_post(db, post_id)
     viewer_id = auth_user_id(context)
+    post = get_visible_post(db, post_id, viewer_id)
     anonymous_hash = ensure_anonymous_cookie(request, response)
     qualified = req.completed or req.watch_ms >= (2000 if post.media_type == "image" else 3000)
     counted = False
@@ -858,8 +944,8 @@ def create_event(
     event_type = req.event_type.strip().casefold()
     if event_type not in allowed:
         error(422, "INVALID_EVENT", "Unsupported event type.", "event_type")
-    post = get_target_post(db, req.post_id) if req.post_id else None
     viewer_id = auth_user_id(context)
+    post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
     anonymous_hash = ensure_anonymous_cookie(request, response)
     row = record_event(
         db,
@@ -891,7 +977,10 @@ def get_feed(
     if scope == "following" and not viewer_id:
         error(401, "AUTH_REQUIRED", "Sign in to view posts from people you follow.")
     limit = max(1, min(int(limit), 50))
-    query = post_query(db)
+    hidden_ids = blocked_user_ids(db, viewer_id)
+    query = post_query(db).join(User, User.id == Post.owner_id).filter(User.status == "active")
+    if hidden_ids:
+        query = query.filter(~Post.owner_id.in_(hidden_ids))
     if media in {"video", "image"}:
         query = query.filter(Post.media_type == media)
     if scope == "following":
@@ -923,16 +1012,20 @@ def search_suggestions(
     key = query.casefold().lstrip("@#")
     bounded = max(1, min(int(limit), 12))
     viewer_id = auth_user_id(context)
+    hidden_ids = blocked_user_ids(db, viewer_id)
 
     user_rows = []
     if key:
-        candidates = db.query(User).filter(
+        candidate_query = db.query(User).filter(
             User.status == "active",
             or_(
                 User.username_norm.contains(key),
                 User.display_name.ilike(f"%{key}%"),
             ),
-        ).limit(bounded * 3).all()
+        )
+        if hidden_ids:
+            candidate_query = candidate_query.filter(~User.id.in_(hidden_ids))
+        candidates = candidate_query.limit(bounded * 3).all()
 
         def user_score(user: User):
             display = user.display_name.casefold()
@@ -948,7 +1041,7 @@ def search_suggestions(
         for user in candidates[:bounded]:
             user_rows.append(public_user(user, viewer_id, relationship_state(db, viewer_id, user.id)))
     else:
-        candidates = db.query(User).filter(User.status == "active").order_by(
+        candidates = db.query(User).filter(User.status == "active", ~User.id.in_(hidden_ids) if hidden_ids else User.id.is_not(None)).order_by(
             User.follower_count.desc(), User.post_count.desc(), User.username_norm.asc()
         ).limit(bounded).all()
         user_rows = [
@@ -961,13 +1054,17 @@ def search_suggestions(
     posts = []
     if key:
         rows = post_query(db).join(User, User.id == Post.owner_id).filter(
+            User.status == "active",
             or_(
                 Post.title.ilike(f"%{key}%"),
                 Post.caption.ilike(f"%{key}%"),
                 User.username_norm.contains(key),
                 User.display_name.ilike(f"%{key}%"),
-            )
-        ).order_by(Post.created_at.desc()).limit(bounded).all()
+            ),
+        )
+        if hidden_ids:
+            rows = rows.filter(~Post.owner_id.in_(hidden_ids))
+        rows = rows.order_by(Post.created_at.desc()).limit(bounded).all()
         posts = [media_card(post, db, viewer_id) for post in rows]
 
     return {

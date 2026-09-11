@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ExploreTile from '../components/explore/ExploreTile.jsx';
-import { Button } from '../components/ui/controls.jsx';
+import { Button, Field } from '../components/ui/controls.jsx';
+import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
@@ -93,6 +94,10 @@ export default function ProfilePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState('');
+  const [followBusy, setFollowBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({ title: '', caption: '', tags: '' });
 
   const loadProfile = useCallback(async () => {
     setError('');
@@ -152,6 +157,7 @@ export default function ProfilePage() {
   };
 
   const toggleFollow = async () => {
+    if (followBusy) return;
     if (!viewer) {
       try {
         sessionStorage.setItem('echo:pending-action', JSON.stringify({
@@ -166,6 +172,7 @@ export default function ProfilePage() {
       return;
     }
     const wasFollowing = profile.is_following;
+    setFollowBusy(true);
     setProfile((current) => ({
       ...current,
       is_following: !wasFollowing,
@@ -183,18 +190,86 @@ export default function ProfilePage() {
         follower_count: Math.max(0, current.follower_count + (wasFollowing ? 1 : -1)),
       }));
       setError(requestError.message || 'Could not update follow status.');
+    } finally {
+      setFollowBusy(false);
     }
   };
 
   const openPost = (post) => {
-    const params = new URLSearchParams({
-      folder: 'ALL FOLDERS',
-      codec: 'all',
-      sort: 'newest',
-      author: profile.username,
-      play: post.path,
+    navigate(profilePostUrl(post, profile.username, tab));
+  };
+
+  const beginEditPost = (post) => {
+    setEditing(post);
+    setEditForm({
+      title: post.title || '',
+      caption: post.caption || '',
+      tags: (post.tags || []).join(', '),
     });
-    navigate('/reels?' + params.toString());
+  };
+
+  const saveEditedPost = async () => {
+    if (!editing) return;
+    setActionBusy(editing.id);
+    setError('');
+    try {
+      const result = await api.patch('/api/posts/' + encodeURIComponent(editing.id), {
+        title: editForm.title,
+        caption: editForm.caption,
+        tags: editForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 5),
+      });
+      setItems((current) => current.map((item) => item.id === editing.id ? { ...item, ...result.post } : item));
+      setEditing(null);
+    } catch (requestError) {
+      setError(requestError.message || 'Could not update post.');
+    } finally {
+      setActionBusy('');
+    }
+  };
+
+  const deletePost = async (post) => {
+    if (!window.confirm('Delete this post? This cannot be undone from the profile.')) return;
+    setActionBusy(post.id);
+    setError('');
+    try {
+      await api.delete('/api/posts/' + encodeURIComponent(post.id));
+      setItems((current) => current.filter((item) => item.id !== post.id));
+      setProfile((current) => ({ ...current, post_count: Math.max(0, current.post_count - 1) }));
+    } catch (requestError) {
+      setError(requestError.message || 'Could not delete post.');
+    const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
+    } finally {
+      setActionBusy('');
+    }
+  };
+
+  const reportProfile = async () => {
+    if (!viewer) {
+      navigate('/login?next=' + encodeURIComponent('/profile/' + username));
+      return;
+    }
+    if (!reason) return;
+    const details = window.prompt('Optional details') || '';
+    try {
+      await api.post('/api/reports', { target_type: 'user', target_id: profile.id, reason, details });
+      window.alert('Report submitted. Thank you.');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not submit report.');
+    if (!window.confirm('Block @' + profile.username + '? You will no longer see each other’s content.')) return;
+    }
+  };
+
+  const blockProfile = async () => {
+    if (!viewer) {
+      navigate('/login?next=' + encodeURIComponent('/profile/' + username));
+      return;
+    }
+    try {
+      await api.put('/api/users/' + encodeURIComponent(profile.username) + '/block');
+      navigate('/reels');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not block this profile.');
+    }
   };
 
   if (error && !profile) {
@@ -216,9 +291,13 @@ export default function ProfilePage() {
                 {profile.is_me ? (
                   <Button onClick={() => navigate('/settings/profile')}>EDIT PROFILE</Button>
                 ) : (
-                  <Button primary={profile.is_following} onClick={toggleFollow}>
-                    {profile.is_following ? 'FOLLOWING' : 'FOLLOW'}
-                  </Button>
+                  <div className="sx-profile-actions">
+                    <Button primary={profile.is_following} loading={followBusy} disabled={followBusy} onClick={toggleFollow}>
+                      {profile.is_following ? 'FOLLOWING' : 'FOLLOW'}
+                    </Button>
+                    <Button onClick={reportProfile}>REPORT</Button>
+                    <Button onClick={blockProfile}>BLOCK</Button>
+                  </div>
                 )}
               </div>
               <div className="sx-profile-counts">
@@ -246,7 +325,15 @@ export default function ProfilePage() {
           ) : items.length ? (
             <>
               <div className="sx-explore-grid sx-profile-grid">
-                {items.map((post) => <ExploreTile key={post.id} video={post} onOpen={openPost} />)}
+                {items.map((post) => (
+                  <ExploreTile
+                    key={post.id}
+                    video={post}
+                    onOpen={openPost}
+                    onEdit={post.viewer_state?.can_edit ? beginEditPost : undefined}
+                    onDelete={post.viewer_state?.can_edit && actionBusy !== post.id ? deletePost : undefined}
+                  />
+                ))}
               </div>
               {cursor ? (
                 <div className="sx-profile-load-more">
@@ -260,6 +347,32 @@ export default function ProfilePage() {
               text={profile.is_me ? 'Published images and reels will appear here.' : 'This creator has not published anything in this category.'}
             />
           )}
+
+          {editing ? (
+            <div className="sx-modal-backdrop" role="presentation" onMouseDown={() => setEditing(null)}>
+              <section className="sx-people-dialog sx-post-editor" role="dialog" aria-modal="true" aria-label="Edit post" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="sx-people-dialog-head">
+                  <strong>EDIT POST</strong>
+                  <button type="button" onClick={() => setEditing(null)} aria-label="Close">×</button>
+                </div>
+                <div className="sx-post-editor-fields">
+                  <Field label="TITLE">
+                    <input className="sx-input" maxLength={100} value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} />
+                  </Field>
+                  <Field label="CAPTION">
+                    <textarea className="sx-textarea" maxLength={2200} value={editForm.caption} onChange={(event) => setEditForm({ ...editForm, caption: event.target.value })} />
+                  </Field>
+                  <Field label="TAGS (COMMA SEPARATED, MAX 5)">
+                    <input className="sx-input" value={editForm.tags} onChange={(event) => setEditForm({ ...editForm, tags: event.target.value })} />
+                  </Field>
+                  <div className="sx-profile-actions">
+                    <Button onClick={() => setEditing(null)}>CANCEL</Button>
+                    <Button primary loading={actionBusy === editing.id} disabled={actionBusy === editing.id} onClick={saveEditedPost}>SAVE POST</Button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : null}
 
           {dialog ? <PeopleDialog title={dialog.toUpperCase()} username={profile.username} kind={dialog} onClose={() => setDialog('')} /> : null}
         </>

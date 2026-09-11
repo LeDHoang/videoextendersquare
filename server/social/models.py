@@ -45,6 +45,7 @@ class User(Base):
     avatar_path = Column(String(500), nullable=True)
     avatar_color = Column(String(16), nullable=False, default="#FF3B1F")
     account_type = Column(String(16), nullable=False, default="real", index=True)
+    role = Column(String(16), nullable=False, default="user", index=True)
     status = Column(String(16), nullable=False, default="active", index=True)
     post_count = Column(Integer, nullable=False, default=0)
     follower_count = Column(Integer, nullable=False, default=0)
@@ -69,6 +70,27 @@ class AuthSession(Base):
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class RateLimitEvent(Base):
+    __tablename__ = "rate_limit_events"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    key_hash = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (Index("ix_rate_limit_key_created", "key_hash", "created_at"),)
 
 
 class Post(Base):
@@ -164,6 +186,21 @@ class Follow(Base):
     )
 
 
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    blocker_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    blocked_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("blocker_id", "blocked_id", name="uq_user_block_pair"),
+        Index("ix_user_blocks_blocker", "blocker_id", "created_at"),
+        Index("ix_user_blocks_blocked", "blocked_id", "created_at"),
+    )
+
+
 class Comment(Base):
     __tablename__ = "comments"
 
@@ -224,6 +261,24 @@ class EngagementEvent(Base):
     completed = Column(Boolean, nullable=False, default=False)
     context = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    reporter_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    target_type = Column(String(16), nullable=False, index=True)
+    target_id = Column(String(64), nullable=False, index=True)
+    reason = Column(String(32), nullable=False, index=True)
+    details = Column(String(500), nullable=False, default="")
+    status = Column(String(16), nullable=False, default="open", index=True)
+    moderator_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolution = Column(String(500), nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_reports_status_created", "status", "created_at"),)
 
 
 class DataMigration(Base):

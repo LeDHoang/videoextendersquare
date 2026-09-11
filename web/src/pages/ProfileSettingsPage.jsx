@@ -14,10 +14,19 @@ export default function ProfileSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [blocked, setBlocked] = useState(null);
+  const [deleteForm, setDeleteForm] = useState({ current_password: '', confirmation: '' });
 
   useEffect(() => {
     if (user) setForm({ display_name: user.display_name || '', bio: user.bio || '', website: user.website || '' });
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    api.get('/api/users/me/blocked')
+      .then((result) => setBlocked(result.users || []))
+      .catch(() => setBlocked([]));
+  }, [user?.id]);
 
   if (loading) return <SectionSkeleton label="Loading account" />;
   if (!user) return <Navigate to={'/login?next=' + encodeURIComponent('/settings/profile')} replace />;
@@ -83,6 +92,36 @@ export default function ProfileSettingsPage() {
     }
   };
 
+  const unblockUser = async (username) => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.delete('/api/users/' + encodeURIComponent(username) + '/block');
+      setBlocked((current) => (current || []).filter((person) => person.username !== username));
+      setMessage('USER UNBLOCKED');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not unblock this user.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteAccount = async () => {
+    if (!window.confirm('Permanently delete your account and hide all of your posts and comments?')) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.delete('/api/users/me', deleteForm);
+      setUser(null);
+      navigate('/reels', { replace: true });
+    } catch (requestError) {
+      setError(requestError.message || 'Could not delete account.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div>
       <Hero title="PROFILE SETTINGS" kicker={'SIGNED IN AS @' + user.username} />
@@ -127,6 +166,35 @@ export default function ProfileSettingsPage() {
           <Button disabled={busy || !passwords.current_password || passwords.new_password.length < 10} onClick={changePassword}>CHANGE PASSWORD</Button>
         </div>
       </Section>
+      <Section num={3} title="Blocked Profiles" active note="MANAGE HIDDEN ACCOUNTS">
+        <div className="sx-settings-fields">
+          {blocked === null ? <Mono>LOADING…</Mono> : blocked.length ? blocked.map((person) => (
+            <div key={person.id} className="sx-blocked-user">
+              <span><strong>@{person.username}</strong><small>{person.display_name}</small></span>
+              <Button disabled={busy} onClick={() => unblockUser(person.username)}>UNBLOCK</Button>
+            </div>
+          )) : <Mono>NO BLOCKED PROFILES</Mono>}
+        </div>
+      </Section>
+
+      {user.can_moderate ? (
+        <Section num={4} title="Moderation" active note="BETA SAFETY QUEUE">
+          <Button onClick={() => navigate('/moderation')}>OPEN MODERATION QUEUE</Button>
+        </Section>
+      ) : null}
+
+      <Section num={user.can_moderate ? 5 : 4} title="Delete Account" active note="PERMANENT · CANNOT BE UNDONE">
+        <div className="sx-settings-fields">
+          <Field label="CURRENT PASSWORD">
+            <input className="sx-input" type="password" autoComplete="current-password" value={deleteForm.current_password} onChange={(event) => setDeleteForm({ ...deleteForm, current_password: event.target.value })} />
+          </Field>
+          <Field label='TYPE "DELETE" TO CONFIRM'>
+            <input className="sx-input" value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} />
+          </Field>
+          <Button disabled={busy || !deleteForm.current_password || deleteForm.confirmation !== 'DELETE'} onClick={deleteAccount}>DELETE ACCOUNT</Button>
+        </div>
+      </Section>
+
 
       {message ? <Mono>✓ {message}</Mono> : null}
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
