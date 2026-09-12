@@ -1,0 +1,14 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Precision Faceted Bookmark / Vault Chassis -->
+  <path d="M5.5 3.5H18.5V19.5L12 15L5.5 19.5V3.5Z" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Subtle Internal Horizon Guideline -->
+  <line x1="7.5" y1="7.5" x2="16.5" y2="7.5" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.25"/>
+
+  <!-- Leica Vermilion Vertical Datum Anchor Beam -->
+  <line x1="12" y1="4.5" x2="12" y2="13.5" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+
+  <!-- Central Optical Core Diamond Pulse Node -->
+  <polygon points="12,7 14.5,9.5 12,12 9.5,9.5" fill="#ff3b1f"/>
+  <circle cx="12" cy="9.5" r="0.75" fill="#f2f3f5"/>
+</svg>

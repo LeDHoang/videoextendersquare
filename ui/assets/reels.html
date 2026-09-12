@@ -136,7 +136,8 @@
   .reels-phone-frame:-webkit-full-screen .reels-actions,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
     position: absolute !important;
-    right: max(14px, env(safe-area-inset-right)) !important;
+    /* Clear the fixed page-edge prev/next chevrons (40px + 10px edge + gap). */
+    right: max(64px, calc(env(safe-area-inset-right) + 54px)) !important;
     top: 50% !important;
     bottom: auto !important;
     left: auto !important;
@@ -150,7 +151,20 @@
     .reels-phone-frame:fullscreen .reels-actions,
     .reels-phone-frame:-webkit-full-screen .reels-actions,
     .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
-      right: max(8px, env(safe-area-inset-right)) !important;
+      right: max(58px, calc(env(safe-area-inset-right) + 48px)) !important;
+    }
+  }
+
+  /* Fullscreen-active marker (JS toggles .sx-fs-active on the frame for ALL
+     fullscreen modes). Real fullscreen targets the frame's PARENT, so the
+     :fullscreen selectors above never match it — this class is the selector
+     that actually applies. It clears the fixed page-edge chevrons. */
+  .reels-phone-frame.sx-fs-active .reels-actions {
+    right: max(64px, calc(env(safe-area-inset-right) + 54px)) !important;
+  }
+  @media (max-width: 480px) {
+    .reels-phone-frame.sx-fs-active .reels-actions {
+      right: max(58px, calc(env(safe-area-inset-right) + 48px)) !important;
     }
   }
 
@@ -277,9 +291,16 @@
     transform: translateY(-50%);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     z-index: 25;
+    /* Never clip even if buttons are added later. */
+    max-height: calc(100% - 60px);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .reels-actions::-webkit-scrollbar {
+    display: none;
   }
   .reels-cluster {
     background: #08090A;
@@ -289,6 +310,11 @@
     flex-direction: column;
     gap: 3px;
   }
+  /* The `hidden` attribute must win over the flex display above, otherwise
+     the overflow group stacks below the primary group instead of replacing it. */
+  .reels-cluster[hidden] {
+    display: none !important;
+  }
   .reels-cluster-divider {
     width: 100%;
     height: 1px;
@@ -296,8 +322,8 @@
     margin: 2px 0;
   }
   .action-btn {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: 0px;
     background: #16191C;
     border: 1px solid #24282D;
@@ -340,6 +366,10 @@
     height: 18px;
     display: block;
   }
+  /* Horizontal mirror (e.g. BACK chevron reused as forward AUTO icon). */
+  .sx-flip-x svg {
+    transform: scaleX(-1);
+  }
   .action-btn-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 8px;
@@ -369,13 +399,127 @@
     color: #FF3B1F !important;
   }
   #saveBtn.active,
-  #followBtn.active {
+  #followBtn.active,
+  .follow-pill.active {
     border-color: #00E5FF !important;
     box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
   }
   #saveBtn.active .action-btn-label,
   #followBtn.active .action-btn-label {
     color: #00E5FF !important;
+  }
+
+  /* Creator row: profile link + follow pill (bottom-left meta overlay). */
+  .meta-creator-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    pointer-events: none;
+  }
+  .meta-creator-row .meta-creator {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .follow-pill {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #24282D;
+    background: #16191C;
+    color: #FF3B1F;
+    font: 700 9px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.08em;
+    padding: 5px 9px;
+    border-radius: 0px;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .follow-pill .follow-pill-icon {
+    display: inline-flex;
+    width: 13px;
+    height: 13px;
+    line-height: 1;
+  }
+  .follow-pill .follow-pill-icon svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+  }
+  .follow-pill:hover {
+    border-color: #FF3B1F;
+    color: #ffffff;
+  }
+  .follow-pill.active {
+    border-color: #FF3B1F !important;
+    box-shadow: 0 0 14px rgba(255, 59, 31, 0.35);
+    color: #FF3B1F;
+  }
+
+  /* Page-edge prev/next chevrons: fixed to the viewport's right edge,
+     vertically centered on the player window via JS (see positionEdgeNav).
+     Industrial square look at ~78% opacity (30% less transparent than the
+     0.5-alpha ghost treatment) so page content stays faintly visible. */
+  .reels-edge-nav {
+    position: fixed;
+    right: max(10px, env(safe-area-inset-right));
+    top: 50vh;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 24;
+  }
+  .reels-edge-nav[hidden] {
+    display: none;
+  }
+  .edge-chevron {
+    width: 40px;
+    height: 40px;
+    border-radius: 0px;
+    background: #16191C;
+    border: 1px solid #24282D;
+    color: #A4ABB3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+  .edge-chevron:hover {
+    background: #1D2126;
+    color: #FF3B1F;
+    border-color: #FF3B1F;
+  }
+  .edge-chevron:active {
+    background: #FF3B1F !important;
+    color: #0A0A0A !important;
+    border-color: #FF3B1F !important;
+    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45) !important;
+    transform: scale(0.96);
+  }
+  .edge-chevron:active .action-btn-label {
+    color: #0A0A0A !important;
+  }
+  .edge-chevron .btn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+  }
+  .edge-chevron .btn-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
   }
 
   /* Bottom Left Overlay */
@@ -385,7 +529,7 @@
     border: 0;
     padding: 0;
     background: transparent;
-    color: #00E5FF;
+    color: #FF3B1F;
     font: 700 10px/1.2 'JetBrains Mono', monospace;
     letter-spacing: 0.06em;
     cursor: pointer;
@@ -679,6 +823,7 @@
     min-width: 0;
   }
   .drawer-header-left .material-symbols-outlined { color: #ff553a; font-size: 18px; }
+  .drawer-header-left svg { width: 18px; height: 18px; display: block; }
   .drawer-title {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
@@ -721,6 +866,7 @@
     box-sizing: border-box;
   }
   .drawer-tab .material-symbols-outlined { font-size: 14px; line-height: 1; }
+  .drawer-tab svg { width: 14px; height: 14px; display: block; }
   .drawer-tab:hover { background: #292a2b; border-color: #ff553a; }
   .drawer-tab.active {
     background: #ff553a;
@@ -822,6 +968,9 @@
     transition: all 0.15s ease;
   }
   .comment-time-btn .material-symbols-outlined { font-size: 12px; }
+  .comment-time-btn svg { width: 12px; height: 12px; display: block; }
+  .sync-time-toggle svg { width: 13px; height: 13px; display: block; }
+  .sync-time-icon { display: inline-flex; line-height: 1; }
   .comment-time-btn:hover { background: #ff553a; border-color: #ff553a; color: #5a0600; }
   .comment-time-gen {
     background: #292a2b;
@@ -890,17 +1039,6 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
-  }
-  .meta-sys-box {
-    width: 24px; height: 24px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: #1f2021;
-    border: 1px solid #ff553a;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 8px; font-weight: 700;
-    color: #ff553a;
-    letter-spacing: 0.06em;
-    flex-shrink: 0;
   }
   .account-btn {
     background: #1f2021;
@@ -1291,44 +1429,30 @@
     </div>
   </div>
 
-  <!-- Floating Command Grid (Right Side) -->
-  <div class="reels-actions">
-    <!-- AUDIO Cluster -->
-    <div class="reels-cluster">
+  <!-- Floating Command Grid (Right Side).
+       Primary group is always visible; the "..." button swaps in the
+       overflow group. Tapping the video dismisses the overflow. -->
+  <div class="reels-actions" id="reelsActions">
+    <!-- PRIMARY Cluster -->
+    <div class="reels-cluster" id="railPrimary">
       <button class="action-btn" id="soundBtn" title="Toggle Sound (M)">
         <span class="btn-icon">
           __ICON_SOUND_MUTE__
         </span>
         <span class="action-btn-label">MUTE</span>
       </button>
-    </div>
-
-    <!-- PLAYBACK Cluster -->
-    <div class="reels-cluster">
-      <button class="action-btn" id="playBtn" title="Play/Pause (Space)">
-        <span class="btn-icon">
-          __ICON_PAUSE__
-        </span>
-        <span class="action-btn-label">PAUSE</span>
-      </button>
       <button class="action-btn" id="modeBtn" title="Auto-Next / Loop">
-        <span class="btn-icon">
-          __ICON_MODE_AUTO__
+        <span class="btn-icon sx-flip-x">
+          __ICON_BACK__
         </span>
         <span class="action-btn-label" id="modeLabel">AUTO</span>
       </button>
       <div class="reels-cluster-divider"></div>
-      <button class="action-btn" id="prevBtn" title="Previous Video (W / Up)">
+      <button class="action-btn" id="likeBtn" title="Like / Unlike (F)">
         <span class="btn-icon">
-          __ICON_PREV__
+          __ICON_LIKE__
         </span>
-        <span class="action-btn-label">PREV</span>
-      </button>
-      <button class="action-btn" id="nextBtn" title="Next Video (S / Down)">
-        <span class="btn-icon">
-          __ICON_NEXT__
-        </span>
-        <span class="action-btn-label">NEXT</span>
+        <span class="action-btn-label" id="likeCount">0</span>
       </button>
       <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)" style="position: relative;">
         <span class="btn-icon">
@@ -1336,38 +1460,12 @@
         </span>
         <span class="action-btn-label" id="commentBadge">0</span>
       </button>
-      <button class="action-btn" id="likeBtn" title="Like / Unlike (F)">
-        <span class="btn-icon">
-          __ICON_LIKE__
-        </span>
-        <span class="action-btn-label" id="likeCount">0</span>
-      </button>
-      <button class="action-btn" id="saveBtn" title="Save / Unsave">
-        <span class="btn-icon material-symbols-outlined">bookmark</span>
-        <span class="action-btn-label">SAVE</span>
-      </button>
       <button class="action-btn" id="shareBtn" title="Share reel">
-        <span class="btn-icon material-symbols-outlined">share</span>
+        <span class="btn-icon">
+          __ICON_SHARE__
+        </span>
         <span class="action-btn-label">SHARE</span>
       </button>
-      <button class="action-btn" id="followBtn" title="Follow creator">
-        <span class="btn-icon material-symbols-outlined">person_add</span>
-        <span class="action-btn-label" id="followLabel">FOLLOW</span>
-      </button>
-      <button class="action-btn" id="reportBtn" title="Report post">
-        <span class="btn-icon material-symbols-outlined">flag</span>
-        <span class="action-btn-label">REPORT</span>
-      </button>
-      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
-        <span class="btn-icon">
-          __ICON_PRELOAD__
-        </span>
-        <span class="action-btn-label" id="preloadLabel">CACHE</span>
-      </button>
-    </div>
-
-    <!-- VIEW Cluster -->
-    <div class="reels-cluster">
       <button class="action-btn" id="fullBtn" title="Fullscreen">
         <span class="btn-icon">
           __ICON_FULLSCREEN__
@@ -1382,12 +1480,66 @@
           <span class="action-btn-label" style="color: #A855F7;">VR</span>
         </button>
       </div>
+      <button class="action-btn" id="moreBtn" title="More actions">
+        <span class="btn-icon">
+          __ICON_MORE__
+        </span>
+        <span class="action-btn-label">MORE</span>
+      </button>
+    </div>
+
+    <!-- OVERFLOW Cluster (replaces the primary cluster in place) -->
+    <div class="reels-cluster" id="railMore" hidden>
+      <button class="action-btn" id="railBackBtn" title="Back to main actions">
+        <span class="btn-icon">
+          __ICON_BACK__
+        </span>
+        <span class="action-btn-label">BACK</span>
+      </button>
+      <div class="reels-cluster-divider"></div>
+      <button class="action-btn" id="saveBtn" title="Save / Unsave">
+        <span class="btn-icon">
+          __ICON_SAVE__
+        </span>
+        <span class="action-btn-label">SAVE</span>
+      </button>
+      <button class="action-btn" id="reportBtn" title="Report post">
+        <span class="btn-icon">
+          __ICON_REPORT__
+        </span>
+        <span class="action-btn-label">REPORT</span>
+      </button>
+      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
+        <span class="btn-icon">
+          __ICON_PRELOAD__
+        </span>
+        <span class="action-btn-label" id="preloadLabel">CACHE</span>
+      </button>
     </div>
   </div>
 
+  <!-- Page-edge prev/next chevrons: fixed to the viewport right edge,
+       vertically centered on the player window by positionEdgeNav(). -->
+  <div class="reels-edge-nav" id="edgeNav" hidden>
+    <button class="edge-chevron" id="edgePrevBtn" title="Previous reel (W / Up)">
+      <span class="btn-icon">__ICON_PREV__</span>
+      <span class="action-btn-label">PREV</span>
+    </button>
+    <button class="edge-chevron" id="edgeNextBtn" title="Next reel (S / Down)">
+      <span class="btn-icon">__ICON_NEXT__</span>
+      <span class="action-btn-label">NEXT</span>
+    </button>
+  </div>
+
+  <!-- Icon templates cloned by JS (quote-safe: tokens in markup, not strings). -->
+  <template id="timesyncIconTpl">__ICON_TIMESYNC__</template>
+
   <div class="reels-meta" id="reelsMeta">
     <div class="meta-folder" id="metaFolder">📁 root</div>
-    <button type="button" class="meta-creator" id="metaCreator" hidden></button>
+    <div class="meta-creator-row">
+      <button type="button" class="meta-creator" id="metaCreator" hidden></button>
+      <button type="button" class="follow-pill" id="followPill" hidden><span class="follow-pill-icon" aria-hidden="true">__ICON_FOLLOW__</span><span id="followPillLabel">FOLLOW</span></button>
+    </div>
     <div class="meta-title" id="metaTitle">Loading video…</div>
     <div class="meta-sub" id="metaSub">
       <span id="metaSize">-- MB</span>
@@ -1407,13 +1559,13 @@
   <div class="reels-comments-drawer" id="commentsDrawer" tabindex="-1">
     <div class="drawer-header">
       <div class="drawer-header-left">
-        <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
+        <span class="drawer-header-icon" aria-hidden="true">__ICON_COMMENT__</span>
         <h2 class="drawer-title" id="drawerTitle">COMMENTS <span class="drawer-title-count">(0)</span></h2>
       </div>
       <div class="drawer-header-right">
         <div class="drawer-tabs">
           <button type="button" class="drawer-tab active" data-tab="all" id="tabAll">ALL</button>
-          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync"><span class="material-symbols-outlined">schedule</span> TIME-SYNC</button>
+          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync">__ICON_TIMESYNC__ TIME-SYNC</button>
           <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral"><span class="material-symbols-outlined">forum</span> GENERAL</button>
         </div>
         <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)"><span class="material-symbols-outlined">close</span></button>
@@ -1425,13 +1577,12 @@
     <div class="drawer-footer">
       <div class="input-meta-bar">
         <div class="input-meta-left">
-          <div class="meta-sys-box">SYS</div>
           <button type="button" class="account-btn" id="accountBtn" title="Open your profile or sign in">
             <span id="accountAvatar">?</span> <span id="accountName">SIGN IN</span>
           </button>
         </div>
         <button type="button" class="sync-time-toggle" id="syncTimeToggle" title="Toggle time-sync to current video playback">
-          <span class="material-symbols-outlined">schedule</span> SYNC: <span id="syncTimeDisplay">0:00</span>
+          <span class="sync-time-icon" aria-hidden="true">__ICON_TIMESYNC__</span> SYNC: <span id="syncTimeDisplay">0:00</span>
         </button>
       </div>
       <form class="comment-form" id="commentForm">
@@ -1484,12 +1635,20 @@
     const shareBtn = document.getElementById('shareBtn');
     const followBtn = document.getElementById('followBtn');
     const followLabel = document.getElementById('followLabel');
+    const followPill = document.getElementById('followPill');
     const modeBtn = document.getElementById('modeBtn');
     const modeLabel = document.getElementById('modeLabel');
     const reportBtn = document.getElementById('reportBtn');
     const prevBtn = document.getElementById('prevBtn');
     const nextBtn = document.getElementById('nextBtn');
     const fullBtn = document.getElementById('fullBtn');
+    const moreBtn = document.getElementById('moreBtn');
+    const railPrimary = document.getElementById('railPrimary');
+    const railMore = document.getElementById('railMore');
+    const railBackBtn = document.getElementById('railBackBtn');
+    const edgeNav = document.getElementById('edgeNav');
+    const edgePrevBtn = document.getElementById('edgePrevBtn');
+    const edgeNextBtn = document.getElementById('edgeNextBtn');
 
     const metaFolder = document.getElementById('metaFolder');
     const metaTitle = document.getElementById('metaTitle');
@@ -1824,6 +1983,13 @@
         followBtn.hidden = !creator || !creator.username || isOwnPost;
         followBtn.classList.toggle('active', !!item._following);
         followBtn.title = item._following ? 'Unfollow creator' : 'Follow creator';
+      }
+      if (followPill) {
+        followPill.hidden = !creator || !creator.username || isOwnPost;
+        followPill.classList.toggle('active', !!item._following);
+        followPill.title = item._following ? 'Unfollow creator' : 'Follow creator';
+        const pillLabel = document.getElementById('followPillLabel');
+        if (pillLabel) pillLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
       }
       if (reportBtn) reportBtn.hidden = isOwnPost || !item.post_id;
       if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
@@ -2335,7 +2501,7 @@
       const countEl = drawerTitle ? drawerTitle.querySelector('.drawer-title-count') : null;
       if (countEl) countEl.textContent = `(${comments.length})`;
       else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${comments.length})`;
-      if (commentBadge) commentBadge.textContent = comments.length ? `ANNO (${comments.length})` : 'ANNO';
+      if (commentBadge) commentBadge.textContent = String(comments.length);
 
       let filtered = comments;
       if (activeTab === 'sync') {
@@ -2388,10 +2554,11 @@
           timeControl = document.createElement('button');
           timeControl.type = 'button';
           timeControl.className = 'comment-time-btn';
-          const icon = document.createElement('span');
-          icon.className = 'material-symbols-outlined';
-          icon.textContent = 'schedule';
-          timeControl.append(icon, document.createTextNode(' ' + formatTime(comment.timestamp)));
+          const syncTpl = document.getElementById('timesyncIconTpl');
+          if (syncTpl && syncTpl.content && syncTpl.content.firstElementChild) {
+            timeControl.append(syncTpl.content.firstElementChild.cloneNode(true));
+          }
+          timeControl.append(document.createTextNode(' ' + formatTime(comment.timestamp)));
           timeControl.addEventListener('click', () => {
             const timestamp = Number(comment.timestamp);
             if (!isNaN(timestamp)) {
@@ -2479,6 +2646,7 @@
     if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
     if (shareBtn) shareBtn.addEventListener('click', () => shareCurrentReel());
     if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
+    if (followPill) followPill.addEventListener('click', () => followCurrentCreator());
     if (reportBtn) reportBtn.addEventListener('click', () => reportTarget('post', videoData[idx] && videoData[idx].post_id));
     if (metaCreator) {
       metaCreator.addEventListener('click', () => {
@@ -2686,8 +2854,8 @@
       if (!modeBtn) return;
       if (auto) {
         modeBtn.innerHTML = `
-          <span class="btn-icon">
-            __ICON_MODE_AUTO__
+          <span class="btn-icon sx-flip-x">
+            __ICON_BACK__
           </span>
           <span class="action-btn-label" id="modeLabel">AUTO</span>
         `;
@@ -2847,13 +3015,45 @@
       loadVideo(idx - 1);
     }
 
-    // Button Listeners
-    playBtn.addEventListener('click', togglePlay);
+    // Button Listeners (play/prev/next rail buttons were removed; the
+    // functions remain bound to keyboard, video-tap, and edge chevrons)
+    if (playBtn) playBtn.addEventListener('click', togglePlay);
     soundBtn.addEventListener('click', toggleSound);
     modeBtn.addEventListener('click', toggleMode);
-    nextBtn.addEventListener('click', nextVideo);
-    prevBtn.addEventListener('click', prevVideo);
+    if (nextBtn) nextBtn.addEventListener('click', nextVideo);
+    if (prevBtn) prevBtn.addEventListener('click', prevVideo);
+    if (edgeNextBtn) edgeNextBtn.addEventListener('click', () => { flashEdge(edgeNextBtn); nextVideo(); });
+    if (edgePrevBtn) edgePrevBtn.addEventListener('click', () => { flashEdge(edgePrevBtn); prevVideo(); });
+    if (moreBtn) moreBtn.addEventListener('click', () => setRailOverflow(true));
+    if (railBackBtn) railBackBtn.addEventListener('click', () => setRailOverflow(false));
     if (preloadBtn) preloadBtn.addEventListener('click', preloadAllVideos);
+
+    // Rail overflow: swap the primary cluster for the overflow cluster.
+    // Tapping the video dismisses the overflow (see videoWrap handler).
+    function setRailOverflow(open) {
+      if (railPrimary) railPrimary.hidden = open;
+      if (railMore) railMore.hidden = !open;
+    }
+    function isRailOverflowOpen() {
+      return !!(railMore && !railMore.hidden);
+    }
+    function flashEdge(btn) {
+      if (!btn) return;
+      btn.style.borderColor = '#FF3B1F';
+      btn.style.color = '#FF3B1F';
+      setTimeout(() => { btn.style.borderColor = ''; btn.style.color = ''; }, 180);
+    }
+
+    // Marker class for "any fullscreen mode is active" (real fullscreen
+    // targets the frame's PARENT, so :fullscreen never matches the frame
+    // itself — CSS that must apply in real fullscreen keys off this class).
+    function syncFsActiveClass() {
+      if (!frame) return;
+      try {
+        frame.classList.toggle('sx-fs-active', isCurrentFullscreen());
+      } catch (e) {}
+      positionEdgeNav();
+    }
 
     function togglePseudoFullscreen(enable) {
       const fsTarget = frame.parentElement || frame;
@@ -2873,6 +3073,7 @@
         window.dispatchEvent(new CustomEvent('echo:fullscreen-exit'));
         try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:fullscreen-exit')); } catch (e2) {}
       }
+      syncFsActiveClass();
     }
 
     fullBtn.addEventListener('click', () => {
@@ -3001,6 +3202,7 @@
     function notifyFsChange() {
       const isFs = !!document.fullscreenElement;
       const target = document.fullscreenElement;
+      syncFsActiveClass();
       const isReelsFs = !!target && (
         target.id === 'reelsFrame' ||
         target.id === 'sxReelsRoot' ||
@@ -3028,17 +3230,66 @@
     document.addEventListener('fullscreenchange', notifyFsChange);
     document.addEventListener('webkitfullscreenchange', notifyFsChange);
 
-    // Click on video area toggles play/pause (unless drawer is clicked or user just panned)
+    // Click on video area toggles play/pause (unless drawer is clicked or user just panned).
+    // An open rail overflow is dismissed first instead of toggling playback.
     document.getElementById('videoWrap').addEventListener('click', (e) => {
       if (wasPanning) return;
       if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG' || e.target.id === 'videoWrap') {
-        if (commentsDrawer && commentsDrawer.classList.contains('open')) {
+        if (isRailOverflowOpen()) {
+          setRailOverflow(false);
+        } else if (commentsDrawer && commentsDrawer.classList.contains('open')) {
           toggleDrawer(false);
         } else {
           togglePlay();
         }
       }
     });
+
+    // Page-edge prev/next chevrons: fixed to the viewport's right edge,
+    // vertically centered on the player window (tracked, not 50vh, so they
+    // follow the frame in the SPA embed). Hidden when the player is off-screen.
+    // In fullscreen the frame rect IS the viewport, so this degrades to 50vh.
+    let edgeNavInView = true;
+    function positionEdgeNav() {
+      if (!edgeNav || !frame) return;
+      const rect = frame.getBoundingClientRect();
+      const onScreen = rect.bottom > 0 && rect.top < window.innerHeight && rect.height > 0;
+      const show = onScreen && edgeNavInView;
+      edgeNav.hidden = !show;
+      if (!show) return;
+      const mid = rect.top + rect.height / 2;
+      edgeNav.style.top = Math.min(Math.max(mid, 70), window.innerHeight - 70) + 'px';
+    }
+    let edgeNavObserver = null;
+    if (edgeNav && frame && typeof IntersectionObserver !== 'undefined') {
+      edgeNavObserver = new IntersectionObserver(
+        (entries) => {
+          edgeNavInView = !!(entries[0] && entries[0].isIntersecting);
+          positionEdgeNav();
+        },
+        { threshold: 0 },
+      );
+      edgeNavObserver.observe(frame);
+    }
+    window.addEventListener('scroll', positionEdgeNav, { passive: true, capture: true });
+    window.addEventListener('resize', positionEdgeNav);
+    document.addEventListener('fullscreenchange', positionEdgeNav);
+    document.addEventListener('webkitfullscreenchange', positionEdgeNav);
+    positionEdgeNav();
+    syncFsActiveClass();
+    // ReelsPlayer.jsx re-injects this script on param change and calls this
+    // hook on teardown — release the window-level listeners + observer.
+    window.__sxReelsCleanup = function () {
+      window.removeEventListener('scroll', positionEdgeNav, { capture: true });
+      window.removeEventListener('resize', positionEdgeNav);
+      document.removeEventListener('fullscreenchange', positionEdgeNav);
+      document.removeEventListener('webkitfullscreenchange', positionEdgeNav);
+      if (edgeNavObserver) {
+        try { edgeNavObserver.disconnect(); } catch (e) {}
+        edgeNavObserver = null;
+      }
+      window.__sxReelsCleanup = null;
+    };
 
     // Video Ended -> Auto-advance or Loop
     video.addEventListener('ended', () => {

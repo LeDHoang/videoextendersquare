@@ -1,0 +1,22 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Precision Node Hubs (Source and Dual Recipients) -->
+  <!-- Origin Node (White ring with dark core) -->
+  <circle cx="6" cy="12" r="2.5" stroke="#f2f3f5" stroke-width="1.5" fill="#121315"/>
+  <circle cx="6" cy="12" r="0.75" fill="#f2f3f5"/>
+
+  <!-- Target Node Upper Right (Leica Vermilion active pulse node) -->
+  <polygon points="18,3.5 20.5,6 18,8.5 15.5,6" fill="#ff3b1f"/>
+  <circle cx="18" cy="6" r="0.65" fill="#f2f3f5"/>
+
+  <!-- Target Node Lower Right (Leica Vermilion secondary telemetry node) -->
+  <polygon points="18,15.5 20.5,18 18,20.5 15.5,18" fill="#ff3b1f"/>
+  <circle cx="18" cy="18" r="0.65" fill="#f2f3f5"/>
+
+  <!-- Tactical Divergence Ray Lines -->
+  <line x1="8.5" y1="10.8" x2="15.5" y2="7.2" stroke="#f2f3f5" stroke-width="1.6" stroke-linecap="square"/>
+  <line x1="8.5" y1="13.2" x2="15.5" y2="16.8" stroke="#f2f3f5" stroke-width="1.6" stroke-linecap="square"/>
+
+  <!-- Telemetry Tick Accents -->
+  <line x1="12" y1="8" x2="13.5" y2="11" stroke="#ff3b1f" stroke-width="1.2" stroke-opacity="0.8"/>
+  <line x1="12" y1="16" x2="13.5" y2="13" stroke="#ff3b1f" stroke-width="1.2" stroke-opacity="0.8"/>
+</svg>
