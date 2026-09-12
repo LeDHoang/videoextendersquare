@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import MessagingPanel from '../components/messaging/MessagingPanel.jsx';
 import { Hero } from '../components/ui/primitives.jsx';
+import { IndustrialMessageIcon } from '../components/icons/index.jsx';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 
 export default function MessagesPage() {
@@ -17,7 +18,7 @@ export default function MessagesPage() {
 
   return (
     <div className="sx-messages-page">
-      <Hero title="MESSAGES" kicker="ECHO · ENCRYPTED AT REST · DIRECT CONVERSATIONS">
+      <Hero title="MESSAGES" kicker="ECHO · ENCRYPTED AT REST · DIRECT CONVERSATIONS" icon={<IndustrialMessageIcon className="sx-hero-icon-svg" />}>
         <div className="sx-stats-pill">
           <span>UNREAD: <strong>{messaging.unread.total}</strong></span>
           <span>REQUESTS: <strong>{messaging.unread.requests}</strong></span>

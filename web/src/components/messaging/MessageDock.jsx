@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useAuth } from '../../hooks/AuthContext.jsx';
+import { IndustrialMessageIcon } from '../icons/index.jsx';
 import MessagingPanel from './MessagingPanel.jsx';
 
 export default function MessageDock() {
@@ -19,6 +20,7 @@ export default function MessageDock() {
         }}
         aria-label="Open compact messages"
       >
+        <IndustrialMessageIcon className="sx-message-launcher-icon" />
         MESSAGE{messaging.unread.total ? <span>{messaging.unread.total}</span> : null}
       </button>
     );
@@ -26,7 +28,7 @@ export default function MessageDock() {
   return (
     <section className={`sx-message-dock ${messaging.dockMinimized ? 'sx-minimized' : ''}`} aria-label="Compact messages">
       <header>
-        <button type="button" onClick={() => navigate(messaging.selectedId ? `/messages/${messaging.selectedId}` : '/messages')}>MESSAGES</button>
+        <button type="button" className="sx-message-dock-title" onClick={() => navigate(messaging.selectedId ? `/messages/${messaging.selectedId}` : '/messages')}><IndustrialMessageIcon className="sx-message-dock-icon" />MESSAGES</button>
         <span>{messaging.unread.total ? `${messaging.unread.total} UNREAD` : 'LIVE'}</span>
         <button
           type="button"

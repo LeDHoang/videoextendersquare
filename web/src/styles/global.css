@@ -864,6 +864,17 @@ button:hover .sx-sidebar-hero-logo,
   margin-top: var(--sx-3);
 }
 
+.sx-hero-icon {
+  display: inline-flex;
+  vertical-align: baseline;
+  margin-right: 12px;
+}
+
+.sx-hero-icon-svg {
+  width: 0.85em;
+  height: 0.85em;
+}
+
 .sx-eyebrow {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: var(--sx-t-eyebrow);
@@ -5038,6 +5049,24 @@ button.sx-explore-loc-link:hover {
   font: 800 0.72rem/1 var(--sx-font-mono, monospace);
   letter-spacing: 0.08em;
   cursor: pointer;
+}
+
+.sx-message-launcher-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.sx-message-dock-title {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+}
+
+.sx-message-dock-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .sx-share-backdrop {
