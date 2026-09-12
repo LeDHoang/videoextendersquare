@@ -349,6 +349,36 @@ def create_or_update_post(
     return post
 
 
+def shared_preview_urls(post: Post) -> dict:
+    """Lightweight preview/poster URLs for inline playback (chat embeds, etc.).
+
+    Falls back to the full media URL when no transcoded preview exists yet.
+    """
+    from server import media as media_service
+
+    url = f"/media/{post.media_path}"
+    if post.media_type == "image":
+        return {"preview_url": url, "poster_url": url}
+    try:
+        source = Path("output") / post.media_path
+        root = Path("output").resolve()
+
+        def sibling_url(path: Path) -> str | None:
+            try:
+                if path.exists() and path.stat().st_size > 0:
+                    return f"/media/{path.resolve().relative_to(root).as_posix()}"
+            except (OSError, ValueError):
+                return None
+            return None
+
+        preview = sibling_url(media_service.explore_preview_path(str(source)))
+        poster = sibling_url(media_service.explore_poster_path(str(source)))
+    except Exception:
+        preview = None
+        poster = None
+    return {"preview_url": preview or url, "poster_url": poster}
+
+
 def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
     liked = False
     saved = False
@@ -358,7 +388,7 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         saved = db.query(PostSave.id).filter(PostSave.user_id == viewer_id, PostSave.post_id == post.id).first() is not None
         following = db.query(Follow.id).filter(Follow.follower_id == viewer_id, Follow.followee_id == post.owner_id).first() is not None
     creator = public_user(post.owner, viewer_id=viewer_id, is_following=following)
-    return {
+    card = {
         "id": post.id,
         "post_id": post.id,
         "path": post.media_path,
@@ -385,6 +415,8 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         },
         "created_at": post.created_at.isoformat() if post.created_at else None,
     }
+    card.update(shared_preview_urls(post))
+    return card
 
 
 def encode_cursor(post: Post) -> str:

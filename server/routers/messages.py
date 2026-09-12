@@ -490,6 +490,11 @@ def send_into_conversation(
         created_at=now,
     )
     db.add(row)
+    # Flush the message before emitting events that reference it: when the
+    # parent conversation is also dirty in the same flush, the unit of work
+    # can otherwise attempt the message_events INSERT before the
+    # direct_messages INSERT, violating the message_id foreign key.
+    db.flush()
     conversation.latest_message_id = row.id
     conversation.updated_at = now
     member.last_read_at = now

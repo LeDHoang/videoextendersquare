@@ -20,16 +20,43 @@ function MessageContent({ message }) {
     return <img className="sx-message-gif" src={message.content?.url} alt={message.content?.title || 'Shared GIF'} />;
   }
   if (message.kind === 'reel') {
+    if (!message.post) {
+      return (
+        <div className="sx-message-reel-card">
+          <span>Reel unavailable</span>
+          {message.content?.text ? <p>{message.content.text}</p> : null}
+        </div>
+      );
+    }
+    const post = message.post;
+    const isImage = post.media_type === 'image';
+    const src = post.preview_url || post.url;
+    const link = `/reels?post=${encodeURIComponent(post.id)}`;
+    const fileStem = (post.path || '').split('/').pop()?.replace(/\.[^.]+$/, '') || '';
+    const reelName = post.title || fileStem || 'Shared reel';
     return (
       <div className="sx-message-reel-card">
-        {message.post ? (
-          <Link to={`/reels?post=${encodeURIComponent(message.post.id)}`}>
-            <strong>{message.post.title || 'Shared reel'}</strong>
-            <span>@{message.post.creator?.username || 'creator'}</span>
-          </Link>
-        ) : (
-          <span>Reel unavailable</span>
-        )}
+        <Link to={link} className="sx-message-reel-preview" aria-label={`Open reel ${post.title || ''}`}>
+          {isImage ? (
+            <img src={src} alt={post.title || 'Shared reel'} loading="lazy" />
+          ) : (
+            <video
+              src={src}
+              poster={post.poster_url || undefined}
+              muted
+              loop
+              playsInline
+              autoPlay
+              preload="metadata"
+              disablePictureInPicture
+            />
+          )}
+          <span className="sx-message-reel-play" aria-hidden="true">▶</span>
+        </Link>
+        <Link to={link} className="sx-message-reel-meta">
+          <strong title={reelName}>{reelName}</strong>
+          <span>@{post.creator?.username || 'creator'}</span>
+        </Link>
         {message.content?.text ? <p>{message.content.text}</p> : null}
       </div>
     );
@@ -256,7 +283,7 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
               {history.map((message) => {
                 const mine = message.sender_id === user?.id;
                 return (
-                  <article key={message.id} className={`sx-message-bubble ${mine ? 'sx-mine' : ''} ${message.pending ? 'sx-pending' : ''}`}>
+                  <article key={message.id} className={`sx-message-bubble ${mine ? 'sx-mine' : ''} ${message.pending ? 'sx-pending' : ''} ${message.kind === 'reel' ? 'sx-message-bubble--reel' : ''}`}>
                     <MessageContent message={message} />
                     <footer>
                       <time>{message.created_at ? new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</time>
