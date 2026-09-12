@@ -1509,6 +1509,14 @@
         </span>
         <span class="action-btn-label">REPORT</span>
       </button>
+      <button class="action-btn" id="notInterestedBtn" title="Show fewer reels like this">
+        <span class="btn-icon material-symbols-outlined">thumb_down</span>
+        <span class="action-btn-label">LESS</span>
+      </button>
+      <button class="action-btn" id="hideCreatorBtn" title="Hide this creator">
+        <span class="btn-icon material-symbols-outlined">person_off</span>
+        <span class="action-btn-label">HIDE</span>
+      </button>
       <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
         <span class="btn-icon">
           __ICON_PRELOAD__
@@ -1605,7 +1613,12 @@
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
-    const videoData = __VIDEO_DATA_JSON__;
+    let videoData = __VIDEO_DATA_JSON__;
+    const initialFeedState = __FEED_STATE_JSON__;
+    const feedParams = (initialFeedState && initialFeedState.feed_params) || {};
+    let feedCursor = initialFeedState && initialFeedState.next_cursor;
+    let feedHasMore = !!(initialFeedState && initialFeedState.has_more);
+    let feedPromise = null;
     let idx = 0;
     let isAutoNext = true;
     let isMuted = true;
@@ -1636,6 +1649,8 @@
     const followBtn = document.getElementById('followBtn');
     const followLabel = document.getElementById('followLabel');
     const followPill = document.getElementById('followPill');
+    const notInterestedBtn = document.getElementById('notInterestedBtn');
+    const hideCreatorBtn = document.getElementById('hideCreatorBtn');
     const modeBtn = document.getElementById('modeBtn');
     const modeLabel = document.getElementById('modeLabel');
     const reportBtn = document.getElementById('reportBtn');
@@ -1713,7 +1728,7 @@
       imageTimer = setTimeout(() => {
         imageTimer = null;
         finishViewTracking('complete');
-        if (isAutoNext) nextVideo();
+        if (isAutoNext) nextVideo('autoplay');
         else {
           startViewTracking(videoData[idx]);
           armImageTimer();
@@ -1745,6 +1760,15 @@
     }
 
     const preloadVideo = document.getElementById('preloadVideo');
+
+    function clearPreloadVideo() {
+      if (!preloadVideo) return;
+      try {
+        preloadVideo.pause();
+        preloadVideo.removeAttribute('src');
+        preloadVideo.load();
+      } catch (e) {}
+    }
 
     function resolveItemUrl(item) {
       if (!item || !item.url) return '';
@@ -1809,6 +1833,82 @@
       return body;
     }
 
+    function recommendationImpressionId(item) {
+      return item && item.recommendation && item.recommendation.impression_id
+        ? item.recommendation.impression_id
+        : null;
+    }
+
+    function recommendationHeaders(item, headers) {
+      const result = { ...(headers || {}) };
+      const impressionId = recommendationImpressionId(item);
+      if (impressionId) result['X-Recommendation-Impression-Id'] = impressionId;
+      return result;
+    }
+
+    function feedRequestUrl(cursor) {
+      const url = new URL('/api/reels/feed', location.origin);
+      Object.entries(feedParams).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+          url.searchParams.set(key, String(value));
+        }
+      });
+      if (cursor) url.searchParams.set('cursor', cursor);
+      return url.pathname + url.search;
+    }
+
+    function clearBlobCache() {
+      clearPreloadVideo();
+      Object.keys(blobUrlMap).forEach((key) => {
+        try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
+        delete blobUrlMap[key];
+      });
+    }
+
+    function pruneBlobCache(currentIndex) {
+      const keep = new Set([currentIndex, currentIndex + 1, currentIndex + 2].map(String));
+      Object.keys(blobUrlMap).forEach((key) => {
+        if (keep.has(key)) return;
+        try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
+        delete blobUrlMap[key];
+      });
+    }
+
+    async function fetchNextPage() {
+      if (!feedHasMore || !feedCursor) return 0;
+      if (feedPromise) return feedPromise;
+      feedPromise = (async () => {
+        try {
+          const page = await requestJson(feedRequestUrl(feedCursor));
+          const seen = new Set(videoData.map((item) => item.post_id || item.path));
+          const additions = (page.items || []).filter((item) => {
+            const key = item.post_id || item.path;
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          videoData.push(...additions);
+          feedCursor = page.next_cursor || null;
+          feedHasMore = !!page.has_more && !!feedCursor;
+          if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length + (feedHasMore ? '+' : '');
+          if (additions.length) preloadNext(idx);
+          return additions.length;
+        } catch (error) {
+          console.error('[ReelsPlayer] Next recommendation page failed:', error);
+          showFlash('FEED RETRY');
+          return 0;
+        } finally {
+          feedPromise = null;
+        }
+      })();
+      return feedPromise;
+    }
+
+    function maybeFetchMore() {
+      const remaining = videoData.length - idx - 1;
+      if (feedHasMore && remaining <= 4) fetchNextPage();
+    }
+
     async function leaveImmersiveModes() {
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) {
@@ -1865,6 +1965,22 @@
 
     function openProfile(username) {
       if (!username) return;
+      const item = videoData[idx];
+      if (item && item.creator && item.creator.username === username) {
+        requestJson('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: 'profile_open',
+            post_id: item.post_id,
+            source: 'reels',
+            client_event_id: eventId(),
+            recommendation_impression_id: recommendationImpressionId(item),
+            client_occurred_at: new Date().toISOString(),
+            context: { target_user_id: item.creator.id },
+          }),
+        }).catch(() => {});
+      }
       dispatchNavigation('/profile/' + encodeURIComponent(username));
     }
 
@@ -1992,6 +2108,8 @@
         if (pillLabel) pillLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
       }
       if (reportBtn) reportBtn.hidden = isOwnPost || !item.post_id;
+      if (notInterestedBtn) notInterestedBtn.hidden = !item.post_id;
+      if (hideCreatorBtn) hideCreatorBtn.hidden = !creator || isOwnPost;
       if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
     }
 
@@ -2013,6 +2131,7 @@
       try {
         const result = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/like', {
           method: item._liked ? 'PUT' : 'DELETE',
+          headers: recommendationHeaders(item),
         });
         item.likes = result.likes;
         item._liked = !!result.liked;
@@ -2043,6 +2162,7 @@
       try {
         const result = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/save', {
           method: item._saved ? 'PUT' : 'DELETE',
+          headers: recommendationHeaders(item),
         });
         item._saved = !!result.saved;
         item.saves = result.saves;
@@ -2062,7 +2182,23 @@
     function shareCurrentReel() {
       const item = videoData[idx];
       if (!item || !item.post_id) return;
-      const detail = { post_id: item.post_id, title: item.title || item.filename || 'Shared reel' };
+      requestJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'share',
+          post_id: item.post_id,
+          source: 'reels',
+          client_event_id: eventId(),
+          recommendation_impression_id: recommendationImpressionId(item),
+          client_occurred_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+      const detail = {
+        post_id: item.post_id,
+        title: item.title || item.filename || 'Shared reel',
+        recommendation_impression_id: recommendationImpressionId(item),
+      };
       window.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
       try {
         if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
@@ -2093,6 +2229,7 @@
       try {
         const result = await requestJson('/api/users/' + encodeURIComponent(creator.username) + '/follow', {
           method: wasFollowing ? 'DELETE' : 'PUT',
+          headers: recommendationHeaders(item),
         });
         setCreatorFollowing(creator.id, !!result.following);
       } catch (error) {
@@ -2107,6 +2244,43 @@
       }
 
       refreshEngagementUI();
+    }
+
+    async function dismissCurrentRecommendation(action) {
+      const item = videoData[idx];
+      if (!item || !item.post_id) return;
+      const creatorId = item.creator && item.creator.id;
+      try {
+        await requestJson('/api/recommendations/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: action,
+            post_id: item.post_id,
+            recommendation_impression_id: recommendationImpressionId(item),
+            client_event_id: eventId(),
+          }),
+        });
+      } catch (error) {
+        showFlash('FEEDBACK FAILED');
+        return;
+      }
+      finishViewTracking(action);
+      const oldIndex = idx;
+      videoData = videoData.filter((entry) => {
+        if (action === 'hide_creator') return !creatorId || !entry.creator || entry.creator.id !== creatorId;
+        return entry !== item;
+      });
+      clearBlobCache();
+      if (!videoData.length && feedHasMore) await fetchNextPage();
+      if (!videoData.length) {
+        showError('No more recommendations match your preferences.');
+        if (counter) counter.textContent = '0 / 0';
+        return;
+      }
+      idx = Math.min(oldIndex, videoData.length - 1);
+      showFlash(action === 'hide_creator' ? 'CREATOR HIDDEN' : 'SHOWING FEWER');
+      loadVideo(idx);
     }
     async function reportTarget(targetType, targetId) {
       if (!targetId) return;
@@ -2134,6 +2308,28 @@
     }
 
 
+    function playbackMeasurements(item, state) {
+      const durationMs = isImageItem(item)
+        ? IMAGE_DWELL_S * 1000
+        : (video && Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
+      let playbackQuality = {};
+      try {
+        const quality = video && video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+        if (quality) {
+          playbackQuality = {
+            dropped_frames: Number(quality.droppedVideoFrames || 0),
+            total_frames: Number(quality.totalVideoFrames || 0),
+          };
+        }
+      } catch (e) {}
+      return {
+        foreground_ms: Math.round(state.watchMs),
+        duration_ms: durationMs,
+        watch_ratio: durationMs ? Math.min(4, state.watchMs / durationMs) : null,
+        playback_quality: playbackQuality,
+      };
+    }
+
     function tickViewTracker() {
       const state = viewTracker;
       if (!state || state.finished) return;
@@ -2143,15 +2339,22 @@
       state.lastTick = now;
       if (!state.viewSent && state.watchMs >= state.thresholdMs) {
         state.viewSent = true;
+        const measurements = playbackMeasurements(state.item, state);
         requestJson('/api/posts/' + encodeURIComponent(state.item.post_id) + '/view', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             watch_ms: Math.round(state.watchMs),
+            foreground_ms: measurements.foreground_ms,
+            duration_ms: measurements.duration_ms,
+            watch_ratio: measurements.watch_ratio,
             position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
             completed: false,
             source: 'reels',
             client_event_id: state.viewEventId,
+            client_occurred_at: new Date().toISOString(),
+            recommendation_impression_id: recommendationImpressionId(state.item),
+            playback_quality: measurements.playback_quality,
             context: { media_type: state.item.media_type || 'video' },
           }),
         }).then((result) => {
@@ -2182,7 +2385,13 @@
           post_id: item.post_id,
           source: 'reels',
           client_event_id: eventId(),
-          context: { index: idx, media_type: item.media_type || 'video' },
+          client_occurred_at: new Date().toISOString(),
+          recommendation_impression_id: recommendationImpressionId(item),
+          context: {
+            index: idx,
+            position: item.recommendation ? item.recommendation.position : idx,
+            media_type: item.media_type || 'video',
+          },
         }),
       }).catch(() => {});
     }
@@ -2195,6 +2404,7 @@
       if (state.interval) clearInterval(state.interval);
       viewTracker = null;
       const completed = reason === 'complete';
+      const measurements = playbackMeasurements(state.item, state);
       if (completed && !state.viewSent) {
         state.viewSent = true;
         requestJson('/api/posts/' + encodeURIComponent(state.item.post_id) + '/view', {
@@ -2202,17 +2412,22 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             watch_ms: Math.round(state.watchMs),
+            foreground_ms: measurements.foreground_ms,
+            duration_ms: measurements.duration_ms,
+            watch_ratio: measurements.watch_ratio,
             position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
             completed: true,
             source: 'reels',
             client_event_id: state.viewEventId,
+            client_occurred_at: new Date().toISOString(),
+            recommendation_impression_id: recommendationImpressionId(state.item),
+            playback_quality: measurements.playback_quality,
             context: { media_type: state.item.media_type || 'video' },
           }),
         }).then((result) => {
           state.item.views = result.views;
           if (videoData[idx] === state.item) refreshEngagementUI();
         }).catch(() => {});
-        return;
       }
       if (state.watchMs <= 0) return;
       requestJson('/api/events', {
@@ -2222,10 +2437,17 @@
           event_type: completed ? 'complete' : 'skip',
           post_id: state.item.post_id,
           watch_ms: Math.round(state.watchMs),
+          foreground_ms: measurements.foreground_ms,
+          duration_ms: measurements.duration_ms,
+          watch_ratio: measurements.watch_ratio,
           position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
           completed: completed,
+          navigation_reason: completed ? 'media_ended' : reason,
           source: 'reels',
           client_event_id: eventId(),
+          client_occurred_at: new Date().toISOString(),
+          recommendation_impression_id: recommendationImpressionId(state.item),
+          playback_quality: measurements.playback_quality,
           context: { qualified_view_sent: state.viewSent, media_type: state.item.media_type || 'video' },
         }),
       }).catch(() => {});
@@ -2300,7 +2522,7 @@
       try {
         const newComment = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/comments', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: recommendationHeaders(item, { 'Content-Type': 'application/json' }),
           body: JSON.stringify({ text: text, timestamp: normalizedTimestamp }),
         });
         if (!item.comments) item.comments = [];
@@ -2647,6 +2869,8 @@
     if (shareBtn) shareBtn.addEventListener('click', () => shareCurrentReel());
     if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
     if (followPill) followPill.addEventListener('click', () => followCurrentCreator());
+    if (notInterestedBtn) notInterestedBtn.addEventListener('click', () => dismissCurrentRecommendation('not_interested'));
+    if (hideCreatorBtn) hideCreatorBtn.addEventListener('click', () => dismissCurrentRecommendation('hide_creator'));
     if (reportBtn) reportBtn.addEventListener('click', () => reportTarget('post', videoData[idx] && videoData[idx].post_id));
     if (metaCreator) {
       metaCreator.addEventListener('click', () => {
@@ -2689,11 +2913,18 @@
     }
 
     function preloadNext(currentIndex) {
-      if (!videoData || videoData.length <= 1) return;
-      const nextIdx = (currentIndex + 1) % videoData.length;
+      if (!videoData || videoData.length <= 1) {
+        clearPreloadVideo();
+        return;
+      }
+      const nextIdx = currentIndex + 1;
       const nextItem = videoData[nextIdx];
-      if (!nextItem) return;
+      if (!nextItem) {
+        clearPreloadVideo();
+        return;
+      }
       if (isImageItem(nextItem)) {
+        clearPreloadVideo();
         // Warm the browser cache for the still; the <video> preloader can't
         // decode image files.
         try {
@@ -2743,12 +2974,18 @@
       hideError();
       clearImageTimer();
       if (typeof resetPan === 'function') resetPan();
-      if (index < 0) index = videoData.length - 1;
-      if (index >= videoData.length) index = 0;
+      if (!videoData.length) {
+        showError('No recommendations are currently available.');
+        if (counter) counter.textContent = '0 / 0';
+        return;
+      }
+      if (index < 0) index = 0;
+      if (index >= videoData.length) index = videoData.length - 1;
       idx = index;
+      pruneBlobCache(idx);
 
       const item = videoData[idx];
-      if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length;
+      if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length + (feedHasMore ? '+' : '');
       metaFolder.textContent = '📁 ' + (item.folder || 'root');
       metaTitle.textContent = item.title || item.filename;
       try {
@@ -2757,6 +2994,7 @@
       metaSize.textContent = item.size || '';
       refreshEngagementUI();
       startViewTracking(item);
+      maybeFetchMore();
 
       // Update comments display for this reel
       renderDrawerComments();
@@ -2894,7 +3132,7 @@
     });
 
     skipErrorBtn.addEventListener('click', () => {
-      nextVideo();
+      nextVideo('playback_error');
     });
 
     // Seek Relative (A / D controls: -5s / +5s)
@@ -2958,15 +3196,16 @@
       showFlash(isAutoNext ? '🔄 AUTO' : '🔁 LOOP');
     }
 
-    // Preload All Videos
+    // Preload the bounded look-ahead window.
     function updatePreloadStatus() {
-      const total = Math.min(2, (videoData && videoData.length) || 0);
+      const total = Math.min(2, Math.max(0, ((videoData && videoData.length) || 0) - idx - 1));
+      const completed = Math.min(preloadedCount, total);
       if (preloadStatus) {
-        preloadStatus.textContent = `⚡ ${preloadedCount}/${total}`;
+        preloadStatus.textContent = `⚡ ${completed}/${total}`;
         preloadStatus.style.display = 'inline-block';
       }
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onPreloadProgress) {
-        WebXRVR.onPreloadProgress(preloadedCount, total);
+        WebXRVR.onPreloadProgress(completed, total);
       }
     }
 
@@ -2978,15 +3217,16 @@
     // is refetched each call so navigating updates the cache.
     async function preloadAllVideos() {
       if (isPreloading || !videoData || videoData.length === 0) return;
+      if (feedHasMore && videoData.length - idx - 1 < 2) await fetchNextPage();
       isPreloading = true;
       if (preloadStatus) preloadStatus.style.display = 'inline-block';
       if (preloadLabel) preloadLabel.textContent = 'LOADING...';
       preloadedCount = 0;
-      const total = Math.min(2, videoData.length);
+      const total = Math.min(2, Math.max(0, videoData.length - idx - 1));
       updatePreloadStatus();
 
       for (let off = 1; off <= total; off++) {
-        const i = (idx + off) % videoData.length;
+        const i = idx + off;
         if (blobUrlMap[i]) {
           preloadedCount++;
           updatePreloadStatus();
@@ -3008,10 +3248,23 @@
     }
 
     // Navigation
-    function nextVideo() {
-      loadVideo(idx + 1);
+    async function nextVideo(reason) {
+      finishViewTracking(reason || 'manual_next');
+      if (idx + 1 >= videoData.length && feedHasMore) {
+        await fetchNextPage();
+      }
+      if (idx + 1 < videoData.length) {
+        loadVideo(idx + 1);
+      } else {
+        showFlash('END OF FEED');
+      }
     }
     function prevVideo() {
+      if (idx <= 0) {
+        showFlash('START OF FEED');
+        return;
+      }
+      finishViewTracking('manual_previous');
       loadVideo(idx - 1);
     }
 
@@ -3295,7 +3548,7 @@
     video.addEventListener('ended', () => {
       finishViewTracking('complete');
       if (isAutoNext) {
-        nextVideo();
+        nextVideo('autoplay');
       } else {
         video.currentTime = 0;
         startViewTracking(videoData[idx]);
@@ -3560,8 +3813,9 @@
     window.__sxGlowInterval = setInterval(updateDesktopGlow, 140);
 
     window.__sxReelsRuntimeCleanup = function () {
-      finishViewTracking('skip');
+      finishViewTracking('unload');
       clearImageTimer();
+      clearBlobCache();
       if (tickerHideTimer) clearTimeout(tickerHideTimer);
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) WebXRVR.exitVR();
@@ -3571,7 +3825,8 @@
     };
 
     // Initial Load
-    loadVideo(0);
+    if (videoData.length) loadVideo(0);
+    else showError('No recommendations are currently available.');
     loadCurrentUser();
   })();
 </script>

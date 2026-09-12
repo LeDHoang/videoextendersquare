@@ -18,9 +18,11 @@ from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import job_manager
-from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf
+from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, require_auth_csrf
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
+from server.social.models import Post
+from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import get_post_by_reference, metadata_for_paths, reel_records, scoped_media_paths
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
@@ -995,6 +997,170 @@ def _build_payload(
     return payload
 
 
+def _recommendation_feed_data(
+    *,
+    request: Request,
+    response: Response,
+    db: Session,
+    viewer: AuthContext | None,
+    surface: str | None = None,
+    folder: str | None = None,
+    codec: str | None = "hevc",
+    search: str = "",
+    sort: str = "for_you",
+    tunnel: str = "",
+    refresh: bool = False,
+    media: str | None = None,
+    tag: str | None = None,
+    location: str | None = None,
+    feed: str | None = None,
+    author: str | None = None,
+    post: str | None = None,
+    cursor: str | None = None,
+    limit: int = 12,
+) -> dict:
+    """Build one stable materialized feed page and hydrate its media payload."""
+    if refresh:
+        _scan_cache["at"] = 0.0
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    requested_surface = (surface or "").strip().casefold()
+    if post or requested_surface == "related":
+        requested_surface = "related"
+    elif feed == "following" or requested_surface == "following":
+        requested_surface = "following"
+    elif requested_surface in {"", "discover", "for_you"}:
+        requested_surface = "for_you"
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_FEED", "message": "Surface must be for_you, following, or related."},
+        )
+    if requested_surface == "following" and not viewer_id:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."},
+        )
+
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    seed_post = get_post_by_reference(db, post_id=post) if post else None
+    if post and not seed_post:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "POST_NOT_FOUND", "message": "Reel not found."},
+        )
+    if requested_surface == "related":
+        videos = _apply_filters(raw, folder, "", "newest", media)
+        if seed_post and seed_post.media_path not in {video["rel_path"] for video in videos}:
+            seed_video = next((video for video in raw if video["rel_path"] == seed_post.media_path), None)
+            if seed_video:
+                videos.insert(0, seed_video)
+    else:
+        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
+
+    scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author)
+    if scoped_paths is not None and requested_surface != "related":
+        positions = {value: index for index, value in enumerate(scoped_paths)}
+        videos = [video for video in videos if video["rel_path"] in positions]
+        videos.sort(key=lambda video: positions[video["rel_path"]])
+
+    paths = [video["rel_path"] for video in videos]
+    path_to_post_id = {
+        media_path: post_id
+        for media_path, post_id in db.query(Post.media_path, Post.id)
+        .filter(Post.media_path.in_(paths) if paths else False)
+        .all()
+    }
+    allowed_post_ids = set(path_to_post_id.values())
+    explicit_scope = bool(search.strip() or tag or location or author)
+    personalized = requested_surface == "for_you" and sort in {"for_you", "personalized"} and not explicit_scope
+    manual_order = None
+    if requested_surface == "for_you" and not personalized:
+        manual_order = [path_to_post_id[path] for path in paths if path in path_to_post_id]
+
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
+    feed_filters = {
+        "folder": folder or "",
+        "codec": _codec_key(codec),
+        "search": search.strip(),
+        "sort": sort,
+        "media": media or "all",
+        "tag": _tag_slug(tag) if tag else "",
+        "location": location or "",
+        "feed": feed or "",
+        "author": author or "",
+        "post": post or "",
+    }
+    try:
+        page = get_reel_page(
+            db,
+            actor=actor,
+            surface=requested_surface,
+            seed_post_id=seed_post.id if seed_post else None,
+            allowed_post_ids=allowed_post_ids,
+            manual_order=manual_order,
+            filters=feed_filters,
+            cursor=cursor,
+            limit=limit,
+        )
+    except RecommendationCursorError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_CURSOR", "message": str(exc), "field": "cursor"},
+        ) from exc
+
+    post_id_to_video = {
+        path_to_post_id[video["rel_path"]]: video
+        for video in videos
+        if video["rel_path"] in path_to_post_id
+    }
+    selected_videos = [
+        post_id_to_video[item.target_id]
+        for item in page.items
+        if item.target_id in post_id_to_video
+    ]
+    hydrated = _build_payload(selected_videos, codec, tunnel=tunnel, viewer_id=viewer_id)
+    payload_by_post = {item.get("post_id"): item for item in hydrated if item.get("post_id")}
+    items = []
+    for recommendation in page.items:
+        item = payload_by_post.get(recommendation.target_id)
+        if not item:
+            continue
+        item["recommendation"] = {
+            "impression_id": recommendation.impression_id,
+            "position": recommendation.position,
+            "reason_key": recommendation.reason_key,
+        }
+        items.append(item)
+    return {
+        "surface": requested_surface,
+        "session_id": page.session_id,
+        "request_id": page.request_id,
+        "algorithm_version": page.algorithm_version,
+        "items": items,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+        "restarted": page.restarted,
+        "total_eligible": len(videos),
+        "feed_params": {
+            "surface": requested_surface,
+            "folder": folder,
+            "codec": codec,
+            "search": search,
+            "sort": sort,
+            "tunnel": tunnel,
+            "media": media,
+            "tag": tag,
+            "location": location,
+            "feed": feed,
+            "author": author,
+            "post": post,
+            "limit": max(1, min(int(limit), 24)),
+        },
+    }
+
+
 @router.get("")
 def list_reels(
     folder: str | None = None,
@@ -1045,6 +1211,52 @@ def list_reels(
         "active_tag": _tag_slug(tag) if tag else None,
         "videos": _build_payload(videos, codec, viewer_id=viewer_id),
     }
+
+
+@router.get("/feed")
+def reels_feed(
+    request: Request,
+    response: Response,
+    surface: str = "for_you",
+    folder: str | None = None,
+    codec: str | None = "hevc",
+    search: str = "",
+    sort: str = "for_you",
+    tunnel: str = "",
+    refresh: bool = False,
+    media: str | None = None,
+    tag: str | None = None,
+    location: str | None = None,
+    feed: str | None = None,
+    author: str | None = None,
+    post: str | None = None,
+    cursor: str | None = None,
+    limit: int = 12,
+    viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return _recommendation_feed_data(
+        request=request,
+        response=response,
+        db=db,
+        viewer=viewer,
+        surface=surface,
+        folder=folder,
+        codec=codec,
+        search=search,
+        sort=sort,
+        tunnel=tunnel,
+        refresh=refresh,
+        media=media,
+        tag=tag,
+        location=location,
+        feed=feed,
+        author=author,
+        post=post,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.get("/tags")
@@ -1283,6 +1495,7 @@ def get_comments(
 @router.post("/comments")
 def create_comment(
     req: CommentCreate,
+    request: Request,
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -1295,6 +1508,7 @@ def create_comment(
     return create_post_comment(
         post.id,
         CommentRequest(text=req.text, timestamp=req.timestamp),
+        request,
         context,
         db,
     )
@@ -1508,39 +1722,46 @@ def _json_for_script(payload) -> str:
 
 @router.get("/player", response_class=HTMLResponse)
 def reels_player(
+    request: Request,
+    response: Response,
     folder: str | None = None,
     codec: str | None = "hevc",
     search: str = "",
-    sort: str = "newest",
+    sort: str = "for_you",
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
     media: str | None = None,
     tag: str | None = None,
+    location: str | None = None,
     feed: str | None = None,
     author: str | None = None,
+    post: str | None = None,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
-    if refresh:
-        _scan_cache["at"] = 0.0
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    videos = _apply_filters(raw, folder, search, sort, media, tag)
-    scoped_paths = scoped_media_paths(
-        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+    feed_data = _recommendation_feed_data(
+        request=request,
+        response=response,
+        db=db,
+        viewer=viewer,
+        folder=folder,
+        codec=codec,
+        search=search,
+        sort=sort,
+        tunnel=tunnel,
+        refresh=refresh,
+        media=media,
+        tag=tag,
+        location=location,
         feed=feed,
         author=author,
+        post=post,
     )
-    if feed == "following" and not isinstance(viewer, AuthContext):
-        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
-    if scoped_paths is not None:
-        positions = {value: index for index, value in enumerate(scoped_paths)}
-        videos = [video for video in videos if video["rel_path"] in positions]
-        videos.sort(key=lambda video: positions[video["rel_path"]])
-    payload = _build_payload(videos, codec, tunnel=tunnel, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None)
+    payload = feed_data["items"]
     try:
-        start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
+        start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
         start_idx = 0
 
@@ -1560,13 +1781,18 @@ def reels_player(
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
 
     html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
+    html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
     html = html.replace("loadVideo(0);", f"loadVideo(__SX_START_INDEX__);")
     html = html.replace("__SX_START_INDEX__", str(start_idx))
-    return Response(
+    result = Response(
         content=html,
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
     )
+    for header, value in response.raw_headers:
+        if header.lower() == b"set-cookie":
+            result.raw_headers.append((header, value))
+    return result
 
 
 def _scope_rules(css: str, root: str = "#sxReelsRoot") -> list[str]:
@@ -1644,10 +1870,12 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
 
 @router.get("/player-inline")
 def reels_player_inline(
+    request: Request,
+    response: Response,
     folder: str | None = None,
     codec: str | None = "hevc",
     search: str = "",
-    sort: str = "newest",
+    sort: str = "for_you",
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
@@ -1662,31 +1890,27 @@ def reels_player_inline(
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
-    if refresh:
-        _scan_cache["at"] = 0.0
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    if post:
-        target = get_post_by_reference(db, post_id=post)
-        videos = [item for item in raw if target and item["rel_path"] == target.media_path]
-        if not videos:
-            raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
-    else:
-        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
-    scoped_paths = scoped_media_paths(
-        viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+    feed_data = _recommendation_feed_data(
+        request=request,
+        response=response,
+        db=db,
+        viewer=viewer,
+        folder=folder,
+        codec=codec,
+        search=search,
+        sort=sort,
+        tunnel=tunnel,
+        refresh=refresh,
+        media=media,
+        tag=tag,
+        location=location,
         feed=feed,
         author=author,
+        post=post,
     )
-    if feed == "following" and not isinstance(viewer, AuthContext):
-        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
-    if scoped_paths is not None and not post:
-        positions = {value: index for index, value in enumerate(scoped_paths)}
-        videos = [video for video in videos if video["rel_path"] in positions]
-        videos.sort(key=lambda video: positions[video["rel_path"]])
-    payload = _build_payload(videos, codec, tunnel=tunnel, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None)
+    payload = feed_data["items"]
     try:
-        start_idx = max(0, min(int(start), max(0, len(payload) - 1)))
+        start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
         start_idx = 0
 
@@ -1712,7 +1936,10 @@ def reels_player_inline(
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))
         else:
-            scripts.append(tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload)))
+            scripts.append(
+                tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
+                .replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
+            )
 
     if scripts:
         init = scripts[-1]
@@ -1792,13 +2019,22 @@ def reels_player_inline(
     # Strip <script> tags from body_html so innerHTML gets clean markup without unparsed placeholders
     body_html = re.sub(r"<script.*?>.*?</script>", "", body_html, flags=re.S)
 
-    return JSONResponse(
+    result = JSONResponse(
         {
-            "count": len(videos),
+            "count": len(payload),
             "start": start_idx,
+            "feed": {
+                key: value
+                for key, value in feed_data.items()
+                if key not in {"items", "feed_params"}
+            },
             "css": css,
             "html": body_html,
             "scripts": scripts,
         },
         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
     )
+    for header, value in response.raw_headers:
+        if header.lower() == b"set-cookie":
+            result.raw_headers.append((header, value))
+    return result

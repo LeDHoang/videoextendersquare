@@ -460,8 +460,15 @@ def record_event(
     anonymous_id: str | None = None,
     source: str = "unknown",
     watch_ms: int | None = None,
+    foreground_ms: int | None = None,
+    duration_ms: int | None = None,
+    watch_ratio: float | None = None,
     position_ms: int | None = None,
     completed: bool = False,
+    navigation_reason: str | None = None,
+    playback_quality: dict | None = None,
+    client_occurred_at: datetime | None = None,
+    recommendation_impression_id: str | None = None,
     context: dict | None = None,
     client_event_id: str | None = None,
 ) -> EngagementEvent | None:
@@ -472,19 +479,57 @@ def record_event(
         existing = db.query(EngagementEvent.id).filter(EngagementEvent.client_event_id == client_event_id[:64]).first()
         if existing:
             return None
+    recommendation_request_id = None
+    recommendation_session_id = None
+    if recommendation_impression_id:
+        from .recommendations.events import resolve_attribution
+
+        impression, duplicate = resolve_attribution(
+            db,
+            impression_id=recommendation_impression_id,
+            user_id=user_id,
+            anonymous_id=anonymous_id,
+            post_id=post_id,
+            event_type=event_type,
+            context=dict(context or {}),
+        )
+        if duplicate:
+            return None
+        recommendation_impression_id = impression.id
+        recommendation_request_id = impression.request_id
+        recommendation_session_id = impression.session_id
+    bounded_duration = max(0, int(duration_ms)) if duration_ms is not None else None
+    bounded_watch = max(0, int(watch_ms)) if watch_ms is not None else None
+    if watch_ratio is None and bounded_duration and bounded_watch is not None:
+        watch_ratio = bounded_watch / bounded_duration
+    bounded_ratio = max(0.0, min(4.0, float(watch_ratio))) if watch_ratio is not None else None
     row = EngagementEvent(
         client_event_id=client_event_id[:64] if client_event_id else None,
         user_id=user_id,
         anonymous_id=anonymous_id,
         post_id=post_id,
+        recommendation_impression_id=recommendation_impression_id,
+        recommendation_request_id=recommendation_request_id,
+        recommendation_session_id=recommendation_session_id,
         event_type=event_type[:40],
         source=str(source or "unknown")[:40],
-        watch_ms=max(0, int(watch_ms)) if watch_ms is not None else None,
+        watch_ms=bounded_watch,
+        foreground_ms=max(0, int(foreground_ms)) if foreground_ms is not None else bounded_watch,
+        duration_ms=bounded_duration,
+        watch_ratio=bounded_ratio,
         position_ms=max(0, int(position_ms)) if position_ms is not None else None,
         completed=bool(completed),
+        navigation_reason=str(navigation_reason or "")[:32] or None,
+        playback_quality=dict(playback_quality or {}),
+        client_occurred_at=client_occurred_at,
+        schema_version=2,
         context=dict(context or {}),
     )
     db.add(row)
+    db.flush()
+    from .recommendations.events import update_aggregates
+
+    update_aggregates(db, row)
     return row
 
 

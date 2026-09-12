@@ -37,6 +37,7 @@ from server.social.auth import (
     require_auth_csrf,
     set_auth_cookies,
     validate_origin,
+    validate_csrf,
     validate_password,
     validate_username,
     verify_password,
@@ -303,8 +304,15 @@ class CommentRequest(BaseModel):
 
 class ViewRequest(BaseModel):
     watch_ms: int = 0
+    foreground_ms: int | None = None
+    duration_ms: int | None = None
+    watch_ratio: float | None = None
     position_ms: int | None = None
     completed: bool = False
+    navigation_reason: str | None = None
+    playback_quality: dict = Field(default_factory=dict)
+    client_occurred_at: datetime | None = None
+    recommendation_impression_id: str | None = None
     source: str = "reels"
     client_event_id: str | None = None
     context: dict = Field(default_factory=dict)
@@ -314,11 +322,26 @@ class EventRequest(BaseModel):
     event_type: str
     post_id: str | None = None
     watch_ms: int | None = None
+    foreground_ms: int | None = None
+    duration_ms: int | None = None
+    watch_ratio: float | None = None
     position_ms: int | None = None
     completed: bool = False
+    navigation_reason: str | None = None
+    playback_quality: dict = Field(default_factory=dict)
+    client_occurred_at: datetime | None = None
+    recommendation_impression_id: str | None = None
     source: str = "unknown"
     client_event_id: str | None = None
     context: dict = Field(default_factory=dict)
+
+
+class RecommendationFeedbackRequest(BaseModel):
+    action: str
+    post_id: str | None = None
+    creator_id: str | None = None
+    recommendation_impression_id: str | None = None
+    client_event_id: str | None = None
 
 
 @router.post("/api/auth/register")
@@ -605,6 +628,7 @@ def following(
 @router.put("/api/users/{username}/follow")
 def follow_user(
     username: str,
+    request: Request,
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -622,7 +646,25 @@ def follow_user(
         db.add(Follow(follower_id=context.user.id, followee_id=target.id))
         context.user.following_count = max(0, int(context.user.following_count or 0) + 1)
         target.follower_count = max(0, int(target.follower_count or 0) + 1)
-        record_event(db, event_type="follow", user_id=context.user.id, source="profile", context={"target_user_id": target.id})
+        recommendation_impression_id = request.headers.get("x-recommendation-impression-id")
+        event_post_id = None
+        if recommendation_impression_id:
+            from server.social.models import RecommendationImpression
+
+            impression = db.get(RecommendationImpression, recommendation_impression_id)
+            event_post_id = impression.post_id if impression else None
+        try:
+            record_event(
+                db,
+                event_type="follow",
+                post_id=event_post_id,
+                user_id=context.user.id,
+                source="recommendation" if recommendation_impression_id else "profile",
+                recommendation_impression_id=recommendation_impression_id,
+                context={"target_user_id": target.id},
+            )
+        except ValueError:
+            error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
         try:
             db.commit()
         except IntegrityError:
@@ -634,6 +676,7 @@ def follow_user(
 @router.delete("/api/users/{username}/follow")
 def unfollow_user(
     username: str,
+    request: Request,
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -646,7 +689,18 @@ def unfollow_user(
         db.delete(row)
         context.user.following_count = max(0, int(context.user.following_count or 0) - 1)
         target.follower_count = max(0, int(target.follower_count or 0) - 1)
-        record_event(db, event_type="unfollow", user_id=context.user.id, source="profile", context={"target_user_id": target.id})
+        recommendation_impression_id = request.headers.get("x-recommendation-impression-id")
+        try:
+            record_event(
+                db,
+                event_type="unfollow",
+                user_id=context.user.id,
+                source="recommendation" if recommendation_impression_id else "profile",
+                recommendation_impression_id=recommendation_impression_id,
+                context={"target_user_id": target.id},
+            )
+        except ValueError:
+            error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
         db.commit()
     return {"following": False, "follower_count": target.follower_count}
 
@@ -747,53 +801,129 @@ def delete_post(
     return {"ok": True}
 
 
-def set_post_like(db: Session, post: Post, user_id: str, enabled: bool) -> dict:
+def set_post_like(
+    db: Session,
+    post: Post,
+    user_id: str,
+    enabled: bool,
+    recommendation_impression_id: str | None = None,
+) -> dict:
     row = db.query(PostLike).filter(PostLike.user_id == user_id, PostLike.post_id == post.id).first()
     if enabled and not row:
         db.add(PostLike(user_id=user_id, post_id=post.id))
         post.like_count = max(post.legacy_like_count, int(post.like_count or 0) + 1)
-        record_event(db, event_type="like", post_id=post.id, user_id=user_id, source="reels")
+        record_event(
+            db,
+            event_type="like",
+            post_id=post.id,
+            user_id=user_id,
+            source="reels",
+            recommendation_impression_id=recommendation_impression_id,
+        )
     elif not enabled and row:
         db.delete(row)
         post.like_count = max(post.legacy_like_count, int(post.like_count or 0) - 1)
-        record_event(db, event_type="unlike", post_id=post.id, user_id=user_id, source="reels")
+        record_event(
+            db,
+            event_type="unlike",
+            post_id=post.id,
+            user_id=user_id,
+            source="reels",
+            recommendation_impression_id=recommendation_impression_id,
+        )
     db.commit()
     return {"post_id": post.id, "likes": post.like_count, "liked": enabled, "liked_by_me": enabled}
 
 
 @router.put("/api/posts/{post_id}/like")
-def like_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
+def like_post(post_id: str, request: Request, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
     rate_limiter.check(db, f"like:{context.user.id}", 300, 60)
-    return set_post_like(db, get_visible_post(db, post_id, context.user.id), context.user.id, True)
+    try:
+        return set_post_like(
+            db,
+            get_visible_post(db, post_id, context.user.id),
+            context.user.id,
+            True,
+            request.headers.get("x-recommendation-impression-id"),
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
 
 
 @router.delete("/api/posts/{post_id}/like")
-def unlike_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_like(db, get_visible_post(db, post_id, context.user.id), context.user.id, False)
+def unlike_post(post_id: str, request: Request, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
+    try:
+        return set_post_like(
+            db,
+            get_visible_post(db, post_id, context.user.id),
+            context.user.id,
+            False,
+            request.headers.get("x-recommendation-impression-id"),
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
 
 
-def set_post_save(db: Session, post: Post, user_id: str, enabled: bool) -> dict:
+def set_post_save(
+    db: Session,
+    post: Post,
+    user_id: str,
+    enabled: bool,
+    recommendation_impression_id: str | None = None,
+) -> dict:
     row = db.query(PostSave).filter(PostSave.user_id == user_id, PostSave.post_id == post.id).first()
     if enabled and not row:
         db.add(PostSave(user_id=user_id, post_id=post.id))
         post.save_count = max(0, int(post.save_count or 0) + 1)
-        record_event(db, event_type="save", post_id=post.id, user_id=user_id, source="reels")
+        record_event(
+            db,
+            event_type="save",
+            post_id=post.id,
+            user_id=user_id,
+            source="reels",
+            recommendation_impression_id=recommendation_impression_id,
+        )
     elif not enabled and row:
         db.delete(row)
         post.save_count = max(0, int(post.save_count or 0) - 1)
-        record_event(db, event_type="unsave", post_id=post.id, user_id=user_id, source="reels")
+        record_event(
+            db,
+            event_type="unsave",
+            post_id=post.id,
+            user_id=user_id,
+            source="reels",
+            recommendation_impression_id=recommendation_impression_id,
+        )
     db.commit()
     return {"post_id": post.id, "saves": post.save_count, "saved": enabled, "saved_by_me": enabled}
 
 
 @router.put("/api/posts/{post_id}/save")
-def save_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_save(db, get_visible_post(db, post_id, context.user.id), context.user.id, True)
+def save_post(post_id: str, request: Request, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
+    try:
+        return set_post_save(
+            db,
+            get_visible_post(db, post_id, context.user.id),
+            context.user.id,
+            True,
+            request.headers.get("x-recommendation-impression-id"),
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
 
 
 @router.delete("/api/posts/{post_id}/save")
-def unsave_post(post_id: str, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
-    return set_post_save(db, get_visible_post(db, post_id, context.user.id), context.user.id, False)
+def unsave_post(post_id: str, request: Request, context: AuthContext = Depends(require_auth_csrf), db: Session = Depends(get_db)):
+    try:
+        return set_post_save(
+            db,
+            get_visible_post(db, post_id, context.user.id),
+            context.user.id,
+            False,
+            request.headers.get("x-recommendation-impression-id"),
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
 
 
 @router.get("/api/posts/{post_id}/comments")
@@ -827,6 +957,7 @@ def list_comments(
 def create_post_comment(
     post_id: str,
     req: CommentRequest,
+    request: Request,
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
@@ -848,7 +979,17 @@ def create_post_comment(
     )
     db.add(comment)
     post.comment_count = max(0, int(post.comment_count or 0) + 1)
-    record_event(db, event_type="comment", post_id=post.id, user_id=context.user.id, source="reels")
+    try:
+        record_event(
+            db,
+            event_type="comment",
+            post_id=post.id,
+            user_id=context.user.id,
+            source="reels",
+            recommendation_impression_id=request.headers.get("x-recommendation-impression-id"),
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
     db.commit()
     db.refresh(comment)
     comment.author = context.user
@@ -927,19 +1068,29 @@ def record_view(
             db.add(ViewDedup(post_id=post.id, viewer_key=key, window_date=today))
             post.view_count = max(post.legacy_view_count, int(post.view_count or 0) + 1)
             counted = True
-    record_event(
-        db,
-        event_type="view" if qualified else "playback",
-        post_id=post.id,
-        user_id=viewer_id,
-        anonymous_id=None if viewer_id else anonymous_hash,
-        source=req.source,
-        watch_ms=req.watch_ms,
-        position_ms=req.position_ms,
-        completed=req.completed,
-        context=req.context,
-        client_event_id=req.client_event_id,
-    )
+    try:
+        record_event(
+            db,
+            event_type="view" if qualified else "playback",
+            post_id=post.id,
+            user_id=viewer_id,
+            anonymous_id=None if viewer_id else anonymous_hash,
+            source=req.source,
+            watch_ms=req.watch_ms,
+            foreground_ms=req.foreground_ms,
+            duration_ms=req.duration_ms,
+            watch_ratio=req.watch_ratio,
+            position_ms=req.position_ms,
+            completed=req.completed,
+            navigation_reason=req.navigation_reason,
+            playback_quality=req.playback_quality,
+            client_occurred_at=req.client_occurred_at,
+            recommendation_impression_id=req.recommendation_impression_id,
+            context=req.context,
+            client_event_id=req.client_event_id,
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
     try:
         db.commit()
     except IntegrityError:
@@ -960,7 +1111,8 @@ def create_event(
     validate_origin(request)
     allowed = {
         "impression", "open", "playback", "view", "complete", "skip",
-        "search_impression", "search_select", "share",
+        "search_impression", "search_select", "share", "share_sent",
+        "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
     }
     event_type = req.event_type.strip().casefold()
     if event_type not in allowed:
@@ -968,21 +1120,134 @@ def create_event(
     viewer_id = auth_user_id(context)
     post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
     anonymous_hash = ensure_anonymous_cookie(request, response)
-    row = record_event(
-        db,
-        event_type=event_type,
-        post_id=post.id if post else None,
-        user_id=viewer_id,
-        anonymous_id=None if viewer_id else anonymous_hash,
-        source=req.source,
-        watch_ms=req.watch_ms,
-        position_ms=req.position_ms,
-        completed=req.completed,
-        context=req.context,
-        client_event_id=req.client_event_id,
-    )
+    try:
+        row = record_event(
+            db,
+            event_type=event_type,
+            post_id=post.id if post else None,
+            user_id=viewer_id,
+            anonymous_id=None if viewer_id else anonymous_hash,
+            source=req.source,
+            watch_ms=req.watch_ms,
+            foreground_ms=req.foreground_ms,
+            duration_ms=req.duration_ms,
+            watch_ratio=req.watch_ratio,
+            position_ms=req.position_ms,
+            completed=req.completed,
+            navigation_reason=req.navigation_reason,
+            playback_quality=req.playback_quality,
+            client_occurred_at=req.client_occurred_at,
+            recommendation_impression_id=req.recommendation_impression_id,
+            context=req.context,
+            client_event_id=req.client_event_id,
+        )
+    except ValueError:
+        error(422, "INVALID_ATTRIBUTION", "Recommendation attribution is invalid.")
     db.commit()
     return {"accepted": row is not None}
+
+
+@router.post("/api/recommendations/feedback")
+def recommendation_feedback(
+    req: RecommendationFeedbackRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    context: AuthContext | None = Depends(get_optional_auth),
+):
+    from server.social.recommendations import (
+        actor_identity,
+        dismiss_creator_recommendation,
+        dismiss_recommendation,
+    )
+
+    validate_origin(request)
+    if context:
+        validate_csrf(request, context)
+    viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
+    action = req.action.strip().casefold()
+    post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
+    try:
+        if post and action in {"not_interested", "hide_creator"}:
+            dismissal = dismiss_recommendation(db, actor=actor, action=action, post=post)
+            creator_id = post.owner_id
+        elif req.creator_id and action in {"dismiss_creator", "hide_creator"}:
+            creator = db.query(User).filter(User.id == req.creator_id, User.status == "active").first()
+            if not creator or users_blocked(db, viewer_id, creator.id):
+                error(404, "USER_NOT_FOUND", "Creator not found.")
+            dismissal = dismiss_creator_recommendation(
+                db,
+                actor=actor,
+                creator_id=creator.id,
+                reason=action,
+            )
+            creator_id = creator.id
+        else:
+            error(422, "INVALID_RECOMMENDATION_FEEDBACK", "A matching post or creator target is required.")
+        event = record_event(
+            db,
+            event_type=action,
+            post_id=post.id if post else None,
+            user_id=viewer_id,
+            anonymous_id=None if viewer_id else anonymous_hash,
+            source="reels",
+            recommendation_impression_id=req.recommendation_impression_id,
+            client_event_id=req.client_event_id,
+            context={"target_user_id": creator_id},
+        )
+    except ValueError:
+        error(422, "INVALID_RECOMMENDATION_FEEDBACK", "Recommendation feedback or attribution is invalid.")
+    db.commit()
+    return {
+        "accepted": event is not None,
+        "action": dismissal.reason,
+        "post_id": post.id if post else None,
+        "creator_id": creator_id if dismissal.target_type == "creator" else None,
+    }
+
+
+@router.get("/api/recommendations/creators")
+def recommended_creators(
+    request: Request,
+    response: Response,
+    cursor: str | None = None,
+    limit: int = 8,
+    db: Session = Depends(get_db),
+    context: AuthContext | None = Depends(get_optional_auth),
+):
+    from server.social.recommendations import RecommendationCursorError, actor_identity, get_creator_page
+
+    viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
+    try:
+        page, creators = get_creator_page(db, actor=actor, cursor=cursor, limit=limit)
+    except RecommendationCursorError as exc:
+        error(422, "INVALID_CURSOR", str(exc), "cursor")
+    response.headers["Cache-Control"] = "no-store"
+    items = []
+    for recommendation, creator in zip(page.items, creators):
+        items.append(
+            {
+                "creator": creator,
+                "recommendation": {
+                    "impression_id": recommendation.impression_id,
+                    "position": recommendation.position,
+                    "reason_key": recommendation.reason_key,
+                },
+            }
+        )
+    return {
+        "session_id": page.session_id,
+        "request_id": page.request_id,
+        "algorithm_version": page.algorithm_version,
+        "items": items,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+        "restarted": page.restarted,
+    }
 
 
 @router.get("/api/feed")
