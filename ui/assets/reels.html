@@ -1610,15 +1610,24 @@
 </div>
 
 <script>__QUEST_CONTROLLER_IMG_JS__</script>
+<script>__REELS_FEED_STATE_JS__</script>
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
     let videoData = __VIDEO_DATA_JSON__;
     const initialFeedState = __FEED_STATE_JSON__;
-    const feedParams = (initialFeedState && initialFeedState.feed_params) || {};
+    const FeedState = window.ReelsFeedState;
+    let feedParams = { ...((initialFeedState && initialFeedState.feed_params) || {}) };
     let feedCursor = initialFeedState && initialFeedState.next_cursor;
     let feedHasMore = !!(initialFeedState && initialFeedState.has_more);
     let feedPromise = null;
+    let feedRequestController = null;
+    let feedTransitionController = null;
+    let preloadController = null;
+    let feedGeneration = 0;
+    let originalFeedSnapshot = null;
+    let activeLocationFeed = null;
+    let earthEntryPlayback = null;
     let idx = 0;
     let isAutoNext = true;
     let isMuted = true;
@@ -1846,15 +1855,28 @@
       return result;
     }
 
-    function feedRequestUrl(cursor) {
+    function feedRequestUrl(cursor, params) {
       const url = new URL('/api/reels/feed', location.origin);
-      Object.entries(feedParams).forEach(([key, value]) => {
+      Object.entries(params || feedParams).forEach(([key, value]) => {
         if (value !== null && value !== undefined && value !== '') {
           url.searchParams.set(key, String(value));
         }
       });
       if (cursor) url.searchParams.set('cursor', cursor);
       return url.pathname + url.search;
+    }
+
+    function abortFeedWork() {
+      feedGeneration = FeedState.nextGeneration(feedGeneration);
+      if (feedRequestController) feedRequestController.abort();
+      if (feedTransitionController) feedTransitionController.abort();
+      if (preloadController) preloadController.abort();
+      feedRequestController = null;
+      feedTransitionController = null;
+      preloadController = null;
+      feedPromise = null;
+      isPreloading = false;
+      clearPreloadVideo();
     }
 
     function clearBlobCache() {
@@ -1877,9 +1899,14 @@
     async function fetchNextPage() {
       if (!feedHasMore || !feedCursor) return 0;
       if (feedPromise) return feedPromise;
+      const generation = feedGeneration;
+      feedRequestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
       feedPromise = (async () => {
         try {
-          const page = await requestJson(feedRequestUrl(feedCursor));
+          const page = await requestJson(feedRequestUrl(feedCursor), {
+            signal: feedRequestController ? feedRequestController.signal : undefined,
+          });
+          if (!FeedState.isCurrent(generation, feedGeneration)) return 0;
           const seen = new Set(videoData.map((item) => item.post_id || item.path));
           const additions = (page.items || []).filter((item) => {
             const key = item.post_id || item.path;
@@ -1894,11 +1921,15 @@
           if (additions.length) preloadNext(idx);
           return additions.length;
         } catch (error) {
+          if (error && error.name === 'AbortError') return 0;
           console.error('[ReelsPlayer] Next recommendation page failed:', error);
           showFlash('FEED RETRY');
           return 0;
         } finally {
-          feedPromise = null;
+          if (FeedState.isCurrent(generation, feedGeneration)) {
+            feedPromise = null;
+            feedRequestController = null;
+          }
         }
       })();
       return feedPromise;
@@ -2940,7 +2971,7 @@
     }
 
     // Render one image tile: still on screen, no timeline, 10s dwell.
-    function showImage(item) {
+    function showImage(item, options) {
       try { video.pause(); } catch (e) {}
       try {
         video.removeAttribute('src');
@@ -2967,10 +2998,12 @@
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
       }
-      armImageTimer();
+      if (!options || options.autoplay !== false) armImageTimer();
+      else updatePlayBtnUI(false);
     }
 
-    function loadVideo(index) {
+    function loadVideo(index, options) {
+      const loadOptions = options || {};
       hideError();
       clearImageTimer();
       if (typeof resetPan === 'function') resetPan();
@@ -3000,7 +3033,7 @@
       renderDrawerComments();
 
       if (isImageItem(item)) {
-        showImage(item);
+        showImage(item, loadOptions);
         return;
       }
 
@@ -3016,6 +3049,14 @@
       const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
       video.src = itemUrl;
       video.muted = isMuted;
+      const requestedTime = Number(loadOptions.seekTo);
+      if (Number.isFinite(requestedTime) && requestedTime > 0) {
+        const restoreTime = function () {
+          try { video.currentTime = Math.min(requestedTime, video.duration || requestedTime); } catch (e) {}
+        };
+        if (video.readyState >= 1) restoreTime();
+        else video.addEventListener('loadedmetadata', restoreTime, { once: true });
+      }
 
       renderCommentMarkers();
       updateTwitchTicker();
@@ -3034,6 +3075,12 @@
 
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
+      }
+
+      if (loadOptions.autoplay === false) {
+        video.pause();
+        updatePlayBtnUI(false);
+        return;
       }
 
       video.play().then(() => {
@@ -3218,6 +3265,8 @@
     async function preloadAllVideos() {
       if (isPreloading || !videoData || videoData.length === 0) return;
       if (feedHasMore && videoData.length - idx - 1 < 2) await fetchNextPage();
+      const generation = feedGeneration;
+      preloadController = typeof AbortController !== 'undefined' ? new AbortController() : null;
       isPreloading = true;
       if (preloadStatus) preloadStatus.style.display = 'inline-block';
       if (preloadLabel) preloadLabel.textContent = 'LOADING...';
@@ -3234,17 +3283,28 @@
         }
         try {
           const url = resolveItemUrl(videoData[i]);
-          const res = await fetch(url);
+          const res = await fetch(url, {
+            signal: preloadController ? preloadController.signal : undefined,
+          });
           const blob = await res.blob();
-          blobUrlMap[i] = URL.createObjectURL(blob);
+          const blobUrl = URL.createObjectURL(blob);
+          if (generation !== feedGeneration) {
+            URL.revokeObjectURL(blobUrl);
+            break;
+          }
+          blobUrlMap[i] = blobUrl;
           preloadedCount++;
           updatePreloadStatus();
         } catch (e) {
+          if (e && e.name === 'AbortError') break;
           console.error('Failed to preload video at index', i, e);
         }
       }
-      isPreloading = false;
-      if (preloadLabel) preloadLabel.textContent = 'NEXT 2';
+      if (generation === feedGeneration) {
+        isPreloading = false;
+        preloadController = null;
+        if (preloadLabel) preloadLabel.textContent = 'NEXT 2';
+      }
     }
 
     // Navigation
@@ -3266,6 +3326,112 @@
       }
       finishViewTracking('manual_previous');
       loadVideo(idx - 1);
+    }
+
+    function captureOriginalFeed() {
+      if (originalFeedSnapshot) return;
+      const current = videoData[idx] || null;
+      const entryPlayback = earthEntryPlayback || {};
+      const wasPlaying = typeof entryPlayback.wasPlaying === 'boolean'
+        ? entryPlayback.wasPlaying
+        : (isImageItem(current) ? !!imageTimer : !video.paused);
+      originalFeedSnapshot = FeedState.capture({
+        videoData: videoData.slice(),
+        idx,
+        feedParams: { ...feedParams },
+        feedCursor,
+        feedHasMore,
+        isAutoNext,
+        isMuted,
+        currentTime: Number.isFinite(Number(entryPlayback.currentTime))
+          ? Number(entryPlayback.currentTime)
+          : (isImageItem(current) ? 0 : (video.currentTime || 0)),
+        wasPlaying,
+      });
+    }
+
+    function locationFeedParams(locationRow) {
+      return FeedState.locationParams(feedParams, locationRow);
+    }
+
+    async function switchToLocationFeed(locationRow) {
+      if (!locationRow || !locationRow.slug) return false;
+      captureOriginalFeed();
+      abortFeedWork();
+      const generation = feedGeneration;
+      const params = locationFeedParams(locationRow);
+      feedTransitionController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      showFlash('LOADING ' + String(locationRow.name || locationRow.slug).toUpperCase());
+      try {
+        const page = await requestJson(feedRequestUrl(null, params), {
+          signal: feedTransitionController ? feedTransitionController.signal : undefined,
+        });
+        if (!FeedState.isCurrent(generation, feedGeneration)) return false;
+        const nextState = FeedState.fromPage(page, params, locationRow);
+        if (!nextState.videoData.length) {
+          showFlash('NO RECENT REELS');
+          return false;
+        }
+        finishViewTracking('location_feed_switch');
+        clearImageTimer();
+        clearBlobCache();
+        try { video.pause(); } catch (e) {}
+        videoData = nextState.videoData;
+        feedParams = nextState.feedParams;
+        feedCursor = nextState.feedCursor;
+        feedHasMore = nextState.feedHasMore;
+        activeLocationFeed = nextState.activeLocationFeed;
+        idx = nextState.idx;
+        preloadedCount = 0;
+        loadVideo(0, { autoplay: true });
+        showFlash('📍 ' + String(activeLocationFeed.name).toUpperCase());
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return false;
+        console.error('[ReelsPlayer] Location feed failed:', error);
+        showFlash('LOCATION FEED ERROR');
+        throw error;
+      } finally {
+        if (FeedState.isCurrent(generation, feedGeneration)) feedTransitionController = null;
+      }
+    }
+
+    async function restoreAllLocations() {
+      if (!originalFeedSnapshot) return false;
+      const snapshot = FeedState.restore(originalFeedSnapshot);
+      finishViewTracking('restore_all_locations');
+      abortFeedWork();
+      clearImageTimer();
+      clearBlobCache();
+      try { video.pause(); } catch (e) {}
+      videoData = snapshot.videoData.slice();
+      feedParams = { ...snapshot.feedParams };
+      feedCursor = snapshot.feedCursor || null;
+      feedHasMore = !!snapshot.feedHasMore;
+      isAutoNext = !!snapshot.isAutoNext;
+      isMuted = !!snapshot.isMuted;
+      activeLocationFeed = null;
+      originalFeedSnapshot = null;
+      earthEntryPlayback = null;
+      preloadedCount = 0;
+      updateModeBtnUI(isAutoNext);
+      updateSoundBtnUI(isMuted);
+      loadVideo(Math.max(0, Math.min(snapshot.idx, videoData.length - 1)), {
+        autoplay: snapshot.wasPlaying,
+        seekTo: snapshot.currentTime,
+      });
+      showFlash('ALL LOCATIONS');
+      return true;
+    }
+
+    function resumeAfterEarth(shouldResume) {
+      if (!shouldResume) return;
+      const item = videoData[idx];
+      if (isImageItem(item)) {
+        if (!imageTimer) armImageTimer();
+      } else if (video && video.paused) {
+        video.play().catch(() => {});
+      }
     }
 
     // Button Listeners (play/prev/next rail buttons were removed; the
@@ -3746,6 +3912,22 @@
         getPlaylist: function() { return videoData; },
         getCurrentIndex: function() { return idx; },
         getAutoNext: function() { return isAutoNext; },
+        isLocationFeedActive: function() { return !!activeLocationFeed; },
+        onEarthOpen: function(wasPlaying) {
+          const imageWasAdvancing = isImageItem(videoData[idx]) && !!imageTimer;
+          earthEntryPlayback = {
+            wasPlaying: imageWasAdvancing || !!wasPlaying,
+            currentTime: isImageItem(videoData[idx]) ? 0 : (video.currentTime || 0),
+          };
+          if (imageWasAdvancing) clearImageTimer();
+          return earthEntryPlayback.wasPlaying;
+        },
+        onEarthClose: function(shouldResume) {
+          if (!activeLocationFeed && feedTransitionController) abortFeedWork();
+          resumeAfterEarth(shouldResume);
+        },
+        onSelectLocation: function(locationRow) { return switchToLocationFeed(locationRow); },
+        onRestoreAllLocations: restoreAllLocations,
         getComments: function() { return getCurrentComments(); },
         getCurrentUser: function() { return currentUser; },
         onOpenAccount: function() {
@@ -3814,6 +3996,7 @@
 
     window.__sxReelsRuntimeCleanup = function () {
       finishViewTracking('unload');
+      abortFeedWork();
       clearImageTimer();
       clearBlobCache();
       if (tickerHideTimer) clearTimeout(tickerHideTimer);

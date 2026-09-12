@@ -11,7 +11,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v4.11-20260910-ambilight-throttle';
+  const VR_VERSION = 'v5.0-20260912-earth-preview';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -134,6 +134,76 @@ window.WebXRVR = window.WebXRVR || (function () {
   let targetGlowColor = [0.12, 0.28, 0.65];
   let lastColorSampleTime = 0;
 
+  // Shared scene mode: normal reels or the location-activity Earth.
+  let sceneMode = 'reels';
+  let reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  // Earth mode is lazy: no GPU resources are created and no globe draw calls
+  // occur until the user explicitly opens it.
+  const EARTH_TEXTURE_URL = '/assets/earth-natural-1024x512.jpg';
+  const EARTH_RADIUS = 0.52;
+  const EARTH_MARKER_LIMIT = 128;
+  const EARTH_IDLE_RADIANS_PER_SECOND = Math.PI / 60; // 3 degrees/second
+  let earthCenter = { x: 0, y: 1.12, z: -1.3 };
+  let earthYaw = -0.35;
+  let earthPitch = -0.12;
+  let earthLocations = [];
+  let earthHoveredIndex = -1;
+  let earthSelectedIndex = -1;
+  let earthStatus = 'OPEN EARTH TO LOAD ACTIVITY';
+  let earthDragging = false;
+  let earthDragSource = null;
+  let earthDragLastDir = null;
+  let earthDragMoved = false;
+  let earthPressMarker = -1;
+  let earthLastFrameTime = -1;
+  let earthActivityAbort = null;
+  let earthActivityGeneration = 0;
+  let earthSelectionGeneration = 0;
+  let earthResumePlayback = false;
+
+  let glEarthSphereBuf = null;
+  let glEarthSphereIndexBuf = null;
+  let glEarthSphereIndexCount = 0;
+  let glEarthRimBuf = null;
+  let glEarthRimIndexBuf = null;
+  let glEarthRimIndexCount = 0;
+  let glEarthMarkerProgram = null;
+  let glEarthMarkerBuf = null;
+  let glEarthMarkerCount = 0;
+  let glEarthTexture = null;
+  let glEarthRimTexture = null;
+  let glEarthLabelTexture = null;
+  let earthLabelCanvas = null;
+  let earthLabelCtx = null;
+  let earthLabelSignature = '';
+  let loc_earthMarker_aPos = -1;
+  let loc_earthMarker_aHeat = -1;
+  let loc_earthMarker_aState = -1;
+  let loc_earthMarker_uMVP = null;
+  let glIsWebGL2 = false;
+  let earthResourcesReady = false;
+  let earthTextureReady = false;
+  let earthDragInputSource = null;
+  let earthInteractionUntil = 0;
+  const renderStats = { earthDrawCalls: 0, reelDrawCalls: 0, videoUploads: 0 };
+
+  // Desktop preview driver. It owns only camera/input/RAF; scene geometry and
+  // draw functions are shared with the XR driver.
+  let previewCanvas = null;
+  let previewRaf = 0;
+  let previewRunning = false;
+  let previewCameraMode = 'headset';
+  let previewStereo = false;
+  let previewYaw = 0;
+  let previewPitch = 0;
+  let previewOrbitYaw = 0;
+  let previewOrbitPitch = -0.08;
+  let previewOrbitDistance = 4.8;
+  let previewPointer = null;
+  let previewLastViews = [];
+  let previewListeners = null;
+
   // Pointer & Ray tracking
   let activeRayOrigin = null;
   let activeRayDir = null;
@@ -221,6 +291,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let hasNewVideoFrame = true;
   let lastVideoTime = -1;
   let lastVideoFrameCount = -1; // decoded-frame counter (getVideoPlaybackQuality)
+  let videoFrameCallbackId = null;
+  let videoFrameTrackingGeneration = 0;
 
   // Adaptive upload stride (resolution + stall aware). Low-res files sustain
   // stride 1 (every decoded frame → full motion); high-res / stalling sessions
@@ -300,6 +372,9 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     // Header comment pill → toggles the VR comments panel
     { label: '💬',    action: 'comments', x: 476, y: 13, w: 64, h: 22 },
+
+    // Open Earth activity mode, or restore All Locations after a location feed.
+    { label: 'EARTH', action: 'earth', x: 628, y: 13, w: 108, h: 22 },
 
     // Header exit button
     { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
@@ -682,24 +757,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.fillStyle = '#E7BDB5';
     ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, 584, 24);
 
-    // Status Indicator Dot + Text
-    const isLocked = lockToViewer;
-    ctx.fillStyle = isLocked ? '#22C55E' : '#9BA1A8';
-    if (isLocked) {
-      ctx.shadowColor = 'rgba(34, 197, 94, 0.7)';
-      ctx.shadowBlur = 8;
-    }
+    // Earth / All Locations mode control.
+    const earthBtnIdx = CTRL_BUTTONS.findIndex((button) => button.action === 'earth');
+    const earthButton = CTRL_BUTTONS[earthBtnIdx];
+    const isEarthHover = hoveredButton === earthBtnIdx;
+    const hasLocationFeed = callbacks.isLocationFeedActive && callbacks.isLocationFeedActive();
+    ctx.fillStyle = (sceneMode === 'earth' || isEarthHover) ? '#1D2126' : '#101214';
+    ctx.strokeStyle = (sceneMode === 'earth' || isEarthHover) ? '#FFB11F' : '#3A4047';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(640, 24, 4, 0, Math.PI * 2);
+    ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, 3);
     ctx.fill();
-    ctx.shadowBlur = 0;
-
-    ctx.font = 'bold 10px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(isLocked ? 'LOCKED' : 'FREE', 650, 24);
+    ctx.stroke();
+    ctx.fillStyle = (sceneMode === 'earth' || isEarthHover) ? '#FFFFFF' : '#E7BDB5';
+    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(hasLocationFeed && sceneMode !== 'earth' ? 'ALL LOCATIONS' : (sceneMode === 'earth' ? 'REELS' : 'EARTH'), earthButton.x + earthButton.w / 2, 24);
 
     // Exit Button
-    const isExitHover = (hoveredButton === 10);
+    const exitBtnIdx = CTRL_BUTTONS.findIndex((button) => button.action === 'exit');
+    const isExitHover = (hoveredButton === exitBtnIdx);
     ctx.fillStyle = isExitHover ? '#1D2126' : '#101214';
     ctx.strokeStyle = isExitHover ? '#FF3B1F' : '#3A4047';
     ctx.beginPath();
@@ -719,9 +796,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.lineTo(776, 48);
     ctx.stroke();
 
+    if (sceneMode === 'earth') {
+      ctx.fillStyle = '#F7FAFC';
+      ctx.font = '700 18px "Archivo", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DRAG THE GLOBE · SELECT A HEAT MARKER', CONTROLS_W / 2, 112);
+      ctx.fillStyle = '#AEB9C8';
+      ctx.font = '700 12px "JetBrains Mono", monospace';
+      ctx.fillText('THUMBSTICK / WHEEL ALSO ROTATES · EARTH RETURNS TO REELS', CONTROLS_W / 2, 148);
+      return;
+    }
+
     // 4. Main Controls Cluster
     CTRL_BUTTONS.forEach((btn, i) => {
-      if (btn.action === 'exit' || btn.action === 'seek' || btn.action === 'comments') return;
+      if (btn.action === 'exit' || btn.action === 'seek' || btn.action === 'comments' || btn.action === 'earth') return;
 
       const isHover = (hoveredButton === i);
 
@@ -1806,6 +1894,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function getControlsCenter() {
+    if (sceneMode === 'earth') {
+      return { x: earthCenter.x, y: earthCenter.y - 0.72, z: earthCenter.z + 0.08 };
+    }
     if (lockToViewer) {
       // Decoupled from the head-locked screen block: the transport panel stays
       // fixed and level in the room at the default screen spot.
@@ -1833,6 +1924,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function getControlsQuat() {
+    if (sceneMode === 'earth') {
+      return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
+    }
     if (lockToViewer) {
       return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
     }
@@ -1840,6 +1934,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function getControlsScale() {
+    if (sceneMode === 'earth') return 1.2;
     return lockToViewer ? DEFAULT_SCALE : screenScale;
   }
 
@@ -1888,6 +1983,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
+      if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit') continue;
       if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
           canvasY >= btn.y && canvasY <= btn.y + btn.h) {
         return i;
@@ -1899,6 +1995,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   function executeControlButton(index) {
     if (index < 0 || index >= CTRL_BUTTONS.length) return;
     const action = CTRL_BUTTONS[index].action;
+    if (sceneMode === 'earth' && action !== 'earth' && action !== 'exit') return;
     resetAutoHideTimer();
     switch (action) {
       case 'prev':  callbacks.onPrev && callbacks.onPrev(); break;
@@ -1931,7 +2028,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         break;
       case 'comments': toggleCommentsPanel(); break;
-      case 'exit':  exitVR(); break;
+      case 'earth': toggleEarthMode(); break;
+      case 'exit':  xrSession ? exitVR() : stopPreview(); break;
     }
   }
 
@@ -1968,17 +2066,348 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // ─── Earth Activity Mode ─────────────────────────────────────────────
+
+  function earthRotationQuat() {
+    const yawQ = { x: 0, y: Math.sin(earthYaw / 2), z: 0, w: Math.cos(earthYaw / 2) };
+    const pitchQ = { x: Math.sin(earthPitch / 2), y: 0, z: 0, w: Math.cos(earthPitch / 2) };
+    return quatMul(yawQ, pitchQ);
+  }
+
+  function locationToUnit(lat, lon) {
+    const latRad = Number(lat) * Math.PI / 180;
+    const lonRad = Number(lon) * Math.PI / 180;
+    const cosLat = Math.cos(latRad);
+    return {
+      x: cosLat * Math.sin(lonRad),
+      y: Math.sin(latRad),
+      z: cosLat * Math.cos(lonRad),
+    };
+  }
+
+  function setEarthStatus(message) {
+    earthStatus = String(message || '');
+    earthLabelSignature = '';
+  }
+
+  function renderEarthLabelCanvas() {
+    if (!earthLabelCtx || !earthLabelCanvas) return;
+    const location = earthLocations[earthSelectedIndex] || earthLocations[earthHoveredIndex] || null;
+    const title = location ? location.name : 'EARTH ACTIVITY';
+    const detail = location
+      ? ((location.active_reel_count || 0) + ' ACTIVE · ' + (location.new_reel_count || 0) + ' NEW · HEAT ' + Math.round((location.heat || 0) * 100) + '%')
+      : earthStatus;
+    const signature = title + '|' + detail;
+    if (signature === earthLabelSignature) return;
+    earthLabelSignature = signature;
+    const ctx = earthLabelCtx;
+    ctx.clearRect(0, 0, earthLabelCanvas.width, earthLabelCanvas.height);
+    ctx.fillStyle = 'rgba(7, 12, 24, 0.94)';
+    ctx.strokeStyle = location ? '#FFB11F' : '#3A506B';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(2, 2, earthLabelCanvas.width - 4, earthLabelCanvas.height - 4, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#F7FAFC';
+    ctx.font = '700 28px "Archivo", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(title, earthLabelCanvas.width / 2, 43);
+    ctx.fillStyle = '#B8C6D9';
+    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.fillText(detail || 'NO RECENT ACTIVITY', earthLabelCanvas.width / 2, 84);
+    if (gl && glEarthLabelTexture) {
+      gl.bindTexture(gl.TEXTURE_2D, glEarthLabelTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, earthLabelCanvas);
+    }
+  }
+
+  function uploadEarthMarkers() {
+    if (!gl || !glEarthMarkerBuf) return;
+    const values = [];
+    earthLocations.slice(0, EARTH_MARKER_LIMIT).forEach((location) => {
+      const unit = location._unit || locationToUnit(location.lat, location.lon);
+      location._unit = unit;
+      const radius = EARTH_RADIUS * 1.025;
+      const index = values.length / 5;
+      const state = index === earthSelectedIndex ? 2 : (index === earthHoveredIndex ? 1 : 0);
+      values.push(
+        unit.x * radius,
+        unit.y * radius,
+        unit.z * radius,
+        Math.max(0, Math.min(1, Number(location.heat) || 0)),
+        state
+      );
+    });
+    glEarthMarkerCount = Math.min(earthLocations.length, EARTH_MARKER_LIMIT);
+    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthMarkerBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(values), gl.DYNAMIC_DRAW);
+  }
+
+  function setEarthHoveredIndex(index) {
+    const next = Number.isInteger(index) ? index : -1;
+    if (earthHoveredIndex === next) return;
+    earthHoveredIndex = next;
+    earthLabelSignature = '';
+    uploadEarthMarkers();
+  }
+
+  function setLocationActivity(rows) {
+    earthLocations = Array.isArray(rows)
+      ? rows.slice(0, EARTH_MARKER_LIMIT).filter((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lon)))
+      : [];
+    earthLocations.forEach((location) => { location._unit = locationToUnit(location.lat, location.lon); });
+    earthHoveredIndex = -1;
+    earthSelectedIndex = -1;
+    setEarthStatus(earthLocations.length ? 'POINT, DRAG, OR USE THUMBSTICK' : 'NO RECENT LOCATION ACTIVITY');
+    uploadEarthMarkers();
+    return earthLocations.length;
+  }
+
+  function anchorEarthFromHead() {
+    const facing = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
+    const horizontal = vecNorm({ x: facing.x, y: 0, z: facing.z });
+    earthCenter = {
+      x: currentHeadPos.x + horizontal.x * 1.3,
+      y: currentHeadPos.y - 0.4,
+      z: currentHeadPos.z + horizontal.z * 1.3,
+    };
+  }
+
+  async function loadEarthActivity() {
+    if (earthActivityAbort) earthActivityAbort.abort();
+    const generation = ++earthActivityGeneration;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    earthActivityAbort = controller;
+    setEarthStatus('LOADING 7-DAY ACTIVITY…');
+    try {
+      const response = await fetch('/api/reels/locations/activity?window_days=7&limit=128', {
+        credentials: 'include',
+        signal: controller ? controller.signal : undefined,
+      });
+      if (!response.ok) throw new Error('Activity request failed (' + response.status + ')');
+      const payload = await response.json();
+      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
+      setLocationActivity(payload.locations || []);
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
+      console.error('[WebXRVR] Earth activity load failed:', error);
+      setEarthStatus('ACTIVITY UNAVAILABLE · TRY AGAIN');
+    } finally {
+      if (earthActivityAbort === controller) earthActivityAbort = null;
+    }
+  }
+
+  function openEarthMode() {
+    if (sceneMode === 'earth') return;
+    sceneMode = 'earth';
+    earthResumePlayback = !!(videoElement && !videoElement.paused);
+    commentsPanelVisible = false;
+    controlsVisible = true;
+    clearAutoHideTimer();
+    anchorEarthFromHead();
+    earthLastFrameTime = -1;
+    earthDragging = false;
+    earthDragSource = null;
+    earthDragLastDir = null;
+    earthDragInputSource = null;
+    earthPressMarker = -1;
+    earthLocations = [];
+    earthHoveredIndex = -1;
+    earthSelectedIndex = -1;
+    uploadEarthMarkers();
+    if (videoElement) {
+      try { videoElement.pause(); } catch (e) {}
+    }
+    if (callbacks.onEarthOpen) {
+      const resumeOverride = callbacks.onEarthOpen(earthResumePlayback);
+      if (typeof resumeOverride === 'boolean') earthResumePlayback = resumeOverride;
+    }
+    if (gl) initEarthResources();
+    loadEarthActivity();
+    if (callbacks.onSceneModeChange) callbacks.onSceneModeChange('earth');
+    emitPreviewState();
+  }
+
+  function closeEarthMode(options) {
+    if (sceneMode !== 'earth') return;
+    const opts = options || {};
+    sceneMode = 'reels';
+    earthActivityGeneration += 1;
+    earthSelectionGeneration += 1;
+    if (earthActivityAbort) {
+      earthActivityAbort.abort();
+      earthActivityAbort = null;
+    }
+    earthHoveredIndex = -1;
+    earthSelectedIndex = -1;
+    earthDragging = false;
+    earthDragSource = null;
+    earthDragLastDir = null;
+    earthDragInputSource = null;
+    earthPressMarker = -1;
+    earthLastFrameTime = -1;
+    if (callbacks.onEarthClose) callbacks.onEarthClose(opts.resume !== false && earthResumePlayback);
+    if (callbacks.onSceneModeChange) callbacks.onSceneModeChange('reels');
+    resetAutoHideTimer();
+    emitPreviewState();
+  }
+
+  function toggleEarthMode() {
+    if (sceneMode === 'earth') {
+      closeEarthMode();
+      return;
+    }
+    if (callbacks.isLocationFeedActive && callbacks.isLocationFeedActive()) {
+      Promise.resolve(callbacks.onRestoreAllLocations && callbacks.onRestoreAllLocations())
+        .catch((error) => console.error('[WebXRVR] All locations restore failed:', error));
+      return;
+    }
+    openEarthMode();
+  }
+
+  function selectEarthLocation(index) {
+    const location = earthLocations[index];
+    if (!location || !callbacks.onSelectLocation) return;
+    const generation = ++earthSelectionGeneration;
+    earthSelectedIndex = index;
+    uploadEarthMarkers();
+    setEarthStatus('LOADING ' + String(location.name || location.slug || 'LOCATION').toUpperCase() + '…');
+    Promise.resolve(callbacks.onSelectLocation(location)).then((accepted) => {
+      if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return;
+      if (accepted === false) {
+        setEarthStatus('NO RECENT REELS IN THIS LOCATION');
+        return;
+      }
+      closeEarthMode({ resume: false });
+    }).catch((error) => {
+      if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return;
+      console.error('[WebXRVR] Location feed switch failed:', error);
+      setEarthStatus('LOCATION FEED UNAVAILABLE');
+    });
+  }
+
+  function rotateEarth(deltaYaw, deltaPitch) {
+    earthYaw = (earthYaw + deltaYaw) % (Math.PI * 2);
+    earthPitch = Math.max(-1.1, Math.min(1.1, earthPitch + deltaPitch));
+  }
+
+  function raySphereHit(rayOrigin, rayDir, center, radius) {
+    const offset = vecSub(rayOrigin, center);
+    const a = rayDir.x * rayDir.x + rayDir.y * rayDir.y + rayDir.z * rayDir.z;
+    const b = 2 * (offset.x * rayDir.x + offset.y * rayDir.y + offset.z * rayDir.z);
+    const c = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z - radius * radius;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0 || a < 0.000001) return null;
+    let distance = (-b - Math.sqrt(disc)) / (2 * a);
+    if (distance < 0) distance = (-b + Math.sqrt(disc)) / (2 * a);
+    if (distance < 0 || distance > 20) return null;
+    const world = vecAdd(rayOrigin, vecScale(rayDir, distance));
+    const local = vecNorm(quatRotVec(quatInvert(earthRotationQuat()), vecSub(world, earthCenter)));
+    return { distance, world, local };
+  }
+
+  function hitTestEarth(rayOrigin, rayDir) {
+    const hit = raySphereHit(rayOrigin, rayDir, earthCenter, EARTH_RADIUS * 1.08);
+    if (!hit) return { hit: false, dist: -1, markerIndex: -1 };
+    let markerIndex = -1;
+    let bestDot = -1;
+    earthLocations.forEach((location, index) => {
+      const unit = location._unit || locationToUnit(location.lat, location.lon);
+      const dot = hit.local.x * unit.x + hit.local.y * unit.y + hit.local.z * unit.z;
+      const threshold = Math.cos(0.12 + Math.max(0, Math.min(1, Number(location.heat) || 0)) * 0.08);
+      if (dot >= threshold && dot > bestDot) {
+        bestDot = dot;
+        markerIndex = index;
+      }
+    });
+    return { hit: true, dist: hit.distance, markerIndex, local: hit.local };
+  }
+
+  function updateEarthDrag(direction) {
+    if (!direction) return;
+    const normalized = vecNorm(direction);
+    if (earthDragLastDir) {
+      const dx = normalized.x - earthDragLastDir.x;
+      const dy = normalized.y - earthDragLastDir.y;
+      if (Math.abs(dx) + Math.abs(dy) > 0.002) earthDragMoved = true;
+      rotateEarth(dx * 2.8, -dy * 2.4);
+    }
+    earthDragLastDir = normalized;
+  }
+
+
+  function advanceEarthSpin(time) {
+    if (earthLastFrameTime < 0) {
+      earthLastFrameTime = time;
+      return 0;
+    }
+    const dt = Math.max(0, Math.min(0.1, (time - earthLastFrameTime) * 0.001));
+    earthLastFrameTime = time;
+    if (reducedMotion || earthDragging || time < earthInteractionUntil) return 0;
+    const delta = EARTH_IDLE_RADIANS_PER_SECOND * dt;
+    rotateEarth(delta, 0);
+    return delta;
+  }
+
+  function beginEarthDrag(source, hit) {
+    if (!hit || !hit.hit) return false;
+    earthDragging = true;
+    earthDragSource = source || 'pointer';
+    earthDragInputSource = source && typeof source === 'object' ? source : null;
+    earthDragLastDir = hit.local;
+    earthDragMoved = false;
+    earthPressMarker = hit.markerIndex;
+    earthInteractionUntil = performance.now() + 900;
+    return true;
+  }
+
+  function endEarthDrag(source, hit) {
+    if (!earthDragging) return false;
+    if (earthDragInputSource && source && earthDragInputSource !== source) return false;
+    if (hit && hit.hit) updateEarthDrag(hit.local);
+    const selected = !earthDragMoved && earthPressMarker >= 0
+      && hit && hit.markerIndex === earthPressMarker
+      ? earthPressMarker
+      : -1;
+    earthDragging = false;
+    earthDragSource = null;
+    earthDragInputSource = null;
+    earthDragLastDir = null;
+    earthPressMarker = -1;
+    earthInteractionUntil = performance.now() + 900;
+    if (selected >= 0) selectEarthLocation(selected);
+    return true;
+  }
+
+
   // ─── Video Frame Tracking ───────────────────────────────────────────
 
-  function setupVideoFrameTracking() {
-    if (!videoElement) return;
-    if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-      function onFrame(now, metadata) {
-        hasNewVideoFrame = true;
-        if (xrSession) videoElement.requestVideoFrameCallback(onFrame);
-      }
-      videoElement.requestVideoFrameCallback(onFrame);
+  function stopVideoFrameTracking() {
+    videoFrameTrackingGeneration += 1;
+    if (videoElement && videoFrameCallbackId !== null &&
+        typeof videoElement.cancelVideoFrameCallback === 'function') {
+      try { videoElement.cancelVideoFrameCallback(videoFrameCallbackId); } catch (e) {}
     }
+    videoFrameCallbackId = null;
+  }
+
+  function setupVideoFrameTracking() {
+    stopVideoFrameTracking();
+    if (!videoElement || typeof videoElement.requestVideoFrameCallback !== 'function') return;
+    const generation = videoFrameTrackingGeneration;
+    function onFrame() {
+      if (generation !== videoFrameTrackingGeneration) return;
+      hasNewVideoFrame = true;
+      if (xrSession || previewRunning) {
+        videoFrameCallbackId = videoElement.requestVideoFrameCallback(onFrame);
+      } else {
+        videoFrameCallbackId = null;
+      }
+    }
+    videoFrameCallbackId = videoElement.requestVideoFrameCallback(onFrame);
   }
 
   // Minimum sane stride for the current file: 4K masters start at 2 because a
@@ -2447,6 +2876,76 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   `;
 
+  const EARTH_MARKER_VERT = `
+    attribute vec3 aPos;
+    attribute float aHeat;
+    attribute float aState;
+    uniform mat4 uMVP;
+    varying float vHeat;
+    varying float vState;
+
+    void main() {
+      vHeat = clamp(aHeat, 0.0, 1.0);
+      vState = aState;
+      gl_Position = uMVP * vec4(aPos, 1.0);
+      gl_PointSize = 10.0 + vHeat * 18.0 + aState * 6.0;
+    }
+  `;
+
+  const EARTH_MARKER_FRAG = `
+    precision mediump float;
+    varying float vHeat;
+    varying float vState;
+
+    void main() {
+      vec2 p = gl_PointCoord * 2.0 - 1.0;
+      float radius = length(p);
+      if (radius > 1.0) discard;
+      vec3 cool = vec3(1.0, 0.72, 0.12);
+      vec3 hot = vec3(1.0, 0.12, 0.03);
+      vec3 color = mix(mix(cool, hot, vHeat), vec3(1.0), clamp(vState, 0.0, 1.0) * 0.7);
+      float alpha = (1.0 - smoothstep(0.55, 1.0, radius)) * (0.68 + vHeat * 0.32);
+      gl_FragColor = vec4(color, alpha);
+    }
+  `;
+
+  const EARTH_MARKER_VERT_V2 = `
+    #version 300 es
+    in vec3 aPos;
+    in float aHeat;
+    in float aState;
+    uniform mat4 uMVP;
+    out float vHeat;
+    out float vState;
+
+    void main() {
+      vHeat = clamp(aHeat, 0.0, 1.0);
+      vState = aState;
+      gl_Position = uMVP * vec4(aPos, 1.0);
+      gl_PointSize = 10.0 + vHeat * 18.0 + aState * 6.0;
+    }
+  `;
+
+  const EARTH_MARKER_FRAG_V2 = `
+    #version 300 es
+    precision mediump float;
+    in float vHeat;
+    in float vState;
+    out vec4 fragColor;
+
+    void main() {
+      vec2 p = gl_PointCoord * 2.0 - 1.0;
+      float radius = length(p);
+      if (radius > 1.0) discard;
+      vec3 cool = vec3(1.0, 0.72, 0.12);
+      vec3 hot = vec3(1.0, 0.12, 0.03);
+      vec3 color = mix(mix(cool, hot, vHeat), vec3(1.0), clamp(vState, 0.0, 1.0) * 0.7);
+      float alpha = (1.0 - smoothstep(0.55, 1.0, radius)) * (0.68 + vHeat * 0.32);
+      fragColor = vec4(color, alpha);
+    }
+  `;
+
+
   function compileShader(type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -2560,7 +3059,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
-  function initGL(session) {
+  function initGL(session, suppliedCanvas) {
+    const isXR = !!session;
     // WebGL2 first: the Quest WebGL1 context does NOT expose OES_texture_external
     // and forbids texSubImage2D from a video source — both needed for the
     // zero-copy / in-place update paths. Falls back to WebGL1 + GLSL ES 1.00
@@ -2568,47 +3068,57 @@ window.WebXRVR = window.WebXRVR || (function () {
     // texImage2D behavior. Each candidate uses a FRESH canvas (a canvas can only
     // ever bind one context type), and XRWebGLLayer construction is guarded so a
     // rejection here returns false instead of throwing → enterVR ends the session.
-    let isGL2 = true;
-    let layerOk = false;
+    let isGL2 = false;
+    let contextOk = false;
+    let layerOk = !isXR;
     // Quest Browser: WebGL1 XR layers work, WebGL2 XR layers do not register a
     // compositor client → auto-exit. Prefer WebGL1; WebGL2 only when forced.
-    const GL_TRY = VR_GL_MODE === '2' ? [['webgl2', true]]
-                 : VR_GL_MODE === '1' ? [['webgl', false]]
-                 : [['webgl', false], ['webgl2', true]];
+    const GL_TRY = isXR
+      ? (VR_GL_MODE === '2' ? [['webgl2', true]]
+        : VR_GL_MODE === '1' ? [['webgl', false]]
+        : [['webgl', false], ['webgl2', true]])
+      : [['webgl2', true], ['webgl', false]];
     for (const [ctxt, is2] of GL_TRY) {
-      let c = null;
-      try { c = document.createElement('canvas').getContext(ctxt, { xrCompatible: true, alpha: false }); } catch (e) { window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(e); }
-      if (!c) continue;
+      const canvas = suppliedCanvas || document.createElement('canvas');
+      let candidate = null;
       try {
-        const layer = new XRWebGLLayer(session, c);
-        if (layer) {
-          gl = c;
-          isGL2 = is2;
+        candidate = canvas.getContext(ctxt, { xrCompatible: isXR, alpha: false, antialias: true });
+      } catch (error) {
+        if (isXR) window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(error);
+      }
+      if (!candidate) continue;
+      if (isXR) {
+        try {
+          const layer = new XRWebGLLayer(session, candidate);
+          if (!layer) continue;
           glLayer = layer;
           layerOk = true;
-          break;
+        } catch (error) {
+          console.warn('[WebXRVR] XRWebGLLayer rejected ' + ctxt + ' context:', error);
+          window.__xrErr = 'XRWebGLLayer rejected ' + ctxt + ': ' + String(error);
+          continue;
         }
-      } catch (e) {
-        console.warn('[WebXRVR] XRWebGLLayer rejected ' + ctxt + ' context:', e);
-        window.__xrErr = 'XRWebGLLayer rejected ' + ctxt + ': ' + String(e);
       }
+      gl = candidate;
+      isGL2 = is2;
+      contextOk = true;
+      break;
     }
-    if (!layerOk) {
-      console.error('[WebXRVR] No compatible XR WebGL context — aborting VR setup');
-      window.__xrErr = 'no compatible XR WebGL context (tried: ' + GL_TRY.map(x => x[0]).join(',') + ')';
+    if (!contextOk || !layerOk) {
+      console.error('[WebXRVR] No compatible ' + (isXR ? 'XR ' : '') + 'WebGL context');
+      if (isXR) window.__xrErr = 'no compatible XR WebGL context (tried: ' + GL_TRY.map(x => x[0]).join(',') + ')';
       return false;
     }
-    window.__xrGL = (isGL2 ? 'webgl2' : 'webgl1') + ':' + (isGL2 ? 'glsl300' : 'glsl100');
-    console.log('[WebXRVR] GL context:', isGL2 ? 'WebGL 2.0' : 'WebGL 1.0');
-    session.updateRenderState({ baseLayer: glLayer });
-
-    // Video playback targets 72 Hz, not 90: live telemetry shows an ~11.1ms+
-    // baseline, leaving zero headroom at 90Hz (11.1ms budget), so the
-    // compositor invents frames (= flashing/black edge bars). At 72Hz
-    // (13.9ms budget) the baseline fits and only true upload stalls cost one.
-    if (typeof session.updateTargetFrameRate === 'function') {
-      try { session.updateTargetFrameRate(72); } catch (e) { /* void */ }
+    glIsWebGL2 = isGL2;
+    videoTexMode = '2d';
+    if (isXR) {
+      window.__xrGL = (isGL2 ? 'webgl2' : 'webgl1') + ':' + (isGL2 ? 'glsl300' : 'glsl100');
+      session.updateRenderState({ baseLayer: glLayer });
+      if (typeof session.updateTargetFrameRate === 'function') {
+        try { session.updateTargetFrameRate(72); } catch (e) { /* optional API */ }
+      }
     }
+    console.log('[WebXRVR] GL context:', (isGL2 ? 'WebGL 2.0' : 'WebGL 1.0') + (isXR ? ' XR' : ' preview'));
 
     // GLSL ES 3.00 shaders for WebGL2, GLSL ES 1.00 for the WebGL1 fallback.
     const VS = isGL2 ? VERT_V2 : VERT;
@@ -2650,7 +3160,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     //     WebGL1 forbids uploading video via texSubImage2D, hence path 3 there.
     //  3) 2d — original texImage2D per frame (fallback, no gain expected).
     let extOES = null;
-    if (VR_TEX_MODE !== '2d') {
+    if (isXR && VR_TEX_MODE !== '2d') {
       try { extOES = gl.getExtension('OES_texture_external'); } catch (e) {}
     }
     if (extOES) {
@@ -2671,7 +3181,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         loc2_uStereo = gl.getUniformLocation(glVideoProgram, 'uStereo');
         loc2_uEyeOff = gl.getUniformLocation(glVideoProgram, 'uEyeOff');
         videoTexMode = 'external';
-        window.__xrGL += ':external';
+        if (isXR) window.__xrGL += ':external';
         console.log('[WebXRVR] OES_texture_external armed — zero-copy video path active');
       } else {
         console.error('[WebXRVR] External shader link error:', gl.getProgramInfoLog(glVideoProgram));
@@ -2679,10 +3189,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     } else if (isGL2) {
       videoTexMode = 'subimage';
-      window.__xrGL += ':subimage';
+      if (isXR) window.__xrGL += ':subimage';
       console.log('[WebXRVR] OES_texture_external unavailable — WebGL2 in-place texSubImage2D path armed');
     } else {
-      window.__xrGL += ':2d';
+      if (isXR) window.__xrGL += ':2d';
       console.log('[WebXRVR] OES_texture_external unavailable on WebGL1 — using per-frame texImage2D');
     }
 
@@ -2760,6 +3270,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
 
     // Double-buffer back texture: the 2d path re-specifies via texImage2D, and
     // re-specifying the texture currently sampled by in-flight draws stalls
@@ -2771,6 +3282,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
 
     if (videoTexMode === 'external') {
       glVideoTextureExt = gl.createTexture();
@@ -2820,6 +3332,160 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
 
+  function initEarthResources() {
+    if (!gl || earthResourcesReady) return earthResourcesReady;
+
+    const markerVs = compileShader(gl.VERTEX_SHADER, glIsWebGL2 ? EARTH_MARKER_VERT_V2 : EARTH_MARKER_VERT);
+    const markerFs = compileShader(gl.FRAGMENT_SHADER, glIsWebGL2 ? EARTH_MARKER_FRAG_V2 : EARTH_MARKER_FRAG);
+    glEarthMarkerProgram = gl.createProgram();
+    gl.attachShader(glEarthMarkerProgram, markerVs);
+    gl.attachShader(glEarthMarkerProgram, markerFs);
+    gl.linkProgram(glEarthMarkerProgram);
+    if (!gl.getProgramParameter(glEarthMarkerProgram, gl.LINK_STATUS)) {
+      console.error('[WebXRVR] Earth marker program link error:', gl.getProgramInfoLog(glEarthMarkerProgram));
+      glEarthMarkerProgram = null;
+      return false;
+    }
+    loc_earthMarker_aPos = gl.getAttribLocation(glEarthMarkerProgram, 'aPos');
+    loc_earthMarker_aHeat = gl.getAttribLocation(glEarthMarkerProgram, 'aHeat');
+    loc_earthMarker_aState = gl.getAttribLocation(glEarthMarkerProgram, 'aState');
+    loc_earthMarker_uMVP = gl.getUniformLocation(glEarthMarkerProgram, 'uMVP');
+
+    const sphereVerts = [];
+    const sphereIndices = [];
+    const latSegments = 24;
+    const lonSegments = 48;
+    for (let row = 0; row <= latSegments; row++) {
+      const v = row / latSegments;
+      const lat = Math.PI * 0.5 - v * Math.PI;
+      const cosLat = Math.cos(lat);
+      for (let col = 0; col <= lonSegments; col++) {
+        const u = col / lonSegments;
+        const lon = u * Math.PI * 2 - Math.PI;
+        sphereVerts.push(
+          EARTH_RADIUS * cosLat * Math.sin(lon),
+          EARTH_RADIUS * Math.sin(lat),
+          EARTH_RADIUS * cosLat * Math.cos(lon),
+          u,
+          v
+        );
+      }
+    }
+    for (let row = 0; row < latSegments; row++) {
+      for (let col = 0; col < lonSegments; col++) {
+        const a = row * (lonSegments + 1) + col;
+        const b = a + lonSegments + 1;
+        sphereIndices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+    glEarthSphereBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthSphereBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereVerts), gl.STATIC_DRAW);
+    glEarthSphereIndexBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glEarthSphereIndexBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphereIndices), gl.STATIC_DRAW);
+    glEarthSphereIndexCount = sphereIndices.length;
+
+    const rimVerts = [];
+    const rimIndices = [];
+    const rimSegments = 64;
+    const rimInner = EARTH_RADIUS * 0.94;
+    const rimOuter = EARTH_RADIUS * 1.30;
+    const rimTop = -EARTH_RADIUS * 0.10;
+    const rimBottom = -EARTH_RADIUS * 0.72;
+    function appendRimRing(radius, y) {
+      const start = rimVerts.length / 5;
+      for (let i = 0; i <= rimSegments; i++) {
+        const a = i / rimSegments * Math.PI * 2;
+        rimVerts.push(Math.sin(a) * radius, y, Math.cos(a) * radius, i / rimSegments, y === rimTop ? 0 : 1);
+      }
+      return start;
+    }
+    function appendRimStrip(first, second) {
+      for (let i = 0; i < rimSegments; i++) {
+        const a = first + i;
+        const b = second + i;
+        rimIndices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+    const topInner = appendRimRing(rimInner, rimTop);
+    const topOuter = appendRimRing(rimOuter, rimTop);
+    const bottomOuter = appendRimRing(rimOuter, rimBottom);
+    const bottomInner = appendRimRing(rimInner, rimBottom);
+    appendRimStrip(topInner, topOuter);
+    appendRimStrip(topOuter, bottomOuter);
+    appendRimStrip(bottomInner, topInner);
+    appendRimStrip(bottomOuter, bottomInner);
+    glEarthRimBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthRimBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rimVerts), gl.STATIC_DRAW);
+    glEarthRimIndexBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glEarthRimIndexBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(rimIndices), gl.STATIC_DRAW);
+    glEarthRimIndexCount = rimIndices.length;
+
+    glEarthMarkerBuf = gl.createBuffer();
+
+    glEarthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glEarthTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([17, 62, 92, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    const rimCanvas = document.createElement('canvas');
+    rimCanvas.width = 64;
+    rimCanvas.height = 64;
+    const rimCtx = rimCanvas.getContext('2d');
+    const rimGradient = rimCtx.createRadialGradient(32, 32, 5, 32, 32, 32);
+    rimGradient.addColorStop(0, '#25334a');
+    rimGradient.addColorStop(0.62, '#101a2c');
+    rimGradient.addColorStop(1, '#050914');
+    rimCtx.fillStyle = rimGradient;
+    rimCtx.fillRect(0, 0, 64, 64);
+    glEarthRimTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glEarthRimTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rimCanvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    earthLabelCanvas = document.createElement('canvas');
+    earthLabelCanvas.width = 640;
+    earthLabelCanvas.height = 112;
+    earthLabelCtx = earthLabelCanvas.getContext('2d');
+    glEarthLabelTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glEarthLabelTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    earthResourcesReady = true;
+    uploadEarthMarkers();
+    renderEarthLabelCanvas();
+
+    const context = gl;
+    const texture = glEarthTexture;
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = function () {
+      if (gl !== context || glEarthTexture !== texture) return;
+      context.bindTexture(context.TEXTURE_2D, texture);
+      context.texImage2D(context.TEXTURE_2D, 0, context.RGBA, context.RGBA, context.UNSIGNED_BYTE, image);
+      earthTextureReady = true;
+    };
+    image.onerror = function () {
+      console.warn('[WebXRVR] Bundled Earth texture could not be loaded:', EARTH_TEXTURE_URL);
+      setEarthStatus('MAP TEXTURE UNAVAILABLE');
+    };
+    image.src = EARTH_TEXTURE_URL;
+    return true;
+  }
+
+
   // ─── Matrix & Transformation Math ────────────────────────────────────
 
   function mat4FromRotationTranslationScale(q, p, sW, sH) {
@@ -2863,6 +3529,449 @@ window.WebXRVR = window.WebXRVR || (function () {
     return r;
   }
 
+  function mat4Perspective(fovY, aspect, near, far) {
+    const f = 1 / Math.tan(fovY / 2);
+    const nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, (2 * far * near) * nf, 0,
+    ]);
+  }
+
+  function vecDot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+  function vecCross(a, b) {
+    return {
+      x: a.y * b.z - a.z * b.y,
+      y: a.z * b.x - a.x * b.z,
+      z: a.x * b.y - a.y * b.x,
+    };
+  }
+
+  function mat4LookAt(eye, target, up) {
+    const z = vecNorm(vecSub(eye, target));
+    const x = vecNorm(vecCross(up, z));
+    const y = vecCross(z, x);
+    return new Float32Array([
+      x.x, y.x, z.x, 0,
+      x.y, y.y, z.y, 0,
+      x.z, y.z, z.z, 0,
+      -vecDot(x, eye), -vecDot(y, eye), -vecDot(z, eye), 1,
+    ]);
+  }
+
+  function quatFromYawPitch(yaw, pitch) {
+    const yawQ = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+    const pitchQ = { x: Math.sin(pitch / 2), y: 0, z: 0, w: Math.cos(pitch / 2) };
+    return quatMul(yawQ, pitchQ);
+  }
+
+  function quatFromForward(direction) {
+    const forward = vecNorm(direction);
+    const yaw = Math.atan2(-forward.x, -forward.z);
+    const pitch = Math.asin(Math.max(-1, Math.min(1, forward.y)));
+    return quatFromYawPitch(yaw, pitch);
+  }
+
+  function previewSceneTarget() {
+    return sceneMode === 'earth' ? earthCenter : screenPos;
+  }
+
+  function getPreviewCamera() {
+    if (previewCameraMode === 'orbit') {
+      const target = previewSceneTarget();
+      const cosPitch = Math.cos(previewOrbitPitch);
+      const position = {
+        x: target.x + Math.sin(previewOrbitYaw) * cosPitch * previewOrbitDistance,
+        y: target.y + Math.sin(previewOrbitPitch) * previewOrbitDistance,
+        z: target.z + Math.cos(previewOrbitYaw) * cosPitch * previewOrbitDistance,
+      };
+      const forward = vecNorm(vecSub(target, position));
+      return { position, quat: quatFromForward(forward), target };
+    }
+    const position = { x: 0, y: 1.52, z: 0 };
+    const quat = quatFromYawPitch(previewYaw, previewPitch);
+    return {
+      position,
+      quat,
+      target: vecAdd(position, quatRotVec(quat, { x: 0, y: 0, z: -1 })),
+    };
+  }
+
+  function previewRayAt(clientX, clientY) {
+    if (!previewCanvas) return null;
+    const rect = previewCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    let localX = clientX - rect.left;
+    let viewWidth = rect.width;
+    if (previewStereo) {
+      viewWidth *= 0.5;
+      localX = localX >= viewWidth ? localX - viewWidth : localX;
+    }
+    const nx = (localX / viewWidth) * 2 - 1;
+    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const camera = getPreviewCamera();
+    const forward = quatRotVec(camera.quat, { x: 0, y: 0, z: -1 });
+    const right = quatRotVec(camera.quat, { x: 1, y: 0, z: 0 });
+    const up = quatRotVec(camera.quat, { x: 0, y: 1, z: 0 });
+    const aspect = viewWidth / rect.height;
+    const tanHalf = Math.tan(65 * Math.PI / 360);
+    const direction = vecNorm(vecAdd(forward, vecAdd(vecScale(right, nx * aspect * tanHalf), vecScale(up, ny * tanHalf))));
+    return { origin: camera.position, direction };
+  }
+
+  function getPreviewState() {
+    return {
+      running: previewRunning,
+      cameraMode: previewCameraMode,
+      stereo: previewStereo,
+      reducedMotion,
+      sceneMode,
+      renderStats: { ...renderStats },
+      views: previewLastViews.slice(),
+    };
+  }
+
+  function emitPreviewState() {
+    try {
+      window.dispatchEvent(new CustomEvent('echo:webxr-preview-state', { detail: getPreviewState() }));
+    } catch (e) {}
+  }
+
+  function resizePreviewCanvas() {
+    if (!previewCanvas || !gl) return false;
+    const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const width = Math.max(2, Math.round((previewCanvas.clientWidth || 1) * ratio));
+    const height = Math.max(2, Math.round((previewCanvas.clientHeight || 1) * ratio));
+    if (previewCanvas.width === width && previewCanvas.height === height) return false;
+    previewCanvas.width = width;
+    previewCanvas.height = height;
+    return true;
+  }
+
+  function uploadPreviewTextures(time) {
+    let hasOverlayComments = false;
+    if (sceneMode === 'earth') {
+      advanceEarthSpin(time);
+      initEarthResources();
+      renderEarthLabelCanvas();
+    } else {
+      updateAmbilightColor(time);
+      curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
+      curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
+      curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
+
+      if (videoElement && videoElement.readyState >= 2 &&
+          (hasNewVideoFrame || videoElement.currentTime !== lastVideoTime)) {
+        gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+        if (videoTexMode === 'subimage' && videoTexAllocated) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+        } else if (glVideoTextureB && videoTexMode === '2d') {
+          const backTex = videoTexFront === 0 ? glVideoTextureB : glVideoTexture;
+          gl.bindTexture(gl.TEXTURE_2D, backTex);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+          videoTexFront = videoTexFront === 0 ? 1 : 0;
+        } else {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+          videoTexAllocated = true;
+        }
+        hasNewVideoFrame = false;
+        lastVideoTime = videoElement.currentTime;
+        renderStats.videoUploads += 1;
+      }
+
+      hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
+      if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
+        gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
+      }
+      if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture &&
+          (vrLastPanelUploadT < 0 || time - vrLastPanelUploadT >= VR_UI_MIN_INTERVAL)) {
+        vrLastPanelUploadT = time;
+        renderCommentsPanelCanvas();
+        gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
+      }
+    }
+
+    if (controlsVisible && glControlsTexture &&
+        (vrLastUiUploadT < 0 || time - vrLastUiUploadT >= VR_UI_MIN_INTERVAL)) {
+      vrLastUiUploadT = time;
+      renderControlsCanvas();
+      gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+    }
+    if (sceneMode === 'reels' && controlsVisible && guideCanvas && glGuideTexture && !vrGuideUploaded) {
+      renderGuideCanvas();
+      gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
+      vrGuideUploaded = true;
+    }
+    return hasOverlayComments;
+  }
+
+  function onPreviewFrame(time) {
+    if (!previewRunning || !previewCanvas || !gl) return;
+    previewRaf = window.requestAnimationFrame(onPreviewFrame);
+    resizePreviewCanvas();
+
+    const camera = getPreviewCamera();
+    currentHeadPos = { ...camera.position };
+    currentHeadQuat = { ...camera.quat };
+    if (sceneMode === 'reels' && previewCameraMode === 'headset') applyLockToViewer();
+
+    const hasOverlayComments = uploadPreviewTextures(time);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.clearColor(0.0095, 0.0175, 0.052, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const width = previewCanvas.width;
+    const height = previewCanvas.height;
+    const viewWidth = previewStereo ? Math.floor(width / 2) : width;
+    const forward = quatRotVec(camera.quat, { x: 0, y: 0, z: -1 });
+    const right = quatRotVec(camera.quat, { x: 1, y: 0, z: 0 });
+    const up = quatRotVec(camera.quat, { x: 0, y: 1, z: 0 });
+    const eyes = previewStereo
+      ? [{ eye: 'left', offset: -0.032, x: 0 }, { eye: 'right', offset: 0.032, x: viewWidth }]
+      : [{ eye: 'none', offset: 0, x: 0 }];
+    const projection = mat4Perspective(65 * Math.PI / 180, viewWidth / Math.max(1, height), 0.05, 100);
+    previewLastViews = [];
+    for (const view of eyes) {
+      const eyePos = vecAdd(camera.position, vecScale(right, view.offset));
+      const viewMat = mat4LookAt(eyePos, vecAdd(eyePos, forward), up);
+      gl.viewport(view.x, 0, viewWidth, height);
+      renderSceneView(viewMat, projection, view.eye, time * 0.001, hasOverlayComments);
+      previewLastViews.push({ eye: view.eye, viewport: [view.x, 0, viewWidth, height] });
+    }
+  }
+
+  function updatePreviewPointer(clientX, clientY) {
+    const ray = previewRayAt(clientX, clientY);
+    if (!ray) return null;
+    activeRayOrigin = ray.origin;
+    activeRayDir = ray.direction;
+    hoveredButton = controlsVisible ? hitTestControls(ray.origin, ray.direction) : -1;
+    let hit = null;
+    if (hoveredButton >= 0) {
+      activeHitDist = getHitDistControls(ray.origin, ray.direction);
+      activeIsHovering = true;
+    } else if (sceneMode === 'earth') {
+      hit = hitTestEarth(ray.origin, ray.direction);
+      activeHitDist = hit.hit ? hit.dist : 3;
+      activeIsHovering = !!hit.hit;
+      setEarthHoveredIndex(hit.hit ? hit.markerIndex : -1);
+    } else {
+      hit = hitTestCurvedScreen(ray.origin, ray.direction);
+      activeHitDist = hit.hit ? hit.dist : 3;
+      activeIsHovering = !!hit.hit;
+    }
+    return { ray, hit, controlIndex: hoveredButton };
+  }
+
+  function installPreviewListeners() {
+    if (!previewCanvas || previewListeners) return;
+    const onPointerDown = function (event) {
+      if (event.button !== undefined && event.button !== 0) return;
+      event.preventDefault();
+      previewCanvas.focus();
+      try { previewCanvas.setPointerCapture(event.pointerId); } catch (e) {}
+      const target = updatePreviewPointer(event.clientX, event.clientY);
+      const source = 'preview-pointer-' + event.pointerId;
+      previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
+      if (target && target.controlIndex >= 0) {
+        executeControlButton(target.controlIndex);
+        previewPointer.control = true;
+        return;
+      }
+      if (sceneMode === 'earth' && target) {
+        previewPointer.earth = beginEarthDrag(source, target.hit);
+      }
+    };
+    const onPointerMove = function (event) {
+      const target = updatePreviewPointer(event.clientX, event.clientY);
+      if (!previewPointer || previewPointer.id !== event.pointerId) return;
+      const dx = event.clientX - previewPointer.x;
+      const dy = event.clientY - previewPointer.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) previewPointer.moved = true;
+      previewPointer.x = event.clientX;
+      previewPointer.y = event.clientY;
+      if (previewPointer.control) return;
+      if (sceneMode === 'earth') {
+        if (previewPointer.earth && target && target.hit && target.hit.hit) updateEarthDrag(target.hit.local);
+        return;
+      }
+      const sensitivity = 0.006;
+      if (previewCameraMode === 'orbit') {
+        previewOrbitYaw -= dx * sensitivity;
+        previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
+      } else {
+        previewYaw -= dx * sensitivity;
+        previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
+      }
+    };
+    const finishPointer = function (event) {
+      if (!previewPointer || previewPointer.id !== event.pointerId) return;
+      const target = updatePreviewPointer(event.clientX, event.clientY);
+      if (sceneMode === 'earth' && previewPointer.earth) {
+        endEarthDrag(previewPointer.source, target && target.hit);
+      } else if (!previewPointer.control && !previewPointer.moved && target) {
+        if (target.hit && target.hit.hit) callbacks.onTogglePlay && callbacks.onTogglePlay();
+        else toggleControls();
+      }
+      try { previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
+      previewPointer = null;
+    };
+    const onWheel = function (event) {
+      event.preventDefault();
+      if (sceneMode === 'earth') {
+        rotateEarth(event.deltaX * 0.0025, event.deltaY * 0.0018);
+        earthInteractionUntil = performance.now() + 900;
+      } else if (previewCameraMode === 'orbit') {
+        previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + event.deltaY * 0.006));
+      }
+    };
+    const onContextMenu = function (event) { event.preventDefault(); };
+    const onResize = function () { resizePreviewCanvas(); };
+    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onContextMenu, onResize };
+    previewCanvas.style.touchAction = 'none';
+    previewCanvas.addEventListener('pointerdown', onPointerDown);
+    previewCanvas.addEventListener('pointermove', onPointerMove);
+    previewCanvas.addEventListener('pointerup', finishPointer);
+    previewCanvas.addEventListener('pointercancel', finishPointer);
+    previewCanvas.addEventListener('wheel', onWheel, { passive: false });
+    previewCanvas.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('resize', onResize);
+  }
+
+  function removePreviewListeners() {
+    if (!previewCanvas || !previewListeners) return;
+    const listeners = previewListeners;
+    previewCanvas.removeEventListener('pointerdown', listeners.onPointerDown);
+    previewCanvas.removeEventListener('pointermove', listeners.onPointerMove);
+    previewCanvas.removeEventListener('pointerup', listeners.finishPointer);
+    previewCanvas.removeEventListener('pointercancel', listeners.finishPointer);
+    previewCanvas.removeEventListener('wheel', listeners.onWheel);
+    previewCanvas.removeEventListener('contextmenu', listeners.onContextMenu);
+    window.removeEventListener('resize', listeners.onResize);
+    previewListeners = null;
+  }
+
+  function resetPreview() {
+    previewYaw = 0;
+    previewPitch = 0;
+    previewOrbitYaw = 0;
+    previewOrbitPitch = -0.08;
+    previewOrbitDistance = 4.8;
+    earthYaw = -0.35;
+    earthPitch = -0.12;
+    screenPos = { ...DEFAULT_POS };
+    screenQuat = { x: 0, y: 0, z: 0, w: 1 };
+    screenScale = DEFAULT_SCALE;
+    currentHeadPos = { x: 0, y: 1.52, z: 0 };
+    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
+    if (sceneMode === 'earth') anchorEarthFromHead();
+    emitPreviewState();
+  }
+
+  function setPreviewCameraMode(mode) {
+    previewCameraMode = mode === 'orbit' ? 'orbit' : 'headset';
+    lockToViewer = previewCameraMode === 'headset';
+    if (lockToViewer) applyLockToViewer();
+    emitPreviewState();
+    return previewCameraMode;
+  }
+
+  function setPreviewStereo(enabled) {
+    previewStereo = !!enabled;
+    emitPreviewState();
+    return previewStereo;
+  }
+
+  function setReducedMotion(enabled) {
+    reducedMotion = !!enabled;
+    emitPreviewState();
+    return reducedMotion;
+  }
+
+  function setSceneMode(mode) {
+    const next = mode === 'earth' ? 'earth' : 'reels';
+    if (next === sceneMode) return sceneMode;
+    if (next === 'earth') openEarthMode();
+    else closeEarthMode();
+    emitPreviewState();
+    return sceneMode;
+  }
+
+  async function requestPreviewFullscreen(target) {
+    const element = target || (previewCanvas && previewCanvas.parentElement) || previewCanvas;
+    if (!element) return false;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (element.requestFullscreen) await element.requestFullscreen();
+      else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
+      return true;
+    } catch (error) {
+      console.warn('[WebXRVR] Preview fullscreen request failed:', error);
+      return false;
+    }
+  }
+
+  function startPreview(canvas, options) {
+    if (!canvas || typeof canvas.getContext !== 'function') {
+      throw new Error('A canvas element is required for immersive preview.');
+    }
+    if (xrSession) throw new Error('Exit the immersive XR session before starting desktop preview.');
+    if (previewRunning || gl) stopPreview();
+    const opts = options || {};
+    previewCanvas = canvas;
+    previewRunning = true;
+    previewCameraMode = opts.cameraMode === 'orbit' ? 'orbit' : 'headset';
+    previewStereo = !!opts.stereo;
+    if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
+    sceneMode = 'reels';
+    lockToViewer = previewCameraMode === 'headset';
+    controlsVisible = opts.showControls !== false;
+    renderStats.earthDrawCalls = 0;
+    renderStats.reelDrawCalls = 0;
+    renderStats.videoUploads = 0;
+    resetPreview();
+    initControlsCanvas();
+    initOverlayCanvas();
+    initCommentsPanelCanvas();
+    if (!initGL(null, canvas)) {
+      cleanup({ preview: true });
+      previewCanvas = null;
+      throw new Error('WebGL is unavailable for immersive preview.');
+    }
+    initGuideCanvas();
+    setupVideoFrameTracking();
+    if (videoElement) {
+      videoElement.addEventListener('pause', onVideoPause);
+      videoElement.addEventListener('play', onVideoPlay);
+    }
+    installPreviewListeners();
+    resizePreviewCanvas();
+    if (opts.sceneMode === 'earth') openEarthMode();
+    previewRaf = window.requestAnimationFrame(onPreviewFrame);
+    emitPreviewState();
+    return getPreviewState();
+  }
+
+  function stopPreview() {
+    if (!previewRunning && !previewCanvas) return;
+    previewRunning = false;
+    if (previewRaf) window.cancelAnimationFrame(previewRaf);
+    previewRaf = 0;
+    removePreviewListeners();
+    cleanup({ preview: true });
+    previewCanvas = null;
+    previewPointer = null;
+    previewLastViews = [];
+    emitPreviewState();
+  }
+
+
   // ─── Draw Mesh Grid ──────────────────────────────────────────────────
 
   function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
@@ -2893,6 +4002,70 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
   }
+
+  function drawTexturedMesh(viewMat, projMat, buffer, indexBuffer, indexCount, texture, pos, quat, alpha) {
+    if (!buffer || !indexBuffer || !indexCount || !texture) return;
+    gl.useProgram(glProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.enableVertexAttribArray(loc_aPos);
+    gl.enableVertexAttribArray(loc_aUV);
+    gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(loc_aUV, 2, gl.FLOAT, false, 20, 12);
+    const modelMat = mat4FromRotationTranslationScale(quat, pos, 1, 1);
+    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
+    gl.uniformMatrix4fv(loc_uMVP, false, mvp);
+    gl.uniform1f(loc_uCurvatureMode, 0);
+    gl.uniform1f(loc_uStereo, 0);
+    gl.uniform1f(loc_uEyeOff, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform1i(loc_uTex, 0);
+    gl.uniform1f(loc_uAlpha, alpha);
+    gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
+  }
+
+  function drawEarthMarkers(viewMat, projMat) {
+    if (!glEarthMarkerProgram || !glEarthMarkerBuf || !glEarthMarkerCount) return;
+    gl.useProgram(glEarthMarkerProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthMarkerBuf);
+    gl.enableVertexAttribArray(loc_earthMarker_aPos);
+    gl.enableVertexAttribArray(loc_earthMarker_aHeat);
+    gl.enableVertexAttribArray(loc_earthMarker_aState);
+    gl.vertexAttribPointer(loc_earthMarker_aPos, 3, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(loc_earthMarker_aHeat, 1, gl.FLOAT, false, 20, 12);
+    gl.vertexAttribPointer(loc_earthMarker_aState, 1, gl.FLOAT, false, 20, 16);
+    const modelMat = mat4FromRotationTranslationScale(earthRotationQuat(), earthCenter, 1, 1);
+    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
+    gl.uniformMatrix4fv(loc_earthMarker_uMVP, false, mvp);
+    gl.depthMask(false);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.drawArrays(gl.POINTS, 0, glEarthMarkerCount);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(true);
+  }
+
+  function drawEarthScene(viewMat, projMat) {
+    if (!initEarthResources()) return;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    drawTexturedMesh(
+      viewMat, projMat, glEarthSphereBuf, glEarthSphereIndexBuf, glEarthSphereIndexCount,
+      glEarthTexture, earthCenter, earthRotationQuat(), 1
+    );
+    drawEarthMarkers(viewMat, projMat);
+    drawTexturedMesh(
+      viewMat, projMat, glEarthRimBuf, glEarthRimIndexBuf, glEarthRimIndexCount,
+      glEarthRimTexture, earthCenter, { x: 0, y: 0, z: 0, w: 1 }, 1
+    );
+    gl.disable(gl.DEPTH_TEST);
+    if (glEarthLabelTexture) {
+      const labelPos = { x: earthCenter.x, y: earthCenter.y + 0.73, z: earthCenter.z };
+      drawGrid(viewMat, projMat, glEarthLabelTexture, labelPos, quatFaceViewerLevel(labelPos, currentHeadPos), 0.86, 0.15, 0.98, 0);
+    }
+    renderStats.earthDrawCalls += 1;
+  }
+
 
   // Front video texture of the double-buffer pair (the back one is being
   // uploaded to). Falls back to A if B failed to allocate.
@@ -3030,6 +4203,51 @@ window.WebXRVR = window.WebXRVR || (function () {
     drawGrid(viewMat, projMat, glReticleTexture, hitP, screenQuat, dotScale, dotScale, 0.95, false);
   }
 
+  function drawControlsDock(viewMat, projMat, includeGuide) {
+    if (!controlsVisible || !glControlsTexture) return;
+    const ctrlPos = getControlsCenter();
+    const ctrlScale = getControlsScale();
+    const ctrlW = ctrlScale * 0.82;
+    const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
+    const ctrlQuat = getControlsQuat();
+    drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0);
+    if (includeGuide && glGuideTexture) {
+      const guidePos = getGuideCenter();
+      const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
+      const guideW = ctrlScale * 0.4212;
+      const guideH = guideW * (GUIDE_H / GUIDE_W);
+      drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0);
+    }
+  }
+
+  function renderSceneView(viewMat, projMat, eye, timeSec, hasOverlayComments) {
+    drawStarfield(viewMat, projMat, reducedMotion ? 0 : timeSec);
+
+    if (sceneMode === 'earth') {
+      drawEarthScene(viewMat, projMat);
+      drawControlsDock(viewMat, projMat, false);
+      drawLaserPointer(viewMat, projMat);
+      return;
+    }
+
+    drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
+    const videoEye = stereoMode ? (eye === 'right' ? 0.5 : 0.0) : undefined;
+    drawVideoGrid(viewMat, projMat, screenPos, screenQuat, screenScale, screenScale, 1, curvatureMode, videoEye);
+    if (hasOverlayComments && glOverlayTexture) {
+      drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
+    }
+    drawControlsDock(viewMat, projMat, true);
+    if (commentsPanelVisible && glCommentsTexture) {
+      const cpPos = getCommentsPanelCenter();
+      const cpQuat = getCommentsPanelQuat();
+      const cpSize = getCommentsPanelSize();
+      drawGrid(viewMat, projMat, glCommentsTexture, cpPos, cpQuat, cpSize.w, cpSize.h, 0.96, 0);
+    }
+    drawLaserPointer(viewMat, projMat);
+    renderStats.reelDrawCalls += 1;
+  }
+
+
   // ─── XR Frame Loop ──────────────────────────────────────────────────
 
   function onXRFrame(time, frame) {
@@ -3093,12 +4311,27 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     processInput(frame);
 
-    if (videoElement && videoElement.paused && !controlsVisible) {
+    if (sceneMode === 'reels' && videoElement && videoElement.paused && !controlsVisible) {
       showControls();
     }
 
     if (!glLayer || !gl) return;
 
+    let hasOverlayComments = false;
+    if (sceneMode === 'earth') {
+      advanceEarthSpin(time);
+      initEarthResources();
+      renderEarthLabelCanvas();
+      if (controlsVisible && (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= VR_UI_MIN_INTERVAL)) {
+        vrLastUiUploadT = time;
+        renderControlsCanvas();
+        gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+      gl.clearColor(0.0095, 0.0175, 0.052, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    } else {
     // Update real-time Ambilight video color extraction and smooth interpolation
     updateAmbilightColor(time);
     curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
@@ -3158,6 +4391,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
         _diagTexUploads++;
+        renderStats.videoUploads += 1;
         hasNewVideoFrame = false;
         lastVideoTime = videoElement.currentTime;
         lastVideoFrameCount = vf;
@@ -3193,7 +4427,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     // Suppress the live in-screen time-synced overlay while the comments panel is open
-    const hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
+    hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
     if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
       gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
@@ -3209,6 +4443,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
     }
+    }
 
     const timeSec = time * 0.001;
 
@@ -3219,50 +4454,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const viewMat = view.transform.inverse.matrix;
       const projMat = view.projectionMatrix;
 
-      // 1. Draw breathing celestial starfield
-      drawStarfield(viewMat, projMat, timeSec);
-
-      // 2. Draw dynamic ambient video glow (Ambilight) behind video screen with matching curvature
-      drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
-
-      // 3. Draw main video screen with all-side concave curvature.
-      // In SBS stereo mode each eye samples its own half of the frame.
-      const videoEye = stereoMode ? (view.eye === 'right' ? 0.5 : 0.0) : undefined;
-      drawVideoGrid(viewMat, projMat, screenPos, screenQuat, screenScale, screenScale, 1.0, curvatureMode, videoEye);
-
-      // 4. Draw in-screen direct time-synced comments overlay over reels screen
-      if (hasOverlayComments && glOverlayTexture) {
-        drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
-      }
-
-      if (controlsVisible) {
-        const ctrlPos = getControlsCenter();
-        const ctrlScale = lockToViewer ? DEFAULT_SCALE : screenScale;
-        const ctrlW = ctrlScale * 0.82;
-        const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
-        const ctrlQuat = lockToViewer ? quatFaceViewerLevel(ctrlPos, currentHeadPos) : screenQuat;
-        drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0.0);
-
-        // Draw Meta Quest 3 Controller Guide Panel to the right of screen
-        // Face the guide panel toward the viewer so it's readable from their POV
-        if (glGuideTexture) {
-          const guidePos = getGuideCenter();
-          const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
-          const guideW = ctrlScale * 0.4212;
-          const guideH = guideW * (GUIDE_H / GUIDE_W);
-          drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0.0);
-        }
-      }
-
-      // Draw VR Comments Panel to the left of screen (symmetric to the guide)
-      if (commentsPanelVisible && glCommentsTexture) {
-        const cpPos = getCommentsPanelCenter();
-        const cpQuat = getCommentsPanelQuat();
-        const cpSize = getCommentsPanelSize();
-        drawGrid(viewMat, projMat, glCommentsTexture, cpPos, cpQuat, cpSize.w, cpSize.h, 0.96, 0.0);
-      }
-
-      drawLaserPointer(viewMat, projMat);
+      renderSceneView(viewMat, projMat, view.eye, timeSec, hasOverlayComments);
     }
     } catch (err) {
       // Record the first render-loop error so post-abort CDP can read WHY the
@@ -3279,11 +4471,15 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function processInput(frame) {
     if (!xrSession) return;
+    let nextEarthHover = -1;
+    let earthRayPriority = -1;
+    if (sceneMode === 'earth') {
+      activeRayOrigin = null;
+      activeRayDir = null;
+    }
 
     for (const source of xrSession.inputSources) {
-      if (!source.gamepad) continue;
-
-      const gp = source.gamepad;
+      const gp = source.gamepad || null;
       const hand = source.handedness;
 
       let controllerPos = null;
@@ -3299,7 +4495,59 @@ window.WebXRVR = window.WebXRVR || (function () {
           const m = t.matrix || rayPose.transform.matrix;
           if (m) controllerDir = { x: -m[8], y: -m[9], z: -m[10] };
         }
+
       }
+      if (sceneMode === 'earth') {
+        const priority = earthDragInputSource === source ? 3 : (hand === 'right' ? 2 : (hand === 'left' ? 1 : 0));
+        if (controllerPos && controllerDir && priority >= earthRayPriority) {
+          earthRayPriority = priority;
+          activeRayOrigin = controllerPos;
+          activeRayDir = controllerDir;
+          let hitDist = -1;
+          let isHover = false;
+          let markerIndex = -1;
+          if (controlsVisible) {
+            const btnIdx = hitTestControls(controllerPos, controllerDir);
+            hoveredButton = btnIdx;
+            if (btnIdx >= 0) {
+              hitDist = getHitDistControls(controllerPos, controllerDir);
+              isHover = true;
+            }
+          }
+          if (!isHover) {
+            const earthHit = hitTestEarth(controllerPos, controllerDir);
+            if (earthHit.hit) {
+              hitDist = earthHit.dist;
+              markerIndex = earthHit.markerIndex;
+              isHover = true;
+              if (earthDragging && (!earthDragInputSource || earthDragInputSource === source)) {
+                updateEarthDrag(earthHit.local);
+                earthInteractionUntil = performance.now() + 900;
+              }
+            }
+          }
+          nextEarthHover = markerIndex;
+          activeHitDist = hitDist > 0 ? hitDist : 3;
+          activeIsHovering = isHover;
+        }
+        if (gp) {
+          const axes = gp.axes || [];
+          const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
+          const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+          if (Math.abs(thumbX) > 0.12 || Math.abs(thumbY) > 0.12) {
+            rotateEarth(thumbX * 0.035, -thumbY * 0.025);
+            earthInteractionUntil = performance.now() + 900;
+          }
+          if (hand === 'right') {
+            const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
+            if (bPressed && !prevBtnState.rightB) toggleControls();
+            prevBtnState.rightB = bPressed;
+          }
+        }
+        continue;
+      }
+
+      if (!gp) continue;
 
       // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
       const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
@@ -3450,6 +4698,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       prevBtnState.rightB = bPressed;
     }
+    if (sceneMode === 'earth') setEarthHoveredIndex(nextEarthHover);
   }
 
   // ─── XR Availability ───────────────────────────────────────────────
@@ -3463,6 +4712,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ─── Session Management ──────────────────────────────────────────────
 
   async function enterVR() {
+    if (previewRunning) stopPreview();
     if (xrSession) return;
     window.__xrErr = null;
     window.__xrGL = null;
@@ -3480,7 +4730,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     initDomOverlay();
 
     const sessionOpts = {
-      optionalFeatures: ['local-floor', 'local', 'dom-overlay'],
+      optionalFeatures: ['local-floor', 'local', 'dom-overlay', 'hand-tracking'],
     };
     if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
 
@@ -3565,6 +4815,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       setupVideoFrameTracking();
 
       xrSession.addEventListener('selectstart', onSelectStart);
+      xrSession.addEventListener('selectend', onSelectEnd);
       xrSession.addEventListener('end', onSessionEnd);
 
       if (videoElement) {
@@ -3602,7 +4853,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function onVideoPause() {
-    if (xrSession) showControls();
+    if (xrSession || previewRunning) showControls();
   }
 
   function onVideoPlay() {
@@ -3626,6 +4877,18 @@ window.WebXRVR = window.WebXRVR || (function () {
         const m = t.matrix || rayPose.transform.matrix;
         if (m) rayDir = { x: -m[8], y: -m[9], z: -m[10] };
       }
+
+    }
+    if (sceneMode === 'earth') {
+      if (controlsVisible && rayOrigin && rayDir) {
+        const controlIndex = hitTestControls(rayOrigin, rayDir);
+        if (controlIndex >= 0) {
+          executeControlButton(controlIndex);
+          return;
+        }
+      }
+      if (rayOrigin && rayDir) beginEarthDrag(source, hitTestEarth(rayOrigin, rayDir));
+      return;
     }
 
     // 1. VR Comments Panel — highest priority
@@ -3662,24 +4925,89 @@ window.WebXRVR = window.WebXRVR || (function () {
     toggleControls();
   }
 
+  function onSelectEnd(ev) {
+    if (sceneMode !== 'earth' || !earthDragging) return;
+    const source = ev.inputSource;
+    if (!source || (earthDragInputSource && earthDragInputSource !== source)) return;
+    let hit = null;
+    if (source.targetRaySpace && ev.frame && xrRefSpace) {
+      const rayPose = ev.frame.getPose(source.targetRaySpace, xrRefSpace);
+      if (rayPose) {
+        const t = rayPose.transform;
+        const matrix = t.matrix || rayPose.transform.matrix;
+        if (matrix) {
+          hit = hitTestEarth(
+            { x: t.position.x, y: t.position.y, z: t.position.z },
+            { x: -matrix[8], y: -matrix[9], z: -matrix[10] }
+          );
+        }
+      }
+    }
+    endEarthDrag(source, hit);
+  }
+
+
   function onSessionEnd() {
     cleanup();
   }
 
   async function exitVR() {
     const session = xrSession;
-    if (!session) return;
+    if (!session) {
+      if (previewRunning) stopPreview();
+      return;
+    }
     try {
       await session.end();
     } catch (e) {}
   }
 
-  function cleanup() {
+  function releaseGLResources() {
+    if (!gl) return;
+    const buffers = [
+      glGridBuf, glGridIndexBuf, glLaserBuf, glStarBuf,
+      glEarthSphereBuf, glEarthSphereIndexBuf, glEarthRimBuf,
+      glEarthRimIndexBuf, glEarthMarkerBuf,
+    ];
+    const textures = [
+      glVideoTexture, glVideoTextureB, glVideoTextureExt, glControlsTexture,
+      glOverlayTexture, glGuideTexture, glCommentsTexture, glReticleTexture,
+      glEarthTexture, glEarthRimTexture, glEarthLabelTexture,
+    ];
+    const programs = [glProgram, glVideoProgram, glStarProgram, glGlowProgram, glEarthMarkerProgram];
+    buffers.forEach((buffer) => { if (buffer) try { gl.deleteBuffer(buffer); } catch (e) {} });
+    textures.forEach((texture) => { if (texture) try { gl.deleteTexture(texture); } catch (e) {} });
+    programs.forEach((program) => { if (program) try { gl.deleteProgram(program); } catch (e) {} });
+  }
+
+  function cleanup(options) {
+    const opts = options || {};
+    const session = xrSession;
+    const wasXR = !!session && !opts.preview;
+    const wasEarth = sceneMode === 'earth';
+    const resumeAfterEarth = earthResumePlayback;
+    if (session) {
+      try { session.removeEventListener('selectstart', onSelectStart); } catch (e) {}
+      try { session.removeEventListener('selectend', onSelectEnd); } catch (e) {}
+      try { session.removeEventListener('end', onSessionEnd); } catch (e) {}
+    }
+    previewRunning = false;
+    if (previewRaf) window.cancelAnimationFrame(previewRaf);
+    previewRaf = 0;
+    removePreviewListeners();
+    earthActivityGeneration += 1;
+    earthSelectionGeneration += 1;
+    if (earthActivityAbort) {
+      earthActivityAbort.abort();
+      earthActivityAbort = null;
+    }
     if (videoElement) {
       videoElement.removeEventListener('pause', onVideoPause);
       videoElement.removeEventListener('play', onVideoPlay);
     }
+    stopVideoFrameTracking();
     clearAutoHideTimer();
+    releaseGLResources();
     xrSession = null;
     xrRefSpace = null;
     gl = null;
@@ -3741,8 +5069,39 @@ window.WebXRVR = window.WebXRVR || (function () {
     glStarProgram = null;
     glStarBuf = null;
     glGlowProgram = null;
+    glEarthSphereBuf = null;
+    glEarthSphereIndexBuf = null;
+    glEarthSphereIndexCount = 0;
+    glEarthRimBuf = null;
+    glEarthRimIndexBuf = null;
+    glEarthRimIndexCount = 0;
+    glEarthMarkerProgram = null;
+    glEarthMarkerBuf = null;
+    glEarthMarkerCount = 0;
+    glEarthTexture = null;
+    glEarthRimTexture = null;
+    glEarthLabelTexture = null;
+    earthLabelCanvas = null;
+    earthLabelCtx = null;
+    earthLabelSignature = '';
+    earthResourcesReady = false;
+    earthTextureReady = false;
+    earthHoveredIndex = -1;
+    earthSelectedIndex = -1;
+    earthDragging = false;
+    earthDragSource = null;
+    earthDragLastDir = null;
+    earthDragInputSource = null;
+    earthPressMarker = -1;
+    earthLastFrameTime = -1;
+    earthInteractionUntil = 0;
+    sceneMode = 'reels';
     ambilightCanvas = null;
     ambilightCtx = null;
+    controlsCanvas = null;
+    controlsCtx = null;
+    guideCanvas = null;
+    guideCtx = null;
     controlsVisible = false;
     isGrabbing = false;
     currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
@@ -3756,22 +5115,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     flickedY = false;
     _diagGLInfo = null;
 
+    if (wasXR && wasEarth && callbacks.onEarthClose) {
+      try { callbacks.onEarthClose(resumeAfterEarth); } catch (e) {}
+    }
+
     const frameEl = document.getElementById('reelsFrame');
     if (frameEl) frameEl.classList.remove('vr-active');
 
-    // Final telemetry: record why the session ended, best-effort before teardown.
-    try {
-      fetch('/api/reels/diag', { method: 'POST', keepalive: true,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'session_end',
-          xrErr: window.__xrErr || null,
-          glPath: window.__xrGL || null,
-          presented: window.__xrPresented || 0,
-        }) }).catch(() => {});
-    } catch (e) {}
-
-    notifyVrExit();
+    if (wasXR) {
+      // Final telemetry: record why the session ended, best-effort before teardown.
+      try {
+        fetch('/api/reels/diag', { method: 'POST', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'session_end',
+            xrErr: window.__xrErr || null,
+            glPath: window.__xrGL || null,
+            presented: window.__xrPresented || 0,
+          }) }).catch(() => {});
+      } catch (e) {}
+      notifyVrExit();
+    }
   }
 
   function onVideoChange() {
@@ -3810,12 +5174,50 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     enterVR,
     exitVR,
+    startPreview,
+    stopPreview,
+    resetPreview,
+    setPreviewCameraMode,
+    setPreviewStereo,
+    setReducedMotion,
+    setSceneMode,
+    requestPreviewFullscreen,
+    getPreviewState,
     onVideoChange,
 
     /** Enable/disable SBS stereoscopic sampling of the video frame. */
     setStereo(enabled) {
       stereoMode = !!enabled;
       console.log('[WebXRVR] Stereo (SBS) mode:', stereoMode ? 'ON' : 'OFF');
+    },
+
+    __test: {
+      locationToUnit,
+      raySphereHit,
+      hitTestEarth,
+      setLocationActivity,
+      beginEarthDrag,
+      updateEarthDrag,
+      endEarthDrag,
+      advanceEarthSpin,
+      cleanup,
+      setEarthPose(yaw, pitch, center) {
+        earthYaw = Number(yaw) || 0;
+        earthPitch = Number(pitch) || 0;
+        if (center) earthCenter = { x: center.x, y: center.y, z: center.z };
+        earthLastFrameTime = -1;
+      },
+      getEarthState() {
+        return {
+          center: { ...earthCenter },
+          yaw: earthYaw,
+          pitch: earthPitch,
+          dragging: earthDragging,
+          resourcesReady: earthResourcesReady,
+          locationSlugs: earthLocations.map((location) => location.slug),
+          renderStats: { ...renderStats },
+        };
+      },
     },
   };
 })();

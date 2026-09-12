@@ -8,7 +8,13 @@ import { ReelsPlayerSkeleton } from './Skeleton.jsx';
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
 // player scripts; we re-inject them in order and clean up on change.
-export default function ReelsPlayer({ params, initialIndex = 0 }) {
+export default function ReelsPlayer({
+  params,
+  initialIndex = 0,
+  previewMode = false,
+  previewOptions = {},
+  onPreviewReady,
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, setUser } = useAuth();
@@ -16,8 +22,10 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
+  const previewCanvasRef = useRef(null);
   const start = Math.max(0, initialIndex | 0);
   const sig = JSON.stringify({ ...params, start, viewer: user?.id || null });
+  const previewSig = JSON.stringify(previewOptions || {});
 
   useEffect(() => {
     const onNavigate = (event) => {
@@ -87,8 +95,30 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
       s.textContent = code;
       mount.appendChild(s);
     }
+    let previewFrame = 0;
+    if (previewMode) {
+      previewFrame = window.requestAnimationFrame(() => {
+        try {
+          const renderer = window.WebXRVR;
+          const canvas = previewCanvasRef.current;
+          if (!renderer?.startPreview || !canvas) throw new Error('Preview renderer did not initialize.');
+          renderer.startPreview(canvas, previewOptions);
+          onPreviewReady?.(renderer);
+        } catch (error) {
+          setErr(String(error?.message || error));
+        }
+      });
+    }
     // Tear down player timers/handlers (e.g. the image-reel dwell timer).
     return () => {
+      if (previewFrame) window.cancelAnimationFrame(previewFrame);
+      if (previewMode && window.WebXRVR?.stopPreview) {
+        try {
+          window.WebXRVR.stopPreview();
+        } catch {
+          /* best-effort */
+        }
+      }
       if (typeof window !== 'undefined' && typeof window.__sxReelsCleanup === 'function') {
         try {
           window.__sxReelsCleanup();
@@ -97,7 +127,7 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
         }
       }
     };
-  }, [data]);
+  }, [data, previewMode, previewSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -108,7 +138,20 @@ export default function ReelsPlayer({ params, initialIndex = 0 }) {
         </div>
       ) : null}
       {!data && !err ? <ReelsPlayerSkeleton label="Loading reels player" /> : null}
-      <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />
+      {previewMode ? (
+        <div className="sx-immersive-preview-stage">
+          <canvas
+            ref={previewCanvasRef}
+            className="sx-immersive-preview-canvas"
+            tabIndex="0"
+            role="img"
+            aria-label="Interactive desktop preview of the immersive Reels scene"
+          />
+          <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount sx-immersive-preview-source" aria-hidden="true" />
+        </div>
+      ) : (
+        <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ const ImagePage = lazy(() => import('./pages/ImagePage.jsx'));
 const VideoPage = lazy(() => import('./pages/VideoPage.jsx'));
 const ComparePage = lazy(() => import('./pages/ComparePage.jsx'));
 const ReelsPage = lazy(() => import('./pages/ReelsPage.jsx'));
+const ImmersivePreviewPage = lazy(() => import('./pages/ImmersivePreviewPage.jsx'));
 const ExplorePage = lazy(() => import('./pages/ExplorePage.jsx'));
 const TagExplorePage = lazy(() => import('./pages/TagExplorePage.jsx'));
 const LocationExplorePage = lazy(() => import('./pages/LocationExplorePage.jsx'));
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/video" element={<VideoPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/reels" element={<ReelsPage />} />
+          <Route path="/reels/immersive-preview" element={<ImmersivePreviewPage />} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
           <Route path="/explore/location/:key" element={<LocationExplorePage />} />

@@ -5239,3 +5239,80 @@ button.sx-explore-loc-link:hover {
   .sx-share-link-row input { grid-column: 1 / -1; }
   .sx-share-people { grid-template-columns: 1fr; }
 }
+
+/* Creator-only desktop view of the shared immersive Reels scene. */
+.sx-immersive-preview-page {
+  width: min(100%, 1480px);
+  margin: 0 auto;
+}
+
+.sx-immersive-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sx-2);
+  margin: var(--sx-4) 0;
+  padding: var(--sx-3);
+  border: 1px solid var(--sx-border);
+  background: var(--sx-panel);
+}
+
+.sx-immersive-preview-stage {
+  position: relative;
+  width: 100%;
+  min-height: 520px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--sx-border-strong);
+  background: #020612;
+  box-shadow: 0 18px 70px rgb(0 0 0 / 45%);
+  isolation: isolate;
+}
+
+.sx-immersive-preview-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  cursor: grab;
+  outline: none;
+}
+
+.sx-immersive-preview-canvas:active { cursor: grabbing; }
+.sx-immersive-preview-canvas:focus-visible { box-shadow: inset 0 0 0 3px var(--sx-accent); }
+
+.sx-immersive-preview-source {
+  position: absolute !important;
+  left: 0 !important;
+  bottom: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0.001;
+  pointer-events: none;
+  clip-path: inset(50%);
+}
+
+.sx-immersive-preview-stage:fullscreen,
+.sx-immersive-preview-stage:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  aspect-ratio: auto;
+  border: 0;
+}
+
+.sx-immersive-preview-stage:fullscreen .sx-immersive-preview-canvas,
+.sx-immersive-preview-stage:-webkit-full-screen .sx-immersive-preview-canvas {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+@media (max-width: 760px) {
+  .sx-immersive-preview-stage,
+  .sx-immersive-preview-canvas {
+    min-height: 360px;
+  }
+}

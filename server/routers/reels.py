@@ -8,7 +8,7 @@ import random
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,7 +21,7 @@ from server.jobs import job_manager
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, require_auth_csrf
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
-from server.social.models import Post
+from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import get_post_by_reference, metadata_for_paths, reel_records, scoped_media_paths
 
@@ -85,6 +85,16 @@ def _inject_icons(html: str) -> str:
 # enough to re-run, but not on every keystroke of a search box).
 _scan_cache: dict = {"at": 0.0, "data": []}
 _SCAN_TTL = 10.0
+
+RECENT_ACTIVITY_DEFAULT_DAYS = 7
+RECENT_ACTIVITY_MAX_DAYS = 30
+RECENT_ACTIVITY_HALF_LIFE_HOURS = 48.0
+RECENT_ACTIVITY_POST_WEIGHT = 2.0
+RECENT_ACTIVITY_VIEW_WEIGHT = 1.0
+RECENT_ACTIVITY_COMMENT_WEIGHT = 3.0
+RECENT_ACTIVITY_LIKE_WEIGHT = 3.0
+RECENT_ACTIVITY_SAVE_WEIGHT = 4.0
+RECENT_ACTIVITY_SHARE_WEIGHTS = {"share": 2.0, "share_sent": 5.0}
 
 # Latest VR telemetry snapshot pushed by the in-headset WebXR render loop.
 # CDP can't see the Quest tab during immersive VR, so the page POSTs here ~1Hz.
@@ -429,6 +439,15 @@ CITY_COORDS = {
     "seoul,south korea": (37.5665, 126.9780),
     "bangkok,thailand": (13.7563, 100.5018),
     "singapore,singapore": (1.3521, 103.8198),
+    "mumbai,india": (19.0760, 72.8777),
+    "sydney,australia": (-33.8688, 151.2093),
+    "toronto,canada": (43.6532, -79.3832),
+    "mexico city,mexico": (19.4326, -99.1332),
+    "são paulo,brazil": (-23.5505, -46.6333),
+    "lagos,nigeria": (6.5244, 3.3792),
+    "cairo,egypt": (30.0444, 31.2357),
+    "nairobi,kenya": (-1.2921, 36.8219),
+    "auckland,new zealand": (-36.8509, 174.7645),
 }
 
 
@@ -566,6 +585,196 @@ def _rank_location_catalog(catalog: dict[str, dict], q: str = "", limit: int = 8
         {key: row[key] for key in ("name", "slug", "city", "country", "reel_count", "views", "likes")}
         for row in rows[:max(1, min(int(limit), 20))]
     ]
+
+
+def _bounded_activity_window(window_days: int | str | None) -> int:
+    """Clamp public activity queries to a small, predictable time window."""
+    try:
+        requested = int(window_days or RECENT_ACTIVITY_DEFAULT_DAYS)
+    except (TypeError, ValueError):
+        requested = RECENT_ACTIVITY_DEFAULT_DAYS
+    return max(1, min(requested, RECENT_ACTIVITY_MAX_DAYS))
+
+
+def _as_utc_datetime(value) -> datetime | None:
+    """Normalize database, ISO, and epoch timestamps for decay calculations."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, TypeError, ValueError):
+            return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _activity_decay(occurred_at, now: datetime | None = None) -> float:
+    """Return a 48-hour half-life multiplier, capped at one for future clocks."""
+    timestamp = _as_utc_datetime(occurred_at)
+    current = _as_utc_datetime(now) or datetime.now(timezone.utc)
+    if timestamp is None:
+        return 0.0
+    age_hours = max(0.0, (current - timestamp).total_seconds() / 3600.0)
+    return math.pow(0.5, age_hours / RECENT_ACTIVITY_HALF_LIFE_HOURS)
+
+
+def _recent_activity_by_path(
+    db: Session,
+    raw: list[dict],
+    window_days: int | str | None = RECENT_ACTIVITY_DEFAULT_DAYS,
+    now: datetime | None = None,
+) -> dict[str, dict]:
+    """Score recent positive activity per media path without exposing actors."""
+    days = _bounded_activity_window(window_days)
+    current = _as_utc_datetime(now) or datetime.now(timezone.utc)
+    cutoff = current - timedelta(days=days)
+    paths = [str(item.get("rel_path") or "").strip().replace("\\", "/") for item in raw]
+    paths = [path for path in paths if path]
+    result = {
+        path: {"score": 0.0, "is_new": False, "active": False, "last_activity_at": None}
+        for path in paths
+    }
+    if not paths:
+        return result
+
+    posts = (
+        db.query(Post)
+        .filter(
+            Post.media_path.in_(paths),
+            Post.status == "published",
+            Post.deleted_at.is_(None),
+        )
+        .all()
+    )
+    posts_by_path = {post.media_path: post for post in posts}
+    paths_by_post = {post.id: post.media_path for post in posts}
+
+    def add(path: str | None, weight: float, occurred_at) -> None:
+        if not path or path not in result:
+            return
+        timestamp = _as_utc_datetime(occurred_at)
+        if timestamp is None or timestamp < cutoff:
+            return
+        contribution = float(weight) * _activity_decay(timestamp, current)
+        if contribution <= 0.0:
+            return
+        entry = result[path]
+        entry["score"] += contribution
+        entry["active"] = True
+        previous = entry["last_activity_at"]
+        if previous is None or timestamp > previous:
+            entry["last_activity_at"] = timestamp
+
+    for item in raw:
+        path = str(item.get("rel_path") or "").strip().replace("\\", "/")
+        post = posts_by_path.get(path)
+        published_at = _as_utc_datetime(post.created_at if post is not None else None)
+        if published_at is None:
+            published_at = _as_utc_datetime(item.get("mtime"))
+        if published_at is not None and published_at >= cutoff:
+            add(path, RECENT_ACTIVITY_POST_WEIGHT, published_at)
+            result[path]["is_new"] = True
+
+    post_ids = list(paths_by_post)
+    if not post_ids:
+        return result
+
+    for row in db.query(ViewDedup).filter(
+        ViewDedup.post_id.in_(post_ids), ViewDedup.created_at >= cutoff
+    ).all():
+        add(paths_by_post.get(row.post_id), RECENT_ACTIVITY_VIEW_WEIGHT, row.created_at)
+    for row in db.query(PostLike).filter(
+        PostLike.post_id.in_(post_ids), PostLike.created_at >= cutoff
+    ).all():
+        add(paths_by_post.get(row.post_id), RECENT_ACTIVITY_LIKE_WEIGHT, row.created_at)
+    for row in db.query(Comment).filter(
+        Comment.post_id.in_(post_ids),
+        Comment.created_at >= cutoff,
+        Comment.deleted_at.is_(None),
+    ).all():
+        add(paths_by_post.get(row.post_id), RECENT_ACTIVITY_COMMENT_WEIGHT, row.created_at)
+    for row in db.query(PostSave).filter(
+        PostSave.post_id.in_(post_ids), PostSave.created_at >= cutoff
+    ).all():
+        add(paths_by_post.get(row.post_id), RECENT_ACTIVITY_SAVE_WEIGHT, row.created_at)
+    for row in db.query(EngagementEvent).filter(
+        EngagementEvent.post_id.in_(post_ids),
+        EngagementEvent.event_type.in_(tuple(RECENT_ACTIVITY_SHARE_WEIGHTS)),
+        EngagementEvent.created_at >= cutoff,
+    ).all():
+        occurred_at = row.client_occurred_at or row.created_at
+        weight = RECENT_ACTIVITY_SHARE_WEIGHTS.get(str(row.event_type or "").casefold())
+        if weight is not None:
+            add(paths_by_post.get(row.post_id), weight, occurred_at)
+    return result
+
+
+def _location_activity_rows(
+    raw: list[dict],
+    activity_by_path: dict[str, dict],
+    metadata: dict[str, dict] | None = None,
+    limit: int = 128,
+) -> list[dict]:
+    """Aggregate activity into privacy-safe city centroids and normalized heat."""
+    snapshot = metadata if metadata is not None else _metadata_snapshot(raw)
+    catalog: dict[str, dict] = {}
+    for item in raw:
+        path = str(item.get("rel_path") or "").strip().replace("\\", "/")
+        activity = activity_by_path.get(path) or {}
+        score = max(0.0, float(activity.get("score") or 0.0))
+        if score <= 0.0:
+            continue
+        meta = _item_meta(item, snapshot)
+        location = meta.get("location") if isinstance(meta.get("location"), dict) else {}
+        city = str(location.get("city") or "").strip()
+        country = str(location.get("country") or "").strip()
+        slug = _location_key(city, country)
+        coords = _location_coords(city, country, location.get("lat"), location.get("lon"))
+        if not slug or coords is None:
+            continue
+        row = catalog.setdefault(slug, {
+            "slug": slug,
+            "name": city + ((", " + country) if country else ""),
+            "city": city,
+            "country": country,
+            "active_reel_count": 0,
+            "new_reel_count": 0,
+            "score": 0.0,
+            "_lat_sum": 0.0,
+            "_lon_sum": 0.0,
+            "_coord_count": 0,
+        })
+        row["active_reel_count"] += 1
+        row["new_reel_count"] += 1 if activity.get("is_new") else 0
+        row["score"] += score
+        row["_lat_sum"] += coords[0]
+        row["_lon_sum"] += coords[1]
+        row["_coord_count"] += 1
+
+    rows = list(catalog.values())
+    scores = sorted(row["score"] for row in rows if row["score"] > 0.0)
+    p95 = scores[max(0, math.ceil(len(scores) * 0.95) - 1)] if scores else 0.0
+    heat_denominator = math.log1p(p95) if p95 > 0.0 else 1.0
+    for row in rows:
+        count = max(1, row.pop("_coord_count"))
+        row["lat"] = round(row.pop("_lat_sum") / count, 6)
+        row["lon"] = round(row.pop("_lon_sum") / count, 6)
+        row["score"] = round(row["score"], 6)
+        row["heat"] = round(min(1.0, math.log1p(row["score"]) / heat_denominator), 6)
+    rows.sort(key=lambda row: (-row["score"], row["name"]))
+    return rows[:max(1, min(int(limit), 128))]
 
 
 def _rank_tag_catalog(
@@ -801,7 +1010,8 @@ def _is_image_item(item: dict) -> bool:
 
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
                    sort: str, media: str | None = None,
-                   tag: str | None = None, location: str | None = None) -> list[dict]:
+                   tag: str | None = None, location: str | None = None,
+                   recent_activity: dict[str, dict] | None = None) -> list[dict]:
     videos = list(raw)
     metadata = None
     if media in ("video", "videos"):
@@ -842,6 +1052,17 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
     elif sort == "shuffle":
         r = random.Random(int(time.time()) // 60)
         r.shuffle(videos)
+    elif sort == "recent_trending":
+        activity = recent_activity or {}
+
+        def _recent_score(item: dict) -> tuple[float, float]:
+            row = activity.get(item.get("rel_path", "")) or {}
+            return (
+                float(row.get("score") or 0.0),
+                float(item.get("mtime") or 0.0),
+            )
+
+        videos.sort(key=_recent_score, reverse=True)
     elif sort in ("views", "likes", "trending"):
         metadata = metadata or _metadata_snapshot(videos)
 
@@ -1008,6 +1229,7 @@ def _recommendation_feed_data(
     codec: str | None = "hevc",
     search: str = "",
     sort: str = "for_you",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     tunnel: str = "",
     refresh: bool = False,
     media: str | None = None,
@@ -1043,6 +1265,9 @@ def _recommendation_feed_data(
 
     hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    activity_days = _bounded_activity_window(window_days)
+    recent_activity = _recent_activity_by_path(db, raw, activity_days) if sort == "recent_trending" else None
+
     seed_post = get_post_by_reference(db, post_id=post) if post else None
     if post and not seed_post:
         raise HTTPException(
@@ -1056,7 +1281,16 @@ def _recommendation_feed_data(
             if seed_video:
                 videos.insert(0, seed_video)
     else:
-        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
+        videos = _apply_filters(
+            raw,
+            folder,
+            search,
+            sort,
+            media,
+            tag,
+            location,
+            recent_activity=recent_activity,
+        )
 
     scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author)
     if scoped_paths is not None and requested_surface != "related":
@@ -1086,6 +1320,7 @@ def _recommendation_feed_data(
         "search": search.strip(),
         "sort": sort,
         "media": media or "all",
+        "window_days": activity_days,
         "tag": _tag_slug(tag) if tag else "",
         "location": location or "",
         "feed": feed or "",
@@ -1150,6 +1385,7 @@ def _recommendation_feed_data(
             "search": search,
             "sort": sort,
             "tunnel": tunnel,
+            "window_days": activity_days,
             "media": media,
             "tag": tag,
             "location": location,
@@ -1167,6 +1403,7 @@ def list_reels(
     codec: str | None = "hevc",
     search: str = "",
     sort: str = "newest",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     refresh: bool = False,
     media: str | None = None,
     tag: str | None = None,
@@ -1186,13 +1423,24 @@ def list_reels(
     hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
+
     if post:
         target = get_post_by_reference(db, post_id=post)
         videos = [item for item in raw if target and item["rel_path"] == target.media_path]
         if not videos:
             raise HTTPException(status_code=404, detail={"code": "POST_NOT_FOUND", "message": "Reel not found."})
     else:
-        videos = _apply_filters(raw, folder, search, sort, media, tag, location)
+        videos = _apply_filters(
+            raw,
+            folder,
+            search,
+            sort,
+            media,
+            tag,
+            location,
+            recent_activity=recent_activity,
+        )
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
@@ -1222,6 +1470,7 @@ def reels_feed(
     codec: str | None = "hevc",
     search: str = "",
     sort: str = "for_you",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     tunnel: str = "",
     refresh: bool = False,
     media: str | None = None,
@@ -1247,6 +1496,7 @@ def reels_feed(
         search=search,
         sort=sort,
         tunnel=tunnel,
+        window_days=window_days,
         refresh=refresh,
         media=media,
         tag=tag,
@@ -1277,9 +1527,11 @@ def get_reel_tag(
     tag_name: str,
     codec: str | None = "hevc",
     sort: str = "trending",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     folder: str | None = None,
     refresh: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Return one exact tag feed plus stats and co-occurring tags."""
     slug = _tag_slug(tag_name)
@@ -1291,7 +1543,8 @@ def get_reel_tag(
     hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     catalog, _ = _tag_catalog(raw)
-    videos = _apply_filters(raw, folder, "", sort, tag=slug)
+    recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
+    videos = _apply_filters(raw, folder, "", sort, tag=slug, recent_activity=recent_activity)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -1327,14 +1580,40 @@ def list_reel_locations(q: str = "", limit: int = 8):
     }
 
 
+@router.get("/locations/activity")
+def list_reel_location_activity(
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
+    limit: int = 128,
+    viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
+):
+    """Return privacy-safe city heat markers for recent positive reel activity."""
+    days = _bounded_activity_window(window_days)
+    bounded_limit = max(1, min(int(limit), 128))
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
+    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    activity = _recent_activity_by_path(db, raw, days)
+    locations = _location_activity_rows(raw, activity, limit=bounded_limit)
+    return {
+        "strategy": "recent-activity-v1",
+        "window_days": days,
+        "half_life_hours": RECENT_ACTIVITY_HALF_LIFE_HOURS,
+        "count": len(locations),
+        "locations": locations,
+    }
+
+
 @router.get("/locations/{location_key}")
 def get_reel_location(
     location_key: str,
     codec: str | None = "hevc",
     sort: str = "trending",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     folder: str | None = None,
     refresh: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Return one exact city+country feed plus stats and related places."""
     slug = _location_key(*_split_location_key(location_key))
@@ -1346,7 +1625,8 @@ def get_reel_location(
     hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     catalog = _location_catalog(raw)
-    videos = _apply_filters(raw, folder, "", sort, location=slug)
+    recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
+    videos = _apply_filters(raw, folder, "", sort, location=slug, recent_activity=recent_activity)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -1728,6 +2008,7 @@ def reels_player(
     codec: str | None = "hevc",
     search: str = "",
     sort: str = "for_you",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
@@ -1749,6 +2030,7 @@ def reels_player(
         folder=folder,
         codec=codec,
         search=search,
+        window_days=window_days,
         sort=sort,
         tunnel=tunnel,
         refresh=refresh,
@@ -1776,6 +2058,9 @@ def reels_player(
     if img_js.exists():
         html = html.replace("__QUEST_CONTROLLER_IMG_JS__",
                             img_js.read_text(encoding="utf-8"))
+    feed_state_js = ASSETS_DIR / "reels_feed_state.js"
+    if feed_state_js.exists():
+        html = html.replace("__REELS_FEED_STATE_JS__", feed_state_js.read_text(encoding="utf-8"))
     vr_js = ASSETS_DIR / "webxr_vr.js"
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
@@ -1876,6 +2161,7 @@ def reels_player_inline(
     codec: str | None = "hevc",
     search: str = "",
     sort: str = "for_you",
+    window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     tunnel: str = "",
     refresh: bool = False,
     start: int = 0,
@@ -1898,6 +2184,7 @@ def reels_player_inline(
         folder=folder,
         codec=codec,
         search=search,
+        window_days=window_days,
         sort=sort,
         tunnel=tunnel,
         refresh=refresh,
@@ -1924,6 +2211,7 @@ def reels_player_inline(
     html = _inject_icons(html)
 
     img_js = ASSETS_DIR / "quest_controller_img.js"
+    feed_state_js = ASSETS_DIR / "reels_feed_state.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"
 
     scripts: list[str] = []
@@ -1932,6 +2220,9 @@ def reels_player_inline(
         if stripped.startswith("__QUEST_CONTROLLER_IMG_JS__"):
             if img_js.exists():
                 scripts.append(img_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__REELS_FEED_STATE_JS__"):
+            if feed_state_js.exists():
+                scripts.append(feed_state_js.read_text(encoding="utf-8"))
         elif stripped.startswith("__WEBXR_VR_JS__"):
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))
@@ -1955,7 +2246,12 @@ def reels_player_inline(
         # initial loadVideo(0) with the clamped start offset.
         init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
-            "\nwindow.__sxReelsCleanup = function () {\n"
+            "\nwindow.__sxReelsDomCleanup = window.__sxReelsCleanup;\n"
+            "window.__sxReelsCleanup = function () {\n"
+            "  if (window.__sxReelsDomCleanup) {\n"
+            "    try { window.__sxReelsDomCleanup(); } catch (e) {}\n"
+            "    window.__sxReelsDomCleanup = null;\n"
+            "  }\n"
             "  if (window.__sxReelsRuntimeCleanup) {\n"
             "    try { window.__sxReelsRuntimeCleanup(); } catch (e) {}\n"
             "    window.__sxReelsRuntimeCleanup = null;\n"

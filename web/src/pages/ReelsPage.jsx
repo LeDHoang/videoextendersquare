@@ -408,6 +408,9 @@ export default function ReelsPage() {
                 onChange={(e) => setTunnel(e.target.value)}
               />
             </Field>
+            <Button onClick={() => navigate('/reels/immersive-preview')}>
+              OPEN DESKTOP IMMERSIVE PREVIEW
+            </Button>
           </div>
         </AccentBlock>
       ) : null}
