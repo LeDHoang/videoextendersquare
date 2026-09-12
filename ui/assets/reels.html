@@ -3354,6 +3354,28 @@
       return FeedState.locationParams(feedParams, locationRow);
     }
 
+    async function loadLocationHoverPreview(locationRow, options) {
+      if (!locationRow || !locationRow.slug) return [];
+      const previewOptions = options || {};
+      const limit = Math.max(1, Math.min(3, Number(previewOptions.limit) || 3));
+      const url = new URL('/api/reels/locations/' + encodeURIComponent(locationRow.slug), location.origin);
+      url.searchParams.set('codec', 'h264');
+      url.searchParams.set('sort', 'recent_trending');
+      url.searchParams.set('window_days', '7');
+      const payload = await requestJson(url.pathname + url.search, {
+        signal: previewOptions.signal,
+      });
+      return (Array.isArray(payload && payload.videos) ? payload.videos : [])
+        .filter((item) => item && item.media_type === 'video')
+        .slice(0, limit)
+        .map((item) => ({
+          ...item,
+          url: resolveItemUrl({ ...item, url: item.preview_url || item.url }),
+          preview_url: '',
+        }))
+        .filter((item) => !!item.url);
+    }
+
     async function switchToLocationFeed(locationRow) {
       if (!locationRow || !locationRow.slug) return false;
       captureOriginalFeed();
@@ -3926,6 +3948,7 @@
           if (!activeLocationFeed && feedTransitionController) abortFeedWork();
           resumeAfterEarth(shouldResume);
         },
+        onPreviewLocation: loadLocationHoverPreview,
         onSelectLocation: function(locationRow) { return switchToLocationFeed(locationRow); },
         onRestoreAllLocations: restoreAllLocations,
         getComments: function() { return getCurrentComments(); },

@@ -438,7 +438,7 @@ def test_inline_player_bootstraps_only_first_page_and_preserves_anonymous_cookie
             re.S,
         )
         state_match = re.search(
-            r"const initialFeedState = (.*?);\n\s*const feedParams =",
+            r"const initialFeedState = (.*?);\n\s*const FeedState =",
             init_script,
             re.S,
         )
