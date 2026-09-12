@@ -27,6 +27,46 @@ class RecommendationAttributionError(ValueError):
     pass
 
 
+def get_or_create(db: Session, model, *filters, **create_kwargs):
+    """Fetch-or-insert robust to concurrent writers.
+
+    Two requests (double-click, two tabs, auto-fired view + manual like) can
+    pass the initial SELECT together. A naive ORM add + flush then collides:
+    with SQLite DEFERRED transactions both flushes can succeed locally and
+    the loser blows up at COMMIT time — outside any SAVEPOINT — leaving the
+    session unusable (PendingRollbackError) and the request a 500.
+
+    Instead this issues an atomic INSERT ... ON CONFLICT DO NOTHING and then
+    SELECTs the winner's row. The loser never raises; both callers converge
+    on the same persisted row.
+    """
+    row = db.query(model).filter(*filters).first()
+    if row is not None:
+        return row
+    table = model.__table__
+    bind = db.get_bind() if hasattr(db, "get_bind") else None
+    dialect = getattr(getattr(bind, "dialect", None), "name", "sqlite") or "sqlite"
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(table).values(**create_kwargs).on_conflict_do_nothing()
+    else:
+        from sqlalchemy.dialects.sqlite import insert as lite_insert
+
+        stmt = lite_insert(table).values(**create_kwargs).on_conflict_do_nothing()
+    for _ in range(3):
+        db.execute(stmt)
+        row = db.query(model).filter(*filters).first()
+        if row is not None:
+            return row
+    # Winner rolled back between our INSERT and SELECT (or another anomaly):
+    # fall back to a plain ORM insert so the original error surfaces loudly.
+    row = model(**create_kwargs)
+    db.add(row)
+    db.flush()
+    return row
+
+
 def resolve_attribution(
     db: Session,
     *,
@@ -162,16 +202,17 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
     )
     for other in recent:
         left_id, right_id = sorted((post_id, other.post_id))
-        pair = db.query(CoWatchPair).filter(
+        pair = get_or_create(
+            db,
+            CoWatchPair,
             CoWatchPair.actor_key == actor_key,
             CoWatchPair.left_post_id == left_id,
             CoWatchPair.right_post_id == right_id,
-        ).first()
-        if pair:
-            pair.last_seen_at = utcnow()
-            continue
-        db.add(CoWatchPair(actor_key=actor_key, left_post_id=left_id, right_post_id=right_id))
-        db.flush()
+            actor_key=actor_key,
+            left_post_id=left_id,
+            right_post_id=right_id,
+        )
+        pair.last_seen_at = utcnow()
         support = db.query(CoWatchPair.id).filter(
             CoWatchPair.left_post_id == left_id,
             CoWatchPair.right_post_id == right_id,
@@ -187,20 +228,18 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
         cosine = support / math.sqrt(max(1, left_viewers) * max(1, right_viewers))
         score = cosine * support / (support + 3.0)
         for source_id, target_id in ((left_id, right_id), (right_id, left_id)):
-            similarity = db.query(ItemSimilarity).filter(
+            similarity = get_or_create(
+                db,
+                ItemSimilarity,
                 ItemSimilarity.source_post_id == source_id,
                 ItemSimilarity.target_post_id == target_id,
                 ItemSimilarity.method == "co_watch",
                 ItemSimilarity.model_version == "co-watch-v1",
-            ).first()
-            if not similarity:
-                similarity = ItemSimilarity(
-                    source_post_id=source_id,
-                    target_post_id=target_id,
-                    method="co_watch",
-                    model_version="co-watch-v1",
-                )
-                db.add(similarity)
+                source_post_id=source_id,
+                target_post_id=target_id,
+                method="co_watch",
+                model_version="co-watch-v1",
+            )
             similarity.support = support
             similarity.score = score
             similarity.updated_at = utcnow()
@@ -217,52 +256,46 @@ def update_aggregates(db: Session, event: EngagementEvent) -> None:
     target_creator_id = post.owner_id if post else str((event.context or {}).get("target_user_id") or "") or None
     item_row = None
     if post:
-        item_row = db.query(ActorItemAffinity).filter(
+        item_row = get_or_create(
+            db,
+            ActorItemAffinity,
             ActorItemAffinity.actor_key == actor_key,
             ActorItemAffinity.post_id == post.id,
-        ).first()
-        if not item_row:
-            item_row = ActorItemAffinity(
-                actor_key=actor_key,
-                user_id=user_id,
-                anonymous_id=anonymous_id,
-                post_id=post.id,
-            )
-            db.add(item_row)
+            actor_key=actor_key,
+            user_id=user_id,
+            anonymous_id=anonymous_id,
+            post_id=post.id,
+        )
         _update_affinity_row(item_row, value, event)
         item_row.total_watch_ms = int(item_row.total_watch_ms or 0) + max(0, int(event.watch_ms or 0))
         if event.event_type == "view":
             item_row.qualified_watches = int(item_row.qualified_watches or 0) + 1
 
     if target_creator_id:
-        creator_row = db.query(ActorCreatorAffinity).filter(
+        creator_row = get_or_create(
+            db,
+            ActorCreatorAffinity,
             ActorCreatorAffinity.actor_key == actor_key,
             ActorCreatorAffinity.creator_id == target_creator_id,
-        ).first()
-        if not creator_row:
-            creator_row = ActorCreatorAffinity(
-                actor_key=actor_key,
-                user_id=user_id,
-                anonymous_id=anonymous_id,
-                creator_id=target_creator_id,
-            )
-            db.add(creator_row)
+            actor_key=actor_key,
+            user_id=user_id,
+            anonymous_id=anonymous_id,
+            creator_id=target_creator_id,
+        )
         _update_affinity_row(creator_row, value, event)
 
     if post:
         for link in post.tags:
-            tag_row = db.query(ActorTagAffinity).filter(
+            tag_row = get_or_create(
+                db,
+                ActorTagAffinity,
                 ActorTagAffinity.actor_key == actor_key,
                 ActorTagAffinity.tag_id == link.tag_id,
-            ).first()
-            if not tag_row:
-                tag_row = ActorTagAffinity(
-                    actor_key=actor_key,
-                    user_id=user_id,
-                    anonymous_id=anonymous_id,
-                    tag_id=link.tag_id,
-                )
-                db.add(tag_row)
+                actor_key=actor_key,
+                user_id=user_id,
+                anonymous_id=anonymous_id,
+                tag_id=link.tag_id,
+            )
             _update_affinity_row(tag_row, value, event)
         if event.event_type == "view":
             db.flush()

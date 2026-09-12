@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import timedelta
 
 from argon2 import PasswordHasher
@@ -489,3 +490,257 @@ def test_materialized_creator_page_reapplies_hard_exclusions(app):
         assert target["creator"]["id"] not in {
             item["creator"]["id"] for item in retried.json()["items"]
         }
+
+
+def test_concurrent_page_materialization_replays_winner(app):
+    """Same unmaterialized cursor from N threads: all succeed, identical page."""
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    seed_catalog(app, creators=3, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        page0 = get_reel_page(
+            db,
+            actor=actor_identity(None, "race-probe"),
+            surface="for_you",
+            filters={"folder": "ALL FOLDERS", "limit": 3},
+            cursor=None,
+            limit=3,
+        )
+    cursor = page0.next_cursor
+    assert cursor
+
+    results, errors = [], []
+
+    def worker():
+        db = app.state.testing_session()
+        try:
+            page = get_reel_page(
+                db,
+                actor=actor_identity(None, "race-probe"),
+                surface="for_you",
+                filters={"folder": "ALL FOLDERS", "limit": 3},
+                cursor=cursor,
+                limit=3,
+            )
+            results.append(tuple(item.target_id for item in page.items))
+        except Exception as exc:  # noqa: BLE001 — collected, asserted below
+            errors.append(repr(exc))
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    assert len(results) == 5
+    assert all(page_ids == results[0] for page_ids in results)
+
+
+def test_concurrent_affinity_upsert_dedupes(app):
+    """Simultaneous view+like style writers create exactly one affinity row."""
+    from server.social.models import ActorCreatorAffinity
+    from server.social.recommendations.events import get_or_create
+
+    seed_catalog(app, creators=2, posts_per_creator=1)
+    errors = []
+
+    def worker():
+        db = app.state.testing_session()
+        try:
+            row = get_or_create(
+                db,
+                ActorCreatorAffinity,
+                ActorCreatorAffinity.actor_key == "u:race-affinity",
+                ActorCreatorAffinity.creator_id == "creator-race",
+                actor_key="u:race-affinity",
+                creator_id="creator-race",
+            )
+            row.score = float(row.score or 0.0) + 1.0
+            db.commit()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    with app.state.testing_session() as db:
+        count = (
+            db.query(ActorCreatorAffinity)
+            .filter(
+                ActorCreatorAffinity.actor_key == "u:race-affinity",
+                ActorCreatorAffinity.creator_id == "creator-race",
+            )
+            .count()
+        )
+        assert count == 1
+
+
+def test_double_feedback_does_not_duplicate_dismissal(app):
+    seed_catalog(app, creators=2, posts_per_creator=2)
+    with TestClient(app) as client:
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        ).json()
+        target = feed["items"][0]
+        for index in range(2):
+            response = client.post(
+                "/api/recommendations/feedback",
+                json={
+                    "action": "not_interested",
+                    "post_id": target["post_id"],
+                    "recommendation_impression_id": target["recommendation"]["impression_id"],
+                    "client_event_id": f"double-feedback-{index}",
+                },
+            )
+            assert response.status_code == 200, response.text
+        with app.state.testing_session() as db:
+            count = (
+                db.query(RecommendationDismissal)
+                .filter(RecommendationDismissal.target_type == "post")
+                .count()
+            )
+            assert count == 1
+
+
+def test_recommendation_endpoints_are_rate_limited(app):
+    seed_catalog(app)
+    with TestClient(app) as client:
+        last = None
+        for _ in range(61):
+            last = client.get("/api/reels/feed", params={"limit": 1})
+        assert last.status_code == 429, last.text
+
+        creators_last = None
+        # Fresh client would share the same IP limiter; use creators budget
+        # on the same client — 60 allowed, 61st rejected.
+        for _ in range(61):
+            creators_last = client.get("/api/recommendations/creators", params={"limit": 1})
+        assert creators_last.status_code == 429, creators_last.text
+
+
+def test_feedback_endpoint_is_rate_limited(app):
+    posts = seed_catalog(app, creators=2, posts_per_creator=1)
+    creator_id = posts[0].owner_id
+    with TestClient(app) as client:
+        last = None
+        for index in range(31):
+            last = client.post(
+                "/api/recommendations/feedback",
+                json={
+                    "action": "dismiss_creator",
+                    "creator_id": creator_id,
+                    "client_event_id": f"rate-limit-feedback-{index}",
+                },
+            )
+        assert last.status_code == 429, last.text
+
+
+def test_stale_attribution_fails_open_on_like(app):
+    posts = seed_catalog(app, creators=2, posts_per_creator=1)
+    with TestClient(app) as client:
+        viewer = register(client, "failopen_viewer")
+        response = client.put(
+            f"/api/posts/{posts[0].id}/like",
+            headers={
+                **csrf_headers(client),
+                "x-recommendation-impression-id": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["liked"] is True
+        with app.state.testing_session() as db:
+            event = (
+                db.query(EngagementEvent)
+                .filter(
+                    EngagementEvent.user_id == viewer["id"],
+                    EngagementEvent.event_type == "like",
+                    EngagementEvent.post_id == posts[0].id,
+                )
+                .one()
+            )
+            assert event.recommendation_impression_id is None
+
+
+def test_limit_change_restarts_feed_instead_of_422(app):
+    seed_catalog(app, creators=3, posts_per_creator=3)
+    with TestClient(app) as client:
+        first = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        )
+        assert first.status_code == 200, first.text
+        cursor = first.json()["next_cursor"]
+        assert cursor
+        changed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8, "cursor": cursor},
+        )
+        assert changed.status_code == 200, changed.text
+        body = changed.json()
+        assert body["restarted"] is True
+        assert body["session_id"] != first.json()["session_id"]
+
+
+def test_expired_sessions_and_dismissals_are_purged(app):
+    from server.social.models import RecommendationDismissal, RecommendationSession
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    posts = seed_catalog(app, creators=2, posts_per_creator=1)
+    actor = actor_identity(None, "janitor-probe")
+    with app.state.testing_session() as db:
+        first = get_reel_page(
+            db, actor=actor, surface="for_you",
+            filters={"folder": "ALL FOLDERS", "limit": 2},
+            cursor=None, limit=2,
+        )
+        assert first.items
+        # Age a second session for the SAME actor so the next new session
+        # (triggered by a filter change) purges it.
+        stale = RecommendationSession(
+            actor_key=actor.actor_key,
+            surface="for_you",
+            filter_hash="x",
+            filters={},
+            algorithm_version="reels-heuristic-v1",
+            status="active",
+            created_at=utcnow() - timedelta(hours=7),
+            last_accessed_at=utcnow() - timedelta(hours=7),
+            expires_at=utcnow() - timedelta(hours=1),
+        )
+        db.add(stale)
+        db.flush()
+        expired_dismissal = RecommendationDismissal(
+            actor_key=actor.actor_key,
+            target_type="post",
+            post_id=posts[0].id,
+            reason="not_interested",
+            created_at=utcnow() - timedelta(days=100),
+            expires_at=utcnow() - timedelta(days=10),
+        )
+        db.add(expired_dismissal)
+        db.commit()
+        stale_session_id = stale.id
+    with app.state.testing_session() as db:
+        # Different limit => different filter_hash => fresh session + purge.
+        second = get_reel_page(
+            db, actor=actor, surface="for_you",
+            filters={"folder": "ALL FOLDERS", "limit": 3},
+            cursor=None, limit=3,
+        )
+        assert second.items
+    with app.state.testing_session() as db:
+        assert db.get(RecommendationSession, stale_session_id) is None
+        remaining = (
+            db.query(RecommendationDismissal)
+            .filter(RecommendationDismissal.actor_key == actor.actor_key)
+            .count()
+        )
+        assert remaining == 0

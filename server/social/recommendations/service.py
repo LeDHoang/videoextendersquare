@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from server.social.auth import SECURITY_SECRET, public_user
@@ -44,6 +45,7 @@ from .config import (
     SESSION_IDLE_MINUTES,
     SESSION_MAX_HOURS,
 )
+from .events import get_or_create
 from .ranking import rank_candidates, rerank_page
 from .sources import gather_source_hits
 from .types import (
@@ -134,7 +136,36 @@ def _new_session(
     )
     db.add(row)
     db.flush()
+    _purge_actor_history(db, actor=actor, now=now, keep_session_id=row.id)
     return row
+
+
+def _purge_actor_history(db: Session, *, actor: ActorIdentity, now: datetime, keep_session_id: str) -> None:
+    """Delete this actor's expired sessions and stale dismissals (capped).
+
+    Runs lazily on every new session: no scheduler needed, each purge stays
+    tiny and contention-free. Engagement history survives via SET NULL FKs.
+    """
+    stale_ids = [
+        row[0]
+        for row in db.query(RecommendationSession.id)
+        .filter(
+            RecommendationSession.actor_key == actor.actor_key,
+            RecommendationSession.id != keep_session_id,
+            RecommendationSession.expires_at <= now,
+        )
+        .limit(100)
+        .all()
+    ]
+    if stale_ids:
+        db.query(RecommendationSession).filter(RecommendationSession.id.in_(stale_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(RecommendationDismissal).filter(
+        RecommendationDismissal.actor_key == actor.actor_key,
+        RecommendationDismissal.expires_at.is_not(None),
+        RecommendationDismissal.expires_at <= now,
+    ).delete(synchronize_session=False)
 
 
 def _resolve_session(
@@ -164,7 +195,19 @@ def _resolve_session(
     if row.actor_key != actor.actor_key:
         raise RecommendationCursorError("Recommendation cursor belongs to another viewer.")
     if row.surface != surface or row.filter_hash != filter_hash(filters):
-        raise RecommendationCursorError("Recommendation cursor does not match this feed.")
+        # Filters changed mid-feed (new search, different page size, ...):
+        # restart cleanly instead of 422ing — the restarted flag tells the
+        # client to swap queues.
+        row.status = "expired"
+        return _new_session(
+            db,
+            actor=actor,
+            surface=surface,
+            seed_post_id=seed_post_id,
+            filters=filters,
+            algorithm_version=algorithm_version,
+            restart_reason="filters_changed",
+        ), 0, True
     now = utcnow()
     idle_expired = (now - aware(row.last_accessed_at)) > timedelta(minutes=SESSION_IDLE_MINUTES)
     hard_expired = aware(row.expires_at) <= now
@@ -477,26 +520,109 @@ def get_reel_page(
         algorithm_version=REELS_ALGORITHM_VERSION,
         cursor=cursor,
     )
+    # Persist session setup first: concurrent requests for the same
+    # unmaterialized page race on uq_recommendation_request_session_page.
+    # With the session committed, the loser can roll back just its own
+    # materialization inserts and replay the winner's rows below.
+    db.commit()
     existing = db.query(RecommendationRequest).filter(
         RecommendationRequest.session_id == session.id,
         RecommendationRequest.page_index == page_index,
     ).first()
     if existing:
-        rows = db.query(RecommendationImpression).filter(
-            RecommendationImpression.request_id == existing.id,
-            RecommendationImpression.post_id.is_not(None),
-        ).all()
-        eligible = _catalog(
+        return _replay_reel_page(
             db,
             actor=actor,
+            session=session,
+            page_index=page_index,
+            restarted=restarted,
             allowed_post_ids=allowed_post_ids,
-            excluded_post_ids=set(),
             surface=surface,
         )
-        rows = [row for row in rows if row.post_id in eligible]
-        db.commit()
-        return _page_from_request(session, existing, rows, restarted=restarted)
+    try:
+        return _materialize_reel_page(
+            db,
+            actor=actor,
+            session=session,
+            surface=surface,
+            seed_post_id=seed_post_id,
+            allowed_post_ids=allowed_post_ids,
+            manual_order=manual_order,
+            page_index=page_index,
+            restarted=restarted,
+            limit=limit,
+            started=started,
+        )
+    except IntegrityError:
+        db.rollback()
+        existing = None
+        for _ in range(5):
+            existing = db.query(RecommendationRequest).filter(
+                RecommendationRequest.session_id == session.id,
+                RecommendationRequest.page_index == page_index,
+            ).first()
+            if existing is not None:
+                break
+            time.sleep(0.02)
+        if existing is None:
+            raise
+        return _replay_reel_page(
+            db,
+            actor=actor,
+            session=session,
+            page_index=page_index,
+            restarted=restarted,
+            allowed_post_ids=allowed_post_ids,
+            surface=surface,
+        )
 
+
+def _replay_reel_page(
+    db: Session,
+    *,
+    actor: ActorIdentity,
+    session: RecommendationSession,
+    page_index: int,
+    restarted: bool,
+    allowed_post_ids: set[str] | None,
+    surface: str,
+) -> RecommendationPage:
+    existing = db.query(RecommendationRequest).filter(
+        RecommendationRequest.session_id == session.id,
+        RecommendationRequest.page_index == page_index,
+    ).first()
+    if existing is None:
+        raise RecommendationCursorError("Recommendation page no longer exists.")
+    rows = db.query(RecommendationImpression).filter(
+        RecommendationImpression.request_id == existing.id,
+        RecommendationImpression.post_id.is_not(None),
+    ).all()
+    eligible = _catalog(
+        db,
+        actor=actor,
+        allowed_post_ids=allowed_post_ids,
+        excluded_post_ids=set(),
+        surface=surface,
+    )
+    rows = [row for row in rows if row.post_id in eligible]
+    db.commit()
+    return _page_from_request(session, existing, rows, restarted=restarted)
+
+
+def _materialize_reel_page(
+    db: Session,
+    *,
+    actor: ActorIdentity,
+    session: RecommendationSession,
+    surface: str,
+    seed_post_id: str | None,
+    allowed_post_ids: set[str] | None,
+    manual_order: list[str] | None,
+    page_index: int,
+    restarted: bool,
+    limit: int,
+    started: float,
+) -> RecommendationPage:
     context = _pipeline_context(
         db,
         actor=actor,
@@ -564,27 +690,35 @@ def dismiss_recommendation(
     if action not in {"not_interested", "hide_creator"}:
         raise ValueError("Unsupported recommendation feedback action.")
     target_type = "post" if action == "not_interested" else "creator"
-    query = db.query(RecommendationDismissal).filter(
-        RecommendationDismissal.actor_key == actor.actor_key,
-        RecommendationDismissal.target_type == target_type,
-    )
-    if target_type == "post":
-        query = query.filter(RecommendationDismissal.post_id == post.id)
-    else:
-        query = query.filter(RecommendationDismissal.creator_id == post.owner_id)
-    row = query.first()
     now = utcnow()
-    if not row:
-        row = RecommendationDismissal(
+    if target_type == "post":
+        row = get_or_create(
+            db,
+            RecommendationDismissal,
+            RecommendationDismissal.actor_key == actor.actor_key,
+            RecommendationDismissal.target_type == "post",
+            RecommendationDismissal.post_id == post.id,
             actor_key=actor.actor_key,
             user_id=actor.user_id,
             anonymous_id=actor.anonymous_id,
-            target_type=target_type,
-            post_id=post.id if target_type == "post" else None,
-            creator_id=post.owner_id if target_type == "creator" else None,
+            target_type="post",
+            post_id=post.id,
             reason=action,
         )
-        db.add(row)
+    else:
+        row = get_or_create(
+            db,
+            RecommendationDismissal,
+            RecommendationDismissal.actor_key == actor.actor_key,
+            RecommendationDismissal.target_type == "creator",
+            RecommendationDismissal.creator_id == post.owner_id,
+            actor_key=actor.actor_key,
+            user_id=actor.user_id,
+            anonymous_id=actor.anonymous_id,
+            target_type="creator",
+            creator_id=post.owner_id,
+            reason=action,
+        )
     row.reason = action
     row.created_at = now
     row.expires_at = now + timedelta(days=90) if target_type == "post" else None
@@ -598,22 +732,20 @@ def dismiss_creator_recommendation(
     creator_id: str,
     reason: str = "dismiss_creator",
 ) -> RecommendationDismissal:
-    row = db.query(RecommendationDismissal).filter(
+    row = get_or_create(
+        db,
+        RecommendationDismissal,
         RecommendationDismissal.actor_key == actor.actor_key,
         RecommendationDismissal.target_type == "creator",
         RecommendationDismissal.creator_id == creator_id,
-    ).first()
+        actor_key=actor.actor_key,
+        user_id=actor.user_id,
+        anonymous_id=actor.anonymous_id,
+        target_type="creator",
+        creator_id=creator_id,
+        reason=reason,
+    )
     now = utcnow()
-    if not row:
-        row = RecommendationDismissal(
-            actor_key=actor.actor_key,
-            user_id=actor.user_id,
-            anonymous_id=actor.anonymous_id,
-            target_type="creator",
-            creator_id=creator_id,
-            reason=reason,
-        )
-        db.add(row)
     row.reason = reason
     row.created_at = now
     row.expires_at = None if reason == "hide_creator" else now + timedelta(days=90)
@@ -638,6 +770,44 @@ def get_creator_page(
         algorithm_version=CREATOR_ALGORITHM_VERSION,
         cursor=cursor,
     )
+    # See get_reel_page: persist session setup so a materialization race can
+    # roll back to it and replay the winner's rows.
+    db.commit()
+    existing = db.query(RecommendationRequest).filter(
+        RecommendationRequest.session_id == session.id,
+        RecommendationRequest.page_index == page_index,
+    ).first()
+    if existing:
+        return _replay_creator_page(db, actor=actor, session=session, page_index=page_index, restarted=restarted)
+    try:
+        return _materialize_creator_page(
+            db, actor=actor, session=session, page_index=page_index,
+            restarted=restarted, limit=limit,
+        )
+    except IntegrityError:
+        db.rollback()
+        existing = None
+        for _ in range(5):
+            existing = db.query(RecommendationRequest).filter(
+                RecommendationRequest.session_id == session.id,
+                RecommendationRequest.page_index == page_index,
+            ).first()
+            if existing is not None:
+                break
+            time.sleep(0.02)
+        if existing is None:
+            raise
+        return _replay_creator_page(db, actor=actor, session=session, page_index=page_index, restarted=restarted)
+
+
+def _replay_creator_page(
+    db: Session,
+    *,
+    actor: ActorIdentity,
+    session: RecommendationSession,
+    page_index: int,
+    restarted: bool,
+) -> tuple[RecommendationPage, list[dict]]:
     followed = set()
     if actor.user_id:
         followed = {
@@ -654,23 +824,46 @@ def get_creator_page(
         RecommendationRequest.session_id == session.id,
         RecommendationRequest.page_index == page_index,
     ).first()
-    if existing:
-        rows = db.query(RecommendationImpression).filter(
-            RecommendationImpression.request_id == existing.id,
-            RecommendationImpression.creator_id.is_not(None),
-        ).order_by(RecommendationImpression.position).all()
-        eligible_ids = {row.creator_id for row in rows if row.creator_id not in hard_excluded}
-        users = {
-            user.id: user
-            for user in db.query(User).filter(
-                User.id.in_(eligible_ids) if eligible_ids else False,
-                User.status == "active",
-            ).all()
+    if existing is None:
+        raise RecommendationCursorError("Recommendation page no longer exists.")
+    rows = db.query(RecommendationImpression).filter(
+        RecommendationImpression.request_id == existing.id,
+        RecommendationImpression.creator_id.is_not(None),
+    ).order_by(RecommendationImpression.position).all()
+    eligible_ids = {row.creator_id for row in rows if row.creator_id not in hard_excluded}
+    users = {
+        user.id: user
+        for user in db.query(User).filter(
+            User.id.in_(eligible_ids) if eligible_ids else False,
+            User.status == "active",
+        ).all()
+    }
+    valid_rows = [row for row in rows if row.creator_id in users]
+    db.commit()
+    page = _page_from_request(session, existing, valid_rows, restarted=restarted)
+    return page, [public_user(users[row.creator_id], actor.user_id, False) for row in valid_rows]
+
+
+def _materialize_creator_page(
+    db: Session,
+    *,
+    actor: ActorIdentity,
+    session: RecommendationSession,
+    page_index: int,
+    restarted: bool,
+    limit: int,
+) -> tuple[RecommendationPage, list[dict]]:
+    followed = set()
+    if actor.user_id:
+        followed = {
+            row[0]
+            for row in db.query(Follow.followee_id).filter(Follow.follower_id == actor.user_id).all()
         }
-        valid_rows = [row for row in rows if row.creator_id in users]
-        db.commit()
-        page = _page_from_request(session, existing, valid_rows, restarted=restarted)
-        return page, [public_user(users[row.creator_id], actor.user_id, False) for row in valid_rows]
+    hidden = blocked_user_ids(db, actor.user_id)
+    _, dismissed = _active_dismissals(db, actor.actor_key)
+    hard_excluded = hidden | dismissed | followed
+    if actor.user_id:
+        hard_excluded.add(actor.user_id)
 
     served = {
         row[0]

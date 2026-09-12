@@ -405,6 +405,24 @@ class RecommendationDismissal(Base):
             name="ck_recommendation_dismissal_target",
         ),
         Index("ix_recommendation_dismissal_actor_target", "actor_key", "target_type", "post_id", "creator_id"),
+        # Partial: plain UNIQUE would ignore NULLs, so concurrent double
+        # feedback could still duplicate rows (and double-count negatives).
+        Index(
+            "uq_recommendation_dismissal_actor_post",
+            "actor_key",
+            "post_id",
+            unique=True,
+            sqlite_where=(target_type == "post"),
+            postgresql_where=(target_type == "post"),
+        ),
+        Index(
+            "uq_recommendation_dismissal_actor_creator",
+            "actor_key",
+            "creator_id",
+            unique=True,
+            sqlite_where=(target_type == "creator"),
+            postgresql_where=(target_type == "creator"),
+        ),
     )
 
 

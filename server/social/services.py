@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +28,9 @@ from .models import (
     User,
     utcnow,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_media_path(value: str) -> str:
@@ -482,22 +486,35 @@ def record_event(
     recommendation_request_id = None
     recommendation_session_id = None
     if recommendation_impression_id:
-        from .recommendations.events import resolve_attribution
+        from .recommendations.events import RecommendationAttributionError, resolve_attribution
 
-        impression, duplicate = resolve_attribution(
-            db,
-            impression_id=recommendation_impression_id,
-            user_id=user_id,
-            anonymous_id=anonymous_id,
-            post_id=post_id,
-            event_type=event_type,
-            context=dict(context or {}),
-        )
-        if duplicate:
-            return None
-        recommendation_impression_id = impression.id
-        recommendation_request_id = impression.request_id
-        recommendation_session_id = impression.session_id
+        try:
+            impression, duplicate = resolve_attribution(
+                db,
+                impression_id=recommendation_impression_id,
+                user_id=user_id,
+                anonymous_id=anonymous_id,
+                post_id=post_id,
+                event_type=event_type,
+                context=dict(context or {}),
+            )
+        except RecommendationAttributionError as exc:
+            # Fail open: attribution is enrichment, never a reason to reject
+            # the underlying action (like/follow/feedback). Record the event
+            # unattributed so engagement is never lost to a stale client id.
+            logger.warning(
+                "recommendation attribution failed open: impression=%s event=%s error=%s",
+                str(recommendation_impression_id)[:8],
+                event_type,
+                exc,
+            )
+            recommendation_impression_id = None
+        else:
+            if duplicate:
+                return None
+            recommendation_impression_id = impression.id
+            recommendation_request_id = impression.request_id
+            recommendation_session_id = impression.session_id
     bounded_duration = max(0, int(duration_ms)) if duration_ms is not None else None
     bounded_watch = max(0, int(watch_ms)) if watch_ms is not None else None
     if watch_ratio is None and bounded_duration and bounded_watch is not None:

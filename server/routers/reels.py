@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import job_manager
-from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, require_auth_csrf
+from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_auth_csrf
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
@@ -1485,6 +1485,8 @@ def reels_feed(
     db: Session = Depends(get_db),
 ):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
+    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60)
     return _recommendation_feed_data(
         request=request,
         response=response,
