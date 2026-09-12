@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -254,13 +256,275 @@ class EngagementEvent(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     anonymous_id = Column(String(64), nullable=True, index=True)
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    recommendation_impression_id = Column(
+        String(36),
+        ForeignKey("recommendation_impressions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recommendation_request_id = Column(
+        String(36),
+        ForeignKey("recommendation_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recommendation_session_id = Column(
+        String(36),
+        ForeignKey("recommendation_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     event_type = Column(String(40), nullable=False, index=True)
     source = Column(String(40), nullable=False, default="unknown", index=True)
     watch_ms = Column(Integer, nullable=True)
+    foreground_ms = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    watch_ratio = Column(Float, nullable=True)
     position_ms = Column(Integer, nullable=True)
     completed = Column(Boolean, nullable=False, default=False)
+    navigation_reason = Column(String(32), nullable=True)
+    playback_quality = Column(JSON, nullable=False, default=dict)
+    client_occurred_at = Column(DateTime(timezone=True), nullable=True)
+    schema_version = Column(Integer, nullable=False, default=2)
     context = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_engagement_actor_created", "user_id", "anonymous_id", "created_at"),
+        Index("ix_engagement_post_type_created", "post_id", "event_type", "created_at"),
+    )
+
+
+class RecommendationSession(Base):
+    __tablename__ = "recommendation_sessions"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    surface = Column(String(32), nullable=False, index=True)
+    seed_post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True)
+    filter_hash = Column(String(64), nullable=False, index=True)
+    filters = Column(JSON, nullable=False, default=dict)
+    algorithm_version = Column(String(64), nullable=False)
+    experiment_id = Column(String(64), nullable=True)
+    variant = Column(String(32), nullable=True)
+    status = Column(String(16), nullable=False, default="active", index=True)
+    restart_reason = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_recommendation_sessions_actor_surface", "actor_key", "surface", "last_accessed_at"),
+    )
+
+
+class RecommendationRequest(Base):
+    __tablename__ = "recommendation_requests"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    session_id = Column(
+        String(36),
+        ForeignKey("recommendation_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    page_index = Column(Integer, nullable=False)
+    requested_count = Column(Integer, nullable=False)
+    returned_count = Column(Integer, nullable=False, default=0)
+    candidate_count = Column(Integer, nullable=False, default=0)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    fallback_reason = Column(String(64), nullable=True)
+    diagnostics = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "page_index", name="uq_recommendation_request_session_page"),
+    )
+
+
+class RecommendationImpression(Base):
+    __tablename__ = "recommendation_impressions"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    request_id = Column(
+        String(36),
+        ForeignKey("recommendation_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    session_id = Column(
+        String(36),
+        ForeignKey("recommendation_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    creator_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    position = Column(Integer, nullable=False)
+    primary_source = Column(String(40), nullable=False)
+    source_rank = Column(Integer, nullable=True)
+    retrieval_score = Column(Float, nullable=False, default=0.0)
+    final_score = Column(Float, nullable=False, default=0.0)
+    reason_key = Column(String(64), nullable=False, default="popular_now")
+    provenance = Column(JSON, nullable=False, default=dict)
+    delivered_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    first_visible_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(post_id IS NOT NULL AND creator_id IS NULL) OR "
+            "(post_id IS NULL AND creator_id IS NOT NULL)",
+            name="ck_recommendation_impression_one_target",
+        ),
+        UniqueConstraint("session_id", "position", name="uq_recommendation_impression_session_position"),
+        UniqueConstraint("session_id", "post_id", name="uq_recommendation_impression_session_post"),
+        UniqueConstraint("session_id", "creator_id", name="uq_recommendation_impression_session_creator"),
+    )
+
+
+class RecommendationDismissal(Base):
+    __tablename__ = "recommendation_dismissals"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    target_type = Column(String(16), nullable=False, index=True)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=True, index=True)
+    creator_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    reason = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(target_type = 'post' AND post_id IS NOT NULL AND creator_id IS NULL) OR "
+            "(target_type = 'creator' AND post_id IS NULL AND creator_id IS NOT NULL)",
+            name="ck_recommendation_dismissal_target",
+        ),
+        Index("ix_recommendation_dismissal_actor_target", "actor_key", "target_type", "post_id", "creator_id"),
+    )
+
+
+class ActorItemAffinity(Base):
+    __tablename__ = "actor_item_affinities"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False, default=0.0)
+    positive_count = Column(Integer, nullable=False, default=0)
+    negative_count = Column(Integer, nullable=False, default=0)
+    qualified_watches = Column(Integer, nullable=False, default=0)
+    total_watch_ms = Column(Integer, nullable=False, default=0)
+    last_event_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("actor_key", "post_id", name="uq_actor_item_affinity"),
+        Index("ix_actor_item_affinity_actor_score", "actor_key", "score"),
+    )
+
+
+class ActorCreatorAffinity(Base):
+    __tablename__ = "actor_creator_affinities"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    creator_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False, default=0.0)
+    positive_count = Column(Integer, nullable=False, default=0)
+    negative_count = Column(Integer, nullable=False, default=0)
+    last_event_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("actor_key", "creator_id", name="uq_actor_creator_affinity"),
+        Index("ix_actor_creator_affinity_actor_score", "actor_key", "score"),
+    )
+
+
+class ActorTagAffinity(Base):
+    __tablename__ = "actor_tag_affinities"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    anonymous_id = Column(String(64), nullable=True, index=True)
+    tag_id = Column(String(36), ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False, default=0.0)
+    positive_count = Column(Integer, nullable=False, default=0)
+    negative_count = Column(Integer, nullable=False, default=0)
+    last_event_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("actor_key", "tag_id", name="uq_actor_tag_affinity"),
+        Index("ix_actor_tag_affinity_actor_score", "actor_key", "score"),
+    )
+
+
+class PostRecommendationStats(Base):
+    __tablename__ = "post_recommendation_stats"
+
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    impressions = Column(Integer, nullable=False, default=0)
+    qualified_views = Column(Integer, nullable=False, default=0)
+    completions = Column(Integer, nullable=False, default=0)
+    skips = Column(Integer, nullable=False, default=0)
+    likes = Column(Integer, nullable=False, default=0)
+    saves = Column(Integer, nullable=False, default=0)
+    shares = Column(Integer, nullable=False, default=0)
+    negative_feedback = Column(Integer, nullable=False, default=0)
+    total_watch_ms = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class CoWatchPair(Base):
+    __tablename__ = "co_watch_pairs"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_key = Column(String(80), nullable=False, index=True)
+    left_post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    right_post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("left_post_id < right_post_id", name="ck_co_watch_pair_order"),
+        UniqueConstraint("actor_key", "left_post_id", "right_post_id", name="uq_co_watch_actor_pair"),
+    )
+
+
+class ItemSimilarity(Base):
+    __tablename__ = "item_similarities"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    source_post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    method = Column(String(24), nullable=False, default="co_watch")
+    model_version = Column(String(32), nullable=False, default="co-watch-v1")
+    score = Column(Float, nullable=False, default=0.0)
+    support = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (
+        CheckConstraint("source_post_id != target_post_id", name="ck_item_similarity_distinct"),
+        UniqueConstraint(
+            "source_post_id",
+            "target_post_id",
+            "method",
+            "model_version",
+            name="uq_item_similarity_version",
+        ),
+        Index("ix_item_similarity_source_score", "source_post_id", "score"),
+    )
 
 
 class Report(Base):

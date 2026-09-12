@@ -8,6 +8,7 @@ import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skele
 import { useAuth } from '../hooks/AuthContext.jsx';
 
 const SORTS = [
+  { label: 'FOR YOU', value: 'for_you' },
   { label: 'NEWEST', value: 'newest' },
   { label: 'TOP', value: 'trending' },
   { label: 'MOST VIEWED', value: 'views' },
@@ -44,7 +45,7 @@ export default function ReelsPage() {
   const [activeTag, setActiveTag] = useState(searchParams.get('tag') || '');
   const [activeLocation, setActiveLocation] = useState(searchParams.get('location') || '');
   const [sort, setSort] = useState(
-    VALID_SORTS.includes(paramSort) ? paramSort : 'newest',
+    VALID_SORTS.includes(paramSort) ? paramSort : 'for_you',
   );
   const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
   const [feedScope, setFeedScope] = useState(searchParams.get('feed') === 'following' ? 'following' : 'discover');
@@ -163,7 +164,8 @@ export default function ReelsPage() {
 
   const videos = data?.videos || [];
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
-  const initialIndex = deepIndex >= 0 ? deepIndex : 0;
+  const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
+  const initialIndex = deepPostId ? 0 : (deepIndex >= 0 ? deepIndex : 0);
   const playerParams = {
     folder,
     codec: codecParam,
@@ -173,7 +175,7 @@ export default function ReelsPage() {
     ...(activeLocation ? { location: activeLocation } : {}),
     ...(feedScope === 'following' ? { feed: 'following' } : {}),
     ...(activeAuthor ? { author: activeAuthor } : {}),
-    ...(deepPost ? { post: deepPost } : {}),
+    ...(deepPostId ? { post: deepPostId } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
   const videoOpts = videos.map((v) => ({
@@ -309,7 +311,7 @@ export default function ReelsPage() {
           <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
             <Pills
               options={[
-                { label: 'DISCOVER', value: 'discover' },
+                { label: 'FOR YOU', value: 'discover' },
                 { label: 'FOLLOWING', value: 'following' },
               ]}
               value={feedScope}

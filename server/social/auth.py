@@ -207,6 +207,11 @@ def require_auth_csrf(
     request: Request,
     context: AuthContext = Depends(require_auth),
 ) -> AuthContext:
+    validate_csrf(request, context)
+    return context
+
+
+def validate_csrf(request: Request, context: AuthContext) -> None:
     cookie_value = request.cookies.get(CSRF_COOKIE, "")
     header_value = request.headers.get("x-csrf-token", "")
     if not cookie_value or not header_value or not hmac.compare_digest(cookie_value, header_value):
@@ -219,7 +224,6 @@ def require_auth_csrf(
             status_code=403,
             detail={"code": "CSRF_FAILED", "message": "Security token is missing or invalid."},
         )
-    return context
 
 
 def require_moderator(context: AuthContext = Depends(require_auth)) -> AuthContext:
