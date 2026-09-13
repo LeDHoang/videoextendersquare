@@ -3426,7 +3426,11 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function compileShader(type, src) {
     const s = gl.createShader(type);
-    gl.shaderSource(s, src);
+    // GLSL ES 3.00 requires `#version 300 es` to be the very first line
+    // (no leading newline/whitespace). Template literals indent it, so
+    // strip leading whitespace before compiling.
+    const normalized = typeof src === 'string' ? src.replace(/^\s+/, '') : src;
+    gl.shaderSource(s, normalized);
     gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
       console.error('[WebXRVR] Shader error:', gl.getShaderInfoLog(s));
@@ -3559,10 +3563,24 @@ window.WebXRVR = window.WebXRVR || (function () {
     for (const [ctxt, is2] of GL_TRY) {
       const canvas = suppliedCanvas || document.createElement('canvas');
       let candidate = null;
-      try {
-        candidate = canvas.getContext(ctxt, { xrCompatible: isXR, alpha: false, antialias: true });
-      } catch (error) {
-        if (isXR) window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(error);
+      // A canvas that already holds a *different* context type returns null
+      // for getContext (no throw). Retry with plain attributes as a last
+      // resort — some desktop configs reject antialias+xrCompatible combos.
+      const attrSets = isXR
+        ? [{ xrCompatible: isXR, alpha: false, antialias: true }]
+        : [
+            { xrCompatible: false, alpha: false, antialias: true },
+            { xrCompatible: false, alpha: false, antialias: false },
+            {},
+          ];
+      for (const attrs of attrSets) {
+        try {
+          candidate = canvas.getContext(ctxt, attrs);
+        } catch (error) {
+          candidate = null;
+          if (isXR) window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(error);
+        }
+        if (candidate) break;
       }
       if (!candidate) continue;
       if (isXR) {

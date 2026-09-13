@@ -369,6 +369,9 @@ export default function ReelsPage() {
             >
               {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
             </Button>
+            <Button onClick={() => navigate('/reels/immersive-preview')}>
+              🥽 IMMERSIVE PREVIEW
+            </Button>
             {needsProxy ? (
               <Button
                 primary

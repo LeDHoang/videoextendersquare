@@ -96,18 +96,30 @@ export default function ReelsPlayer({
       mount.appendChild(s);
     }
     let previewFrame = 0;
+    let previewAttempts = 0;
     if (previewMode) {
-      previewFrame = window.requestAnimationFrame(() => {
+      const tryStartPreview = () => {
         try {
           const renderer = window.WebXRVR;
           const canvas = previewCanvasRef.current;
           if (!renderer?.startPreview || !canvas) throw new Error('Preview renderer did not initialize.');
+          // Layout may still be 0×0 on the first frame (fonts/skeleton swap);
+          // wait a few frames for a real size before binding the GL context.
+          if ((canvas.clientWidth | 0) === 0 && previewAttempts < 30) {
+            previewAttempts += 1;
+            previewFrame = window.requestAnimationFrame(tryStartPreview);
+            return;
+          }
           renderer.startPreview(canvas, previewOptions);
           onPreviewReady?.(renderer);
         } catch (error) {
-          setErr(String(error?.message || error));
+          const hint = /webgl/i.test(String(error?.message || ''))
+            ? ' — WebGL context creation failed. Enable hardware acceleration (Chrome: Settings → System → Use graphics acceleration), disable --disable-gpu, and reload. Headless/software-GL browsers need SwiftShader (`--use-gl=swiftshader`).'
+            : '';
+          setErr(String(error?.message || error) + hint);
         }
-      });
+      };
+      previewFrame = window.requestAnimationFrame(tryStartPreview);
     }
     // Tear down player timers/handlers (e.g. the image-reel dwell timer).
     return () => {
