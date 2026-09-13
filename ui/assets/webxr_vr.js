@@ -143,7 +143,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Earth mode is lazy: no GPU resources are created and no globe draw calls
   // occur until the user explicitly opens it.
   const EARTH_TEXTURE_URL = '/assets/earth-natural-1024x512.jpg';
-  const EARTH_RADIUS = 0.52;
+  const EARTH_RADIUS = 0.676; // +30% (was 0.52) for easier zone hits in VR
   const EARTH_ZONE_LIMIT = 128;
   const EARTH_IDLE_RADIANS_PER_SECOND = Math.PI / 60; // 3 degrees/second
   const EARTH_MAP_W = 2048;
@@ -163,8 +163,23 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthStatus = 'OPEN EARTH TO LOAD ACTIVITY';
   let earthDragging = false;
   let earthDragSource = null;
+  // Trigger/pointer press only becomes a globe rotation after an explicit
+  // hold: quick taps (press + release) are reserved for zone selection, so a
+  // click can never nudge the planet out from under the aimed zone.
+  const EARTH_DRAG_HOLD_MS = 280;
+  const EARTH_TAP_CHORD = 0.06; // ~= 3.4 degrees — above this, a tap is void
+  const EARTH_DRAG_CHORD = 0.12; // ~= 6.9 degrees — deliberate flick engages now
   let earthDragLastDir = null;
+  let earthDragStartDir = null;
   let earthDragMoved = false;
+  // Single-axis lock: once a drag engages, rotation follows the dominant
+  // direction only (yaw XOR pitch) until release. Mixed rotation is
+  // disorienting, so the axis is decided from cumulative travel and held.
+  let earthDragCumX = 0;
+  let earthDragCumY = 0;
+  let earthDragAxis = null; // null | 'yaw' | 'pitch'
+  let earthPressTime = 0;
+  let earthDragEngaged = false;
   let earthPressZone = -1;
   let earthLastFrameTime = -1;
   let earthActivityAbort = null;
@@ -1961,7 +1976,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function getControlsCenter() {
     if (sceneMode === 'earth') {
-      return { x: earthCenter.x, y: earthCenter.y - 0.72, z: earthCenter.z + 0.08 };
+      return { x: earthCenter.x, y: earthCenter.y - 0.94, z: earthCenter.z + 0.08 };
     }
     if (lockToViewer) {
       // Decoupled from the head-locked screen block: the transport panel stays
@@ -2142,10 +2157,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ─── Earth Activity Mode ─────────────────────────────────────────────
 
   function earthRotationQuat() {
-    // The geographic north axis stays aligned to world-up. Rotation is yaw
-    // only so a swipe can never leave the planet tilted or upside down.
-    earthPitch = 0;
-    return { x: 0, y: Math.sin(earthYaw / 2), z: 0, w: Math.cos(earthYaw / 2) };
+    // Yaw + clamped pitch so the globe can be spun horizontally AND
+    // vertically (drag up/down, thumbstick Y, wheel) without ever
+    // flipping upside down. Pitch is about the yawed local X axis.
+    const clamped = Math.max(-1.2, Math.min(1.2, earthPitch || 0));
+    earthPitch = clamped;
+    const yawQ = { x: 0, y: Math.sin(earthYaw / 2), z: 0, w: Math.cos(earthYaw / 2) };
+    const pitchQ = { x: Math.sin(clamped / 2), y: 0, z: 0, w: Math.cos(clamped / 2) };
+    return quatMul(yawQ, pitchQ);
   }
 
   function locationToUnit(lat, lon) {
@@ -2737,7 +2756,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthLocations.forEach((location) => { location._unit = locationToUnit(location.lat, location.lon); });
     earthHoveredIndex = -1;
     earthSelectedIndex = -1;
-    setEarthStatus(earthLocations.length ? 'POINT, DRAG, OR USE THUMBSTICK' : 'NO RECENT LOCATION ACTIVITY');
+    setEarthStatus(earthLocations.length ? 'TAP ZONE TO OPEN · HOLD & DRAG TO SPIN' : 'NO RECENT LOCATION ACTIVITY');
     uploadEarthHeatZones();
     return earthLocations.length;
   }
@@ -2790,6 +2809,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthDragging = false;
     earthDragSource = null;
     earthDragLastDir = null;
+    earthDragStartDir = null;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
     earthDragInputSource = null;
     earthPressZone = -1;
     earthPitch = 0;
@@ -2827,6 +2851,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthDragging = false;
     earthDragSource = null;
     earthDragLastDir = null;
+    earthDragStartDir = null;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
     earthDragInputSource = null;
     earthPressZone = -1;
     earthLastFrameTime = -1;
@@ -2872,7 +2901,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function rotateEarth(deltaYaw, deltaPitch) {
     earthYaw = (earthYaw + deltaYaw) % (Math.PI * 2);
-    earthPitch = 0;
+    earthPitch = Math.max(-1.2, Math.min(1.2, (earthPitch || 0) + (deltaPitch || 0)));
   }
 
   function raySphereHit(rayOrigin, rayDir, center, radius) {
@@ -2913,8 +2942,48 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (earthDragLastDir) {
       const dx = normalized.x - earthDragLastDir.x;
       const dy = normalized.y - earthDragLastDir.y;
-      if (Math.abs(dx) + Math.abs(dy) > 0.002) earthDragMoved = true;
-      rotateEarth(dx * 2.8, 0);
+      // Cumulative travel decides the locked axis; tremor oscillates around
+      // zero so it roughly cancels, while deliberate motion dominates.
+      earthDragCumX += dx;
+      earthDragCumY += dy;
+      // Tap-vs-drag is measured from the press point, NOT accumulated
+      // per-frame: at 72-90fps even stationary hand tremor sums past a
+      // tight threshold when the trigger is held briefly to aim.
+      let chord = -1;
+      if (earthDragStartDir) {
+        const sx = normalized.x - earthDragStartDir.x;
+        const sy = normalized.y - earthDragStartDir.y;
+        const sz = normalized.z - earthDragStartDir.z;
+        chord = Math.sqrt(sx * sx + sy * sy + sz * sz);
+        if (!earthDragMoved && chord > EARTH_TAP_CHORD) earthDragMoved = true;
+      }
+      // Rotation engages on HOLD (press held >= EARTH_DRAG_HOLD_MS) or on a
+      // deliberate flick (moved past EARTH_DRAG_CHORD). Until engaged, the
+      // globe stays frozen so clicks can't fight zone selection. Deltas are
+      // per-frame and rotation is skipped pre-engagement, so engaging late
+      // can never cause a jump.
+      if (!earthDragEngaged) {
+        const heldLong = (performance.now() - earthPressTime) >= EARTH_DRAG_HOLD_MS;
+        if (heldLong || chord > EARTH_DRAG_CHORD) earthDragEngaged = true;
+      }
+      if (earthDragEngaged) {
+        // Single-axis lock: decide once from cumulative travel, then only
+        // the dominant axis rotates for the rest of this drag.
+        if (!earthDragAxis) {
+          const ax = Math.abs(earthDragCumX);
+          const ay = Math.abs(earthDragCumY);
+          if (ax > 0.012 || ay > 0.012) earthDragAxis = ax >= ay ? 'yaw' : 'pitch';
+        }
+        if (earthDragAxis === 'pitch') {
+          rotateEarth(0, dy * 2.24);
+        } else if (earthDragAxis === 'yaw') {
+          rotateEarth(dx * 2.8, 0);
+        } else {
+          // Engaged (held long enough) but no dominant direction yet —
+          // apply yaw only so hold-still never tilts the globe.
+          rotateEarth(dx * 2.8, 0);
+        }
+      }
     }
     earthDragLastDir = normalized;
   }
@@ -2939,7 +3008,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthDragSource = source || 'pointer';
     earthDragInputSource = source && typeof source === 'object' ? source : null;
     earthDragLastDir = hit.local;
+    earthDragStartDir = hit.local;
     earthDragMoved = false;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
+    earthPressTime = performance.now();
     earthPressZone = hit.zoneIndex;
     earthInteractionUntil = performance.now() + 900;
     return true;
@@ -2949,14 +3024,29 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!earthDragging) return false;
     if (earthDragInputSource && source && earthDragInputSource !== source) return false;
     if (hit && hit.hit) updateEarthDrag(hit.local);
-    const selected = !earthDragMoved && earthPressZone >= 0
-      && hit && hit.zoneIndex === earthPressZone
-      ? earthPressZone
-      : -1;
+    // Tap-to-select: Quest Browser often delivers selectend with ev.frame
+    // null (no fresh ray pose), so `hit` can be null even when the user
+    // tapped cleanly on a zone. Fall back to the press-time / hovered zone
+    // instead of dropping the tap. Any zone under the release ray also wins
+    // over the press zone so near-misses still open the feed.
+    const releaseZone = hit && hit.hit ? hit.zoneIndex : -1;
+    const hoverZone = earthHoveredIndex;
+    let selected = -1;
+    if (!earthDragMoved) {
+      if (releaseZone >= 0) selected = releaseZone;
+      else if (earthPressZone >= 0 && (!hit || !hit.hit)) selected = earthPressZone;
+      else if (earthPressZone >= 0 && releaseZone === earthPressZone) selected = earthPressZone;
+      else if (earthPressZone < 0 && hoverZone >= 0 && (!hit || !hit.hit)) selected = hoverZone;
+    }
     earthDragging = false;
     earthDragSource = null;
     earthDragInputSource = null;
     earthDragLastDir = null;
+    earthDragStartDir = null;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
     earthPressZone = -1;
     earthInteractionUntil = performance.now() + 900;
     if (selected >= 0) selectEarthLocation(selected);
@@ -4358,7 +4448,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const onWheel = function (event) {
       event.preventDefault();
       if (sceneMode === 'earth') {
-        rotateEarth((event.deltaX + event.deltaY * 0.65) * 0.0025, 0);
+        // Wheel X = yaw, wheel Y / trackpad vertical = pitch (20% softer).
+        rotateEarth(event.deltaX * 0.0025, (event.deltaY * 0.65) * 0.002);
         earthInteractionUntil = performance.now() + 900;
       } else if (previewCameraMode === 'orbit') {
         previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + event.deltaY * 0.006));
@@ -4595,13 +4686,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     );
     gl.disable(gl.DEPTH_TEST);
     if (glEarthLabelTexture) {
-      const labelPos = { x: earthCenter.x, y: earthCenter.y + 0.73, z: earthCenter.z };
+      const labelPos = { x: earthCenter.x, y: earthCenter.y + 0.95, z: earthCenter.z };
       drawGrid(viewMat, projMat, glEarthLabelTexture, labelPos, quatFaceViewerLevel(labelPos, currentHeadPos), 0.86, 0.15, 0.98, 0);
     }
     if (glEarthPreviewTexture && earthPreviewLocationIndex >= 0) {
       const previewPos = vecAdd(
         { x: earthCenter.x, y: earthCenter.y + 0.17, z: earthCenter.z },
-        vecScale(earthAnchorRight, 0.72)
+        vecScale(earthAnchorRight, 0.94)
       );
       drawGrid(
         viewMat,
@@ -5088,8 +5179,14 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (gp) {
           const axes = gp.axes || [];
           const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
-          if (Math.abs(thumbX) > 0.12) {
-            rotateEarth(thumbX * 0.035, 0);
+          const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+          if (Math.abs(thumbX) > 0.12 || Math.abs(thumbY) > 0.12) {
+            // Single-axis like drags: follow the dominant stick direction
+            // only so diagonal holds can't spin yaw + pitch together.
+            const yawMag = Math.abs(thumbX) > 0.12 ? Math.abs(thumbX) : -1;
+            const pitchMag = Math.abs(thumbY) > 0.12 ? Math.abs(thumbY) : -1;
+            if (yawMag >= pitchMag) rotateEarth(thumbX * 0.035, 0);
+            else rotateEarth(0, -thumbY * 0.024);
             earthInteractionUntil = performance.now() + 900;
           }
           if (hand === 'right') {
@@ -5480,11 +5577,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function onSelectEnd(ev) {
-    if (sceneMode !== 'earth' || !earthDragging) return;
+    if (sceneMode !== 'earth') return;
     const source = ev.inputSource;
-    if (!source || (earthDragInputSource && earthDragInputSource !== source)) return;
+    if (source && earthDragInputSource && earthDragInputSource !== source) return;
     let hit = null;
-    if (source.targetRaySpace && ev.frame && xrRefSpace) {
+    if (source && source.targetRaySpace && ev.frame && xrRefSpace) {
       const rayPose = ev.frame.getPose(source.targetRaySpace, xrRefSpace);
       if (rayPose) {
         const t = rayPose.transform;
@@ -5497,7 +5594,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
     }
-    endEarthDrag(source, hit);
+    if (earthDragging) {
+      endEarthDrag(source, hit);
+      return;
+    }
+    // Trigger was pressed/released without an active drag (e.g. selectstart
+    // ray missed or was never delivered on Quest Browser). Treat a clean
+    // release over a zone — or the last hovered zone when no fresh pose is
+    // available — as a tap.
+    const zone = hit && hit.hit ? hit.zoneIndex : earthHoveredIndex;
+    if (zone >= 0) selectEarthLocation(zone);
   }
 
 
@@ -5791,7 +5897,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       setEarthPose(yaw, pitch, center) {
         earthYaw = Number(yaw) || 0;
-        earthPitch = 0;
+        earthPitch = Math.max(-1.2, Math.min(1.2, Number(pitch) || 0));
         if (center) earthCenter = { x: center.x, y: center.y, z: center.z };
         earthLastFrameTime = -1;
       },
