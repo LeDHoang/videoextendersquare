@@ -177,19 +177,88 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       </nav>
 
       {/* ─── Account Billing Module ───────────────────────── */}
-      <div className="sx-sidebar-card">
+      <div className="sx-sidebar-card sx-sidebar-billing-card">
         <div className="sx-sidebar-card-head">
-          <span className="sx-sidebar-card-title">ECHO CREDITS</span>
+          <span className="sx-sidebar-card-title">
+            <span style={{ color: 'var(--sx-accent)' }}>⚡</span> ECHO CREDITS & KEY
+          </span>
           <div className="sx-sidebar-status-pill">
-            <span className={`sx-status-dot ${user ? 'sx-dot-online' : 'sx-dot-offline'}`} />
-            <span className="sx-sidebar-status-text">{user ? `${wallet?.available_credits ?? '—'} AVAILABLE` : 'SIGN IN'}</span>
+            <span
+              className={`sx-status-dot ${
+                !user
+                  ? 'sx-dot-offline'
+                  : (wallet?.available_credits ?? 0) > 0 || falKey?.configured
+                    ? 'sx-dot-online'
+                    : 'sx-dot-warning'
+              }`}
+            />
+            <span className="sx-sidebar-status-text">
+              {!user
+                ? 'GUEST'
+                : (wallet?.available_credits ?? 0) > 0
+                  ? 'ACTIVE'
+                  : falKey?.configured
+                    ? 'BYOK ACTIVE'
+                    : '0 CREDITS'}
+            </span>
           </div>
         </div>
-        <div className="sx-monospace-sm" style={{ fontSize: '0.72rem', marginBottom: 10 }}>
-          {falKey?.configured ? `MY FAL KEY ${falKey.hint}` : 'NO PERSONAL FAL KEY SAVED'}
+
+        {/* Hero Credits Stat Box */}
+        <div className="sx-sidebar-credits-hero">
+          <div className="sx-sidebar-credits-left">
+            <div className="sx-sidebar-credits-icon-wrap" aria-hidden="true">
+              <IndustrialCreditsIcon className="sx-sidebar-icon-svg" />
+            </div>
+            <div className="sx-sidebar-credits-meta">
+              <span className="sx-sidebar-credits-label">AVAILABLE</span>
+              <span className="sx-sidebar-credits-sub">
+                {user ? '$0.01 / CREDIT' : 'SIGN IN TO USE'}
+              </span>
+            </div>
+          </div>
+          <div className="sx-sidebar-credits-right">
+            <span
+              className={`sx-sidebar-credits-num ${
+                user && (wallet?.available_credits ?? 0) > 0 ? 'sx-sidebar-credits-num--accent' : ''
+              }`}
+            >
+              {user ? (wallet?.available_credits ?? 0).toLocaleString() : '—'}
+            </span>
+            <span className="sx-sidebar-credits-unit">CREDITS</span>
+          </div>
         </div>
-        <Link className="sx-sidebar-btn-primary" to={user ? '/wallet' : '/login?next=%2Fwallet'} onClick={() => onClose?.()}>
-          {user ? 'MANAGE CREDITS / KEY' : 'SIGN IN'}
+
+        {/* Personal FAL Key (BYOK) Status */}
+        <div className="sx-sidebar-key-row">
+          <span className="sx-sidebar-key-label">
+            <span style={{ opacity: 0.65 }}>BYOK</span> FAL KEY
+          </span>
+          {falKey?.configured ? (
+            <span
+              className="sx-sidebar-key-badge sx-sidebar-key-badge--configured"
+              title={`Personal key active (${falKey.hint || 'CONFIGURED'})`}
+            >
+              <span>✓</span> {falKey.hint || 'CONFIGURED'}
+            </span>
+          ) : (
+            <span
+              className="sx-sidebar-key-badge sx-sidebar-key-badge--none"
+              title="Using shared platform credits pool"
+            >
+              SHARED POOL
+            </span>
+          )}
+        </div>
+
+        {/* Action Button */}
+        <Link
+          className="sx-sidebar-billing-btn"
+          to={user ? '/wallet' : '/login?next=%2Fwallet'}
+          onClick={() => onClose?.()}
+        >
+          <span>{user ? 'MANAGE CREDITS / KEY' : 'SIGN IN TO TOP UP'}</span>
+          <span className="sx-btn-arrow" aria-hidden="true">↗</span>
         </Link>
       </div>
 

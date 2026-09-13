@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 # stack never did, so FAL_KEY in .env was invisible to `uvicorn server.app:app`
 # unless it was also exported in the shell. The platform key is no longer
 # mutable through a public API.
-load_dotenv()
+load_dotenv(override=True)
 
 _CLEANUP_INTERVAL_S = 15 * 60
 
