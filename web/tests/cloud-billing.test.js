@@ -51,3 +51,19 @@ test('cloud detection skips square local work but includes outpaint and Fal upsc
   assert.equal(stagedItemNeedsCloud({ width: 1000, height: 500 }, { upscale_only: false, upscale_engine: 'fast' }), true);
   assert.equal(stagedItemNeedsCloud({ width: 1000, height: 1000 }, { upscale_only: true, upscale_engine: 'fal' }), true);
 });
+
+test('missing optionals never serialize as undefined or NaN', () => {
+  const parameters = videoBillingParameters({
+    upscaleOnly: true,
+    falPicked: false,
+    studioPicked: false,
+    outpaintModel: 'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+    upscaleModel: 'fal-ai/bytedance-upscaler/upscale/video',
+  });
+  const form = appendProcessingParameters(new FormData(), { ...parameters, extra: undefined, nil: null });
+  for (const value of form.values()) {
+    assert.ok(!/undefined|NaN|null/.test(value), `leaked sentinel: ${value}`);
+  }
+  assert.equal(form.get('prompt'), '');
+  assert.equal(Number.isNaN(Number(form.get('sharpening'))), false);
+});

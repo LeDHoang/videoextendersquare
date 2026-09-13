@@ -9,9 +9,9 @@ export function imageBillingParameters({
   customUpscaleArgs,
 }) {
   return {
-    prompt: upscaleOnly ? '' : prompt,
+    prompt: upscaleOnly ? '' : (prompt ?? ''),
     upscale_only: Boolean(upscaleOnly),
-    sharpening: Number(sharpening),
+    sharpening: Number(sharpening ?? 0),
     upscale_engine: falPicked ? 'fal' : 'fast',
     upscale_model: upscaleModel,
     outpaint_model: outpaintModel,
@@ -49,20 +49,20 @@ export function videoBillingParameters({
   customUpscaleArgs,
 }) {
   return {
-    prompt: upscaleOnly ? '' : prompt,
+    prompt: upscaleOnly ? '' : (prompt ?? ''),
     upscale_only: Boolean(upscaleOnly),
     upscale_engine: falPicked ? 'fal' : studioPicked ? 'studio' : 'fast',
-    sharpening: Number(sharpening),
+    sharpening: Number(sharpening ?? 0),
     outpaint_model: outpaintModel,
     upscale_model: upscaleModel,
     ltx_resolution: ltxResolution,
     ltx_audio: Boolean(ltxAudio),
-    ltx_guidance: Number(ltxGuidance),
+    ltx_guidance: Number(ltxGuidance ?? 0),
     ltx_prompt_expansion: Boolean(ltxPromptExpansion),
-    ltx_negative_prompt: ltxNegativePrompt,
+    ltx_negative_prompt: ltxNegativePrompt ?? '',
     ltx_loras: ltxLoras || [],
     wan_resolution: wanResolution,
-    seedvr_factor: Number(seedvrFactor),
+    seedvr_factor: Number(seedvrFactor ?? 2),
     seedvr_target: seedvrTarget,
     bytedance_target_res: bytedanceTargetRes,
     bytedance_target_fps: bytedanceTargetFps,
@@ -70,8 +70,8 @@ export function videoBillingParameters({
     bytedance_preset: bytedancePreset,
     bytedance_fidelity: bytedanceFidelity,
     trim_enabled: Boolean(trimEnabled),
-    trim_start: Number(trimStart),
-    trim_duration: Number(trimDuration),
+    trim_start: Number(trimStart ?? 0),
+    trim_duration: Number(trimDuration ?? 15),
     custom_outpaint_args: customOutpaintArgs || {},
     custom_upscale_args: customUpscaleArgs || {},
   };
@@ -79,6 +79,7 @@ export function videoBillingParameters({
 
 export function appendProcessingParameters(formData, parameters) {
   Object.entries(parameters).forEach(([key, value]) => {
+    if (value === undefined || value === null) return; // Never emit "undefined"/"null".
     const encoded = value && typeof value === 'object' ? JSON.stringify(value) : String(value);
     formData.append(key, encoded);
   });

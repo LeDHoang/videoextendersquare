@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, GatedReason } from '../components/ui/primitives.jsx';
 import { Button, Field } from '../components/ui/controls.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
+import { billingErrorMessage } from '../utils/billingErrors.js';
+
+// Stripe Checkout is the only external navigation target in this app.
+const CHECKOUT_URL_ALLOWLIST = /^https:\/\/(checkout\.stripe\.com|buy\.stripe\.com)(\/|$)/;
 
 export default function WalletPage() {
   const { wallet, catalog, falKey, refresh, saveFalKey, deleteFalKey } = useWallet();
@@ -11,16 +15,37 @@ export default function WalletPage() {
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  const checkoutHandledRef = useRef(false);
 
   const loadTransactions = () => api.get('/api/billing/transactions').then((r) => setTransactions(r.transactions || []));
   useEffect(() => { loadTransactions().catch(() => {}); }, []);
   useEffect(() => {
+    // Run once per mount: the Stripe webhook fulfills asynchronously, so poll
+    // the wallet a few times with backoff instead of a single refresh, then
+    // strip the query param so a remount never re-fires this flow.
+    if (checkoutHandledRef.current) return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') === 'success') {
-      setMessage('PAYMENT RECEIVED — credits appear after Stripe confirms the webhook.');
-      refresh().catch(() => {});
-      loadTransactions().catch(() => {});
-    }
+    if (params.get('checkout') !== 'success') return;
+    checkoutHandledRef.current = true;
+    params.delete('checkout');
+    params.delete('session_id');
+    const query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
+    setMessage('PAYMENT RECEIVED — credits appear after Stripe confirms the webhook.');
+    let attempts = 0;
+    let cancelled = false;
+    const poll = () => {
+      if (cancelled) return;
+      refresh({ silent: true })
+        .catch(() => {})
+        .finally(() => {
+          loadTransactions().catch(() => {});
+          attempts += 1;
+          if (attempts < 4 && !cancelled) setTimeout(poll, attempts * 2500);
+        });
+    };
+    poll();
+    return () => { cancelled = true; };
   }, [refresh]);
 
   const checkout = async (packId) => {
@@ -28,9 +53,12 @@ export default function WalletPage() {
     setMessage('');
     try {
       const result = await api.post('/api/billing/checkout-session', { pack_id: packId });
+      if (!CHECKOUT_URL_ALLOWLIST.test(String(result.checkout_url || ''))) {
+        throw new Error('Checkout is temporarily unavailable. Try again later.');
+      }
       window.location.assign(result.checkout_url);
     } catch (error) {
-      setMessage(error.message);
+      setMessage(billingErrorMessage(error));
       setBusy('');
     }
   };
@@ -39,11 +67,11 @@ export default function WalletPage() {
     setBusy('key');
     setMessage('');
     try {
-      await saveFalKey(keyValue);
+      await saveFalKey(keyValue.trim());
       setKeyValue('');
       setMessage('PERSONAL FAL KEY SAVED ENCRYPTED');
     } catch (error) {
-      setMessage(error.message);
+      setMessage(billingErrorMessage(error));
     } finally {
       setBusy('');
     }
@@ -55,7 +83,7 @@ export default function WalletPage() {
       await deleteFalKey();
       setMessage('PERSONAL FAL KEY REMOVED');
     } catch (error) {
-      setMessage(error.message);
+      setMessage(billingErrorMessage(error));
     } finally {
       setBusy('');
     }
@@ -104,15 +132,23 @@ export default function WalletPage() {
       </Section>
 
       <Section num={4} title="Transaction History" active>
-        {transactions.length ? transactions.map((row) => (
-          <div className="sx-cost-panel" key={row.id} style={{ marginBottom: 8 }}>
-            <div className="sx-cost-head">
-              <span>{row.source.toUpperCase()} · {row.type.toUpperCase()}</span>
-              <strong>{row.delta_available > 0 ? '+' : ''}{row.delta_available} available / {row.delta_reserved > 0 ? '+' : ''}{row.delta_reserved} reserved</strong>
+        {transactions.length ? transactions.map((row, index) => {
+          const source = String(row.source ?? 'unknown').toUpperCase();
+          const type = String(row.type ?? 'entry').toUpperCase();
+          const created = new Date(row.created_at);
+          const when = Number.isNaN(created.getTime()) ? 'date unavailable' : created.toLocaleString();
+          const deltaAvailable = Number(row.delta_available ?? 0);
+          const deltaReserved = Number(row.delta_reserved ?? 0);
+          return (
+            <div className="sx-cost-panel" key={row.id ?? index} style={{ marginBottom: 8 }}>
+              <div className="sx-cost-head">
+                <span>{source} · {type}</span>
+                <strong>{deltaAvailable > 0 ? '+' : ''}{deltaAvailable} available / {deltaReserved > 0 ? '+' : ''}{deltaReserved} reserved</strong>
+              </div>
+              <small>{when} · balance {Number(row.balance_available ?? 0)}</small>
             </div>
-            <small>{new Date(row.created_at).toLocaleString()} · balance {row.balance_available}</small>
-          </div>
-        )) : <p className="sx-body">No credit transactions yet.</p>}
+          );
+        }) : <p className="sx-body">No credit transactions yet.</p>}
       </Section>
     </div>
   );

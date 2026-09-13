@@ -62,11 +62,12 @@ export const api = {
       : '';
     return request(path + q);
   },
-  post(path, body) {
+  post(path, body, options) {
     return request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
+      ...options,
     });
   },
   put(path, body) {

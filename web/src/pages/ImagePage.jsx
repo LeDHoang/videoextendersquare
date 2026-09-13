@@ -14,6 +14,7 @@ import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud } from '../utils/cloudBilling.js';
+import { billingErrorMessage } from '../utils/billingErrors.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -55,6 +56,7 @@ export default function ImagePage() {
   const [imgOutArgs, setImgOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [imgUpArgs, setImgUpArgs] = useState({ args: {}, ok: true, error: '' });
   const [paymentSource, setPaymentSource] = useState('credits');
+  const autoByokRef = useRef(false);
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
@@ -93,19 +95,34 @@ export default function ImagePage() {
     enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
   });
   const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
+  // button stays clickable and render() re-fetches fresh quotes first.
+  const quoteStale = cloudRequired && paymentSource === 'credits' && !byokOnly && Boolean(catalog?.credits_enabled) && (
+    quoteState.loading || Boolean(quoteState.error) || quoteState.quotes.length !== quoteItems.length
+  );
   const fundingBlocked = cloudRequired && (
     !user ||
     (paymentSource === 'byok' && !falKey?.configured) ||
     (paymentSource === 'credits' && (
-      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
-      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+      byokOnly || !catalog?.credits_enabled || insufficientCredits
     ))
   );
   const disabled = blocked.length > 0 || fundingBlocked || busy;
 
   useEffect(() => {
-    if (byokOnly) setPaymentSource('byok');
-  }, [byokOnly]);
+    if (byokOnly) {
+      if (paymentSource !== 'byok') {
+        autoByokRef.current = true;
+        setPaymentSource('byok');
+      }
+    } else if (autoByokRef.current) {
+      // The switch to BYOK was automatic: restore credits now that a
+      // credit-supported model is selected again. An explicit user choice
+      // of BYOK is left untouched.
+      autoByokRef.current = false;
+      setPaymentSource('credits');
+    }
+  }, [byokOnly, paymentSource]);
 
   // Preselect the sidebar's CUSTOM(...) override once the catalog arrives.
   const customInit = useRef(false);
@@ -168,13 +185,13 @@ export default function ImagePage() {
           const res = await api.form('/api/image/process', fd);
           jobList.push({ jobId: res.job_id, name: item.name, kind: 'image' });
         } catch (submissionError) {
-          setError(submissionError.message);
+          setError(billingErrorMessage(submissionError));
         }
       }
       setJobs(jobList);
       if (cloudRequired) await refreshWallet();
     } catch (requestError) {
-      setError(requestError.message || 'Could not prepare cloud billing.');
+      setError(billingErrorMessage(requestError, 'Could not prepare cloud billing.'));
     } finally {
       setBusy(false);
     }
@@ -321,7 +338,7 @@ export default function ImagePage() {
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button primary disabled={disabled} loading={busy} onClick={render}>
-                ▶ RENDER {items.length ? `${items.length} ` : ''}IMAGE(S) 4K SQUARE
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}IMAGE(S) 4K SQUARE`}
               </Button>
             </div>
 
@@ -338,7 +355,7 @@ export default function ImagePage() {
       {jobs.length ? (
         <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
-            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="image" onSettled={refreshWallet} />
+            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="image" onSettled={() => refreshWallet({ silent: true })} />
           ))}
           {hasJobs ? (
             <>

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from server.billing.service import RewardError, claim_reel_reward, flag_enabled
+from server.billing.service import BillingError, RewardError, claim_reel_reward, flag_enabled, require_billing_secrets
 from server.social.auth import AuthContext, keyed_hash, request_identity, require_auth_csrf, validate_origin
 from server.social.database import get_db
 
@@ -29,6 +29,7 @@ def claim_reel(
         raise HTTPException(status_code=503, detail={"code": "REWARDS_DISABLED", "message": "Reel rewards are disabled."})
     ip_hash = keyed_hash("reel-reward:" + request_identity(request))
     try:
+        require_billing_secrets()
         return claim_reel_reward(
             db,
             user_id=context.user.id,
@@ -39,6 +40,13 @@ def claim_reel(
     except RewardError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
-    except (IntegrityError, OperationalError) as exc:
+    except BillingError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail={"code": exc.code, "message": str(exc)}) from exc
+    except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail={"code": "REWARD_ALREADY_CLAIMED", "message": "This reel has already been claimed."}) from exc
+    except OperationalError as exc:
+        # SQLite write contention, not a duplicate claim — retryable.
+        db.rollback()
+        raise HTTPException(status_code=503, detail={"code": "REWARD_RETRYABLE", "message": "Reward service is busy. Try again shortly."}) from exc

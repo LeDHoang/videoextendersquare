@@ -1,6 +1,5 @@
 """Read-only platform-key status and administrator-only model settings."""
 
-import os
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
@@ -30,13 +29,12 @@ class ModelsUpdate(BaseModel):
 
 @router.get("")
 def get_config():
-    """Return current configuration state (masked FAL key, model overrides,
-    and the full model/pricing catalog the frontend renders from)."""
-    key = os.environ.get("FAL_KEY", "")
-    masked = f"****{key[-4:]}" if len(key) >= 4 else ("set" if key else "")
+    """Return the model/pricing catalog the frontend renders from.
+
+    The platform Fal key is server-owned and never exposed here — not even
+    masked. Operators confirm it via server logs / Stripe dashboard instead.
+    """
     return {
-        "fal_key_set": bool(key),
-        "fal_key_masked": masked,
         "models": _models.config_payload(_model_config),
     }
 

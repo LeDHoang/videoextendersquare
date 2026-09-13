@@ -6,6 +6,7 @@ import hashlib
 import os
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.social.models import StripeEvent, StripePurchase, utcnow
@@ -147,9 +148,22 @@ def _fulfill_checkout(db: Session, session_obj: Any) -> bool:
         db.flush()
     payment_intent = _event_value(session, "payment_intent")
     if payment_intent:
-        purchase.payment_intent_id = str(_event_value(payment_intent, "id", payment_intent))
+        new_pi = str(_event_value(payment_intent, "id", payment_intent))
+        if not purchase.payment_intent_id:
+            purchase.payment_intent_id = new_pi
+        elif purchase.status in {"created", "pending"} and purchase.payment_intent_id != new_pi:
+            # PI rotation before money moved: track the latest attempt.
+            # Once fulfilled the PI is frozen — it identifies the money
+            # movement that refunds/disputes reference, so overwriting it
+            # would lose the reversal mapping.
+            purchase.payment_intent_id = new_pi
     if str(_event_value(session, "payment_status", "")).casefold() != "paid":
         purchase.status = "pending"
+        return False
+    if purchase.status in {"reversed", "partially_reversed"}:
+        # Out-of-order refund/dispute already reversed this purchase. The
+        # grant below dedupes via idempotency, and the terminal reversal
+        # status must stand — never resurrect to fulfilled.
         return False
     _, granted = grant_credits(
         db,
@@ -161,12 +175,28 @@ def _fulfill_checkout(db: Session, session_obj: Any) -> bool:
         reference_id=purchase.id,
         details={"pack_id": purchase.pack_id, "amount_cents": purchase.amount_total_cents},
     )
+    if not granted:
+        # Dedupe hit. In the rare raced-rollback case grant_credits rolled
+        # back this transaction (including a newly added purchase row), so
+        # re-fetch the canonical row instead of touching a stale instance.
+        purchase = db.query(StripePurchase).filter(StripePurchase.checkout_session_id == session_id).first()
+        if purchase is None:
+            return False
+        if purchase.status in {"reversed", "partially_reversed"}:
+            return False
     purchase.status = "fulfilled"
     purchase.fulfilled_at = purchase.fulfilled_at or utcnow()
     return granted
 
 
-def _reverse_payment(db: Session, payment_intent_id: str, event_type: str) -> bool:
+def _reverse_payment(
+    db: Session,
+    payment_intent_id: str,
+    event_type: str,
+    *,
+    event_id: str = "",
+    amount_cents: int = 0,
+) -> bool:
     purchase = db.query(StripePurchase).filter(StripePurchase.payment_intent_id == payment_intent_id).first()
     if not purchase and payment_intent_id:
         sessions = _stripe().checkout.Session.list(payment_intent=payment_intent_id, limit=1)
@@ -178,18 +208,49 @@ def _reverse_payment(db: Session, payment_intent_id: str, event_type: str) -> bo
             ).first()
     if not purchase:
         return False
+    if purchase.status not in {"fulfilled", "partially_reversed"}:
+        # Unpaid/failed purchases hold no granted credits: a refund arriving
+        # before payment must not drive the wallet negative. (Refund-before-
+        # paid creates the purchase via _fulfill_checkout above but leaves it
+        # pending, so we land here and skip the debit.)
+        return False
+    total = int(purchase.amount_total_cents or 0)
+    if total <= 0:
+        return False
+    if amount_cents > 0:
+        refunded_total = min(total, max(int(purchase.amount_refunded_cents or 0), int(amount_cents)))
+    else:
+        # No amount reported (dispute without amount, legacy event): revoke all.
+        refunded_total = total
+    # Cumulative pro-rating: revoke ceil(credits * refunded/total) overall,
+    # minus what earlier partial events already revoked. Rounding slack stays
+    # under 1 credit per pack; the total never exceeds the granted pack.
+    target = min(
+        int(purchase.credits or 0),
+        -(-int(purchase.credits or 0) * refunded_total // total),
+    )
+    revoke = min(target - int(purchase.credits_revoked or 0), int(purchase.credits or 0) - int(purchase.credits_revoked or 0))
+    purchase.amount_refunded_cents = refunded_total
+    if revoke <= 0:
+        db.flush()
+        return False
     _, debited = debit_credits(
         db,
         purchase.user_id,
-        purchase.credits,
+        revoke,
         source="refund" if event_type == "charge.refunded" else "dispute",
-        idempotency_key=f"stripe-reversal:{purchase.id}",
+        idempotency_key=f"stripe-reversal:{purchase.id}:{event_id or event_type}",
         reference_type="stripe_purchase",
         reference_id=purchase.id,
-        details={"stripe_event_type": event_type},
+        details={"stripe_event_type": event_type, "revoked_credits": revoke, "refunded_cents": refunded_total},
     )
-    purchase.status = "reversed"
-    purchase.reversed_at = purchase.reversed_at or utcnow()
+    if debited:
+        purchase.credits_revoked = int(purchase.credits_revoked or 0) + revoke
+    if refunded_total >= total:
+        purchase.status = "reversed"
+        purchase.reversed_at = purchase.reversed_at or utcnow()
+    else:
+        purchase.status = "partially_reversed"
     return debited
 
 
@@ -219,7 +280,29 @@ def process_webhook(db: Session, *, payload: bytes, signature: str) -> dict[str,
             status="processing",
         )
         db.add(row)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Concurrent delivery inserted the same event first: re-read instead
+        # of 500ing. A failed row is retried below; processed/processing rows
+        # are reported as duplicates.
+        db.rollback()
+        row = db.get(StripeEvent, event_id)
+        if row is not None and row.status in {"processed", "processing"}:
+            return {"received": True, "duplicate": True, "status": row.status}
+        if row is None:
+            row = StripeEvent(
+                event_id=event_id,
+                event_type=event_type,
+                payload_hash=payload_hash,
+                status="processing",
+            )
+            db.add(row)
+        else:
+            row.status = "processing"
+            row.error = None
+            row.processed_at = None
+        db.flush()
     try:
         obj = _event_value(_event_value(event, "data", {}), "object", {})
         changed = False
@@ -232,7 +315,14 @@ def process_webhook(db: Session, *, payload: bytes, signature: str) -> dict[str,
             if purchase and purchase.status != "fulfilled":
                 purchase.status = "failed"
         elif event_type == "charge.refunded":
-            changed = _reverse_payment(db, str(_event_value(obj, "payment_intent", "")), event_type)
+            charge = obj if isinstance(obj, dict) else {}
+            changed = _reverse_payment(
+                db,
+                str(_event_value(charge, "payment_intent", "")),
+                event_type,
+                event_id=event_id,
+                amount_cents=int(_event_value(charge, "amount_refunded", 0) or 0),
+            )
         elif event_type == "charge.dispute.created":
             charge = _event_value(obj, "charge")
             if charge and not isinstance(charge, str):
@@ -240,7 +330,13 @@ def process_webhook(db: Session, *, payload: bytes, signature: str) -> dict[str,
             else:
                 charge_obj = _stripe().Charge.retrieve(str(charge)) if charge else {}
                 payment_intent = str(_event_value(charge_obj, "payment_intent", ""))
-            changed = _reverse_payment(db, payment_intent, event_type)
+            changed = _reverse_payment(
+                db,
+                payment_intent,
+                event_type,
+                event_id=event_id,
+                amount_cents=int(_event_value(obj, "amount", 0) or 0),
+            )
         row.status = "processed"
         row.processed_at = utcnow()
         db.commit()

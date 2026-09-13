@@ -203,6 +203,33 @@ def require_auth(context: AuthContext | None = Depends(get_optional_auth)) -> Au
     return context
 
 
+def stage_owner_identity(request: Request, response: Response, context: AuthContext | None) -> str:
+    """Ownership tag for a freshly staged upload.
+
+    Signed-in uploads bind to the user id; anonymous uploads bind to the
+    anon-cookie hash so two browsers never share staged files.
+    """
+    if context is not None:
+        return f"user:{context.user.id}"
+    return "anon:" + ensure_anonymous_cookie(request, response)
+
+
+def stage_owner_matches(staged_owner: str | None, request: Request, context: AuthContext | None) -> bool:
+    """Whether the caller may quote/process a staged upload.
+
+    Accepts the uploader's user id, or — for uploads staged anonymously
+    before sign-in — the still-present anon cookie of the same browser.
+    Unknown owners (pre-ownership entries cannot exist: the map is
+    process-memory) fail closed.
+    """
+    if not staged_owner:
+        return False
+    if context is not None and staged_owner == f"user:{context.user.id}":
+        return True
+    anon = request.cookies.get(ANON_COOKIE, "")
+    return bool(anon) and staged_owner == "anon:" + token_hash(anon)
+
+
 def require_auth_csrf(
     request: Request,
     context: AuthContext = Depends(require_auth),

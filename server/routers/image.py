@@ -4,7 +4,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -12,28 +12,30 @@ from pipeline.image_worker import process_image
 from core import models as _models
 from server.billing.parameters import image_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
-from server.billing.service import BillingError, create_billing_job, finalize_job_failure
+from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.utils import calculate_square_padding, get_image_dimensions
 from server import media as SM
 from server import output
 from server.jobs import JobStatus, job_manager
 from server.sse import job_progress_stream
-from server.social.auth import AuthContext, get_optional_auth, validate_csrf, validate_origin
+from server.social.auth import AuthContext, get_optional_auth, stage_owner_identity, stage_owner_matches, validate_csrf, validate_origin
 from server.social.database import get_db
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/image", tags=["image"])
 
 # stage_id -> (path, staged_at). See video.py's identical pattern.
-STAGED_UPLOADS: dict[str, tuple[str, float]] = {}
+STAGED_UPLOADS: dict[str, tuple[str, float, str]] = {}
 STAGE_TTL_S = 6 * 3600
 
 
 def cleanup_stale_uploads() -> int:
     now = time.time()
-    stale = [sid for sid, (_, ts) in STAGED_UPLOADS.items() if now - ts > STAGE_TTL_S]
+    stale = [sid for sid, entry in STAGED_UPLOADS.items() if now - entry[1] > STAGE_TTL_S]
     for sid in stale:
-        path, _ = STAGED_UPLOADS.pop(sid, (None, None))
+        entry = STAGED_UPLOADS.pop(sid, None)
+        path = entry[0] if entry else None
         if path and os.path.exists(path):
             try:
                 os.unlink(path)
@@ -43,7 +45,12 @@ def cleanup_stale_uploads() -> int:
 
 
 @router.post("/upload")
-def upload_image(file: UploadFile = File(...)):
+def upload_image(
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+    context: AuthContext | None = Depends(get_optional_auth),
+):
     """Stage an uploaded image file and return its metadata.
 
     Streams straight to disk in chunks (no full-body buffering in RAM) and
@@ -60,7 +67,7 @@ def upload_image(file: UploadFile = File(...)):
     except SM.UploadRejected as ex:
         raise HTTPException(status_code=400, detail=str(ex)) from ex
 
-    STAGED_UPLOADS[stage_id] = (dest_path, time.time())
+    STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
 
     w, h = get_image_dimensions(dest_path)
     top, bottom, left, right = calculate_square_padding(w, h)
@@ -109,6 +116,7 @@ def start_image_process(
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
 
     width, height = get_image_dimensions(src_path)
+    submit_fingerprint = stage_fingerprint(src_path, width=width, height=height)
     cloud_required = ((not upscale_only) and width != height) or upscale_engine.casefold() == "fal"
     params = image_parameters({
         "prompt": prompt,
@@ -133,7 +141,10 @@ def start_image_process(
         validate_origin(request)
         validate_csrf(request, context)
         owner_id = context.user.id
+        if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
+            raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
         try:
+            require_billing_secrets()
             fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
             stage_specs = []
             if not upscale_only and width != height:
@@ -150,14 +161,26 @@ def start_image_process(
                 params=params,
                 quote_id=quote_id,
                 stage_specs=stage_specs,
+                fingerprint=submit_fingerprint,
             )
         except BillingError as ex:
             db.rollback()
-            status = 402 if getattr(ex, "code", "") == "INSUFFICIENT_CREDITS" else 409
-            raise HTTPException(status_code=status, detail={"code": getattr(ex, "code", "BILLING_ERROR"), "message": str(ex)}) from ex
+            code = getattr(ex, "code", "")
+            status = 402 if code == "INSUFFICIENT_CREDITS" else 503 if code == "BILLING_MISCONFIGURED" else 409
+            raise HTTPException(status_code=status, detail={"code": code or "BILLING_ERROR", "message": str(ex)}) from ex
+        except IntegrityError as ex:
+            # Same-job retry raced the first submit: the winner owns the
+            # reservation — report a conflict, not a 500.
+            db.rollback()
+            raise HTTPException(status_code=409, detail={"code": "BILLING_CONFLICT", "message": "This job was already submitted."}) from ex
         lifecycle = lifecycle_callback(job_id)
         on_success = success_callback(job_id)
         on_failure = failure_callback(job_id)
+
+    # Ownership is checked after the cloud/auth gate above so anonymous cloud
+    # attempts still 401; the error matches a missing stage (no oracle).
+    if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
+        raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
 
     kwargs = {
         "image_source": src_path,

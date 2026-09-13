@@ -21,6 +21,8 @@ PASSWORD = "correct-horse-battery"
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_REEL_REWARDS_ENABLED", "1")
+    monkeypatch.setenv("SX_SECURITY_SECRET", "test-only-security-secret")
+    monkeypatch.setenv("SX_FAL_KEY_ENCRYPTION_KEY", "test-only-dedicated-fal-encryption-secret")
     monkeypatch.setattr(auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     engine = create_engine(
         "sqlite:///" + str(tmp_path / "rewards.db"),

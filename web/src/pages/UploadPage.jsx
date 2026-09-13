@@ -16,6 +16,7 @@ import { useWallet } from '../hooks/WalletContext.jsx';
 import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
 import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
 import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { billingErrorMessage } from '../utils/billingErrors.js';
 
 // Upload wizard — single-file intake that will eventually replace the
 // standalone Image/Video extender pages (which stay mounted for now).
@@ -133,6 +134,7 @@ export default function UploadPage() {
   const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
   const [paymentSource, setPaymentSource] = useState('credits');
+  const autoByokRef = useRef(false);
 
   // ── 03 Details ──
   const [title, setTitle] = useState('');
@@ -191,6 +193,8 @@ export default function UploadPage() {
         ltxPromptExpansion,
         ltxNegativePrompt,
         ltxLoras: loraList,
+        // Pinned like VideoPage: no selector in the UI, so quote the top
+        // tier rather than risk understating the charge.
         wanResolution: '720p',
         seedvrFactor,
         seedvrTarget,
@@ -237,12 +241,16 @@ export default function UploadPage() {
     enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
   });
   const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
+  // button stays clickable and startExtend() re-fetches fresh quotes first.
+  const quoteStale = cloudRequired && paymentSource === 'credits' && !byokOnly && Boolean(catalog?.credits_enabled) && (
+    quoteState.loading || Boolean(quoteState.error) || quoteState.quotes.length !== quoteItems.length
+  );
   const fundingBlocked = cloudRequired && (
     !user ||
     (paymentSource === 'byok' && !falKey?.configured) ||
     (paymentSource === 'credits' && (
-      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
-      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+      byokOnly || !catalog?.credits_enabled || insufficientCredits
     ))
   );
 
@@ -264,8 +272,19 @@ export default function UploadPage() {
   }, [kind, imgUpscaleCatalog, vidOutpaintCatalog, vidUpscaleCatalog, models]);
 
   useEffect(() => {
-    if (byokOnly) setPaymentSource('byok');
-  }, [byokOnly]);
+    if (byokOnly) {
+      if (paymentSource !== 'byok') {
+        autoByokRef.current = true;
+        setPaymentSource('byok');
+      }
+    } else if (autoByokRef.current) {
+      // The switch to BYOK was automatic: restore credits now that a
+      // credit-supported model is selected again. An explicit user choice
+      // of BYOK is left untouched.
+      autoByokRef.current = false;
+      setPaymentSource('credits');
+    }
+  }, [byokOnly, paymentSource]);
 
   const extendDisabled =
     blocked.length > 0 || fundingBlocked || (kind === 'video' && studioPicked && !studioOk) || busy;
@@ -379,7 +398,7 @@ export default function UploadPage() {
       setJob({ jobId: res.job_id, name: file?.name || 'upload', kind });
       if (cloudRequired) await refreshWallet();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(billingErrorMessage(requestError, 'Could not start cloud processing.'));
     } finally {
       setBusy(false);
     }
@@ -887,7 +906,7 @@ export default function UploadPage() {
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button primary disabled={extendDisabled} loading={busy} onClick={startExtend}>
-                ▶ RENDER 1:1 SQUARE
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : '▶ RENDER 1:1 SQUARE'}
               </Button>
             </div>
 
@@ -897,7 +916,7 @@ export default function UploadPage() {
                 <div>{error}</div>
               </div>
             ) : null}
-            {job ? <JobRunner jobId={job.jobId} name={job.name} kind={job.kind} onDone={setJobDone} onSettled={refreshWallet} /> : null}
+            {job ? <JobRunner jobId={job.jobId} name={job.name} kind={job.kind} onDone={setJobDone} onSettled={() => refreshWallet({ silent: true })} /> : null}
             {jobDone ? <Mono>✓ RENDER COMPLETE — READY TO SHARE</Mono> : null}
           </div>
         ) : null}

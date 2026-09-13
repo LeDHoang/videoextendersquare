@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from datetime import timedelta
 from cryptography.exceptions import InvalidTag
 
 from sqlalchemy.orm import Session
 
-from server.social.models import FalCredential
+from server.social.models import FalCredential, utcnow
 
 from .crypto import FalKeyConfigurationError, decrypt_fal_key
 from .service import (
@@ -48,12 +49,18 @@ def lifecycle_callback(job_id: str) -> Callable[[str, str, str | None], None]:
         from server.social.database import SessionLocal
 
         with SessionLocal() as db:
-            if event == "submitted":
-                mark_stage_submitted(db, job_id, stage, request_id)
-            elif event == "completed":
-                capture_stage(db, job_id, stage)
-            elif event == "failed":
-                fail_stage(db, job_id, stage, definitive=True)
+            try:
+                if event == "submitted":
+                    mark_stage_submitted(db, job_id, stage, request_id)
+                elif event == "completed":
+                    capture_stage(db, job_id, stage)
+                elif event == "failed":
+                    fail_stage(db, job_id, stage, definitive=True)
+            except BillingError:
+                # Fire-and-forget background callback: a lost settlement race
+                # is already resolved (winner committed); anything else is
+                # picked up by reconcile_pending_requests / the stale reaper.
+                pass
 
     return callback
 
@@ -63,7 +70,10 @@ def success_callback(job_id: str) -> Callable[[object], None]:
         from server.social.database import SessionLocal
 
         with SessionLocal() as db:
-            finalize_job_success(db, job_id)
+            try:
+                finalize_job_success(db, job_id)
+            except BillingError:
+                pass
 
     return callback
 
@@ -73,8 +83,11 @@ def failure_callback(job_id: str) -> Callable[[Exception], None]:
         from server.social.database import SessionLocal
 
         with SessionLocal() as db:
-            error_code = "provider_timeout" if isinstance(exc, TimeoutError) else "pipeline_failed"
-            finalize_job_failure(db, job_id, error_code=error_code)
+            try:
+                error_code = "provider_timeout" if isinstance(exc, TimeoutError) else "pipeline_failed"
+                finalize_job_failure(db, job_id, error_code=error_code)
+            except BillingError:
+                pass
 
     return callback
 
@@ -98,7 +111,7 @@ def reconcile_pending_requests() -> dict[str, int]:
             db.query(CloudGenerationStage, CloudGenerationBilling)
             .join(CloudGenerationBilling, CloudGenerationBilling.id == CloudGenerationStage.billing_id)
             .filter(
-                CloudGenerationStage.status == "submitted",
+                CloudGenerationStage.status.in_(("submitted", "capturing", "releasing")),
                 CloudGenerationStage.fal_request_id.is_not(None),
             )
             .all()
@@ -133,3 +146,65 @@ def reconcile_pending_requests() -> dict[str, int]:
                 db.rollback()
                 stats["pending"] += 1
     return stats
+
+
+def _reserved_ttl() -> timedelta:
+    try:
+        minutes = max(5, int(os.environ.get("SX_BILLING_RESERVED_TTL_MIN", "30")))
+    except ValueError:
+        minutes = 30
+    return timedelta(minutes=minutes)
+
+
+def reap_stale_reservations(db: Session | None = None) -> dict[str, int]:
+    """Release credit reservations stranded by a crash before Fal submission.
+
+    Covers the two gaps reconcile_pending_requests cannot see: billings whose
+    stages never left ``reserved`` (crash between reserve_credits and the
+    first mark_stage_submitted), and ``submitted`` stages with no
+    fal_request_id (nothing remote to reconcile). ``submitted`` stages WITH a
+    request id are left alone — Fal may still be running them.
+    """
+    from server.social.database import SessionLocal
+    from server.social.models import CloudGenerationBilling, CloudGenerationStage
+
+    stats = {"checked": 0, "released_billings": 0, "released_stages": 0}
+    owned = db is None
+    session = db if db is not None else SessionLocal()
+    try:
+        cutoff = utcnow() - _reserved_ttl()
+        rows = (
+            session.query(CloudGenerationBilling)
+            .filter(
+                CloudGenerationBilling.status.in_(("reserved", "submitted")),
+                CloudGenerationBilling.created_at < cutoff,
+            )
+            .all()
+        )
+        for billing in rows:
+            stats["checked"] += 1
+            stages = (
+                session.query(CloudGenerationStage)
+                .filter(CloudGenerationStage.billing_id == billing.id)
+                .all()
+            )
+            if not stages:
+                continue
+            if all(stage.status == "reserved" for stage in stages):
+                finalize_job_failure(session, billing.job_id, error_code="reservation_expired")
+                stats["released_billings"] += 1
+                stats["released_stages"] += len(stages)
+            else:
+                released = 0
+                for stage in stages:
+                    if stage.status == "submitted" and not stage.fal_request_id:
+                        fail_stage(session, billing.job_id, stage.stage_name, definitive=True)
+                        released += 1
+                if released:
+                    stats["released_stages"] += released
+                    if finalize_reconciled_job(session, billing.job_id):
+                        stats["released_billings"] += 1
+        return stats
+    finally:
+        if owned:
+            session.close()

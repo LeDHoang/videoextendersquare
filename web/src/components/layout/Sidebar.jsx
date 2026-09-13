@@ -11,13 +11,14 @@ import {
   IndustrialExploreIcon,
   IndustrialMessageIcon,
   IndustrialUploadIcon,
+  IndustrialCreditsIcon,
 } from '../icons/index.jsx';
 
 const NAV_ITEMS = [
   { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
   { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
   { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
-  { to: '/wallet', label: 'Credits', Icon: IndustrialUploadIcon },
+  { to: '/wallet', label: 'Credits', Icon: IndustrialCreditsIcon }, // TEMP glyph — final art to follow
   { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
   { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
   { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },

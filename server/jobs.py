@@ -135,7 +135,16 @@ class JobManager:
                 if postprocess is not None:
                     result = postprocess(result)
                 if on_success is not None:
-                    on_success(result)
+                    try:
+                        on_success(result)
+                    except Exception as settle_ex:
+                        # The pipeline itself succeeded and its output is real.
+                        # A settlement failure (billing DB unreachable, lost
+                        # settlement race) must not mis-mark the job FAILED
+                        # with a partial capture kept: the billing row is left
+                        # for pending_reconciliation (restart/server reconcile),
+                        # and the settlement error is surfaced on the record.
+                        status_callback(f"NOTE: billing settlement deferred ({settle_ex}); reconciliation will finalize charges")
                 with record._lock:
                     record.status = JobStatus.COMPLETE
                     record.phase = "COMPLETE"

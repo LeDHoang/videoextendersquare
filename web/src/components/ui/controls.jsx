@@ -136,7 +136,7 @@ export function Dropdown({ label, value, options = [], onChange, placeholder = '
   );
 }
 
-export function Segmented({ options = [], value, onChange, disabled = false, ariaLabel }) {
+export function Segmented({ options = [], value, onChange, disabled = false, disabledOptions = [], ariaLabel }) {
   return (
     <div className="sx-seg" role="radiogroup" aria-label={ariaLabel}>
       {options.map((opt) => (
@@ -146,7 +146,7 @@ export function Segmented({ options = [], value, onChange, disabled = false, ari
           role="radio"
           aria-checked={opt === value}
           className={opt === value ? 'sx-selected' : ''}
-          disabled={disabled}
+          disabled={disabled || disabledOptions.includes(opt)}
           onClick={() => onChange(opt)}
         >
           <Emoji text={opt} />

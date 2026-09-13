@@ -8,6 +8,7 @@ Serves:
 """
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,7 +30,7 @@ _CLEANUP_INTERVAL_S = 15 * 60
 
 async def _cleanup_loop():
     """Periodically reclaim finished job records and expired staged uploads."""
-    from server.billing.runtime import reconcile_pending_requests
+    from server.billing.runtime import reap_stale_reservations, reconcile_pending_requests
     from server.jobs import job_manager
     from server.routers import image, messages, video
 
@@ -41,6 +42,7 @@ async def _cleanup_loop():
             video.cleanup_stale_uploads()
             await asyncio.to_thread(messages.cleanup_message_events)
             await asyncio.to_thread(reconcile_pending_requests)
+            await asyncio.to_thread(reap_stale_reservations)
         except Exception:
             pass  # best-effort housekeeping must never crash the loop
 
@@ -53,8 +55,17 @@ async def lifespan(app: FastAPI):
 
     init_database()
     await asyncio.to_thread(import_legacy_social)
-    from server.billing.runtime import reconcile_pending_requests
+    from server.billing.runtime import reap_stale_reservations, reconcile_pending_requests
     await asyncio.to_thread(reconcile_pending_requests)
+    await asyncio.to_thread(reap_stale_reservations)
+    try:
+        from server.billing.service import require_billing_secrets
+        require_billing_secrets()
+    except Exception as exc:
+        # Option B fail-closed: billing routes 503 on their own; the rest of
+        # the app (free local processing, reels) keeps running. Loud so a
+        # misconfigured deploy cannot sit half-broken unnoticed.
+        logging.getLogger("server.app").error("Billing secrets misconfigured; paid endpoints will refuse work: %s", exc)
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
@@ -78,15 +89,17 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan)
 
-    # CORS for the Vite dev server (port 5173)
+    # CORS for the Vite dev server (port 5173). Credentials are on, so keep
+    # the surface tight: only the methods/headers the frontend actually sends
+    # (CSRF protection in server/social/auth.py is the real defense).
     dev_origins = os.environ.get("SX_DEV_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in dev_origins.split(",") if o.strip()],
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-CSRF-Token"],
+        expose_headers=[],
     )
 
     from server.routers import account_safety, billing, compare, config, health, image, messages, model_info, reels, rewards, social, uploads, video

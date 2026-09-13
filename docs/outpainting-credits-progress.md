@@ -4,7 +4,7 @@
 - **Last updated:** 2026-09-13 UTC
 - **Current milestone:** 8 — Automated validation complete; external release checks remain
 - **Immediate next action:** Run the documented Stripe, live Fal, live PostgreSQL, legal/tax, HTTPS webhook, and supported-host Meta policy checks before enabling production flags.
-- **Migration state:** New head `20260913_0006` created and applied successfully to a fresh SQLite database.
+- **Migration state:** Head `20260913_0008` (quote stage fingerprint; partial-refund tracking in `0007`) applied successfully to a fresh SQLite database, including a downgrade/upgrade cycle.
 - **Quest verification:** Blocked on this host because `metavr` has no `linux-x64` binary. A supported-host policy check remains a release gate.
 
 ## Milestones
@@ -113,6 +113,8 @@
 - 2026-09-13: Added frontend funding-source and Checkout-return tests; the first run found missing test cleanup (`26 passed, 1 failed`), which was corrected before rerun.
 - 2026-09-13: Complete frontend suite passed after fixing test cleanup (`27 passed`: 22 Node tests and 5 Vitest tests).
 - 2026-09-13: Hardened BYOK resolution to convert corrupted AES-GCM credentials into a safe billing error and added synchronous enqueue cleanup that releases reservations and removes orphan in-memory jobs.
+- 2026-09-13: Fixed High review findings — CAS stage settlement (no double capture/release), guarded release, per-stage finalize commits with `pending_reconciliation` deferral, write-once Fal request IDs, stale-reservation reaper (`SX_BILLING_RESERVED_TTL_MIN`), pro-rated partial refunds (migration `0007`), terminal Stripe reversal states, and BYOK auto-switch with visible notice.
+- 2026-09-13: Fixed Medium/Low review findings — guarded quote restore on reserve failure, idempotent grant/debit/reserve ledger inserts, webhook event dedup race handling, reward milestone grant-first, staged-upload ownership binding + quote file fingerprint (migration `0008`), fail-closed billing secrets (Option B: billing 503s, rest runs), public config key-leak removal, required `SX_PUBLIC_BASE_URL`, tightened CORS, generic webhook errors, invalid-cursor 404, quote refresh race/abort, retry-quote submit flow, wallet freshness + origin-checked messages, param serialization guards, friendly billing error map, reward claim retry with backoff, checkout-return polling, and credits nav icon placeholder.
 - 2026-09-13: New corrupted-key and enqueue-failure regressions passed (`2 passed`).
 - 2026-09-13: Final complete scoped backend suite passed (`51 passed`, 2 dependency deprecation warnings).
 - 2026-09-13: Final production Vite build succeeded (`168 modules transformed`).

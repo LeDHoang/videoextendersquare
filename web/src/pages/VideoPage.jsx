@@ -14,6 +14,7 @@ import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { billingErrorMessage } from '../utils/billingErrors.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
@@ -82,6 +83,7 @@ export default function VideoPage() {
   const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
   const [paymentSource, setPaymentSource] = useState('credits');
+  const autoByokRef = useRef(false);
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
@@ -124,6 +126,9 @@ export default function VideoPage() {
     ltxPromptExpansion,
     ltxNegativePrompt,
     ltxLoras: loraList,
+    // No WAN resolution selector in the UI yet: pin the top tier so quotes
+    // never understate the charge (backend bills 480p/580p/720p at
+    // $0.04/$0.06/$0.08 per second).
     wanResolution: '720p',
     seedvrFactor,
     seedvrTarget,
@@ -154,19 +159,34 @@ export default function VideoPage() {
     enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
   });
   const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
+  // button stays clickable and render() re-fetches fresh quotes first.
+  const quoteStale = cloudRequired && paymentSource === 'credits' && !byokOnly && Boolean(catalog?.credits_enabled) && (
+    quoteState.loading || Boolean(quoteState.error) || quoteState.quotes.length !== quoteItems.length
+  );
   const fundingBlocked = cloudRequired && (
     !user ||
     (paymentSource === 'byok' && !falKey?.configured) ||
     (paymentSource === 'credits' && (
-      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
-      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+      byokOnly || !catalog?.credits_enabled || insufficientCredits
     ))
   );
   const disabled = blocked.length > 0 || fundingBlocked || (studioPicked && !studioOk) || busy;
 
   useEffect(() => {
-    if (byokOnly) setPaymentSource('byok');
-  }, [byokOnly]);
+    if (byokOnly) {
+      if (paymentSource !== 'byok') {
+        autoByokRef.current = true;
+        setPaymentSource('byok');
+      }
+    } else if (autoByokRef.current) {
+      // The switch to BYOK was automatic: restore credits now that a
+      // credit-supported model is selected again. An explicit user choice
+      // of BYOK is left untouched.
+      autoByokRef.current = false;
+      setPaymentSource('credits');
+    }
+  }, [byokOnly, paymentSource]);
 
   const onFiles = async (files) => {
     setError('');
@@ -221,13 +241,13 @@ export default function VideoPage() {
           const res = await api.form('/api/video/process', fd);
           jobList.push({ jobId: res.job_id, name: item.name, kind: 'video' });
         } catch (submissionError) {
-          setError(submissionError.message);
+          setError(billingErrorMessage(submissionError));
         }
       }
       setJobs(jobList);
       if (cloudRequired) await refreshWallet();
     } catch (requestError) {
-      setError(requestError.message || 'Could not prepare cloud billing.');
+      setError(billingErrorMessage(requestError, 'Could not prepare cloud billing.'));
     } finally {
       setBusy(false);
     }
@@ -608,7 +628,7 @@ export default function VideoPage() {
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button primary disabled={disabled} loading={busy} onClick={render}>
-                ▶ RENDER {items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE`}
               </Button>
             </div>
 
@@ -625,7 +645,7 @@ export default function VideoPage() {
       {jobs.length ? (
         <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
-            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={refreshWallet} />
+            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={() => refreshWallet({ silent: true })} />
           ))}
           <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
           <Mono>

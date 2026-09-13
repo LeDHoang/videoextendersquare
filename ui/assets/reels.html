@@ -1867,18 +1867,21 @@
       return body;
     }
 
+    function showRewardToast(message, award) {
+      if (!rewardToast || !message) return;
+      rewardToast.textContent = message;
+      rewardToast.classList.toggle('award', !!award);
+      rewardToast.classList.add('show');
+      if (rewardToastTimer) clearTimeout(rewardToastTimer);
+      rewardToastTimer = setTimeout(() => rewardToast.classList.remove('show'), award ? 4200 : 2600);
+    }
+
     function showRewardProgress(result) {
       if (!result) return;
       const message = window.ReelsRewards && window.ReelsRewards.progressMessage
         ? window.ReelsRewards.progressMessage(result)
         : (result.credit_awarded ? '+1 ECHO CREDIT' : String(result.progress || 0) + '/10 TO NEXT CREDIT');
-      if (rewardToast) {
-        rewardToast.textContent = message;
-        rewardToast.classList.toggle('award', !!result.credit_awarded);
-        rewardToast.classList.add('show');
-        if (rewardToastTimer) clearTimeout(rewardToastTimer);
-        rewardToastTimer = setTimeout(() => rewardToast.classList.remove('show'), result.credit_awarded ? 4200 : 2200);
-      }
+      showRewardToast(message, result.credit_awarded);
       if (!result.credit_awarded) return;
       const detail = { ...result, type: 'echo:credits-awarded' };
       window.dispatchEvent(new CustomEvent('echo:credits-awarded', { detail }));
@@ -1933,10 +1936,27 @@
         if (error.status === 401 || error.status === 403) {
           currentUser = null;
           refreshAccountUI();
-        } else if (!error.status || error.status >= 500) {
+        } else if (error.status === 409 || error.code === 'REWARD_ALREADY_CLAIMED') {
+          // Terminal duplicate: this reel already counted. Informative, no retry.
+          showRewardToast('ALREADY CLAIMED FOR THIS REEL', false);
+        } else if (!error.status || error.status >= 500 || error.status === 429 || error.code === 'REWARD_RETRYABLE') {
+          // Transient (network / 5xx / rate-limit / busy): retry after backoff.
+          const delay = error.status === 429 ? 5000 : 2000;
           setTimeout(() => {
             if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
-          }, 2000);
+          }, delay);
+        } else {
+          // Other 4xx (validation / telemetry timing): the server event may
+          // land just after the claim — allow up to 2 retries with backoff,
+          // then surface feedback instead of silently dropping the view.
+          state.rewardClaimAttempts = (state.rewardClaimAttempts || 0) + 1;
+          if (state.rewardClaimAttempts <= 2) {
+            setTimeout(() => {
+              if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
+            }, 4000);
+          } else {
+            showRewardToast('REWARD NOT ELIGIBLE YET', false);
+          }
         }
       }
     }
@@ -4126,6 +4146,7 @@
       clearBlobCache();
       if (tickerHideTimer) clearTimeout(tickerHideTimer);
       if (rewardToastTimer) clearTimeout(rewardToastTimer);
+      if (rewardToast) rewardToast.classList.remove('show');
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) WebXRVR.exitVR();
       } catch (e) {}

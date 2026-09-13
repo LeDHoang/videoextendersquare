@@ -75,7 +75,8 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 | `SX_STRIPE_PRICE_500` | Stripe Price ID for the $5 / 500-credit pack | — |
 | `SX_STRIPE_PRICE_1050` | Stripe Price ID for the $10 / 1,050-credit pack | — |
 | `SX_STRIPE_PRICE_2750` | Stripe Price ID for the $25 / 2,750-credit pack | — |
-| `SX_PUBLIC_BASE_URL` | Browser origin used for Stripe Checkout return URLs | request origin |
+| `SX_PUBLIC_BASE_URL` | Browser origin used for Stripe Checkout return URLs (required for Checkout; no `Host` fallback) | — |
+| `SX_BILLING_RESERVED_TTL_MIN` | Age after which never-submitted credit reservations are reaped (minimum 5) | `30` |
 | `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `10`) |
 | `DATABASE_URL` | Shared social/messaging/billing database URL | `sqlite:///./data/echo.db` |
 | `SX_PUBLIC_URL` | Public origin used for reset and canonical reel-share links | `http://localhost:5173` |
@@ -93,7 +94,11 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 
 ## Credits, Stripe, and reel-reward deployment notes
 
-Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migration `20260913_0006`, back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
+Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migration `20260913_0008`, back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
+
+When any billing flag is on, `SX_SECURITY_SECRET` must be a real secret (not the development default) and `SX_FAL_KEY_ENCRYPTION_KEY` must be at least 16 characters and not a placeholder — otherwise paid endpoints (`/api/billing/*`, credit-funded `/process`, reward claims) return 503 `BILLING_MISCONFIGURED` while free local processing and reels keep working. The misconfiguration is also logged loudly at startup.
+
+Staged uploads live in process memory: in multi-worker deployments a quote/submit pair must land on the same worker (sticky sessions or a single worker), and a restart drops staged files. Quotes record a fingerprint (size, mtime, dimensions, duration) of the staged bytes; if the file changes between quote and submit the job is rejected with `INVALID_QUOTE` so a swap can never ride a stale price.
 
 For Stripe, create three one-time USD Prices whose totals exactly match $5.00, $10.00, and $25.00, then place their IDs in `SX_STRIPE_PRICE_500`, `SX_STRIPE_PRICE_1050`, and `SX_STRIPE_PRICE_2750`. Configure the webhook endpoint at `/api/billing/webhooks/stripe` and subscribe to Checkout completion/delayed-success events plus refunds and disputes. The webhook must receive the unmodified raw request body. Set `SX_PUBLIC_BASE_URL` to the externally reachable HTTPS origin used for Checkout redirects.
 
@@ -107,9 +112,11 @@ Recommended rollout order:
 
 Credits never expire, are non-transferable, and have no cash value. Refunds/disputes may make a wallet negative, which blocks new platform-funded jobs. FAST/STUDIO work remains anonymous and free; all Fal-backed work requires sign-in and either ECHO Credits or a saved personal key.
 
+Reward anti-gaming posture (accepted, documented): the watch threshold uses the client-reported duration, but every claim is additionally gated by server-observed elapsed time (impression `first_visible_at` → event `created_at`), foreground-playback telemetry, 1 credit per 10 distinct eligible reels, 5 credits per user per UTC day, and a keyed-IP daily cap. A forged short duration still requires real foreground watch time to pass the server gate, and farming throughput is capped by the daily limits.
+
 ## Messaging deployment notes
 
-Run `make migrate` before startup so the database is at revision `20260913_0006`. Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
+Run `make migrate` before startup so the database is at revision `20260913_0008`. Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
 
 Set `SX_PUBLIC_URL` to the externally reachable origin, without a trailing slash. This is the base for copied reel links and QR codes. Tenor is optional; if enabled, the backend needs outbound HTTPS access to `tenor.googleapis.com`, while stored GIF URLs must match `SX_TENOR_ALLOWED_HOSTS`.
 

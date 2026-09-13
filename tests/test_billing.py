@@ -130,6 +130,241 @@ def test_quote_reuse_and_tamper_are_rejected(sessions):
             create_billing_job(db, user_id=user.id, job_id="again", kind="image", payment_source="credits", stage_id="img", params=params, quote_id=quote.id)
 
 
+def test_concurrent_failure_paths_release_exactly_once(sessions):
+    """fail_stage racing finalize_job_failure must refund a stage once."""
+    from server.social.models import CreditLedgerEntry
+
+    with sessions() as db:
+        user = add_user(db, "double_release")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:dr")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="dr-stage",
+            width=1920, height=1080, duration=5, params=params,
+        )
+        total = quote.credits
+        create_billing_job(
+            db, user_id=user.id, job_id="dr-job", kind="video", payment_source="credits",
+            stage_id="dr-stage", params=params, quote_id=quote.id,
+        )
+        # Provider failure callback and job-failure finalizer overlap.
+        fail_stage(db, "dr-job", "outpaint", definitive=True)
+        fail_stage(db, "dr-job", "outpaint", definitive=True)
+        finalize_job_failure(db, "dr-job", error_code="pipeline_failed")
+        wallet = get_wallet(db, user.id)
+        assert wallet["available_credits"] == 100
+        assert wallet["reserved_credits"] == 0
+        assert wallet["lifetime_spent"] == 0
+        releases = db.query(CreditLedgerEntry).filter(
+            CreditLedgerEntry.idempotency_key == "generation:dr-job:release:outpaint"
+        ).all()
+        assert len(releases) == 1
+
+
+def test_repeated_success_finalizes_capture_exactly_once(sessions):
+    """Double success finalization (callback + reconciler) captures once."""
+    from server.social.models import CreditLedgerEntry
+
+    with sessions() as db:
+        user = add_user(db, "double_capture")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:dc")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="dc-stage",
+            width=640, height=480, duration=5, params=params,
+        )
+        total = quote.credits
+        assert total > 0
+        create_billing_job(
+            db, user_id=user.id, job_id="dc-job", kind="video", payment_source="credits",
+            stage_id="dc-stage", params=params, quote_id=quote.id,
+        )
+        from server.billing.service import finalize_job_success
+
+        finalize_job_success(db, "dc-job")
+        finalize_job_success(db, "dc-job")
+        wallet = get_wallet(db, user.id)
+        assert wallet["available_credits"] == 100 - total
+        assert wallet["reserved_credits"] == 0
+        assert wallet["lifetime_spent"] == total
+        billing = db.query(CloudGenerationBilling).filter_by(job_id="dc-job").one()
+        assert billing.status == "complete"
+        captures = db.query(CreditLedgerEntry).filter(
+            CreditLedgerEntry.idempotency_key.like("generation:dc-job:capture:%")
+        ).all()
+        assert len(captures) == 1
+
+
+def test_success_after_stage_release_defers_to_reconciliation(sessions):
+    """A succeeded pipeline with a released stage must not raise/charge half."""
+    from server.billing.service import finalize_job_success
+
+    with sessions() as db:
+        user = add_user(db, "half_success")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:hs")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="hs-stage",
+            width=1920, height=1080, duration=5, params=params,
+        )
+        create_billing_job(
+            db, user_id=user.id, job_id="hs-job", kind="video", payment_source="credits",
+            stage_id="hs-stage", params=params, quote_id=quote.id,
+        )
+        fail_stage(db, "hs-job", "outpaint", definitive=True)
+        finalize_job_success(db, "hs-job")  # must not raise
+        billing = db.query(CloudGenerationBilling).filter_by(job_id="hs-job").one()
+        assert billing.status == "pending_reconciliation"
+
+
+def test_mark_stage_submitted_keeps_first_request_id(sessions):
+    with sessions() as db:
+        user = add_user(db, "request_id_once")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:rid")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="rid-stage",
+            width=640, height=480, duration=5, params=params,
+        )
+        create_billing_job(
+            db, user_id=user.id, job_id="rid-job", kind="video", payment_source="credits",
+            stage_id="rid-stage", params=params, quote_id=quote.id,
+        )
+        mark_stage_submitted(db, "rid-job", "upscale", "fal-first")
+        mark_stage_submitted(db, "rid-job", "upscale", "fal-second")
+        billing = db.query(CloudGenerationBilling).filter_by(job_id="rid-job").one()
+        stage = db.query(CloudGenerationStage).filter_by(billing_id=billing.id, stage_name="upscale").one()
+        assert stage.fal_request_id == "fal-first"
+
+
+def test_insufficient_balance_restores_quote_for_retry(sessions):
+    with sessions() as db:
+        user = add_user(db, "restore_quote")
+        grant_credits(db, user.id, 5, source="purchase", idempotency_key="purchase:rq")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="rq-stage",
+            width=1920, height=1080, duration=5, params=params,
+        )
+        assert quote.credits == 61
+        with pytest.raises(InsufficientCredits):
+            create_billing_job(
+                db, user_id=user.id, job_id="rq-job", kind="video", payment_source="credits",
+                stage_id="rq-stage", params=params, quote_id=quote.id,
+            )
+        db.refresh(quote)
+        assert quote.status == "active"
+        wallet = get_wallet(db, user.id)
+        assert wallet["available_credits"] == 5
+        assert wallet["reserved_credits"] == 0
+        # After topping up, the same quote works — no re-quote needed.
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:rq-topup")
+        db.commit()
+        create_billing_job(
+            db, user_id=user.id, job_id="rq-job", kind="video", payment_source="credits",
+            stage_id="rq-stage", params=params, quote_id=quote.id,
+        )
+        assert get_wallet(db, user.id)["reserved_credits"] == 61
+
+
+def test_swapped_upload_between_quote_and_submit_is_rejected(sessions, tmp_path):
+    from server.billing.service import stage_fingerprint
+
+    with sessions() as db:
+        user = add_user(db, "swap_user")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:swap")
+        db.commit()
+        params = {"prompt": "", "upscale_only": False, "sharpening": 0.0, "upscale_engine": "fast", "outpaint_model": "fal-ai/image-apps-v2/outpaint", "upscale_model": "fal-ai/clarity-upscaler", "custom_outpaint_args": {}, "custom_upscale_args": {}}
+        first = tmp_path / "first.png"
+        first.write_bytes(b"original-bytes")
+        quote = create_quote(
+            db, user_id=user.id, kind="image", stage_id="swap-stage", width=1000, height=500,
+            duration=None, params=params,
+            fingerprint=stage_fingerprint(str(first), width=1000, height=500),
+        )
+        swapped = tmp_path / "swapped.png"
+        swapped.write_bytes(b"different-bytes-entirely")
+        with pytest.raises(QuoteError, match="changed since the quote"):
+            create_billing_job(
+                db, user_id=user.id, job_id="swap-job", kind="image", payment_source="credits",
+                stage_id="swap-stage", params=params, quote_id=quote.id,
+                fingerprint=stage_fingerprint(str(swapped), width=1000, height=500),
+            )
+        db.rollback()
+        # Unchanged bytes still submit fine.
+        create_billing_job(
+            db, user_id=user.id, job_id="swap-job", kind="image", payment_source="credits",
+            stage_id="swap-stage", params=params, quote_id=quote.id,
+            fingerprint=stage_fingerprint(str(first), width=1000, height=500),
+        )
+        assert get_wallet(db, user.id)["reserved_credits"] == quote.credits
+
+
 def test_atomic_reservation_prevents_overspend(tmp_path):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'wallet.db'}",
@@ -270,6 +505,45 @@ def _reward_candidate(
     return post, impression, event
 
 
+def test_milestone_race_loser_records_claim_without_credit(sessions):
+    """A concurrent milestone winner's grant must not become our phantom award."""
+    from server.social.models import ReelRewardClaim
+
+    with sessions() as db:
+        viewer = add_user(db, "race_viewer")
+        owner = add_user(db, "race_owner")
+        for index in range(9):
+            post, impression, _ = _reward_candidate(
+                db, viewer, owner, index=index, media_type="image",
+                duration_ms=3000, foreground_ms=3000,
+            )
+            result = claim_reel_reward(
+                db, user_id=viewer.id, post_id=post.id, impression_id=impression.id, ip_hash="race-ip",
+            )
+            assert result["credit_awarded"] is False
+        # A sibling claim wins milestone 1 first (same idempotency key).
+        today = utcnow().date().isoformat()
+        grant_credits(
+            db, viewer.id, 1, source="earned",
+            idempotency_key=f"reel-reward:{viewer.id}:{today}:1",
+            reference_type="reel_reward", reference_id="sibling",
+            details={},
+        )
+        db.commit()
+        tenth, tenth_impression, _ = _reward_candidate(
+            db, viewer, owner, index=9, media_type="image",
+            duration_ms=3000, foreground_ms=3000,
+        )
+        result = claim_reel_reward(
+            db, user_id=viewer.id, post_id=tenth.id, impression_id=tenth_impression.id, ip_hash="race-ip",
+        )
+        assert result["credit_awarded"] is False
+        assert result["eligible_reels_today"] == 10
+        assert get_wallet(db, viewer.id)["available_credits"] == 1
+        row = db.query(ReelRewardClaim).filter_by(user_id=viewer.id, post_id=tenth.id).one()
+        assert row.awarded_credit is False
+
+
 def test_reel_reward_enforces_video_threshold_and_self_view(sessions):
     with sessions() as db:
         viewer = add_user(db, "threshold_viewer")
@@ -379,6 +653,92 @@ def test_timeout_keeps_submitted_stage_reserved_until_reconciled(sessions):
         assert billing.status == "failed"
         assert get_wallet(db, user.id)["reserved_credits"] == 0
         assert get_wallet(db, user.id)["available_credits"] == 100
+
+
+def test_reaper_releases_stale_never_submitted_reservations(sessions, monkeypatch):
+    from server.billing.runtime import reap_stale_reservations
+
+    monkeypatch.setenv("SX_BILLING_RESERVED_TTL_MIN", "5")
+    with sessions() as db:
+        user = add_user(db, "reap_user")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:reap")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="reap-stage",
+            width=640, height=480, duration=5, params=params,
+        )
+        create_billing_job(
+            db, user_id=user.id, job_id="reap-job", kind="video", payment_source="credits",
+            stage_id="reap-stage", params=params, quote_id=quote.id,
+        )
+        billing = db.query(CloudGenerationBilling).filter_by(job_id="reap-job").one()
+        billing.created_at = utcnow() - timedelta(minutes=10)
+        db.commit()
+        stats = reap_stale_reservations(db)
+        assert stats == {"checked": 1, "released_billings": 1, "released_stages": 1}
+        db.refresh(billing)
+        assert billing.status == "failed"
+        assert billing.error_code == "reservation_expired"
+        wallet = get_wallet(db, user.id)
+        assert wallet["available_credits"] == 100
+        assert wallet["reserved_credits"] == 0
+        # Second run is a no-op: billing already terminal.
+        assert reap_stale_reservations(db) == {"checked": 0, "released_billings": 0, "released_stages": 0}
+
+
+def test_reaper_only_releases_submitted_stages_without_request_id(sessions, monkeypatch):
+    from server.billing.runtime import reap_stale_reservations
+
+    monkeypatch.setenv("SX_BILLING_RESERVED_TTL_MIN", "5")
+    with sessions() as db:
+        user = add_user(db, "reap_submitted")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:reap-sub")
+        db.commit()
+        params = {
+            "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
+            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+            "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
+            "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
+            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
+            "bytedance_tier": "fast", "bytedance_preset": "general",
+            "bytedance_fidelity": "medium", "trim_enabled": False,
+            "trim_start": 0.0, "trim_duration": 15.0,
+            "custom_outpaint_args": {}, "custom_upscale_args": {},
+        }
+        quote = create_quote(
+            db, user_id=user.id, kind="video", stage_id="reap-sub-stage",
+            width=1920, height=1080, duration=5, params=params,
+        )
+        create_billing_job(
+            db, user_id=user.id, job_id="reap-sub-job", kind="video", payment_source="credits",
+            stage_id="reap-sub-stage", params=params, quote_id=quote.id,
+        )
+        mark_stage_submitted(db, "reap-sub-job", "outpaint", None)
+        mark_stage_submitted(db, "reap-sub-job", "upscale", "fal-still-running")
+        billing = db.query(CloudGenerationBilling).filter_by(job_id="reap-sub-job").one()
+        billing.created_at = utcnow() - timedelta(minutes=10)
+        db.commit()
+        stats = reap_stale_reservations(db)
+        assert stats["released_stages"] == 1
+        assert stats["released_billings"] == 0  # upscale still submitted -> not final
+        stages = {s.stage_name: s for s in db.query(CloudGenerationStage).filter_by(billing_id=billing.id)}
+        assert stages["outpaint"].status == "failed"
+        assert stages["upscale"].status == "submitted"
 
 
 def test_byok_jobs_do_not_touch_wallet_and_negative_balance_blocks_reservation(sessions):

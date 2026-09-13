@@ -7,7 +7,8 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import func, inspect as sa_inspect, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.pricing import QUOTE_TTL_SECONDS, PricingError, parameter_hash, quote_image, quote_video
@@ -43,8 +44,66 @@ class RewardError(BillingError):
     code = "REWARD_INELIGIBLE"
 
 
+class BillingNotConfigured(BillingError):
+    code = "BILLING_MISCONFIGURED"
+
+
 def flag_enabled(name: str) -> bool:
     return os.environ.get(name, "0").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+_BILLING_FLAGS = ("SX_CREDITS_ENABLED", "SX_STRIPE_ENABLED", "SX_REEL_REWARDS_ENABLED")
+_DEV_SECURITY_SECRET = "echo-development-secret-change-me"
+
+
+def require_billing_secrets() -> None:
+    """Fail closed (Option B) when billing features are on with placeholder secrets.
+
+    Only the billing surface refuses work (503); free local processing and
+    reels keep running. Callers map BillingNotConfigured to 503; startup also
+    logs the offending variable names loudly (see server/app.py lifespan).
+    """
+    if not any(flag_enabled(name) for name in _BILLING_FLAGS):
+        return
+    problems = []
+    # Read env directly (not the auth module constant, which binds at import)
+    # so tests and late configuration take effect.
+    _secret = os.environ.get("SX_SECURITY_SECRET", "").strip()
+    if not _secret or _secret == _DEV_SECURITY_SECRET:
+        problems.append("SX_SECURITY_SECRET")
+    fal_secret = os.environ.get("SX_FAL_KEY_ENCRYPTION_KEY", "").strip()
+    if len(fal_secret) < 16 or "change-this" in fal_secret.casefold():
+        problems.append("SX_FAL_KEY_ENCRYPTION_KEY")
+    if problems:
+        raise BillingNotConfigured(
+            "Billing is misconfigured (" + ", ".join(problems) + "); refusing paid work"
+        )
+
+
+def stage_fingerprint(
+    path: str,
+    *,
+    width: int,
+    height: int,
+    duration: float | None = None,
+) -> dict[str, Any]:
+    """Content fingerprint binding a quote to the exact staged bytes.
+
+    Size + mtime catch byte swaps; dimensions/duration catch semantic swaps
+    that preserve size. Compared with plain dict equality at submit time.
+    """
+    try:
+        stat = os.stat(path)
+        size_bytes, mtime_ns = stat.st_size, stat.st_mtime_ns
+    except OSError:
+        size_bytes, mtime_ns = -1, -1
+    return {
+        "size_bytes": size_bytes,
+        "mtime_ns": mtime_ns,
+        "width": int(width),
+        "height": int(height),
+        "duration": None if duration is None else float(duration),
+    }
 
 
 def _insert_ignore(db: Session, model, values: dict[str, Any]):
@@ -111,8 +170,9 @@ def list_transactions(db: Session, user_id: str, *, limit: int = 50, before: str
     query = db.query(CreditLedgerEntry).filter(CreditLedgerEntry.user_id == user_id)
     if before:
         cursor = db.get(CreditLedgerEntry, before)
-        if cursor and cursor.user_id == user_id:
-            query = query.filter(CreditLedgerEntry.created_at < cursor.created_at)
+        if cursor is None or cursor.user_id != user_id:
+            raise BillingError("Transaction cursor is invalid")
+        query = query.filter(CreditLedgerEntry.created_at < cursor.created_at)
     rows = query.order_by(CreditLedgerEntry.created_at.desc(), CreditLedgerEntry.id.desc()).limit(max(1, min(limit, 100))).all()
     return [
         {
@@ -192,7 +252,7 @@ def grant_credits(
         values[CreditAccount.lifetime_earned] = CreditAccount.lifetime_earned + amount
     db.execute(update(CreditAccount).where(CreditAccount.user_id == user_id).values(values))
     db.expire(account)
-    _ledger(
+    if not _insert_ledger_once(
         db,
         account,
         entry_type="credit",
@@ -203,7 +263,11 @@ def grant_credits(
         reference_type=reference_type,
         reference_id=reference_id,
         details=details,
-    )
+    ):
+        # Concurrent duplicate grant won the race; its commit holds the
+        # single credit. Roll back our balance move and report no-op.
+        db.rollback()
+        return ensure_account(db, user_id), False
     return account, True
 
 
@@ -232,7 +296,7 @@ def debit_credits(
         .values(available_balance=CreditAccount.available_balance - amount, updated_at=utcnow())
     )
     db.expire(account)
-    _ledger(
+    if not _insert_ledger_once(
         db,
         account,
         entry_type="debit",
@@ -243,7 +307,10 @@ def debit_credits(
         reference_type=reference_type,
         reference_id=reference_id,
         details=details,
-    )
+    ):
+        # Concurrent duplicate debit won the race; roll back our move.
+        db.rollback()
+        return ensure_account(db, user_id), False
     return account, True
 
 
@@ -251,6 +318,9 @@ def reserve_credits(db: Session, user_id: str, amount: int, *, job_id: str) -> C
     amount = int(amount)
     account = ensure_account(db, user_id)
     if amount <= 0:
+        return account
+    existing = db.query(CreditLedgerEntry.id).filter(CreditLedgerEntry.idempotency_key == f"generation:{job_id}:reserve").first()
+    if existing:
         return account
     result = db.execute(
         update(CreditAccount)
@@ -264,7 +334,7 @@ def reserve_credits(db: Session, user_id: str, amount: int, *, job_id: str) -> C
     if result.rowcount != 1:
         raise InsufficientCredits("Not enough ECHO Credits for this job")
     db.expire(account)
-    _ledger(
+    if not _insert_ledger_once(
         db,
         account,
         entry_type="reserve",
@@ -274,7 +344,11 @@ def reserve_credits(db: Session, user_id: str, amount: int, *, job_id: str) -> C
         idempotency_key=f"generation:{job_id}:reserve",
         reference_type="cloud_job",
         reference_id=job_id,
-    )
+    ):
+        # Lost a same-job retry race after moving the balance: roll back our
+        # move and treat as a no-op (the winner holds the reservation).
+        db.rollback()
+        return ensure_account(db, user_id)
     return account
 
 
@@ -290,6 +364,7 @@ def create_quote(
     params: dict[str, Any],
     source_fps: float | None = None,
     source_frames: int | None = None,
+    fingerprint: dict[str, Any] | None = None,
 ) -> BillingQuote:
     kind = str(kind).casefold()
     try:
@@ -322,6 +397,7 @@ def create_quote(
         pricing_snapshot=snapshot,
         provider_cost_microusd=int(snapshot["provider_cost_microusd"]),
         credits=int(snapshot["credits"]),
+        stage_fingerprint=dict(fingerprint) if fingerprint else None,
         expires_at=now + timedelta(seconds=QUOTE_TTL_SECONDS),
     )
     db.add(row)
@@ -356,6 +432,7 @@ def create_billing_job(
     params: dict[str, Any],
     quote_id: str | None = None,
     stage_specs: list[tuple[str, str]] | None = None,
+    fingerprint: dict[str, Any] | None = None,
 ) -> CloudGenerationBilling:
     payment_source = str(payment_source).casefold()
     if payment_source == "byok":
@@ -396,6 +473,8 @@ def create_billing_job(
         raise QuoteError("Quote has expired; request a new quote")
     if quote.parameter_hash != parameter_hash(kind=kind, stage_id=stage_id, params=params):
         raise QuoteError("Processing parameters do not match the quote")
+    if quote.stage_fingerprint and fingerprint and dict(quote.stage_fingerprint) != dict(fingerprint):
+        raise QuoteError("Upload changed since the quote; request a new quote")
 
     consumed = db.execute(
         update(BillingQuote)
@@ -404,7 +483,28 @@ def create_billing_job(
     )
     if consumed.rowcount != 1:
         raise QuoteError("Quote has already been used")
-    reserve_credits(db, user_id, quote.credits, job_id=job_id)
+    try:
+        reserve_credits(db, user_id, quote.credits, job_id=job_id)
+    except InsufficientCredits:
+        # The quote was consumed but no billing row exists yet: hand the quote
+        # back so the user can top up and retry instead of re-quoting. The
+        # NOT EXISTS guard closes the reuse hole — if a concurrent submit
+        # won this quote and created its billing row meanwhile, we must not
+        # resurrect it.
+        db.rollback()
+        db.execute(
+            update(BillingQuote)
+            .where(
+                BillingQuote.id == quote.id,
+                BillingQuote.status == "consumed",
+                ~db.query(CloudGenerationBilling.id)
+                .filter(CloudGenerationBilling.quote_id == quote.id)
+                .exists(),
+            )
+            .values(status="active", consumed_at=None)
+        )
+        db.commit()
+        raise
     billing = CloudGenerationBilling(
         job_id=job_id,
         user_id=user_id,
@@ -447,14 +547,68 @@ def _load_stage(db: Session, job_id: str, stage_name: str) -> tuple[CloudGenerat
 
 def mark_stage_submitted(db: Session, job_id: str, stage_name: str, request_id: str | None) -> None:
     billing, stage = _load_stage(db, job_id, stage_name)
-    if stage.status in {"captured", "completed", "released", "failed"}:
+    if stage.status in {"captured", "completed", "released", "failed", "capturing", "releasing"}:
         return
     stage.status = "submitted"
     stage.submitted_at = stage.submitted_at or utcnow()
-    if request_id:
+    # Write-once: a retried submit must never orphan the first Fal request
+    # (which may still be running and incurring provider cost).
+    if request_id and not stage.fal_request_id:
         stage.fal_request_id = str(request_id)[:160]
     billing.status = "submitted"
     db.commit()
+
+
+# Terminal stage states. "capturing"/"releasing" are interim states owned by
+# exactly one settler via compare-and-swap below; a crash between the CAS
+# flush and commit can strand them, so reconciliation treats them as
+# unsettled (see finalize_reconciled_job and runtime.reconcile_pending_requests).
+_STAGE_TERMINAL = frozenset({"captured", "completed", "released", "failed"})
+_STAGE_CLAIMABLE = frozenset({"reserved", "submitted", "capturing", "releasing"})
+
+
+def _claim_stage(db: Session, stage: CloudGenerationStage, interim: str) -> bool:
+    """Atomically claim a stage for settlement (compare-and-swap on status).
+
+    Returns True when this caller won the claim. Returns False when the stage
+    is already terminal (a concurrent settler finished — treat as a no-op).
+    Raises BillingError when the row cannot be claimed, so the caller defers
+    to reconciliation instead of charging twice. No SELECT FOR UPDATE is
+    needed: the guarded UPDATE is atomic on both PostgreSQL and SQLite, and
+    the guarded balance move plus idempotent ledger insert below make the
+    loser of any residual race roll back cleanly.
+    """
+    result = db.execute(
+        update(CloudGenerationStage)
+        .where(
+            CloudGenerationStage.id == stage.id,
+            CloudGenerationStage.status.in_(tuple(_STAGE_CLAIMABLE)),
+        )
+        .values(status=interim, updated_at=utcnow())
+    )
+    if result.rowcount == 1:
+        db.refresh(stage)
+        return True
+    db.expire(stage)
+    current = db.get(CloudGenerationStage, stage.id)
+    if current is not None and current.status in _STAGE_TERMINAL:
+        return False
+    raise BillingError("Billing stage is being settled concurrently")
+
+
+def _insert_ledger_once(db: Session, account: CreditAccount, **kwargs: Any) -> bool:
+    """Insert a ledger entry; False means a concurrent settler already did.
+
+    The savepoint confines the unique-violation rollback to this insert so a
+    lost race does not discard the caller's other flushed (but uncommitted)
+    work; the caller still rolls back its own settlement attempt and re-reads.
+    """
+    try:
+        with db.begin_nested():
+            _ledger(db, account, **kwargs)
+        return True
+    except IntegrityError:
+        return False
 
 
 def _capture_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGenerationStage) -> None:
@@ -465,8 +619,8 @@ def _capture_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGen
         return
     if stage.status == "captured":
         return
-    if stage.status in {"released", "failed"}:
-        raise BillingError("Cannot capture a released billing stage")
+    if not _claim_stage(db, stage, "capturing"):
+        return  # already terminal elsewhere; idempotent no-op
     amount = int(stage.reserved_credits)
     account = ensure_account(db, billing.user_id)
     result = db.execute(
@@ -479,9 +633,10 @@ def _capture_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGen
         )
     )
     if result.rowcount != 1:
+        db.rollback()
         raise BillingError("Reserved credit balance is inconsistent")
     db.expire(account)
-    _ledger(
+    if not _insert_ledger_once(
         db,
         account,
         entry_type="capture",
@@ -492,7 +647,13 @@ def _capture_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGen
         reference_type="cloud_job",
         reference_id=billing.job_id,
         details={"stage": stage.stage_name, "model": stage.model_id},
-    )
+    ):
+        # Lost the race: the winning settler committed the capture.
+        db.rollback()
+        current = db.get(CloudGenerationStage, stage.id)
+        if current is not None and current.status in _STAGE_TERMINAL:
+            return
+        raise BillingError("Billing stage settlement conflicted; retry reconciliation")
     stage.status = "captured"
     stage.captured_credits = amount
     stage.settled_at = utcnow()
@@ -510,21 +671,26 @@ def _release_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGen
         stage.status = "failed"
         stage.settled_at = utcnow()
         return
-    if stage.status in {"captured", "released", "failed"}:
+    if stage.status in {"released", "failed"}:
         return
+    if not _claim_stage(db, stage, "releasing"):
+        return  # already terminal elsewhere; idempotent no-op
     amount = int(stage.reserved_credits)
     account = ensure_account(db, billing.user_id)
-    db.execute(
+    result = db.execute(
         update(CreditAccount)
-        .where(CreditAccount.user_id == billing.user_id)
+        .where(CreditAccount.user_id == billing.user_id, CreditAccount.reserved_balance >= amount)
         .values(
             available_balance=CreditAccount.available_balance + amount,
             reserved_balance=CreditAccount.reserved_balance - amount,
             updated_at=utcnow(),
         )
     )
+    if result.rowcount != 1:
+        db.rollback()
+        raise BillingError("Reserved credit balance is inconsistent")
     db.expire(account)
-    _ledger(
+    if not _insert_ledger_once(
         db,
         account,
         entry_type="release",
@@ -535,7 +701,13 @@ def _release_stage(db: Session, billing: CloudGenerationBilling, stage: CloudGen
         reference_type="cloud_job",
         reference_id=billing.job_id,
         details={"stage": stage.stage_name, "reason": reason},
-    )
+    ):
+        # Lost the race: the winning settler committed the release.
+        db.rollback()
+        current = db.get(CloudGenerationStage, stage.id)
+        if current is not None and current.status in _STAGE_TERMINAL:
+            return
+        raise BillingError("Billing stage settlement conflicted; retry reconciliation")
     stage.status = "released"
     stage.released_credits = amount
     stage.settled_at = utcnow()
@@ -550,14 +722,42 @@ def fail_stage(db: Session, job_id: str, stage_name: str, *, definitive: bool = 
     db.commit()
 
 
+def release_stage(db: Session, job_id: str, stage_name: str, reason: str) -> None:
+    """Release one reserved stage and commit, leaving status "released".
+
+    Used by finalize_job_failure for stages that never ran (distinct from
+    fail_stage's definitive provider failure, which marks "failed").
+    """
+    billing, stage = _load_stage(db, job_id, stage_name)
+    _release_stage(db, billing, stage, reason)
+    db.commit()
+
+
 def finalize_job_success(db: Session, job_id: str) -> None:
     billing = db.query(CloudGenerationBilling).filter(CloudGenerationBilling.job_id == job_id).first()
     if not billing:
         return
     if billing.payment_source == "credits":
+        pending = False
+        for stage in db.query(CloudGenerationStage).filter(CloudGenerationStage.billing_id == billing.id).all():
+            if stage.status == "captured":
+                continue
+            try:
+                # Per-stage commit: a lost settlement race rolls back only
+                # this stage, never the stages already captured above.
+                capture_stage(db, job_id, stage.stage_name)
+            except BillingError:
+                # Released/failed stage or a concurrent settler won: never
+                # report half a pipeline as a successful charge. Defer to
+                # reconciliation instead of raising into the job runner
+                # (which would mis-mark a succeeded pipeline as failed).
+                pending = True
+        db.refresh(billing)
         stages = db.query(CloudGenerationStage).filter(CloudGenerationStage.billing_id == billing.id).all()
-        for stage in stages:
-            _capture_stage(db, billing, stage)
+        if pending or any(stage.status != "captured" for stage in stages):
+            billing.status = "pending_reconciliation"
+            db.commit()
+            return
     billing.status = "complete"
     billing.completed_at = utcnow()
     db.commit()
@@ -569,12 +769,17 @@ def finalize_job_failure(db: Session, job_id: str, error_code: str = "pipeline_f
         return
     pending = False
     if billing.payment_source == "credits":
-        stages = db.query(CloudGenerationStage).filter(CloudGenerationStage.billing_id == billing.id).all()
-        for stage in stages:
+        for stage in db.query(CloudGenerationStage).filter(CloudGenerationStage.billing_id == billing.id).all():
             if stage.status == "reserved":
-                _release_stage(db, billing, stage, error_code)
-            elif stage.status == "submitted":
+                try:
+                    # Per-stage commit, mirroring finalize_job_success.
+                    release_stage(db, job_id, stage.stage_name, error_code)
+                except BillingError:
+                    pending = True
+            elif stage.status in {"submitted", "capturing", "releasing"}:
                 pending = True
+            # captured/completed/failed/released: leave as-is.
+    db.refresh(billing)
     billing.status = "pending_reconciliation" if pending else "failed"
     billing.error_code = str(error_code)[:64]
     if not pending:
@@ -587,7 +792,7 @@ def finalize_reconciled_job(db: Session, job_id: str) -> bool:
     if not billing:
         return False
     stages = db.query(CloudGenerationStage).filter(CloudGenerationStage.billing_id == billing.id).all()
-    if any(stage.status in {"reserved", "submitted"} for stage in stages):
+    if any(stage.status in {"reserved", "submitted", "capturing", "releasing"} for stage in stages):
         return False
     billing.status = "failed" if any(stage.status in {"failed", "released"} for stage in stages) else "complete"
     billing.completed_at = billing.completed_at or utcnow()
@@ -703,25 +908,41 @@ def claim_reel_reward(
         media_type=media_type,
         foreground_ms=foreground_ms,
         duration_ms=duration_ms or None,
-        awarded_credit=should_award,
+        awarded_credit=False,
     )
     db.add(claim)
+    # Flush before moving money: a same-post duplicate fails here with
+    # IntegrityError (mapped to 409 upstream) before any credit is granted.
     db.flush()
+    awarded = False
     if should_award:
-        grant_credits(
+        # Concurrent milestone claims for different posts serialize on the
+        # ledger idempotency key, so exactly one of them is credited. The
+        # milestone index derives from committed awards, not the racy count.
+        _, awarded = grant_credits(
             db,
             user_id,
             1,
             source="earned",
-            idempotency_key=f"reel-reward:{user_id}:{today}:{next_count // 10}",
+            idempotency_key=f"reel-reward:{user_id}:{today}:{int(awarded_count) + 1}",
             reference_type="reel_reward",
             reference_id=claim.id,
             details={"post_id": post_id, "impression_id": impression_id},
         )
+        if sa_inspect(claim).transient:
+            # Lost the grant race: grant_credits rolled back this
+            # transaction (including the claim insert above). Re-record the
+            # claim without the credit — a sibling claim won this milestone.
+            claim.awarded_credit = False
+            db.add(claim)
+            db.flush()
+            awarded = False
+        else:
+            claim.awarded_credit = awarded
     db.commit()
     db.refresh(account)
     return {
-        **_reward_payload(next_count, int(awarded_count) + (1 if should_award else 0), should_award),
+        **_reward_payload(next_count, int(awarded_count) + (1 if awarded else 0), awarded),
         "wallet": _wallet_payload(account),
     }
 

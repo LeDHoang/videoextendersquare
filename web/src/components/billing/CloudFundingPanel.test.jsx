@@ -61,6 +61,24 @@ describe('CloudFundingPanel', () => {
       <MemoryRouter>
         <CloudFundingPanel
           required
+          paymentSource="byok"
+          onChange={() => {}}
+          quoteState={quoteState}
+          byokOnly
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('radio', { name: 'ECHO CREDITS' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'MY FAL KEY' })).not.toBeDisabled();
+    expect(screen.getByText(/REQUIRES MY FAL KEY/)).toBeInTheDocument();
+  });
+
+  it('shows the BYOK notice even before the automatic switch lands on credits', () => {
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel
+          required
           paymentSource="credits"
           onChange={() => {}}
           quoteState={quoteState}
@@ -70,7 +88,6 @@ describe('CloudFundingPanel', () => {
     );
 
     expect(screen.getByRole('radio', { name: 'ECHO CREDITS' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'MY FAL KEY' })).toBeDisabled();
     expect(screen.getByText(/REQUIRES MY FAL KEY/)).toBeInTheDocument();
   });
 });

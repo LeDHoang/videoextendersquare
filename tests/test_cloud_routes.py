@@ -26,6 +26,8 @@ PASSWORD = "correct-horse-battery"
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
+    monkeypatch.setenv("SX_SECURITY_SECRET", "test-only-security-secret")
+    monkeypatch.setenv("SX_FAL_KEY_ENCRYPTION_KEY", "test-only-dedicated-fal-encryption-secret")
     engine = create_engine(
         "sqlite:///" + str(tmp_path / "cloud-routes.db"),
         connect_args={"check_same_thread": False},
@@ -78,29 +80,30 @@ def csrf_headers(client):
 def test_cloud_requires_auth_while_square_local_processing_remains_anonymous(app, tmp_path, monkeypatch):
     source = tmp_path / "source.png"
     source.write_bytes(b"staged")
-    cloud_stage = "cloud-" + uuid.uuid4().hex[:8]
-    local_stage = "local-" + uuid.uuid4().hex[:8]
-    app.state.staged_ids.extend([cloud_stage, local_stage])
-    image.STAGED_UPLOADS[cloud_stage] = (str(source), time.time())
-    image.STAGED_UPLOADS[local_stage] = (str(source), time.time())
-
-    def dimensions(path):
-        return (1000, 500) if image.STAGED_UPLOADS[cloud_stage][0] == path and current["stage"] == "cloud" else (1000, 1000)
-
-    current = {"stage": "cloud"}
-    monkeypatch.setattr(image, "get_image_dimensions", dimensions)
+    monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 1000))
     with TestClient(app) as client:
+        cloud = client.post("/api/image/upload", files={"file": ("cloud.png", b"staged", "image/png")})
+        assert cloud.status_code == 200, cloud.text
+        local = client.post("/api/image/upload", files={"file": ("local.png", b"staged", "image/png")})
+        assert local.status_code == 200, local.text
+        cloud_id = cloud.json()["stage_id"]
+        local_id = local.json()["stage_id"]
+        app.state.staged_ids.extend([cloud_id, local_id])
+        cloud_path = image.STAGED_UPLOADS[cloud_id][0]
+        monkeypatch.setattr(
+            image, "get_image_dimensions",
+            lambda path: (1000, 500) if path == cloud_path else (1000, 1000),
+        )
         denied = client.post(
             "/api/image/process",
-            data={"stage_id": cloud_stage, "upscale_only": "false", "upscale_engine": "fast"},
+            data={"stage_id": cloud_id, "upscale_only": "false", "upscale_engine": "fast"},
         )
         assert denied.status_code == 401
         assert denied.json()["detail"]["code"] == "AUTH_REQUIRED"
 
-        current["stage"] = "local"
         accepted = client.post(
             "/api/image/process",
-            data={"stage_id": local_stage, "upscale_only": "false", "upscale_engine": "fast"},
+            data={"stage_id": local_id, "upscale_only": "false", "upscale_engine": "fast"},
         )
         assert accepted.status_code == 200, accepted.text
         body = accepted.json()
@@ -131,6 +134,94 @@ def test_owned_cloud_job_status_and_download_are_private(app, tmp_path):
         assert other_client.get(f"/api/image/jobs/{job_id}/download").status_code == 404
         assert anonymous.get(f"/api/image/jobs/{job_id}").status_code == 404
 
+def test_staged_uploads_are_owner_private(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
+    monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 500))
+    monkeypatch.setattr(billing, "get_image_dimensions", lambda _path: (1000, 500))
+    params = {
+        "prompt": "",
+        "upscale_only": False,
+        "sharpening": 0.0,
+        "upscale_engine": "fast",
+        "upscale_model": "fal-ai/clarity-upscaler",
+        "outpaint_model": "fal-ai/image-apps-v2/outpaint",
+        "custom_outpaint_args": {},
+        "custom_upscale_args": {},
+    }
+    with TestClient(app) as owner_client, TestClient(app) as other_client:
+        register(owner_client, "stage_owner")
+        register(other_client, "stage_other")
+        uploaded = owner_client.post("/api/image/upload", files={"file": ("owned.png", b"staged", "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        stage_id = uploaded.json()["stage_id"]
+        app.state.staged_ids.append(stage_id)
+
+        foreign_quote = other_client.post(
+            "/api/billing/quote",
+            json={"kind": "image", "stage_id": stage_id, "parameters": params},
+            headers=csrf_headers(other_client),
+        )
+        assert foreign_quote.status_code == 400
+        assert foreign_quote.json()["detail"]["code"] == "INVALID_STAGE"
+
+        foreign_process = other_client.post(
+            "/api/image/process",
+            data={"stage_id": stage_id, "upscale_only": "false", "upscale_engine": "fast"},
+            headers=csrf_headers(other_client),
+        )
+        assert foreign_process.status_code == 400
+
+        own_quote = owner_client.post(
+            "/api/billing/quote",
+            json={"kind": "image", "stage_id": stage_id, "parameters": params},
+            headers=csrf_headers(owner_client),
+        )
+        assert own_quote.status_code == 200, own_quote.text
+
+
+def test_anonymous_upload_survives_sign_in_on_same_browser(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
+    monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 500))
+    monkeypatch.setattr(billing, "get_image_dimensions", lambda _path: (1000, 500))
+    params = {
+        "prompt": "",
+        "upscale_only": False,
+        "sharpening": 0.0,
+        "upscale_engine": "fast",
+        "upscale_model": "fal-ai/clarity-upscaler",
+        "outpaint_model": "fal-ai/image-apps-v2/outpaint",
+        "custom_outpaint_args": {},
+        "custom_upscale_args": {},
+    }
+    with TestClient(app) as client:
+        uploaded = client.post("/api/image/upload", files={"file": ("prelogin.png", b"staged", "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        stage_id = uploaded.json()["stage_id"]
+        app.state.staged_ids.append(stage_id)
+        register(client, "prelogin_user")
+        quoted = client.post(
+            "/api/billing/quote",
+            json={"kind": "image", "stage_id": stage_id, "parameters": params},
+            headers=csrf_headers(client),
+        )
+        assert quoted.status_code == 200, quoted.text
+
+
+def test_billing_refuses_paid_work_with_placeholder_secrets(app, monkeypatch):
+    monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
+    monkeypatch.setenv("SX_SECURITY_SECRET", "echo-development-secret-change-me")
+    monkeypatch.delenv("SX_FAL_KEY_ENCRYPTION_KEY", raising=False)
+    with TestClient(app) as client:
+        register(client, "misconfigured_user")
+        quoted = client.post(
+            "/api/billing/quote",
+            json={"kind": "image", "stage_id": "nope", "parameters": {}},
+            headers=csrf_headers(client),
+        )
+        assert quoted.status_code == 503
+        assert quoted.json()["detail"]["code"] == "BILLING_MISCONFIGURED"
+
+
 def test_enqueue_failure_releases_reserved_credits(app, tmp_path, monkeypatch):
     monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
     monkeypatch.setenv("FAL_KEY", "platform-fal-key")
@@ -155,6 +246,10 @@ def test_enqueue_failure_releases_reserved_credits(app, tmp_path, monkeypatch):
 
     with TestClient(app) as client:
         user = register(client, "enqueue_failure")
+        uploaded = client.post("/api/image/upload", files={"file": ("enqueue.png", b"staged", "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        stage_id = uploaded.json()["stage_id"]
+        app.state.staged_ids.append(stage_id)
         with app.state.testing_session() as db:
             grant_credits(
                 db, user["id"], 100, source="purchase",

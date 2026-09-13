@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useSSE } from '../../hooks/useSSE.js';
+import { billingErrorMessage } from '../../utils/billingErrors.js';
 import Progress from './Progress.jsx';
 import Emoji from './Emoji.jsx';
 
@@ -94,11 +95,12 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled }) {
 
   if (job?.status === 'failed' || (!job && error)) {
     const detail = job?.error?.[1] || error?.message || 'Unknown pipeline execution error';
+    // Billing/credit failures map to user copy; pipeline errors pass through.
     const headline = job?.error?.[0] || 'PIPELINE EXECUTION FAILED';
     return (
       <div className="sx-error-box" role="alert">
         <div className="sx-error-title">{headline}</div>
-        <div>{detail}</div>
+        <div>{billingErrorMessage({ message: detail })}</div>
       </div>
     );
   }

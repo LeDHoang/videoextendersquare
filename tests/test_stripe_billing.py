@@ -143,6 +143,96 @@ def test_out_of_order_refund_creates_then_reverses_purchase(db, monkeypatch):
     assert get_wallet(db, user.id)["available_credits"] == 0
 
 
+def test_partial_refunds_revoke_pro_rata_and_accumulate(db, monkeypatch):
+    configure(monkeypatch)
+    user = add_user(db, "partial_user")
+    session = paid_session(user.id, session_id="cs_partial", payment_intent="pi_partial")
+    completed = event("evt_partial_paid", "checkout.session.completed", {"id": "cs_partial"})
+    events = {
+        b"paid": completed,
+        b"part1": event("evt_r1", "charge.refunded", {"payment_intent": "pi_partial", "amount_refunded": 100}),
+        b"part2": event("evt_r2", "charge.refunded", {"payment_intent": "pi_partial", "amount_refunded": 250}),
+        b"full": event("evt_r3", "charge.refunded", {"payment_intent": "pi_partial", "amount_refunded": 500}),
+    }
+    monkeypatch.setattr(stripe_service, "construct_event", lambda payload, signature: events[payload])
+    monkeypatch.setattr(stripe_service, "_retrieve_checkout", lambda session_id: session)
+
+    stripe_service.process_webhook(db, payload=b"paid", signature="valid")
+    assert get_wallet(db, user.id)["available_credits"] == 500
+
+    assert stripe_service.process_webhook(db, payload=b"part1", signature="valid")["changed"] is True
+    purchase = db.query(StripePurchase).one()
+    assert purchase.status == "partially_reversed"
+    assert purchase.amount_refunded_cents == 100
+    assert purchase.credits_revoked == 100  # ceil(500 * 100/500)
+    assert get_wallet(db, user.id)["available_credits"] == 400
+
+    assert stripe_service.process_webhook(db, payload=b"part2", signature="valid")["changed"] is True
+    purchase = db.query(StripePurchase).one()
+    assert purchase.status == "partially_reversed"
+    assert purchase.credits_revoked == 250  # ceil(500 * 250/500) cumulative
+    assert get_wallet(db, user.id)["available_credits"] == 250
+
+    assert stripe_service.process_webhook(db, payload=b"full", signature="valid")["changed"] is True
+    purchase = db.query(StripePurchase).one()
+    assert purchase.status == "reversed"
+    assert purchase.reversed_at is not None
+    assert get_wallet(db, user.id)["available_credits"] == 0
+
+
+def test_refund_on_unpaid_purchase_skips_debit(db, monkeypatch):
+    configure(monkeypatch)
+    user = add_user(db, "unpaid_refund_user")
+    session = paid_session(user.id, session_id="cs_unpaid", payment_intent="pi_unpaid")
+    session["payment_status"] = "unpaid"
+    events = {
+        b"pending": event("evt_unpaid", "checkout.session.completed", {"id": "cs_unpaid"}),
+        b"refund": event("evt_unpaid_r", "charge.refunded", {"payment_intent": "pi_unpaid", "amount_refunded": 500}),
+    }
+    monkeypatch.setattr(stripe_service, "construct_event", lambda payload, signature: events[payload])
+    monkeypatch.setattr(stripe_service, "_retrieve_checkout", lambda session_id: session)
+
+    stripe_service.process_webhook(db, payload=b"pending", signature="valid")
+    assert db.query(StripePurchase).one().status == "pending"
+    result = stripe_service.process_webhook(db, payload=b"refund", signature="valid")
+    assert result["changed"] is False
+    purchase = db.query(StripePurchase).one()
+    assert purchase.status == "pending"
+    assert get_wallet(db, user.id)["available_credits"] == 0
+
+
+def test_late_completed_after_reversal_keeps_reversed_status(db, monkeypatch):
+    configure(monkeypatch)
+    user = add_user(db, "late_completed_user")
+    session = paid_session(user.id, session_id="cs_late", payment_intent="pi_late")
+
+    class SessionApi:
+        @staticmethod
+        def list(payment_intent, limit):
+            return {"data": [{"id": "cs_late"}]}
+
+    class FakeStripe:
+        class checkout:
+            Session = SessionApi
+
+    events = {
+        b"refund": event("evt_late_r", "charge.refunded", {"payment_intent": "pi_late", "amount_refunded": 500}),
+        b"completed": event("evt_late_c", "checkout.session.completed", {"id": "cs_late"}),
+    }
+    monkeypatch.setattr(stripe_service, "_stripe", lambda: FakeStripe())
+    monkeypatch.setattr(stripe_service, "construct_event", lambda payload, signature: events[payload])
+    monkeypatch.setattr(stripe_service, "_retrieve_checkout", lambda session_id: session)
+
+    stripe_service.process_webhook(db, payload=b"refund", signature="valid")
+    assert db.query(StripePurchase).one().status == "reversed"
+
+    result = stripe_service.process_webhook(db, payload=b"completed", signature="valid")
+    assert result["changed"] is False
+    purchase = db.query(StripePurchase).one()
+    assert purchase.status == "reversed"
+    assert get_wallet(db, user.id)["available_credits"] == 0
+
+
 def test_unknown_pack_metadata_is_rejected_without_credit(db, monkeypatch):
     configure(monkeypatch)
     user = add_user(db, "tampered_user")
