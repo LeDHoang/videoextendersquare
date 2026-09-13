@@ -2,6 +2,8 @@
 
 Last verified: 2026-09-13 on top of `227c919` (uncommitted billing-fix work in tree) — deep functional pass: 66/66 pytest + 6/6 vitest + `vite build` clean + live-app smoke (invalid cursor → 400, checkout without base URL → 503, webhook bad signature → generic message, `/api/config` key-leak closed) + Alembic up → down → up through `20260913_0008` on scratch SQLite; dev `data/echo.db` migrated `0005` → `0008` (backup at `/tmp/echo.db.pre-mig-backup`).
 
+VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md), added 2026-09-13. Documentation only; no product implementation or test rerun was performed.
+
 ## Done
 
 - [x] Fix upload avatar (root cause: Vite dev proxy forwarded `/api` + `/media` but not `/avatars`, so uploads succeeded while avatar images 404'd on :5173; fixed by adding `'/avatars': 'http://localhost:8000'` to `web/vite.config.js`.)
@@ -25,6 +27,77 @@ Last verified: 2026-09-13 on top of `227c919` (uncommitted billing-fix work in t
 - [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
 - [ ] Commit the uncommitted billing-fix work (16 modified + 3 new files: migrations `0007`/`0008`, `billingErrors.js`, credits icon) after final review.
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
+
+## VR Reels recommended execution order
+
+Follow the phases in order unless measured results change a dependency.
+
+### Phase 0 — Playback and release foundation
+
+- [ ] Complete the controlled physical-Quest playback matrix in `docs/vr-reels-playback-investigation.md`.
+- [ ] Remove normal-path decoded-frame skipping and select a validated Quest/browser rendition automatically.
+- [ ] Measure and control contention from hidden preload, glow sampling, comments, and other texture uploads.
+- [ ] Verify bounded cache, cancellation, memory stability, buffering, frame pacing, and thermal behavior on device.
+- [ ] Complete the applicable security, ownership, quota, queue, recommendation-concurrency, privacy, moderation, storage, and monitoring blockers in `docs/to-beta.md`.
+- [ ] Repeat Meta documentation verification on a supported host and record Quest Browser/Horizon OS versions.
+
+### Phase 1 — Immersive-media contract
+
+- [ ] Store explicit projection, stereo-layout, presentation-mode, orientation, and comfort metadata.
+- [ ] Store codec, dimensions, bitrate, frame rate, device target, and fallback for every rendition.
+- [ ] Add caption, translation, audio-description, generated-asset, and provenance metadata.
+- [ ] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration.
+- [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets.
+
+### Phase 2 — World Shell proof of concept
+
+- [ ] Let the creator select or approve a representative keyframe.
+- [ ] Generate one static panorama/cubemap or shallow depth-layered shell during upload.
+- [ ] Keep the original reel unchanged as the central authoritative source.
+- [ ] Render one static shell rather than a second background video.
+- [ ] Add explicit `ENTER WORLD` and `EXIT WORLD` controls.
+- [ ] Label generated surroundings and store source/model/version provenance.
+- [ ] Add reduced-motion fallback and measure performance against the no-shell baseline.
+
+### Phase 3 — Comfort and accessibility
+
+- [ ] Make stable world/body lock the default; retain direct head lock as an option.
+- [ ] Add recenter plus `COMFORT`, `CINEMA`, and `IMMERSIVE` viewing presets.
+- [ ] Validate screen FOV, text, targets, controls, and horizon stability on physical hardware.
+- [ ] Ensure every core action works seated and with one controller or hand.
+- [ ] Add timed captions with adjustable size, position, contrast, and background.
+- [ ] Add optional transcription, translation, reduced motion, and non-audio alternatives for important cues.
+
+### Phase 4 — Reel Packs and Earth
+
+- [ ] Add finite, ordered Reel Packs with covers, creators, visibility, canonical links, resume state, and explicit endings.
+- [ ] Allow packs to mix normal, stereo, native immersive, and World Shell reels through the existing player.
+- [ ] Add creator authoring and ownership-safe publish/edit/delete flows.
+- [ ] Reuse existing save, share, QR, profile, and messaging features for packs.
+- [ ] Open city and event packs from Earth while retaining city-level location privacy.
+- [ ] Add content-safety checks before reels or packs appear in Earth previews.
+
+### Phase 5 — Controlled commercial pilots
+
+- [ ] Pilot property, hospitality, studio, and creator-space tours with rights holders.
+- [ ] Pilot travel, restaurant, and city packs connected to Earth.
+- [ ] Measure generation cost, failure rate, comfort, completion, saves, shares, and qualified leads.
+- [ ] Require sponsorship, rights, likeness, venue, and AI-generation disclosures.
+- [ ] Consider licensed music next; defer sports until fast-motion playback and broadcast rights are proven.
+- [ ] Defer creator payouts based on views until fraud and event-attribution controls are production-ready.
+
+### Phase 6 — Later social and research work
+
+- [ ] Prototype invitation-based synchronized viewing using existing messaging.
+- [ ] Add optional voice navigation only with visible listening state and controller/hand fallback.
+- [ ] Prototype conservative 2.5D image reels.
+- [ ] Research Gaussian splats, volumetric capture, and live generated worlds separately from the product roadmap.
+- [ ] Treat physical projection rooms and custom glasses as future partnerships/research, not current product work.
+
+Guardrails: no stolen media, deceptive fake memories, unlabeled AI, casino-style
+engagement design, biometric/gaze-data resale, military conditioning, harmful
+trauma optimization, precise private-location exposure, or bots masquerading as
+people.
 
 ## Known gaps found during verification (not yet fixed)
 
