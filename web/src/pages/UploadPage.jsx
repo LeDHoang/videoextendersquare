@@ -12,6 +12,10 @@ import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
+import { useWallet } from '../hooks/WalletContext.jsx';
+import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
+import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
+import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
 
 // Upload wizard — single-file intake that will eventually replace the
 // standalone Image/Video extender pages (which stay mounted for now).
@@ -36,10 +40,20 @@ const FALLBACK_FAL_MODEL_IDS = {
   AuraSR: 'fal-ai/aura-sr',
   ESRGAN: 'fal-ai/esrgan',
 };
-const STOCK_OUTPAINT_IMG = 'fal-ai/flux/outpaint';
+const STOCK_OUTPAINT_IMG = 'fal-ai/image-apps-v2/outpaint';
 const IMG_PROMPT_DEFAULT = 'Seamlessly extend the background environment, high details, matching texture and lighting.';
 const VID_PROMPT_DEFAULT = 'Seamlessly extend the background environment, cool lighting, neutral color temperature, matching original white balance and color palette.';
 const VID_NEG_DEFAULT = 'yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated';
+const CREDIT_VIDEO_OUTPAINT_MODELS = new Set([
+  'fal-ai/ltx-2.3-quality/outpaint',
+  'fal-ai/ltx-2.3-quality/outpaint/lora',
+  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'fal-ai/wan-vace-14b/outpainting',
+]);
+const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
+  'fal-ai/bytedance-upscaler/upscale/video',
+  'fal-ai/seedvr/upscale/video',
+]);
 
 function fmtBytes(n) {
   if (!n) return '—';
@@ -57,14 +71,15 @@ function kindOf(name) {
 export default function UploadPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { wallet, catalog, falKey, refresh: refreshWallet } = useWallet();
   const health = useHealthContext();
   const cfg = useConfigContext();
   const probes = health?.probes || {};
-  const falOk = health?.fal_key?.ok ?? false;
   const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
 
   const models = cfg?.config?.models || {};
   // Image catalogs (mirror ImagePage).
+  const imgOutpaintCatalog = models.image_outpaint_catalog || [];
   const imgUpscaleCatalog = models.image_upscale_catalog || [];
   const imgUpscaleOptions = imgUpscaleCatalog.length
     ? imgUpscaleCatalog.map((e) => e.label)
@@ -117,6 +132,7 @@ export default function UploadPage() {
   const [trimDur, setTrimDur] = useState(15);
   const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
+  const [paymentSource, setPaymentSource] = useState('credits');
 
   // ── 03 Details ──
   const [title, setTitle] = useState('');
@@ -135,7 +151,6 @@ export default function UploadPage() {
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
   const studioPicked = engine === 'STUDIO';
-  const needsKey = path === 'extend' && (!upscaleOnly || falPicked);
   const canShareSource = path === 'skip' ? !!staged : !!jobDone;
 
   const blockedIds = kind === 'video' ? ['ffmpeg', 'ffprobe', 'encoder'] : ['ffmpeg', 'ffprobe'];
@@ -145,6 +160,7 @@ export default function UploadPage() {
   const imgUpscaleEntry = imgUpscaleCatalog.find((e) => e.label === imgFalModel) || null;
   const imgUpscaleModel = imgUpscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[imgFalModel] || models.upscale_img;
   const imgOutpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
+  const imgOutpaintEntry = imgOutpaintCatalog.find((entry) => entry.model === imgOutpaintModel) || null;
   const imgOutpaintCustom = imgOutpaintModel !== STOCK_OUTPAINT_IMG;
   const imgOutpaintShort = (imgOutpaintModel || '').split('/').filter(Boolean).pop() || 'custom';
 
@@ -154,43 +170,81 @@ export default function UploadPage() {
   const vidOutpaintModel = vidOutpaintEntry?.model || models.outpaint_vid;
   const vidUpscaleModel = vidUpscaleEntry?.model || models.upscale_vid;
   const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (vidOutpaintModel || '').includes('/lora'));
-  const loraList = loraPicked ? ltxLoras.map((l) => ({ ...l, path: (l.path || '').trim() })).filter((l) => l.path) : [];
+  const loraList = useMemo(
+    () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
+    [loraPicked, ltxLoras],
+  );
   const maxSourceDur = staged?.duration || 60;
-  const effDur = trimEnabled ? Math.min(maxSourceDur, trimDur) : (staged?.duration || 0);
 
-  const cost = useMemo(() => {
-    const out = { label: 'None (Upscale Only)', value: 0 };
-    const up = { label: `Local (${engine} Engine — $0.00)`, value: 0 };
-    const resWidth = { '480p': 480, '720p': 720, '1080p': 1080 }[ltxRes] || 720;
-    const frames = effDur > 0 ? Math.round(effDur * 24) : 121;
-    if (!upscaleOnly && vidOutpaintEntry) {
-      if (vidOutpaintEntry.pricing_kind === 'per_mp') {
-        out.label = `${vidOutpaintEntry.label} (${ltxRes}) (~$${vidOutpaintEntry.price.toFixed(4)}/MP)`;
-        out.value = ((resWidth * resWidth * frames) / 1e6) * vidOutpaintEntry.price;
-      } else {
-        const rate = vidOutpaintEntry.price || 0.06;
-        out.label = `${vidOutpaintEntry.label} ($${rate.toFixed(2)}/s)`;
-        out.value = effDur * rate;
-      }
-    }
-    if (falPicked && vidUpscaleEntry) {
-      if (vidUpscaleEntry.pricing_kind === 'per_mp') {
-        const w = { '720p': 720, '1080p': 1080, '2160p': 2160 }[seedvrTarget] || 1080;
-        up.label = `${vidUpscaleEntry.label} (${seedvrTarget}) ($${vidUpscaleEntry.price.toFixed(3)}/MP)`;
-        up.value = ((w * w * frames) / 1e6) * vidUpscaleEntry.price;
-      } else if (vidUpscaleEntry.model && vidUpscaleEntry.model.includes('bytedance')) {
-        const base = vidUpscaleEntry.base_rates?.[btdRes] ?? 0.0288;
-        const rate = base * (vidUpscaleEntry.fps_multiplier?.[btdFps] ?? 1) * (vidUpscaleEntry.tier_multiplier?.[btdTier] ?? 1);
-        up.label = `Bytedance (${btdRes}, ${btdFps}, ${btdTier}) ($${rate.toFixed(4)}/s)`;
-        up.value = effDur * rate;
-      } else {
-        const rate = vidUpscaleEntry.price || 0.003;
-        up.label = `${vidUpscaleEntry.label} ($${rate.toFixed(3)}/s)`;
-        up.value = effDur * rate;
-      }
-    }
-    return { out, up, total: out.value + up.value };
-  }, [upscaleOnly, vidOutpaintEntry, effDur, ltxRes, falPicked, vidUpscaleEntry, btdRes, btdFps, btdTier, seedvrTarget, engine]);
+  const processingParameters = useMemo(() => kind === 'video'
+    ? videoBillingParameters({
+        prompt,
+        upscaleOnly,
+        falPicked,
+        studioPicked,
+        sharpening,
+        outpaintModel: vidOutpaintModel,
+        upscaleModel: vidUpscaleModel,
+        ltxResolution: ltxRes,
+        ltxAudio,
+        ltxGuidance,
+        ltxPromptExpansion,
+        ltxNegativePrompt,
+        ltxLoras: loraList,
+        wanResolution: '720p',
+        seedvrFactor,
+        seedvrTarget,
+        bytedanceTargetRes: btdRes,
+        bytedanceTargetFps: btdFps,
+        bytedanceTier: btdTier,
+        bytedancePreset: btdPreset,
+        bytedanceFidelity: btdFidelity,
+        trimEnabled,
+        trimStart,
+        trimDuration: trimDur,
+        customOutpaintArgs: vidOutpaintEntry?.is_custom ? outArgs.args : {},
+        customUpscaleArgs: vidUpscaleEntry?.is_custom ? upArgs.args : {},
+      })
+    : imageBillingParameters({
+        prompt,
+        upscaleOnly,
+        sharpening,
+        falPicked,
+        upscaleModel: imgUpscaleModel,
+        outpaintModel: imgOutpaintModel,
+        customOutpaintArgs: imgOutpaintCustom ? imgOutArgs.args : {},
+        customUpscaleArgs: imgUpscaleEntry?.is_custom ? imgUpArgs.args : {},
+      }), [kind, prompt, upscaleOnly, falPicked, studioPicked, sharpening, vidOutpaintModel, vidUpscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, vidOutpaintEntry?.is_custom, outArgs.args, vidUpscaleEntry?.is_custom, upArgs.args, imgUpscaleModel, imgOutpaintModel, imgOutpaintCustom, imgOutArgs.args, imgUpscaleEntry?.is_custom, imgUpArgs.args]);
+  const quoteItems = useMemo(
+    () => path === 'extend' && staged && stagedItemNeedsCloud(staged, processingParameters)
+      ? [{ stage_id: staged.stage_id }]
+      : [],
+    [path, staged, processingParameters],
+  );
+  const cloudRequired = quoteItems.length > 0;
+  const needsOutpaintCloud = path === 'extend' && !upscaleOnly && !isSquare;
+  const imageOutpaintCreditSupported = imgOutpaintEntry?.credit_enabled ?? !imgOutpaintCustom;
+  const imageUpscaleCreditSupported = imgUpscaleEntry?.credit_enabled ?? imgUpscaleModel === 'fal-ai/clarity-upscaler';
+  const videoOutpaintCreditSupported = vidOutpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(vidOutpaintModel);
+  const videoUpscaleCreditSupported = vidUpscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(vidUpscaleModel);
+  const byokOnly = kind === 'video'
+    ? (needsOutpaintCloud && !videoOutpaintCreditSupported) || (falPicked && !videoUpscaleCreditSupported)
+    : (needsOutpaintCloud && !imageOutpaintCreditSupported) || (falPicked && !imageUpscaleCreditSupported);
+  const quoteState = useCreditQuotes({
+    kind: kind || 'image',
+    items: quoteItems,
+    parameters: processingParameters,
+    enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
+  });
+  const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  const fundingBlocked = cloudRequired && (
+    !user ||
+    (paymentSource === 'byok' && !falKey?.configured) ||
+    (paymentSource === 'credits' && (
+      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
+      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+    ))
+  );
 
   // Preselect sidebar CUSTOM overrides once catalogs arrive (mirrors both pages).
   const customInit = useRef(false);
@@ -209,8 +263,12 @@ export default function UploadPage() {
     }
   }, [kind, imgUpscaleCatalog, vidOutpaintCatalog, vidUpscaleCatalog, models]);
 
+  useEffect(() => {
+    if (byokOnly) setPaymentSource('byok');
+  }, [byokOnly]);
+
   const extendDisabled =
-    blocked.length > 0 || (needsKey && !falOk) || (kind === 'video' && studioPicked && !studioOk) || busy;
+    blocked.length > 0 || fundingBlocked || (kind === 'video' && studioPicked && !studioOk) || busy;
 
   const captionTags = useMemo(() => {
     const found = [];
@@ -237,8 +295,7 @@ export default function UploadPage() {
     !title.trim() ||
     !canShareSource ||
     publishing ||
-    busy ||
-    (needsKey && !falOk);
+    busy;
 
   const onFiles = async (files) => {
     const picked = (files || [])[0];
@@ -298,55 +355,31 @@ export default function UploadPage() {
         return;
       }
     }
+    if (fundingBlocked) {
+      setError('Choose an available cloud payment source and wait for a valid quote.');
+      return;
+    }
     setBusy(true);
     setJob(null);
     setJobDone(null);
     try {
+      const freshQuotes = paymentSource === 'credits' && cloudRequired ? await quoteState.refresh() : [];
       const fd = new FormData();
-      if (kind === 'image') {
-        fd.append('stage_id', staged.stage_id);
-        fd.append('prompt', upscaleOnly ? '' : prompt);
-        fd.append('upscale_only', String(upscaleOnly));
-        fd.append('sharpening', String(sharpening));
-        fd.append('upscale_engine', falPicked ? 'fal' : 'fast');
-        fd.append('upscale_model', imgUpscaleModel);
-        fd.append('outpaint_model', imgOutpaintModel);
-        fd.append('custom_outpaint_args', JSON.stringify(imgOutpaintCustom ? imgOutArgs.args || {} : {}));
-        fd.append('custom_upscale_args', JSON.stringify(imgUpscaleEntry?.is_custom ? imgUpArgs.args || {} : {}));
-      } else {
-        const kv = {
-          stage_id: staged.stage_id,
-          prompt: upscaleOnly ? '' : prompt,
-          upscale_only: String(upscaleOnly),
-          upscale_engine: falPicked ? 'fal' : studioPicked ? 'studio' : 'fast',
-          sharpening: String(sharpening),
-          outpaint_model: upscaleOnly ? 'fal-ai/ltx-2.3-quality/outpaint' : vidOutpaintModel,
-          upscale_model: vidUpscaleModel,
-          ltx_resolution: ltxRes,
-          ltx_audio: String(ltxAudio),
-          ltx_guidance: String(ltxGuidance),
-          ltx_prompt_expansion: String(ltxPromptExpansion),
-          ltx_negative_prompt: ltxNegativePrompt,
-          ltx_loras: JSON.stringify(loraList),
-          seedvr_factor: String(seedvrFactor),
-          seedvr_target: seedvrTarget,
-          bytedance_target_res: btdRes,
-          bytedance_target_fps: btdFps,
-          bytedance_tier: btdTier,
-          bytedance_preset: btdPreset,
-          bytedance_fidelity: btdFidelity,
-          trim_enabled: String(trimEnabled),
-          trim_start: String(trimStart),
-          trim_duration: String(trimDur),
-          custom_outpaint_args: JSON.stringify(vidOutpaintEntry?.is_custom ? outArgs.args || {} : {}),
-          custom_upscale_args: JSON.stringify(vidUpscaleEntry?.is_custom ? upArgs.args || {} : {}),
-        };
-        for (const [k, v] of Object.entries(kv)) fd.append(k, v);
+      fd.append('stage_id', staged.stage_id);
+      appendProcessingParameters(fd, processingParameters);
+      if (cloudRequired) {
+        fd.append('payment_source', paymentSource);
+        if (paymentSource === 'credits') {
+          const quote = freshQuotes.find((entry) => entry.stage_id === staged.stage_id);
+          if (!quote?.quote_id) throw new Error('A fresh quote is unavailable for this upload.');
+          fd.append('quote_id', quote.quote_id);
+        }
       }
       const res = await api.form(kind === 'image' ? '/api/image/process' : '/api/video/process', fd);
       setJob({ jobId: res.job_id, name: file?.name || 'upload', kind });
-    } catch (e) {
-      setError(e.message);
+      if (cloudRequired) await refreshWallet();
+    } catch (requestError) {
+      setError(requestError.message);
     } finally {
       setBusy(false);
     }
@@ -532,9 +565,9 @@ export default function UploadPage() {
                     onArgs={setImgOutArgs}
                     entry={{
                       label: `CUSTOM OUTPAINT (${imgOutpaintShort})`,
-                      requirements: 'FAL_KEY set; source image uploaded to fal.ai CDN by the pipeline.',
+                      requirements: 'A saved personal Fal key is required; the source image is uploaded by the pipeline.',
                       cost_note: 'No estimate stored — pull live pricing via MODEL INFO below before rendering.',
-                      expects: 'Sends {image_url, prompt} (padded flux args only apply to fal-ai/flux/outpaint). Check MODEL INFO for the live schema.',
+                      expects: 'Sends {image_url, prompt}; expand_* arguments are applied only to the stock Image Apps outpaint model. Check MODEL INFO for the live schema.',
                     }}
                   />
                 ) : null}
@@ -839,27 +872,17 @@ export default function UploadPage() {
               </div>
             ) : null}
 
-            {kind === 'video' ? (
-              <div className="sx-cost-panel">
-                <div className="sx-cost-head">
-                  <span className="sx-cost-title">ESTIMATED CLOUD BILLING BREAKDOWN</span>
-                  <span className="sx-cost-total">EST. TOTAL: ~${cost.total.toFixed(4)} USD</span>
-                </div>
-                <div className="sx-cost-body">
-                  <div>• <b>Batch Scope:</b> 1 video ({effDur.toFixed(1)}s total processing time)</div>
-                  <div>• <b>Trimming:</b> {trimEnabled ? `ENABLED (${trimDur}s max)` : 'DISABLED (Full video)'}</div>
-                  <div>• <b>Outpaint Stage:</b> ~${cost.out.value.toFixed(4)} USD ({cost.out.label})</div>
-                  <div>• <b>Upscale Stage:</b> ~${cost.up.value.toFixed(4)} USD ({cost.up.label})</div>
-                </div>
-              </div>
-            ) : null}
+            <CloudFundingPanel
+              required={cloudRequired}
+              paymentSource={paymentSource}
+              onChange={setPaymentSource}
+              quoteState={quoteState}
+              byokOnly={byokOnly}
+            />
 
             {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
             {!blocked.length && kind === 'video' && studioPicked && !studioOk ? (
               <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-            ) : null}
-            {!blocked.length && needsKey && !falOk ? (
-              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
             ) : null}
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
@@ -874,7 +897,7 @@ export default function UploadPage() {
                 <div>{error}</div>
               </div>
             ) : null}
-            {job ? <JobRunner jobId={job.jobId} name={job.name} kind={job.kind} onDone={setJobDone} /> : null}
+            {job ? <JobRunner jobId={job.jobId} name={job.name} kind={job.kind} onDone={setJobDone} onSettled={refreshWallet} /> : null}
             {jobDone ? <Mono>✓ RENDER COMPLETE — READY TO SHARE</Mono> : null}
           </div>
         ) : null}
@@ -976,7 +999,6 @@ export default function UploadPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-3)' }}>
             {!title.trim() ? <GatedReason>TITLE IS REQUIRED BEFORE SHARING</GatedReason> : null}
             {path === 'extend' && !jobDone ? <GatedReason>RENDER THE 1:1 EXTEND FIRST (STEP 02)</GatedReason> : null}
-            {needsKey && !falOk ? <GatedReason>FAL API KEY REQUIRED FOR THE EXTEND PATH</GatedReason> : null}
             <div>
               <Button primary disabled={shareDisabled} loading={publishing} onClick={share}>
                 SHARE REEL TO UPLOADS

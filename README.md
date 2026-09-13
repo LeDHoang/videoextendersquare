@@ -49,8 +49,8 @@ Interactive side-by-side A/B slider comparing Lanczos4+CAS against ZNEDI3 neural
 
 ### 🎨 Generative 1:1 Square Outpainting & 4K Encoding
 - **Dual Pipeline Modes**:
-  - **OUTPAINT + UPSCALE**: Generatively extends portrait/landscape videos to 1:1 square via `fal.ai` models (LTX 2.3, Luma Ray-2, Kling Video) before upscaling.
-  - **UPSCALE ONLY**: Runs 100% locally with zero cloud API keys required.
+  - **OUTPAINT + UPSCALE**: Generatively extends portrait/landscape videos to 1:1 square via supported `fal.ai` models (LTX 2.3, Luma Ray-2 Flash, or Wan VACE) before upscaling.
+  - **UPSCALE ONLY**: Runs locally with FAST/STUDIO, or through supported Fal upscalers when FAL AI is selected.
 - **Bytedance Video Upscaler Integration**:
   - Model ID: `fal-ai/bytedance-upscaler/upscale/video`
   - Custom target resolution (`1080p`, `2k`, `4k`), frame rate (`30fps`, `60fps`), quality tier, scenario presets, and fidelity settings.
@@ -93,10 +93,17 @@ cd ..
 ### 3. Configuration
 Create a `.env` file in the project root:
 
+Start from `.env.example`. For local-only FAST/STUDIO processing, the credits flags and Fal key can remain disabled/blank. To enable account-funded cloud processing, configure at least:
+
 ```env
-FAL_KEY=your_fal_ai_api_key_here
+FAL_KEY=your_platform_fal_key
+SX_FAL_KEY_ENCRYPTION_KEY=a-separate-long-random-secret
+SX_CREDITS_ENABLED=1
+SX_STRIPE_ENABLED=0
+SX_REEL_REWARDS_ENABLED=0
 ```
-*(Note: `FAL_KEY` is only required for generative outpainting and cloud upscaling. Local FAST/STUDIO modes run completely offline.)*
+
+`FAL_KEY` is the server-owned platform credential and cannot be changed through public APIs. Users can optionally save their own encrypted Fal key from the Credits page. Stripe and reel rewards should remain disabled until their settings and test-mode checks in [RUNNING.md](RUNNING.md) are complete.
 
 ### Social beta setup
 
@@ -187,7 +194,7 @@ videoextendersquare/
 │   └── jobs.py             # Asynchronous task runner with SSE broadcast
 ├── pipeline/               # Core media transformation workers
 │   ├── image_worker.py     # Flux outpainting & Lanczos4 / FAL upscaling
-│   ├── video_worker.py     # Video outpainting (LTX/Luma/Kling) & HEVC encoding
+│   ├── video_worker.py     # Video outpainting (LTX/Luma/Wan) & HEVC encoding
 │   └── utils.py            # Geometric padding math & FFmpeg probing
 ├── ui/assets/              # WebGL & WebXR shaders (webxr_vr.js, reels.html, compare.html)
 └── docs/images/            # High-resolution documentation screenshots

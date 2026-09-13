@@ -9,7 +9,7 @@ Status: **Blocked for public beta.** Complete every item in "Public beta release
 ### Processing API security and cost controls
 
 - [ ] Require authentication and CSRF protection for image/video upload and processing endpoints.
-- [ ] Restrict `PUT /api/config/fal-key` and `PUT /api/config/models` to administrators, or remove runtime FAL-key mutation from production entirely.
+- [x] Remove runtime platform-key mutation and restrict `PUT /api/config/models` to administrator sessions with CSRF protection.
 - [ ] Protect CPU/GPU-intensive Reels and comparison endpoints, including Explore preview generation, proxy generation, spatialization, comparison preparation, and forced health refreshes.
 - [ ] Add per-user and per-IP upload, processing, event, and storage quotas.
 - [ ] Add bounded job queues, global and per-user concurrency limits, and overload responses instead of allowing an unlimited pending executor queue.

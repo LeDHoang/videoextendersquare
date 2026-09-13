@@ -246,6 +246,24 @@ def require_moderator_csrf(
     return context
 
 
+def require_admin(context: AuthContext = Depends(require_auth)) -> AuthContext:
+    if context.user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ADMIN_REQUIRED", "message": "Administrator access is required."},
+        )
+    return context
+
+
+def require_admin_csrf(context: AuthContext = Depends(require_auth_csrf)) -> AuthContext:
+    if context.user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ADMIN_REQUIRED", "message": "Administrator access is required."},
+        )
+    return context
+
+
 
 def ensure_anonymous_cookie(request: Request, response: Response) -> str:
     value = request.cookies.get(ANON_COOKIE)

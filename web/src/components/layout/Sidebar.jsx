@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../../hooks/AuthContext.jsx';
+import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
 import { Field } from '../ui/controls.jsx';
 import {
@@ -15,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
   { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
   { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
+  { to: '/wallet', label: 'Credits', Icon: IndustrialUploadIcon },
   { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
   { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
   { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
@@ -28,11 +31,9 @@ const MODEL_FIELDS = [
   { key: 'upscale_img', label: 'IMAGE UPSCALE (FAL)' },
 ];
 
-export default function Sidebar({ health, config, setFalKey, setModels, isOpen, onClose }) {
-  const [keyVal, setKeyVal] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [keyMsg, setKeyMsg] = useState('');
-  const [keySaving, setKeySaving] = useState(false);
+export default function Sidebar({ health, config, setModels, isOpen, onClose }) {
+  const { user } = useAuth();
+  const { wallet, falKey } = useWallet();
   const [modelDraft, setModelDraft] = useState({});
   const [saving, setSaving] = useState(false);
   const [modelMsg, setModelMsg] = useState('');
@@ -51,27 +52,6 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
   const probes = health?.probes || {};
   const fal = health?.fal_key || {};
   const modelDefaults = config?.models || {};
-
-  const saveKey = async () => {
-    setKeyMsg('');
-    setKeySaving(true);
-    try {
-      const res = await setFalKey(keyVal);
-      setKeyMsg(res.fal_key_set ? '✓ KEY SAVED' : 'KEY REMOVED');
-      setKeyVal('');
-      health?.refresh?.();
-    } catch (e) {
-      setKeyMsg(String(e.message || e));
-    } finally {
-      setKeySaving(false);
-    }
-  };
-
-  const clearKey = async () => {
-    await setFalKey('');
-    health?.refresh?.();
-    setKeyMsg('KEY CLEARED');
-  };
 
   const saveModels = async () => {
     setModelErr('');
@@ -195,71 +175,21 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
         ))}
       </nav>
 
-      {/* ─── FAL.AI Auth Module ─────────────────────────────── */}
+      {/* ─── Account Billing Module ───────────────────────── */}
       <div className="sx-sidebar-card">
         <div className="sx-sidebar-card-head">
-          <span className="sx-sidebar-card-title">FAL.AI AUTH</span>
+          <span className="sx-sidebar-card-title">ECHO CREDITS</span>
           <div className="sx-sidebar-status-pill">
-            <span
-              className={`sx-status-dot ${fal.ok ? 'sx-dot-online' : 'sx-dot-offline'}`}
-            />
-            <span className="sx-sidebar-status-text">
-              {fal.ok ? 'ONLINE' : 'OFFLINE'}
-            </span>
+            <span className={`sx-status-dot ${user ? 'sx-dot-online' : 'sx-dot-offline'}`} />
+            <span className="sx-sidebar-status-text">{user ? `${wallet?.available_credits ?? '—'} AVAILABLE` : 'SIGN IN'}</span>
           </div>
         </div>
-
-        <div className="sx-sidebar-key-input-wrap">
-          <input
-            className="sx-input sx-sidebar-key-input"
-            type={showKey ? 'text' : 'password'}
-            placeholder="Enter FAL key..."
-            value={keyVal}
-            onChange={(e) => setKeyVal(e.target.value)}
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            className="sx-sidebar-key-toggle-btn"
-            onClick={() => setShowKey((s) => !s)}
-            title={showKey ? 'Hide key' : 'Show key'}
-            aria-label={showKey ? 'Hide key' : 'Show key'}
-          >
-            {showKey ? '🔒' : '👁'}
-          </button>
+        <div className="sx-monospace-sm" style={{ fontSize: '0.72rem', marginBottom: 10 }}>
+          {falKey?.configured ? `MY FAL KEY ${falKey.hint}` : 'NO PERSONAL FAL KEY SAVED'}
         </div>
-
-        {fal.detail ? (
-          <div className="sx-sidebar-key-preview">
-            <span className="sx-sidebar-key-badge">KEY</span>
-            <span className="sx-sidebar-key-val">{fal.detail}</span>
-          </div>
-        ) : null}
-
-        {keyMsg ? (
-          <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)', fontSize: '0.72rem' }}>
-            {keyMsg}
-          </div>
-        ) : null}
-
-        <div className="sx-sidebar-btn-grid">
-          <button
-            type="button"
-            className="sx-sidebar-btn-secondary"
-            onClick={clearKey}
-            disabled={!fal.ok && !keyVal}
-          >
-            CLEAR
-          </button>
-          <button
-            type="button"
-            className="sx-sidebar-btn-primary"
-            onClick={saveKey}
-            disabled={keySaving || !keyVal.trim()}
-          >
-            {keySaving ? 'SAVING…' : 'SAVE'}
-          </button>
-        </div>
+        <Link className="sx-sidebar-btn-primary" to={user ? '/wallet' : '/login?next=%2Fwallet'} onClick={() => onClose?.()}>
+          {user ? 'MANAGE CREDITS / KEY' : 'SIGN IN'}
+        </Link>
       </div>
 
       {/* ─── System Probes Module ───────────────────────────── */}
@@ -344,6 +274,7 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
       </div>
 
       {/* ─── Model Endpoints Customizer ─────────────────────── */}
+      {user?.role === 'admin' ? (
       <details className="sx-sidebar-card sx-expander">
         <summary className="sx-sidebar-card-title" style={{ cursor: 'pointer', outline: 'none' }}>
           ▸ MODEL ENDPOINTS
@@ -403,6 +334,7 @@ export default function Sidebar({ health, config, setFalKey, setModels, isOpen, 
           </div>
         </div>
       </details>
+      ) : null}
 
       {/* ─── Telemetry Bottom Bar ───────────────────────────── */}
       <div className="sx-sidebar-telemetry-bottom">

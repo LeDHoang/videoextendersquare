@@ -2063,6 +2063,9 @@ def reels_player(
     feed_state_js = ASSETS_DIR / "reels_feed_state.js"
     if feed_state_js.exists():
         html = html.replace("__REELS_FEED_STATE_JS__", feed_state_js.read_text(encoding="utf-8"))
+    rewards_js = ASSETS_DIR / "reels_rewards.js"
+    if rewards_js.exists():
+        html = html.replace("__REELS_REWARDS_JS__", rewards_js.read_text(encoding="utf-8"))
     vr_js = ASSETS_DIR / "webxr_vr.js"
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
@@ -2214,6 +2217,7 @@ def reels_player_inline(
 
     img_js = ASSETS_DIR / "quest_controller_img.js"
     feed_state_js = ASSETS_DIR / "reels_feed_state.js"
+    rewards_js = ASSETS_DIR / "reels_rewards.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"
 
     scripts: list[str] = []
@@ -2225,6 +2229,9 @@ def reels_player_inline(
         elif stripped.startswith("__REELS_FEED_STATE_JS__"):
             if feed_state_js.exists():
                 scripts.append(feed_state_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__REELS_REWARDS_JS__"):
+            if rewards_js.exists():
+                scripts.append(rewards_js.read_text(encoding="utf-8"))
         elif stripped.startswith("__WEBXR_VR_JS__"):
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))

@@ -17,6 +17,7 @@ const AuthPage = lazy(() => import('./pages/AuthPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage.jsx'));
 const MessagesPage = lazy(() => import('./pages/MessagesPage.jsx'));
+const WalletPage = lazy(() => import('./pages/WalletPage.jsx'));
 
 const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
 const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/profile/:username" element={<ProfilePage />} />
           <Route path="/settings/profile" element={<RequireAuth><ProfileSettingsPage /></RequireAuth>} />
           <Route path="/messages" element={<RequireAuth><MessagesPage /></RequireAuth>} />
+          <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
           <Route path="/messages/:conversationId" element={<RequireAuth><MessagesPage /></RequireAuth>} />
           <Route path="/upload" element={<RequireAuth><UploadPage /></RequireAuth>} />
           <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />

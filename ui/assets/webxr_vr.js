@@ -285,6 +285,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastControlsCanvasY = 0;
   let controlsAutoHideTimer = null;
   const CONTROLS_AUTO_HIDE_MS = 5000;
+  let notificationText = '';
+  let notificationUntil = 0;
 
   // ── VR Comments Panel (world-space, symmetric to the right-side guide) ──
   let commentsPanelVisible = false;
@@ -998,6 +1000,30 @@ window.WebXRVR = window.WebXRVR || (function () {
       ctx.roundRect(thumbX, trackY - 5, 8, 16, 2);
       ctx.fill();
       ctx.shadowBlur = 0;
+    }
+
+    if (notificationText && performance.now() < notificationUntil) {
+      ctx.fillStyle = 'rgba(5, 24, 18, 0.97)';
+      ctx.strokeStyle = '#00FF88';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(0, 255, 136, 0.42)';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.roundRect(132, 66, 536, 96, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#00FF88';
+      ctx.font = '800 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('ECHO CREDIT AWARDED', CONTROLS_W / 2, 98);
+      ctx.fillStyle = '#F2F3F5';
+      ctx.font = '700 12px "JetBrains Mono", monospace';
+      ctx.fillText(notificationText, CONTROLS_W / 2, 132);
+    } else if (notificationText) {
+      notificationText = '';
+      notificationUntil = 0;
     }
   }
 
@@ -2078,6 +2104,13 @@ window.WebXRVR = window.WebXRVR || (function () {
   function showControls() {
     controlsVisible = true;
     resetAutoHideTimer();
+  }
+
+  function showNotification(message) {
+    notificationText = String(message || '').slice(0, 96);
+    notificationUntil = performance.now() + 5000;
+    vrLastUiUploadT = -1;
+    if (xrSession || previewRunning) showControls();
   }
 
   function hideControls() {
@@ -5641,6 +5674,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     guideCanvas = null;
     guideCtx = null;
     controlsVisible = false;
+    notificationText = '';
+    notificationUntil = 0;
     isGrabbing = false;
     currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     hasNewVideoFrame = true;
@@ -5722,6 +5757,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     requestPreviewFullscreen,
     getPreviewState,
     onVideoChange,
+    showNotification,
 
     /** Enable/disable SBS stereoscopic sampling of the video frame. */
     setStereo(enabled) {
@@ -5773,6 +5809,8 @@ window.WebXRVR = window.WebXRVR || (function () {
           resourcesReady: earthResourcesReady,
           locationSlugs: earthLocations.map((location) => location.slug),
           renderStats: { ...renderStats },
+          notificationText,
+          notificationUntil,
         };
       },
     },

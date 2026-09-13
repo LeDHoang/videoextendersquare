@@ -109,6 +109,34 @@ def get_video_dimensions_and_duration(video_path):
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError) as e:
         raise ValueError(f"Could not read video metadata from {video_path}: {e}")
 
+def get_video_frame_metadata(video_path):
+    """Return authoritative source fps and frame count from ffprobe.
+
+    ``nb_frames`` is not available for every container, so the fallback is the
+    conservative ceiling of duration times the average frame rate.
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=avg_frame_rate,nb_frames,duration", "-of", "json", video_path],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15,
+        )
+        stream = json.loads(result.stdout)["streams"][0]
+        numerator, denominator = str(stream.get("avg_frame_rate") or "0/1").split("/", 1)
+        fps = float(numerator) / max(1.0, float(denominator))
+        duration = float(stream.get("duration") or 0)
+        raw_frames = stream.get("nb_frames")
+        frames = int(raw_frames) if raw_frames not in (None, "", "N/A") else int(duration * fps + 0.999999)
+        if fps <= 0 or frames <= 0:
+            raise ValueError("missing frame rate or frame count")
+        return fps, frames
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError, ValueError, ZeroDivisionError) as exc:
+        raise ValueError(f"Could not read video frame metadata from {video_path}: {exc}") from exc
+
+
 def calculate_square_padding(width, height):
     """
     Calculates symmetric padding required to pad the shorter dimension 

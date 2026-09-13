@@ -170,7 +170,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
       <div className="sx-cost-body">
         <div>
           • <b>Requirements:</b>{' '}
-          {entry?.requirements || 'FAL_KEY set; source media uploaded to fal.ai CDN by the pipeline.'}
+          {entry?.requirements || 'A saved personal Fal key is required; source media is uploaded by the pipeline.'}
         </div>
         {entry?.cost_note ? (
           <div>

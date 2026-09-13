@@ -9,9 +9,24 @@ import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
 import StudioLoading from '../components/ui/StudioLoading.jsx';
+import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
+import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
+import { useAuth } from '../hooks/AuthContext.jsx';
+import { useWallet } from '../hooks/WalletContext.jsx';
+import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
+const CREDIT_OUTPAINT_MODELS = new Set([
+  'fal-ai/ltx-2.3-quality/outpaint',
+  'fal-ai/ltx-2.3-quality/outpaint/lora',
+  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'fal-ai/wan-vace-14b/outpainting',
+]);
+const CREDIT_UPSCALE_MODELS = new Set([
+  'fal-ai/bytedance-upscaler/upscale/video',
+  'fal-ai/seedvr/upscale/video',
+]);
 
 function fmtBytes(n) {
   if (!n) return '—';
@@ -20,13 +35,14 @@ function fmtBytes(n) {
 }
 
 export default function VideoPage() {
+  const { user } = useAuth();
+  const { wallet, catalog, falKey, refresh: refreshWallet } = useWallet();
   const health = useHealthContext();
   const cfg = useConfigContext();
   const probes = health?.probes || {};
   const blocked = ['ffmpeg', 'ffprobe', 'encoder']
     .filter((id) => probes[id] && !probes[id].ok)
     .map((id) => probes[id]);
-  const falOk = health?.fal_key?.ok ?? false;
   const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
 
   const models = cfg?.config?.models || {};
@@ -65,12 +81,11 @@ export default function VideoPage() {
   const [error, setError] = useState('');
   const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
+  const [paymentSource, setPaymentSource] = useState('credits');
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
   const studioPicked = engine === 'STUDIO';
-  const needsKey = !upscaleOnly || falPicked;
-  const disabled = blocked.length > 0 || (needsKey && !falOk) || (studioPicked && !studioOk) || busy;
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
@@ -90,41 +105,68 @@ export default function VideoPage() {
   }, [outpaintCatalog, upscaleCatalog, models]);
 
   const totalDur = useMemo(() => items.reduce((a, b) => a + (b.duration || 0), 0), [items]);
-  const effDur = trimEnabled ? Math.min(items.length ? Math.max(...items.map((i) => i.duration)) : 15, trimDur) : totalDur;
+  const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
+  const loraList = useMemo(
+    () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
+    [loraPicked, ltxLoras],
+  );
+  const parameters = useMemo(() => videoBillingParameters({
+    prompt,
+    upscaleOnly,
+    falPicked,
+    studioPicked,
+    sharpening,
+    outpaintModel,
+    upscaleModel,
+    ltxResolution: ltxRes,
+    ltxAudio,
+    ltxGuidance,
+    ltxPromptExpansion,
+    ltxNegativePrompt,
+    ltxLoras: loraList,
+    wanResolution: '720p',
+    seedvrFactor,
+    seedvrTarget,
+    bytedanceTargetRes: btdRes,
+    bytedanceTargetFps: btdFps,
+    bytedanceTier: btdTier,
+    bytedancePreset: btdPreset,
+    bytedanceFidelity: btdFidelity,
+    trimEnabled,
+    trimStart,
+    trimDuration: trimDur,
+    customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
+    customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
+  }), [prompt, upscaleOnly, falPicked, studioPicked, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  const quoteItems = useMemo(
+    () => items.filter((item) => stagedItemNeedsCloud(item, parameters)).map((item) => ({ stage_id: item.stage_id })),
+    [items, parameters],
+  );
+  const cloudRequired = quoteItems.length > 0;
+  const needsOutpaintCloud = items.some((item) => !upscaleOnly && Number(item.width) !== Number(item.height));
+  const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_OUTPAINT_MODELS.has(outpaintModel);
+  const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_UPSCALE_MODELS.has(upscaleModel);
+  const byokOnly = (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
+  const quoteState = useCreditQuotes({
+    kind: 'video',
+    items: quoteItems,
+    parameters,
+    enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
+  });
+  const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  const fundingBlocked = cloudRequired && (
+    !user ||
+    (paymentSource === 'byok' && !falKey?.configured) ||
+    (paymentSource === 'credits' && (
+      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
+      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+    ))
+  );
+  const disabled = blocked.length > 0 || fundingBlocked || (studioPicked && !studioOk) || busy;
 
-  const cost = useMemo(() => {
-    const out = { label: 'None (Upscale Only)', value: 0 };
-    const up = { label: `Local (${engine} Engine — $0.00)`, value: 0 };
-    const resWidth = { '480p': 480, '720p': 720, '1080p': 1080 }[ltxRes] || 720;
-    const frames = effDur > 0 ? Math.round(effDur * 24) : 121;
-    if (!upscaleOnly && outpaintEntry) {
-      if (outpaintEntry.pricing_kind === 'per_mp') {
-        out.label = `${outpaintEntry.label} (${ltxRes}) (~$${outpaintEntry.price.toFixed(4)}/MP)`;
-        out.value = ((resWidth * resWidth * frames) / 1e6) * outpaintEntry.price;
-      } else {
-        const rate = outpaintEntry.price || 0.06;
-        out.label = `${outpaintEntry.label} ($${rate.toFixed(2)}/s)`;
-        out.value = effDur * rate;
-      }
-    }
-    if (falPicked && upscaleEntry) {
-      if (upscaleEntry.pricing_kind === 'per_mp') {
-        const w = { '720p': 720, '1080p': 1080, '2160p': 2160 }[seedvrTarget] || 1080;
-        up.label = `${upscaleEntry.label} (${seedvrTarget}) ($${upscaleEntry.price.toFixed(3)}/MP)`;
-        up.value = ((w * w * frames) / 1e6) * upscaleEntry.price;
-      } else if (upscaleEntry.model && upscaleEntry.model.includes('bytedance')) {
-        const base = upscaleEntry.base_rates?.[btdRes] ?? 0.0288;
-        const rate = base * (upscaleEntry.fps_multiplier?.[btdFps] ?? 1) * (upscaleEntry.tier_multiplier?.[btdTier] ?? 1);
-        up.label = `Bytedance (${btdRes}, ${btdFps}, ${btdTier}) ($${rate.toFixed(4)}/s)`;
-        up.value = effDur * rate;
-      } else {
-        const rate = upscaleEntry.price || 0.003;
-        up.label = `${upscaleEntry.label} ($${rate.toFixed(3)}/s)`;
-        up.value = effDur * rate;
-      }
-    }
-    return { out, up, total: out.value + up.value };
-  }, [upscaleOnly, outpaintEntry, effDur, ltxRes, falPicked, upscaleEntry, btdRes, btdFps, btdTier, seedvrTarget, engine]);
+  useEffect(() => {
+    if (byokOnly) setPaymentSource('byok');
+  }, [byokOnly]);
 
   const onFiles = async (files) => {
     setError('');
@@ -142,8 +184,6 @@ export default function VideoPage() {
     setItems(staged);
   };
 
-  const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
-  const loraList = loraPicked ? ltxLoras.map((l, i) => ({ ...l, path: (l.path || '').trim() })).filter((l) => l.path) : [];
 
   const render = async () => {
     setError('');
@@ -155,47 +195,42 @@ export default function VideoPage() {
       setError(`Upscale custom args: ${upArgs.error}`);
       return;
     }
+    if (fundingBlocked) {
+      setError('Choose an available cloud payment source and wait for a valid quote.');
+      return;
+    }
     setBusy(true);
     const jobList = [];
-    for (const item of items) {
-      const fd = new FormData();
-      const kv = {
-        stage_id: item.stage_id,
-        prompt: upscaleOnly ? '' : prompt,
-        upscale_only: String(upscaleOnly),
-        upscale_engine: falPicked ? 'fal' : studioPicked ? 'studio' : 'fast',
-        sharpening: String(sharpening),
-        outpaint_model: upscaleOnly ? 'fal-ai/ltx-2.3-quality/outpaint' : outpaintModel,
-        upscale_model: upscaleModel,
-        ltx_resolution: ltxRes,
-        ltx_audio: String(ltxAudio),
-        ltx_guidance: String(ltxGuidance),
-        ltx_prompt_expansion: String(ltxPromptExpansion),
-        ltx_negative_prompt: ltxNegativePrompt,
-        ltx_loras: JSON.stringify(loraList),
-        seedvr_factor: String(seedvrFactor),
-        seedvr_target: seedvrTarget,
-        bytedance_target_res: btdRes,
-        bytedance_target_fps: btdFps,
-        bytedance_tier: btdTier,
-        bytedance_preset: btdPreset,
-        bytedance_fidelity: btdFidelity,
-        trim_enabled: String(trimEnabled),
-        trim_start: String(trimStart),
-        trim_duration: String(trimDur),
-        custom_outpaint_args: JSON.stringify(outpaintEntry?.is_custom ? outArgs.args || {} : {}),
-        custom_upscale_args: JSON.stringify(upscaleEntry?.is_custom ? upArgs.args || {} : {}),
-      };
-      for (const [k, v] of Object.entries(kv)) fd.append(k, v);
-      try {
-        const res = await api.form('/api/video/process', fd);
-        jobList.push({ jobId: res.job_id, name: item.name, kind: 'video' });
-      } catch (e) {
-        setError(e.message);
+    try {
+      const freshQuotes = paymentSource === 'credits' && cloudRequired ? await quoteState.refresh() : [];
+      const quoteByStage = new Map(freshQuotes.map((quote) => [quote.stage_id, quote]));
+      for (const item of items) {
+        const itemNeedsCloud = stagedItemNeedsCloud(item, parameters);
+        const fd = new FormData();
+        fd.append('stage_id', item.stage_id);
+        appendProcessingParameters(fd, parameters);
+        if (itemNeedsCloud) {
+          fd.append('payment_source', paymentSource);
+          if (paymentSource === 'credits') {
+            const quote = quoteByStage.get(item.stage_id);
+            if (!quote?.quote_id) throw new Error(`A fresh quote is unavailable for ${item.name}.`);
+            fd.append('quote_id', quote.quote_id);
+          }
+        }
+        try {
+          const res = await api.form('/api/video/process', fd);
+          jobList.push({ jobId: res.job_id, name: item.name, kind: 'video' });
+        } catch (submissionError) {
+          setError(submissionError.message);
+        }
       }
+      setJobs(jobList);
+      if (cloudRequired) await refreshWallet();
+    } catch (requestError) {
+      setError(requestError.message || 'Could not prepare cloud billing.');
+    } finally {
+      setBusy(false);
     }
-    setJobs(jobList);
-    setBusy(false);
   };
 
   const maxSourceDur = items.length ? Math.max(...items.map((i) => i.duration || 0)) : 60;
@@ -558,26 +593,17 @@ export default function VideoPage() {
               ) : null}
             </div>
 
-            {/* Cost Breakdown Panel */}
-            <div className="sx-cost-panel">
-              <div className="sx-cost-head">
-                <span className="sx-cost-title">ESTIMATED CLOUD BILLING BREAKDOWN</span>
-                <span className="sx-cost-total">EST. TOTAL: ~${cost.total.toFixed(4)} USD</span>
-              </div>
-              <div className="sx-cost-body">
-                <div>• <b>Batch Scope:</b> {items.length} video(s) ({effDur.toFixed(1)}s total processing time)</div>
-                <div>• <b>Trimming:</b> {trimEnabled ? `ENABLED (${trimDur}s max)` : 'DISABLED (Full video)'}</div>
-                <div>• <b>Outpaint Stage:</b> ~${cost.out.value.toFixed(4)} USD ({cost.out.label})</div>
-                <div>• <b>Upscale Stage:</b> ~${cost.up.value.toFixed(4)} USD ({cost.up.label})</div>
-              </div>
-            </div>
+            <CloudFundingPanel
+              required={cloudRequired}
+              paymentSource={paymentSource}
+              onChange={setPaymentSource}
+              quoteState={quoteState}
+              byokOnly={byokOnly}
+            />
 
             {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
             {!blocked.length && studioPicked && !studioOk ? (
               <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-            ) : null}
-            {!blocked.length && needsKey && !falOk ? (
-              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
             ) : null}
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
@@ -599,7 +625,7 @@ export default function VideoPage() {
       {jobs.length ? (
         <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
-            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" />
+            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={refreshWallet} />
           ))}
           <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
           <Mono>

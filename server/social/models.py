@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import relationship
 
@@ -654,3 +655,199 @@ class MessageEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     __table_args__ = (Index("ix_message_events_recipient_id_id", "recipient_id", "id"),)
+
+
+class CreditAccount(Base):
+    __tablename__ = "credit_accounts"
+
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    available_balance = Column(Integer, nullable=False, default=0)
+    reserved_balance = Column(Integer, nullable=False, default=0)
+    lifetime_purchased = Column(Integer, nullable=False, default=0)
+    lifetime_earned = Column(Integer, nullable=False, default=0)
+    lifetime_spent = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("reserved_balance >= 0", name="ck_credit_account_reserved_nonnegative"),
+    )
+
+
+class CreditLedgerEntry(Base):
+    __tablename__ = "credit_ledger_entries"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    entry_type = Column(String(32), nullable=False, index=True)
+    source = Column(String(32), nullable=False, index=True)
+    delta_available = Column(Integer, nullable=False, default=0)
+    delta_reserved = Column(Integer, nullable=False, default=0)
+    balance_available = Column(Integer, nullable=False)
+    balance_reserved = Column(Integer, nullable=False)
+    reference_type = Column(String(32), nullable=True, index=True)
+    reference_id = Column(String(128), nullable=True, index=True)
+    idempotency_key = Column(String(160), nullable=False, unique=True, index=True)
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "delta_available != 0 OR delta_reserved != 0",
+            name="ck_credit_ledger_nonzero_delta",
+        ),
+    )
+
+
+@event.listens_for(CreditLedgerEntry, "before_update")
+def _credit_ledger_no_update(_mapper, _connection, _target):
+    raise ValueError("Credit ledger entries are immutable")
+
+
+@event.listens_for(CreditLedgerEntry, "before_delete")
+def _credit_ledger_no_delete(_mapper, _connection, _target):
+    raise ValueError("Credit ledger entries are immutable")
+
+
+class BillingQuote(Base):
+    __tablename__ = "billing_quotes"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, index=True)
+    stage_id = Column(String(64), nullable=False, index=True)
+    parameter_hash = Column(String(64), nullable=False)
+    parameters = Column(JSON, nullable=False)
+    pricing_snapshot = Column(JSON, nullable=False)
+    provider_cost_microusd = Column(Integer, nullable=False)
+    credits = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default="active", index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("provider_cost_microusd >= 0", name="ck_billing_quote_cost_nonnegative"),
+        CheckConstraint("credits >= 0", name="ck_billing_quote_credits_nonnegative"),
+        Index("ix_billing_quotes_user_status_expiry", "user_id", "status", "expires_at"),
+    )
+
+
+class CloudGenerationBilling(Base):
+    __tablename__ = "cloud_generation_billings"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    job_id = Column(String(32), nullable=False, unique=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    quote_id = Column(String(36), ForeignKey("billing_quotes.id", ondelete="RESTRICT"), nullable=True, unique=True)
+    kind = Column(String(16), nullable=False, index=True)
+    payment_source = Column(String(16), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="reserved", index=True)
+    reserved_credits = Column(Integer, nullable=False, default=0)
+    captured_credits = Column(Integer, nullable=False, default=0)
+    released_credits = Column(Integer, nullable=False, default=0)
+    error_code = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("reserved_credits >= 0", name="ck_cloud_billing_reserved_nonnegative"),
+        CheckConstraint("captured_credits >= 0", name="ck_cloud_billing_captured_nonnegative"),
+        CheckConstraint("released_credits >= 0", name="ck_cloud_billing_released_nonnegative"),
+        Index("ix_cloud_generation_user_created", "user_id", "created_at"),
+    )
+
+
+class CloudGenerationStage(Base):
+    __tablename__ = "cloud_generation_stages"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    billing_id = Column(
+        String(36), ForeignKey("cloud_generation_billings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stage_name = Column(String(24), nullable=False)
+    sequence = Column(Integer, nullable=False)
+    model_id = Column(String(200), nullable=False)
+    status = Column(String(24), nullable=False, default="reserved", index=True)
+    provider_cost_microusd = Column(Integer, nullable=False)
+    reserved_credits = Column(Integer, nullable=False)
+    captured_credits = Column(Integer, nullable=False, default=0)
+    released_credits = Column(Integer, nullable=False, default=0)
+    fal_request_id = Column(String(160), nullable=True, unique=True, index=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("billing_id", "sequence", name="uq_cloud_stage_billing_sequence"),
+        CheckConstraint("reserved_credits >= 0", name="ck_cloud_stage_reserved_nonnegative"),
+        CheckConstraint("captured_credits >= 0", name="ck_cloud_stage_captured_nonnegative"),
+        CheckConstraint("released_credits >= 0", name="ck_cloud_stage_released_nonnegative"),
+    )
+
+
+class StripePurchase(Base):
+    __tablename__ = "stripe_purchases"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pack_id = Column(String(32), nullable=False)
+    stripe_price_id = Column(String(128), nullable=False)
+    checkout_session_id = Column(String(128), nullable=False, unique=True, index=True)
+    payment_intent_id = Column(String(128), nullable=True, unique=True, index=True)
+    amount_total_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False, default="usd")
+    credits = Column(Integer, nullable=False)
+    status = Column(String(24), nullable=False, default="created", index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    fulfilled_at = Column(DateTime(timezone=True), nullable=True)
+    reversed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class StripeEvent(Base):
+    __tablename__ = "stripe_events"
+
+    event_id = Column(String(128), primary_key=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    payload_hash = Column(String(64), nullable=False)
+    status = Column(String(24), nullable=False, default="processing", index=True)
+    error = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class FalCredential(Base):
+    __tablename__ = "fal_credentials"
+
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    ciphertext = Column(Text, nullable=False)
+    key_hint = Column(String(16), nullable=False, default="")
+    key_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class ReelRewardClaim(Base):
+    __tablename__ = "reel_reward_claims"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    impression_id = Column(
+        String(36), ForeignKey("recommendation_impressions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    utc_date = Column(String(10), nullable=False, index=True)
+    ip_hash = Column(String(64), nullable=False, index=True)
+    media_type = Column(String(16), nullable=False)
+    foreground_ms = Column(Integer, nullable=False)
+    duration_ms = Column(Integer, nullable=True)
+    awarded_credit = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_id", "utc_date", name="uq_reel_reward_user_post_day"),
+        Index("ix_reel_reward_user_day", "user_id", "utc_date", "created_at"),
+        Index("ix_reel_reward_ip_day", "ip_hash", "utc_date", "created_at"),
+    )

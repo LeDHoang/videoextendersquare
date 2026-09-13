@@ -27,6 +27,7 @@ class JobStatus(str, Enum):
 class JobRecord:
     job_id: str
     kind: str  # "image" or "video"
+    owner_id: str | None = None
     status: JobStatus = JobStatus.QUEUED
     phase: str = "QUEUED"
     progress: float = 0.0
@@ -55,12 +56,17 @@ class JobManager:
         self._image_pool = ThreadPoolExecutor(max_workers=max_image_workers or default_image)
         self._video_pool = ThreadPoolExecutor(max_workers=max_video_workers or default_video)
 
-    def create_job(self, kind: str) -> str:
-        job_id = uuid.uuid4().hex[:12]
-        record = JobRecord(job_id=job_id, kind=kind)
+    def create_job(self, kind: str, owner_id: str | None = None, job_id: str | None = None) -> str:
+        job_id = job_id or uuid.uuid4().hex[:12]
+        record = JobRecord(job_id=job_id, kind=kind, owner_id=owner_id)
         with self._lock:
             self._jobs[job_id] = record
         return job_id
+
+    def discard_job(self, job_id: str) -> bool:
+        """Remove a job that could not be handed to its executor."""
+        with self._lock:
+            return self._jobs.pop(job_id, None) is not None
 
     def get_job(self, job_id: str) -> JobRecord | None:
         with self._lock:
@@ -89,6 +95,8 @@ class JobManager:
         fn: Callable,
         kwargs: dict,
         postprocess: Callable | None = None,
+        on_success: Callable | None = None,
+        on_failure: Callable | None = None,
     ) -> None:
         """Submit a pipeline function for background execution.
 
@@ -126,6 +134,8 @@ class JobManager:
                 result = fn(status_callback=status_callback, **kwargs)
                 if postprocess is not None:
                     result = postprocess(result)
+                if on_success is not None:
+                    on_success(result)
                 with record._lock:
                     record.status = JobStatus.COMPLETE
                     record.phase = "COMPLETE"
@@ -133,6 +143,11 @@ class JobManager:
                     record.elapsed = fmt_elapsed(time.monotonic() - t0)
                     record.result = result
             except Exception as ex:
+                if on_failure is not None:
+                    try:
+                        on_failure(ex)
+                    except Exception:
+                        pass
                 with record._lock:
                     record.status = JobStatus.FAILED
                     record.phase = "FAILED"

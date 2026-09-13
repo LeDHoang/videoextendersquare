@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field } from '../components/ui/controls.jsx';
@@ -9,6 +9,11 @@ import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
 import StudioLoading from '../components/ui/StudioLoading.jsx';
+import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
+import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
+import { useAuth } from '../hooks/AuthContext.jsx';
+import { useWallet } from '../hooks/WalletContext.jsx';
+import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud } from '../utils/cloudBilling.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -21,16 +26,18 @@ const FALLBACK_FAL_MODEL_IDS = {
   AuraSR: 'fal-ai/aura-sr',
   ESRGAN: 'fal-ai/esrgan',
 };
-const STOCK_OUTPAINT_IMG = 'fal-ai/flux/outpaint';
+const STOCK_OUTPAINT_IMG = 'fal-ai/image-apps-v2/outpaint';
 
 export default function ImagePage() {
+  const { user } = useAuth();
+  const { wallet, catalog, falKey, refresh: refreshWallet } = useWallet();
   const health = useHealthContext();
   const cfg = useConfigContext();
   const probes = health?.probes || {};
   const blocked = ['ffmpeg', 'ffprobe'].filter((id) => probes[id] && !probes[id].ok).map((id) => probes[id]);
-  const falOk = health?.fal_key?.ok ?? false;
 
   const models = cfg?.config?.models || {};
+  const outpaintCatalog = models.image_outpaint_catalog || [];
   const upscaleCatalog = models.image_upscale_catalog || [];
   const upscaleOptions = upscaleCatalog.length
     ? upscaleCatalog.map((e) => e.label)
@@ -47,18 +54,58 @@ export default function ImagePage() {
   const [error, setError] = useState('');
   const [imgOutArgs, setImgOutArgs] = useState({ args: {}, ok: true, error: '' });
   const [imgUpArgs, setImgUpArgs] = useState({ args: {}, ok: true, error: '' });
+  const [paymentSource, setPaymentSource] = useState('credits');
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
-  const needsKey = !upscaleOnly || falPicked;
-  const disabled = blocked.length > 0 || (needsKey && !falOk) || busy;
   const previewUrl = useObjectUrl(items.length === 1 ? items[0].file : null);
 
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falModel) || null;
   const upscaleModel = upscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[falModel] || models.upscale_img;
   const outpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
+  const outpaintEntry = outpaintCatalog.find((entry) => entry.model === outpaintModel) || null;
   const outpaintCustom = outpaintModel !== STOCK_OUTPAINT_IMG;
   const outpaintShort = (outpaintModel || '').split('/').filter(Boolean).pop() || 'custom';
+
+  const parameters = useMemo(() => imageBillingParameters({
+    prompt,
+    upscaleOnly,
+    sharpening,
+    falPicked,
+    upscaleModel,
+    outpaintModel,
+    customOutpaintArgs: outpaintCustom ? imgOutArgs.args : {},
+    customUpscaleArgs: upscaleEntry?.is_custom ? imgUpArgs.args : {},
+  }), [prompt, upscaleOnly, sharpening, falPicked, upscaleModel, outpaintModel, outpaintCustom, imgOutArgs.args, upscaleEntry?.is_custom, imgUpArgs.args]);
+  const quoteItems = useMemo(
+    () => items.filter((item) => stagedItemNeedsCloud(item, parameters)).map((item) => ({ stage_id: item.stage_id })),
+    [items, parameters],
+  );
+  const cloudRequired = quoteItems.length > 0;
+  const needsOutpaintCloud = items.some((item) => !upscaleOnly && Number(item.width) !== Number(item.height));
+  const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? !outpaintCustom;
+  const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? upscaleModel === 'fal-ai/clarity-upscaler';
+  const byokOnly = (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
+  const quoteState = useCreditQuotes({
+    kind: 'image',
+    items: quoteItems,
+    parameters,
+    enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
+  });
+  const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  const fundingBlocked = cloudRequired && (
+    !user ||
+    (paymentSource === 'byok' && !falKey?.configured) ||
+    (paymentSource === 'credits' && (
+      byokOnly || !catalog?.credits_enabled || quoteState.loading || Boolean(quoteState.error) ||
+      quoteState.quotes.length !== quoteItems.length || insufficientCredits
+    ))
+  );
+  const disabled = blocked.length > 0 || fundingBlocked || busy;
+
+  useEffect(() => {
+    if (byokOnly) setPaymentSource('byok');
+  }, [byokOnly]);
 
   // Preselect the sidebar's CUSTOM(...) override once the catalog arrives.
   const customInit = useRef(false);
@@ -95,28 +142,42 @@ export default function ImagePage() {
       setError(`Upscale custom args: ${imgUpArgs.error}`);
       return;
     }
+    if (fundingBlocked) {
+      setError('Choose an available cloud payment source and wait for a valid quote.');
+      return;
+    }
     setBusy(true);
     const jobList = [];
-    for (const item of items) {
-      const fd = new FormData();
-      fd.append('stage_id', item.stage_id);
-      fd.append('prompt', upscaleOnly ? '' : prompt);
-      fd.append('upscale_only', String(upscaleOnly));
-      fd.append('sharpening', String(sharpening));
-      fd.append('upscale_engine', falPicked ? 'fal' : 'fast');
-      fd.append('upscale_model', upscaleModel);
-      fd.append('outpaint_model', outpaintModel);
-      fd.append('custom_outpaint_args', JSON.stringify(outpaintCustom ? imgOutArgs.args || {} : {}));
-      fd.append('custom_upscale_args', JSON.stringify(upscaleEntry?.is_custom ? imgUpArgs.args || {} : {}));
-      try {
-        const res = await api.form('/api/image/process', fd);
-        jobList.push({ jobId: res.job_id, name: item.name, kind: 'image' });
-      } catch (e) {
-        setError(e.message);
+    try {
+      const freshQuotes = paymentSource === 'credits' && cloudRequired ? await quoteState.refresh() : [];
+      const quoteByStage = new Map(freshQuotes.map((quote) => [quote.stage_id, quote]));
+      for (const item of items) {
+        const itemNeedsCloud = stagedItemNeedsCloud(item, parameters);
+        const fd = new FormData();
+        fd.append('stage_id', item.stage_id);
+        appendProcessingParameters(fd, parameters);
+        if (itemNeedsCloud) {
+          fd.append('payment_source', paymentSource);
+          if (paymentSource === 'credits') {
+            const quote = quoteByStage.get(item.stage_id);
+            if (!quote?.quote_id) throw new Error(`A fresh quote is unavailable for ${item.name}.`);
+            fd.append('quote_id', quote.quote_id);
+          }
+        }
+        try {
+          const res = await api.form('/api/image/process', fd);
+          jobList.push({ jobId: res.job_id, name: item.name, kind: 'image' });
+        } catch (submissionError) {
+          setError(submissionError.message);
+        }
       }
+      setJobs(jobList);
+      if (cloudRequired) await refreshWallet();
+    } catch (requestError) {
+      setError(requestError.message || 'Could not prepare cloud billing.');
+    } finally {
+      setBusy(false);
     }
-    setJobs(jobList);
-    setBusy(false);
   };
 
   const hasJobs = jobs.length > 0;
@@ -198,10 +259,10 @@ export default function ImagePage() {
                     entry={{
                       label: `CUSTOM OUTPAINT (${outpaintShort})`,
                       requirements:
-                        'FAL_KEY set; source image uploaded to fal.ai CDN by the pipeline.',
+                        'A saved personal Fal key is required; the source image is uploaded by the pipeline.',
                       cost_note: 'No estimate stored — pull live pricing via MODEL INFO below before rendering.',
                       expects:
-                        "Sends {image_url, prompt} (padded flux args only apply to fal-ai/flux/outpaint). Check MODEL INFO for the live schema.",
+                        "Sends {image_url, prompt}; expand_* arguments are applied only to the stock Image Apps outpaint model. Check MODEL INFO for the live schema.",
                     }}
                   />
                 ) : null}
@@ -248,10 +309,15 @@ export default function ImagePage() {
               {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED</GatedReason> : null}
             </div>
 
+            <CloudFundingPanel
+              required={cloudRequired}
+              paymentSource={paymentSource}
+              onChange={setPaymentSource}
+              quoteState={quoteState}
+              byokOnly={byokOnly}
+            />
+
             {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-            {!blocked.length && needsKey && !falOk ? (
-              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
-            ) : null}
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button primary disabled={disabled} loading={busy} onClick={render}>
@@ -272,7 +338,7 @@ export default function ImagePage() {
       {jobs.length ? (
         <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
-            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="image" />
+            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="image" onSettled={refreshWallet} />
           ))}
           {hasJobs ? (
             <>

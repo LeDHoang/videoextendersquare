@@ -20,8 +20,8 @@ from fastapi.staticfiles import StaticFiles
 
 # Only the Streamlit entrypoint (app.py) called this before; the FastAPI
 # stack never did, so FAL_KEY in .env was invisible to `uvicorn server.app:app`
-# unless it was also exported in the shell or set via the (unauthenticated)
-# /api/config/fal-key endpoint.
+# unless it was also exported in the shell. The platform key is no longer
+# mutable through a public API.
 load_dotenv()
 
 _CLEANUP_INTERVAL_S = 15 * 60
@@ -29,6 +29,7 @@ _CLEANUP_INTERVAL_S = 15 * 60
 
 async def _cleanup_loop():
     """Periodically reclaim finished job records and expired staged uploads."""
+    from server.billing.runtime import reconcile_pending_requests
     from server.jobs import job_manager
     from server.routers import image, messages, video
 
@@ -39,6 +40,7 @@ async def _cleanup_loop():
             image.cleanup_stale_uploads()
             video.cleanup_stale_uploads()
             await asyncio.to_thread(messages.cleanup_message_events)
+            await asyncio.to_thread(reconcile_pending_requests)
         except Exception:
             pass  # best-effort housekeeping must never crash the loop
 
@@ -51,6 +53,8 @@ async def lifespan(app: FastAPI):
 
     init_database()
     await asyncio.to_thread(import_legacy_social)
+    from server.billing.runtime import reconcile_pending_requests
+    await asyncio.to_thread(reconcile_pending_requests)
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
@@ -85,9 +89,9 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
-    from server.routers import account_safety, compare, config, health, image, messages, model_info, reels, social, uploads, video
+    from server.routers import account_safety, billing, compare, config, health, image, messages, model_info, reels, rewards, social, uploads, video
 
-    for module in (health, config, model_info, image, video, account_safety, social, messages, reels, uploads, compare):
+    for module in (health, config, model_info, billing, image, video, account_safety, social, messages, reels, rewards, uploads, compare):
         app.include_router(module.router)
 
     # Static media serving (replaces mediaserver.py port 8502).

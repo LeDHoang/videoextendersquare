@@ -356,3 +356,12 @@ test('stale Earth activity responses cannot replace the newest request', async (
   assert.deepEqual(renderer.__test.getEarthState().locationSlugs, ['new']);
   renderer.stopPreview();
 });
+
+test('credit awards can trigger the immersive controls notification', () => {
+  const renderer = loadRenderer();
+  assert.equal(typeof renderer.showNotification, 'function');
+  renderer.showNotification('+1 ECHO CREDIT');
+  const state = renderer.__test.getEarthState();
+  assert.equal(state.notificationText, '+1 ECHO CREDIT');
+  assert.equal(state.notificationUntil, 5000);
+});

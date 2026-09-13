@@ -12,17 +12,11 @@ export function useConfig() {
       .catch(() => setConfig({ fal_key_set: false, fal_key_masked: '', models: {} }));
   }, []);
 
-  const setFalKey = async (key) => {
-    const res = await api.put('/api/config/fal-key', { fal_key: key });
-    setConfig((c) => ({ ...c, ...res }));
-    return res;
-  };
-
   const setModels = async (updates) => {
     const res = await api.put('/api/config/models', updates);
     setConfig((c) => ({ ...c, models: res.models }));
     return res;
   };
 
-  return { config, setFalKey, setModels };
+  return { config, setModels };
 }

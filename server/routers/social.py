@@ -1086,7 +1086,7 @@ def create_event(
 ):
     validate_origin(request)
     allowed = {
-        "impression", "open", "playback", "view", "complete", "skip",
+        "impression", "open", "playback", "view", "complete", "skip", "reward_eligible",
         "search_impression", "search_select", "share", "share_sent",
         "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
     }

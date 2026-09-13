@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useHealthContext } from '../../hooks/HealthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
+import { useWallet } from '../../hooks/WalletContext.jsx';
 
 function compactCount(value) {
   const count = Number(value) || 0;
@@ -36,6 +37,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
   const health = useHealthContext();
   const { user, loading: authLoading, logout } = useAuth();
   const messaging = useMessaging();
+  const { wallet } = useWallet();
   const location = useLocation();
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
@@ -353,6 +355,12 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
           </div>
         </div>
 
+        {user ? (
+          <button type="button" className="sx-top-action-btn" onClick={() => navigate('/wallet')} title="Open ECHO Credits wallet">
+            {wallet?.available_credits ?? '—'} CREDITS
+          </button>
+        ) : null}
+
         <button type="button" className="sx-top-action-btn" onClick={() => navigate('/upload')} title="Open the Upload page">UPLOAD</button>
 
         {user ? (
@@ -375,6 +383,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
                   <button type="button" onClick={() => navigate('/profile/' + user.username)}>PROFILE</button>
                   <button type="button" onClick={() => navigate('/profile/' + user.username + '?tab=saved')}>SAVED</button>
                   <button type="button" onClick={() => navigate('/settings/profile')}>SETTINGS</button>
+                  <button type="button" onClick={() => navigate('/wallet')}>CREDITS / FAL KEY</button>
                   <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>LOG OUT</button>
                 </div>
               ) : null}

@@ -12,7 +12,7 @@ import ReelShareDialog from '../messaging/ReelShareDialog.jsx';
 
 function Shell() {
   const health = useHealthContext();
-  const { config, setFalKey, setModels } = useConfigContext();
+  const { config, setModels } = useConfigContext();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
@@ -106,7 +106,6 @@ function Shell() {
         <Sidebar
           health={health}
           config={config}
-          setFalKey={setFalKey}
           setModels={setModels}
           isOpen={drawerOpen}
           onClose={() => setDrawerOpen(false)}

@@ -1196,6 +1196,27 @@
     transform: translate(-50%, -50%) scale(1);
   }
 
+  .reward-toast {
+    position: absolute;
+    top: 58px;
+    left: 50%;
+    transform: translate(-50%, -10px);
+    max-width: calc(100% - 32px);
+    padding: 9px 14px;
+    border: 1px solid #3A4047;
+    background: rgba(12, 14, 17, 0.96);
+    color: #F2F3F5;
+    font: 800 10px/1.35 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 46;
+  }
+  .reward-toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .reward-toast.award { border-color: #00FF88; color: #00FF88; box-shadow: 0 0 22px rgba(0, 255, 136, 0.24); }
+
   .video-error-overlay {
     position: absolute;
     inset: 0;
@@ -1413,6 +1434,7 @@
     <img id="reelsImage" alt="" style="display:none;" />
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="center-flash" id="centerFlash">▶</div>
+    <div class="reward-toast" id="rewardToast" role="status" aria-live="polite"></div>
     
     <!-- Chat/Annotations Overlay (Bottom) -->
     <div class="reels-twitch-ticker" id="twitchCommentTicker"></div>
@@ -1611,6 +1633,7 @@
 
 <script>__QUEST_CONTROLLER_IMG_JS__</script>
 <script>__REELS_FEED_STATE_JS__</script>
+<script>__REELS_REWARDS_JS__</script>
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
@@ -1637,6 +1660,7 @@
     let currentUser = null;
     let pendingReplayAttempted = false;
     let viewTracker = null;
+    let rewardToastTimer = null;
 
     const frame = document.getElementById('reelsFrame');
     const video = document.getElementById('reelsVideo');
@@ -1685,6 +1709,7 @@
     const progressFill = document.getElementById('progressFill');
     const timeDisplay = document.getElementById('timeDisplay');
     const centerFlash = document.getElementById('centerFlash');
+    const rewardToast = document.getElementById('rewardToast');
     const errorOverlay = document.getElementById('errorOverlay');
     const skipErrorBtn = document.getElementById('skipErrorBtn');
 
@@ -1840,6 +1865,80 @@
         throw err;
       }
       return body;
+    }
+
+    function showRewardProgress(result) {
+      if (!result) return;
+      const message = window.ReelsRewards && window.ReelsRewards.progressMessage
+        ? window.ReelsRewards.progressMessage(result)
+        : (result.credit_awarded ? '+1 ECHO CREDIT' : String(result.progress || 0) + '/10 TO NEXT CREDIT');
+      if (rewardToast) {
+        rewardToast.textContent = message;
+        rewardToast.classList.toggle('award', !!result.credit_awarded);
+        rewardToast.classList.add('show');
+        if (rewardToastTimer) clearTimeout(rewardToastTimer);
+        rewardToastTimer = setTimeout(() => rewardToast.classList.remove('show'), result.credit_awarded ? 4200 : 2200);
+      }
+      if (!result.credit_awarded) return;
+      const detail = { ...result, type: 'echo:credits-awarded' };
+      window.dispatchEvent(new CustomEvent('echo:credits-awarded', { detail }));
+      try {
+        if (window.parent && window.parent !== window) window.parent.postMessage(detail, location.origin);
+      } catch (e) {}
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) {
+        WebXRVR.showNotification(message);
+      }
+    }
+
+    async function maybeClaimReelReward(state) {
+      if (!state || state.finished || state.rewardClaimSent || !currentUser) return;
+      const impressionId = recommendationImpressionId(state.item);
+      if (!impressionId) return;
+      const measurements = playbackMeasurements(state.item, state);
+      const threshold = window.ReelsRewards && window.ReelsRewards.thresholdMs
+        ? window.ReelsRewards.thresholdMs(state.item.media_type, measurements.duration_ms)
+        : null;
+      if (!threshold || state.watchMs < threshold) return;
+      state.rewardClaimSent = true;
+      try {
+        await requestJson('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: 'reward_eligible',
+            post_id: state.item.post_id,
+            watch_ms: Math.round(state.watchMs),
+            foreground_ms: measurements.foreground_ms,
+            duration_ms: measurements.duration_ms,
+            watch_ratio: measurements.watch_ratio,
+            position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
+            source: 'reels',
+            client_event_id: state.rewardEventId,
+            client_occurred_at: new Date().toISOString(),
+            recommendation_impression_id: impressionId,
+            playback_quality: measurements.playback_quality,
+            context: { media_type: state.item.media_type || 'video', reward_threshold_ms: threshold },
+          }),
+        });
+        const result = await requestJson('/api/rewards/reels/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            post_id: state.item.post_id,
+            recommendation_impression_id: impressionId,
+          }),
+        });
+        showRewardProgress(result);
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+        } else if (!error.status || error.status >= 500) {
+          setTimeout(() => {
+            if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
+          }, 2000);
+        }
+      }
     }
 
     function recommendationImpressionId(item) {
@@ -2393,6 +2492,7 @@
           if (videoData[idx] === state.item) refreshEngagementUI();
         }).catch(() => {});
       }
+      maybeClaimReelReward(state);
     }
 
     function startViewTracking(item) {
@@ -2405,6 +2505,8 @@
         thresholdMs: isImageItem(item) ? 2000 : 3000,
         viewSent: false,
         viewEventId: eventId(),
+        rewardClaimSent: false,
+        rewardEventId: eventId(),
         finished: false,
         interval: setInterval(tickViewTracker, 250),
       };
@@ -4023,6 +4125,7 @@
       clearImageTimer();
       clearBlobCache();
       if (tickerHideTimer) clearTimeout(tickerHideTimer);
+      if (rewardToastTimer) clearTimeout(rewardToastTimer);
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) WebXRVR.exitVR();
       } catch (e) {}
