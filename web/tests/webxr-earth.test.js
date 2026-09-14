@@ -33,6 +33,12 @@ function makeMockGl(counters) {
       if (prop === 'getUniformLocation') return () => ({});
       if (prop === 'getExtension') return () => null;
       if (prop === 'getParameter') return () => 'mock-webgl';
+      if (prop === 'texImage2D') {
+        return (...args) => {
+          counters.textureSources ||= [];
+          counters.textureSources.push(args.at(-1));
+        };
+      }
       if (prop === 'deleteBuffer' || prop === 'deleteTexture' || prop === 'deleteProgram') {
         return () => { counters.deleted += 1; };
       }
@@ -144,7 +150,7 @@ test('ray hit testing selects a visible city heat zone', () => {
   const hit = api.hitTestEarth({ x: 0, y: 1.12, z: 0 }, { x: 0, y: 0, z: -1 });
   assert.equal(hit.hit, true);
   assert.equal(hit.zoneIndex, 0);
-  closeTo(hit.dist, 1.3 - (0.52 * 1.08));
+  closeTo(hit.dist, 1.3 - (0.676 * 1.08));
 });
 
 test('drag rotates the globe while a click selects the heat zone', () => {
@@ -167,7 +173,7 @@ test('drag rotates the globe while a click selects the heat zone', () => {
   assert.equal(api.getEarthState().pitch, 0);
 });
 
-test('heat zones scale with activity while the geographic north axis stays upright', () => {
+test('heat zones scale with activity while pitch remains bounded', () => {
   const renderer = loadRenderer();
   const api = renderer.__test;
   assert.ok(api.earthZoneAngularRadius({ heat: 1 }) > api.earthZoneAngularRadius({ heat: 0.1 }));
@@ -177,7 +183,7 @@ test('heat zones scale with activity while the geographic north axis stays uprig
     { slug: 'high', name: 'High', lat: 20, lon: 20, heat: 1 },
   ]);
   const state = api.getEarthState();
-  assert.equal(state.pitch, 0);
+  assert.equal(state.pitch, 0.9);
   assert.equal(state.zoneCount, 2);
   assert.equal(state.visualStyle, 'holographic-zones');
 });
@@ -364,4 +370,135 @@ test('credit awards can trigger the immersive controls notification', () => {
   const state = renderer.__test.getEarthState();
   assert.equal(state.notificationText, '+1 ECHO CREDIT');
   assert.equal(state.notificationUntil, 5000);
+});
+
+test('pack mode exposes distinct pack and reel actions through shared callbacks', () => {
+  const calls = [];
+  const canvas = { width: 1024, height: 1024 };
+  const renderer = loadRenderer();
+  renderer.init(null, {
+    getVisualSource: () => ({
+      kind: 'video',
+      element: { readyState: 2 },
+      ready: true,
+      paused: true,
+      muted: true,
+      currentTime: 4,
+      duration: 12,
+      version: 'video-1',
+    }),
+    isPackMode: () => true,
+    getPackContext: () => ({ index: 1, total: 8, saved: false }),
+    getCurrentItemState: () => ({ available: true, liked: false, saved: false, following: false }),
+    onTogglePackQueue: () => calls.push('queue'),
+    onSavePack: () => calls.push('save-pack'),
+    onSharePack: () => calls.push('share-pack'),
+    onSaveReel: () => calls.push('save-reel'),
+  });
+
+  const actions = renderer.__test.getVisibleControlActions();
+  assert.ok(actions.includes('save_pack'));
+  assert.ok(actions.includes('share_pack'));
+  assert.ok(actions.includes('save_reel'));
+  renderer.__test.executeControl('earth');
+  renderer.__test.executeControl('save_pack');
+  renderer.__test.executeControl('share_pack');
+  renderer.__test.executeControl('save_reel');
+  assert.deepEqual(calls, ['queue', 'save-pack', 'share-pack', 'save-reel']);
+
+  renderer.init(null, {
+    getVisualSource: () => ({ kind: 'static-card', element: canvas, ready: true, paused: true, version: 2 }),
+    isPackMode: () => true,
+    getCurrentItemState: () => ({ available: true }),
+  });
+  const staticActions = renderer.__test.getVisibleControlActions();
+  assert.ok(staticActions.includes('save_pack'));
+  assert.ok(!staticActions.includes('save_reel'));
+  assert.ok(!staticActions.includes('play'));
+});
+
+test('static pack cards upload through TEXTURE_2D and expose normalized hit coordinates', () => {
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
+  const packCanvas = { width: 1024, height: 1024 };
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    getVisualSource: () => ({
+      kind: 'static-card',
+      element: packCanvas,
+      ready: true,
+      paused: true,
+      muted: true,
+      currentTime: 0,
+      duration: 0,
+      version: 7,
+    }),
+    isPackMode: () => true,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+
+  assert.equal(renderer.__test.getVisualSourceState().kind, 'static-card');
+  assert.ok(counters.textureSources.includes(packCanvas));
+  const point = renderer.__test.visualPointFromHit({ x: 0, y: 0 });
+  closeTo(point.u, 0.5);
+  closeTo(point.v, 0.5);
+  renderer.stopPreview();
+});
+
+test('a pending image source clears the prior reel texture before it becomes ready', () => {
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
+  const videoElement = {
+    readyState: 2,
+    paused: false,
+    currentTime: 1,
+    duration: 10,
+    muted: true,
+    addEventListener() {},
+    removeEventListener() {},
+    requestVideoFrameCallback() { return 1; },
+    cancelVideoFrameCallback() {},
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); },
+  };
+  const imageElement = { complete: false, naturalWidth: 0 };
+  let source = {
+    kind: 'video',
+    element: videoElement,
+    ready: true,
+    paused: false,
+    muted: true,
+    currentTime: 1,
+    duration: 10,
+    version: 'video-1',
+  };
+  const renderer = loadRenderer({ gl });
+  renderer.init(videoElement, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  assert.ok(counters.textureSources.includes(videoElement));
+
+  source = {
+    kind: 'image',
+    element: imageElement,
+    ready: false,
+    paused: true,
+    muted: true,
+    currentTime: 0,
+    duration: 8,
+    version: 'image-1',
+  };
+  renderer.onVideoChange();
+  renderer.__runScheduledFrame(32);
+  assert.ok(counters.textureSources.at(-1) instanceof Uint8Array);
+
+  source = { ...source, ready: true };
+  renderer.__runScheduledFrame(48);
+  assert.equal(counters.textureSources.at(-1), imageElement);
+  renderer.stopPreview();
 });

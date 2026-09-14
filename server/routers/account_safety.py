@@ -55,6 +55,8 @@ from server.social.models import (
     Post,
     PostLike,
     PostSave,
+    ReelPack,
+    ReelPackSave,
     Report,
     User,
     UserBlock,
@@ -91,7 +93,7 @@ class AccountDeleteRequest(BaseModel):
 
 
 class ReportCreateRequest(BaseModel):
-    target_type: Literal["user", "post", "comment", "message"]
+    target_type: Literal["user", "post", "pack", "comment", "message"]
     target_id: str
     reason: str
     details: str = ""
@@ -120,6 +122,15 @@ def serialize_report(db: Session, report: Report) -> dict:
         post = db.get(Post, report.target_id)
         if post:
             target = {"title": post.title, "owner_id": post.owner_id, "status": post.status}
+    elif report.target_type == "pack":
+        pack = db.get(ReelPack, report.target_id)
+        if pack:
+            target = {
+                "title": pack.title,
+                "owner_id": pack.owner_id,
+                "status": pack.status,
+                "visibility": pack.visibility,
+            }
     elif report.target_type == "comment":
         comment = db.get(Comment, report.target_id)
         if comment:
@@ -315,6 +326,11 @@ def create_report(
         if not target or target.deleted_at is not None:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported post no longer exists.")
         target_owner_id = target.owner_id
+    elif req.target_type == "pack":
+        target = db.get(ReelPack, target_id)
+        if not target or target.deleted_at is not None or target.status == "deleted":
+            fail(404, "REPORT_TARGET_NOT_FOUND", "The reported Reel Pack no longer exists.")
+        target_owner_id = target.owner_id
     elif req.target_type == "comment":
         target = db.get(Comment, target_id)
         if not target or target.deleted_at is not None:
@@ -359,6 +375,7 @@ def create_report(
                     "kind": target.kind,
                     "content": content,
                     "post_id": target.post_id,
+                    "pack_id": target.pack_id,
                     "created_at": target.created_at.isoformat() if target.created_at else None,
                 },
                 aad=report_aad(report_id, target.id),
@@ -423,6 +440,12 @@ def moderate_report(
             post.deleted_at = utcnow()
             if target_user:
                 target_user.post_count = max(0, int(target_user.post_count or 0) - 1)
+    elif report.target_type == "pack":
+        pack = db.get(ReelPack, report.target_id)
+        target_user = db.get(User, pack.owner_id) if pack else None
+        if req.action == "remove_content" and pack and pack.deleted_at is None:
+            pack.status = "deleted"
+            pack.deleted_at = utcnow()
     elif report.target_type == "comment":
         comment = db.get(Comment, report.target_id)
         target_user = db.get(User, comment.author_id) if comment else None
@@ -499,11 +522,13 @@ def delete_account(
 
     liked_post_ids = {row[0] for row in db.query(PostLike.post_id).filter(PostLike.user_id == user.id).all()}
     saved_post_ids = {row[0] for row in db.query(PostSave.post_id).filter(PostSave.user_id == user.id).all()}
+    saved_pack_ids = {row[0] for row in db.query(ReelPackSave.pack_id).filter(ReelPackSave.user_id == user.id).all()}
     liked_comment_ids = {
         row[0] for row in db.query(CommentLike.comment_id).filter(CommentLike.user_id == user.id).all()
     }
     db.query(PostLike).filter(PostLike.user_id == user.id).delete(synchronize_session=False)
     db.query(PostSave).filter(PostSave.user_id == user.id).delete(synchronize_session=False)
+    db.query(ReelPackSave).filter(ReelPackSave.user_id == user.id).delete(synchronize_session=False)
     db.query(CommentLike).filter(CommentLike.user_id == user.id).delete(synchronize_session=False)
 
     authored_comments = db.query(Comment).filter(Comment.author_id == user.id, Comment.deleted_at.is_(None)).all()
@@ -513,6 +538,9 @@ def delete_account(
 
     db.query(Post).filter(Post.owner_id == user.id, Post.deleted_at.is_(None)).update(
         {Post.status: "deleted", Post.deleted_at: now}, synchronize_session=False
+    )
+    db.query(ReelPack).filter(ReelPack.owner_id == user.id, ReelPack.deleted_at.is_(None)).update(
+        {ReelPack.status: "deleted", ReelPack.deleted_at: now}, synchronize_session=False
     )
     db.query(UserBlock).filter(or_(UserBlock.blocker_id == user.id, UserBlock.blocked_id == user.id)).delete(
         synchronize_session=False
@@ -548,6 +576,10 @@ def delete_account(
             comment.like_count = int(comment.legacy_like_count or 0) + db.query(CommentLike.id).filter(
                 CommentLike.comment_id == comment_id
             ).count()
+    for pack_id in saved_pack_ids:
+        pack = db.get(ReelPack, pack_id)
+        if pack:
+            pack.save_count = db.query(ReelPackSave.id).filter(ReelPackSave.pack_id == pack_id).count()
 
     tombstone = "deleted_" + user.id.replace("-", "")[:12]
     user.email = None

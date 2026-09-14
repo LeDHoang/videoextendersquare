@@ -42,15 +42,27 @@ export default function ReelsPlayer({
     };
     const onShareReel = (event) => {
       const postId = event.detail?.post_id;
-      if (postId) messaging.openShare(event.detail);
+      if (postId) messaging.openShare({ ...event.detail, kind: 'reel', id: postId });
+    };
+    const onSharePack = (event) => {
+      const packId = event.detail?.pack_id || event.detail?.id;
+      if (packId) messaging.openShare({ ...event.detail, kind: 'pack', id: packId });
+    };
+    const onOpenPack = (event) => {
+      const packId = event.detail?.pack_id;
+      if (packId) navigate('/packs/' + encodeURIComponent(packId));
     };
     window.addEventListener('echo:navigate', onNavigate);
     window.addEventListener('echo:auth-required', onAuthRequired);
     window.addEventListener('echo:share-reel', onShareReel);
+    window.addEventListener('echo:share-pack', onSharePack);
+    window.addEventListener('echo:open-pack', onOpenPack);
     return () => {
       window.removeEventListener('echo:navigate', onNavigate);
       window.removeEventListener('echo:auth-required', onAuthRequired);
       window.removeEventListener('echo:share-reel', onShareReel);
+      window.removeEventListener('echo:share-pack', onSharePack);
+      window.removeEventListener('echo:open-pack', onOpenPack);
     };
   }, [navigate, location.pathname, location.search, messaging, setUser]);
 

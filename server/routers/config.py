@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from core import models as _models
+from server.features import reel_pack_features
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 
 router = APIRouter(prefix="/api/config", tags=["config"])
@@ -36,6 +37,7 @@ def get_config():
     """
     return {
         "models": _models.config_payload(_model_config),
+        "features": {"reel_packs": reel_pack_features()},
     }
 
 

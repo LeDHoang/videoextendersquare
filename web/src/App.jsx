@@ -15,6 +15,8 @@ const LocationExplorePage = lazy(() => import('./pages/LocationExplorePage.jsx')
 const UploadPage = lazy(() => import('./pages/UploadPage.jsx'));
 const AuthPage = lazy(() => import('./pages/AuthPage.jsx'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const PackPage = lazy(() => import('./pages/PackPage.jsx'));
+const PackEditorPage = lazy(() => import('./pages/PackEditorPage.jsx'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage.jsx'));
 const MessagesPage = lazy(() => import('./pages/MessagesPage.jsx'));
 const WalletPage = lazy(() => import('./pages/WalletPage.jsx'));
@@ -40,6 +42,9 @@ export default function App() {
           <Route path="/forgot-password" element={<PasswordResetPage requestOnly />} />
           <Route path="/reset-password" element={<PasswordResetPage />} />
           <Route path="/profile/:username" element={<ProfilePage />} />
+          <Route path="/packs/new" element={<RequireAuth><PackEditorPage /></RequireAuth>} />
+          <Route path="/packs/:packId/edit" element={<RequireAuth><PackEditorPage /></RequireAuth>} />
+          <Route path="/packs/:packId" element={<PackPage />} />
           <Route path="/settings/profile" element={<RequireAuth><ProfileSettingsPage /></RequireAuth>} />
           <Route path="/messages" element={<RequireAuth><MessagesPage /></RequireAuth>} />
           <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />

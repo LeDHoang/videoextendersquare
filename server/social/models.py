@@ -146,6 +146,108 @@ class PostTag(Base):
     tag = relationship("Tag")
 
 
+class ReelPack(Base):
+    __tablename__ = "reel_packs"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    owner_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    title = Column(String(80), nullable=False)
+    description = Column(String(500), nullable=False, default="")
+    status = Column(String(16), nullable=False, default="draft", index=True)
+    visibility = Column(String(16), nullable=False, default="public", index=True)
+    cover_post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True)
+    location = Column(JSON, nullable=False, default=dict)
+    save_count = Column(Integer, nullable=False, default=0)
+    revision = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    owner = relationship("User")
+    cover_post = relationship("Post", foreign_keys=[cover_post_id])
+    items = relationship(
+        "ReelPackItem",
+        cascade="all, delete-orphan",
+        back_populates="pack",
+        order_by="ReelPackItem.position",
+    )
+    tags = relationship("ReelPackTag", cascade="all, delete-orphan", back_populates="pack")
+
+    __table_args__ = (
+        Index("ix_reel_packs_owner_updated", "owner_id", "updated_at", "id"),
+        Index("ix_reel_packs_discovery", "status", "visibility", "updated_at", "id"),
+    )
+
+
+class ReelPackItem(Base):
+    __tablename__ = "reel_pack_items"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    position = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    pack = relationship("ReelPack", back_populates="items")
+    post = relationship("Post")
+
+    __table_args__ = (
+        UniqueConstraint("pack_id", "post_id", name="uq_reel_pack_item_post"),
+        UniqueConstraint("pack_id", "position", name="uq_reel_pack_item_position"),
+        CheckConstraint("position >= 0", name="ck_reel_pack_item_position_nonnegative"),
+    )
+
+
+class ReelPackTag(Base):
+    __tablename__ = "reel_pack_tags"
+
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), primary_key=True)
+    tag_id = Column(String(36), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    pack = relationship("ReelPack", back_populates="tags")
+    tag = relationship("Tag")
+
+
+class ReelPackSave(Base):
+    __tablename__ = "reel_pack_saves"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "pack_id", name="uq_reel_pack_save_user_pack"),
+        Index("ix_reel_pack_saves_user", "user_id", "created_at"),
+    )
+
+
+class ReelPackProgress(Base):
+    __tablename__ = "reel_pack_progress"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), nullable=False)
+    current_item_id = Column(
+        String(36),
+        ForeignKey("reel_pack_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    position_ms = Column(Integer, nullable=False, default=0)
+    phase = Column(String(16), nullable=False, default="intro")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    current_item = relationship("ReelPackItem")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "pack_id", name="uq_reel_pack_progress_user_pack"),
+        Index("ix_reel_pack_progress_user_updated", "user_id", "updated_at"),
+        CheckConstraint("position_ms >= 0", name="ck_reel_pack_progress_position_nonnegative"),
+    )
+
+
 class PostLike(Base):
     __tablename__ = "post_likes"
 
@@ -257,6 +359,7 @@ class EngagementEvent(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     anonymous_id = Column(String(64), nullable=True, index=True)
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     recommendation_impression_id = Column(
         String(36),
         ForeignKey("recommendation_impressions.id", ondelete="SET NULL"),
@@ -293,6 +396,7 @@ class EngagementEvent(Base):
     __table_args__ = (
         Index("ix_engagement_actor_created", "user_id", "anonymous_id", "created_at"),
         Index("ix_engagement_post_type_created", "post_id", "event_type", "created_at"),
+        Index("ix_engagement_pack_type_created", "pack_id", "event_type", "created_at"),
     )
 
 
@@ -625,6 +729,7 @@ class DirectMessage(Base):
     kind = Column(String(16), nullable=False, default="text", index=True)
     payload_ciphertext = Column(Text, nullable=False, default="")
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="SET NULL"), nullable=True, index=True)
     client_id = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -632,9 +737,14 @@ class DirectMessage(Base):
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User")
     post = relationship("Post")
+    pack = relationship("ReelPack")
 
     __table_args__ = (
         UniqueConstraint("sender_id", "client_id", name="uq_direct_message_sender_client"),
+        CheckConstraint(
+            "NOT (post_id IS NOT NULL AND pack_id IS NOT NULL)",
+            name="ck_direct_message_single_attachment",
+        ),
         Index("ix_direct_messages_conversation_created", "conversation_id", "created_at", "id"),
     )
 

@@ -37,6 +37,9 @@ def _template() -> str:
     feed_state_path = assets / "reels_feed_state.js"
     feed_state_js = feed_state_path.read_text(encoding="utf-8") if feed_state_path.exists() else ""
     html = html.replace("__REELS_FEED_STATE_JS__", feed_state_js)
+    pack_state_path = assets / "reels_pack_state.js"
+    pack_state_js = pack_state_path.read_text(encoding="utf-8") if pack_state_path.exists() else ""
+    html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js)
     # Inline the WebXR VR module so it's available inside the Streamlit iframe
     vr_js_path = assets / "webxr_vr.js"
     vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""

@@ -156,9 +156,9 @@ export function Segmented({ options = [], value, onChange, disabled = false, dis
   );
 }
 
-export function Pills({ options = [], value, onChange }) {
+export function Pills({ options = [], value, onChange, ariaLabel }) {
   return (
-    <div className="sx-pills" role="radiogroup">
+    <div className="sx-pills" role="radiogroup" aria-label={ariaLabel}>
       {options.map((opt) => (
         <button
           type="button"

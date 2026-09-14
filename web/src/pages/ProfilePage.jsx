@@ -2,17 +2,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ExploreTile from '../components/explore/ExploreTile.jsx';
+import PackTile from '../components/packs/PackTile.jsx';
 import { Button, Field } from '../components/ui/controls.jsx';
 import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
+import { useConfigContext } from '../hooks/ConfigContext.jsx';
 
 const TABS = [
   ['all', 'ALL POSTS'],
   ['video', 'REELS'],
   ['image', 'PHOTOS'],
+  ['packs', 'PACKS'],
 ];
 
 function Avatar({ user, large = false }) {
@@ -88,9 +91,13 @@ export default function ProfilePage() {
   const requestedTab = searchParams.get('tab') || 'all';
   const { user: viewer } = useAuth();
   const messaging = useMessaging();
+  const { config } = useConfigContext();
+  const packCreationEnabled = config?.features?.reel_packs?.creation !== false;
+  const packDiscoveryEnabled = config?.features?.reel_packs?.discovery !== false;
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
-  const [tab, setTab] = useState(['all', 'video', 'image'].includes(requestedTab) ? requestedTab : 'all');
+  const [tab, setTab] = useState(['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all');
+  const [savedKind, setSavedKind] = useState('reels');
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -108,7 +115,7 @@ export default function ProfilePage() {
       setProfile(result.user);
       const nextTab = requestedTab === 'saved' && result.user.is_me
         ? 'saved'
-        : ['all', 'video', 'image'].includes(requestedTab) ? requestedTab : 'all';
+        : ['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all';
       setTab(nextTab);
     } catch (requestError) {
       setError(requestError.message || 'Profile not found.');
@@ -119,15 +126,19 @@ export default function ProfilePage() {
     if (append) setLoadingMore(true);
     else setLoading(true);
     try {
-      const result = tab === 'saved'
-        ? await api.get('/api/users/me/saved', { cursor: nextCursor, limit: 24 })
-        : await api.get('/api/users/' + encodeURIComponent(username) + '/posts', {
+      const result = tab === 'packs'
+        ? await api.get('/api/users/' + encodeURIComponent(username) + '/packs')
+        : tab === 'saved' && savedKind === 'packs'
+          ? await api.get('/api/users/me/saved-packs', { offset: nextCursor || 0, limit: 24 })
+          : tab === 'saved'
+            ? await api.get('/api/users/me/saved', { cursor: nextCursor, limit: 24 })
+            : await api.get('/api/users/' + encodeURIComponent(username) + '/posts', {
             media: tab,
             cursor: nextCursor,
             limit: 24,
           });
       setItems((current) => append ? current.concat(result.items || []) : result.items || []);
-      setCursor(result.next_cursor || null);
+      setCursor(result.next_cursor ?? result.next_offset ?? null);
     } catch (requestError) {
       setError(requestError.message || 'Could not load posts.');
       if (!append) setItems([]);
@@ -135,12 +146,12 @@ export default function ProfilePage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [username, tab]);
+  }, [username, tab, savedKind]);
 
   useEffect(() => {
     setProfile(null);
     setItems([]);
-    setTab(['all', 'video', 'image'].includes(requestedTab) ? requestedTab : 'all');
+    setTab(['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all');
     setCursor(null);
     setLoading(true);
     loadProfile();
@@ -152,10 +163,21 @@ export default function ProfilePage() {
 
   const selectTab = (value) => {
     setTab(value);
+    setItems([]);
+    setCursor(null);
+    setError('');
     const next = new URLSearchParams(searchParams);
     if (value === 'all') next.delete('tab');
     else next.set('tab', value);
     setSearchParams(next, { replace: true });
+  };
+
+  const selectSavedKind = (value) => {
+    if (value === savedKind) return;
+    setSavedKind(value);
+    setItems([]);
+    setCursor(null);
+    setError('');
   };
 
   const toggleFollow = async () => {
@@ -199,6 +221,10 @@ export default function ProfilePage() {
 
   const openPost = (post) => {
     navigate(profilePostUrl(post, profile.username, tab));
+  };
+
+  const updatePack = (updated) => {
+    setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
   };
 
   const beginEditPost = (post) => {
@@ -315,28 +341,53 @@ export default function ProfilePage() {
           </section>
 
           <div className="sx-profile-tabs" role="tablist" aria-label="Profile posts">
-            {TABS.concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => (
+            {TABS.filter(([value]) => value !== 'packs' || packDiscoveryEnabled || profile.is_me).concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => (
               <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'sx-active' : ''} onClick={() => selectTab(value)}>
                 {label}
               </button>
             ))}
           </div>
 
+          {tab === 'saved' ? (
+            <div className="sx-profile-saved-tabs" role="tablist" aria-label="Saved content type">
+              <button type="button" role="tab" aria-selected={savedKind === 'reels'} className={savedKind === 'reels' ? 'sx-active' : ''} onClick={() => selectSavedKind('reels')}>REELS</button>
+              <button type="button" role="tab" aria-selected={savedKind === 'packs'} className={savedKind === 'packs' ? 'sx-active' : ''} onClick={() => selectSavedKind('packs')}>PACKS</button>
+            </div>
+          ) : null}
+
+          {profile.is_me && tab === 'packs' && packCreationEnabled ? (
+            <div className="sx-profile-pack-create">
+              <Button primary onClick={() => navigate('/packs/new')}>+ CREATE REEL PACK</Button>
+            </div>
+          ) : null}
+
           {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
           {loading ? (
-            <ExploreGridSkeleton label="Loading profile posts" />
+            <ExploreGridSkeleton label={tab === 'packs' || (tab === 'saved' && savedKind === 'packs') ? 'Loading Reel Packs' : 'Loading profile posts'} />
           ) : items.length ? (
             <>
-              <div className="sx-explore-grid sx-profile-grid">
-                {items.map((post) => (
-                  <ExploreTile
-                    key={post.id}
-                    video={post}
-                    onOpen={openPost}
-                    onShare={(post) => messaging.openShare(post)}
-                    onEdit={post.viewer_state?.can_edit ? beginEditPost : undefined}
-                    onDelete={post.viewer_state?.can_edit && actionBusy !== post.id ? deletePost : undefined}
-                  />
+              <div className={(tab === 'packs' || (tab === 'saved' && savedKind === 'packs')) ? 'sx-pack-grid' : 'sx-explore-grid sx-profile-grid'}>
+                {items.map((item) => (
+                  (tab === 'packs' || (tab === 'saved' && savedKind === 'packs')) ? (
+                    <PackTile
+                      key={item.id}
+                      pack={item}
+                      onOpen={(pack) => navigate('/packs/' + encodeURIComponent(pack.id))}
+                      onShare={(target) => messaging.openShare(target)}
+                      onChanged={updatePack}
+                      ownerActions={profile.is_me && tab === 'packs'}
+                      source={tab === 'saved' ? 'saved_packs' : 'profile_packs'}
+                    />
+                  ) : (
+                    <ExploreTile
+                      key={item.id}
+                      video={item}
+                      onOpen={openPost}
+                      onShare={(post) => messaging.openShare({ ...post, kind: 'reel' })}
+                      onEdit={item.viewer_state?.can_edit ? beginEditPost : undefined}
+                      onDelete={item.viewer_state?.can_edit && actionBusy !== item.id ? deletePost : undefined}
+                    />
+                  )
                 ))}
               </div>
               {cursor ? (
@@ -347,8 +398,10 @@ export default function ProfilePage() {
             </>
           ) : (
             <EmptyState
-              title={tab === 'saved' ? 'NO SAVED POSTS' : 'NO POSTS YET'}
-              text={profile.is_me ? 'Published images and reels will appear here.' : 'This creator has not published anything in this category.'}
+              title={tab === 'saved' ? `NO SAVED ${savedKind.toUpperCase()}` : tab === 'packs' ? 'NO REEL PACKS YET' : 'NO POSTS YET'}
+              text={tab === 'saved' && savedKind === 'packs'
+                ? 'Packs you save will appear here. Saving a pack never saves its individual reels.'
+                : profile.is_me ? 'Published images, reels, and Reel Packs will appear here.' : 'This creator has not published anything in this category.'}
             />
           )}
 

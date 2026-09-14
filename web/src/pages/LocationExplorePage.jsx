@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
+import PackTile from '../components/packs/PackTile.jsx';
 import { Button, Pills } from '../components/ui/controls.jsx';
 import { EmptyState, Hero, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
+import { useConfigContext } from '../hooks/ConfigContext.jsx';
 
 const SORT_OPTIONS = [
   { label: 'TOP', value: 'trending' },
@@ -36,6 +38,8 @@ function shuffled(items) {
 
 export default function LocationExplorePage() {
   const messaging = useMessaging();
+  const { config } = useConfigContext();
+  const packDiscoveryEnabled = config?.features?.reel_packs?.discovery !== false;
   const { key: routeKey = '' } = useParams();
   const navigate = useNavigate();
   const requestedKey = readableKey(routeKey);
@@ -43,7 +47,9 @@ export default function LocationExplorePage() {
   const [codec, setCodec] = useState('hevc');
   const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState(null);
+  const [packData, setPackData] = useState(null);
   const [error, setError] = useState('');
+  const [packError, setPackError] = useState('');
   const { items: videos, previewMessage } = useExplorePreviews(data?.videos);
 
   useEffect(() => {
@@ -80,10 +86,38 @@ export default function LocationExplorePage() {
     };
   }, [requestedKey, codec, sort, refreshKey]);
 
+  useEffect(() => {
+    let alive = true;
+    setPackData(null);
+    setPackError('');
+    if (!packDiscoveryEnabled) {
+      setPackData({ items: [], total: 0, next_offset: null });
+      return () => { alive = false; };
+    }
+    api.get('/api/packs', { location: requestedKey, offset: 0, limit: 12 })
+      .then((response) => {
+        if (alive) setPackData(response);
+      })
+      .catch((requestError) => {
+        if (!alive) return;
+        setPackError(String(requestError.message || requestError));
+        setPackData({ items: [], total: 0, next_offset: null });
+      });
+    return () => { alive = false; };
+  }, [packDiscoveryEnabled, requestedKey, refreshKey]);
+
   const location = data?.location;
   const displayName = (location?.name || requestedKey).toUpperCase();
   const locationSlug = location?.slug || requestedKey;
   const relatedLocations = data?.related_locations || [];
+  const packs = packData?.items || [];
+
+  const updatePack = (updated) => {
+    setPackData((current) => ({
+      ...(current || {}),
+      items: (current?.items || []).map((pack) => pack.id === updated.id ? updated : pack),
+    }));
+  };
 
   const openReel = (video) => {
     const query = new URLSearchParams({
@@ -115,6 +149,7 @@ export default function LocationExplorePage() {
       >
         <div className="sx-stats-pill">
           <span>REELS: <strong>{data ? videos.length : '—'}</strong></span>
+          {packDiscoveryEnabled ? <span>PACKS: <strong>{packData ? packData.total : '—'}</strong></span> : null}
           <span>VIEWS: <strong>{location ? formatCompactCount(location.views) : '—'}</strong></span>
           <span>LIKES: <strong>{location ? formatCompactCount(location.likes) : '—'}</strong></span>
           <span>RELATED: <strong>{data ? relatedLocations.length : '—'}</strong></span>
@@ -183,31 +218,63 @@ export default function LocationExplorePage() {
 
       {previewMessage ? <Mono>{previewMessage}</Mono> : null}
       {error ? <Mono>{'LOCATION FEED ERROR · ' + error}</Mono> : null}
+      {packError ? (
+        <div className="sx-error-box" role="alert">
+          <span>{'PACK DISCOVERY ERROR · ' + packError}</span>
+          <Button onClick={() => setRefreshKey((key) => key + 1)}>RETRY</Button>
+        </div>
+      ) : null}
 
-      {data === null ? (
-        <ExploreGridSkeleton label={'Loading ' + displayName + ' reels'} />
-      ) : !videos.length ? (
+      {data === null || (packDiscoveryEnabled && packData === null) ? (
+        <ExploreGridSkeleton label={'Loading ' + displayName + ' reels and packs'} />
+      ) : !videos.length && !packs.length ? (
         <EmptyState
-          title={'NO REELS FROM ' + displayName}
-          text="This place exists as a valid destination, but no current media was shot here. Try a related place from above."
+          title={'NO CONTENT FROM ' + displayName}
+          text="This place exists as a valid destination, but no current reels or Reel Packs use it. Try a related place from above."
           hint="Location matching is exact on city and country."
         />
       ) : (
         <>
-          <div className="sx-tag-grid-heading">
-            <h2>{sort === 'trending' ? 'TOP REELS' : 'LOCATION REELS'}</h2>
-            <span>{videos.length + ' RESULT' + (videos.length === 1 ? '' : 'S')}</span>
-          </div>
-          <div className="sx-explore-grid">
-            {videos.map((video) => (
-              <ExploreTile
-                key={video.path}
-                video={video}
-                onOpen={openReel}
-                onShare={(item) => messaging.openShare(item)}
-              />
-            ))}
-          </div>
+          {packs.length ? (
+            <section className="sx-pack-explore-section" aria-labelledby="sx-location-pack-title">
+              <div className="sx-pack-section-head">
+                <div><span>CURATED IN {displayName}</span><h2 id="sx-location-pack-title">REEL PACKS</h2></div>
+                {packData?.next_offset != null ? (
+                  <Button onClick={() => navigate('/explore?type=packs&search=' + encodeURIComponent(displayName))}>VIEW ALL PACKS</Button>
+                ) : null}
+              </div>
+              <div className="sx-pack-grid">
+                {packs.map((pack) => (
+                  <PackTile
+                    key={pack.id}
+                    pack={pack}
+                    onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id))}
+                    onShare={(target) => messaging.openShare(target)}
+                    onChanged={updatePack}
+                    source="location_explore"
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {videos.length ? (
+            <>
+              <div className="sx-tag-grid-heading">
+                <h2>{sort === 'trending' ? 'TOP REELS' : 'LOCATION REELS'}</h2>
+                <span>{videos.length + ' RESULT' + (videos.length === 1 ? '' : 'S')}</span>
+              </div>
+              <div className="sx-explore-grid">
+                {videos.map((video) => (
+                  <ExploreTile
+                    key={video.path}
+                    video={video}
+                    onOpen={openReel}
+                    onShare={(item) => messaging.openShare(item)}
+                  />
+                ))}
+              </div>
+            </>
+          ) : null}
         </>
       )}
     </div>

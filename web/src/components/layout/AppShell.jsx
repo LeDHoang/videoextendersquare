@@ -55,8 +55,8 @@ function Shell() {
     };
   }, []);
 
-  const isReelsRoute = location.pathname === '/reels';
-  const immersive = isReelsRoute && (isVrActive || isFsActive);
+  const isPlayerRoute = location.pathname === '/reels' || /^\/packs\/[^/]+$/.test(location.pathname);
+  const immersive = isPlayerRoute && (isVrActive || isFsActive);
 
   // Keep html/body class in sync so pure-CSS fallback also hides chrome
   useEffect(() => {
@@ -75,10 +75,10 @@ function Shell() {
 
   // Close immersive chrome when navigating away from /reels while fullscreen
   useEffect(() => {
-    if (!isReelsRoute && document.fullscreenElement) {
+    if (!isPlayerRoute && document.fullscreenElement) {
       // Let fullscreen persist but header will re-appear via `immersive` flag
     }
-  }, [isReelsRoute]);
+  }, [isPlayerRoute]);
 
   return (
     <>

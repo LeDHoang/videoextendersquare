@@ -115,8 +115,13 @@ export function MessagingProvider({ children }) {
     }
     try {
       const pendingShare = JSON.parse(sessionStorage.getItem('echo:resume-share') || 'null');
-      if (pendingShare?.post_id && Date.now() - Number(pendingShare.created_at || 0) < 10 * 60 * 1000) {
-        setShareTarget({ post_id: pendingShare.post_id });
+      if (pendingShare?.target_id && Date.now() - Number(pendingShare.created_at || 0) < 10 * 60 * 1000) {
+        setShareTarget({
+          kind: pendingShare.kind === 'pack' ? 'pack' : 'reel',
+          id: pendingShare.target_id,
+        });
+      } else if (pendingShare?.post_id && Date.now() - Number(pendingShare.created_at || 0) < 10 * 60 * 1000) {
+        setShareTarget({ kind: 'reel', id: pendingShare.post_id });
       }
       sessionStorage.removeItem('echo:resume-share');
     } catch {

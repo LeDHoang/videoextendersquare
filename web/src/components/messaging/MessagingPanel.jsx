@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
-import { useMessaging } from '../../hooks/MessagingContext.jsx';
+import { clientId, useMessaging } from '../../hooks/MessagingContext.jsx';
+import PackCover from '../packs/PackCover.jsx';
 
 function Avatar({ user }) {
   const label = (user?.display_name || user?.username || '?').trim();
@@ -61,6 +62,43 @@ function MessageContent({ message }) {
       </div>
     );
   }
+  if (message.kind === 'pack') {
+    if (!message.pack) {
+      return (
+        <div className="sx-message-pack-card sx-message-pack-card--unavailable">
+          <span>▦ REEL PACK</span>
+          <strong>Reel Pack unavailable</strong>
+          <small>This collection was removed or you no longer have access.</small>
+          {message.content?.text ? <p>{message.content.text}</p> : null}
+        </div>
+      );
+    }
+    const pack = message.pack;
+    const link = `/packs/${encodeURIComponent(pack.id)}`;
+    const recordOpen = () => {
+      api.post('/api/events', {
+        event_type: 'pack_message_open',
+        pack_id: pack.id,
+        source: 'messages',
+        client_event_id: clientId('pack-message-open'),
+        context: { message_id: message.id },
+      }).catch(() => {});
+    };
+    return (
+      <div className="sx-message-pack-card">
+        <Link to={link} className="sx-message-pack-preview" aria-label={`Open Reel Pack ${pack.title}`} onClick={recordOpen}>
+          <PackCover pack={pack} decorative />
+        </Link>
+        <div className="sx-message-pack-meta">
+          <span>▦ REEL PACK</span>
+          <Link to={link} onClick={recordOpen}><strong>{pack.title}</strong></Link>
+          <small>@{pack.creator?.username || 'creator'} · {pack.reel_count} REELS</small>
+          <Link to={link} className="sx-message-pack-open" onClick={recordOpen}>OPEN PACK</Link>
+        </div>
+        {message.content?.text ? <p>{message.content.text}</p> : null}
+      </div>
+    );
+  }
   return <span>{message.content?.emote || message.content?.text || message.text}</span>;
 }
 
@@ -76,7 +114,15 @@ function ConversationList({ rows, selectedId, onSelect, empty }) {
       <Avatar user={conversation.participant} />
       <span className="sx-conversation-copy">
         <strong>{conversation.participant.display_name || `@${conversation.participant.username}`}</strong>
-        <small>{conversation.last_message?.deleted ? 'Message deleted' : conversation.last_message?.text || conversation.last_message?.kind || 'New conversation'}</small>
+        <small>{
+          conversation.last_message?.deleted
+            ? 'Message deleted'
+            : conversation.last_message?.kind === 'pack'
+              ? conversation.last_message.pack
+                ? `Shared a Reel Pack · ${conversation.last_message.pack.title}`
+                : 'Reel Pack unavailable'
+              : conversation.last_message?.text || conversation.last_message?.kind || 'New conversation'
+        }</small>
       </span>
       {conversation.unread_count ? <span className="sx-message-badge">{conversation.unread_count}</span> : null}
     </button>
@@ -283,7 +329,7 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
               {history.map((message) => {
                 const mine = message.sender_id === user?.id;
                 return (
-                  <article key={message.id} className={`sx-message-bubble ${mine ? 'sx-mine' : ''} ${message.pending ? 'sx-pending' : ''} ${message.kind === 'reel' ? 'sx-message-bubble--reel' : ''}`}>
+                  <article key={message.id} className={`sx-message-bubble ${mine ? 'sx-mine' : ''} ${message.pending ? 'sx-pending' : ''} ${['reel', 'pack'].includes(message.kind) ? 'sx-message-bubble--reel' : ''}`}>
                     <MessageContent message={message} />
                     <footer>
                       <time>{message.created_at ? new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</time>

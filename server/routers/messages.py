@@ -37,15 +37,17 @@ from server.social.models import (
     Follow,
     MessageEvent,
     Post,
+    ReelPack,
     User,
     utcnow,
 )
 from server.social.safety import users_blocked
 from server.social.services import get_post_by_reference, post_card, record_event
+from server.routers.packs import can_view_pack, get_pack_for_viewer, serialize_pack
 
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
-MESSAGE_KINDS = {"text", "emote", "gif", "reel"}
+MESSAGE_KINDS = {"text", "emote", "gif", "reel", "pack"}
 CURATED_EMOTES = ["👍", "❤️", "😂", "😮", "😢", "😡", "🔥", "👏", "🎉", "💯", "🙌", "👀"]
 CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 EVENT_RETENTION_DAYS = 30
@@ -56,13 +58,14 @@ class ConversationCreateRequest(BaseModel):
 
 
 class MessageCreateRequest(BaseModel):
-    kind: Literal["text", "emote", "gif", "reel"] = "text"
+    kind: Literal["text", "emote", "gif", "reel", "pack"] = "text"
     text: str = ""
     emote: str = ""
     gif_url: str = ""
     gif_preview_url: str = ""
     gif_title: str = ""
     post_id: str | None = None
+    pack_id: str | None = None
     client_id: str | None = Field(default=None, max_length=64)
 
 
@@ -72,6 +75,14 @@ class DirectMessageRequest(MessageCreateRequest):
 
 class ShareReelRequest(BaseModel):
     post_id: str
+    usernames: list[str] = Field(min_length=1, max_length=10)
+    note: str = Field(default="", max_length=500)
+    client_id: str = Field(min_length=8, max_length=64)
+
+
+class ShareContentRequest(BaseModel):
+    kind: Literal["reel", "pack"]
+    target_id: str
     usernames: list[str] = Field(min_length=1, max_length=10)
     note: str = Field(default="", max_length=500)
     client_id: str = Field(min_length=8, max_length=64)
@@ -187,11 +198,22 @@ def serialize_message(
     deleted = message.deleted_at is not None
     content, encryption_unavailable = message_payload(message)
     shared_post = None
+    shared_pack = None
     attachment_unavailable = False
     if message.kind == "reel" and message.post_id and not deleted:
         post = get_post_by_reference(db, post_id=message.post_id)
         if can_view_shared_post(db, post, viewer_id):
             shared_post = post_card(post, db, viewer_id)
+        else:
+            attachment_unavailable = True
+    elif message.kind == "pack" and message.pack_id and not deleted:
+        pack = None
+        try:
+            pack = get_pack_for_viewer(db, message.pack_id, viewer_id)
+        except HTTPException:
+            pack = None
+        if pack and can_view_pack(db, pack, viewer_id):
+            shared_pack = serialize_pack(db, pack, viewer_id)
         else:
             attachment_unavailable = True
     read_by_recipient = False
@@ -208,6 +230,8 @@ def serialize_message(
         "text": "" if deleted else str(display_text),
         "post_id": None if deleted else message.post_id,
         "post": shared_post,
+        "pack_id": None if deleted else message.pack_id,
+        "pack": shared_pack,
         "attachment_unavailable": attachment_unavailable,
         "encryption_unavailable": encryption_unavailable,
         "deleted": deleted,
@@ -345,7 +369,7 @@ def normalize_message_content(req: MessageCreateRequest) -> dict:
             "provider": "tenor",
         }
     if len(text) > 500:
-        fail(422, "MESSAGE_TOO_LONG", "Reel notes are limited to 500 characters.", "text")
+        fail(422, "MESSAGE_TOO_LONG", "Shared-content notes are limited to 500 characters.", "text")
     return {"text": text}
 
 
@@ -461,14 +485,26 @@ def send_into_conversation(
 
     content = normalize_message_content(req)
     post = None
+    pack = None
     if req.kind == "reel":
         if not req.post_id:
             fail(422, "REEL_REQUIRED", "Choose a reel to share.", "post_id")
         post = get_post_by_reference(db, post_id=req.post_id)
         if not can_view_shared_post(db, post, sender.id):
             fail(404, "POST_NOT_FOUND", "Reel not found.")
-    elif req.post_id:
-        fail(422, "UNEXPECTED_POST", "Only reel messages can include a post.", "post_id")
+        if req.pack_id:
+            fail(422, "UNEXPECTED_PACK", "A reel message cannot include a Reel Pack.", "pack_id")
+    elif req.kind == "pack":
+        if not req.pack_id:
+            fail(422, "PACK_REQUIRED", "Choose a Reel Pack to share.", "pack_id")
+        try:
+            pack = get_pack_for_viewer(db, req.pack_id, sender.id)
+        except HTTPException:
+            fail(404, "PACK_NOT_FOUND", "Reel Pack not found.")
+        if req.post_id:
+            fail(422, "UNEXPECTED_POST", "A Reel Pack message cannot include a reel.", "post_id")
+    elif req.post_id or req.pack_id:
+        fail(422, "UNEXPECTED_ATTACHMENT", "Only reel or Reel Pack messages can include content.", "kind")
 
     now = utcnow()
     message_id = str(uuid.uuid4())
@@ -486,6 +522,7 @@ def send_into_conversation(
         kind=req.kind,
         payload_ciphertext=ciphertext,
         post_id=post.id if post else None,
+        pack_id=pack.id if pack else None,
         client_id=client_id,
         created_at=now,
     )
@@ -507,6 +544,16 @@ def send_into_conversation(
             db,
             event_type="reel_share_message",
             post_id=post.id,
+            user_id=sender.id,
+            source="messages",
+            context={"conversation_id": conversation.id},
+            client_event_id=f"share:{row.id}",
+        )
+    if pack:
+        record_event(
+            db,
+            event_type="pack_share_message",
+            pack_id=pack.id,
             user_id=sender.id,
             source="messages",
             context={"conversation_id": conversation.id},
@@ -593,6 +640,7 @@ def capabilities():
         "limits": {
             "text_characters": 2000,
             "reel_note_characters": 500,
+            "pack_note_characters": 500,
             "share_recipients": 10,
             "history_page": 100,
         },
@@ -962,17 +1010,28 @@ def search_gifs(
     return {"results": results, "next": payload.get("next"), "attribution": "Powered by Tenor"}
 
 
-@router.post("/share-reel")
-def share_reel(
-    req: ShareReelRequest,
-    context: AuthContext = Depends(require_auth_csrf),
-    db: Session = Depends(get_db),
-):
+def share_content(
+    req: ShareContentRequest,
+    context: AuthContext,
+    db: Session,
+) -> dict:
     require_messaging_user(context.user)
     base_client_id = validate_client_id(req.client_id)
-    post = get_post_by_reference(db, post_id=req.post_id)
-    if not can_view_shared_post(db, post, context.user.id):
-        fail(404, "POST_NOT_FOUND", "Reel not found.")
+    post = None
+    pack = None
+    if req.kind == "reel":
+        post = get_post_by_reference(db, post_id=req.target_id)
+        if not can_view_shared_post(db, post, context.user.id):
+            fail(404, "POST_NOT_FOUND", "Reel not found.")
+        target_id = post.id
+    else:
+        try:
+            pack = get_pack_for_viewer(db, req.target_id, context.user.id)
+        except HTTPException:
+            fail(404, "PACK_NOT_FOUND", "Reel Pack not found.")
+        if pack.status != "published":
+            fail(422, "PACK_NOT_PUBLISHED", "Only published Reel Packs can be shared.")
+        target_id = pack.id
     normalized = []
     seen = set()
     for raw in req.usernames:
@@ -985,14 +1044,25 @@ def share_reel(
     rate_limiter.check(db, f"message-share:{context.user.id}", 20, 60 * 60)
     results = []
     for username in normalized:
-        recipient_client_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"echo-share:{base_client_id}:{username}"))
+        recipient_client_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"echo-share:{base_client_id}:{req.kind}:{target_id}:{username}",
+            )
+        )
         try:
             target = target_user(db, username, context.user)
-            conversation = get_or_create_conversation(db, context.user, target)
+            try:
+                conversation = get_or_create_conversation(db, context.user, target)
+            except IntegrityError:
+                # Concurrent first-time share created the conversation first.
+                db.rollback()
+                conversation = get_or_create_conversation(db, context.user, target)
             message_req = MessageCreateRequest(
-                kind="reel",
+                kind=req.kind,
                 text=req.note,
-                post_id=post.id,
+                post_id=post.id if post else None,
+                pack_id=pack.id if pack else None,
                 client_id=recipient_client_id,
             )
             row, duplicate = send_into_conversation(
@@ -1016,14 +1086,53 @@ def share_reel(
                 "username": username,
                 "ok": False,
                 "code": detail.get("code", "SHARE_FAILED"),
-                "message": detail.get("message", "Could not share this reel."),
+                "message": detail.get("message", "Could not share this content."),
+            })
+        except IntegrityError:
+            db.rollback()
+            results.append({
+                "username": username,
+                "ok": False,
+                "code": "SHARE_RETRYABLE",
+                "message": "Share raced another request; retry with a new share.",
             })
     return {
-        "post_id": post.id,
+        "kind": req.kind,
+        "target_id": target_id,
+        "post_id": post.id if post else None,
+        "pack_id": pack.id if pack else None,
         "results": results,
         "succeeded": sum(1 for row in results if row["ok"]),
         "failed": sum(1 for row in results if not row["ok"]),
     }
+
+
+@router.post("/share-content")
+def share_content_endpoint(
+    req: ShareContentRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    return share_content(req, context, db)
+
+
+@router.post("/share-reel")
+def share_reel(
+    req: ShareReelRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    return share_content(
+        ShareContentRequest(
+            kind="reel",
+            target_id=req.post_id,
+            usernames=req.usernames,
+            note=req.note,
+            client_id=req.client_id,
+        ),
+        context,
+        db,
+    )
 
 
 def cleanup_message_events() -> int:

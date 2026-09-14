@@ -1,14 +1,15 @@
 # To-do List
 
-Last verified: 2026-09-13 on top of `227c919` (uncommitted billing-fix work in tree) — deep functional pass: 66/66 pytest + 6/6 vitest + `vite build` clean + live-app smoke (invalid cursor → 400, checkout without base URL → 503, webhook bad signature → generic message, `/api/config` key-leak closed) + Alembic up → down → up through `20260913_0008` on scratch SQLite; dev `data/echo.db` migrated `0005` → `0008` (backup at `/tmp/echo.db.pre-mig-backup`).
+Last verified: 2026-09-14 on top of `227c919` (uncommitted billing and Reel Packs work in tree) — Reel Packs pass: 9/9 focused pytest, 68/68 available application pytest excluding `test_cloud_routes.py` because `sse_starlette` is absent, 40/40 Node tests, 6/6 Vitest tests, `vite build` clean, pack/WebXR script syntax clean, and Alembic up → down → up through `20260913_0009` on scratch SQLite (prior pass; no new migration in fix batch). The earlier billing live-smoke record remains in the deep-test notes below.
 
-VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md), added 2026-09-13. Documentation only; no product implementation or test rerun was performed.
+VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md). Reel Packs implementation record: [Reel Packs implementation investigation](reel-packs-implementation-investigation.md).
 
 ## Done
 
 - [x] Fix upload avatar (root cause: Vite dev proxy forwarded `/api` + `/media` but not `/avatars`, so uploads succeeded while avatar images 404'd on :5173; fixed by adding `'/avatars': 'http://localhost:8000'` to `web/vite.config.js`.)
 - [x] Encrypted direct messaging — requests (pending/active), text/emote/GIF/reel kinds, idempotent sends via `(sender, client_id)`, read receipts, deletion, blocking, durable SSE events (`server/routers/messages.py`, `server/social/message_crypto.py` AES-GCM, migration `20260911_0003`). Note: app-level encryption with a server-held key, **not** true end-to-end (the UI discloses this).
 - [x] Reel sharing — canonical links (`GET /api/posts/:id/share`), clipboard + native share, QR PNG download (`qrcode`), multi-recipient (≤10) idempotent delivery, entry points on Reels page, Explore tiles, profile, and player (`ReelShareDialog.jsx`).
+- [x] Reel Packs — first-class ordered 5–12 reel collections with public/unlisted visibility, stable URLs and revisions, authoring/reordering, covers/collages, discovery/search/tag/location/profile/library surfaces, live saves, finite 2D and WebXR playback, distinct sharing/messages/tombstones, analytics attribution, moderation, feature flags, and additive migration `20260913_0009`.
 - [x] Messages UI — responsive page (`/messages`), compact dock, unread badges, profile entry point (`MessagingContext.jsx`, `MessagingPanel.jsx`, `MessageDock.jsx`, `MessagesPage.jsx`).
 - [x] Messages nav icon — `/messages` now uses `IndustrialMessageIcon` (was reusing the explore icon).
 - [x] ECHO Credits billing + reel rewards (`18ecbd0`: deterministic Fal pricing, credit accounts/ledger/reservations, Stripe Checkout/webhooks, encrypted BYOK keys, reward claims, migration `20260913_0006`, React + reels + WebXR integration).
@@ -20,6 +21,8 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 ## Still open
 
 - [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign.
+- [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
+- [ ] Install the intended `sse_starlette` test dependency and rerun `tests/test_cloud_routes.py` with the complete application backend suite.
 - [ ] Review the Explore page reels loading priority.
 - [ ] Review VR immersive-mode reel playback and loading. (Earth interaction reworked, but full playback/loading review still open.)
 - [ ] Reduce and spread out controls on the player action rail.
@@ -49,15 +52,22 @@ Follow the phases in order unless measured results change a dependency.
 - [ ] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration.
 - [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets.
 
-### Phase 2 — World Shell proof of concept
+### Phase 2 — Reel Packs
 
-- [ ] Let the creator select or approve a representative keyframe.
-- [ ] Generate one static panorama/cubemap or shallow depth-layered shell during upload.
-- [ ] Keep the original reel unchanged as the central authoritative source.
-- [ ] Render one static shell rather than a second background video.
-- [ ] Add explicit `ENTER WORLD` and `EXIT WORLD` controls.
-- [ ] Label generated surroundings and store source/model/version provenance.
-- [ ] Add reduced-motion fallback and measure performance against the no-shell baseline.
+- [x] Add additive Pack models, item/tag/save/progress relationships, message/event references, constraints, and migration `20260913_0009`.
+- [x] Add ownership-safe draft/create/edit/publish/unpublish/delete APIs with atomic expected-revision conflicts.
+- [x] Add public/unlisted permissions, repair hiding, unavailable-item tombstones, and generic inaccessible responses.
+- [x] Add distinct Pack tiles and `ALL | REELS | PACKS` discovery with Pack pagination.
+- [x] Add Pack results to tag and location discovery, plus public profile and saved-library Pack views.
+- [x] Add finite authored 2D playback with intro, resume, queue selection, previous/next, unavailable skipping, and explicit completion.
+- [x] Keep like, comments, Save/Share Reel, follow/profile, report, seek, mute, projection, and immersive controls available for the active reel while keeping Pack Save/Share separate.
+- [x] Generalize sharing and add live Pack attachments, optional notes, recipient-specific idempotency, distinct conversation previews, and unavailable tombstones.
+- [x] Extend WebXR with video/image/static-card sources, Pack position/queue UI, stable intro/completion cards, and safe DOM-action transitions.
+- [x] Add Pack analytics attribution and independent creation/discovery/immersive feature flags.
+- [ ] Complete browser, mobile, screen-reader, grayscale, keyboard-only, and multi-session conflict validation.
+- [ ] Complete physical Quest controller, hand, one-handed, seated, tracking-loss, XR exit/resume, frame pacing, memory, and thermal validation.
+- [ ] Re-run official Meta documentation verification on a supported host before immersive rollout.
+- [ ] Open city/event Packs directly from Earth while retaining city-level location privacy and preview safety filtering.
 
 ### Phase 3 — Comfort and accessibility
 
@@ -68,14 +78,15 @@ Follow the phases in order unless measured results change a dependency.
 - [ ] Add timed captions with adjustable size, position, contrast, and background.
 - [ ] Add optional transcription, translation, reduced motion, and non-audio alternatives for important cues.
 
-### Phase 4 — Reel Packs and Earth
+### Phase 4 — World Shell proof of concept
 
-- [ ] Add finite, ordered Reel Packs with covers, creators, visibility, canonical links, resume state, and explicit endings.
-- [ ] Allow packs to mix normal, stereo, native immersive, and World Shell reels through the existing player.
-- [ ] Add creator authoring and ownership-safe publish/edit/delete flows.
-- [ ] Reuse existing save, share, QR, profile, and messaging features for packs.
-- [ ] Open city and event packs from Earth while retaining city-level location privacy.
-- [ ] Add content-safety checks before reels or packs appear in Earth previews.
+- [ ] Let the creator select or approve a representative keyframe.
+- [ ] Generate one static panorama/cubemap or shallow depth-layered shell during upload.
+- [ ] Keep the original reel unchanged as the central authoritative source.
+- [ ] Render one static shell rather than a second background video.
+- [ ] Add explicit `ENTER WORLD` and `EXIT WORLD` controls.
+- [ ] Label generated surroundings and store source/model/version provenance.
+- [ ] Add reduced-motion fallback and measure performance against the no-shell baseline.
 
 ### Phase 5 — Controlled commercial pilots
 
@@ -101,10 +112,9 @@ people.
 
 ## Known gaps found during verification (not yet fixed)
 
-- `ReelShareDialog.jsx:25`: `client_id` batch key is generated once per dialog mount and never rotated — a second distinct share from the same open dialog may dedupe as a duplicate.
 - `MessagingContext.jsx:248-256`: send-reconcile builds `reconciled` but discards it (possible duplicate bubbles on key migration); optimistic GIF sends render empty until server echo.
 - Report on an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
-- `web/tests/webxr-earth.test.js`: 2 failures on current HEAD (`ray hit testing…`, `heat zones scale…`) — introduced by the `227c919` Earth interaction commit (proven green at `18ecbd0`); needs test updates for hold-to-drag/pitch/radius behavior, not yet done.
+- `tests/test_cloud_routes.py` cannot currently collect in this environment because the optional `sse_starlette` package is not installed; the remaining 64 application backend tests pass.
 - Staged uploads are process-memory: multi-worker deployments need sticky sessions (or a single worker) or quote/submit pairs may miss; a restart drops staged files (documented in `RUNNING.md`).
 - Reward threshold uses client-reported duration (accepted risk: server-elapsed gate + foreground telemetry + 5/day + IP caps bound farming; documented in `RUNNING.md`).
 

@@ -1419,6 +1419,43 @@
       font-size: 13px;
     }
   }
+  .reels-pack-bar { position:absolute; top:14px; left:14px; right:88px; z-index:16; display:flex; align-items:center; gap:8px; pointer-events:none; }
+  .reels-pack-bar[hidden], .reels-pack-card[hidden], .reels-pack-queue[hidden] { display:none !important; }
+  .reels-pack-pill { min-height:40px; padding:8px 12px; border:1px solid rgba(255,85,58,.82); border-radius:4px; background:rgba(9,11,14,.92); color:#fff; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.05em; cursor:pointer; pointer-events:auto; }
+  .reels-pack-pill:hover, .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; background:#241512; }
+  .reels-pack-pill.primary { background:#ff553a; color:#090b0e; }
+  .reels-pack-title-pill { min-width:0; max-width:48%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .reels-pack-card { position:absolute; inset:0; z-index:12; display:grid; place-items:center; padding:28px; background:linear-gradient(135deg,rgba(255,85,58,.12),transparent 42%),radial-gradient(circle at 50% 34%,rgba(96,165,250,.18),transparent 38%),rgba(5,8,14,.97); color:#fff; }
+  .reels-pack-card-inner { width:min(560px,92%); border:1px solid rgba(255,85,58,.82); border-radius:8px; padding:28px; background:rgba(12,14,17,.96); box-shadow:0 20px 70px rgba(0,0,0,.55); text-align:center; }
+  .reels-pack-card-label { color:#ff765f; font:900 12px/1 "JetBrains Mono",monospace; letter-spacing:.16em; }
+  .reels-pack-card h2 { margin:14px 0 8px; font:900 clamp(24px,5vw,42px)/1.05 "Archivo",sans-serif; }
+  .reels-pack-card p { margin:0 auto 20px; max-width:44ch; color:#c7ccd4; line-height:1.5; }
+  .reels-pack-card-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+  .reels-pack-card-actions button, .reels-pack-queue-actions button, .reels-pack-queue-close { min-height:44px; padding:10px 14px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
+  .reels-pack-card-actions button:first-child, .reels-pack-queue-actions button:first-child { border-color:#ff553a; background:#ff553a; color:#090b0e; }
+  .reels-pack-queue { position:absolute; inset:54px 54px 34px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid #ff553a; border-radius:8px; background:rgba(9,11,14,.98); color:#fff; box-shadow:0 24px 90px rgba(0,0,0,.72); }
+  .reels-pack-queue-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid #30363d; }
+  .reels-pack-queue-head div { min-width:0; flex:1; }
+  .reels-pack-queue-head strong, .reels-pack-queue-head small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .reels-pack-queue-head small { margin-top:4px; color:#aab1bb; }
+  .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; }
+  .reels-pack-queue-item { width:100%; min-height:52px; display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:10px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:#fff; text-align:left; cursor:pointer; }
+  .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible, .reels-pack-queue-item.current { border-color:#ff553a; background:#1b1515; outline:none; }
+  .reels-pack-queue-item:disabled { color:#767d86; cursor:not-allowed; }
+  .reels-pack-queue-item strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .reels-pack-queue-item span:last-child { font:800 10px/1 "JetBrains Mono",monospace; }
+  .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid #30363d; }
+  .reels-pack-card-actions button:focus-visible, .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-pack-card-status { color:#ffd166 !important; font-family:"JetBrains Mono",monospace; }
+  @media (max-width:720px) {
+    .reels-pack-bar { right:68px; gap:5px; }
+    .reels-pack-pill { min-height:44px; padding:8px 10px; font-size:10px; }
+    .reels-pack-title-pill { max-width:42%; }
+    .reels-pack-queue { inset:50px 16px 22px; max-height:calc(100% - 72px); }
+    .reels-pack-card { padding:14px; }
+    .reels-pack-card-inner { padding:20px 14px; }
+    .reels-pack-queue-item { min-height:52px; }
+  }
 </style>
 </head>
 <body>
@@ -1429,10 +1466,41 @@
     <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:#16191C; padding:3px 8px; border-radius:0px; border:1px solid #00FF88;">⚡ 0/0</div>
   </div>
 
+  <div class="reels-pack-bar" id="packModeBar" hidden>
+    <button type="button" class="reels-pack-pill reels-pack-title-pill primary" id="packQueueBtn">▦ PACK <span id="packPosition">1/1</span></button>
+    <button type="button" class="reels-pack-pill" id="packSaveBtn">SAVE PACK</button>
+    <button type="button" class="reels-pack-pill" id="packShareBtn">SHARE PACK</button>
+  </div>
+
   <div class="reels-video-wrap" id="videoWrap">
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
+    <canvas id="packVisualCanvas" width="1024" height="1024" hidden></canvas>
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
+    <div class="reels-pack-card" id="packStageCard" hidden role="dialog" aria-modal="false" aria-labelledby="packStageTitle" aria-describedby="packStageText packStageStatus">
+      <div class="reels-pack-card-inner">
+        <div class="reels-pack-card-label" id="packStageLabel">REEL PACK</div>
+        <h2 id="packStageTitle">Reel Pack</h2>
+        <p id="packStageText">Loading pack…</p>
+        <p class="reels-pack-card-status" id="packStageStatus"></p>
+        <div class="reels-pack-card-actions">
+          <button type="button" id="packStagePrimary">START PACK</button>
+          <button type="button" id="packStageSecondary" hidden>RETURN TO PACK</button>
+          <button type="button" id="packStageExplore" hidden>EXPLORE PACKS</button>
+        </div>
+      </div>
+    </div>
+    <section class="reels-pack-queue" id="packQueuePanel" role="dialog" aria-modal="false" aria-label="Reel Pack queue" hidden>
+      <div class="reels-pack-queue-head">
+        <div><strong id="packQueueTitle">REEL PACK</strong><small id="packQueueCreator">Loading pack…</small></div>
+        <button type="button" class="reels-pack-queue-close" id="packQueueClose" aria-label="Close pack queue">CLOSE</button>
+      </div>
+      <div class="reels-pack-queue-list" id="packQueueList"></div>
+      <div class="reels-pack-queue-actions">
+        <button type="button" id="packQueueSave">SAVE PACK</button>
+        <button type="button" id="packQueueShare">SHARE PACK</button>
+      </div>
+    </section>
     <div class="center-flash" id="centerFlash">▶</div>
     <div class="reward-toast" id="rewardToast" role="status" aria-live="polite"></div>
     
@@ -1634,12 +1702,27 @@
 <script>__QUEST_CONTROLLER_IMG_JS__</script>
 <script>__REELS_FEED_STATE_JS__</script>
 <script>__REELS_REWARDS_JS__</script>
+<script>__REELS_PACK_STATE_JS__</script>
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
     let videoData = __VIDEO_DATA_JSON__;
     const initialFeedState = __FEED_STATE_JSON__;
     const FeedState = window.ReelsFeedState;
+    const PackState = window.ReelsPackState;
+    let packState = PackState && PackState.initialState
+      ? PackState.initialState({ ...(initialFeedState || {}), items: videoData }, initialFeedState && initialFeedState.start_index)
+      : { mode: 'feed', phase: 'playing', items: videoData, index: 0 };
+    const isPackMode = packState.mode === 'pack';
+    const packImmersiveEnabled = !isPackMode || !initialFeedState || initialFeedState.pack_immersive_enabled !== false;
+    let packQueueOpen = false;
+    let packProgressTimer = null;
+    let packVisualVersion = 0;
+    let packVisualMode = '';
+    let packVisualRegions = [];
+    let packResumeAfterOverlay = false;
+    let packUnavailableTimer = null;
+    const analyticsSource = isPackMode ? 'pack' : 'reels';
     let feedParams = { ...((initialFeedState && initialFeedState.feed_params) || {}) };
     let feedCursor = initialFeedState && initialFeedState.next_cursor;
     let feedHasMore = !!(initialFeedState && initialFeedState.has_more);
@@ -1651,7 +1734,7 @@
     let originalFeedSnapshot = null;
     let activeLocationFeed = null;
     let earthEntryPlayback = null;
-    let idx = 0;
+    let idx = isPackMode ? packState.index : 0;
     let isAutoNext = true;
     let isMuted = true;
     let activeTab = 'all';
@@ -1666,6 +1749,25 @@
     const video = document.getElementById('reelsVideo');
     const reelsImage = document.getElementById('reelsImage');
     const videoWrap = document.getElementById('videoWrap');
+    const packVisualCanvas = document.getElementById('packVisualCanvas');
+    const packModeBar = document.getElementById('packModeBar');
+    const packPosition = document.getElementById('packPosition');
+    const packQueueBtn = document.getElementById('packQueueBtn');
+    const packSaveBtn = document.getElementById('packSaveBtn');
+    const packShareBtn = document.getElementById('packShareBtn');
+    const packStageCard = document.getElementById('packStageCard');
+    const packStageLabel = document.getElementById('packStageLabel');
+    const packStageTitle = document.getElementById('packStageTitle');
+    const packStageText = document.getElementById('packStageText');
+    const packStageStatus = document.getElementById('packStageStatus');
+    const packStagePrimary = document.getElementById('packStagePrimary');
+    const packStageSecondary = document.getElementById('packStageSecondary');
+    const packStageExplore = document.getElementById('packStageExplore');
+    const packQueuePanel = document.getElementById('packQueuePanel');
+    const packQueueList = document.getElementById('packQueueList');
+    const packQueueClose = document.getElementById('packQueueClose');
+    const packQueueSave = document.getElementById('packQueueSave');
+    const packQueueShare = document.getElementById('packQueueShare');
     const progressWrap = document.getElementById('progressWrap');
     // Single image tiles hold for a fixed dwell, then auto-advance.
     const IMAGE_DWELL_S = 10;
@@ -1867,6 +1969,453 @@
       return body;
     }
 
+    function packCreatorLabel() {
+      const creator = packState.pack && packState.pack.creator;
+      return creator && creator.username ? '@' + creator.username : 'ECHO CREATOR';
+    }
+
+    function currentVisualSource() {
+      const item = videoData[idx] || null;
+      if (isPackMode && (packQueueOpen || packState.phase !== 'playing' || !item || item.available === false)) {
+        return {
+          kind: 'static-card',
+          element: packVisualCanvas,
+          ready: !!packVisualCanvas,
+          paused: true,
+          muted: true,
+          currentTime: 0,
+          duration: 0,
+          version: packVisualVersion,
+        };
+      }
+      if (isImageItem(item)) {
+        return {
+          kind: 'image',
+          element: reelsImage,
+          ready: !!(reelsImage && reelsImage.complete && reelsImage.naturalWidth),
+          paused: !imageTimer,
+          muted: true,
+          currentTime: 0,
+          duration: IMAGE_DWELL_S,
+          version: String(reelsImage && reelsImage.currentSrc || ''),
+        };
+      }
+      return {
+        kind: 'video',
+        element: video,
+        ready: !!(video && video.readyState >= 2),
+        paused: !video || video.paused,
+        muted: !video || video.muted,
+        currentTime: video ? video.currentTime || 0 : 0,
+        duration: video && Number.isFinite(video.duration) ? video.duration : 0,
+        version: String(video && video.currentSrc || ''),
+      };
+    }
+
+    function notifyVisualSourceChange() {
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) WebXRVR.onVideoChange();
+    }
+
+    function wrapPackCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+      const words = String(text || '').split(/\s+/).filter(Boolean);
+      let line = '';
+      let lineNo = 0;
+      for (let i = 0; i < words.length && lineNo < maxLines; i += 1) {
+        const trial = line ? line + ' ' + words[i] : words[i];
+        if (ctx.measureText(trial).width > maxWidth && line) {
+          ctx.fillText(line, x, y + lineNo * lineHeight);
+          line = words[i];
+          lineNo += 1;
+        } else line = trial;
+      }
+      if (lineNo < maxLines && line) ctx.fillText(line, x, y + lineNo * lineHeight);
+    }
+
+    function addPackVisualRegion(action, x, y, w, h, extra) {
+      packVisualRegions.push({ action, x: x / 1024, y: y / 1024, w: w / 1024, h: h / 1024, ...(extra || {}) });
+    }
+
+    function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra) {
+      ctx.fillStyle = primary ? '#ff553a' : '#171b21';
+      ctx.strokeStyle = primary ? '#ff765f' : '#69727d';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = primary ? '#080a0d' : '#ffffff';
+      ctx.font = '900 24px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + w / 2, y + h / 2);
+      addPackVisualRegion(action, x, y, w, h, extra);
+    }
+
+    function renderPackVisual(mode) {
+      if (!isPackMode || !packVisualCanvas) return;
+      packVisualMode = mode;
+      packVisualRegions = [];
+      const ctx = packVisualCanvas.getContext('2d');
+      const pack = packState.pack || {};
+      ctx.clearRect(0, 0, 1024, 1024);
+      const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+      gradient.addColorStop(0, '#1c0d0b');
+      gradient.addColorStop(0.48, '#09101c');
+      gradient.addColorStop(1, '#05080e');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = '#ff553a';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(34, 34, 956, 956);
+      ctx.fillStyle = '#ff765f';
+      ctx.font = '900 24px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(mode === 'queue' ? 'REEL PACK QUEUE' : 'REEL PACK', 512, 104);
+
+      if (mode === 'queue') {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 42px "Archivo", sans-serif';
+        ctx.fillText(String(pack.title || 'Untitled Pack').slice(0, 34), 512, 158);
+        ctx.fillStyle = '#aeb7c3';
+        ctx.font = '700 21px "JetBrains Mono", monospace';
+        ctx.fillText(packCreatorLabel() + ' · ' + videoData.length + ' REELS', 512, 196);
+        const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
+        videoData.slice(0, 12).forEach((item, index) => {
+          const y = rowStart + index * (rowH + rowGap);
+          const current = index === idx;
+          const available = item && item.available !== false;
+          ctx.fillStyle = current ? '#2a1815' : '#11161d';
+          ctx.strokeStyle = current ? '#ff553a' : '#303945';
+          ctx.lineWidth = current ? 3 : 1;
+          ctx.fillRect(rowX, y, rowW, rowH);
+          ctx.strokeRect(rowX, y, rowW, rowH);
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = available ? '#ffffff' : '#777f89';
+          ctx.font = '800 19px "JetBrains Mono", monospace';
+          ctx.fillText(String(index + 1).padStart(2, '0'), rowX + 18, y + rowH / 2);
+          ctx.font = '700 20px "Archivo", sans-serif';
+          const name = available ? (item.title || item.filename || 'Untitled reel') : 'Reel unavailable';
+          ctx.fillText(String(name).slice(0, 50), rowX + 76, y + rowH / 2);
+          ctx.textAlign = 'right';
+          ctx.font = '800 16px "JetBrains Mono", monospace';
+          ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
+          if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
+        });
+        drawPackCanvasButton(ctx, pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK', 92, 884, 250, 72, true, 'save');
+        drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
+        drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
+      } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 58px "Archivo", sans-serif';
+        const title = mode === 'complete' ? 'PACK COMPLETE' : (mode === 'unavailable' ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack'));
+        wrapPackCanvasText(ctx, title, 512, 300, 820, 68, 2);
+        ctx.fillStyle = '#b8c0ca';
+        ctx.font = '600 25px "Archivo", sans-serif';
+        const description = mode === 'complete'
+          ? 'You reached the end of this authored collection.'
+          : mode === 'unavailable'
+            ? 'This item was removed or is inaccessible. It will be skipped.'
+            : (pack.description || ('An ordered collection by ' + packCreatorLabel() + '.'));
+        wrapPackCanvasText(ctx, description, 512, 465, 760, 38, 4);
+        if (mode === 'complete') {
+          drawPackCanvasButton(ctx, 'REPLAY PACK', 92, 720, 250, 76, true, 'replay');
+          drawPackCanvasButton(ctx, 'RETURN TO PACK', 387, 720, 250, 76, false, 'return');
+          drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
+        } else if (mode === 'unavailable') {
+          drawPackCanvasButton(ctx, 'SKIP ITEM', 337, 720, 350, 76, true, 'skip');
+        } else {
+          drawPackCanvasButton(ctx, packState.resumePositionMs > 0 ? 'RESUME PACK' : 'START PACK', 337, 720, 350, 76, true, 'start');
+        }
+      }
+      packVisualVersion += 1;
+      notifyVisualSourceChange();
+    }
+
+    function handlePackVisualSelect(point) {
+      if (!isPackMode || !point) return false;
+      const region = packVisualRegions.find((entry) =>
+        point.u >= entry.x && point.u <= entry.x + entry.w && point.v >= entry.y && point.v <= entry.y + entry.h
+      );
+      if (!region) return false;
+      if (region.action === 'start') startPackPlayback(false);
+      else if (region.action === 'replay') startPackPlayback(true);
+      else if (region.action === 'select') selectPackItem(region.index);
+      else if (region.action === 'save') togglePackSave();
+      else if (region.action === 'share') shareCurrentPack();
+      else if (region.action === 'close') setPackQueue(false);
+      else if (region.action === 'skip') nextVideo('unavailable');
+      else if (region.action === 'return') returnToPack();
+      else if (region.action === 'explore') dispatchNavigation('/explore?type=packs');
+      return true;
+    }
+
+    function pauseCurrentPlayback() {
+      const item = videoData[idx];
+      if (isImageItem(item)) clearImageTimer();
+      else if (video) {
+        try { video.pause(); } catch (e) {}
+      }
+      updatePlayBtnUI(false);
+    }
+
+    function resumeCurrentPlayback() {
+      if (!isPackMode || packState.phase !== 'playing' || packQueueOpen) return;
+      if (isImageItem(videoData[idx])) armImageTimer();
+      else if (video) video.play().catch(() => {});
+    }
+
+    function renderPackQueueDom() {
+      if (!isPackMode || !packQueueList) return;
+      packQueueList.replaceChildren();
+      const pack = packState.pack || {};
+      const title = document.getElementById('packQueueTitle');
+      const creator = document.getElementById('packQueueCreator');
+      if (title) title.textContent = pack.title || 'Untitled Pack';
+      if (creator) creator.textContent = packCreatorLabel() + ' · ' + videoData.length + ' REELS';
+      videoData.forEach((item, index) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'reels-pack-queue-item' + (index === idx ? ' current' : '');
+        row.disabled = !item || item.available === false;
+        row.setAttribute('aria-current', index === idx ? 'true' : 'false');
+        const number = document.createElement('span');
+        number.textContent = String(index + 1).padStart(2, '0');
+        const name = document.createElement('strong');
+        name.textContent = row.disabled ? 'Reel unavailable' : (item.title || item.filename || 'Untitled reel');
+        const status = document.createElement('span');
+        status.textContent = row.disabled ? 'SKIPPED' : (index === idx ? 'NOW' : 'PLAY');
+        row.append(number, name, status);
+        row.addEventListener('click', () => selectPackItem(index));
+        packQueueList.appendChild(row);
+      });
+    }
+
+    function syncPackChrome() {
+      if (!isPackMode) return;
+      const pack = packState.pack || {};
+      if (packModeBar) packModeBar.hidden = false;
+      if (packPosition) packPosition.textContent = (videoData.length ? idx + 1 : 0) + '/' + videoData.length;
+      if (packQueueBtn) packQueueBtn.title = 'Open ' + (pack.title || 'Reel Pack') + ' queue';
+      const saveLabel = pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK';
+      if (packSaveBtn) packSaveBtn.textContent = saveLabel;
+      if (packQueueSave) packQueueSave.textContent = saveLabel;
+      if (modeBtn) modeBtn.hidden = true;
+      if (notInterestedBtn) notInterestedBtn.hidden = true;
+      if (hideCreatorBtn) hideCreatorBtn.hidden = true;
+      renderPackQueueDom();
+    }
+
+    function showPackStage(mode) {
+      if (!isPackMode || !packStageCard) return;
+      packQueueOpen = false;
+      if (packQueuePanel) packQueuePanel.hidden = true;
+      packStageCard.hidden = false;
+      const pack = packState.pack || {};
+      packStageSecondary.hidden = mode !== 'complete';
+      packStageExplore.hidden = mode !== 'complete';
+      if (mode === 'complete') {
+        packStageLabel.textContent = 'REEL PACK COMPLETE';
+        packStageTitle.textContent = pack.title || 'Pack complete';
+        packStageText.textContent = 'You reached the end of this authored collection.';
+        packStageStatus.textContent = videoData.length + ' ordered reels · no automatic feed continuation';
+        packStagePrimary.textContent = 'REPLAY PACK';
+        packStagePrimary.dataset.action = 'replay';
+      } else if (mode === 'unavailable') {
+        packStageLabel.textContent = 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length;
+        packStageTitle.textContent = 'Reel unavailable';
+        packStageText.textContent = 'This reel was removed or is no longer accessible. Its place in the authored order is preserved.';
+        packStageStatus.textContent = 'Skipping without exposing protected media.';
+        packStagePrimary.textContent = 'SKIP ITEM';
+        packStagePrimary.dataset.action = 'skip';
+      } else {
+        packStageLabel.textContent = 'REEL PACK · ' + videoData.length + ' REELS';
+        packStageTitle.textContent = pack.title || 'Untitled Pack';
+        packStageText.textContent = pack.description || ('An ordered collection by ' + packCreatorLabel() + '.');
+        packStageStatus.textContent = 'Plays in the creator’s order and stops at the end.';
+        packStagePrimary.textContent = packState.resumePositionMs > 0 ? 'RESUME PACK' : 'START PACK';
+        packStagePrimary.dataset.action = 'start';
+      }
+      renderPackVisual(mode);
+      syncPackChrome();
+      try { packStagePrimary.focus({ preventScroll: true }); } catch (e) {
+        try { packStagePrimary.focus(); } catch (ignored) {}
+      }
+    }
+
+    function hidePackStage() {
+      if (packStageCard) packStageCard.hidden = true;
+      if (packQueuePanel) packQueuePanel.hidden = true;
+      packQueueOpen = false;
+      packVisualMode = '';
+      notifyVisualSourceChange();
+    }
+
+    function setPackQueue(open, options) {
+      if (!isPackMode) return false;
+      const shouldOpen = typeof open === 'boolean' ? open : !packQueueOpen;
+      if (shouldOpen) {
+        const source = currentVisualSource();
+        packResumeAfterOverlay = packState.phase === 'playing' && !source.paused;
+        pauseCurrentPlayback();
+        packQueueOpen = true;
+        if (packStageCard) packStageCard.hidden = true;
+        if (packQueuePanel) packQueuePanel.hidden = false;
+        renderPackQueueDom();
+        renderPackVisual('queue');
+        try { packQueueClose.focus({ preventScroll: true }); } catch (e) {
+          try { packQueueClose.focus(); } catch (ignored) {}
+        }
+      } else {
+        packQueueOpen = false;
+        if (packQueuePanel) packQueuePanel.hidden = true;
+        if (packState.phase !== 'playing') showPackStage(packState.phase);
+        else {
+          packVisualMode = '';
+          notifyVisualSourceChange();
+          if ((!options || options.resume !== false) && packResumeAfterOverlay) resumeCurrentPlayback();
+        }
+        packResumeAfterOverlay = false;
+      }
+      return packQueueOpen;
+    }
+
+    function packPositionSeconds() {
+      return isImageItem(videoData[idx]) ? 0 : (video && Number.isFinite(video.currentTime) ? video.currentTime : 0);
+    }
+
+    async function persistPackProgress(immediate) {
+      if (!isPackMode || !currentUser || !packState.pack || !PackState) return;
+      if (packProgressTimer) {
+        clearTimeout(packProgressTimer);
+        packProgressTimer = null;
+      }
+      const send = async () => {
+        packState.index = idx;
+        const payload = PackState.progressPayload(packState, packPositionSeconds());
+        try {
+          await requestJson('/api/packs/' + encodeURIComponent(packState.pack.id) + '/progress', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: !!immediate,
+          });
+        } catch (error) {
+          if (error.status !== 401 && error.status !== 403) console.warn('[ReelsPlayer] Pack progress save failed:', error);
+        }
+      };
+      if (immediate) return send();
+      packProgressTimer = setTimeout(send, 1200);
+    }
+
+    function schedulePackProgress() {
+      if (!isPackMode || packState.phase !== 'playing' || packProgressTimer) return;
+      packProgressTimer = setTimeout(() => {
+        packProgressTimer = null;
+        persistPackProgress(true);
+      }, 2000);
+    }
+
+    function recordPackEvent(eventType, context) {
+      if (!isPackMode || !packState.pack) return;
+      requestJson('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: eventType,
+          pack_id: packState.pack.id,
+          post_id: videoData[idx] && videoData[idx].post_id || null,
+          source: 'pack',
+          client_event_id: eventId(),
+          client_occurred_at: new Date().toISOString(),
+          context: { pack_item_id: videoData[idx] && videoData[idx].pack_item_id || null, ...(context || {}) },
+        }),
+      }).catch(() => {});
+    }
+
+    async function togglePackSave() {
+      if (!isPackMode || !packState.pack) return;
+      if (!currentUser) {
+        requestAuthentication({ kind: 'pack-save', pack_id: packState.pack.id });
+        return;
+      }
+      const wasSaved = !!packState.pack.saved_by_me;
+      packState.pack.saved_by_me = !wasSaved;
+      syncPackChrome();
+      if (packVisualMode) renderPackVisual(packVisualMode);
+      try {
+        const result = await requestJson('/api/packs/' + encodeURIComponent(packState.pack.id) + '/save', {
+          method: wasSaved ? 'DELETE' : 'PUT',
+        });
+        packState.pack.saved_by_me = !!result.saved;
+        packState.pack.saves = result.saves;
+      } catch (error) {
+        packState.pack.saved_by_me = wasSaved;
+        if (error.status === 401 || error.status === 403) requestAuthentication({ kind: 'pack-save', pack_id: packState.pack.id });
+        else showFlash('PACK SAVE FAILED');
+      }
+      syncPackChrome();
+      if (packVisualMode) renderPackVisual(packVisualMode);
+    }
+
+    async function shareCurrentPack() {
+      if (!isPackMode || !packState.pack) return;
+      pauseCurrentPlayback();
+      await persistPackProgress(true);
+      recordPackEvent('pack_share');
+      try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+      const detail = { kind: 'pack', id: packState.pack.id, pack_id: packState.pack.id, title: packState.pack.title || 'Reel Pack' };
+      window.dispatchEvent(new CustomEvent('echo:share-pack', { detail }));
+      try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-pack', { detail })); } catch (e) {}
+    }
+
+    function returnToPack() {
+      if (!isPackMode || !packState.pack) return;
+      persistPackProgress(true);
+      dispatchNavigation('/packs/' + encodeURIComponent(packState.pack.id));
+    }
+
+    function startPackPlayback(replay) {
+      if (!isPackMode || !PackState) return;
+      if (packUnavailableTimer) clearTimeout(packUnavailableTimer);
+      const resumePositionMs = replay ? 0 : Math.max(0, Number(packState.resumePositionMs) || 0);
+      packState = PackState.transition(packState, { type: replay ? 'REPLAY' : 'START' });
+      idx = packState.index;
+      if (packState.phase !== 'playing') {
+        showPackStage('complete');
+        return;
+      }
+      hidePackStage();
+      loadVideo(idx, { autoplay: true, seekTo: resumePositionMs / 1000 });
+      recordPackEvent(replay ? 'pack_start' : (resumePositionMs > 0 ? 'pack_resume' : 'pack_start'));
+      persistPackProgress(true);
+    }
+
+    function selectPackItem(index) {
+      if (!isPackMode || !PackState) return;
+      if (packUnavailableTimer) {
+        clearTimeout(packUnavailableTimer);
+        packUnavailableTimer = null;
+      }
+      const nextState = PackState.transition(packState, { type: 'SELECT', index });
+      if (nextState === packState) return;
+      packState = nextState;
+      idx = packState.index;
+      setPackQueue(false, { resume: false });
+      hidePackStage();
+      loadVideo(idx, { autoplay: true });
+      persistPackProgress(true);
+    }
+
+    function completePack() {
+      if (!isPackMode || !PackState) return;
+      pauseCurrentPlayback();
+      packState = PackState.transition(packState, { type: 'COMPLETE' });
+      showPackStage('complete');
+      persistPackProgress(true);
+      recordPackEvent('pack_complete', { reel_count: videoData.length });
+    }
+
     function showRewardToast(message, award) {
       if (!rewardToast || !message) return;
       rewardToast.textContent = message;
@@ -1915,7 +2464,8 @@
             duration_ms: measurements.duration_ms,
             watch_ratio: measurements.watch_ratio,
             position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
-            source: 'reels',
+            pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+            source: analyticsSource,
             client_event_id: state.rewardEventId,
             client_occurred_at: new Date().toISOString(),
             recommendation_impression_id: impressionId,
@@ -2016,6 +2566,7 @@
     }
 
     async function fetchNextPage() {
+      if (isPackMode) return 0;
       if (!feedHasMore || !feedCursor) return 0;
       if (feedPromise) return feedPromise;
       const generation = feedGeneration;
@@ -2055,6 +2606,7 @@
     }
 
     function maybeFetchMore() {
+      if (isPackMode) return;
       const remaining = videoData.length - idx - 1;
       if (feedHasMore && remaining <= 4) fetchNextPage();
     }
@@ -2073,6 +2625,9 @@
     }
 
     function returnPathForItem(item) {
+      if (isPackMode && packState.pack) {
+        return '/packs/' + encodeURIComponent(packState.pack.id) + '?play=1&item=' + idx;
+      }
       let path = location.pathname + location.search;
       if (location.pathname.indexOf('/api/reels/player') === 0) path = '/reels';
       try {
@@ -2085,6 +2640,10 @@
     }
 
     async function dispatchNavigation(path) {
+      if (isPackMode) {
+        pauseCurrentPlayback();
+        await persistPackProgress(true);
+      }
       await leaveImmersiveModes();
       const event = new CustomEvent('echo:navigate', {
         detail: { path: path },
@@ -2123,7 +2682,8 @@
           body: JSON.stringify({
             event_type: 'profile_open',
             post_id: item.post_id,
-            source: 'reels',
+            pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+            source: analyticsSource,
             client_event_id: eventId(),
             recommendation_impression_id: recommendationImpressionId(item),
             client_occurred_at: new Date().toISOString(),
@@ -2166,6 +2726,11 @@
         try { sessionStorage.removeItem('echo:pending-action'); } catch (e) {}
         return;
       }
+      if (pending.kind === 'pack-save' && isPackMode && packState.pack && pending.pack_id === packState.pack.id) {
+        try { sessionStorage.removeItem('echo:pending-action'); } catch (e) {}
+        await togglePackSave();
+        return;
+      }
       const targetIndex = videoData.findIndex((item) =>
         (pending.post_id && item.post_id === pending.post_id) ||
         (pending.path && item.path === pending.path)
@@ -2194,6 +2759,7 @@
       refreshAccountUI();
       refreshEngagementUI();
       if (currentUser) setTimeout(() => replayPendingAction(), 0);
+      if (currentUser && isPackMode && packState.phase === 'playing') schedulePackProgress();
     }
 
     // Compact engagement counts (1250 -> "1.2K").
@@ -2258,9 +2824,10 @@
         if (pillLabel) pillLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
       }
       if (reportBtn) reportBtn.hidden = isOwnPost || !item.post_id;
-      if (notInterestedBtn) notInterestedBtn.hidden = !item.post_id;
-      if (hideCreatorBtn) hideCreatorBtn.hidden = !creator || isOwnPost;
+      if (notInterestedBtn) notInterestedBtn.hidden = isPackMode || !item.post_id;
+      if (hideCreatorBtn) hideCreatorBtn.hidden = isPackMode || !creator || isOwnPost;
       if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
+      if (isPackMode) syncPackChrome();
     }
 
     async function likeCurrentReel() {
@@ -2329,16 +2896,22 @@
       refreshEngagementUI();
     }
 
-    function shareCurrentReel() {
+    async function shareCurrentReel() {
       const item = videoData[idx];
       if (!item || !item.post_id) return;
+      if (isPackMode) {
+        pauseCurrentPlayback();
+        await persistPackProgress(true);
+        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+      }
       requestJson('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event_type: 'share',
           post_id: item.post_id,
-          source: 'reels',
+          pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+          source: analyticsSource,
           client_event_id: eventId(),
           recommendation_impression_id: recommendationImpressionId(item),
           client_occurred_at: new Date().toISOString(),
@@ -2434,6 +3007,11 @@
     }
     async function reportTarget(targetType, targetId) {
       if (!targetId) return;
+      if (isPackMode) {
+        pauseCurrentPlayback();
+        await persistPackProgress(true);
+        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+      }
       if (!currentUser) {
         requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
         return;
@@ -2500,7 +3078,8 @@
             watch_ratio: measurements.watch_ratio,
             position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
             completed: false,
-            source: 'reels',
+            pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+            source: analyticsSource,
             client_event_id: state.viewEventId,
             client_occurred_at: new Date().toISOString(),
             recommendation_impression_id: recommendationImpressionId(state.item),
@@ -2536,7 +3115,8 @@
         body: JSON.stringify({
           event_type: 'impression',
           post_id: item.post_id,
-          source: 'reels',
+          pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+          source: analyticsSource,
           client_event_id: eventId(),
           client_occurred_at: new Date().toISOString(),
           recommendation_impression_id: recommendationImpressionId(item),
@@ -2570,7 +3150,8 @@
             watch_ratio: measurements.watch_ratio,
             position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
             completed: true,
-            source: 'reels',
+            pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+            source: analyticsSource,
             client_event_id: state.viewEventId,
             client_occurred_at: new Date().toISOString(),
             recommendation_impression_id: recommendationImpressionId(state.item),
@@ -2596,7 +3177,8 @@
           position_ms: isImageItem(state.item) ? null : Math.round((video.currentTime || 0) * 1000),
           completed: completed,
           navigation_reason: completed ? 'media_ended' : reason,
-          source: 'reels',
+          pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+          source: analyticsSource,
           client_event_id: eventId(),
           client_occurred_at: new Date().toISOString(),
           recommendation_impression_id: recommendationImpressionId(state.item),
@@ -3020,6 +3602,24 @@
     if (likeBtn) likeBtn.addEventListener('click', () => likeCurrentReel());
     if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
     if (shareBtn) shareBtn.addEventListener('click', () => shareCurrentReel());
+    if (packQueueBtn) packQueueBtn.addEventListener('click', () => setPackQueue());
+    if (packSaveBtn) packSaveBtn.addEventListener('click', () => togglePackSave());
+    if (packShareBtn) packShareBtn.addEventListener('click', () => shareCurrentPack());
+    if (packQueueClose) packQueueClose.addEventListener('click', () => setPackQueue(false));
+    if (packQueueSave) packQueueSave.addEventListener('click', () => togglePackSave());
+    if (packQueueShare) packQueueShare.addEventListener('click', () => shareCurrentPack());
+    if (packStagePrimary) {
+      packStagePrimary.addEventListener('click', () => {
+        const action = packStagePrimary.dataset.action;
+        if (action === 'replay') startPackPlayback(true);
+        else if (action === 'skip') nextVideo('unavailable');
+        else startPackPlayback(false);
+      });
+    }
+    if (packStageSecondary) packStageSecondary.addEventListener('click', returnToPack);
+    if (packStageExplore) packStageExplore.addEventListener('click', () => dispatchNavigation('/explore?type=packs'));
+    if (packStageCard) packStageCard.addEventListener('click', (event) => event.stopPropagation());
+    if (packQueuePanel) packQueuePanel.addEventListener('click', (event) => event.stopPropagation());
     if (followBtn) followBtn.addEventListener('click', () => followCurrentCreator());
     if (followPill) followPill.addEventListener('click', () => followCurrentCreator());
     if (notInterestedBtn) notInterestedBtn.addEventListener('click', () => dismissCurrentRecommendation('not_interested'));
@@ -3072,7 +3672,7 @@
       }
       const nextIdx = currentIndex + 1;
       const nextItem = videoData[nextIdx];
-      if (!nextItem) {
+      if (!nextItem || nextItem.available === false || nextItem.media_type === 'static') {
         clearPreloadVideo();
         return;
       }
@@ -3103,6 +3703,7 @@
       video.style.display = 'none';
       reelsImage.src = itemUrl;
       reelsImage.alt = item.title || item.filename || 'Image reel';
+      reelsImage.onload = notifyVisualSourceChange;
       reelsImage.style.display = 'block';
       if (videoWrap) videoWrap.classList.add('image-mode');
       if (progressWrap) progressWrap.classList.add('image-hidden');
@@ -3122,6 +3723,7 @@
       }
       if (!options || options.autoplay !== false) armImageTimer();
       else updatePlayBtnUI(false);
+      if (isPackMode) schedulePackProgress();
     }
 
     function loadVideo(index, options) {
@@ -3140,8 +3742,32 @@
       pruneBlobCache(idx);
 
       const item = videoData[idx];
+      if (isPackMode) {
+        packState.index = idx;
+        packState.phase = 'playing';
+        packState.resumePositionMs = 0;
+        syncPackChrome();
+        if (!item || item.available === false || item.media_type === 'static') {
+          try { video.pause(); } catch (e) {}
+          video.style.display = 'none';
+          if (reelsImage) {
+            reelsImage.style.display = 'none';
+            reelsImage.removeAttribute('src');
+          }
+          if (progressWrap) progressWrap.classList.add('image-hidden');
+          metaFolder.textContent = '▦ REEL PACK';
+          metaTitle.textContent = 'Reel unavailable';
+          metaSize.textContent = '';
+          showPackStage('unavailable');
+          persistPackProgress(true);
+          if (packUnavailableTimer) clearTimeout(packUnavailableTimer);
+          packUnavailableTimer = setTimeout(() => nextVideo('unavailable'), 1600);
+          return;
+        }
+        hidePackStage();
+      }
       if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length + (feedHasMore ? '+' : '');
-      metaFolder.textContent = '📁 ' + (item.folder || 'root');
+      metaFolder.textContent = isPackMode ? '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length : '📁 ' + (item.folder || 'root');
       metaTitle.textContent = item.title || item.filename;
       try {
         metaTitle.title = item.caption || item.filename;
@@ -3150,6 +3776,7 @@
       refreshEngagementUI();
       startViewTracking(item);
       maybeFetchMore();
+      if (isPackMode) recordPackEvent('pack_item_view', { index: idx });
 
       // Update comments display for this reel
       renderDrawerComments();
@@ -3179,6 +3806,7 @@
         if (video.readyState >= 1) restoreTime();
         else video.addEventListener('loadedmetadata', restoreTime, { once: true });
       }
+      if (isPackMode) schedulePackProgress();
 
       renderCommentMarkers();
       updateTwitchTicker();
@@ -3359,6 +3987,10 @@
 
     // Toggle Mode
     function toggleMode() {
+      if (isPackMode) {
+        showFlash('AUTHORED ORDER');
+        return;
+      }
       flashBtn(modeBtn);
       isAutoNext = !isAutoNext;
       updateModeBtnUI(isAutoNext);
@@ -3432,6 +4064,22 @@
     // Navigation
     async function nextVideo(reason) {
       finishViewTracking(reason || 'manual_next');
+      if (isPackMode && PackState) {
+        if (packUnavailableTimer) {
+          clearTimeout(packUnavailableTimer);
+          packUnavailableTimer = null;
+        }
+        packState.index = idx;
+        packState = PackState.transition(packState, { type: 'NEXT' });
+        if (packState.phase === 'complete') {
+          completePack();
+          return;
+        }
+        idx = packState.index;
+        loadVideo(idx);
+        persistPackProgress(true);
+        return;
+      }
       if (idx + 1 >= videoData.length && feedHasMore) {
         await fetchNextPage();
       }
@@ -3442,6 +4090,23 @@
       }
     }
     function prevVideo() {
+      if (isPackMode && PackState) {
+        if (packUnavailableTimer) {
+          clearTimeout(packUnavailableTimer);
+          packUnavailableTimer = null;
+        }
+        packState.index = idx;
+        const nextState = PackState.transition(packState, { type: 'PREV' });
+        if (nextState.index === idx) {
+          showFlash('START OF PACK');
+          return;
+        }
+        packState = nextState;
+        idx = packState.index;
+        loadVideo(idx);
+        persistPackProgress(true);
+        return;
+      }
       if (idx <= 0) {
         showFlash('START OF FEED');
         return;
@@ -3868,6 +4533,7 @@
 
     // Update Progress Bar & Time-Synced Overlays
     video.addEventListener('timeupdate', () => {
+      schedulePackProgress();
       if (video.duration) {
         const pct = (video.currentTime / video.duration) * 100;
         progressFill.style.width = pct + '%';
@@ -3988,6 +4654,11 @@
       }
       const key = e.key.toLowerCase();
       if (key === 'escape') {
+        if (isPackMode && packQueueOpen) {
+          setPackQueue(false);
+          try { packQueueBtn.focus({ preventScroll: true }); } catch (focusError) {}
+          return;
+        }
         toggleDrawer(false);
         const fsTarget = frame.parentElement || frame;
         if (fsTarget.classList.contains('sx-pseudo-fullscreen') || frame.classList.contains('sx-pseudo-fullscreen')) {
@@ -4037,6 +4708,39 @@
         onTogglePlay: togglePlay,
         onToggleMode: toggleMode,
         onSeek: seekRelative,
+        onToggleMute: toggleSound,
+        getVisualSource: currentVisualSource,
+        isPackMode: function() { return isPackMode; },
+        getPackContext: function() {
+          if (!isPackMode || !packState.pack) return null;
+          return {
+            id: packState.pack.id,
+            title: packState.pack.title,
+            creator: packCreatorLabel(),
+            index: idx,
+            total: videoData.length,
+            phase: packState.phase,
+            queueOpen: packQueueOpen,
+            saved: !!packState.pack.saved_by_me,
+          };
+        },
+        onTogglePackQueue: function() { return setPackQueue(); },
+        onMainScreenSelect: handlePackVisualSelect,
+        onSavePack: togglePackSave,
+        onSharePack: shareCurrentPack,
+        onLike: likeCurrentReel,
+        onSaveReel: saveCurrentReel,
+        onShareReel: shareCurrentReel,
+        onFollow: followCurrentCreator,
+        onOpenCurrentProfile: function() {
+          const creator = videoData[idx] && videoData[idx].creator;
+          if (creator && creator.username) openProfile(creator.username);
+        },
+        onReportReel: function() { return reportTarget('post', videoData[idx] && videoData[idx].post_id); },
+        getCurrentItemState: function() {
+          const item = videoData[idx] || {};
+          return { liked: !!item._liked, saved: !!item._saved, following: !!item._following, available: item.available !== false };
+        },
         onUnmute: function() {
           isMuted = false;
           if (soundBtn) {
@@ -4093,7 +4797,7 @@
 
       // Per Meta WebXR guidance, only offer the immersive session when the
       // runtime reports support — don't infer it from script presence.
-      if (vrBtnWrap && typeof WebXRVR.isSupported === 'function') {
+      if (vrBtnWrap && packImmersiveEnabled && typeof WebXRVR.isSupported === 'function') {
         WebXRVR.isSupported().then((supported) => {
           if (supported) vrBtnWrap.style.display = '';
         }).catch(() => {});
@@ -4101,12 +4805,13 @@
 
       if (vrBtn) {
         vrBtn.addEventListener('click', function() {
-          isMuted = false;
-          if (video) video.muted = false;
-          if (soundBtn) {
-            soundBtn.textContent = '🔊';
-            soundBtn.classList.add('active');
+          if (!packImmersiveEnabled) {
+            showFlash('PACK VR DISABLED');
+            return;
           }
+          // Avoid background preload contending with the XR decoder/texture
+          // upload path for the active pack item.
+          try { clearPreloadVideo(); } catch (e) {}
           WebXRVR.enterVR();
         });
       }
@@ -4121,6 +4826,9 @@
 
     function updateDesktopGlow() {
       if (!video || video.paused || video.readyState < 2 || !glowEl || document.hidden) return;
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) return;
+      } catch (e) {}
       try {
         glowCtx.drawImage(video, 0, 0, 4, 4);
         const data = glowCtx.getImageData(0, 0, 4, 4).data;
@@ -4140,10 +4848,19 @@
     window.__sxGlowInterval = setInterval(updateDesktopGlow, 140);
 
     window.__sxReelsRuntimeCleanup = function () {
+      if (isPackMode && packState.phase === 'playing') persistPackProgress(true);
       finishViewTracking('unload');
       abortFeedWork();
       clearImageTimer();
       clearBlobCache();
+      if (packProgressTimer) {
+        clearTimeout(packProgressTimer);
+        packProgressTimer = null;
+      }
+      if (packUnavailableTimer) {
+        clearTimeout(packUnavailableTimer);
+        packUnavailableTimer = null;
+      }
       if (tickerHideTimer) clearTimeout(tickerHideTimer);
       if (rewardToastTimer) clearTimeout(rewardToastTimer);
       if (rewardToast) rewardToast.classList.remove('show');
@@ -4155,7 +4872,22 @@
     };
 
     // Initial Load
-    if (videoData.length) loadVideo(0);
+    if (isPackMode) {
+      syncPackChrome();
+      recordPackEvent('pack_open');
+      if (!videoData.length) {
+        packState.phase = 'complete';
+        showPackStage('complete');
+      } else if (packState.phase === 'complete') {
+        showPackStage('complete');
+      } else if (packState.phase === 'intro') {
+        showPackStage('intro');
+      } else {
+        const resumeSeconds = Math.max(0, Number(packState.resumePositionMs) || 0) / 1000;
+        loadVideo(packState.index, { autoplay: true, seekTo: resumeSeconds });
+        recordPackEvent(resumeSeconds > 0 ? 'pack_resume' : 'pack_start');
+      }
+    } else if (videoData.length) loadVideo(0);
     else showError('No recommendations are currently available.');
     loadCurrentUser();
   })();

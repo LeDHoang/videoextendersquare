@@ -313,6 +313,7 @@ class ViewRequest(BaseModel):
     playback_quality: dict = Field(default_factory=dict)
     client_occurred_at: datetime | None = None
     recommendation_impression_id: str | None = None
+    pack_id: str | None = None
     source: str = "reels"
     client_event_id: str | None = None
     context: dict = Field(default_factory=dict)
@@ -321,6 +322,7 @@ class ViewRequest(BaseModel):
 class EventRequest(BaseModel):
     event_type: str
     post_id: str | None = None
+    pack_id: str | None = None
     watch_ms: int | None = None
     foreground_ms: int | None = None
     duration_ms: int | None = None
@@ -1032,6 +1034,13 @@ def record_view(
     validate_origin(request)
     viewer_id = auth_user_id(context)
     post = get_visible_post(db, post_id, viewer_id)
+    pack = None
+    if req.pack_id:
+        from server.routers.packs import active_item, get_pack_for_viewer
+
+        pack = get_pack_for_viewer(db, req.pack_id, viewer_id)
+        if not any(active_item(item) and item.post_id == post.id for item in pack.items):
+            error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
     anonymous_hash = ensure_anonymous_cookie(request, response)
     qualified = req.completed or req.watch_ms >= (2000 if post.media_type == "image" else 3000)
     counted = False
@@ -1051,6 +1060,7 @@ def record_view(
         db,
         event_type="view" if qualified else "playback",
         post_id=post.id,
+        pack_id=pack.id if pack else None,
         user_id=viewer_id,
         anonymous_id=None if viewer_id else anonymous_hash,
         source=req.source,
@@ -1089,17 +1099,27 @@ def create_event(
         "impression", "open", "playback", "view", "complete", "skip", "reward_eligible",
         "search_impression", "search_select", "share", "share_sent",
         "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
+        "pack_impression", "pack_open", "pack_start", "pack_resume", "pack_item_view", "pack_complete",
+        "pack_share", "pack_message_open",
     }
     event_type = req.event_type.strip().casefold()
     if event_type not in allowed:
         error(422, "INVALID_EVENT", "Unsupported event type.", "event_type")
     viewer_id = auth_user_id(context)
     post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
+    pack = None
+    if req.pack_id:
+        from server.routers.packs import active_item, get_pack_for_viewer
+
+        pack = get_pack_for_viewer(db, req.pack_id, viewer_id)
+        if post and not any(active_item(item) and item.post_id == post.id for item in pack.items):
+            error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
     anonymous_hash = ensure_anonymous_cookie(request, response)
     row = record_event(
         db,
         event_type=event_type,
         post_id=post.id if post else None,
+        pack_id=pack.id if pack else None,
         user_id=viewer_id,
         anonymous_id=None if viewer_id else anonymous_hash,
         source=req.source,

@@ -13,7 +13,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
   /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v5.1-20260912-earth-heat-zones';
+  const VR_VERSION = 'v5.2-20260913-reel-packs';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -21,6 +21,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let xrRefSpace = null;
   let videoElement = null;
   let callbacks = {};
+  let lastVisualKind = '';
+  let lastVisualVersion = '';
+  let lastVisualElement = null;
 
   // Curvature Settings
   // 1: Concave Hemisphere (Radial Dome, Default - Center is focal point, curves on all sides)
@@ -284,7 +287,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let controlsCanvas = null;
   let controlsCtx = null;
   const CONTROLS_W = 800;
-  const CONTROLS_H = 260;
+  const CONTROLS_H = 360;
   const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge
 
   // Meta Quest Guide Panel State
@@ -296,6 +299,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   const GUIDE_W = 440;
   const GUIDE_H = 760;
   let hoveredButton = -1;
+  let pressedButton = -1;
   let lastControlsCanvasX = 0;
   let lastControlsCanvasY = 0;
   let controlsAutoHideTimer = null;
@@ -425,9 +429,87 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Header exit button
     { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
 
+    // Existing reel actions remain available in both feed and pack playback.
+    { label: 'LIKE',       action: 'like',       x: 24,  y: 184, w: 112, h: 42 },
+    { label: 'SAVE REEL',  action: 'save_reel',  x: 144, y: 184, w: 112, h: 42 },
+    { label: 'SHARE REEL', action: 'share_reel', x: 264, y: 184, w: 112, h: 42 },
+    { label: 'FOLLOW',     action: 'follow',     x: 384, y: 184, w: 112, h: 42 },
+    { label: 'PROFILE',    action: 'profile',    x: 504, y: 184, w: 112, h: 42 },
+    { label: 'REPORT',     action: 'report',     x: 624, y: 184, w: 152, h: 42 },
+
+    // Pack-level actions are intentionally separate from reel-level actions.
+    { label: 'SAVE PACK',  action: 'save_pack',  x: 218, y: 238, w: 174, h: 42 },
+    { label: 'SHARE PACK', action: 'share_pack', x: 408, y: 238, w: 174, h: 42 },
+
     // Bottom progress scrub track
-    { label: 'TRACK', action: 'seek',  x: 24,  y: 202, w: 752, h: 32 },
+    { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
   ];
+
+  function isPackExperience() {
+    return !!(callbacks.isPackMode && callbacks.isPackMode());
+  }
+
+  function getPackContext() {
+    if (!callbacks.getPackContext) return null;
+    try { return callbacks.getPackContext() || null; } catch (e) { return null; }
+  }
+
+  function getVisualSource() {
+    let source = null;
+    if (callbacks.getVisualSource) {
+      try { source = callbacks.getVisualSource(); } catch (e) { source = null; }
+    }
+    if (!source || !source.element) {
+      source = {
+        kind: 'video',
+        element: videoElement,
+        ready: !!(videoElement && videoElement.readyState >= 2),
+        paused: !videoElement || !!videoElement.paused,
+        muted: !videoElement || !!videoElement.muted,
+        currentTime: videoElement ? Number(videoElement.currentTime) || 0 : 0,
+        duration: videoElement && Number.isFinite(videoElement.duration) ? videoElement.duration : 0,
+        version: videoElement ? String(videoElement.currentSrc || videoElement.src || '') : '',
+      };
+    }
+    const kind = source.kind === 'image' || source.kind === 'static-card' ? source.kind : 'video';
+    return {
+      ...source,
+      kind,
+      ready: source.ready !== false && !!source.element,
+      paused: source.paused !== false,
+      muted: source.muted !== false,
+      currentTime: Math.max(0, Number(source.currentTime) || 0),
+      duration: Math.max(0, Number(source.duration) || 0),
+      version: String(source.version === undefined || source.version === null ? '' : source.version),
+    };
+  }
+
+  function visualPointFromHit(hitLocal) {
+    if (!hitLocal || !screenScale) return null;
+    return {
+      u: Math.max(0, Math.min(1, (hitLocal.x / screenScale) + 0.5)),
+      v: Math.max(0, Math.min(1, 0.5 - (hitLocal.y / screenScale))),
+    };
+  }
+
+  function isReelAction(action) {
+    return action === 'like' || action === 'save_reel' || action === 'share_reel' ||
+      action === 'follow' || action === 'profile' || action === 'report';
+  }
+
+  function isPackAction(action) {
+    return action === 'save_pack' || action === 'share_pack';
+  }
+
+  function isControlVisible(action, source, itemState) {
+    if (isPackAction(action)) return isPackExperience();
+    if (isReelAction(action)) return source.kind !== 'static-card' && itemState.available !== false;
+    if (source.kind === 'static-card' &&
+        (action === 'rew' || action === 'prev' || action === 'play' ||
+         action === 'next' || action === 'fwd' || action === 'seek')) return false;
+    if (source.kind === 'image' && (action === 'rew' || action === 'fwd' || action === 'seek')) return false;
+    return true;
+  }
 
   // ─── Quaternion & Vector Math Helpers ───────────────────────────────
 
@@ -580,9 +662,10 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function renderOverlayCanvas() {
     const ctx = overlayCtx;
-    if (!ctx || !videoElement) return false;
+    const source = getVisualSource();
+    if (!ctx || source.kind === 'static-card') return false;
 
-    const currentTime = videoElement.currentTime || 0;
+    const currentTime = source.currentTime || 0;
     const comments = callbacks.getComments ? callbacks.getComments() : [];
 
     // Filter active time-synced comments within active window [timestamp, timestamp + 4.2s]
@@ -730,10 +813,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ctx = controlsCtx;
     if (!ctx) return;
 
-    const isPaused = videoElement ? videoElement.paused : true;
-    const isMuted = videoElement ? videoElement.muted : true;
-    const currentTime = videoElement ? videoElement.currentTime : 0;
-    const duration = videoElement ? videoElement.duration : 0;
+    const source = getVisualSource();
+    const packMode = isPackExperience();
+    const packContext = getPackContext();
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
+    }
+    const isPaused = source.paused;
+    const isMuted = source.muted;
+    const currentTime = source.currentTime;
+    const duration = source.duration;
     const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
 
     const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
@@ -768,10 +858,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.font = 'bold 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('4K VR REELS', 36, 24);
+    ctx.fillText(packMode ? 'REEL PACK' : '4K VR REELS', 36, 24);
 
     // Filename
-    let dispName = item ? item.filename : 'SYS_RENDER_004.mp4';
+    let dispName = packMode && packContext
+      ? (packContext.title || 'UNTITLED PACK')
+      : (item ? (item.title || item.filename) : 'SYS_RENDER_004.mp4');
     if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
     ctx.fillStyle = '#E3E2E3';
     ctx.font = '12px "JetBrains Mono", monospace';
@@ -808,25 +900,29 @@ window.WebXRVR = window.WebXRVR || (function () {
     const earthButton = CTRL_BUTTONS[earthBtnIdx];
     const isEarthHover = hoveredButton === earthBtnIdx;
     const hasLocationFeed = callbacks.isLocationFeedActive && callbacks.isLocationFeedActive();
-    const earthActive = sceneMode === 'earth' || isEarthHover;
+    const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
     const earthGradient = ctx.createLinearGradient(earthButton.x, earthButton.y, earthButton.x + earthButton.w, earthButton.y);
-    earthGradient.addColorStop(0, earthActive ? '#093D5B' : '#0B202D');
-    earthGradient.addColorStop(1, earthActive ? '#126E88' : '#123445');
+    earthGradient.addColorStop(0, packMode ? (earthActive ? '#512019' : '#241512') : (earthActive ? '#093D5B' : '#0B202D'));
+    earthGradient.addColorStop(1, packMode ? (earthActive ? '#8A2D1C' : '#3B1C17') : (earthActive ? '#126E88' : '#123445'));
     ctx.fillStyle = earthGradient;
-    ctx.strokeStyle = earthActive ? '#55E7FF' : '#2B8DA4';
+    ctx.strokeStyle = packMode ? (earthActive ? '#FF9B88' : '#FF553A') : (earthActive ? '#55E7FF' : '#2B8DA4');
     ctx.lineWidth = earthActive ? 2 : 1;
-    ctx.shadowColor = earthActive ? 'rgba(66, 224, 255, 0.55)' : 'rgba(20, 156, 190, 0.22)';
+    ctx.shadowColor = packMode
+      ? (earthActive ? 'rgba(255, 85, 58, 0.55)' : 'rgba(255, 85, 58, 0.22)')
+      : (earthActive ? 'rgba(66, 224, 255, 0.55)' : 'rgba(20, 156, 190, 0.22)');
     ctx.shadowBlur = earthActive ? 12 : 6;
     ctx.beginPath();
     ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, 5);
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = earthActive ? '#FFFFFF' : '#BEEFFC';
+    ctx.fillStyle = earthActive ? '#FFFFFF' : (packMode ? '#FFD8D0' : '#BEEFFC');
     ctx.font = 'bold 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(
-      hasLocationFeed && sceneMode !== 'earth' ? 'ALL LOCATIONS' : (sceneMode === 'earth' ? 'BACK TO REELS' : '◎ EARTH MAP'),
+      packMode && packContext
+        ? ('▦ PACK ' + (Number(packContext.index || 0) + 1) + '/' + Number(packContext.total || 0))
+        : (hasLocationFeed && sceneMode !== 'earth' ? 'ALL LOCATIONS' : (sceneMode === 'earth' ? 'BACK TO REELS' : '◎ EARTH MAP')),
       earthButton.x + earthButton.w / 2,
       24
     );
@@ -867,12 +963,39 @@ window.WebXRVR = window.WebXRVR || (function () {
     // 4. Main Controls Cluster
     CTRL_BUTTONS.forEach((btn, i) => {
       if (btn.action === 'exit' || btn.action === 'seek' || btn.action === 'comments' || btn.action === 'earth') return;
+      if (!isControlVisible(btn.action, source, itemState)) return;
 
       const isHover = (hoveredButton === i);
+      const isPressed = (pressedButton === i);
+
+      if (isReelAction(btn.action) || isPackAction(btn.action)) {
+        const active = (btn.action === 'like' && itemState.liked) ||
+          (btn.action === 'save_reel' && itemState.saved) ||
+          (btn.action === 'follow' && itemState.following) ||
+          (btn.action === 'save_pack' && packContext && packContext.saved);
+        const packAction = isPackAction(btn.action);
+        ctx.fillStyle = isPressed ? '#07090C' : (active ? '#FF553A' : (isHover ? '#242A31' : '#11161D'));
+        ctx.strokeStyle = packAction ? '#FF9B88' : (active || isHover ? '#FF553A' : '#56616D');
+        ctx.lineWidth = packAction ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = active ? '#090B0E' : '#F4F6F8';
+        ctx.font = '800 10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let actionLabel = btn.label;
+        if (btn.action === 'like' && itemState.liked) actionLabel = 'LIKED';
+        if (btn.action === 'save_reel' && itemState.saved) actionLabel = 'REEL SAVED';
+        if (btn.action === 'follow' && itemState.following) actionLabel = 'FOLLOWING';
+        if (btn.action === 'save_pack' && packContext && packContext.saved) actionLabel = 'PACK SAVED';
+        ctx.fillText(actionLabel, btn.x + btn.w / 2, btn.y + btn.h / 2);
+      }
 
       // Left Column Pill Buttons (AUTO / DOME)
-      if (btn.action === 'mode' || btn.action === 'curve') {
-        ctx.fillStyle = isHover ? '#1D2126' : '#101214';
+      else if (btn.action === 'mode' || btn.action === 'curve') {
+        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
         ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -885,21 +1008,21 @@ window.WebXRVR = window.WebXRVR || (function () {
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const label = btn.action === 'mode'
-          ? (isAutoNext ? 'AUTO' : 'LOOP')
+          ? (packMode ? 'AUTHORED' : (isAutoNext ? 'AUTO' : 'LOOP'))
           : (curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT'));
         ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
 
         ctx.font = '15px sans-serif';
         ctx.textAlign = 'right';
         ctx.fillStyle = isHover ? '#FF3B1F' : '#C5C6C8';
-        const icon = btn.action === 'mode' ? '⟳' : '🌐';
+        const icon = btn.action === 'mode' ? (packMode ? '≡' : '⟳') : '🌐';
         ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
       }
 
       // Right Column Pill Buttons (LOCK / AUDIO)
       else if (btn.action === 'lock' || btn.action === 'mute') {
         const isLockActive = (btn.action === 'lock' && lockToViewer);
-        ctx.fillStyle = (isLockActive || isHover) ? '#1D2126' : '#101214';
+        ctx.fillStyle = isPressed ? '#07090C' : ((isLockActive || isHover) ? '#1D2126' : '#101214');
         ctx.strokeStyle = (isLockActive || isHover) ? '#FF3B1F' : '#3A4047';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -927,7 +1050,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       // Center Secondary Buttons (rew, prev, next, fwd)
       else if (btn.action !== 'play') {
-        ctx.fillStyle = isHover ? '#1D2126' : '#101214';
+        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
         ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -949,7 +1072,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       // Center Primary Play/Pause Glow Button
       else if (btn.action === 'play') {
-        ctx.fillStyle = '#FF3B1F';
+        ctx.fillStyle = isPressed ? '#C93420' : '#FF3B1F';
         ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
         ctx.shadowBlur = isHover ? 28 : 20;
         ctx.beginPath();
@@ -970,8 +1093,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.strokeStyle = '#24282D';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(24, 184);
-    ctx.lineTo(776, 184);
+    ctx.moveTo(24, 296);
+    ctx.lineTo(776, 296);
     ctx.stroke();
 
     // Time Indicators
@@ -979,14 +1102,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#FF3B1F';
-    ctx.fillText(formatTime(currentTime), 24, 198);
+    ctx.fillText(formatTime(currentTime), 24, 312);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#9BA1A8';
-    ctx.fillText(formatTime(duration), 776, 198);
+    ctx.fillText(formatTime(duration), 776, 312);
 
     // Track Bar
-    const trackX = 24, trackY = 214, trackW = 752, trackH = 6;
+    const trackX = 24, trackY = 338, trackW = 752, trackH = 6;
     ctx.fillStyle = '#101214';
     ctx.strokeStyle = '#3A4047';
     ctx.lineWidth = 1;
@@ -1749,7 +1872,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.fillStyle = 'rgba(155,161,168,0.8)';
     ctx.font = '700 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
-    ctx.fillText('SYNC: ' + formatTime(videoElement ? videoElement.currentTime : 0), CPANEL_W - 16, footerY + 28);
+    ctx.fillText('SYNC: ' + formatTime(getVisualSource().currentTime), CPANEL_W - 16, footerY + 28);
 
     const addHover = cPanelHover === 'add';
     ctx.fillStyle = addHover ? '#ff6a52' : accent;
@@ -1886,7 +2009,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   function openVrKeyboard() {
     initDomOverlay();
     if (!domOverlayInput) return;
-    pendingSyncTime = videoElement ? Math.round(videoElement.currentTime * 10) / 10 : null;
+    const source = getVisualSource();
+    pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
     domOverlayInput.value = '';
     domOverlayInput.style.display = 'block';
     try { domOverlayInput.focus(); } catch (e) {}
@@ -2031,6 +2155,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function hitTestControls(rayOrigin, rayDir) {
+    const source = getVisualSource();
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
+    }
     const ctrlCenter = getControlsCenter();
     const ctrlWidth = getControlsScale() * 0.82;
     const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
@@ -2065,6 +2194,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit') continue;
+      if (!isControlVisible(btn.action, source, itemState)) continue;
       if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
           canvasY >= btn.y && canvasY <= btn.y + btn.h) {
         return i;
@@ -2077,6 +2207,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (index < 0 || index >= CTRL_BUTTONS.length) return;
     const action = CTRL_BUTTONS[index].action;
     if (sceneMode === 'earth' && action !== 'earth' && action !== 'exit') return;
+    pressedButton = index;
+    vrLastUiUploadT = -1;
     resetAutoHideTimer();
     switch (action) {
       case 'prev':  callbacks.onPrev && callbacks.onPrev(); break;
@@ -2097,21 +2229,44 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         break;
       case 'mute':
-        if (videoElement) {
+        if (callbacks.onToggleMute) callbacks.onToggleMute();
+        else if (videoElement) {
           videoElement.muted = !videoElement.muted;
           if (callbacks.onMuteChange) callbacks.onMuteChange(videoElement.muted);
         }
         break;
       case 'seek':
-        if (videoElement && videoElement.duration) {
+        {
+          const source = getVisualSource();
+          if (!source.duration) break;
           const ratio = Math.max(0, Math.min(1, (lastControlsCanvasX - 24) / 752));
-          videoElement.currentTime = ratio * videoElement.duration;
+          const target = ratio * source.duration;
+          if (callbacks.onSeekTo) callbacks.onSeekTo(target);
+          else if (source.kind === 'video' && source.element) source.element.currentTime = target;
         }
         break;
       case 'comments': toggleCommentsPanel(); break;
-      case 'earth': toggleEarthMode(); break;
+      case 'earth':
+        if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
+        else toggleEarthMode();
+        break;
+      case 'like': callbacks.onLike && callbacks.onLike(); break;
+      case 'save_reel': callbacks.onSaveReel && callbacks.onSaveReel(); break;
+      case 'share_reel': callbacks.onShareReel && callbacks.onShareReel(); break;
+      case 'follow': callbacks.onFollow && callbacks.onFollow(); break;
+      case 'profile': callbacks.onOpenCurrentProfile && callbacks.onOpenCurrentProfile(); break;
+      case 'report': callbacks.onReportReel && callbacks.onReportReel(); break;
+      case 'save_pack': callbacks.onSavePack && callbacks.onSavePack(); break;
+      case 'share_pack': callbacks.onSharePack && callbacks.onSharePack(); break;
       case 'exit':  xrSession ? exitVR() : stopPreview(); break;
     }
+  }
+
+  function pulseInput(source) {
+    const actuator = source && source.gamepad && source.gamepad.hapticActuators &&
+      source.gamepad.hapticActuators[0];
+    if (!actuator || typeof actuator.pulse !== 'function') return;
+    try { actuator.pulse(0.45, 120).catch(() => {}); } catch (e) {}
   }
 
   // ─── Controls Visibility ─────────────────────────────────────────────
@@ -2140,7 +2295,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function resetAutoHideTimer() {
     clearAutoHideTimer();
-    if (videoElement && !videoElement.paused) {
+    if (!getVisualSource().paused) {
       controlsAutoHideTimer = setTimeout(function() {
         controlsVisible = false;
       }, CONTROLS_AUTO_HIDE_MS);
@@ -2799,8 +2954,10 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function openEarthMode() {
     if (sceneMode === 'earth') return;
+    if (isPackExperience()) return;
+    const source = getVisualSource();
     sceneMode = 'earth';
-    earthResumePlayback = !!(videoElement && !videoElement.paused);
+    earthResumePlayback = !source.paused;
     commentsPanelVisible = false;
     controlsVisible = true;
     clearAutoHideTimer();
@@ -2822,8 +2979,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthHoveredIndex = -1;
     earthSelectedIndex = -1;
     uploadEarthHeatZones();
-    if (videoElement) {
-      try { videoElement.pause(); } catch (e) {}
+    if (source.kind === 'video' && source.element) {
+      try { source.element.pause(); } catch (e) {}
     }
     if (callbacks.onEarthOpen) {
       const resumeOverride = callbacks.onEarthOpen(earthResumePlayback);
@@ -2866,6 +3023,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function toggleEarthMode() {
+    if (isPackExperience()) {
+      if (callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
+      return;
+    }
     if (sceneMode === 'earth') {
       closeEarthMode();
       return;
@@ -3085,7 +3246,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // stride-1 4K upload (~100ms flush) can never fit an 11-14ms XR budget.
   // Low-res files (720p/1080p/1280²) start at 1 → full frame rate.
   function vrMinStride() {
-    const w = videoElement ? (videoElement.videoWidth || 0) : 0;
+    const source = getVisualSource();
+    const w = source.kind === 'video' && source.element ? (source.element.videoWidth || 0) : 0;
     if (w >= 3000) return 2;
     return 1;
   }
@@ -3108,8 +3270,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     _diagLastPost = time;
     _diagForce = false;
 
-    const pq = (videoElement && videoElement.getVideoPlaybackQuality)
-      ? videoElement.getVideoPlaybackQuality() : null;
+    const source = getVisualSource();
+    const mediaElement = source.kind === 'video' ? source.element : null;
+    const pq = (mediaElement && mediaElement.getVideoPlaybackQuality)
+      ? mediaElement.getVideoPlaybackQuality() : null;
     const pqTotal = pq ? pq.totalVideoFrames : 0;
     const pqDropped = pq ? pq.droppedVideoFrames : 0;
     if (_diagLastPqTotal < 0) _diagLastPqTotal = pqTotal;
@@ -3147,10 +3311,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       pqDropped: pqDropped,
       texTarget: videoTexMode,
       upStride: vrUploadStride,
-      videoW: videoElement ? videoElement.videoWidth : 0,
-      videoH: videoElement ? videoElement.videoHeight : 0,
-      ct: videoElement ? +(videoElement.currentTime).toFixed(2) : 0,
-      ready: videoElement ? videoElement.readyState : 0,
+      visualKind: source.kind,
+      videoW: mediaElement ? mediaElement.videoWidth : 0,
+      videoH: mediaElement ? mediaElement.videoHeight : 0,
+      ct: +source.currentTime.toFixed(2),
+      ready: source.ready ? 1 : 0,
       gl: _diagGLInfo,
     };
     try {
@@ -3629,7 +3794,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function updateAmbilightColor(now) {
-    if (!videoElement || videoElement.readyState < 2 || videoElement.paused) return;
+    const source = getVisualSource();
+    // Static cards (intro/queue/complete/unavailable) are canvas textures —
+    // sampling them here wastes an XR-thread readback for no glow benefit.
+    // 2D glow already samples video only; keep XR consistent.
+    if (!source.ready || !source.element || source.kind !== 'video') return;
+    if (source.kind === 'video' && source.paused) return;
     // In-XR the drawImage+getImageData readback below runs ON the XR thread and
     // forces a CPU sync against the playing decoder (typically 10-20ms — a
     // missed vsync at 72Hz that never trips the >20ms tripwire, i.e. invisible
@@ -3640,7 +3810,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastColorSampleTime = now;
 
     try {
-      ambilightCtx.drawImage(videoElement, 0, 0, 8, 8);
+      ambilightCtx.drawImage(source.element, 0, 0, 8, 8);
       const imgData = ambilightCtx.getImageData(0, 0, 8, 8).data;
       let r = 0, g = 0, b = 0;
       const count = 64;
@@ -4285,23 +4455,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
       curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
 
-      if (videoElement && videoElement.readyState >= 2 &&
-          (hasNewVideoFrame || videoElement.currentTime !== lastVideoTime)) {
-        gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-        if (videoTexMode === 'subimage' && videoTexAllocated) {
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-        } else if (glVideoTextureB && videoTexMode === '2d') {
-          const backTex = videoTexFront === 0 ? glVideoTextureB : glVideoTexture;
-          gl.bindTexture(gl.TEXTURE_2D, backTex);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-          videoTexFront = videoTexFront === 0 ? 1 : 0;
-        } else {
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-          videoTexAllocated = true;
-        }
+      const source = getVisualSource();
+      const visualChanged = source.kind !== lastVisualKind ||
+        visualSourceSignature(source) !== lastVisualVersion ||
+        source.element !== lastVisualElement;
+      if (source.ready && (source.kind !== 'video' ? visualChanged :
+          (hasNewVideoFrame || source.currentTime !== lastVideoTime))) {
+        uploadVisual2D(source);
         hasNewVideoFrame = false;
-        lastVideoTime = videoElement.currentTime;
-        renderStats.videoUploads += 1;
+        lastVideoTime = source.currentTime;
+      } else if (!source.ready && visualChanged) {
+        clearPendingVisual2D(source);
       }
 
       hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
@@ -4342,7 +4506,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     const camera = getPreviewCamera();
     currentHeadPos = { ...camera.position };
     currentHeadQuat = { ...camera.quat };
-    if (sceneMode === 'reels' && previewCameraMode === 'headset') applyLockToViewer();
+    // Pack cards stay room-stable like in XR; do not head-lock the desktop
+    // preview while a pack experience is active.
+    if (sceneMode === 'reels' && previewCameraMode === 'headset' && !isPackExperience()) applyLockToViewer();
 
     const hasOverlayComments = uploadPreviewTextures(time);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -4439,9 +4605,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (sceneMode === 'earth' && previewPointer.earth) {
         endEarthDrag(previewPointer.source, target && target.hit);
       } else if (!previewPointer.control && !previewPointer.moved && target) {
-        if (target.hit && target.hit.hit) callbacks.onTogglePlay && callbacks.onTogglePlay();
+        if (target.hit && target.hit.hit) {
+          const source = getVisualSource();
+          const handled = source.kind === 'static-card' && callbacks.onMainScreenSelect
+            ? callbacks.onMainScreenSelect(visualPointFromHit(target.hit.hitLocal))
+            : false;
+          if (!handled) callbacks.onTogglePlay && callbacks.onTogglePlay();
+        }
         else toggleControls();
       }
+      pressedButton = -1;
+      vrLastUiUploadT = -1;
       try { previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
       previewPointer = null;
     };
@@ -4507,7 +4681,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function setPreviewCameraMode(mode) {
     previewCameraMode = mode === 'orbit' ? 'orbit' : 'headset';
-    lockToViewer = previewCameraMode === 'headset';
+    lockToViewer = previewCameraMode === 'headset' && !isPackExperience();
     if (lockToViewer) applyLockToViewer();
     emitPreviewState();
     return previewCameraMode;
@@ -4540,7 +4714,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function setSceneMode(mode) {
-    const next = mode === 'earth' ? 'earth' : 'reels';
+    const next = mode === 'earth' && !isPackExperience() ? 'earth' : 'reels';
     if (next === sceneMode) return sceneMode;
     if (next === 'earth') openEarthMode();
     else closeEarthMode();
@@ -4575,7 +4749,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewStereo = !!opts.stereo;
     if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
     sceneMode = 'reels';
-    lockToViewer = previewCameraMode === 'headset';
+    // Pack intro/queue/complete cards are room-stable in XR; keep desktop
+    // preview consistent instead of head-locking them.
+    lockToViewer = previewCameraMode === 'headset' && !isPackExperience();
     controlsVisible = opts.showControls !== false;
     renderStats.earthDrawCalls = 0;
     renderStats.reelDrawCalls = 0;
@@ -4717,10 +4893,75 @@ window.WebXRVR = window.WebXRVR || (function () {
     return glVideoTexture;
   }
 
+  function visualSourceSignature(source) {
+    return source.kind + ':' + source.version;
+  }
+
+  function clearPendingVisual2D(source) {
+    if (!gl || !glVideoTexture || !source) return false;
+    const signature = visualSourceSignature(source);
+    if (lastVisualKind === 'pending:' + source.kind &&
+        lastVisualVersion === signature &&
+        lastVisualElement === source.element) return false;
+    const blank = new Uint8Array([0, 0, 0, 255]);
+    gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blank);
+    if (glVideoTextureB) {
+      gl.bindTexture(gl.TEXTURE_2D, glVideoTextureB);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blank);
+    }
+    videoTexAllocated = true;
+    videoTexFront = 0;
+    lastVisualKind = 'pending:' + source.kind;
+    lastVisualVersion = signature;
+    lastVisualElement = source.element;
+    return true;
+  }
+
+  function uploadVisual2D(source) {
+    if (!gl || !glVideoTexture || !source || !source.ready || !source.element) return false;
+    const signature = visualSourceSignature(source);
+    if (source.kind !== 'video' &&
+        lastVisualKind === source.kind &&
+        lastVisualVersion === signature &&
+        lastVisualElement === source.element) return false;
+
+    if (source.kind === 'video' && videoTexMode === 'subimage') {
+      gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+      if (videoTexAllocated) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
+        videoTexAllocated = true;
+      }
+      videoTexFront = 0;
+    } else if (source.kind === 'video' && videoTexMode === '2d' && glVideoTextureB) {
+      const backTex = videoTexFront === 0 ? glVideoTextureB : glVideoTexture;
+      gl.bindTexture(gl.TEXTURE_2D, backTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
+      videoTexFront = videoTexFront === 0 ? 1 : 0;
+    } else {
+      // Images and generated static cards always use a regular TEXTURE_2D.
+      // Uploading them once avoids treating canvas/image sources like videos
+      // while preserving the external-texture fast path for actual video.
+      gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
+      videoTexAllocated = true;
+      videoTexFront = 0;
+    }
+
+    lastVisualKind = source.kind;
+    lastVisualVersion = signature;
+    lastVisualElement = source.element;
+    renderStats.videoUploads += 1;
+    return true;
+  }
+
   // Video-screen draw. Uses the OES external-texture program + target when the
   // zero-copy path is armed; otherwise delegates to the standard 2D path.
   function drawVideoGrid(viewMat, projMat, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
-    if (videoTexMode === 'external' && glVideoProgram && glVideoTextureExt) {
+    const source = getVisualSource();
+    if (source.kind === 'video' && videoTexMode === 'external' && glVideoProgram && glVideoTextureExt) {
       gl.useProgram(glVideoProgram);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
@@ -4875,7 +5116,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
-    const videoEye = stereoMode ? (eye === 'right' ? 0.5 : 0.0) : undefined;
+    const source = getVisualSource();
+    const videoEye = source.kind === 'video' && stereoMode ? (eye === 'right' ? 0.5 : 0.0) : undefined;
     drawVideoGrid(viewMat, projMat, screenPos, screenQuat, screenScale, screenScale, 1, curvatureMode, videoEye);
     if (hasOverlayComments && glOverlayTexture) {
       drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
@@ -4909,7 +5151,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         else if (fdt < 18) { vrCalmFrames += 1; }
         else { vrCalmFrames = 0; }
         if (vrStallFrames >= 8) {
-          const maxStride = (videoElement && (videoElement.videoWidth || 0) >= 3000) ? 3 : 2;
+          const activeSource = getVisualSource();
+          const maxStride = (activeSource.kind === 'video' && activeSource.element &&
+            (activeSource.element.videoWidth || 0) >= 3000) ? 3 : 2;
           if (vrUploadStride < maxStride) vrUploadStride += 1;
           vrStallFrames = 0; vrCalmFrames = 0;
         } else if (vrCalmFrames >= 240 && vrUploadStride > vrMinStride()) {
@@ -4955,7 +5199,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     processInput(frame);
 
-    if (sceneMode === 'reels' && videoElement && videoElement.paused && !controlsVisible) {
+    if (sceneMode === 'reels' && getVisualSource().paused && !controlsVisible) {
       showControls();
     }
 
@@ -4989,7 +5233,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     gl.clearColor(0.0095, 0.0175, 0.052, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    if (videoElement && videoElement.readyState >= 2) {
+    const source = getVisualSource();
+    if (source.kind === 'video' && source.ready && source.element) {
+      const mediaElement = source.element;
       // Strict gate: upload ONLY on a newly decoded frame. totalVideoFrames
       // ticks once per decoded frame (~video fps). The old `hasNewVideoFrame
       // ||` bypass re-fired from rVFC with zero new decoded frames (live
@@ -4997,7 +5243,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Adaptive stride then drops intermediate frames on high-res/stalled
       // sessions so the re-spec flush fires less often (low-res keeps every
       // frame → full motion; 4K backs off to 1/2–1/3 rate → far fewer flashes).
-      const vf = (videoElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1);
+      const vf = (mediaElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1);
       // Fallback: if the browser lacks getVideoPlaybackQuality, vf stays -1
       // and we must trust the rVFC flag as before.
       const vChanged = (vf === -1) ? hasNewVideoFrame : (vf !== lastVideoFrameCount);
@@ -5005,53 +5251,52 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (vChanged && vrSkipCounter >= vrUploadStride) {
         vrSkipCounter = 0;
         const _u0 = performance.now();
+        let uploaded = false;
         if (videoTexMode === 'external' && glVideoTextureExt) {
           // Zero-copy bind: points the external texture at the decoder surface.
           // No re-spec of a sampled 2D texture → no GPU pipeline flush.
           gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
-          gl.texImage2D(gl.TEXTURE_EXTERNAL_OES, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
+          gl.texImage2D(gl.TEXTURE_EXTERNAL_OES, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, mediaElement);
+          lastVisualKind = source.kind;
+          lastVisualVersion = visualSourceSignature(source);
+          lastVisualElement = mediaElement;
+          renderStats.videoUploads += 1;
+          uploaded = true;
         } else {
-          gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-          if (videoTexMode === 'subimage') {
-            // Allocate the 4K storage ONCE, then update in place per decoded
-            // frame. texSubImage2D (valid only in WebGL2 for video sources)
-            // avoids re-specifying the sampled texture → no pipeline flush.
-            if (!videoTexAllocated) {
-              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-              videoTexAllocated = true;
-            } else {
-              gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-            }
-          } else if (glVideoTextureB) {
-            // Double-buffered re-spec: upload into the BACK texture (sampled
-            // by no in-flight draw) then flip, so the GPU never re-specifies
-            // the texture it is currently sampling → no pipeline bubble.
-            const backTex = (videoTexFront === 0) ? glVideoTextureB : glVideoTexture;
-            gl.bindTexture(gl.TEXTURE_2D, backTex);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-            videoTexFront = (videoTexFront === 0) ? 1 : 0;
-          } else {
-            gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoElement);
-          }
+          uploaded = uploadVisual2D(source);
         }
-        _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
-        _diagTexUploads++;
-        renderStats.videoUploads += 1;
+        if (uploaded) {
+          _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
+          _diagTexUploads++;
+        }
         hasNewVideoFrame = false;
-        lastVideoTime = videoElement.currentTime;
+        lastVideoTime = source.currentTime;
         lastVideoFrameCount = vf;
       } else if (vChanged) {
         // Skipped by stride: advance the counter so frames never backlog —
         // this decoded frame is dropped from the VR texture, the next one
         // within stride gets uploaded.
         hasNewVideoFrame = false;
-        lastVideoTime = videoElement.currentTime;
+        lastVideoTime = source.currentTime;
         lastVideoFrameCount = vf;
       } else {
         // Stale rVFC ping with no decoded frame: clear the flag, never upload.
         hasNewVideoFrame = false;
       }
+    } else if (source.ready && source.element) {
+      const _u0 = performance.now();
+      if (uploadVisual2D(source)) {
+        _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
+        _diagTexUploads++;
+      }
+      hasNewVideoFrame = false;
+      lastVideoTime = source.currentTime;
+      lastVideoFrameCount = -1;
+    } else {
+      const visualChanged = source.kind !== lastVisualKind ||
+        visualSourceSignature(source) !== lastVisualVersion ||
+        source.element !== lastVisualElement;
+      if (visualChanged) clearPendingVisual2D(source);
     }
 
     // Transport controls: 10Hz re-upload is visually smooth in VR and removes
@@ -5117,6 +5362,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function processInput(frame) {
     if (!xrSession) return;
+    const hasRightInput = Array.from(xrSession.inputSources || []).some((source) => source.handedness === 'right');
     let nextEarthHover = -1;
     let earthRayPriority = -1;
     if (sceneMode === 'earth') {
@@ -5198,7 +5444,39 @@ window.WebXRVR = window.WebXRVR || (function () {
         continue;
       }
 
-      if (!gp) continue;
+      const pointerEligible = hand === 'right' || (!hasRightInput && (hand === 'left' || hand === 'none' || !hand));
+      if (!gp) {
+        if (pointerEligible && controllerPos && controllerDir) {
+          activeRayOrigin = controllerPos;
+          activeRayDir = controllerDir;
+          let hitDist = -1;
+          let isHover = false;
+          if (commentsPanelVisible) {
+            cPanelHover = hitTestCommentsPanel(controllerPos, controllerDir);
+            if (cPanelHover) {
+              hitDist = getHitDistCommentsPanel(controllerPos, controllerDir);
+              isHover = true;
+            }
+          }
+          if (!isHover && controlsVisible) {
+            hoveredButton = hitTestControls(controllerPos, controllerDir);
+            if (hoveredButton >= 0) {
+              hitDist = getHitDistControls(controllerPos, controllerDir);
+              isHover = true;
+            }
+          }
+          if (!isHover) {
+            const mainHit = hitTestCurvedScreen(controllerPos, controllerDir);
+            if (mainHit.hit) {
+              hitDist = mainHit.dist;
+              isHover = true;
+            }
+          }
+          activeHitDist = hitDist > 0 ? hitDist : 3;
+          activeIsHovering = isHover;
+        }
+        continue;
+      }
 
       // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
       const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
@@ -5227,8 +5505,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         grabControllerIdx = -1;
       }
 
-      // Process right controller inputs
-      if (hand !== 'right') continue;
+      // Prefer the right controller, but keep every core action usable with
+      // only a left controller connected.
+      if (!pointerEligible) continue;
 
       // Active pointer ray tracking
       if (controllerPos && controllerDir) {
@@ -5311,13 +5590,18 @@ window.WebXRVR = window.WebXRVR || (function () {
           flickedY = false;
         }
       } else {
-        // B2) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation
+        // B2) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation.
+        // Static cards own their queue UI — thumbstick must not skip behind
+        // the card's back while intro/queue/complete is shown.
+        const cardOpen = getVisualSource().kind === 'static-card' && isPackExperience();
         if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
           flickedY = true;
-          if (thumbY > 0) {
-            callbacks.onNext && callbacks.onNext();
-          } else {
-            callbacks.onPrev && callbacks.onPrev();
+          if (!cardOpen) {
+            if (thumbY > 0) {
+              callbacks.onNext && callbacks.onNext();
+            } else {
+              callbacks.onPrev && callbacks.onPrev();
+            }
           }
           showControls();
         } else if (Math.abs(thumbY) < FLICK_RESET) {
@@ -5325,19 +5609,21 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
 
-      // C) Joystick X Left/Right -> Seek ±5s
+      // C) Joystick X Left/Right -> Seek ±5s (disabled on static cards).
+      const seekBlocked = getVisualSource().kind === 'static-card' && isPackExperience();
       if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
         flickedX = true;
-        callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
+        if (!seekBlocked) callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
         showControls();
       } else if (Math.abs(thumbX) < FLICK_RESET) {
         flickedX = false;
       }
 
-      // ── 3. A Button: Toggle Play / Pause ──
+      // ── 3. A Button: Toggle Play / Pause (disabled on static cards) ──
       const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
       if (aPressed && !prevBtnState.rightA) {
-        callbacks.onTogglePlay && callbacks.onTogglePlay();
+        const cardOpen = getVisualSource().kind === 'static-card' && isPackExperience();
+        if (!cardOpen) callbacks.onTogglePlay && callbacks.onTogglePlay();
         showControls();
       }
       prevBtnState.rightA = aPressed;
@@ -5403,7 +5689,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     currentHeadPos = { x: 0, y: 1.52, z: 0 };
     currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
     isInitialPoseSet = false;
-    lockToViewer = true;
+    // Pack intro/queue/completion cards remain stable in the room instead of
+    // following the user's head. Existing feed playback keeps its prior lock.
+    lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
     cPanelScrollY = 0;
@@ -5427,6 +5715,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     vrGuideUploaded = false;
     vrUploadStride = vrMinStride();
     hoveredButton = -1;
+    pressedButton = -1;
     isGrabbing = false;
     activeRayOrigin = null;
     activeRayDir = null;
@@ -5476,14 +5765,6 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       const frameEl = document.getElementById('reelsFrame');
       if (frameEl) frameEl.classList.add('vr-active');
-
-      if (videoElement) {
-        videoElement.muted = false;
-        if (callbacks.onUnmute) callbacks.onUnmute();
-        if (videoElement.paused) {
-          videoElement.play().catch(() => {});
-        }
-      }
 
       // Notify host SPA so the global Top Bar can auto-hide for immersive Reels
       notifyVrEnter();
@@ -5535,6 +5816,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const controlIndex = hitTestControls(rayOrigin, rayDir);
         if (controlIndex >= 0) {
           executeControlButton(controlIndex);
+          pulseInput(source);
           return;
         }
       }
@@ -5543,15 +5825,23 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     // 1. VR Comments Panel — highest priority
-    if (commentsPanelVisible && cPanelHover) {
-      executeCommentAction(cPanelHover);
+    const directCommentHit = commentsPanelVisible && rayOrigin && rayDir
+      ? hitTestCommentsPanel(rayOrigin, rayDir)
+      : cPanelHover;
+    if (directCommentHit) {
+      executeCommentAction(directCommentHit);
+      pulseInput(source);
       return;
     }
 
     // 2. Check UI Controls Button Click
-    if (controlsVisible && hoveredButton >= 0) {
-      executeControlButton(hoveredButton);
-      return;
+    if (controlsVisible) {
+      const directControlIndex = rayOrigin && rayDir ? hitTestControls(rayOrigin, rayDir) : hoveredButton;
+      if (directControlIndex >= 0) {
+        executeControlButton(directControlIndex);
+        pulseInput(source);
+        return;
+      }
     }
 
     // 2. Check Click on Main Video Screen
@@ -5563,10 +5853,31 @@ window.WebXRVR = window.WebXRVR || (function () {
           const cid = overlayCommentAtHit(mainHit.hitLocal);
           if (cid) {
             openCommentsPanelToComment(cid);
+            pulseInput(source);
             return;
           }
         }
+        const visualSource = getVisualSource();
+        if (visualSource.kind === 'static-card' && callbacks.onMainScreenSelect) {
+          const handled = callbacks.onMainScreenSelect(visualPointFromHit(mainHit.hitLocal));
+          if (handled) {
+            pulseInput(source);
+            showControls();
+            return;
+          }
+          // Card shown but tap missed all card buttons — show controls only.
+          // Do not toggle the hidden video clock behind the card.
+          pulseInput(source);
+          showControls();
+          return;
+        }
+        if (visualSource.kind === 'static-card') {
+          pulseInput(source);
+          showControls();
+          return;
+        }
         callbacks.onTogglePlay && callbacks.onTogglePlay();
+        pulseInput(source);
         toggleControls();
         return;
       }
@@ -5577,6 +5888,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function onSelectEnd(ev) {
+    pressedButton = -1;
+    vrLastUiUploadT = -1;
     if (sceneMode !== 'earth') return;
     const source = ev.inputSource;
     if (source && earthDragInputSource && earthDragInputSource !== source) return;
@@ -5787,6 +6100,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     lastVideoFrameCount = -1;
+    lastVisualKind = '';
+    lastVisualVersion = '';
+    lastVisualElement = null;
     hoveredButton = -1;
     activeRayOrigin = null;
     activeRayDir = null;
@@ -5821,6 +6137,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     hasNewVideoFrame = true;
     lastVideoTime = -1;
     lastVideoFrameCount = -1;
+    lastVisualKind = '';
+    lastVisualVersion = '';
+    lastVisualElement = null;
+    videoTexFront = 0;
     videoTexAllocated = false;
     // New file → re-derive stride from its resolution (guide art is static,
     // so its uploaded flag survives across videos).
@@ -5853,6 +6173,8 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     enterVR,
     exitVR,
+    isPresenting() { return !!xrSession; },
+    isPreviewRunning() { return !!previewRunning; },
     startPreview,
     stopPreview,
     resetPreview,
@@ -5877,6 +6199,33 @@ window.WebXRVR = window.WebXRVR || (function () {
       getControlButton(action) {
         const button = CTRL_BUTTONS.find((item) => item.action === action);
         return button ? { ...button } : null;
+      },
+      getVisibleControlActions() {
+        const source = getVisualSource();
+        let itemState = {};
+        if (callbacks.getCurrentItemState) {
+          try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
+        }
+        return CTRL_BUTTONS
+          .filter((button) => isControlVisible(button.action, source, itemState))
+          .map((button) => button.action);
+      },
+      getVisualSourceState() {
+        const source = getVisualSource();
+        return {
+          kind: source.kind,
+          ready: source.ready,
+          paused: source.paused,
+          muted: source.muted,
+          currentTime: source.currentTime,
+          duration: source.duration,
+          version: source.version,
+        };
+      },
+      visualPointFromHit,
+      executeControl(action) {
+        const index = CTRL_BUTTONS.findIndex((button) => button.action === action);
+        if (index >= 0) executeControlButton(index);
       },
       raySphereHit,
       hitTestEarth,

@@ -11,7 +11,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 DEFAULT_DATABASE_URL = "sqlite:///./data/echo.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
-EXPECTED_SCHEMA_REVISION = "20260913_0008"
+EXPECTED_SCHEMA_REVISION = "20260913_0009"
 
 if DATABASE_URL.startswith("sqlite"):
     database_path = DATABASE_URL.removeprefix("sqlite:///")
@@ -71,6 +71,11 @@ def init_database() -> None:
         "post_recommendation_stats",
         "co_watch_pairs",
         "item_similarities",
+        "reel_packs",
+        "reel_pack_items",
+        "reel_pack_tags",
+        "reel_pack_saves",
+        "reel_pack_progress",
         "credit_accounts",
         "credit_ledger_entries",
         "billing_quotes",

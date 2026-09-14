@@ -1218,6 +1218,161 @@ def _build_payload(
     return payload
 
 
+def _pack_feed_data(
+    *,
+    db: Session,
+    viewer: AuthContext | None,
+    pack_id: str,
+    codec: str | None = "hevc",
+    tunnel: str = "",
+    restart: bool = False,
+) -> dict:
+    """Hydrate a finite, authored Reel Pack through the existing player wire shape."""
+    from server.features import reel_pack_features
+    from server.routers.packs import active_item, get_pack_for_viewer, progress_card, serialize_pack
+
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    pack = get_pack_for_viewer(db, pack_id, viewer_id)
+    scanned = {item["rel_path"]: item for item in _scan_cached()}
+    available_scan = [
+        scanned[item.post.media_path]
+        for item in sorted(pack.items, key=lambda row: row.position)
+        if active_item(item) and item.post and item.post.media_path in scanned
+    ]
+    hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id)
+    by_path = {item.get("path"): item for item in hydrated}
+    # DB fallback for active items whose media file is not (or not yet) in the
+    # output/ scan — e.g. fresh uploads, test fixtures, cache TTL gaps. Without
+    # this every such item renders as an unavailable tombstone even though the
+    # post is published and viewable via post_card.
+    from server.social.services import post_card as _pack_post_card
+
+    def _db_fallback_entry(item) -> dict | None:
+        post = item.post
+        if not post or not active_item(item):
+            return None
+        try:
+            card = _pack_post_card(post, db, viewer_id)
+        except Exception:
+            return None
+        is_image = (post.media_type == "image")
+        return {
+            "post_id": post.id,
+            "pack_item_id": item.id,
+            "pack_id": pack.id,
+            "pack_position": item.position,
+            "pack_total": len(pack.items),
+            "available": True,
+            "media_type": post.media_type or ("image" if is_image else "video"),
+            "title": card.get("title", ""),
+            "caption": card.get("caption", ""),
+            "filename": (post.media_path or "").split("/")[-1] or "Reel",
+            "folder": "REEL PACK",
+            "size": "",
+            "path": post.media_path,
+            "url": card.get("url") or f"/media/{post.media_path}",
+            "preview_url": card.get("preview_url"),
+            "poster_url": card.get("poster_url"),
+            "codec": "IMG" if is_image else "MASTER",
+            "is_proxy": False,
+            "stream_tag": "IMAGE" if is_image else "DB MASTER",
+            "tags": card.get("tags", []),
+            "location": card.get("location", {}),
+            "likes": card.get("likes", 0),
+            "views": card.get("views", 0),
+            "saves": card.get("saves", 0),
+            "comments": [],
+            "author_name": card.get("author_name", ""),
+            "creator": card.get("creator"),
+            "viewer_state": card.get("viewer_state", {
+                "liked": False,
+                "saved": False,
+                "following_creator": False,
+                "can_edit": False,
+            }),
+            "liked_by_me": card.get("liked_by_me", False),
+            "saved_by_me": card.get("saved_by_me", False),
+            "tunnel_url": (tunnel or "").strip(),
+            "source": card.get("source", ""),
+            "created_at": card.get("created_at", ""),
+        }
+
+    ordered = []
+    total = len(pack.items)
+    for item in sorted(pack.items, key=lambda row: row.position):
+        media = by_path.get(item.post.media_path) if active_item(item) and item.post else None
+        if media:
+            entry = dict(media)
+            entry.update({
+                "pack_item_id": item.id,
+                "pack_id": pack.id,
+                "pack_position": item.position,
+                "pack_total": total,
+                "available": True,
+            })
+        else:
+            fallback = _db_fallback_entry(item)
+            if fallback is not None:
+                entry = fallback
+            else:
+                entry = {
+                "post_id": item.post_id,
+                "pack_item_id": item.id,
+                "pack_id": pack.id,
+                "pack_position": item.position,
+                "pack_total": total,
+                "available": False,
+                "media_type": "static",
+                "static_kind": "unavailable",
+                "title": "Reel unavailable",
+                "caption": "This reel was removed or is no longer available.",
+                "filename": "Unavailable reel",
+                "folder": "REEL PACK",
+                "size": "",
+                "path": "",
+                "url": "",
+                "preview_url": None,
+                "poster_url": None,
+                "codec": "CARD",
+                "stream_tag": "UNAVAILABLE",
+                "tags": [],
+                "location": {},
+                "likes": 0,
+                "views": 0,
+                "saves": 0,
+                "comments": [],
+                "viewer_state": {
+                    "liked": False,
+                    "saved": False,
+                    "following_creator": False,
+                    "can_edit": False,
+                },
+                "creator": serialize_pack(db, pack, viewer_id)["creator"],
+            }
+        ordered.append(entry)
+    progress = progress_card(db, pack, viewer_id)
+    return {
+        "surface": "pack",
+        "session_id": None,
+        "request_id": None,
+        "algorithm_version": "authored-pack-v1",
+        "items": ordered,
+        "next_cursor": None,
+        "has_more": False,
+        "restarted": False,
+        "restart": bool(restart),
+        "pack_immersive_enabled": reel_pack_features()["immersive"],
+        "total_eligible": len(ordered),
+        "pack": serialize_pack(db, pack, viewer_id),
+        "resume": progress,
+        "feed_params": {
+            "pack_id": pack.id,
+            "codec": codec,
+            "tunnel": tunnel,
+        },
+    }
+
+
 def _recommendation_feed_data(
     *,
     request: Request,
@@ -2020,11 +2175,20 @@ def reels_player(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    pack_id: str | None = None,
+    restart: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
     """Render the full Reels/VR player page for embedding in an iframe."""
-    feed_data = _recommendation_feed_data(
+    feed_data = _pack_feed_data(
+        db=db,
+        viewer=viewer,
+        pack_id=pack_id,
+        codec=codec,
+        tunnel=tunnel,
+        restart=restart,
+    ) if pack_id else _recommendation_feed_data(
         request=request,
         response=response,
         db=db,
@@ -2045,9 +2209,17 @@ def reels_player(
     )
     payload = feed_data["items"]
     try:
-        start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
+        if pack_id and not restart and (feed_data.get("resume") or {}).get("current_item_id"):
+            resume_item_id = feed_data["resume"]["current_item_id"]
+            start_idx = next(
+                (index for index, item in enumerate(payload) if item.get("pack_item_id") == resume_item_id),
+                0,
+            )
+        else:
+            start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
         start_idx = 0
+    feed_data["start_index"] = start_idx
 
     try:
         html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
@@ -2066,6 +2238,9 @@ def reels_player(
     rewards_js = ASSETS_DIR / "reels_rewards.js"
     if rewards_js.exists():
         html = html.replace("__REELS_REWARDS_JS__", rewards_js.read_text(encoding="utf-8"))
+    pack_state_js = ASSETS_DIR / "reels_pack_state.js"
+    if pack_state_js.exists():
+        html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js.read_text(encoding="utf-8"))
     vr_js = ASSETS_DIR / "webxr_vr.js"
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
@@ -2176,12 +2351,21 @@ def reels_player_inline(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    pack_id: str | None = None,
+    restart: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
     embedding (no iframe, so the player sizes itself to the page)."""
-    feed_data = _recommendation_feed_data(
+    feed_data = _pack_feed_data(
+        db=db,
+        viewer=viewer,
+        pack_id=pack_id,
+        codec=codec,
+        tunnel=tunnel,
+        restart=restart,
+    ) if pack_id else _recommendation_feed_data(
         request=request,
         response=response,
         db=db,
@@ -2202,9 +2386,17 @@ def reels_player_inline(
     )
     payload = feed_data["items"]
     try:
-        start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
+        if pack_id and not restart and (feed_data.get("resume") or {}).get("current_item_id"):
+            resume_item_id = feed_data["resume"]["current_item_id"]
+            start_idx = next(
+                (index for index, item in enumerate(payload) if item.get("pack_item_id") == resume_item_id),
+                0,
+            )
+        else:
+            start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):
         start_idx = 0
+    feed_data["start_index"] = start_idx
 
     try:
         html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
@@ -2218,6 +2410,7 @@ def reels_player_inline(
     img_js = ASSETS_DIR / "quest_controller_img.js"
     feed_state_js = ASSETS_DIR / "reels_feed_state.js"
     rewards_js = ASSETS_DIR / "reels_rewards.js"
+    pack_state_js = ASSETS_DIR / "reels_pack_state.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"
 
     scripts: list[str] = []
@@ -2232,6 +2425,9 @@ def reels_player_inline(
         elif stripped.startswith("__REELS_REWARDS_JS__"):
             if rewards_js.exists():
                 scripts.append(rewards_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__REELS_PACK_STATE_JS__"):
+            if pack_state_js.exists():
+                scripts.append(pack_state_js.read_text(encoding="utf-8"))
         elif stripped.startswith("__WEBXR_VR_JS__"):
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))
