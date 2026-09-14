@@ -246,47 +246,31 @@ export default function ExplorePage() {
       ) : (
         <>
           {packsVisible && !packs.length && !packError ? (
-            <p className="sx-mono" role="status">No Reel Packs match this filter yet — try another search or publish a pack.</p>
+            <p className="sx-mono" role="status">No Reel Packs match this filter yet — try another search or publish a collection.</p>
           ) : null}
-          {packsVisible && packs.length ? (
-            <section className="sx-pack-explore-section" aria-labelledby="sx-pack-explore-title">
-              <div className="sx-pack-section-head">
-                <div>
-                  <span>CURATED COLLECTIONS</span>
-                  <h2 id="sx-pack-explore-title">REEL PACKS</h2>
-                </div>
-                {contentType === 'all' ? <Button onClick={() => setType('packs')}>VIEW ALL PACKS</Button> : null}
-              </div>
-              <div className="sx-pack-grid">
-                {packs.map((pack) => (
-                  <PackTile
-                    key={pack.id}
-                    pack={pack}
-                    onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id))}
-                    onShare={(target) => messaging.openShare(target)}
-                    onChanged={updatePack}
-                    source="explore"
-                  />
-                ))}
-              </div>
-              {contentType === 'packs' && packData?.next_offset != null ? (
-                <div className="sx-profile-load-more">
-                  <Button loading={packLoadingMore} disabled={packLoadingMore} onClick={loadMorePacks}>
-                    LOAD MORE PACKS
-                  </Button>
-                </div>
-              ) : null}
-            </section>
+          {packsVisible || reelsVisible ? (
+            <div className="sx-explore-grid" aria-label="Explore results">
+              {packsVisible ? packs.map((pack) => (
+                <PackTile
+                  key={pack.id}
+                  pack={pack}
+                  onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id) + '?play=1')}
+                  onShare={(target) => messaging.openShare(target)}
+                  onChanged={updatePack}
+                  source="explore"
+                />
+              )) : null}
+              {reelsVisible ? order.map((video) => (
+                <ExploreTile key={video.path} video={video} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
+              )) : null}
+            </div>
           ) : null}
-          {reelsVisible && order.length ? (
-            <section aria-label="Reels">
-              {contentType === 'all' ? <div className="sx-pack-section-head"><div><span>INDIVIDUAL POSTS</span><h2>REELS</h2></div></div> : null}
-              <div className="sx-explore-grid">
-                {order.map((video) => (
-                  <ExploreTile key={video.path} video={video} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
-                ))}
-              </div>
-            </section>
+          {contentType === 'packs' && packData?.next_offset != null ? (
+            <div className="sx-profile-load-more">
+              <Button loading={packLoadingMore} disabled={packLoadingMore} onClick={loadMorePacks}>
+                LOAD MORE PACKS
+              </Button>
+            </div>
           ) : null}
         </>
       )}

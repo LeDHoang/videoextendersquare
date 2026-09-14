@@ -245,7 +245,7 @@ export default function TagExplorePage() {
                   <PackTile
                     key={pack.id}
                     pack={pack}
-                    onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id))}
+                    onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id) + '?play=1')}
                     onShare={(target) => messaging.openShare(target)}
                     onChanged={updatePack}
                     source="tag_explore"

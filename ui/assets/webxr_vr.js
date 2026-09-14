@@ -441,6 +441,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     { label: 'SAVE PACK',  action: 'save_pack',  x: 218, y: 238, w: 174, h: 42 },
     { label: 'SHARE PACK', action: 'share_pack', x: 408, y: 238, w: 174, h: 42 },
 
+    // Feed-mode collection shortcut (opens the SAVE TO card).
+    { label: 'COLLECT',    action: 'collect',    x: 24,  y: 238, w: 174, h: 42 },
+
     // Bottom progress scrub track
     { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
   ];
@@ -503,6 +506,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function isControlVisible(action, source, itemState) {
     if (isPackAction(action)) return isPackExperience();
+    if (action === 'collect') return !isPackExperience();
     if (isReelAction(action)) return source.kind !== 'static-card' && itemState.available !== false;
     if (source.kind === 'static-card' &&
         (action === 'rew' || action === 'prev' || action === 'play' ||
@@ -2258,6 +2262,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'report': callbacks.onReportReel && callbacks.onReportReel(); break;
       case 'save_pack': callbacks.onSavePack && callbacks.onSavePack(); break;
       case 'share_pack': callbacks.onSharePack && callbacks.onSharePack(); break;
+      case 'collect': callbacks.onCollectReel && callbacks.onCollectReel(); break;
       case 'exit':  xrSession ? exitVR() : stopPreview(); break;
     }
   }
@@ -5593,7 +5598,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         // B2) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation.
         // Static cards own their queue UI — thumbstick must not skip behind
         // the card's back while intro/queue/complete is shown.
-        const cardOpen = getVisualSource().kind === 'static-card' && isPackExperience();
+        const cardOpen = getVisualSource().kind === 'static-card';
         if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
           flickedY = true;
           if (!cardOpen) {
@@ -5610,7 +5615,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
 
       // C) Joystick X Left/Right -> Seek ±5s (disabled on static cards).
-      const seekBlocked = getVisualSource().kind === 'static-card' && isPackExperience();
+      const seekBlocked = getVisualSource().kind === 'static-card';
       if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
         flickedX = true;
         if (!seekBlocked) callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
@@ -5622,7 +5627,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // ── 3. A Button: Toggle Play / Pause (disabled on static cards) ──
       const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
       if (aPressed && !prevBtnState.rightA) {
-        const cardOpen = getVisualSource().kind === 'static-card' && isPackExperience();
+        const cardOpen = getVisualSource().kind === 'static-card';
         if (!cardOpen) callbacks.onTogglePlay && callbacks.onTogglePlay();
         showControls();
       }

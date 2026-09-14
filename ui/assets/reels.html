@@ -1442,6 +1442,21 @@
   .reels-pack-queue-item { width:100%; min-height:52px; display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:10px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:#fff; text-align:left; cursor:pointer; }
   .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible, .reels-pack-queue-item.current { border-color:#ff553a; background:#1b1515; outline:none; }
   .reels-pack-queue-item:disabled { color:#767d86; cursor:not-allowed; }
+  .reels-pack-queue-empty { margin:0; padding:18px 14px; color:#aab1bb; font:700 13px/1.4 "JetBrains Mono",monospace; }
+  .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
+  .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid #ff553a; border-radius:8px; background:rgba(9,11,14,.98); color:#fff; box-shadow:0 24px 90px rgba(0,0,0,.72); }
+  .reels-collect-dialog[hidden], .reels-collect-backdrop[hidden] { display:none !important; }
+  .reels-phone-frame.sx-collect-open .reels-actions,
+  .reels-phone-frame.sx-collect-open .reels-progress-wrap,
+  .reels-phone-frame.sx-collect-open .reels-pack-bar,
+  body.sx-collect-open .reels-edge-nav { visibility:hidden; }
+  .reels-collect-newrow { display:flex; gap:8px; padding:10px 16px; border-top:1px solid #30363d; }
+  .reels-collect-newrow[hidden] { display:none !important; }
+  .reels-collect-newrow input { flex:1; min-width:0; min-height:44px; padding:8px 12px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:700 13px/1.2 "JetBrains Mono",monospace; }
+  .reels-collect-newrow input:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-collect-newrow button { min-height:44px; padding:8px 14px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
+  .reels-collect-newrow button:first-of-type { border-color:#ff553a; background:#ff553a; color:#090b0e; }
+  .reels-collect-newrow button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
   .reels-pack-queue-item strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .reels-pack-queue-item span:last-child { font:800 10px/1 "JetBrains Mono",monospace; }
   .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid #30363d; }
@@ -1499,6 +1514,7 @@
       <div class="reels-pack-queue-actions">
         <button type="button" id="packQueueSave">SAVE PACK</button>
         <button type="button" id="packQueueShare">SHARE PACK</button>
+        <button type="button" id="packQueuePublish" hidden>PUBLISH COLLECTION</button>
       </div>
     </section>
     <div class="center-flash" id="centerFlash">▶</div>
@@ -1518,6 +1534,24 @@
       </button>
     </div>
   </div>
+
+  <div class="reels-collect-backdrop" id="collectMenuBackdrop" hidden></div>
+  <section class="reels-collect-dialog" id="collectMenuPanel" role="dialog" aria-modal="true" aria-label="Save reel" hidden>
+    <div class="reels-pack-queue-head">
+      <div><strong>SAVE REEL</strong><small id="collectMenuHint">All saved items, or pick a collection</small></div>
+      <button type="button" class="reels-pack-queue-close" id="collectMenuClose" aria-label="Close save menu">CLOSE</button>
+    </div>
+    <div class="reels-pack-queue-list" id="collectMenuList"></div>
+    <div class="reels-collect-newrow" id="collectNewRow" hidden>
+      <input id="collectNewName" maxlength="80" placeholder="Collection name" aria-label="New collection name" />
+      <button type="button" id="collectNewCreate">CREATE</button>
+      <button type="button" id="collectNewCancel">CANCEL</button>
+    </div>
+    <div class="reels-pack-queue-actions">
+      <button type="button" id="collectMenuNew">+ NEW COLLECTION</button>
+      <button type="button" id="collectMenuJustSave">ALL SAVED</button>
+    </div>
+  </section>
 
   <!-- Floating Command Grid (Right Side).
        Primary group is always visible; the "..." button swaps in the
@@ -1722,6 +1756,10 @@
     let packVisualRegions = [];
     let packResumeAfterOverlay = false;
     let packUnavailableTimer = null;
+    let collectOpen = false;
+    let collectRows = [];
+    let collectPostId = null;
+    let collectWasPlaying = false;
     const analyticsSource = isPackMode ? 'pack' : 'reels';
     let feedParams = { ...((initialFeedState && initialFeedState.feed_params) || {}) };
     let feedCursor = initialFeedState && initialFeedState.next_cursor;
@@ -1768,6 +1806,18 @@
     const packQueueClose = document.getElementById('packQueueClose');
     const packQueueSave = document.getElementById('packQueueSave');
     const packQueueShare = document.getElementById('packQueueShare');
+    const packQueuePublish = document.getElementById('packQueuePublish');
+    const collectMenuPanel = document.getElementById('collectMenuPanel');
+    const collectMenuBackdrop = document.getElementById('collectMenuBackdrop');
+    const collectMenuList = document.getElementById('collectMenuList');
+    const collectMenuClose = document.getElementById('collectMenuClose');
+    const collectMenuNew = document.getElementById('collectMenuNew');
+    const collectMenuJustSave = document.getElementById('collectMenuJustSave');
+    const collectMenuHint = document.getElementById('collectMenuHint');
+    const collectNewRow = document.getElementById('collectNewRow');
+    const collectNewName = document.getElementById('collectNewName');
+    const collectNewCreate = document.getElementById('collectNewCreate');
+    const collectNewCancel = document.getElementById('collectNewCancel');
     const progressWrap = document.getElementById('progressWrap');
     // Single image tiles hold for a fixed dwell, then auto-advance.
     const IMAGE_DWELL_S = 10;
@@ -1976,6 +2026,18 @@
 
     function currentVisualSource() {
       const item = videoData[idx] || null;
+      if (collectOpen) {
+        return {
+          kind: 'static-card',
+          element: packVisualCanvas,
+          ready: !!packVisualCanvas,
+          paused: true,
+          muted: true,
+          currentTime: 0,
+          duration: 0,
+          version: packVisualVersion,
+        };
+      }
       if (isPackMode && (packQueueOpen || packState.phase !== 'playing' || !item || item.available === false)) {
         return {
           kind: 'static-card',
@@ -2053,6 +2115,7 @@
 
     function renderPackVisual(mode) {
       if (!isPackMode || !packVisualCanvas) return;
+      if (mode === 'collect') { renderCollectVisual(); return; }
       packVisualMode = mode;
       packVisualRegions = [];
       const ctx = packVisualCanvas.getContext('2d');
@@ -2078,9 +2141,13 @@
         ctx.fillText(String(pack.title || 'Untitled Pack').slice(0, 34), 512, 158);
         ctx.fillStyle = '#aeb7c3';
         ctx.font = '700 21px "JetBrains Mono", monospace';
-        ctx.fillText(packCreatorLabel() + ' · ' + videoData.length + ' REELS', 512, 196);
+        ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 512, 196);
         const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
-        videoData.slice(0, 12).forEach((item, index) => {
+        // Draft owners get a publish row above the action bar; trim the
+        // visible queue rows so the two never overlap.
+        const canPublishQueue = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft';
+        const maxRows = canPublishQueue ? 10 : 12;
+        videoData.slice(0, maxRows).forEach((item, index) => {
           const y = rowStart + index * (rowH + rowGap);
           const current = index === idx;
           const available = item && item.available !== false;
@@ -2102,6 +2169,25 @@
           ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
           if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
         });
+        if (videoData.length > maxRows) {
+          ctx.fillStyle = '#aeb7c3';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'alphabetic';
+          ctx.font = '700 18px "JetBrains Mono", monospace';
+          ctx.fillText('+' + (videoData.length - maxRows) + ' MORE · FULL LIST IN THE PACK DETAILS', 512, 868);
+        }
+        if (canPublishQueue) {
+          const queuePlayable = videoData.filter((row) => row && row.available !== false && row.media_type !== 'static').length;
+          if (queuePlayable >= 3) {
+            drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 796, 350, 64, false, 'publish-pack');
+          } else {
+            ctx.fillStyle = '#767d86';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '800 19px "JetBrains Mono", monospace';
+            ctx.fillText('PUBLISH AT 3+ AVAILABLE (' + queuePlayable + '/3)', 512, 828);
+          }
+        }
         drawPackCanvasButton(ctx, pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK', 92, 884, 250, 72, true, 'save');
         drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
         drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
@@ -2124,8 +2210,19 @@
           drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
         } else if (mode === 'unavailable') {
           drawPackCanvasButton(ctx, 'SKIP ITEM', 337, 720, 350, 76, true, 'skip');
-        } else {
-          drawPackCanvasButton(ctx, packState.resumePositionMs > 0 ? 'RESUME PACK' : 'START PACK', 337, 720, 350, 76, true, 'start');
+        }
+        const canPublishHere = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft' && mode === 'complete';
+        if (canPublishHere) {
+          const playable = videoData.filter((row) => row && row.available !== false && row.media_type !== 'static').length;
+          if (playable >= 3) {
+            drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 822, 350, 64, false, 'publish-pack');
+          } else {
+            ctx.fillStyle = '#767d86';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '800 19px "JetBrains Mono", monospace';
+            ctx.fillText('PUBLISH AT 3+ AVAILABLE (' + playable + '/3)', 512, 854);
+          }
         }
       }
       packVisualVersion += 1;
@@ -2147,7 +2244,27 @@
       else if (region.action === 'skip') nextVideo('unavailable');
       else if (region.action === 'return') returnToPack();
       else if (region.action === 'explore') dispatchNavigation('/explore?type=packs');
+      else if (region.action === 'publish-pack') publishPackFromPlayer();
       return true;
+    }
+
+    async function publishPackFromPlayer() {
+      const pack = packState.pack;
+      if (!pack || !pack.viewer_state || !pack.viewer_state.can_edit || pack.status !== 'draft') return;
+      if ((pack.playable_count ?? 0) < 3) { showFlash('NEEDS 3+ AVAILABLE REELS'); return; }
+      try {
+        const result = await requestJson('/api/packs/' + encodeURIComponent(pack.id) + '/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected_revision: pack.revision }),
+        });
+        packState.pack = { ...packState.pack, ...result.pack };
+        showFlash('COLLECTION PUBLISHED');
+        syncPackChrome();
+      } catch (error) {
+        showFlash(error.code === 'PACK_REVISION_CONFLICT' ? 'RELOAD THE PACK TO PUBLISH' : 'PUBLISH FAILED');
+      }
+      if (packVisualMode) renderPackVisual(packVisualMode);
     }
 
     function pauseCurrentPlayback() {
@@ -2172,7 +2289,7 @@
       const title = document.getElementById('packQueueTitle');
       const creator = document.getElementById('packQueueCreator');
       if (title) title.textContent = pack.title || 'Untitled Pack';
-      if (creator) creator.textContent = packCreatorLabel() + ' · ' + videoData.length + ' REELS';
+      if (creator) creator.textContent = 'CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS';
       videoData.forEach((item, index) => {
         const row = document.createElement('button');
         row.type = 'button';
@@ -2200,6 +2317,10 @@
       const saveLabel = pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK';
       if (packSaveBtn) packSaveBtn.textContent = saveLabel;
       if (packQueueSave) packQueueSave.textContent = saveLabel;
+      if (packQueuePublish) {
+        const canPublish = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft';
+        packQueuePublish.hidden = !canPublish;
+      }
       if (modeBtn) modeBtn.hidden = true;
       if (notInterestedBtn) notInterestedBtn.hidden = true;
       if (hideCreatorBtn) hideCreatorBtn.hidden = true;
@@ -2208,6 +2329,12 @@
 
     function showPackStage(mode) {
       if (!isPackMode || !packStageCard) return;
+      // Collections play immediately — the stage card only covers terminal
+      // states (pack complete) and per-item recovery (unavailable member).
+      if (mode !== 'complete' && mode !== 'unavailable') {
+        hidePackStage();
+        return;
+      }
       packQueueOpen = false;
       if (packQueuePanel) packQueuePanel.hidden = true;
       packStageCard.hidden = false;
@@ -2221,20 +2348,13 @@
         packStageStatus.textContent = videoData.length + ' ordered reels · no automatic feed continuation';
         packStagePrimary.textContent = 'REPLAY PACK';
         packStagePrimary.dataset.action = 'replay';
-      } else if (mode === 'unavailable') {
+      } else {
         packStageLabel.textContent = 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length;
         packStageTitle.textContent = 'Reel unavailable';
         packStageText.textContent = 'This reel was removed or is no longer accessible. Its place in the authored order is preserved.';
         packStageStatus.textContent = 'Skipping without exposing protected media.';
         packStagePrimary.textContent = 'SKIP ITEM';
         packStagePrimary.dataset.action = 'skip';
-      } else {
-        packStageLabel.textContent = 'REEL PACK · ' + videoData.length + ' REELS';
-        packStageTitle.textContent = pack.title || 'Untitled Pack';
-        packStageText.textContent = pack.description || ('An ordered collection by ' + packCreatorLabel() + '.');
-        packStageStatus.textContent = 'Plays in the creator’s order and stops at the end.';
-        packStagePrimary.textContent = packState.resumePositionMs > 0 ? 'RESUME PACK' : 'START PACK';
-        packStagePrimary.dataset.action = 'start';
       }
       renderPackVisual(mode);
       syncPackChrome();
@@ -2414,6 +2534,288 @@
       showPackStage('complete');
       persistPackProgress(true);
       recordPackEvent('pack_complete', { reel_count: videoData.length });
+    }
+
+    // ── Save to collection (2D DOM menu + XR static card) ──
+    function collectPresenting() {
+      try { return !!(typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
+    }
+
+    async function loadCollectRows() {
+      const result = await requestJson('/api/users/me/packs');
+      collectRows = (result.items || [])
+        .filter((row) => row.status === 'draft')
+        .map((row) => ({ id: row.id, title: row.title || 'Untitled Collection', count: row.reel_count || 0, added: false }));
+    }
+
+    async function openCollectOverlay() {
+      const item = videoData[idx];
+      if (!item || !item.post_id) { showFlash('NOTHING TO COLLECT'); return false; }
+      if (collectOpen) { closeCollectOverlay(); return false; }
+      if (!currentUser) {
+        requestAuthentication({ kind: 'collect', post_id: item.post_id });
+        return false;
+      }
+      collectPostId = item.post_id;
+      collectWasPlaying = isImageItem(item) ? !!imageTimer : !!(video && !video.paused);
+      pauseCurrentPlayback();
+      collectOpen = true;
+      try {
+        await loadCollectRows();
+      } catch (error) {
+        collectOpen = false;
+        collectPostId = null;
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'collect', post_id: item.post_id });
+        } else {
+          showFlash('COLLECTIONS UNAVAILABLE');
+        }
+        return false;
+      }
+      renderCollectVisual();
+      if (!collectPresenting() && collectMenuPanel) {
+        renderCollectMenuDom();
+        if (collectMenuBackdrop) collectMenuBackdrop.hidden = false;
+        collectMenuPanel.hidden = false;
+        // The edge nav is a page-level sibling of the frame, so the class
+        // goes on body as well to hide it while the modal is up.
+        if (frame) frame.classList.add('sx-collect-open');
+        document.body.classList.add('sx-collect-open');
+        try { collectMenuClose.focus({ preventScroll: true }); } catch (e) {
+          try { collectMenuClose.focus(); } catch (ignored) {}
+        }
+      }
+      return true;
+    }
+
+    function closeCollectOverlay() {
+      if (!collectOpen) return;
+      collectOpen = false;
+      collectPostId = null;
+      packVisualMode = '';
+      if (collectMenuPanel) collectMenuPanel.hidden = true;
+      if (collectMenuBackdrop) collectMenuBackdrop.hidden = true;
+      if (frame) frame.classList.remove('sx-collect-open');
+      document.body.classList.remove('sx-collect-open');
+      hideCollectNewRow();
+      notifyVisualSourceChange();
+      if (isPackMode) resumeCurrentPlayback();
+      else if (collectWasPlaying) {
+        const item = videoData[idx];
+        if (isImageItem(item)) armImageTimer();
+        else if (video) video.play().catch(() => {});
+        updatePlayBtnUI(true);
+      }
+      collectWasPlaying = false;
+    }
+
+    function hideCollectNewRow() {
+      if (collectNewRow) collectNewRow.hidden = true;
+      if (collectNewName) collectNewName.value = '';
+    }
+
+    // Instagram-style save: a collection pick also keeps the reel in All
+    // saved items.
+    async function ensureGeneralSaved() {
+      const item = videoData[idx];
+      if (!item || !item.post_id || item._saved) return;
+      await saveCurrentReel();
+    }
+
+    function renderCollectMenuDom() {
+      if (!collectMenuList) return;
+      collectMenuList.replaceChildren();
+      const item = videoData[idx];
+      const generalRow = document.createElement('button');
+      generalRow.type = 'button';
+      generalRow.className = 'reels-pack-queue-item' + (item && item._saved ? ' current' : '');
+      generalRow.setAttribute('aria-label', item && item._saved ? 'Saved to all saved items — tap to remove' : 'Save to all saved items');
+      const gMark = document.createElement('span');
+      gMark.textContent = '∞';
+      const gName = document.createElement('strong');
+      gName.textContent = 'ALL SAVED ITEMS';
+      const gStatus = document.createElement('span');
+      gStatus.textContent = item && item._saved ? 'SAVED' : 'SAVE';
+      generalRow.append(gMark, gName, gStatus);
+      generalRow.addEventListener('click', async () => {
+        await saveCurrentReel();
+        renderCollectMenuDom();
+      });
+      collectMenuList.appendChild(generalRow);
+      if (!collectRows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'reels-pack-queue-empty';
+        empty.textContent = 'No collections yet — create one below.';
+        collectMenuList.appendChild(empty);
+      }
+      collectRows.forEach((row) => {
+        const rowBtn = document.createElement('button');
+        rowBtn.type = 'button';
+        rowBtn.className = 'reels-pack-queue-item' + (row.added ? ' current' : '');
+        rowBtn.disabled = !!row.added;
+        rowBtn.setAttribute('aria-label', (row.added ? 'Added to ' : 'Add to collection ') + row.title);
+        const count = document.createElement('span');
+        count.textContent = String(row.count).padStart(2, '0');
+        const name = document.createElement('strong');
+        name.textContent = row.title;
+        const status = document.createElement('span');
+        status.textContent = row.added ? 'ADDED' : 'ADD';
+        rowBtn.append(count, name, status);
+        rowBtn.addEventListener('click', () => addReelToCollection(row.id, row));
+        collectMenuList.appendChild(rowBtn);
+      });
+    }
+
+    async function addReelToCollection(packId, row) {
+      if (!collectPostId || !packId) return;
+      await ensureGeneralSaved();
+      try {
+        const result = await requestJson('/api/packs/' + encodeURIComponent(packId) + '/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ post_id: collectPostId }),
+        });
+        if (row) { row.added = true; row.count = result.pack ? result.pack.reel_count : row.count + 1; }
+        requestJson('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_type: 'collection_add',
+            post_id: collectPostId,
+            pack_id: packId,
+            source: 'collection',
+            client_event_id: eventId(),
+            client_occurred_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        showFlash('ADDED TO COLLECTION');
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'collect', post_id: collectPostId });
+        } else {
+          showFlash(error.code === 'PACK_TOO_LARGE' ? 'COLLECTION FULL (30)' : 'COLLECTION ADD FAILED');
+        }
+      }
+      if (collectOpen) {
+        renderCollectVisual();
+        if (!collectPresenting()) renderCollectMenuDom();
+      }
+    }
+
+    async function createCollectionFromCurrentReel(title) {
+      if (!collectPostId) return;
+      const name = (typeof title === 'string' ? title : '').trim() || 'New Collection';
+      try {
+        const result = await requestJson('/api/packs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: name, post_ids: [collectPostId] }),
+        });
+        const pack = result.pack;
+        collectRows.unshift({ id: pack.id, title: pack.title || name, count: pack.reel_count || 1, added: true });
+        await ensureGeneralSaved();
+        showFlash('SAVED TO ' + name.toUpperCase().slice(0, 26));
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          currentUser = null;
+          refreshAccountUI();
+          requestAuthentication({ kind: 'collect', post_id: collectPostId });
+        } else {
+          showFlash('COULD NOT CREATE COLLECTION');
+        }
+      }
+      if (collectOpen) {
+        renderCollectVisual();
+        if (!collectPresenting()) renderCollectMenuDom();
+      }
+    }
+
+    function submitCollectNew() {
+      const name = collectNewName ? collectNewName.value : '';
+      hideCollectNewRow();
+      createCollectionFromCurrentReel(name);
+    }
+
+    function renderCollectVisual() {
+      if (!packVisualCanvas) return;
+      packVisualMode = 'collect';
+      packVisualRegions = [];
+      const ctx = packVisualCanvas.getContext('2d');
+      ctx.clearRect(0, 0, 1024, 1024);
+      const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+      gradient.addColorStop(0, '#1c0d0b');
+      gradient.addColorStop(0.48, '#09101c');
+      gradient.addColorStop(1, '#05080e');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = '#ff553a';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(34, 34, 956, 956);
+      ctx.fillStyle = '#ff765f';
+      ctx.font = '900 24px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText('SAVE TO COLLECTION', 512, 104);
+      const item = videoData[idx];
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 38px "Archivo", sans-serif';
+      ctx.fillText(String((item && (item.title || item.filename)) || 'This reel').slice(0, 40), 512, 160);
+      const shown = collectRows.slice(0, 7);
+      const rowX = 92, rowW = 840, rowH = 56, rowGap = 8, rowStart = 220;
+      shown.forEach((row, index) => {
+        const y = rowStart + index * (rowH + rowGap);
+        ctx.fillStyle = row.added ? '#14251c' : '#11161d';
+        ctx.strokeStyle = row.added ? '#4ade80' : '#303945';
+        ctx.lineWidth = row.added ? 3 : 1;
+        ctx.beginPath();
+        ctx.roundRect(rowX, y, rowW, rowH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 22px "Archivo", sans-serif';
+        ctx.fillText(String(row.title).slice(0, 42), rowX + 22, y + rowH / 2);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = row.added ? '#4ade80' : '#aeb7c3';
+        ctx.font = '800 17px "JetBrains Mono", monospace';
+        ctx.fillText(row.added ? 'ADDED' : 'ADD', rowX + rowW - 22, y + rowH / 2);
+        if (!row.added) addPackVisualRegion('collect-pack', rowX, y, rowW, rowH, { packId: row.id, row });
+      });
+      if (collectRows.length > shown.length) {
+        ctx.fillStyle = '#aeb7c3';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '700 18px "JetBrains Mono", monospace';
+        ctx.fillText('+' + (collectRows.length - shown.length) + ' MORE · SEE ALL IN 2D', 512, rowStart + shown.length * (rowH + rowGap) + 12);
+      }
+      drawPackCanvasButton(ctx, '+ NEW COLLECTION', 92, 884, 250, 72, false, 'collect-new');
+      drawPackCanvasButton(ctx, 'ALL SAVED', 387, 884, 250, 72, true, 'collect-just-save');
+      drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'collect-close');
+      packVisualVersion += 1;
+      notifyVisualSourceChange();
+    }
+
+    function handleCollectSelect(point) {
+      if (!collectOpen || !point) return false;
+      const region = packVisualRegions.find((entry) =>
+        point.u >= entry.x && point.u <= entry.x + entry.w && point.v >= entry.y && point.v <= entry.y + entry.h
+      );
+      if (!region) return false;
+      if (region.action === 'collect-just-save') { closeCollectOverlay(); saveCurrentReel(); }
+      else if (region.action === 'collect-pack') addReelToCollection(region.packId, region.row);
+      else if (region.action === 'collect-new') createCollectionFromCurrentReel();
+      else if (region.action === 'collect-close') closeCollectOverlay();
+      return true;
+    }
+
+    function handleCardSelect(point) {
+      if (collectOpen) return handleCollectSelect(point);
+      return handlePackVisualSelect(point);
     }
 
     function showRewardToast(message, award) {
@@ -2740,6 +3142,7 @@
       if (targetIndex !== idx) loadVideo(targetIndex);
       if (pending.kind === 'like') await likeCurrentReel();
       else if (pending.kind === 'save') await saveCurrentReel();
+      else if (pending.kind === 'collect') await openCollectOverlay();
       else if (pending.kind === 'follow') await followCurrentCreator();
       else if (pending.kind === 'comment' && pending.text) {
         const posted = await postComment(pending.text, pending.timestamp);
@@ -3600,7 +4003,37 @@
     if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));
     if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
     if (likeBtn) likeBtn.addEventListener('click', () => likeCurrentReel());
-    if (saveBtn) saveBtn.addEventListener('click', () => saveCurrentReel());
+    if (saveBtn) saveBtn.addEventListener('click', () => openCollectOverlay());
+    if (collectMenuClose) collectMenuClose.addEventListener('click', () => closeCollectOverlay());
+    if (collectMenuBackdrop) collectMenuBackdrop.addEventListener('click', () => closeCollectOverlay());
+    if (collectMenuNew) collectMenuNew.addEventListener('click', () => {
+      if (collectPresenting() || !collectNewRow) {
+        createCollectionFromCurrentReel();
+        return;
+      }
+      collectNewRow.hidden = false;
+      try { collectNewName.focus({ preventScroll: true }); } catch (e) {
+        try { collectNewName.focus(); } catch (ignored) {}
+      }
+    });
+    if (collectMenuJustSave) collectMenuJustSave.addEventListener('click', async () => {
+      await saveCurrentReel();
+      if (collectOpen && !collectPresenting()) renderCollectMenuDom();
+    });
+    if (collectNewCreate) collectNewCreate.addEventListener('click', () => submitCollectNew());
+    if (collectNewCancel) collectNewCancel.addEventListener('click', () => hideCollectNewRow());
+    if (collectNewName) {
+      collectNewName.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitCollectNew();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          hideCollectNewRow();
+          try { collectMenuClose.focus({ preventScroll: true }); } catch (e) {}
+        }
+      });
+    }
     if (shareBtn) shareBtn.addEventListener('click', () => shareCurrentReel());
     if (packQueueBtn) packQueueBtn.addEventListener('click', () => setPackQueue());
     if (packSaveBtn) packSaveBtn.addEventListener('click', () => togglePackSave());
@@ -3608,6 +4041,7 @@
     if (packQueueClose) packQueueClose.addEventListener('click', () => setPackQueue(false));
     if (packQueueSave) packQueueSave.addEventListener('click', () => togglePackSave());
     if (packQueueShare) packQueueShare.addEventListener('click', () => shareCurrentPack());
+    if (packQueuePublish) packQueuePublish.addEventListener('click', () => publishPackFromPlayer());
     if (packStagePrimary) {
       packStagePrimary.addEventListener('click', () => {
         const action = packStagePrimary.dataset.action;
@@ -3728,6 +4162,7 @@
 
     function loadVideo(index, options) {
       const loadOptions = options || {};
+      if (collectOpen) closeCollectOverlay();
       hideError();
       clearImageTimer();
       if (typeof resetPan === 'function') resetPan();
@@ -4649,11 +5084,22 @@
     window.addEventListener('keydown', (e) => {
       // Don't capture shortcuts when typing in comment input
       if (e.target && e.target.tagName === 'INPUT') {
-        if (e.key === 'Escape') toggleDrawer(false);
+        if (e.key === 'Escape') {
+          if (collectOpen) {
+            hideCollectNewRow();
+            return;
+          }
+          toggleDrawer(false);
+        }
         return;
       }
       const key = e.key.toLowerCase();
       if (key === 'escape') {
+        if (collectOpen) {
+          closeCollectOverlay();
+          try { if (saveBtn && !saveBtn.closest('[hidden]')) saveBtn.focus({ preventScroll: true }); else moreBtn && moreBtn.focus({ preventScroll: true }); } catch (focusError) {}
+          return;
+        }
         if (isPackMode && packQueueOpen) {
           setPackQueue(false);
           try { packQueueBtn.focus({ preventScroll: true }); } catch (focusError) {}
@@ -4725,9 +5171,10 @@
           };
         },
         onTogglePackQueue: function() { return setPackQueue(); },
-        onMainScreenSelect: handlePackVisualSelect,
+        onMainScreenSelect: handleCardSelect,
         onSavePack: togglePackSave,
         onSharePack: shareCurrentPack,
+        onCollectReel: function() { return openCollectOverlay(); },
         onLike: likeCurrentReel,
         onSaveReel: saveCurrentReel,
         onShareReel: shareCurrentReel,
@@ -4879,9 +5326,7 @@
         packState.phase = 'complete';
         showPackStage('complete');
       } else if (packState.phase === 'complete') {
-        showPackStage('complete');
-      } else if (packState.phase === 'intro') {
-        showPackStage('intro');
+        startPackPlayback(true);
       } else {
         const resumeSeconds = Math.max(0, Number(packState.resumePositionMs) || 0) / 1000;
         loadVideo(packState.index, { autoplay: true, seekTo: resumeSeconds });

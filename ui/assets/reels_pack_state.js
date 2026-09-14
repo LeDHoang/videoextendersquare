@@ -34,14 +34,23 @@
 
     const resume = source.resume || null;
     const restart = !!source.restart;
-    let phase = restart ? 'intro' : (resume && PHASES.has(resume.phase) ? resume.phase : 'intro');
+    // Collections open straight into playback: there is no start/intro gate.
+    // A finished pack replays from the top, a half-watched pack resumes, and
+    // a brand new pack starts at the requested member.
+    let phase = 'playing';
     let index = clampIndex(items, requestedIndex);
+    let resumePositionMs = 0;
     let skippedUnavailable = false;
-    if (!restart && resume && resume.current_item_id) {
-      const resumeIndex = items.findIndex((item) => item && item.pack_item_id === resume.current_item_id);
-      if (resumeIndex >= 0) index = resumeIndex;
+    if (!restart && resume && resume.phase === 'complete') {
+      index = clampIndex(items, 0);
+    } else if (!restart && resume && resume.phase === 'playing') {
+      if (resume.current_item_id) {
+        const resumeIndex = items.findIndex((item) => item && item.pack_item_id === resume.current_item_id);
+        if (resumeIndex >= 0) index = resumeIndex;
+      }
+      resumePositionMs = Math.max(0, Number(resume.position_ms) || 0);
     }
-    if (phase === 'playing' && !isAvailable(items[index])) {
+    if (!isAvailable(items[index])) {
       const originalIndex = index;
       const forward = findPlayable(items, index, 1, true);
       const backward = findPlayable(items, index, -1, true);
@@ -49,6 +58,7 @@
       skippedUnavailable = index !== originalIndex;
       if (index < 0) phase = 'complete';
     }
+    if (index < 0) index = 0;
 
     return {
       mode: 'pack',
@@ -57,7 +67,7 @@
       revision: Number(pack.revision) || 1,
       items,
       index: Math.max(0, index),
-      resumePositionMs: !restart && resume && phase === 'playing' && !skippedUnavailable ? Math.max(0, Number(resume.position_ms) || 0) : 0,
+      resumePositionMs: phase === 'playing' && !skippedUnavailable ? resumePositionMs : 0,
     };
   }
 

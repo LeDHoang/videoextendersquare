@@ -92,7 +92,7 @@ function MessageContent({ message }) {
         <div className="sx-message-pack-meta">
           <span>▦ REEL PACK</span>
           <Link to={link} onClick={recordOpen}><strong>{pack.title}</strong></Link>
-          <small>@{pack.creator?.username || 'creator'} · {pack.reel_count} REELS</small>
+          <small>CURATED BY @{pack.creator?.username || 'creator'} · {pack.reel_count} REELS</small>
           <Link to={link} className="sx-message-pack-open" onClick={recordOpen}>OPEN PACK</Link>
         </div>
         {message.content?.text ? <p>{message.content.text}</p> : null}

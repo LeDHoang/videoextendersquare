@@ -501,6 +501,8 @@ def send_into_conversation(
             pack = get_pack_for_viewer(db, req.pack_id, sender.id)
         except HTTPException:
             fail(404, "PACK_NOT_FOUND", "Reel Pack not found.")
+        if pack.status != "published":
+            fail(422, "PACK_NOT_PUBLISHED", "Only published Reel Packs can be shared.")
         if req.post_id:
             fail(422, "UNEXPECTED_POST", "A Reel Pack message cannot include a reel.", "post_id")
     elif req.post_id or req.pack_id:

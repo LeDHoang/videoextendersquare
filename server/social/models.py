@@ -158,6 +158,8 @@ class ReelPack(Base):
     cover_post_id = Column(String(36), ForeignKey("posts.id", ondelete="SET NULL"), nullable=True)
     location = Column(JSON, nullable=False, default=dict)
     save_count = Column(Integer, nullable=False, default=0)
+    like_count = Column(Integer, nullable=False, default=0)
+    view_count = Column(Integer, nullable=False, default=0)
     revision = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
@@ -221,6 +223,33 @@ class ReelPackSave(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "pack_id", name="uq_reel_pack_save_user_pack"),
         Index("ix_reel_pack_saves_user", "user_id", "created_at"),
+    )
+
+
+class ReelPackLike(Base):
+    __tablename__ = "reel_pack_likes"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "pack_id", name="uq_reel_pack_like_user_pack"),
+        Index("ix_reel_pack_likes_pack", "pack_id", "created_at"),
+    )
+
+
+class ReelPackView(Base):
+    __tablename__ = "reel_pack_views"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    pack_id = Column(String(36), ForeignKey("reel_packs.id", ondelete="CASCADE"), nullable=False)
+    viewer_key = Column(String(80), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_reel_pack_views_pack_viewer", "pack_id", "viewer_key", "created_at"),
     )
 
 

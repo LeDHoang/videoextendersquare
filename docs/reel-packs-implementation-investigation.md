@@ -1,6 +1,6 @@
 # Reel Packs — Implementation Investigation
 
-Last updated: 2026-09-14 UTC (visual/form pass: tile/cover semantics, Explore/Profile/Tag/Location states, message-card overflow/targets, share preview metadata, player dialog roles/focus/Escape + 44px targets, XR preview stability; 9/9 pack pytest, 68 app pytest, 40 Node + 6 Vitest, vite build clean)
+Last updated: 2026-09-14 UTC (collection pipeline change: save-to-collection from 2D player and XR collect card, mixed-creator public-reel membership with per-viewer tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, draft-DM share guard; 11/11 pack pytest, 77/77 full `tests/` suite, 44 Node + 13 Vitest, vite build clean. Prior independent verification pass on macOS: alembic round trip, runtime probes, Meta WebXR documentation checks via `metavr` 1.3.2.2.2)
 
 Status: **Implemented in the working tree; automated checks pass for the application surface. Physical Quest, accessibility, and sustained-performance release gates remain open.**
 
@@ -46,7 +46,7 @@ The review covered:
 
 The linked Instagram posts in the source note were not independently authenticated. Their accompanying text was treated as the author's intended observation, not as verified evidence about an external product or technology.
 
-Official Meta documentation verification was attempted with `npx -y metavr docs search ...`, but the current `metavr` package has no `linux-x64` binary. No claim in this document should therefore be interpreted as current Meta platform-policy certification. Re-run the documentation checks on a supported host and validate on physical target Quest devices before release.
+Official Meta documentation verification was originally blocked because the `metavr` package available in the earlier Linux environment had no `linux-x64` binary. On 2026-09-14 the checks were re-run successfully on a macOS host with `metavr` 1.3.2.2.2 (`npx -y metavr docs search` and `npx -y metavr docs fetch`). The WebXR feature-detection guidance in `documentation/web/webxr-overview.md`, the hand-input behavior in `documentation/web/webxr-hands.md`, and the system-keyboard requirements in `documentation/web/webxr-keyboard.md` were confirmed to match the implementation. No claim in this document should therefore be interpreted as current Meta platform-policy or Store certification. Validate on physical target Quest devices before release.
 
 ## What the source material contributes
 
@@ -54,7 +54,7 @@ The source note is broad and mixes useful product ideas with concepts that shoul
 
 | Source | Relevant observation | Product consequence |
 |---|---|---|
-| `IMG_3379.png` — View-Master reels | A finite physical reel contains a deliberately ordered set of views and has a recognizable collection identity. | Strongest direct support for 5–12 item Reel Packs, explicit order, clear start, and clear ending. |
+| `IMG_3379.png` — View-Master reels | A finite physical reel contains a deliberately ordered set of views and has a recognizable collection identity. | Strongest direct support for finite Reel Packs, explicit order, clear start, and clear ending. |
 | `IMG_1528.heic` — curved projection room | One primary media surface can be strengthened by peripheral context without replacing the source. | Packs should use one authoritative reel at a time and stable supporting UI, not multiple competing autoplay surfaces. |
 | `IMG_2289.png` — MTV Cribs/personal tours | Tours naturally consist of chapters or stops and work as episodes. | Property, hospitality, studio, venue, and creator-space Packs are strong early use cases. |
 | `IMG_1712.jpeg` — place exploration | People want to enter recent experiences associated with a place. | Location-filtered Packs are useful in Explore now and can later become curated Earth destinations. |
@@ -105,23 +105,25 @@ Spotify is useful as a behavioral reference, not as a visual or branding templat
 
 ### Authoring and publication
 
-- Drafts allow 0–12 unique reels.
-- Publishing requires 5–12 currently available reels.
-- A creator may include only their own published reels.
-- V1 visibility is `public` or `unlisted`.
-- Creators set title, description, up to five tags, optional city/country, cover reel, and exact member order.
+- Collections are personal draft packs. The pipeline is: see a reel → save it to a collection (general save and collection saves are separate actions) → the collection owner can publish the collection as a Reel Pack.
+- Drafts allow 0–30 unique reels created through either the editor or the save-to-collection flow (`POST /api/packs/:id/items`, idempotent; `DELETE /api/packs/:id/items/:postId`).
+- Publishing requires 3–30 currently available reels (testing cap: `PACK_MAX_ITEMS = 30`).
+- A collection may mix reels from any creator: membership requires a currently published reel from an active owner that the collector can view (no block in either direction). Public reels only.
+- Collection owners set title, description, up to five tags, optional city/country, cover reel, and exact member order in the 2D editor; PackPage exposes publish plus a visibility choice (public/unlisted) for drafts.
 - Desktop drag-and-drop and explicit up/down buttons provide pointer, keyboard, and mobile-compatible reordering paths.
 - The selected cover uses a poster when available. Image media may use its image URL. Video URLs are never incorrectly used as `<img>` sources.
 - When no usable selected poster exists, the UI builds a static collage from up to four available member covers.
-- Duplicate member reels, foreign-owned reels, unpublished reels, deleted reels, and more than 12 members are rejected.
+- Duplicate member reels, unpublished/deleted reels, and more than 30 members are rejected.
 - Published edits preserve the Pack ID and canonical URL.
-- Edit, publish, unpublish, and delete operations require an expected revision. Revision acquisition is an atomic conditional database update; a stale request returns `409 PACK_REVISION_CONFLICT` and its transaction is rolled back.
+- Edit, publish, unpublish, delete, and item add/remove operations use revision claims; a stale request returns `409 PACK_REVISION_CONFLICT` and its transaction is rolled back.
 
 ### Removed or moderated members
 
 Pack item IDs and positions remain structurally stable when a post reference becomes unavailable. The API returns an unavailable item without post details, and playback renders a static unavailable card and skips it during next/previous navigation.
 
-A published public Pack with fewer than five playable items is:
+Availability is per viewer: a member reel whose creator blocks the viewer (or is blocked by them) renders as a tombstone with no post payload for that viewer, while other viewers still see it. Blocking between the viewer and the pack curator hides the whole pack as before.
+
+A published public Pack with fewer than three playable items is:
 
 - marked `needs_repair` for its creator;
 - removed from public discovery;
@@ -147,7 +149,7 @@ Public profiles have a `PACKS` tab. The current user's Saved tab separates `REEL
 
 - a static cover or fallback collage;
 - a stacked-card glyph and persistent `REEL PACK` label;
-- title, creator, reel count, optional location, and repair state;
+- title, curated-by creator, reel count, optional location, and repair state;
 - independent Save Pack and Share controls;
 - an accessible collection label;
 - keyboard activation that opens the Pack only when the tile itself is activated, without allowing nested save/share controls to bubble into an unintended open.
@@ -156,7 +158,9 @@ The tile records a `pack_impression` only after it becomes substantially visible
 
 ### Detail and playback
 
-The canonical route is `/packs/:packId`. It presents metadata, creator, count, visibility, revision, location, tags, save/share/report or owner controls, resume state, and the complete ordered member list.
+The canonical route is `/packs/:packId`. It presents metadata, curator, count, visibility, revision, location, tags, save/share/report or owner controls (draft owners additionally get publish plus a visibility choice), resume state, and the complete ordered member list.
+
+Curator attribution is collection-level only: PackTile, the PackPage hero, XR queue/intro cards, and message cards read `CURATED BY @x`; reel-level surfaces (track rows, playback meta) keep the individual reel's creator.
 
 The player uses one Pack state machine:
 
@@ -217,6 +221,24 @@ Migration `20260913_0009` adds:
 - nullable `pack_id` on `direct_messages`
 - nullable `pack_id` on `engagement_events`
 
+Migration `20260913_0010` adds collection engagement counters and de-duplicated viewing:
+
+- `like_count`, `view_count` on `reel_packs`
+- `reel_pack_likes` (unique user/Pack)
+- `reel_pack_views` (per-viewer rolling window)
+
+Collections expose read-only likes/views/comment counters. Likes are per-viewer
+and idempotent. A view is any `pack_start` and counts both authenticated and
+anonymous viewers, de-duplicated per viewer in a rolling 10-minute window. The
+comment count aggregates live comments across the member reels the viewer can
+see; there is no Pack-level comment thread.
+
+Collections also open straight into playback: there is no start/intro gate. A
+finished Pack replays from the top, a half-watched Pack resumes, and a new Pack
+starts at the requested member. `START PACK`/`RESUME` buttons are gone from the
+Pack page; the hero cover itself plays, and Explore collection tiles navigate
+directly to the player.
+
 Important constraints include unique Pack/post membership, unique Pack/position, one save per user/Pack, one progress row per user/Pack, non-negative positions and progress, and a message check preventing simultaneous reel and Pack attachments.
 
 Implemented HTTP endpoints:
@@ -227,11 +249,16 @@ Implemented HTTP endpoints:
 | `POST /api/packs` | Create a draft. |
 | `GET /api/packs/:id` | Resolve an authorized live Pack detail. |
 | `PATCH /api/packs/:id` | Update metadata and/or complete ordered member list with expected revision. |
+| `POST /api/packs/:id/items` | Append one public reel to the collection (save-to-collection flow); idempotent, optional expected revision. |
+| `DELETE /api/packs/:id/items/:postId` | Remove one member reel from the collection. |
 | `DELETE /api/packs/:id` | Soft-delete with expected revision. |
-| `POST /api/packs/:id/publish` | Publish a valid 5–12 item Pack with expected revision. |
+| `POST /api/packs/:id/publish` | Publish a valid 3–30 item Pack with expected revision. |
 | `POST /api/packs/:id/unpublish` | Return a Pack to draft with expected revision. |
 | `PUT /api/packs/:id/save` | Idempotently save a Pack. |
 | `DELETE /api/packs/:id/save` | Idempotently unsave a Pack. |
+| `PUT /api/packs/:id/like` | Idempotently like a Pack; returns `likes`/`liked_by_me`. |
+| `DELETE /api/packs/:id/like` | Idempotently unlike a Pack. |
+| `POST /api/events` (`pack_start`) | Records a de-duplicated collection view for auth and anonymous viewers. |
 | `PUT /api/packs/:id/progress` | Persist stable item ID, position, and phase. |
 | `GET /api/packs/:id/share` | Return canonical sharing metadata. |
 | `GET /api/users/:username/packs` | Public creator Packs, plus owner drafts for the owner. |
@@ -268,6 +295,8 @@ When an image begins loading, the previous reel texture is cleared immediately s
 - The renderer handles video, image, and static-card textures.
 - Feed/Earth switching is replaced by a Pack position/queue control in Pack mode.
 - The central queue shows Pack identity, current position, ordered members, Save Pack, and Share Pack.
+- A COLLECT dock control (feed mode) opens the SAVE TO card: just-save, add to any of the owner's draft collections, or create a new collection without leaving XR.
+- Draft collections expose a PUBLISH COLLECTION action on the intro and completion cards when the viewer is the owner and at least three items are available.
 - Reel actions and Pack actions use distinct callbacks.
 - Intro and completion cards remain stable in the central viewing zone rather than following every head movement.
 - Controllers and hands use the existing ray interaction system with visible hover/press state.
@@ -280,11 +309,11 @@ The code does not introduce forced camera movement, automatic continuation, or a
 
 The server re-checks access when a Pack is listed, opened, saved, played, shared, rendered in a message, or attributed in analytics. Important properties:
 
-- Blocking is enforced between viewer and Pack creator.
+- Blocking is enforced between viewer and Pack creator, and per member reel between the viewer and that reel's creator (viewer-specific tombstones).
 - Draft and unlisted visibility is not leaked through public discovery.
 - Message attachments resolve live permissions each time they are serialized.
 - Unavailable responses are generic and do not reveal moderation, deletion, block, or visibility details.
-- Member reels must belong to the Pack owner at authoring time.
+- Member reels may come from any creator but must be published, owned by an active account, and visible to the collector at authoring time.
 - Unavailable member rows contain no protected post payload.
 - Pack-level reports cover abusive metadata or curation; reel reports remain independent.
 - Soft deletion keeps historical message structure while making the target unavailable.
@@ -322,7 +351,7 @@ Poster generation remains upstream of Pack creation. Video-only Packs without po
 
 ### External platform verification
 
-The implementation uses the project's existing custom WebXR renderer rather than introducing an unverified Meta-specific SDK dependency. Current Meta documentation and Store behavior still need verification on a supported host because `metavr` could not run on this Linux environment.
+The implementation uses the project's existing custom WebXR renderer rather than introducing an unverified Meta-specific SDK dependency. Current Meta WebXR documentation was verified on a supported macOS `metavr` host on 2026-09-14: the VR-button gating matches the runtime-feature-detection guidance in `webxr-overview.md`, hand input matches `webxr-hands.md`, and DOM-overlay/system-keyboard usage matches `webxr-keyboard.md`. Meta Horizon Store policy and Quest Browser version-matrix behavior remain unverified.
 
 ### Accessibility verification
 
@@ -330,23 +359,34 @@ The structure provides labels, non-color Pack identification, keyboard move cont
 
 ## Automated verification status
 
-Completed on 2026-09-14 (visual/form pass):
+Completed on 2026-09-14 (independent verification pass on macOS):
 
-- `tests/test_reel_packs.py`: 9 passed (8 prior + share-preview metadata).
-- Application backend suite excluding `tests/test_cloud_routes.py`: 68 passed.
-- Node/Vitest web suite: 40 Node tests and 6 Vitest tests passed (includes 7 pack visual/form regression tests + 2 pack-state tests).
+- `tests/test_reel_packs.py`: 9 passed.
+- Full `tests/` suite including `tests/test_cloud_routes.py`: 75 passed. The earlier exclusion no longer applies: `sse-starlette>=2.0` is declared in `requirements.txt` and installed in the project `.venv`, so `tests/test_cloud_routes.py` collects and passes (7 tests).
+- Node/Vitest web suite: 40 Node tests and 13 Vitest tests passed (includes 7 pack visual/form regression tests and 7 pack-state tests).
 - `npm run build`: production Vite build passed.
 - `node --check ui/assets/webxr_vr.js` and `ui/assets/reels_pack_state.js`: passed.
 - Python `ast.parse` on `packs.py` / `reels.py` / `messages.py`: passed.
-- Alembic temporary SQLite round trip through revision `20260913_0009`: upgrade, downgrade to base, and upgrade to head passed (prior pass; no new migration in this fix batch).
+- Alembic temporary SQLite round trip through revision `20260913_0009`: upgrade, downgrade to base, and upgrade to head re-verified on macOS.
+- Independent runtime probes on an isolated SQLite database re-confirmed: repair-hiding below the publish threshold, non-owner 404 versus owner 200 at zero playable items, unpublish/republish save and message-tombstone transitions, blocking enforcement, anonymous `pack_impression` acceptance, stable resume `start_index`, and the DB-fallback player payload.
 
-The unscoped repository-root `pytest` command is not a valid project signal because it also collects the nested ComfyUI test tree and unrelated root experiments. It failed during collection on missing external fixtures/modules and allowed the nested `ComfyUI/server.py` module to shadow the ECHO `server` package. The intended `tests/` suite was run separately. `tests/test_cloud_routes.py` could not collect in this environment because the optional `sse_starlette` dependency is absent.
+Updated verification after the collection pipeline change (2026-09-14):
+
+- `tests/test_reel_packs.py`: 11 passed, including new coverage for mixed-creator membership, collection item add/remove (idempotent duplicate, stale revision 409, cover clearing), publish at three, per-viewer blocked-member tombstones in detail and player payloads, and the draft pack guard on the generic DM endpoint.
+- Full `tests/` suite: 77 passed.
+- Node/Vitest web suite: 44 Node tests (includes new collection-pipeline regression tests) and 13 Vitest tests passed.
+- `npm run build`, `node --check` on `webxr_vr.js`/`reels_pack_state.js`, inline reels.html script syntax checks, and Python `ast.parse`: passed.
+
+The unscoped repository-root `pytest` command is not a valid project signal because it also collects the nested ComfyUI test tree and unrelated root experiments. It failed during collection on missing external fixtures/modules and allowed the nested `ComfyUI/server.py` module to shadow the ECHO `server` package. The intended `tests/` suite was run separately.
 
 ## Acceptance status
 
 | Requirement | Status |
 |---|---|
-| Creator can create a 0–12 item draft and publish at 5–12 | Implemented and tested |
+| Creator can save reels to a 0–30 item collection and publish at 3–30 | Implemented and tested |
+| Mixed-creator membership (any creator's public reels, block-aware) | Implemented and tested |
+| Save to collection from 2D player and XR collect card | Implemented; physical-device QA pending |
+| Publish from the collection page and XR intro/complete cards | Implemented; browser QA pending |
 | Ownership, duplicate, status, order, and cover validation | Implemented and tested |
 | Stable URL and live-reference edits | Implemented |
 | Atomic revision conflicts | Implemented and stale conflict tested |
@@ -364,17 +404,17 @@ The unscoped repository-root `pytest` command is not a valid project signal beca
 | 2D to XR to 2D state preservation | Implemented; physical-device QA pending |
 | Controller, hand, seated, one-handed behavior | Designed and implemented; physical-device QA pending |
 | Lowest-supported-headset frame/thermal budget | Not yet certified |
-| Current Meta documentation/Store verification | Blocked on this Linux host; supported-host check required |
+| Current Meta WebXR documentation verification | Verified on a supported macOS `metavr` host 2026-09-14 (WebXR overview, hands, system keyboard); Store policy and Browser version matrix still unverified |
 
 ## Remaining release gates
 
-1. Run current Meta WebXR, Quest Browser, accessibility, and Store documentation searches on a supported `metavr` host and record the source URLs and versions.
+1. Record the exact Meta documentation URLs (WebXR overview, hands, system keyboard) and the Quest Browser version matrix used in the 2026-09-14 macOS verification, and run the outstanding Quest Browser, accessibility, and Store policy searches.
 2. Test create, edit, publish, unpublish, stale conflict, and delete flows in two concurrent browser sessions.
 3. Test Explore, tag, location, profile, saved library, links, browser back/forward, native share, clipboard, QR, and 10-recipient messaging in supported browsers.
 4. Test screen-reader labels, keyboard-only authoring, focus order, grayscale distinction, reduced motion, captions where present, and responsive mobile layout.
 5. Run the complete Pack matrix on the lowest-powered supported Quest: video, image, unavailable item, intro, queue, completion, controller, hand, one-handed, seated, tracking interruption, XR exit/re-entry, and network interruption.
 6. Record frame rate, CPU/GPU frame time, draw calls, texture memory, thermal state, long-session memory, and decoder behavior. Do not enable immersive Pack rollout if it exceeds the existing certified playback budget.
-7. Install the missing optional `sse_starlette` test dependency in the intended environment and run `tests/test_cloud_routes.py` with the rest of the application suite.
+7. Keep the full `tests/` suite (75 passed including `tests/test_cloud_routes.py`) green in CI; `sse-starlette>=2.0` is already declared in `requirements.txt`, so any collecting environment only needs those requirements installed.
 8. Stage rollout independently: creation first, discovery second, immersive last.
 
 ## Final recommendation

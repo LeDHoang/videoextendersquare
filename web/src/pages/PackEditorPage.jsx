@@ -12,6 +12,9 @@ const VISIBILITY_OPTIONS = [
   { label: 'UNLISTED · LINK ONLY', value: 'unlisted' },
 ];
 
+const PACK_MIN_PUBLISHED_ITEMS = 3;
+const PACK_MAX_ITEMS = 30;
+
 function move(items, from, to) {
   if (to < 0 || to >= items.length || from === to) return items;
   const next = [...items];
@@ -27,6 +30,7 @@ export default function PackEditorPage() {
   const { config } = useConfigContext();
   const packCreationEnabled = config?.features?.reel_packs?.creation !== false;
   const [available, setAvailable] = useState(null);
+  const [librarySearch, setLibrarySearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [form, setForm] = useState({
     title: '',
@@ -43,39 +47,51 @@ export default function PackEditorPage() {
   const [dragIndex, setDragIndex] = useState(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !packId) return undefined;
     let alive = true;
-    Promise.all([
-      api.get('/api/users/' + encodeURIComponent(user.username) + '/posts', { media: 'all', limit: 50 }),
-      packId ? api.get('/api/packs/' + encodeURIComponent(packId)) : Promise.resolve(null),
-    ]).then(([posts, detail]) => {
+    api.get('/api/packs/' + encodeURIComponent(packId)).then((detail) => {
       if (!alive) return;
-      setAvailable(posts.items || []);
-      if (detail?.pack) {
-        const value = detail.pack;
-        if (!value.viewer_state?.can_edit) throw new Error('Only the creator can edit this Reel Pack.');
-        setPack(value);
-        setSelected(value.items.filter((item) => item.post).map((item) => item.post));
-        setForm({
-          title: value.title || '',
-          description: value.description || '',
-          visibility: value.visibility || 'public',
-          tags: (value.tags || []).join(', '),
-          city: value.location?.city || '',
-          country: value.location?.country || '',
-          coverPostId: value.cover_post_id || '',
-        });
-      }
+      const value = detail?.pack;
+      if (!value) throw new Error('This Reel Pack is unavailable.');
+      if (!value.viewer_state?.can_edit) throw new Error('Only the creator can edit this Reel Pack.');
+      setPack(value);
+      setSelected(value.items.filter((item) => item.post).map((item) => item.post));
+      setForm({
+        title: value.title || '',
+        description: value.description || '',
+        visibility: value.visibility || 'public',
+        tags: (value.tags || []).join(', '),
+        city: value.location?.city || '',
+        country: value.location?.country || '',
+        coverPostId: value.cover_post_id || '',
+      });
     }).catch((requestError) => {
       if (alive) setError(requestError.message || 'Could not load the Reel Pack editor.');
     });
     return () => { alive = false; };
   }, [packId, user]);
 
+  // Public-reel browser for the collection library: any creator's published
+  // reels are now valid members.
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(() => {
+      api.get('/api/reels', { search: librarySearch, sort: 'alphabetical', codec: 'all' })
+        .then((result) => {
+          if (!alive) return;
+          setAvailable((result.videos || []).filter((row) => row && row.post_id));
+        })
+        .catch(() => {
+          if (alive) setAvailable([]);
+        });
+    }, 250);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [librarySearch]);
+
   const selectedIds = useMemo(() => new Set(selected.map((post) => post.id)), [selected]);
 
   const addPost = (post) => {
-    if (selected.length >= 12 || selectedIds.has(post.id)) return;
+    if (selected.length >= PACK_MAX_ITEMS || selectedIds.has(post.id)) return;
     setSelected((current) => [...current, post]);
     setForm((current) => ({ ...current, coverPostId: current.coverPostId || post.id }));
   };
@@ -131,8 +147,8 @@ export default function PackEditorPage() {
   };
 
   const publish = async () => {
-    if (selected.length < 5) {
-      setError('Publishing requires at least five reels.');
+    if (selected.length < PACK_MIN_PUBLISHED_ITEMS) {
+      setError(`Publishing requires at least ${PACK_MIN_PUBLISHED_ITEMS} available reels.`);
       return;
     }
     if (busy) return;
@@ -181,7 +197,7 @@ export default function PackEditorPage() {
 
   return (
     <div className="sx-pack-editor">
-      <Hero title={pack ? 'EDIT REEL PACK' : 'CREATE REEL PACK'} kicker="5–12 PUBLISHED REELS · AUTHORED ORDER · LIVE SHARED REFERENCE" />
+      <Hero title={pack ? 'EDIT REEL PACK' : 'CREATE REEL PACK'} kicker="3–30 PUBLIC REELS · AUTHORED ORDER · LIVE SHARED REFERENCE" />
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
       <div className="sx-pack-editor-layout">
         <section className="sx-pack-editor-form">
@@ -211,16 +227,16 @@ export default function PackEditorPage() {
             {pack?.status === 'published' ? (
               <Button loading={busy === 'unpublish'} disabled={!!busy} onClick={unpublish}>UNPUBLISH</Button>
             ) : null}
-            <Button primary loading={busy === 'publish'} disabled={!!busy || selected.length < 5} onClick={publish}>PUBLISH PACK</Button>
+            <Button primary loading={busy === 'publish'} disabled={!!busy || selected.length < PACK_MIN_PUBLISHED_ITEMS} onClick={publish}>PUBLISH PACK</Button>
           </div>
         </section>
 
         <section className="sx-pack-editor-order">
           <div className="sx-pack-editor-heading">
             <h2>PACK ORDER</h2>
-            <span>{selected.length}/12 · MINIMUM 5 TO PUBLISH</span>
+            <span>{selected.length}/{PACK_MAX_ITEMS} · MINIMUM {PACK_MIN_PUBLISHED_ITEMS} TO PUBLISH</span>
           </div>
-          {!selected.length ? <p className="sx-mono">Choose reels from your library below.</p> : null}
+          {!selected.length ? <p className="sx-mono">Search public reels below and add them to this collection.</p> : null}
           {selected.map((post, index) => (
             <article
               key={post.id}
@@ -241,6 +257,7 @@ export default function PackEditorPage() {
                 <img src={post.poster_url || post.preview_url || post.url} alt="" />
               ) : <span className="sx-pack-track-placeholder">▶</span>}
               <strong>{post.title || post.path?.split('/').pop() || 'Untitled reel'}</strong>
+              <small className="sx-pack-editor-owner">@{post.creator?.username || post.author_name || 'creator'}</small>
               <label>
                 <input
                   type="radio"
@@ -260,17 +277,25 @@ export default function PackEditorPage() {
 
       <section className="sx-pack-library">
         <div className="sx-pack-editor-heading">
-          <h2>YOUR PUBLISHED REELS</h2>
-          <span>SELECT TO ADD</span>
+          <h2>FIND PUBLIC REELS</h2>
+          <span>ANY CREATOR'S PUBLISHED REELS CAN JOIN THE COLLECTION</span>
         </div>
+        <input
+          className="sx-input"
+          value={librarySearch}
+          onChange={(event) => setLibrarySearch(event.target.value)}
+          placeholder="Search reels by title, creator, tag, or place…"
+          aria-label="Search public reels to add"
+        />
         <div className="sx-pack-library-grid">
           {available.map((post) => {
             const selectedAlready = selectedIds.has(post.id);
             const image = post.poster_url || (post.media_type === 'image' && (post.preview_url || post.url));
             return (
-              <button type="button" key={post.id} disabled={selectedAlready || selected.length >= 12} onClick={() => addPost(post)}>
+              <button type="button" key={post.id} disabled={selectedAlready || selected.length >= PACK_MAX_ITEMS} onClick={() => addPost(post)}>
                 {image ? <img src={image} alt="" loading="lazy" /> : <span>▶</span>}
                 <strong>{post.title || post.path?.split('/').pop() || 'Untitled reel'}</strong>
+                <small>@{post.creator?.username || post.author_name || 'creator'}</small>
                 <small>{selectedAlready ? 'IN PACK' : 'ADD TO PACK'}</small>
               </button>
             );

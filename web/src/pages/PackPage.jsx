@@ -3,11 +3,16 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js';
 import PackCover from '../components/packs/PackCover.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
-import { Button } from '../components/ui/controls.jsx';
+import { Button, Dropdown } from '../components/ui/controls.jsx';
 import { EmptyState, Hero } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
+
+const VISIBILITY_OPTIONS = [
+  { label: 'PUBLIC · DISCOVERABLE', value: 'public' },
+  { label: 'UNLISTED · LINK ONLY', value: 'unlisted' },
+];
 
 export default function PackPage() {
   const { packId = '' } = useParams();
@@ -100,6 +105,38 @@ export default function PackPage() {
     }
   };
 
+  const changeVisibility = async (visibility) => {
+    setBusy('visibility');
+    try {
+      const result = await api.patch(`/api/packs/${encodeURIComponent(pack.id)}`, {
+        visibility,
+        expected_revision: pack.revision,
+      });
+      setPack((current) => ({ ...current, ...result.pack }));
+    } catch (requestError) {
+      setError(requestError.message || 'Could not update this collection visibility.');
+      load({ recordOpen: false });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const publishPack = async () => {
+    if ((pack.playable_count ?? 0) < 3) return;
+    setBusy('publish');
+    try {
+      const result = await api.post(`/api/packs/${encodeURIComponent(pack.id)}/publish`, {
+        expected_revision: pack.revision,
+      });
+      setPack(result.pack);
+    } catch (requestError) {
+      setError(requestError.message || 'Could not publish this collection.');
+      await load({ recordOpen: false });
+    } finally {
+      setBusy('');
+    }
+  };
+
   const deletePack = async () => {
     if (!window.confirm('Delete this Reel Pack? Existing links and messages will show it as unavailable.')) return;
     setBusy('delete');
@@ -136,6 +173,7 @@ export default function PackPage() {
     );
   }
 
+  const isDraft = pack.status === 'draft';
   const resumeItemId = pack.progress?.current_item_id || null;
   const resumeIndexById = resumeItemId ? pack.items?.findIndex((item) => item.id === resumeItemId) : -1;
   const resumeIndex = resumeIndexById >= 0 ? resumeIndexById : (pack.progress?.item_index || 0);
@@ -146,19 +184,34 @@ export default function PackPage() {
       <Hero title={pack.title} kicker="REEL PACK · AUTHORED PLAYBACK · FINITE SEQUENCE" />
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
       <section className="sx-pack-hero">
-        <PackCover pack={pack} className="sx-pack-cover--hero" />
+        <button
+          type="button"
+          className="sx-pack-hero-cover"
+          onClick={() => openPlayer({ item: hasResume ? resumeIndex : 0 })}
+          disabled={(pack.playable_count ?? 0) <= 0}
+          aria-label={'Play ' + (pack.title || 'collection')}
+        >
+          <PackCover pack={pack} className="sx-pack-cover--hero" />
+          <span className="sx-pack-hero-play">{hasResume ? '▶ RESUME' : '▶ PLAY COLLECTION'}</span>
+        </button>
         <div className="sx-pack-hero-copy">
-          <span className="sx-pack-label">▦ REEL PACK</span>
+          <span className="sx-pack-label">▦ {isDraft ? 'COLLECTION · DRAFT' : 'REEL PACK'}</span>
           <h2>{pack.title}</h2>
-          <Link to={'/profile/' + encodeURIComponent(pack.creator?.username || '')}>
-            @{pack.creator?.username || 'creator'}
-          </Link>
+          <span className="sx-pack-curated">
+            CURATED BY{' '}
+            <Link to={'/profile/' + encodeURIComponent(pack.creator?.username || '')}>
+              @{pack.creator?.username || 'creator'}
+            </Link>
+          </span>
           <p>{pack.description || 'An ordered collection of reels.'}</p>
           <div className="sx-pack-facts">
             <span>{pack.reel_count} REELS</span>
             <span>{pack.playable_count} AVAILABLE</span>
             <span>{(pack.visibility || 'public').toUpperCase()}</span>
             <span>REV {pack.revision}</span>
+            <span>{pack.likes ?? 0} LIKES</span>
+            <span>{pack.views ?? 0} VIEWS</span>
+            <span>{pack.comments ?? 0} COMMENTS</span>
           </div>
           {[pack.location?.city, pack.location?.country].filter(Boolean).length ? (
             <span className="sx-pack-location">
@@ -171,15 +224,38 @@ export default function PackPage() {
             </div>
           ) : null}
           {pack.needs_repair ? (
-            <div className="sx-pack-repair" role="status">This pack is hidden from discovery until it has at least five available reels.</div>
+            <div className="sx-pack-repair" role="status">This pack is hidden from discovery until it has at least three available reels.</div>
           ) : null}
           <div className="sx-pack-actions">
-            <Button primary disabled={(pack.playable_count ?? 0) <= 0} onClick={() => openPlayer({ item: 0, forceRestart: true })}>START PACK</Button>
-            {hasResume ? <Button onClick={() => openPlayer({ item: resumeIndex })}>RESUME {resumeIndex + 1} OF {pack.playable_count ?? pack.reel_count}</Button> : null}
             <Button loading={busy === 'save'} disabled={busy === 'save'} onClick={toggleSave}>
               {pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK'}
             </Button>
             <Button onClick={() => messaging.openShare({ kind: 'pack', id: pack.id, title: pack.title })}>SHARE PACK</Button>
+            {pack.viewer_state?.can_edit && isDraft ? (
+              <>
+                <span
+                  className="sx-pack-publish-hint"
+                  title={(pack.playable_count ?? 0) < 3 ? 'Publishing needs at least 3 available reels' : undefined}
+                >
+                  {(pack.playable_count ?? 0) < 3
+                    ? `${pack.playable_count ?? 0}/3 AVAILABLE`
+                    : `${pack.playable_count ?? 0}/${pack.reel_count ?? 0} READY`}
+                </span>
+                <Button
+                  primary
+                  loading={busy === 'publish'}
+                  disabled={busy === 'publish' || busy === 'visibility' || (pack.playable_count ?? 0) < 3}
+                  onClick={publishPack}
+                >
+                  PUBLISH COLLECTION
+                </Button>
+                <Dropdown
+                  value={pack.visibility || 'public'}
+                  options={VISIBILITY_OPTIONS}
+                  onChange={changeVisibility}
+                />
+              </>
+            ) : null}
             {pack.viewer_state?.can_edit ? (
               <>
                 <Button onClick={() => navigate('/packs/' + encodeURIComponent(pack.id) + '/edit')}>EDIT PACK</Button>

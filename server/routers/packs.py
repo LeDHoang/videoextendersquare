@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import case
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -16,10 +16,12 @@ from server.features import reel_pack_features
 from server.social.auth import AuthContext, get_optional_auth, normalize_username, public_user, require_auth, require_auth_csrf
 from server.social.database import get_db
 from server.social.models import (
+    Comment,
     Follow,
     Post,
     ReelPack,
     ReelPackItem,
+    ReelPackLike,
     ReelPackProgress,
     ReelPackSave,
     ReelPackTag,
@@ -32,8 +34,8 @@ from server.social.services import post_card, record_event, tag_slug
 
 
 router = APIRouter(tags=["packs"])
-PACK_MIN_PUBLISHED_ITEMS = 5
-PACK_MAX_ITEMS = 12
+PACK_MIN_PUBLISHED_ITEMS = 3
+PACK_MAX_ITEMS = 30
 PACK_VISIBILITIES = {"public", "unlisted"}
 PACK_PHASES = {"intro", "playing", "complete"}
 
@@ -100,8 +102,25 @@ def active_item(item: ReelPackItem) -> bool:
         and post.status == "published"
         and post.owner
         and post.owner.status == "active"
-        and post.owner_id == item.pack.owner_id
     )
+
+
+def member_available_for_viewer(
+    db: Session,
+    item: ReelPackItem,
+    viewer_id: str | None,
+    blocked_owner_ids: set[str] | None = None,
+) -> bool:
+    """Post-level availability scoped to the viewer: a member reel whose
+    creator blocks the viewer (or is blocked by them) renders as a
+    tombstone for that viewer without leaking the post payload."""
+    if not active_item(item):
+        return False
+    if not viewer_id or not item.post or not item.post.owner_id:
+        return True
+    if blocked_owner_ids is None:
+        blocked_owner_ids = blocked_user_ids(db, viewer_id)
+    return item.post.owner_id not in blocked_owner_ids
 
 
 def playable_items(pack: ReelPack) -> list[ReelPackItem]:
@@ -181,6 +200,9 @@ def sync_pack_tags(db: Session, pack: ReelPack, values: list[str]) -> None:
 
 
 def validate_posts(db: Session, owner_id: str, post_ids: list[str]) -> list[Post]:
+    """Collections may mix reels from any creator. Membership requires a
+    currently published reel from an active owner that the pack creator
+    can view (no block in either direction)."""
     normalized = [str(value or "").strip() for value in post_ids if str(value or "").strip()]
     if len(normalized) != len(set(normalized)):
         fail(422, "DUPLICATE_PACK_ITEM", "A Reel Pack cannot contain the same reel twice.", "post_ids")
@@ -194,15 +216,17 @@ def validate_posts(db: Session, owner_id: str, post_ids: list[str]) -> list[Post
         post_id
         for post_id in normalized
         if post_id not in by_id
-        or by_id[post_id].owner_id != owner_id
-        or by_id[post_id].status != "published"
         or by_id[post_id].deleted_at is not None
+        or by_id[post_id].status != "published"
+        or not by_id[post_id].owner
+        or by_id[post_id].owner.status != "active"
+        or users_blocked(db, owner_id, by_id[post_id].owner_id)
     ]
     if invalid:
         fail(
             422,
             "INVALID_PACK_ITEM",
-            "Packs may only contain your own currently published reels.",
+            "Packs may only contain public reels that are currently available.",
             "post_ids",
         )
     return [by_id[post_id] for post_id in normalized]
@@ -274,13 +298,26 @@ def claim_revision(db: Session, pack: ReelPack, expected: int) -> None:
     pack.updated_at = changed_at
 
 
-def cover_cards(pack: ReelPack, db: Session, user_id: str | None) -> list[dict]:
+def cover_cards(pack: ReelPack, db: Session, user_id: str | None, blocked_owner_ids: set[str] | None = None) -> list[dict]:
     rows: list[Post] = []
-    if pack.cover_post and any(item.post_id == pack.cover_post_id and active_item(item) for item in pack.items):
+    if (
+        pack.cover_post
+        and pack.cover_post_id
+        and any(
+            item.post_id == pack.cover_post_id
+            and member_available_for_viewer(db, item, user_id, blocked_owner_ids)
+            for item in pack.items
+        )
+    ):
         rows.append(pack.cover_post)
-    for item in playable_items(pack):
-        if item.post and item.post.id not in {post.id for post in rows}:
-            rows.append(item.post)
+    for item in sorted(pack.items, key=lambda row: row.position):
+        if not item.post:
+            continue
+        if not member_available_for_viewer(db, item, user_id, blocked_owner_ids):
+            continue
+        if item.post.id in {post.id for post in rows}:
+            continue
+        rows.append(item.post)
         if len(rows) >= 4:
             break
     return [post_card(post, db, user_id) for post in rows]
@@ -306,6 +343,32 @@ def progress_card(db: Session, pack: ReelPack, user_id: str | None) -> dict | No
     }
 
 
+def pack_comment_count(
+    db: Session,
+    pack: ReelPack,
+    user_id: str | None,
+    blocked_owner_ids: set[str] | None = None,
+) -> int:
+    """Collections surface a read-only comment counter: the number of live
+    comments across the member reels the viewer can currently see. Comments
+    by creators the viewer blocks (or is blocked by) are excluded, matching
+    how the reels feed hides them."""
+    post_ids = [
+        item.post_id
+        for item in pack.items
+        if item.post_id and member_available_for_viewer(db, item, user_id, blocked_owner_ids)
+    ]
+    if not post_ids:
+        return 0
+    query = db.query(func.count(Comment.id)).filter(
+        Comment.post_id.in_(post_ids),
+        Comment.deleted_at.is_(None),
+    )
+    if blocked_owner_ids:
+        query = query.filter(~Comment.author_id.in_(blocked_owner_ids))
+    return int(query.scalar() or 0)
+
+
 def serialize_pack(
     db: Session,
     pack: ReelPack,
@@ -327,8 +390,16 @@ def serialize_pack(
             Follow.followee_id == pack.owner_id,
         ).first()
     )
+    liked = bool(
+        user_id
+        and db.query(ReelPackLike.id).filter(
+            ReelPackLike.user_id == user_id,
+            ReelPackLike.pack_id == pack.id,
+        ).first()
+    )
     active = playable_items(pack)
-    covers = cover_cards(pack, db, user_id)
+    hidden_owners = blocked_user_ids(db, user_id) if user_id else set()
+    covers = cover_cards(pack, db, user_id, hidden_owners)
     cover = covers[0] if covers else None
     cover_url = None
     if cover:
@@ -356,8 +427,13 @@ def serialize_pack(
         "needs_repair": pack.status == "published" and len(active) < PACK_MIN_PUBLISHED_ITEMS,
         "saves": max(0, int(pack.save_count or 0)),
         "saved_by_me": saved,
+        "likes": max(0, int(pack.like_count or 0)),
+        "views": max(0, int(pack.view_count or 0)),
+        "comments": pack_comment_count(db, pack, user_id, hidden_owners),
+        "liked_by_me": liked,
         "viewer_state": {
             "saved": saved,
+            "liked": liked,
             "can_edit": user_id == pack.owner_id,
         },
         "revision": max(1, int(pack.revision or 1)),
@@ -369,10 +445,14 @@ def serialize_pack(
             {
                 "id": item.id,
                 "position": item.position,
-                "available": active_item(item),
+                "available": member_available_for_viewer(db, item, user_id, hidden_owners),
                 "created_at": item.created_at.isoformat() if item.created_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-                "post": post_card(item.post, db, user_id) if active_item(item) else None,
+                "post": (
+                    post_card(item.post, db, user_id)
+                    if member_available_for_viewer(db, item, user_id, hidden_owners)
+                    else None
+                ),
             }
             for item in sorted(pack.items, key=lambda row: row.position)
         ]
@@ -696,6 +776,59 @@ def unpublish_pack(
     return {"pack": serialize_pack(db, pack, context.user.id, include_items=True)}
 
 
+class PackItemAddRequest(BaseModel):
+    post_id: str
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+@router.post("/api/packs/{pack_id}/items")
+def add_pack_item(
+    pack_id: str,
+    req: PackItemAddRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    """Append one public reel to the pack creator's collection (save-to-
+    collection flow). Idempotent on duplicates; optional stale-revision 409."""
+    pack = get_owned_pack(db, pack_id, context.user.id)
+    if any(item.post_id == req.post_id for item in pack.items if item.post_id):
+        return {"pack": serialize_pack(db, pack, context.user.id, include_items=True), "added": False}
+    if len(pack.items) >= PACK_MAX_ITEMS:
+        fail(422, "PACK_TOO_LARGE", f"A Reel Pack can contain at most {PACK_MAX_ITEMS} reels.", "post_id")
+    posts = validate_posts(db, context.user.id, [req.post_id])
+    claim_revision(db, pack, req.expected_revision or pack.revision)
+    next_position = max((item.position for item in pack.items), default=-1) + 1
+    pack.items.append(ReelPackItem(pack_id=pack.id, post_id=posts[0].id, position=next_position))
+    record_event(db, event_type="pack_update", pack_id=pack.id, user_id=context.user.id, source="collection_add")
+    db.commit()
+    db.expire_all()
+    pack = get_owned_pack(db, pack.id, context.user.id)
+    return {"pack": serialize_pack(db, pack, context.user.id, include_items=True), "added": True}
+
+
+@router.delete("/api/packs/{pack_id}/items/{post_id}")
+def remove_pack_item(
+    pack_id: str,
+    post_id: str,
+    expected_revision: int | None = None,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    pack = get_owned_pack(db, pack_id, context.user.id)
+    item = next((row for row in pack.items if row.post_id == post_id), None)
+    if not item:
+        fail(404, "PACK_ITEM_NOT_FOUND", "That reel is not part of this Reel Pack.", "post_id")
+    claim_revision(db, pack, expected_revision or pack.revision)
+    if pack.cover_post_id == post_id:
+        pack.cover_post_id = None
+    db.delete(item)
+    record_event(db, event_type="pack_update", pack_id=pack.id, user_id=context.user.id, source="collection_remove")
+    db.commit()
+    db.expire_all()
+    pack = get_owned_pack(db, pack.id, context.user.id)
+    return {"pack": serialize_pack(db, pack, context.user.id, include_items=True), "removed": True}
+
+
 def set_pack_save(db: Session, pack: ReelPack, user_id: str, enabled: bool) -> dict:
     pack_id = pack.id
     changed = False
@@ -782,6 +915,58 @@ def unsave_pack(
     return set_pack_save(db, get_pack_for_viewer(db, pack_id, context.user.id), context.user.id, False)
 
 
+def pack_like_card(db: Session, pack_id: str, user_id: str) -> dict:
+    likes = db.query(ReelPack.like_count).filter(ReelPack.id == pack_id).scalar() or 0
+    liked = bool(
+        db.query(ReelPackLike.id).filter(
+            ReelPackLike.user_id == user_id,
+            ReelPackLike.pack_id == pack_id,
+        ).first()
+    )
+    return {"pack_id": pack_id, "likes": max(0, int(likes)), "liked_by_me": liked}
+
+
+@router.put("/api/packs/{pack_id}/like")
+def like_pack(
+    pack_id: str,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    pack = get_pack_for_viewer(db, pack_id, context.user.id)
+    existing = db.query(ReelPackLike.id).filter(
+        ReelPackLike.user_id == context.user.id,
+        ReelPackLike.pack_id == pack.id,
+    ).first()
+    if not existing:
+        db.add(ReelPackLike(user_id=context.user.id, pack_id=pack.id))
+        try:
+            db.flush()
+            pack.like_count = max(0, int(pack.like_count or 0)) + 1
+            db.commit()
+        except IntegrityError:
+            # Double-tap raced with another request; the like already exists.
+            db.rollback()
+    return pack_like_card(db, pack.id, context.user.id)
+
+
+@router.delete("/api/packs/{pack_id}/like")
+def unlike_pack(
+    pack_id: str,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    pack = get_pack_for_viewer(db, pack_id, context.user.id)
+    existing = db.query(ReelPackLike).filter(
+        ReelPackLike.user_id == context.user.id,
+        ReelPackLike.pack_id == pack.id,
+    ).first()
+    if existing:
+        db.delete(existing)
+        pack.like_count = max(0, int(pack.like_count or 0) - 1)
+        db.commit()
+    return pack_like_card(db, pack.id, context.user.id)
+
+
 @router.put("/api/packs/{pack_id}/progress")
 def update_progress(
     pack_id: str,
@@ -795,7 +980,7 @@ def update_progress(
         item = next((row for row in pack.items if row.id == req.current_item_id), None)
         if not item:
             fail(422, "PACK_ITEM_NOT_FOUND", "That item is not part of this Reel Pack.", "current_item_id")
-        if not active_item(item):
+        if not member_available_for_viewer(db, item, context.user.id):
             fail(422, "PACK_ITEM_UNAVAILABLE", "That reel is currently unavailable in this pack.", "current_item_id")
     row = db.query(ReelPackProgress).filter(
         ReelPackProgress.user_id == context.user.id,

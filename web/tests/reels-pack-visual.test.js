@@ -15,13 +15,17 @@ test('PackCover uses a persistent REEL PACK label and never raw video urls', () 
   assert.match(src, /poster_url \|\| post\.preview_url/);
 });
 
-test('PackTile is a labeled group with explicit open and pressed save', () => {
+test('PackTile is an autoplaying labeled tile with creator, share, and owner affordances', () => {
   const src = read('web/src/components/packs/PackTile.jsx');
-  assert.match(src, /role="group"/);
-  assert.match(src, /OPEN PACK/);
-  assert.match(src, /aria-pressed/);
-  assert.match(src, /role="status"/);
-  assert.match(src, /role="alert"/);
+  assert.match(src, /role="button"/);
+  assert.match(src, /REEL PACK/);
+  assert.match(src, /sx-explore-stats/);
+  assert.match(src, /sx-explore-creator/);
+  assert.match(src, /sx-explore-share/);
+  assert.match(src, /sx-explore-owner-actions/);
+  assert.match(src, /preview_url/);
+  assert.doesNotMatch(src, /OPEN PACK/);
+  assert.doesNotMatch(src, /SAVE PACK/);
 });
 
 test('Pack tile open button and share preview have dedicated styles', () => {
@@ -63,4 +67,69 @@ test('XR pack experience keeps cards stable and transport gated', () => {
   assert.match(src, /isPresenting\(\)/);
   assert.match(src, /static-card/);
   assert.match(src, /!isPackExperience\(\)/);
+});
+
+test('Collection pipeline: save opens the collect overlay and there is no duplicate rail button', () => {
+  const html = read('ui/assets/reels.html');
+  assert.doesNotMatch(html, /id="collectBtn"/);
+  assert.match(html, /id="saveBtn"/);
+  assert.match(html, /saveBtn\.addEventListener\('click', \(\) => openCollectOverlay\(\)\)/);
+  assert.match(html, /id="collectMenuPanel"/);
+  assert.match(html, /reels-collect-dialog/);
+  assert.match(html, /reels-collect-backdrop/);
+  assert.match(html, /\+ NEW COLLECTION/);
+  assert.match(html, /collectNewName/);
+  assert.match(html, /ALL SAVED ITEMS/);
+  assert.match(html, /ensureGeneralSaved/);
+  assert.match(html, /handleCardSelect/);
+  assert.match(html, /collection_add/);
+  assert.match(html, /reels-collect-dialog \{ position:absolute;[^}]*z-index:91/);
+  assert.match(html, /sx-collect-open/);
+  const xr = read('ui/assets/webxr_vr.js');
+  assert.match(xr, /'collect'/);
+  assert.match(xr, /onCollectReel/);
+});
+
+test('Owner can publish a draft collection from the pack page and XR cards', () => {
+  const page = read('web/src/pages/PackPage.jsx');
+  assert.match(page, /PUBLISH COLLECTION/);
+  assert.match(page, /publishPack/);
+  const html = read('ui/assets/reels.html');
+  assert.match(html, /publishPackFromPlayer/);
+  assert.match(html, /'publish-pack'/);
+});
+
+test('PackTile creator chip links to the curator profile', () => {
+  const tile = read('web/src/components/packs/PackTile.jsx');
+  assert.match(tile, /sx-explore-creator/);
+  assert.match(tile, /pack\.creator\.username/);
+  const page = read('web/src/pages/PackPage.jsx');
+  assert.match(page, /CURATED BY/);
+  const messages = read('web/src/components/messaging/MessagingPanel.jsx');
+  assert.match(messages, /CURATED BY @/);
+  const html = read('ui/assets/reels.html');
+  assert.match(html, /CURATED BY ' \+ packCreatorLabel/);
+});
+
+test('Collections open straight into playback with no intro gate', () => {
+  const state = read('ui/assets/reels_pack_state.js');
+  assert.doesNotMatch(state, /phase = restart \? 'intro'/);
+  const html = read('ui/assets/reels.html');
+  assert.doesNotMatch(html, /packState\.phase === 'intro'/);
+  assert.match(html, /startPackPlayback\(true\)/);
+  const page = read('web/src/pages/PackPage.jsx');
+  assert.doesNotMatch(page, /START PACK/);
+  assert.doesNotMatch(page, /RESUME \{resumeIndex/);
+  const explore = read('web/src/pages/ExplorePage.jsx');
+  assert.match(explore, /\?play=1/);
+});
+
+test('Pack editor browses public reels with 3–30 limits', () => {
+  const src = read('web/src/pages/PackEditorPage.jsx');
+  assert.match(src, /PACK_MIN_PUBLISHED_ITEMS = 3/);
+  assert.match(src, /PACK_MAX_ITEMS = 30/);
+  assert.match(src, /FIND PUBLIC REELS/);
+  assert.match(src, /librarySearch/);
+  const page = read('web/src/pages/PackPage.jsx');
+  assert.match(page, /PACKS tab|EDIT PACK/);
 });

@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from server.routers import account_safety, messages, packs, reels, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import DirectMessage, EngagementEvent, Post, ReelPackItem, ReelPackSave, User
+from server.social.models import Comment, DirectMessage, EngagementEvent, Post, ReelPackItem, ReelPackSave, User
 
 
 PASSWORD = "correct-horse-battery"
@@ -195,13 +195,73 @@ def test_pack_authoring_publish_discovery_save_progress_and_reorder(app):
         assert playback.json()["feed"]["pack_immersive_enabled"] is True
 
 
+def test_pack_engagement_likes_views_and_comment_counters(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client, TestClient(app) as anon_client:
+        owner = register(owner_client, "pack_liker_owner", "pack-liker-owner@example.com")
+        register(viewer_client, "pack_liker", "pack-liker@example.com")
+        post_ids = create_posts(app, owner["id"])
+        pack = create_pack(owner_client, post_ids)
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+
+        # Likes are per-viewer, idempotent, and reflected in the pack payload.
+        liked = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/like")
+        assert liked.status_code == 200, liked.text
+        assert liked.json() == {"pack_id": pack["id"], "likes": 1, "liked_by_me": True}
+        liked_again = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/like")
+        assert liked_again.json()["likes"] == 1
+        detail = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert detail["likes"] == 1
+        assert detail["liked_by_me"] is True
+        assert detail["viewer_state"]["liked"] is True
+        unliked = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/like")
+        assert unliked.json()["likes"] == 0
+        assert unliked.json()["liked_by_me"] is False
+        unliked_again = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/like")
+        assert unliked_again.json()["likes"] == 0
+
+        # Views count authenticated and anonymous viewers, de-duplicated for
+        # the same viewer inside the rolling window.
+        first = viewer_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert first.status_code == 200 and first.json()["accepted"] is True
+        second = viewer_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert second.status_code == 200
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["views"] == 1
+        anon = anon_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert anon.status_code == 200 and anon.json()["accepted"] is True
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["views"] == 2
+
+        # Comments are surfaced as a read-only counter of the member reels.
+        with app.state.testing_session() as db:
+            db.add(Comment(post_id=post_ids[0], author_id=owner["id"], text="Great reel"))
+            db.commit()
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 1
+
+        # Comments by a creator the viewer blocks stop counting, matching the
+        # reels feed behaviour.
+        with TestClient(app) as noisy_client:
+            noisy = register(noisy_client, "pack_noisy", "pack-noisy@example.com")
+            with app.state.testing_session() as db:
+                db.add(Comment(post_id=post_ids[0], author_id=noisy["id"], text="Blocked chatter"))
+                db.commit()
+            assert noisy_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 2
+            blocked = mutate(viewer_client, "PUT", f"/api/users/{noisy['username']}/block")
+            assert blocked.status_code in {200, 409}, blocked.text
+            assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 1
+
+
 def test_pack_rules_unlisted_sharing_messages_and_reports(app):
     with TestClient(app) as owner_client, TestClient(app) as viewer_client:
         owner = register(owner_client, "pack_sender", "pack-sender@example.com")
         viewer = register(viewer_client, "pack_receiver", "pack-receiver@example.com")
         post_ids = create_posts(app, owner["id"], 7)
 
-        too_short = create_pack(owner_client, post_ids[:4], "Too short")
+        too_short = create_pack(owner_client, post_ids[:2], "Too short")
         rejected = mutate(
             owner_client,
             "POST",
@@ -331,7 +391,7 @@ def test_pack_member_validation_and_video_cover_fallback(app):
     with TestClient(app) as owner_client, TestClient(app) as other_client:
         owner = register(owner_client, "pack_validator", "pack-validator@example.com")
         other = register(other_client, "pack_outsider", "pack-outsider@example.com")
-        post_ids = create_posts(app, owner["id"], 13)
+        post_ids = create_posts(app, owner["id"], 31)
         other_post_id = create_posts(app, other["id"], 1)[0]
 
         duplicate = mutate(
@@ -347,18 +407,35 @@ def test_pack_member_validation_and_video_cover_fallback(app):
             owner_client,
             "POST",
             "/api/packs",
-            {"title": "Too large", "post_ids": post_ids},
+            {"title": "Too large", "post_ids": post_ids[:31]},
         )
         assert too_large.status_code == 422
 
+        # Collections may mix in other creators' public reels.
         foreign = mutate(
             owner_client,
             "POST",
             "/api/packs",
-            {"title": "Foreign", "post_ids": post_ids[:4] + [other_post_id]},
+            {"title": "Mixed creators", "post_ids": post_ids[:4] + [other_post_id]},
         )
-        assert foreign.status_code == 422
-        assert foreign.json()["detail"]["code"] == "INVALID_PACK_ITEM"
+        assert foreign.status_code == 200, foreign.text
+        mixed = foreign.json()["pack"]
+        foreign_items = [row for row in mixed["items"] if row["post"] and row["post"]["id"] == other_post_id]
+        assert len(foreign_items) == 1
+        assert foreign_items[0]["post"]["creator"]["username"] == other["username"]
+
+        # An unavailable foreign reel is rejected at authoring time.
+        with app.state.testing_session() as db:
+            db.get(Post, other_post_id).status = "deleted"
+            db.commit()
+        gone = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Foreign gone", "post_ids": post_ids[:4] + [other_post_id]},
+        )
+        assert gone.status_code == 422
+        assert gone.json()["detail"]["code"] == "INVALID_PACK_ITEM"
 
         pack = create_pack(owner_client, post_ids[:5], "Video-only cover")
         assert not pack["cover_url"] or not pack["cover_url"].casefold().endswith(".mp4")
@@ -596,3 +673,148 @@ def test_pack_share_metadata_includes_preview(app):
         assert shared["reel_count"] == 5
         assert shared["playable_count"] == 5
         assert shared["needs_repair"] is False
+
+
+def test_collection_items_endpoints_and_publish_at_three(app):
+    with TestClient(app) as owner_client, TestClient(app) as other_client:
+        owner = register(owner_client, "collection_owner", "collection-owner@example.com")
+        other = register(other_client, "collection_other", "collection-other@example.com")
+        own_ids = create_posts(app, owner["id"], 3)
+        foreign_ids = create_posts(app, other["id"], 5)
+
+        collection = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "My collection", "post_ids": own_ids[:2], "cover_post_id": own_ids[0]},
+        ).json()["pack"]
+
+        added = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{collection['id']}/items",
+            {"post_id": foreign_ids[0]},
+        )
+        assert added.status_code == 200, added.text
+        assert added.json()["added"] is True
+        pack = added.json()["pack"]
+        assert pack["reel_count"] == 3
+
+        # Appending a reel from another creator via the generic message
+        # endpoint is blocked while the collection is a draft, but publishing
+        # at 3+ is allowed.
+        draft_dm = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/direct",
+            {
+                "username": "collection_other",
+                "kind": "pack",
+                "pack_id": pack["id"],
+                "client_id": "collection-draft-dm-001",
+            },
+        )
+        assert draft_dm.status_code == 422
+        assert draft_dm.json()["detail"]["code"] == "PACK_NOT_PUBLISHED"
+
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+        pack = published.json()["pack"]
+
+        # Duplicate adds are idempotent and do not bump the reel count.
+        dupe = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/items",
+            {"post_id": pack["items"][0]["post"]["id"]},
+        )
+        assert dupe.status_code == 200
+        assert dupe.json()["added"] is False
+        assert dupe.json()["pack"]["reel_count"] == 3
+
+        # Stale expected_revision conflicts.
+        stale = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/items",
+            {"post_id": foreign_ids[3], "expected_revision": 1},
+        )
+        assert stale.status_code == 409
+
+        # Removing the cover reel clears the cover reference.
+        cover_post_id = pack["cover_post_id"]
+        assert cover_post_id == own_ids[0]
+        removed = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{pack['id']}/items/{cover_post_id}",
+            {"expected_revision": pack["revision"]},
+        )
+        assert removed.status_code == 200, removed.text
+        pack = removed.json()["pack"]
+        assert pack["cover_post_id"] is None
+        assert pack["reel_count"] == 2
+        assert pack["needs_repair"] is True
+
+        unknown = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{pack['id']}/items/{cover_post_id}",
+            {"expected_revision": pack["revision"]},
+        )
+        assert unknown.status_code == 404
+        assert unknown.json()["detail"]["code"] == "PACK_ITEM_NOT_FOUND"
+
+
+def test_collection_viewer_blocked_member_renders_tombstone(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client, TestClient(app) as member_client:
+        owner = register(owner_client, "tombstone_owner", "tombstone-owner@example.com")
+        register(viewer_client, "tombstone_viewer", "tombstone-viewer@example.com")
+        member = register(member_client, "tombstone_member", "tombstone-member@example.com")
+        own_ids = create_posts(app, owner["id"], 2)
+        member_ids = create_posts(app, member["id"], 2)
+
+        pack = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Mixed tombstones", "post_ids": own_ids + member_ids[:1]},
+        ).json()["pack"]
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+
+        base = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert base["playable_count"] == 3
+        assert all(row["available"] for row in base["items"])
+
+        # The viewer blocks a member reel's creator: that item becomes a
+        # viewer-specific tombstone while other viewers still see it.
+        mutate(viewer_client, "PUT", f"/api/users/{member['username']}/block")
+        scoped = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        member_rows = [row for row in scoped["items"] if row["post"] and row["post"]["id"] == member_ids[0]]
+        assert member_rows == [] or member_rows[0]["available"] is False
+        blocked_rows = [row for row in scoped["items"] if not row["available"]]
+        assert len(blocked_rows) == 1
+        assert blocked_rows[0]["post"] is None
+
+        other_view = member_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert all(row["available"] for row in other_view["items"])
+
+        # Playback payload hides the blocked member for that viewer only.
+        # (player-inline embeds items in scripts; the feed key omits them.)
+        playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert playback.status_code == 200
+        body = playback.json()
+        scripts = " ".join(body.get("scripts") or [])
+        assert f"tests/pack-{member['id'][:5]}-0.mp4" not in scripts
+        assert f"tests/pack-{owner['id'][:5]}-0.mp4" in scripts
+        assert '"available": false' in scripts or '"available":false' in scripts

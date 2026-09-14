@@ -51,6 +51,7 @@ from server.social.models import (
     Post,
     PostLike,
     PostSave,
+    ReelPackView,
     User,
     UserBlock,
     ViewDedup,
@@ -72,6 +73,7 @@ from server.social.services import (
 router = APIRouter(tags=["social"])
 AVATAR_DIR = Path("data/avatars")
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
+PACK_VIEW_WINDOW_MINUTES = 10
 REGISTRATION_ENABLED = os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
 
 
@@ -1036,10 +1038,13 @@ def record_view(
     post = get_visible_post(db, post_id, viewer_id)
     pack = None
     if req.pack_id:
-        from server.routers.packs import active_item, get_pack_for_viewer
+        from server.routers.packs import get_pack_for_viewer, member_available_for_viewer
 
         pack = get_pack_for_viewer(db, req.pack_id, viewer_id)
-        if not any(active_item(item) and item.post_id == post.id for item in pack.items):
+        if not any(
+            member_available_for_viewer(db, item, viewer_id) and item.post_id == post.id
+            for item in pack.items
+        ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
     anonymous_hash = ensure_anonymous_cookie(request, response)
     qualified = req.completed or req.watch_ms >= (2000 if post.media_type == "image" else 3000)
@@ -1100,7 +1105,7 @@ def create_event(
         "search_impression", "search_select", "share", "share_sent",
         "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
         "pack_impression", "pack_open", "pack_start", "pack_resume", "pack_item_view", "pack_complete",
-        "pack_share", "pack_message_open",
+        "pack_share", "pack_message_open", "collection_add",
     }
     event_type = req.event_type.strip().casefold()
     if event_type not in allowed:
@@ -1109,12 +1114,29 @@ def create_event(
     post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
     pack = None
     if req.pack_id:
-        from server.routers.packs import active_item, get_pack_for_viewer
+        from server.routers.packs import get_pack_for_viewer, member_available_for_viewer
 
         pack = get_pack_for_viewer(db, req.pack_id, viewer_id)
-        if post and not any(active_item(item) and item.post_id == post.id for item in pack.items):
+        if post and not any(
+            member_available_for_viewer(db, item, viewer_id) and item.post_id == post.id
+            for item in pack.items
+        ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
     anonymous_hash = ensure_anonymous_cookie(request, response)
+    if pack and event_type == "pack_start":
+        # A collection view is any member reel starting playback. Anonymous
+        # and authenticated viewers both count, de-duplicated per viewer in a
+        # rolling window so scrubbing between members never inflates the count.
+        key = f"u:{viewer_id}" if viewer_id else f"a:{anonymous_hash[:48]}"
+        cutoff = utcnow() - timedelta(minutes=PACK_VIEW_WINDOW_MINUTES)
+        recent = db.query(ReelPackView.id).filter(
+            ReelPackView.pack_id == pack.id,
+            ReelPackView.viewer_key == key,
+            ReelPackView.created_at >= cutoff,
+        ).first()
+        if not recent:
+            db.add(ReelPackView(pack_id=pack.id, viewer_key=key))
+            pack.view_count = max(0, int(pack.view_count or 0)) + 1
     row = record_event(
         db,
         event_type=event_type,

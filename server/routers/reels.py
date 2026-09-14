@@ -1229,7 +1229,12 @@ def _pack_feed_data(
 ) -> dict:
     """Hydrate a finite, authored Reel Pack through the existing player wire shape."""
     from server.features import reel_pack_features
-    from server.routers.packs import active_item, get_pack_for_viewer, progress_card, serialize_pack
+    from server.routers.packs import (
+        get_pack_for_viewer,
+        member_available_for_viewer,
+        progress_card,
+        serialize_pack,
+    )
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     pack = get_pack_for_viewer(db, pack_id, viewer_id)
@@ -1237,7 +1242,8 @@ def _pack_feed_data(
     available_scan = [
         scanned[item.post.media_path]
         for item in sorted(pack.items, key=lambda row: row.position)
-        if active_item(item) and item.post and item.post.media_path in scanned
+        if item.post and item.post.media_path in scanned
+        and member_available_for_viewer(db, item, viewer_id)
     ]
     hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id)
     by_path = {item.get("path"): item for item in hydrated}
@@ -1249,7 +1255,7 @@ def _pack_feed_data(
 
     def _db_fallback_entry(item) -> dict | None:
         post = item.post
-        if not post or not active_item(item):
+        if not post or not member_available_for_viewer(db, item, viewer_id):
             return None
         try:
             card = _pack_post_card(post, db, viewer_id)
@@ -1299,8 +1305,13 @@ def _pack_feed_data(
 
     ordered = []
     total = len(pack.items)
+    pack_creator_card = serialize_pack(db, pack, viewer_id)["creator"]
     for item in sorted(pack.items, key=lambda row: row.position):
-        media = by_path.get(item.post.media_path) if active_item(item) and item.post else None
+        media = (
+            by_path.get(item.post.media_path)
+            if item.post and member_available_for_viewer(db, item, viewer_id)
+            else None
+        )
         if media:
             entry = dict(media)
             entry.update({
@@ -1347,7 +1358,7 @@ def _pack_feed_data(
                     "following_creator": False,
                     "can_edit": False,
                 },
-                "creator": serialize_pack(db, pack, viewer_id)["creator"],
+                "creator": pack_creator_card,
             }
         ordered.append(entry)
     progress = progress_card(db, pack, viewer_id)

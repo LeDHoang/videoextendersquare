@@ -249,12 +249,76 @@
   border-right: 0;
 }
 
+/* Inside the unified Explore grid, a collection behaves like a reel tile:
+   square cell, cover as the thumbnail, copy and actions overlaid. The
+   stacked-card cover keeps collections visually distinct from reels. */
+.sx-explore-grid .sx-pack-tile {
+  grid-template-rows: none;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+
+.sx-explore-grid .sx-pack-tile .sx-pack-cover {
+  position: absolute;
+  inset: 0;
+}
+
+.sx-explore-grid .sx-pack-tile .sx-pack-tile-copy {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 40px;
+  z-index: 2;
+  padding: 30px 12px 8px;
+  background: linear-gradient(180deg, rgba(5, 8, 12, 0) 0%, rgba(5, 8, 12, .84) 52%);
+}
+
+.sx-explore-grid .sx-pack-tile .sx-pack-tile-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--sx-line);
+  background: rgba(5, 8, 12, .88);
+}
+
 .sx-pack-tile-actions button:hover,
 .sx-pack-tile-actions button:focus-visible,
 .sx-profile-saved-tabs button.sx-active {
   color: #fff;
   background: var(--sx-accent);
   outline: none;
+}
+
+/* Collection tiles mirror the reel-tile chrome so collections and reels read
+   as one gallery. A transparent offset frame plus the REEL PACK badge keep
+   them visually distinct without hiding the autoplaying thumbnail. */
+.sx-pack-tile--reel {
+  display: block;
+}
+
+.sx-pack-tile--reel .sx-pack-cover-stack {
+  inset: 10px;
+  background: transparent;
+  border: 1px solid var(--sx-accent);
+  box-shadow: 0 0 0 1px rgba(255, 59, 31, .22), 0 12px 26px rgba(0, 0, 0, .5);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.sx-pack-tile--reel .sx-explore-video,
+.sx-pack-tile--reel .sx-explore-poster {
+  z-index: 0;
+}
+
+.sx-pack-tile-warning {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 40px;
+  z-index: 6;
+  text-align: center;
 }
 
 .sx-pack-page,
@@ -276,6 +340,41 @@
   max-width: 420px;
 }
 
+.sx-pack-hero-cover {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sx-pack-hero-cover:disabled {
+  cursor: default;
+}
+
+.sx-pack-hero-cover:focus-visible {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 4px;
+}
+
+.sx-pack-hero-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 10px 16px;
+  background: rgba(8, 9, 10, .86);
+  border: 1px solid var(--sx-accent);
+  color: #fff;
+  font: 800 12px/1 var(--sx-mono);
+  letter-spacing: .08em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .sx-pack-hero-copy {
   display: flex;
   flex-direction: column;
@@ -285,6 +384,28 @@
 
 .sx-pack-label {
   padding: 7px 9px;
+}
+
+.sx-pack-curated {
+  color: var(--sx-ink-2);
+  font: 700 11px/1.4 var(--sx-mono);
+  letter-spacing: .08em;
+}
+
+.sx-pack-curated a {
+  color: var(--sx-accent);
+}
+
+.sx-pack-publish-hint {
+  border: 1px solid var(--sx-line);
+  padding: 6px 8px;
+  color: var(--sx-ink-2);
+  font: 700 10px/1 var(--sx-mono);
+}
+
+.sx-pack-editor-owner {
+  color: var(--sx-ink-3);
+  font: 700 9px/1 var(--sx-mono);
 }
 
 .sx-pack-hero-copy h2 {

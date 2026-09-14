@@ -12,33 +12,47 @@
 
 ## Visual Showcase
 
-The screenshots below cover the media pipeline and player (v2.0). The social surfaces added since — Reel Packs, Explore, Messages, Wallet — have no captured screenshots yet.
+The screenshots below showcase ECHO's end-to-end platform, from AI spatial outpainting and hardware-accelerated HEVC encoding to WebXR immersive playback, authored Reel Packs, social discovery, and encrypted direct messaging.
 
 ### 1. Image Extender & Multi-File Batch Mode
-Generatively extend canvas borders to 1:1 square (3840×3840) with instant padding metrics and multi-model cloud / offline upscalers.
+Generatively extend canvas borders to 1:1 square (3840×3840) with instant padding metrics, multi-model cloud / offline upscalers, and live system probes.
 ![Image Processing Interface](docs/images/image_extender.png)
 
 ### 2. Video Extender & Live Cost Breakdown
-Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Luma Ray-2, local HEVC master encoding, and live pre-render billing estimator.
+Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Luma Ray-2, local hardware HEVC master encoding, and live pre-render billing estimator.
 ![Video Processing Interface](docs/images/video_extender.png)
 
 ### 3. WebXR 4K Reels Player (Desktop Viewport with Dynamic Glow)
-Ultra-smooth 1:1 square reels player with synchronized dynamic ambient glow (Ambilight), instant folder / codec switching, and search filtering.
+Ultra-smooth 1:1 square reels player with synchronized dynamic ambient glow (Ambilight), time-synced pinned spatial comments, instant folder / codec switching, and search filtering.
 ![Reels Player Interface](docs/images/reels_player.png)
 
-### 4. WebXR Immersive Cosmic VR Mode (Meta Quest 3 / Vision Pro)
+### 4. WebXR Immersive Cosmic VR Mode (Meta Quest 3 / Apple Vision Pro)
 Step inside an atmospheric midnight-blue cosmos with 1,800 breathing stars, real-time radiant video glow, 6DOF natural grab-and-drag, and 3D floating spatial transport panel.
 ![WebXR VR Mode Simulation](docs/images/reels_vr_mode.png)
 
 ### 5. Fast vs Studio Render Comparison Inspector
-Interactive side-by-side A/B slider comparing Lanczos4+CAS against ZNEDI3 neural interpolation with automatic proxy streaming.
+Interactive side-by-side A/B slider comparing Lanczos4+CAS against ZNEDI3 neural interpolation with synchronized video scrubbing and dual proxy streaming.
 ![Compare Page Interface](docs/images/compare_slider.png)
 
-### 6. Reel Packs (no screenshot yet)
-Authored, finite collections of 5–12 reels with a stable `/packs/:id` URL, cover/collage tile, ordered tracklist, resume, and identical playback in 2D and WebXR. See [Reel Packs investigation](docs/reel-packs-implementation-investigation.md).
+### 6. Reel Packs — Curated Spatial Master Collections
+Authored, finite collections with stable `/packs/:id` URLs, collage covers, tracklist management, creator profiles, and identical playback state across 2D desktop and WebXR headsets.
+![Reel Packs Collection View](docs/images/reel_packs.png)
 
-### 7. Explore, Messages & Wallet (no screenshots yet)
-`ALL / REELS / PACKS` discovery with tag and location pages, encrypted direct messaging with reel/pack sharing, and the ECHO Credits wallet with Stripe top-up and reel rewards.
+### 7. Social Discovery & Explore Grid
+Multi-tier discovery across `ALL / REELS / PACKS`, folder categories, HEVC raw master filters, location heat tags, and instant shuffled video playback.
+![Explore Social Gallery](docs/images/explore_social.png)
+
+### 8. Direct Messaging & Rich Reel Sharing
+Real-time threaded direct messaging with conversation requests, encrypted-at-rest delivery, rich embedded reel cards, and floating quick-access message dock.
+![Direct Messaging and Chat](docs/images/messages_chat.png)
+
+### 9. ECHO Credits Wallet & Stripe Top-up
+Balance ledger, Stripe checkout packages, watch-to-earn reward history, and optional creator Bring-Your-Own-Key (BYOK) encrypted Fal credential storage.
+![ECHO Credits Wallet](docs/images/wallet_credits.png)
+
+### 10. Desktop Immersive WebXR Scene Inspector
+Diagnostic desktop tool replicating the exact Three.js 3D WebXR coordinate space, curved video geometry, controller guides, and draw-call telemetry without requiring a physical headset.
+![Desktop Immersive Scene Inspector](docs/images/immersive_preview.png)
 
 ---
 
@@ -94,6 +108,10 @@ Authored, finite collections of 5–12 reels with a stable `/packs/:id` URL, cov
 
 ### 🛡️ Moderation & Account Safety
 - Pack- and reel-level reports, moderation queue (`/moderation` for staff in `SX_ADMIN_USERS` / `SX_MODERATOR_USERS`), user blocking enforced across profiles, Packs, and messaging, and generic unavailable responses that never reveal whether deletion, moderation, blocking, or visibility caused them.
+
+### 🖥️ Desktop Immersive Scene Inspector & Creator Upload Portal
+- **Desktop WebXR Parity Inspector** (`/reels/immersive-preview`): Orbit inspection and headset POV modes using the shared Three.js scene geometry, shaders, starfield, and controller guides to test VR layout parity on standard desktop browsers with live draw-call and video texture upload counters.
+- **Creator Upload Portal** (`/upload`): Direct video and image publishing interface with metadata tagging (title, caption, hashtags), location tagging (city and country for Earth heat map discovery), and instant reel vault ingestion.
 
 ---
 
