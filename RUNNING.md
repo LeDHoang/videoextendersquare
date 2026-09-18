@@ -126,15 +126,35 @@ After deployment, test with two real accounts in separate browser sessions: requ
 
 ## Meta Quest 3 / VR
 
-The Reels player is a WebXR page. Because all media URLs are same-origin
-relative paths, it works in the Quest browser over plain HTTP on your LAN, or
-through an HTTPS tunnel:
+The Reels player is a Three.js-accelerated WebXR experience (`ui/assets/webxr_vr.js`). Because all media URLs are same-origin relative paths, it works in the Quest browser over plain HTTP on your LAN, through an HTTPS tunnel, or via USB reverse port-forwarding:
 
-1. Run the server (dev or start) on the machine hosting `output/`.
+### 1. USB-C Reverse Port Forwarding (Recommended for Development & Zero Lag)
+WebXR requires a Secure Context. By using ADB reverse port forwarding, Quest Browser treats the host machine as `localhost`, providing complete WebXR access without SSL setup:
+
+```bash
+# 1. Connect Quest 3 to your computer with a USB-C link cable and allow debugging
+adb devices
+
+# 2. Map host ports to the headset
+adb reverse tcp:8000 tcp:8000
+adb reverse tcp:5173 tcp:5173
+
+# 3. Open in Meta Quest Browser:
+# Primary feed: http://localhost:5173/reels
+# Desktop 3D parity inspector: http://localhost:5173/reels/immersive-preview
+```
+
+### 2. Real-Time Telemetry & Frame Drops Probing
+To inspect hardware HEVC decoder cadence and dropped frames via Chrome DevTools Protocol:
+```bash
+# Probe active Quest Browser tabs and inspect WebGL renderer stats
+node debug-quest-targets.cjs
+node debug-quest.cjs
+```
+
+### 3. Wi-Fi / LAN Mode
+1. Run the server (`make dev` or `make start`) on the machine hosting `output/`.
 2. On the Quest browser, open `http://<your-LAN-ip>:8000/reels`.
-3. Behind a firewall / for remote play, open an HTTPS tunnel to port 8000 and
-   paste the `https://…` URL into the Reels page's TUNNEL box — the player
-   rewrites media URLs through it.
+3. For remote play over WAN, open an HTTPS tunnel to port 8000 and paste the `https://…` URL into the Reels page's TUNNEL box — the player rewrites media URLs through it.
 
-Streamlit fallback: the reels iframe uses the same assets; make sure the
-mediaserver (8502) is running (`SX_MEDIA_PORT`) or use the tunnel field.
+Streamlit fallback: the reels iframe uses the same assets; make sure the mediaserver (8502) is running (`SX_MEDIA_PORT`) or use the tunnel field.

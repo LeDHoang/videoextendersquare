@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "bundle:three": "esbuild src/vr/three_bundle_entry.js --bundle --minify --format=iife --outfile=../ui/assets/three.min.js",
     "build": "vite build",
     "test": "node --test tests/*.test.js && vitest run",
     "preview": "vite preview"
@@ -13,7 +14,8 @@
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.6.0"
+    "react-router-dom": "^7.6.0",
+    "three": "^0.186.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

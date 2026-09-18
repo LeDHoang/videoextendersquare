@@ -6,11 +6,26 @@ import { AccentBlock, Hero, Mono, SpecRow } from '../components/ui/primitives.js
 const DEFAULT_STATE = {
   running: false,
   cameraMode: 'headset',
+  curvatureMode: 'dome',
   stereo: false,
   reducedMotion: false,
   sceneMode: 'reels',
   renderStats: { earthDrawCalls: 0, reelDrawCalls: 0, videoUploads: 0 },
 };
+
+function formatCurvatureMode(mode) {
+  if (typeof mode === 'number') {
+    mode = mode === 1 ? 'dome' : (mode === 2 ? 'sq_curve' : 'flat');
+  }
+  return String(mode || 'dome').replace('_', ' ').toUpperCase();
+}
+
+function isCurvatureActive(mode, target) {
+  if (typeof mode === 'number') {
+    mode = mode === 1 ? 'dome' : (mode === 2 ? 'sq_curve' : 'flat');
+  }
+  return (mode || 'dome') === target;
+}
 
 export default function ImmersivePreviewPage() {
   const [renderer, setRenderer] = useState(null);
@@ -32,7 +47,7 @@ export default function ImmersivePreviewPage() {
 
   useEffect(() => {
     if (!renderer?.getPreviewState) return undefined;
-    const timer = window.setInterval(() => setPreviewState(renderer.getPreviewState()), 750);
+    const timer = window.setInterval(() => setPreviewState(renderer.getPreviewState()), 500);
     return () => window.clearInterval(timer);
   }, [renderer]);
 
@@ -52,8 +67,9 @@ export default function ImmersivePreviewPage() {
         kicker="CREATOR TOOL · SHARED WEBXR SCENE · DESKTOP INSPECTION"
       >
         <div className="sx-stats-pill">
-          <span>SCENE: <strong>{previewState.sceneMode.toUpperCase()}</strong></span>
-          <span>CAMERA: <strong>{previewState.cameraMode.toUpperCase()}</strong></span>
+          <span>SCENE: <strong>{(previewState.sceneMode || 'reels').toUpperCase()}</strong></span>
+          <span>CURVE: <strong>{formatCurvatureMode(previewState.curvatureMode)}</strong></span>
+          <span>CAMERA: <strong>{(previewState.cameraMode || 'headset').toUpperCase()}</strong></span>
           <span>VIEW: <strong>{previewState.stereo ? 'STEREO' : 'MONO'}</strong></span>
           <span>STATUS: <strong>{previewState.running ? 'LIVE' : 'LOADING'}</strong></span>
         </div>
@@ -82,6 +98,29 @@ export default function ImmersivePreviewPage() {
             onClick={() => invoke('setSceneMode', 'earth')}
           >
             EARTH ACTIVITY
+          </Button>
+        </div>
+        <div className="sx-control-group" role="group" aria-label="Curvature Mode">
+          <Button
+            primary={isCurvatureActive(previewState.curvatureMode, 'dome')}
+            disabled={!renderer}
+            onClick={() => invoke('setCurvatureMode', 'dome')}
+          >
+            DOME
+          </Button>
+          <Button
+            primary={isCurvatureActive(previewState.curvatureMode, 'sq_curve')}
+            disabled={!renderer}
+            onClick={() => invoke('setCurvatureMode', 'sq_curve')}
+          >
+            SQ CURVE
+          </Button>
+          <Button
+            primary={isCurvatureActive(previewState.curvatureMode, 'flat')}
+            disabled={!renderer}
+            onClick={() => invoke('setCurvatureMode', 'flat')}
+          >
+            FLAT
           </Button>
         </div>
         <div className="sx-control-group">

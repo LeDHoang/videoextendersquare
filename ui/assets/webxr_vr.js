@@ -1,232 +1,109 @@
 /**
- * WebXR VR Module for Reels — v5.1 (Desktop Preview & Earth Activity)
+ * ECHO WebXR VR Module for Reels — v8.0 (Pure Three.js Engine with Path A Curvature)
  *
- * Key Improvements:
- *  - Tangent to Viewer POV: Screen tilts forward/backward when moved up/down to face your eyes directly
- *  - 100% Horizontally Level: Zero sideways roll along Z-axis (left/right edges stay level)
- *  - DeoVR/Skybox 6DOF Natural Grab & Repositioning
- *  - YouTube VR Standard Curved Screen (ARC_ANGLE = 0.6 rad ~34.4° arc, R = 1.6667m)
- *  - Shared desktop preview and XR renderer
- *  - Upright holographic Earth with blended activity zones and hover reel previews
+ * Fully overhauled using Three.js (r186) scene graph, THREE.OrbitControls,
+ * and decoupled 2D In-VR UI Canvas (window.VRUICanvas).
  */
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  /* ═══ VERSION TAG ═══ */
-  const VR_VERSION = 'v5.2-20260913-reel-packs';
+  const VR_VERSION = 'v8.1-20260919-entry-drag-hologram';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
-  // ─── State ───────────────────────────────────────────────────────────
-  let xrSession = null;
-  let xrRefSpace = null;
-  let videoElement = null;
-  let callbacks = {};
-  let lastVisualKind = '';
-  let lastVisualVersion = '';
-  let lastVisualElement = null;
-
-  // Curvature Settings
-  // 1: Concave Hemisphere (Radial Dome, Default - Center is focal point, curves on all sides)
-  // 2: Concave Square (Biaxial Pillow Curve - Symmetrical curve maintaining square format)
-  // 0: Flat
-  let curvatureMode = 1;
-  let isCurved = true; // backward compat
-
-  // WebGL state
-  let gl = null;
-  let glLayer = null;
-  let glProgram = null;
-  let glVideoTexture = null;
-  let glVideoTextureB = null; // double-buffer back texture (2d re-spec path only)
-  let videoTexFront = 0; // 0 = A front / B back, 1 = B front / A back
-  let glVideoTextureExt = null; // OES_texture_external target (zero-copy video bind)
-  let glControlsTexture = null;
-  let glOverlayTexture = null;
-  let glGuideTexture = null;
-  let glCommentsTexture = null;
-  let glReticleTexture = null;
-  let glGridBuf = null;
-  let glGridIndexBuf = null;
-  let glGridIndexCount = 0;
-  let glLaserBuf = null;
-
-  // In-Screen VR Comments Overlay Canvas
-  let overlayCanvas = null;
-  let overlayCtx = null;
-  const OVERLAY_W = 1024;
-  const OVERLAY_H = 1024;
-
-  // VR video-texture cap. The Adreno 740 cannot sustain a 56 MiB (3840² RGBA)
-  // texImage2D per decoded frame — each upload stalls ~45-110ms and drops the
-  // XR rate to ~22fps (telemetry-confirmed). The Quest 3S panel is ~1832px/eye,
-  // so 3840 is ~2× oversampled anyway. Drawing the video into a 2048² proxy
-  // canvas (GPU-side drawImage, cheap) then uploading THAT cuts each upload to
-  // 16 MiB → ~13ms → ~72fps, with no visible quality loss on the headset.
-  // Masters on disk stay 4K; only the in-VR texture is capped. Tunable.
+  // ─── Constants & Configuration ──────────────────────────────────────
   const VR_TEX_CAP = 2048;
-  // Video-texture binding path override. 'auto' arms the OES external-texture
-  // zero-copy path when the GPU exposes it (recommended); '2d' forces today's
-  // TEXTURE_2D texImage2D path (used if a device regresses on external bind).
-  const VR_TEX_MODE = 'auto';
-  // GL context preference. 'auto' prefers WebGL1: on Quest Browser, a WebGL2
-// context fails to establish a valid XR compositor client (uid/pid -1, no
-// presenting → runtime auto-exits the session ~0.7s after enter; logcat
-// confirmed). WebGL2 works as a plain context but its XR layer is unreliable
-// here, so it is only used when forced with '2'. '1' forces WebGL1.
-  const VR_GL_MODE = 'auto';
-  let vrProxyCanvas = null;
-  let vrProxyCtx = null;
-  let videoTexAllocated = false; // first upload allocates; later ones texSubImage2D (no re-spec → no GPU pipeline flush)
-  // Hitboxes for the currently rendered pop-up overlay comments (canvas coords),
-  // used to detect a laser trigger on a pop-up so the panel can jump to it.
-  let activeOverlayRegions = [];
-  let activeOverlayHoverId = null;
-  // Comment to highlight in the VR panel (from a pop-up click)
-  let cPanelHighlightId = null;
-  let cPanelHighlightTimer = null;
-
-  // Cached GL locations
-  let loc_aPos = -1;
-  let loc_aUV = -1;
-  let loc_uMVP = null;
-  let loc_uTex = null;
-  let loc_uAlpha = null;
-  let loc_uCurvatureMode = null;
-  let loc_uStereo = null;
-  let loc_uEyeOff = null;
-
-  // OES external-texture video path (zero-copy decoder-surface bind).
-  // Mirrors the main program locs but samples a samplerExternalOES from a
-  // TEXTURE_EXTERNAL_OES target, so per-frame binding avoids re-specifying a
-  // sampled 2D texture (the ~100ms GPU pipeline flush that caused ~22fps).
-  let glVideoProgram = null;
-  let loc2_aPos = -1;
-  let loc2_aUV = -1;
-  let loc2_uMVP = null;
-  let loc2_uTex = null;
-  let loc2_uAlpha = null;
-  let loc2_uCurvatureMode = null;
-  let loc2_uStereo = null;
-  let loc2_uEyeOff = null;
-  let videoTexMode = '2d'; // '2d' | 'external' — set at initGL via feature detection
-
-  // SBS stereoscopic playback: when true, each XR eye samples its half of the
-  // video frame (left half = left eye, right half = right eye).
-  let stereoMode = false;
-
-  // Starfield Environment State
-  let glStarProgram = null;
-  let glStarBuf = null;
-  const STAR_COUNT = 1800;
-  let loc_star_aPos = -1;
-  let loc_star_aData = -1;
-  let loc_star_uVP = null;
-  let loc_star_uHeadPos = null;
-  let loc_star_uTime = null;
-
-  // Ambient Video Glow (Ambilight) State
-  let glGlowProgram = null;
-  let loc_glow_aPos = -1;
-  let loc_glow_aUV = -1;
-  let loc_glow_uMVP = null;
-  let loc_glow_uCurvatureMode = null;
-  let loc_glow_uColor = null;
-  let loc_glow_uIntensity = null;
-
-  let ambilightCanvas = null;
-  let ambilightCtx = null;
-  let curGlowColor = [0.12, 0.28, 0.65];
-  let targetGlowColor = [0.12, 0.28, 0.65];
-  let lastColorSampleTime = 0;
-
-  // Shared scene mode: normal reels or the location-activity Earth.
-  let sceneMode = 'reels';
-  let reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-
-  // Earth mode is lazy: no GPU resources are created and no globe draw calls
-  // occur until the user explicitly opens it.
-  const EARTH_TEXTURE_URL = '/assets/earth-natural-1024x512.jpg';
-  const EARTH_RADIUS = 0.676; // +30% (was 0.52) for easier zone hits in VR
-  const EARTH_ZONE_LIMIT = 128;
-  const EARTH_IDLE_RADIANS_PER_SECOND = Math.PI / 60; // 3 degrees/second
+  const EARTH_RADIUS = 0.676;
   const EARTH_MAP_W = 2048;
   const EARTH_MAP_H = 1024;
-  const EARTH_PREVIEW_W = 512;
-  const EARTH_PREVIEW_H = 720;
-  const EARTH_PREVIEW_DWELL_MS = 260;
-  const EARTH_PREVIEW_UPLOAD_MS = 80;
-  const EARTH_PREVIEW_CLIP_SECONDS = 6;
+  const EARTH_PIN_CAP = 64;
+  // Base photo tried in order: Vite-served public asset (dev) then the
+  // backend route (production/Quest). Procedural fallback covers failure.
+  const EARTH_TEXTURE_URLS = [
+    '/assets/earth-natural-1024x512.jpg',
+    '/api/reels/earth-texture',
+  ];
+  const ARC_ANGLE = 0.65; // ~37.24 deg
+  const SPHERE_RADIUS = 1 / ARC_ANGLE; // ~1.5385m
+
+  // ─── State ──────────────────────────────────────────────────────────
+  let videoElement = null;
+  let callbacks = {};
+  let xrSession = null;
+  let xrRefSpace = null;
+  let previewRunning = false;
+  let previewAnimId = null;
+  let previewCanvas = null;
+  let previewCameraMode = 'headset'; // 'headset' | 'orbit'
+  let sceneMode = 'reels'; // 'reels' | 'earth'
+  let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
+  let isCurved = true;
+  let stereoMode = false;
+  let lockToViewer = false;
+  let reducedMotion = !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let screenScale = 1.0;
+  let controlsVisible = true;
+
+  // Preview camera state (restored custom drag-look; OrbitControls only in orbit mode)
+  let previewYaw = 0;
+  let previewPitch = 0;
+  let previewOrbitYaw = 0;
+  let previewOrbitPitch = -0.08;
+  let previewOrbitDistance = 4.8;
+  let previewPointer = null;
+  let previewListeners = null;
+  let previewResizeHandler = null;
+
+  // Earth Mode State
   let earthCenter = { x: 0, y: 1.12, z: -1.3 };
-  let earthAnchorRight = { x: 1, y: 0, z: 0 };
-  let earthYaw = -0.35;
+  let earthYaw = 0;
   let earthPitch = 0;
-  let earthLocations = [];
-  let earthHoveredIndex = -1;
-  let earthSelectedIndex = -1;
-  let earthStatus = 'OPEN EARTH TO LOAD ACTIVITY';
   let earthDragging = false;
-  let earthDragSource = null;
-  // Trigger/pointer press only becomes a globe rotation after an explicit
-  // hold: quick taps (press + release) are reserved for zone selection, so a
-  // click can never nudge the planet out from under the aimed zone.
-  const EARTH_DRAG_HOLD_MS = 280;
-  const EARTH_TAP_CHORD = 0.06; // ~= 3.4 degrees — above this, a tap is void
-  const EARTH_DRAG_CHORD = 0.12; // ~= 6.9 degrees — deliberate flick engages now
+  // Hold-to-engage drag machine (upstream parity): single-axis lock, tap
+  // chord, flick chord. Pitch factor is upstream-verbatim; yaw is reduced
+  // per owner request.
   let earthDragLastDir = null;
   let earthDragStartDir = null;
   let earthDragMoved = false;
-  // Single-axis lock: once a drag engages, rotation follows the dominant
-  // direction only (yaw XOR pitch) until release. Mixed rotation is
-  // disorienting, so the axis is decided from cumulative travel and held.
+  let earthDragEngaged = false;
   let earthDragCumX = 0;
   let earthDragCumY = 0;
-  let earthDragAxis = null; // null | 'yaw' | 'pitch'
+  let earthDragAxis = null;
   let earthPressTime = 0;
-  let earthDragEngaged = false;
   let earthPressZone = -1;
-  let earthLastFrameTime = -1;
-  let earthActivityAbort = null;
-  let earthActivityGeneration = 0;
-  let earthSelectionGeneration = 0;
+  let earthDragSource = null;
   let earthResumePlayback = false;
-
-  let glEarthSphereBuf = null;
-  let glEarthSphereIndexBuf = null;
-  let glEarthSphereIndexCount = 0;
-  let glEarthRimBuf = null;
-  let glEarthRimIndexBuf = null;
-  let glEarthRimIndexCount = 0;
-  let earthZoneCount = 0;
-  let glEarthTexture = null;
-  let glEarthRimTexture = null;
-  let glEarthLabelTexture = null;
-  let glEarthPreviewTexture = null;
-  let earthBaseCanvas = null;
-  let earthBaseCtx = null;
-  let earthMapCanvas = null;
-  let earthMapCtx = null;
-  let earthMapDirty = true;
-  let earthMapTextureAllocated = false;
-  let earthLabelCanvas = null;
-  let earthLabelCtx = null;
-  let earthLabelSignature = '';
-  let earthPreviewCanvas = null;
-  let earthPreviewCtx = null;
-  let earthPreviewVideo = null;
-  let earthPreviewItems = [];
-  let earthPreviewIndex = 0;
+  let earthLocations = [];
+  let earthHoveredIndex = -1;
   let earthPreviewLocationIndex = -1;
   let earthPreviewStatus = 'idle';
-  let earthPreviewAbort = null;
-  let earthPreviewGeneration = 0;
+  let earthPreviewItems = [];
+  let earthPreviewIndex = 0;
+  let earthPreviewVideo = null;
   let earthPreviewTimer = null;
-  let earthPreviewLastUpload = -1;
-  let earthPreviewSignature = '';
-  let earthPreviewTextureAllocated = false;
-  let glIsWebGL2 = false;
+  let earthPreviewGeneration = 0;
+  let earthSelectedIndex = -1;
+  let earthSelectionGeneration = 0;
+  let earthLastFrameTime = -1;
   let earthResourcesReady = false;
-  let earthDragInputSource = null;
-  let earthInteractionUntil = 0;
+
+  // Notification State
+  let notificationText = '';
+  let notificationUntil = 0;
+
+  // Input & Hover State
+  let hoveredButton = -1;
+  let pressedButton = -1;
+  let lastControlsCanvasX = 0;
+  let lastControlsCanvasY = 0;
+  let lastCommentsCanvasX = 0;
+  let lastCommentsCanvasY = 0;
+  let cPanelTab = 'all';
+  let cPanelScrollY = 0;
+  let cPanelHover = '';
+  let cPanelHighlightId = null;
+  let commentsPanelVisible = false;
+
+  // Telemetry & Render Stats
   const renderStats = {
     earthDrawCalls: 0,
     reelDrawCalls: 0,
@@ -234,229 +111,244 @@ window.WebXRVR = window.WebXRVR || (function () {
     videoUploads: 0,
     earthPreviewUploads: 0,
   };
+  let lastPreviewEmitTime = 0;
 
-  // Desktop preview driver. It owns only camera/input/RAF; scene geometry and
-  // draw functions are shared with the XR driver.
-  let previewCanvas = null;
-  let previewRaf = 0;
-  let previewRunning = false;
-  let previewCameraMode = 'headset';
-  let previewStereo = false;
-  let previewYaw = 0;
-  let previewPitch = 0;
-  let previewOrbitYaw = 0;
-  let previewOrbitPitch = -0.08;
-  let previewOrbitDistance = 4.8;
-  let previewPointer = null;
-  let previewLastViews = [];
-  let previewListeners = null;
-
-  // Pointer & Ray tracking
-  let activeRayOrigin = null;
-  let activeRayDir = null;
-  let activeHitDist = 3.0;
-  let activeIsHovering = false;
-
-  // Screen transform
-  const DEFAULT_POS = { x: 0, y: 1.52, z: -2.24 };
-  const DEFAULT_SCALE = 4.0;
-  const MIN_SCALE = 1.0;
-  const MAX_SCALE = 10.0;
-  const SCALE_SPEED = 0.04;
-
-  let screenPos = { ...DEFAULT_POS };
-  let screenQuat = { x: 0, y: 0, z: 0, w: 1 };
-  let screenScale = DEFAULT_SCALE;
-  let currentHeadPos = { x: 0, y: 1.52, z: 0 };
-  let currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
-  let isInitialPoseSet = false;
-
-  // Head-locked default: the screen stays perpendicular to the user's view and
-  // centered in it, so the user always looks at the middle of the screen.
-  // Toggle off via the 🎯 LOCK control to restore free 6DOF placement.
-  let lockToViewer = true;
-
-  // 6DOF Grab state (DeoVR / Skybox style)
-  let isGrabbing = false;
-  let grabControllerIdx = -1;
-  let grabRelPos = { x: 0, y: 0, z: 0 };
-  let grabRelQuat = { x: 0, y: 0, z: 0, w: 1 };
-
-  // Controls panel state
-  let controlsVisible = false;
-  let controlsCanvas = null;
-  let controlsCtx = null;
-  const CONTROLS_W = 800;
-  const CONTROLS_H = 360;
-  const CONTROLS_Y_OFFSET = 0.08; // Gap below bottom edge
-
-  // Meta Quest Guide Panel State
-  let guideCanvas = null;
-  let guideCtx = null;
-  let questControllerImg = null;
-  let isQuestControllerImgLoaded = false;
-  const QUEST_CONTROLLER_B64 = window.QUEST_CONTROLLER_B64;
-  const GUIDE_W = 440;
-  const GUIDE_H = 760;
-  let hoveredButton = -1;
-  let pressedButton = -1;
-  let lastControlsCanvasX = 0;
-  let lastControlsCanvasY = 0;
-  let controlsAutoHideTimer = null;
-  const CONTROLS_AUTO_HIDE_MS = 5000;
-  let notificationText = '';
-  let notificationUntil = 0;
-
-  // ── VR Comments Panel (world-space, symmetric to the right-side guide) ──
-  let commentsPanelVisible = false;
-  let commentsPanelCanvas = null;
-  let commentsPanelCtx = null;
-  const CPANEL_W = 560;
-  const CPANEL_H = 860;
-  const CP_HEADER_H = 60;
-  const CP_LIST_TOP = 66;
-  const CP_LIST_BOTTOM = 748;
-  const CP_LIST_X = 16;
-  const CP_LIST_W = 498; // 560 - 16 - 46 (right scrollbar column)
-  const CP_ITEM_H = 96;
-  const CP_ITEM_GAP = 10;
-  const CP_SCROLL_X = 516;
-  const CP_SCROLL_W = 30;
-  let cPanelTab = 'all';
-  let cPanelScrollY = 0;
-  let cPanelMaxScroll = 0;
-  let cPanelHover = null;
-  let cPanelDrag = false;
-  let cPanelDragStartCanvasY = 0;
-  let cPanelDragStartScroll = 0;
-  let lastCommentsCanvasX = 0;
-  let lastCommentsCanvasY = 0;
-
-  // Quest DOM-Overlay virtual keyboard for posting comments from VR
-  let domOverlayRoot = null;
-  let domOverlayInput = null;
-  let pendingSyncTime = null;
-
-  // Video frame tracking
-  let hasNewVideoFrame = true;
+  // Video upload gating (avoids re-uploading identical frames every tick)
+  let lastVisualKind = '';
+  let lastVisualVersion = '';
+  let lastVisualElement = null;
   let lastVideoTime = -1;
-  let lastVideoFrameCount = -1; // decoded-frame counter (getVideoPlaybackQuality)
+
+  // Three.js Core Instances
+  let THREE = (typeof window !== 'undefined' && window.THREE) || null;
+  let renderer = null;
+  let scene = null;
+  let camera = null;
+  let orbitControls = null;
+  let raycaster = null;
+  let scratchVec = null;
+  let glContext = null;
+
+  // Video Frame Tracking
+  let hasNewVideoFrame = true;
   let videoFrameCallbackId = null;
   let videoFrameTrackingGeneration = 0;
 
-  // Adaptive upload stride (resolution + stall aware). Low-res files sustain
-  // stride 1 (every decoded frame → full motion); high-res / stalling sessions
-  // back off to 2-3 so the texImage2D re-spec flush fires less often.
-  // 4K masters can never hold stride 1 (telemetry: ~100ms flush vs 11ms budget).
-  let vrUploadStride = 1; // 1 = every decoded frame, 2 = every 2nd, 3 = every 3rd
-  let vrSkipCounter = 0;
-  let vrStallFrames = 0; // recent XR frames with dt > 25ms
-  let vrCalmFrames = 0; // recent XR frames with dt < 18ms
-  let vrLastFrameT = -1;
-  // UI texture throttles: controls progress looks smooth at 10Hz; the guide is
-  // static artwork uploaded once. Per-frame UI re-specs were extra flushes.
-  let vrLastUiUploadT = -1;
-  let vrLastPanelUploadT = -1;
-  let vrGuideUploaded = false;
-  const VR_UI_MIN_INTERVAL = 100; // ms between UI texture uploads
+  // Earth async management
+  let earthActivityGeneration = 0;
+  let earthActivityAbort = null;
+  let earthPreviewAbortController = null;
 
-  // ── In-headset VR telemetry (POSTed to /api/reels/diag ~1Hz) ──
-  // CDP can't see the Quest tab during immersive VR, so the render loop
-  // self-reports XR frame timing + texture-upload count + decode drops.
-  let _diagLastT = null;
-  let _diagLastPost = 0;
-  let _diagFrames = 0;
-  let _diagDtMin = Infinity, _diagDtMax = 0, _diagDtSum = 0, _diagOver20 = 0, _diagOver14 = 0;
-  let _diagLastPqTotal = -1;
-  let _diagTexUploads = 0;
-  let _diagUploadMaxMs = 0;
-  let _diagDrawMaxMs = 0;
-  let _diagGLInfo = null;
-  let _diagForce = false; // emit a snapshot immediately (bypasses 1s throttle)
+  // 3D Objects & Meshes
+  let screenMesh = null;
+  let ambilightMesh = null;
+  let laserLine = null;
+  let laserPositions = null;
+  let reticleMesh = null;
+  let reticleTexture = null;
+  // Last mouse-driven hover ray in preview (persistent head-ray endpoint).
+  let previewHoverRay = null;
+  let scratchMat4 = null;
+  let scratchVec2 = null;
+  let scratchVec3 = null;
+  let glowAlphaTexture = null;
+  let glowProbeCanvas = null;
+  let glowProbeCtx = null;
+  // Ambient glow color state (upstream updateAmbilightColor semantics:
+  // 8x8 video probe, enhance, lerp toward target).
+  let glowColor = [0.10, 0.24, 0.62];
+  let glowTarget = [0.10, 0.24, 0.62];
+  let lastGlowSample = -1;
+  let controlsMesh = null;
+  let commentsMesh = null;
+  let starfieldPoints = null;
+  let earthGroup = null;
+  let earthMesh = null;
+  let earthPinsGroup = null;
+  let earthPreviewMesh = null;
+  let earthMapCanvas = null;
+  let earthMapCtx = null;
+  let earthMapTexture = null;
+  let earthMapDirty = true;
+  let earthBaseSource = 'fallback';
+  let earthBaseTried = false;
+  let earthBaseStale = true;
+  let earthLabelCanvas = null;
+  let earthLabelCtx = null;
+  let earthLabelTexture = null;
+  let earthLabelMesh = null;
+  let lastEarthLabelKey = '';
+  let lastEarthPreviewUpdate = -1;
+  let pinSharedGeo = null;
 
-  // Thumbstick flick debounces
-  let flickedX = false;
-  let flickedY = false;
-  const FLICK_THRESHOLD = 0.5;
-  const FLICK_RESET = 0.3;
+  // 2D Canvases & Textures
+  let vrProxyCanvas = null;
+  let vrProxyCtx = null;
+  let videoTexture = null;
+  let controlsCanvas = null;
+  let controlsCtx = null;
+  let controlsTexture = null;
+  let commentsCanvas = null;
+  let commentsCtx = null;
+  let commentsTexture = null;
+  let earthPreviewCanvas = null;
+  let earthPreviewCtx = null;
+  let earthPreviewTexture = null;
 
-  // External button state tracking
-  const prevBtnState = { rightA: false, rightB: false, leftA: false, leftB: false };
+  function getXR() {
+    return typeof navigator !== 'undefined' && navigator.xr ? navigator.xr : null;
+  }
 
-  // ── VR site-chrome helpers — notify the host page so the global header can hide ──
-  function notifyVrEnter() {
+  function getUICanvas() {
+    return (typeof window !== 'undefined' && window.VRUICanvas) || null;
+  }
+
+  function ensureThree() {
+    if (!THREE && typeof window !== 'undefined' && window.THREE) {
+      THREE = window.THREE;
+    }
+    if (!raycaster && THREE) {
+      raycaster = new THREE.Raycaster();
+    }
+    return THREE;
+  }
+
+  // ─── Preview sizing & camera ──────────────────────────────────────
+  // Mirrors the old raw-WebGL resizePreviewCanvas(): keeps the drawing
+  // buffer in sync with CSS layout every frame instead of freezing the
+  // first-observed clientWidth forever.
+  function updatePreviewSize(canvas) {
+    const target = canvas || previewCanvas;
+    if (!target || !renderer || !camera) return false;
+    const cssW = (target.clientWidth || 960);
+    const cssH = (target.clientHeight || 540);
+    const ratio = (typeof window !== 'undefined' && renderer.getPixelRatio)
+      ? renderer.getPixelRatio()
+      : 1;
+    const width = Math.max(2, Math.round(cssW * ratio));
+    const height = Math.max(2, Math.round(cssH * ratio));
+    let resized = false;
+    if (target.width !== width || target.height !== height) {
+      try {
+        renderer.setSize(cssW, cssH, false);
+        if (target.width !== width || target.height !== height) {
+          target.width = width;
+          target.height = height;
+        }
+      } catch (e) {}
+      resized = true;
+    }
+    const aspect = cssW / Math.max(1, cssH);
+    if (Math.abs(camera.aspect - aspect) > 0.0001) {
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+      resized = true;
+    }
+    return resized;
+  }
+
+  // ─── Below-screen console dock layout ───────────────────────────────
+  // Upstream-faithful: the dock hangs below the screen bottom edge and
+  // faces the viewer with locked roll, so the curved screen (DOME edges
+  // reach z≈-1.6) can never occlude it. Pure math in computeDockPose so
+  // the Node harness can assert the clearances without GL.
+  const DOCK_W = 1.6;
+  const DOCK_H = 0.6;
+  const DOCK_GAP = 0.08;
+  const DOCK_Z = -1.9;
+  const SCREEN_CENTER_Y = 1.6;
+  // Earth-station console: floats before + below the globe (front surface
+  // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
+  // the ride back to reels. Station chosen with the viewer tilt applied:
+  // the tilted top edge still clears the sphere (see dock test).
+  const EARTH_DOCK_POS = { x: 0, y: 0.20, z: -0.85 };
+
+  function computeDockPose(headPos, mode) {
+    const m = mode || sceneMode;
+    const pos = (m === 'earth')
+      ? { x: EARTH_DOCK_POS.x, y: EARTH_DOCK_POS.y, z: EARTH_DOCK_POS.z }
+      : { x: 0, y: SCREEN_CENTER_Y - SCREEN_HALF_H - DOCK_GAP - DOCK_H / 2, z: DOCK_Z };
+    const hx = (headPos && Number(headPos.x)) || 0;
+    const hy = (headPos && Number(headPos.y)) || 1.6;
+    const hz = (headPos && Number(headPos.z)) || 0;
+    const dx = hx - pos.x;
+    const dy = hy - pos.y;
+    const dz = hz - pos.z;
+    return {
+      pos,
+      yaw: Math.atan2(dx, dz),
+      pitch: -Math.atan2(dy, Math.hypot(dx, dz)),
+    };
+  }
+
+  function getHeadPosition() {
+    const out = { x: 0, y: 1.6, z: 0 };
     try {
-      window.dispatchEvent(new CustomEvent('echo:vr-enter', { detail: { inVR: true } }));
-      window.dispatchEvent(new CustomEvent('echo:vrchange', { detail: { inVR: true } }));
-      try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:vr-enter', { detail: { inVR: true } })); } catch (e2) {}
-      document.documentElement.classList.add('sx-vr-active');
-      if (document.body) document.body.classList.add('sx-vr-active');
+      if (camera) {
+        if (xrSession && camera.getWorldPosition) {
+          if (!scratchVec && THREE) scratchVec = new THREE.Vector3();
+          if (scratchVec) {
+            camera.getWorldPosition(scratchVec);
+            out.x = scratchVec.x;
+            out.y = scratchVec.y;
+            out.z = scratchVec.z;
+            return out;
+          }
+        }
+        out.x = camera.position.x;
+        out.y = camera.position.y;
+        out.z = camera.position.z;
+      }
     } catch (e) {}
-  }
-  function notifyVrExit() {
-    try {
-      window.dispatchEvent(new CustomEvent('echo:vr-exit', { detail: { inVR: false } }));
-      window.dispatchEvent(new CustomEvent('echo:vrchange', { detail: { inVR: false } }));
-      try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:vr-exit', { detail: { inVR: false } })); } catch (e2) {}
-      document.documentElement.classList.remove('sx-vr-active');
-      if (document.body) document.body.classList.remove('sx-vr-active');
-    } catch (e) {}
+    return out;
   }
 
-  // Button definitions for the UI controls panel (WebXR HUD Media Control Dock)
-  const CTRL_BUTTONS = [
-    // Left secondary column (Pills)
-    { label: 'AUTO',  action: 'mode',  x: 24,  y: 66,  w: 156, h: 44 },
-    { label: 'DOME',  action: 'curve', x: 24,  y: 120, w: 156, h: 44 },
-
-    // Center primary transport controls
-    { label: '◀◀',   action: 'rew',   x: 228, y: 92,  w: 48,  h: 48 },
-    { label: '⏮',    action: 'prev',  x: 290, y: 88,  w: 56,  h: 56 },
-    { label: '▶',     action: 'play',  x: 360, y: 76,  w: 80,  h: 80 },
-    { label: '⏭',    action: 'next',  x: 454, y: 88,  w: 56,  h: 56 },
-    { label: '▶▶',   action: 'fwd',   x: 524, y: 92,  w: 48,  h: 48 },
-
-    // Right secondary column (Pills)
-    { label: 'LOCK',  action: 'lock',  x: 620, y: 66,  w: 156, h: 44 },
-    { label: 'AUDIO', action: 'mute',  x: 620, y: 120, w: 156, h: 44 },
-
-    // Header comment pill → toggles the VR comments panel
-    { label: '💬',    action: 'comments', x: 476, y: 13, w: 64, h: 22 },
-
-    // Open Earth activity mode, or restore All Locations after a location feed.
-    { label: 'EARTH MAP', action: 'earth', x: 622, y: 8, w: 114, h: 32 },
-
-    // Header exit button
-    { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
-
-    // Existing reel actions remain available in both feed and pack playback.
-    { label: 'LIKE',       action: 'like',       x: 24,  y: 184, w: 112, h: 42 },
-    { label: 'SAVE REEL',  action: 'save_reel',  x: 144, y: 184, w: 112, h: 42 },
-    { label: 'SHARE REEL', action: 'share_reel', x: 264, y: 184, w: 112, h: 42 },
-    { label: 'FOLLOW',     action: 'follow',     x: 384, y: 184, w: 112, h: 42 },
-    { label: 'PROFILE',    action: 'profile',    x: 504, y: 184, w: 112, h: 42 },
-    { label: 'REPORT',     action: 'report',     x: 624, y: 184, w: 152, h: 42 },
-
-    // Pack-level actions are intentionally separate from reel-level actions.
-    { label: 'SAVE PACK',  action: 'save_pack',  x: 218, y: 238, w: 174, h: 42 },
-    { label: 'SHARE PACK', action: 'share_pack', x: 408, y: 238, w: 174, h: 42 },
-
-    // Feed-mode collection shortcut (opens the SAVE TO card).
-    { label: 'COLLECT',    action: 'collect',    x: 24,  y: 238, w: 174, h: 42 },
-
-    // Bottom progress scrub track
-    { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
-  ];
-
-  function isPackExperience() {
-    return !!(callbacks.isPackMode && callbacks.isPackMode());
+  // Yaw/pitch face the viewer with zero roll (upstream quatFaceViewerLevel).
+  function faceViewerLevel(obj, headPos, pitchOverride) {
+    if (!obj || !headPos) return;
+    const dx = headPos.x - obj.position.x;
+    const dy = headPos.y - obj.position.y;
+    const dz = headPos.z - obj.position.z;
+    obj.rotation.order = 'YXZ';
+    obj.rotation.set(
+      pitchOverride !== undefined ? pitchOverride : -Math.atan2(dy, Math.hypot(dx, dz)),
+      Math.atan2(dx, dz),
+      0
+    );
   }
 
-  function getPackContext() {
-    if (!callbacks.getPackContext) return null;
-    try { return callbacks.getPackContext() || null; } catch (e) { return null; }
+  function layoutControlsDock() {
+    if (!controlsMesh) return;
+    const pose = computeDockPose(getHeadPosition());
+    controlsMesh.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
+    controlsMesh.rotation.order = 'YXZ';
+    controlsMesh.rotation.set(pose.pitch, pose.yaw, 0);
+    // Side comments panel keeps its station but faces the viewer too.
+    if (commentsMesh) faceViewerLevel(commentsMesh, getHeadPosition());
   }
 
+  // Applies headset yaw/pitch or orbit spherical position to the camera.
+  // Headset mode keeps the old custom drag-look (OrbitControls disabled);
+  // orbit mode is fully delegated to THREE.OrbitControls.
+  function applyPreviewCamera() {    if (!camera) return;
+    if (previewCameraMode === 'orbit') {
+      const tx = 0, ty = 1.4, tz = -2.0;
+      const d = previewOrbitDistance;
+      const cp = Math.cos(previewOrbitPitch), sp = Math.sin(previewOrbitPitch);
+      const cy = Math.cos(previewOrbitYaw), sy = Math.sin(previewOrbitYaw);
+      camera.position.set(tx + d * sy * cp, ty + d * sp, tz + d * cy * cp);
+      camera.lookAt(tx, ty, tz);
+      if (orbitControls && orbitControls.target) {
+        orbitControls.target.set(tx, ty, tz);
+      }
+    } else {
+      camera.position.set(0, 1.6, 0);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.set(previewPitch, previewYaw, 0);
+    }
+  }
+
+  // ─── Visual Source Helper ───────────────────────────────────────────
   function getVisualSource() {
     let source = null;
     if (callbacks.getVisualSource) {
@@ -487,1854 +379,61 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
   }
 
-  function visualPointFromHit(hitLocal) {
-    if (!hitLocal || !screenScale) return null;
-    return {
-      u: Math.max(0, Math.min(1, (hitLocal.x / screenScale) + 0.5)),
-      v: Math.max(0, Math.min(1, 0.5 - (hitLocal.y / screenScale))),
-    };
-  }
-
-  function isReelAction(action) {
-    return action === 'like' || action === 'save_reel' || action === 'share_reel' ||
-      action === 'follow' || action === 'profile' || action === 'report';
-  }
-
-  function isPackAction(action) {
-    return action === 'save_pack' || action === 'share_pack';
-  }
-
-  function isControlVisible(action, source, itemState) {
-    if (isPackAction(action)) return isPackExperience();
-    if (action === 'collect') return !isPackExperience();
-    if (isReelAction(action)) return source.kind !== 'static-card' && itemState.available !== false;
-    if (source.kind === 'static-card' &&
-        (action === 'rew' || action === 'prev' || action === 'play' ||
-         action === 'next' || action === 'fwd' || action === 'seek')) return false;
-    if (source.kind === 'image' && (action === 'rew' || action === 'fwd' || action === 'seek')) return false;
-    return true;
-  }
-
-  // ─── Quaternion & Vector Math Helpers ───────────────────────────────
-
-  function formatTime(s) {
-    if (!s || isNaN(s)) return '0:00';
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return m + ':' + (sec < 10 ? '0' : '') + sec;
-  }
-
-  function vecLen(a) { return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z); }
-  function vecSub(a, b) { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
-  function vecAdd(a, b) { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
-  function vecScale(a, s) { return { x: a.x * s, y: a.y * s, z: a.z * s }; }
-  function vecNorm(a) {
-    const l = vecLen(a) || 1;
-    return { x: a.x / l, y: a.y / l, z: a.z / l };
-  }
-
-  function quatInvert(q) {
-    const normSq = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
-    if (normSq === 0) return { x: 0, y: 0, z: 0, w: 1 };
-    const inv = -1 / normSq;
-    return { x: q.x * inv, y: q.y * inv, z: q.z * inv, w: q.w / normSq };
-  }
-
-  function quatMul(a, b) {
-    return {
-      w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-      x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-      y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-      z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-    };
-  }
-
-  function quatRotVec(q, v) {
-    const qv = { x: v.x, y: v.y, z: v.z, w: 0 };
-    const res = quatMul(quatMul(q, qv), quatInvert(q));
-    return { x: res.x, y: res.y, z: res.z };
-  }
-
-  function quatLevelFromDir(dir) {
-    // Compute yaw such that screen's local +Z axis points towards viewer direction.
-    const len = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
-    if (len < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
-    const yaw = Math.atan2(dir.x, dir.z);
-    return {
-      x: 0,
-      y: Math.sin(yaw / 2),
-      z: 0,
-      w: Math.cos(yaw / 2),
-    };
-  }
-
-  function quatFaceViewerLevel(screenPos, headPos) {
-    const head = headPos || currentHeadPos || { x: 0, y: 1.52, z: 0 };
-    const dx = head.x - screenPos.x;
-    const dy = head.y - screenPos.y;
-    const dz = head.z - screenPos.z;
-
-    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (len < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
-
-    // Normalized dir pointing to viewer (local +Z)
-    const zx = dx / len;
-    const zy = dy / len;
-    const zz = dz / len;
-
-    // Horizontal len in X-Z plane
-    const lenXZ = Math.sqrt(zx * zx + zz * zz);
-    if (lenXZ < 0.001) return { x: 0, y: 0, z: 0, w: 1 };
-
-    // Local +X axis = (0, 1, 0) x (zx, zy, zz) = (zz, 0, -zx) / lenXZ (Zero Y component = 100% Level)
-    const xx = zz / lenXZ;
-    const xy = 0;
-    const xz = -zx / lenXZ;
-
-    // Local +Y axis = Z_axis x X_axis
-    const yx = zy * xz - zz * xy;
-    const yy = zz * xx - zx * xz;
-    const yz = zx * xy - zy * xx;
-
-    const m00 = xx,  m01 = yx,  m02 = zx;
-    const m10 = xy,  m11 = yy,  m12 = zy;
-    const m20 = xz,  m21 = yz,  m22 = zz;
-
-    const trace = m00 + m11 + m22;
-    let qx, qy, qz, qw;
-
-    if (trace > 0) {
-      const s = 0.5 / Math.sqrt(trace + 1.0);
-      qw = 0.25 / s;
-      qx = (m21 - m12) * s;
-      qy = (m02 - m20) * s;
-      qz = (m10 - m01) * s;
-    } else if (m00 > m11 && m00 > m22) {
-      const s = 2.0 * Math.sqrt(1.0 + m00 - m11 - m22);
-      qw = (m21 - m12) / s;
-      qx = 0.25 * s;
-      qy = (m01 + m10) / s;
-      qz = (m02 + m20) / s;
-    } else if (m11 > m22) {
-      const s = 2.0 * Math.sqrt(1.0 + m11 - m00 - m22);
-      qw = (m02 - m20) / s;
-      qx = (m01 + m10) / s;
-      qy = 0.25 * s;
-      qz = (m12 + m21) / s;
-    } else {
-      const s = 2.0 * Math.sqrt(1.0 + m22 - m00 - m11);
-      qw = (m10 - m01) / s;
-      qx = (m02 + m20) / s;
-      qy = (m12 + m21) / s;
-      qz = 0.25 * s;
+  // ─── Path A: Screen Geometry Generation ─────────────────────────────
+  function createScreenGeometry(mode, width = 2.4, height = 2.4, segX = 48, segY = 48) {
+    ensureThree();
+    if (!THREE) return null;
+    if (mode === 0) {
+      return new THREE.PlaneGeometry(width, height);
     }
 
-    return { x: qx, y: qy, z: qz, w: qw };
-  }
-
-  // ─── Head-Locked Screen Mode ──────────────────────────────────────────
-  // Keeps the screen at a fixed distance in front of the user's face,
-  // perpendicular to the view direction, so the user always looks into the
-  // center of the screen. Screen local axes follow the head exactly:
-  // +Z faces back toward the viewer, +Y up, +X right.
-  function applyLockToViewer() {
-    const dist = -DEFAULT_POS.z;
-    const fwd = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
-    screenPos = {
-      x: currentHeadPos.x + fwd.x * dist,
-      y: currentHeadPos.y + fwd.y * dist,
-      z: currentHeadPos.z + fwd.z * dist,
-    };
-    screenQuat = currentHeadQuat;
-  }
-
-  // ─── Premium UI Controls Canvas Rendering ────────────────────────────
-
-  function initControlsCanvas() {
-    controlsCanvas = document.createElement('canvas');
-    controlsCanvas.width = CONTROLS_W;
-    controlsCanvas.height = CONTROLS_H;
-    controlsCtx = controlsCanvas.getContext('2d');
-  }
-
-  function initOverlayCanvas() {
-    overlayCanvas = document.createElement('canvas');
-    overlayCanvas.width = OVERLAY_W;
-    overlayCanvas.height = OVERLAY_H;
-    overlayCtx = overlayCanvas.getContext('2d');
-  }
-
-  function renderOverlayCanvas() {
-    const ctx = overlayCtx;
-    const source = getVisualSource();
-    if (!ctx || source.kind === 'static-card') return false;
-
-    const currentTime = source.currentTime || 0;
-    const comments = callbacks.getComments ? callbacks.getComments() : [];
-
-    // Filter active time-synced comments within active window [timestamp, timestamp + 4.2s]
-    const active = comments.filter((c) => {
-      if (c.timestamp === null || c.timestamp === undefined) return false;
-      const t = Number(c.timestamp);
-      return currentTime >= t && currentTime <= (t + 4.2);
-    });
-
-    ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
-    activeOverlayRegions = [];
-    if (active.length === 0) {
-      activeOverlayHoverId = null;
-      return false;
-    }
-    if (activeOverlayHoverId && !active.some((c) => c.id === activeOverlayHoverId)) {
-      activeOverlayHoverId = null;
-    }
-
-    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
-    const maxShow = Math.min(3, active.length);
-    const itemHeight = 60;
-    const gap = 11;
-    const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
-    const startY = (OVERLAY_H / 2) - (totalH / 2);
-
-    for (let i = 0; i < maxShow; i++) {
-      const c = active[i];
-      const y = startY + i * (itemHeight + gap);
-      const x = 0.10 * OVERLAY_W; // 10% gap from the left side of the reels
-      const isHovered = (c.id === activeOverlayHoverId);
-
-      // Progress fade-in / fade-out alpha
-      const elapsed = currentTime - Number(c.timestamp);
-      let alpha = 1.0;
-      if (elapsed < 0.35) {
-        alpha = Math.max(0, elapsed / 0.35);
-      } else if (elapsed > 3.6) {
-        alpha = Math.max(0, (4.2 - elapsed) / 0.6);
-      }
-
-      ctx.save();
-      ctx.globalAlpha = alpha;
-
-      // Shadow for high-contrast legibility over video — no background box,
-      // but with the 2D twitch-comment-pill typography AND its left accent line.
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 2;
-
-      const authorColor = c.avatar_color || '#FF3B1F';
-      const authorName = c.author_name || 'Anonymous';
-      const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-      const timeStr = hasTime ? '⏱️ ' + formatTime(c.timestamp) : '';
-
-      // Vertical accent line (mirrors the 3px border-left of .twitch-comment-pill)
-      const barW = 3;
-      const contentX = x + barW + 10; // gap like pill border-left + padding
-
-      // Prepare display text early so the hover pill can be sized and drawn
-      // FIRST (behind) so it never covers the accent bar, avatar or name.
-      ctx.font = '500 14px "Archivo", sans-serif';
-      let dispText = c.text;
-      if (dispText.length > 46) {
-        dispText = dispText.slice(0, 44) + '…';
-      }
-      const textW = ctx.measureText(dispText).width;
-      const regionW = Math.max(260, textW + 90);
-      const regionX = x - 12;
-      const regionY = y - 6;
-      const regionH = itemHeight + 12;
-
-      // Hover / click affordance background — drawn behind all pill content
-      if (isHovered) {
-        ctx.fillStyle = 'rgba(18, 19, 21, 0.78)';
-        ctx.strokeStyle = '#FF3B1F';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(regionX, regionY, regionW, regionH, 4);
-        ctx.fill();
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = authorColor;
-      ctx.fillRect(x, y + 8, barW, itemHeight - 16);
-
-      const avatarX = contentX + 25;
-      const nameX = contentX + 50;
-      const textX = contentX + 50;
-      const nameY = y + 11;
-      const timeY = y + 14;
-      const textY = y + 32;
-
-      // Avatar Icon / Emoji (Middle-Left, like .twitch-avatar)
-      ctx.font = '22px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(c.author_avatar || '👤', avatarX, y + itemHeight / 2);
-
-      // Author Name — bold colored like .twitch-author
-      ctx.font = '800 13px "Archivo", sans-serif';
-      ctx.fillStyle = authorColor;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(authorName, nameX, nameY);
-      const nameW = ctx.measureText(authorName).width;
-
-      // Timestamp tag — muted monospace like .twitch-tag
-      if (hasTime) {
-        ctx.font = '700 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#A4ABB3';
-        ctx.fillText(timeStr, nameX + nameW + 8, timeY);
-      }
-
-      // Comment Text — light Archivo like .twitch-text
-      ctx.font = '500 14px "Archivo", sans-serif';
-      ctx.fillStyle = '#F2F3F5';
-      ctx.textBaseline = 'top';
-      ctx.fillText(dispText, textX, textY);
-
-      // Record the clickable hitbox for this pop-up comment
-      activeOverlayRegions.push({ id: c.id, x: regionX, y: regionY, w: regionW, h: regionH });
-
-      ctx.restore();
-    }
-
-    return true;
-  }
-
-  // Map a screen-local hit point to an overlay pop-up comment id, if any.
-  function overlayCommentAtHit(hitLocal) {
-    if (activeOverlayRegions.length === 0 || !hitLocal) return null;
-    const u = (hitLocal.x / screenScale) + 0.5;
-    const v = 0.5 - (hitLocal.y / screenScale);
-    const cx = u * OVERLAY_W;
-    const cy = v * OVERLAY_H;
-    for (const r of activeOverlayRegions) {
-      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) return r.id;
-    }
-    return null;
-  }
-
-  function renderControlsCanvas() {
-    const ctx = controlsCtx;
-    if (!ctx) return;
-
-    const source = getVisualSource();
-    const packMode = isPackExperience();
-    const packContext = getPackContext();
-    let itemState = {};
-    if (callbacks.getCurrentItemState) {
-      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
-    }
-    const isPaused = source.paused;
-    const isMuted = source.muted;
-    const currentTime = source.currentTime;
-    const duration = source.duration;
-    const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
-
-    const isAutoNext = callbacks.getAutoNext ? callbacks.getAutoNext() : true;
-    const playlist = callbacks.getPlaylist ? callbacks.getPlaylist() : [];
-    const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
-    const item = playlist[idx];
-    const comments = callbacks.getComments ? callbacks.getComments() : [];
-
-    ctx.clearRect(0, 0, CONTROLS_W, CONTROLS_H);
-
-    // 1. Dark Glass Container Background
-    ctx.fillStyle = 'rgba(12, 14, 17, 0.96)';
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
-    ctx.fill();
-
-    // 2. Vermilion Glow Outer Border
-    ctx.strokeStyle = '#FF3B1F';
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(255, 59, 31, 0.25)';
-    ctx.shadowBlur = 14;
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // 3. Top Telemetry Header
-    // Accent Block (Left)
-    ctx.fillStyle = '#FF3B1F';
-    ctx.fillRect(24, 14, 4, 20);
-
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(packMode ? 'REEL PACK' : '4K VR REELS', 36, 24);
-
-    // Filename
-    let dispName = packMode && packContext
-      ? (packContext.title || 'UNTITLED PACK')
-      : (item ? (item.title || item.filename) : 'SYS_RENDER_004.mp4');
-    if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
-    ctx.fillStyle = '#E3E2E3';
-    ctx.font = '12px "JetBrains Mono", monospace';
-    ctx.fillText(dispName, 144, 24);
-
-    // Pill Badges & Status (Right)
-    // Comment pill — also the VR comments panel toggle
-    const commentBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'comments');
-    const isCommentHover = (hoveredButton === commentBtnIdx);
-    ctx.fillStyle = isCommentHover ? '#1D2126' : '#101214';
-    ctx.strokeStyle = isCommentHover ? '#FF3B1F' : '#3A4047';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(476, 13, 64, 22, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = isCommentHover ? '#FFFFFF' : '#E7BDB5';
-    ctx.font = '11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`💬 ${comments.length || 0}`, 508, 24);
-
-    // Index pill
-    ctx.fillStyle = '#101214';
-    ctx.strokeStyle = '#3A4047';
-    ctx.beginPath();
-    ctx.roundRect(548, 13, 72, 22, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#E7BDB5';
-    ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, 584, 24);
-
-    // Earth / All Locations mode control.
-    const earthBtnIdx = CTRL_BUTTONS.findIndex((button) => button.action === 'earth');
-    const earthButton = CTRL_BUTTONS[earthBtnIdx];
-    const isEarthHover = hoveredButton === earthBtnIdx;
-    const hasLocationFeed = callbacks.isLocationFeedActive && callbacks.isLocationFeedActive();
-    const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
-    const earthGradient = ctx.createLinearGradient(earthButton.x, earthButton.y, earthButton.x + earthButton.w, earthButton.y);
-    earthGradient.addColorStop(0, packMode ? (earthActive ? '#512019' : '#241512') : (earthActive ? '#093D5B' : '#0B202D'));
-    earthGradient.addColorStop(1, packMode ? (earthActive ? '#8A2D1C' : '#3B1C17') : (earthActive ? '#126E88' : '#123445'));
-    ctx.fillStyle = earthGradient;
-    ctx.strokeStyle = packMode ? (earthActive ? '#FF9B88' : '#FF553A') : (earthActive ? '#55E7FF' : '#2B8DA4');
-    ctx.lineWidth = earthActive ? 2 : 1;
-    ctx.shadowColor = packMode
-      ? (earthActive ? 'rgba(255, 85, 58, 0.55)' : 'rgba(255, 85, 58, 0.22)')
-      : (earthActive ? 'rgba(66, 224, 255, 0.55)' : 'rgba(20, 156, 190, 0.22)');
-    ctx.shadowBlur = earthActive ? 12 : 6;
-    ctx.beginPath();
-    ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, 5);
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = earthActive ? '#FFFFFF' : (packMode ? '#FFD8D0' : '#BEEFFC');
-    ctx.font = 'bold 9px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(
-      packMode && packContext
-        ? ('▦ PACK ' + (Number(packContext.index || 0) + 1) + '/' + Number(packContext.total || 0))
-        : (hasLocationFeed && sceneMode !== 'earth' ? 'ALL LOCATIONS' : (sceneMode === 'earth' ? 'BACK TO REELS' : '◎ EARTH MAP')),
-      earthButton.x + earthButton.w / 2,
-      24
-    );
-
-    // Exit Button
-    const exitBtnIdx = CTRL_BUTTONS.findIndex((button) => button.action === 'exit');
-    const isExitHover = (hoveredButton === exitBtnIdx);
-    ctx.fillStyle = isExitHover ? '#1D2126' : '#101214';
-    ctx.strokeStyle = isExitHover ? '#FF3B1F' : '#3A4047';
-    ctx.beginPath();
-    ctx.roundRect(746, 13, 30, 22, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = isExitHover ? '#FF3B1F' : '#E7BDB5';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('✕', 761, 24);
-
-    // Divider Line below Header
-    ctx.strokeStyle = '#24282D';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(24, 48);
-    ctx.lineTo(776, 48);
-    ctx.stroke();
-
-    if (sceneMode === 'earth') {
-      ctx.fillStyle = '#F7FAFC';
-      ctx.font = '700 18px "Archivo", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('DRAG THE GLOBE · SELECT A HEAT ZONE', CONTROLS_W / 2, 112);
-      ctx.fillStyle = '#AEB9C8';
-      ctx.font = '700 12px "JetBrains Mono", monospace';
-      ctx.fillText('HOVER FOR MUTED REEL PREVIEWS · EARTH MAP RETURNS TO REELS', CONTROLS_W / 2, 148);
-      return;
-    }
-
-    // 4. Main Controls Cluster
-    CTRL_BUTTONS.forEach((btn, i) => {
-      if (btn.action === 'exit' || btn.action === 'seek' || btn.action === 'comments' || btn.action === 'earth') return;
-      if (!isControlVisible(btn.action, source, itemState)) return;
-
-      const isHover = (hoveredButton === i);
-      const isPressed = (pressedButton === i);
-
-      if (isReelAction(btn.action) || isPackAction(btn.action)) {
-        const active = (btn.action === 'like' && itemState.liked) ||
-          (btn.action === 'save_reel' && itemState.saved) ||
-          (btn.action === 'follow' && itemState.following) ||
-          (btn.action === 'save_pack' && packContext && packContext.saved);
-        const packAction = isPackAction(btn.action);
-        ctx.fillStyle = isPressed ? '#07090C' : (active ? '#FF553A' : (isHover ? '#242A31' : '#11161D'));
-        ctx.strokeStyle = packAction ? '#FF9B88' : (active || isHover ? '#FF553A' : '#56616D');
-        ctx.lineWidth = packAction ? 2 : 1;
-        ctx.beginPath();
-        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = active ? '#090B0E' : '#F4F6F8';
-        ctx.font = '800 10px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        let actionLabel = btn.label;
-        if (btn.action === 'like' && itemState.liked) actionLabel = 'LIKED';
-        if (btn.action === 'save_reel' && itemState.saved) actionLabel = 'REEL SAVED';
-        if (btn.action === 'follow' && itemState.following) actionLabel = 'FOLLOWING';
-        if (btn.action === 'save_pack' && packContext && packContext.saved) actionLabel = 'PACK SAVED';
-        ctx.fillText(actionLabel, btn.x + btn.w / 2, btn.y + btn.h / 2);
-      }
-
-      // Left Column Pill Buttons (AUTO / DOME)
-      else if (btn.action === 'mode' || btn.action === 'curve') {
-        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
-        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = isHover ? '#FFFFFF' : '#E7BDB5';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        const label = btn.action === 'mode'
-          ? (packMode ? 'AUTHORED' : (isAutoNext ? 'AUTO' : 'LOOP'))
-          : (curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT'));
-        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
-
-        ctx.font = '15px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = isHover ? '#FF3B1F' : '#C5C6C8';
-        const icon = btn.action === 'mode' ? (packMode ? '≡' : '⟳') : '🌐';
-        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
-      }
-
-      // Right Column Pill Buttons (LOCK / AUDIO)
-      else if (btn.action === 'lock' || btn.action === 'mute') {
-        const isLockActive = (btn.action === 'lock' && lockToViewer);
-        ctx.fillStyle = isPressed ? '#07090C' : ((isLockActive || isHover) ? '#1D2126' : '#101214');
-        ctx.strokeStyle = (isLockActive || isHover) ? '#FF3B1F' : '#3A4047';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = (isLockActive || isHover) ? '#FFFFFF' : '#E7BDB5';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        const label = btn.action === 'lock'
-          ? (lockToViewer ? 'LOCK' : 'FREE')
-          : (isMuted ? 'MUTED' : 'AUDIO');
-        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
-
-        ctx.font = '15px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = (isLockActive || isHover) ? '#FF3B1F' : '#C5C6C8';
-        const icon = btn.action === 'lock'
-          ? (lockToViewer ? '🔒' : '🔓')
-          : (isMuted ? '🔇' : '🔊');
-        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
-      }
-
-      // Center Secondary Buttons (rew, prev, next, fwd)
-      else if (btn.action !== 'play') {
-        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
-        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = isHover ? '#FFFFFF' : '#E3E2E3';
-        ctx.font = (btn.action === 'prev' || btn.action === 'next') ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        let lbl = btn.label;
-        if (btn.action === 'rew') lbl = '◀◀';
-        if (btn.action === 'fwd') lbl = '▶▶';
-        if (btn.action === 'prev') lbl = '⏮';
-        if (btn.action === 'next') lbl = '⏭';
-        ctx.fillText(lbl, btn.x + btn.w / 2, btn.y + btn.h / 2);
-      }
-
-      // Center Primary Play/Pause Glow Button
-      else if (btn.action === 'play') {
-        ctx.fillStyle = isPressed ? '#C93420' : '#FF3B1F';
-        ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
-        ctx.shadowBlur = isHover ? 28 : 20;
-        ctx.beginPath();
-        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = '#0A0A0A';
-        ctx.font = 'bold 30px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(isPaused ? '▶' : '⏸', btn.x + btn.w / 2, btn.y + btn.h / 2);
-      }
-    });
-
-    // 5. Bottom Progress Track
-    // Divider Line above Progress
-    ctx.strokeStyle = '#24282D';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(24, 296);
-    ctx.lineTo(776, 296);
-    ctx.stroke();
-
-    // Time Indicators
-    ctx.font = 'bold 12px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#FF3B1F';
-    ctx.fillText(formatTime(currentTime), 24, 312);
-
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#9BA1A8';
-    ctx.fillText(formatTime(duration), 776, 312);
-
-    // Track Bar
-    const trackX = 24, trackY = 338, trackW = 752, trackH = 6;
-    ctx.fillStyle = '#101214';
-    ctx.strokeStyle = '#3A4047';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(trackX, trackY, trackW, trackH, 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Progress Fill
-    const fillW = Math.max(0, Math.min(trackW, trackW * progress));
-    if (fillW > 0) {
-      ctx.fillStyle = '#FF3B1F';
-      ctx.shadowColor = 'rgba(255, 59, 31, 0.6)';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.roundRect(trackX, trackY, fillW, trackH, 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // Scrubber Thumb / Playhead
-      const thumbX = Math.max(trackX, Math.min(trackX + trackW - 8, trackX + fillW - 4));
-      ctx.fillStyle = '#FF3B1F';
-      ctx.shadowColor = 'rgba(255, 59, 31, 0.7)';
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.roundRect(thumbX, trackY - 5, 8, 16, 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    }
-
-    if (notificationText && performance.now() < notificationUntil) {
-      ctx.fillStyle = 'rgba(5, 24, 18, 0.97)';
-      ctx.strokeStyle = '#00FF88';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = 'rgba(0, 255, 136, 0.42)';
-      ctx.shadowBlur = 18;
-      ctx.beginPath();
-      ctx.roundRect(132, 66, 536, 96, 8);
-      ctx.fill();
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#00FF88';
-      ctx.font = '800 13px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('ECHO CREDIT AWARDED', CONTROLS_W / 2, 98);
-      ctx.fillStyle = '#F2F3F5';
-      ctx.font = '700 12px "JetBrains Mono", monospace';
-      ctx.fillText(notificationText, CONTROLS_W / 2, 132);
-    } else if (notificationText) {
-      notificationText = '';
-      notificationUntil = 0;
-    }
-  }
-
-  // ─── Meta Quest 3 Controller Guide Panel Canvas Rendering ───────────
-
-  function initGuideCanvas() {
-    guideCanvas = document.createElement('canvas');
-    guideCanvas.width = GUIDE_W;
-    guideCanvas.height = GUIDE_H;
-    guideCtx = guideCanvas.getContext('2d');
-    if (!questControllerImg) {
-      questControllerImg = new Image();
-      questControllerImg.onload = () => {
-        isQuestControllerImgLoaded = true;
-        renderGuideCanvas();
-        vrGuideUploaded = false; // finished artwork: re-upload once next frame
-      };
-      questControllerImg.src = QUEST_CONTROLLER_B64;
-    }
-    renderGuideCanvas();
-  }
-
-  // Helper: Draw a Meta Quest 3 Touch Plus right controller silhouette
-  function drawQuestController(ctx, cx, cy, scale) {
-    const s = scale || 1.0;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(s, s);
-
-    // ── Controller Handle (ergonomic curved grip) ──
-    ctx.fillStyle = '#1A1B1F';
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.12)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-16, 20);
-    ctx.bezierCurveTo(-18, 55, -20, 100, -16, 140);
-    ctx.bezierCurveTo(-14, 155, 14, 155, 16, 140);
-    ctx.bezierCurveTo(20, 100, 18, 55, 16, 20);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Handle texture lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-    ctx.lineWidth = 0.8;
-    for (let i = 0; i < 6; i++) {
-      const ly = 50 + i * 16;
-      ctx.beginPath();
-      ctx.moveTo(-12, ly);
-      ctx.lineTo(12, ly);
-      ctx.stroke();
-    }
-
-    // ── Tracking Ring (circular halo around top) ──
-    ctx.strokeStyle = '#2A2C32';
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.ellipse(0, -18, 52, 42, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Ring inner highlight
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(0, -18, 50, 40, 0, Math.PI * 0.9, Math.PI * 1.9);
-    ctx.stroke();
-
-    // ── Top Face Plate ──
-    ctx.fillStyle = '#222428';
-    ctx.beginPath();
-    ctx.ellipse(0, -5, 38, 28, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#333640';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // ── Thumbstick (left position on face) ──
-    // Thumbstick base
-    ctx.fillStyle = '#0D0E11';
-    ctx.beginPath();
-    ctx.arc(-14, -12, 14, 0, Math.PI * 2);
-    ctx.fill();
-    // Thumbstick cap
-    ctx.fillStyle = '#18191D';
-    ctx.beginPath();
-    ctx.arc(-14, -12, 10, 0, Math.PI * 2);
-    ctx.fill();
-    // Concentric grip ring on cap
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(-14, -12, 7, 0, Math.PI * 2);
-    ctx.stroke();
-    // Directional dot at center
-    ctx.fillStyle = '#FF3B1F';
-    ctx.beginPath();
-    ctx.arc(-14, -12, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ── A Button (lower right) ──
-    ctx.fillStyle = '#FF3B1F';
-    ctx.shadowColor = 'rgba(255, 59, 31, 0.5)';
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(14, -2, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('A', 14, -2);
-
-    // ── B Button (upper right) ──
-    ctx.fillStyle = '#FF3B1F';
-    ctx.shadowColor = 'rgba(255, 59, 31, 0.35)';
-    ctx.shadowBlur = 6;
-    ctx.beginPath();
-    ctx.arc(20, -22, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.fillText('B', 20, -22);
-
-    // ── Index Trigger (front curved) ──
-    ctx.fillStyle = '#2A2C32';
-    ctx.strokeStyle = '#FF3B1F';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-12, 18);
-    ctx.bezierCurveTo(-14, 28, -10, 36, -2, 38);
-    ctx.bezierCurveTo(4, 36, 8, 28, 6, 18);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // ── Side Grip Button ──
-    ctx.fillStyle = '#2A2C32';
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.roundRect(-24, 55, 8, 30, 3);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  function renderGuideCanvas() {
-    const ctx = guideCtx;
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
-
-    // Dark Glass Container Background
-    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
-    ctx.beginPath();
-    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
-    ctx.fill();
-
-    // Signature Red Glow Border
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
-    ctx.stroke();
-
-    // Header Badge
-    ctx.fillStyle = '#FF3B1F';
-    ctx.beginPath();
-    ctx.roundRect(16, 14, 140, 24, 4);
-    ctx.fill();
-
-    ctx.fillStyle = '#0A0A0A';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('CONTROLLER GUIDE', 86, 26);
-
-    ctx.fillStyle = 'rgba(255, 59, 31, 0.85)';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('META QUEST 3', GUIDE_W - 16, 26);
-
-    // ── TOP SECTION: Centered Controller Graphic ──
-    if (isQuestControllerImgLoaded && questControllerImg) {
-      const imgW = 210;
-      const imgH = imgW * (questControllerImg.height / questControllerImg.width);
-      const imgX = (GUIDE_W - imgW) / 2;
-      ctx.drawImage(questControllerImg, imgX, 46, imgW, imgH);
-    } else {
-      drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
-    }
-
-    // Divider Line
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.25)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(20, 405);
-    ctx.lineTo(GUIDE_W - 20, 405);
-    ctx.stroke();
-
-    // ── BOTTOM SECTION: 2-Column Cards Grid ──
-    const accentColor = '#FF3B1F';
-    const dimText = 'rgba(242, 243, 245, 0.85)';
-        const cards = [
-      { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Left/Right → Seek ±5s' },
-      { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
-      { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
-      { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
-      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED (🎯)' },
-      { title: 'GRIP + STICK ↕', desc: 'Zoom Screen In / Out|Smooth Scale Control' }
-    ];const colW = 198;
-    const cardH = 88;
-    const gapX = 12;
-    const gapY = 10;
-    const startX = 16;
-    const startY = 418;
-
-    cards.forEach((card, i) => {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const cx = startX + col * (colW + gapX);
-      const cy = startY + row * (cardH + gapY);
-
-      // Card background
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-      ctx.beginPath();
-      ctx.roundRect(cx, cy, colW, cardH, 8);
-      ctx.fill();
-
-      // Left accent bar
-      ctx.fillStyle = accentColor;
-      ctx.beginPath();
-      ctx.roundRect(cx, cy, 3, cardH, 2);
-      ctx.fill();
-
-      // Card border
-      ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(cx, cy, colW, cardH, 8);
-      ctx.stroke();
-
-      // Title
-      ctx.fillStyle = accentColor;
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(card.title, cx + 10, cy + 10);
-
-      // Desc lines
-      ctx.fillStyle = dimText;
-      ctx.font = '10px sans-serif';
-      const lines = card.desc.split('|');
-      lines.forEach((line, li) => {
-        ctx.fillText(line, cx + 10, cy + 30 + li * 16);
-      });
-    });
-
-    // Footer hint
-    ctx.fillStyle = 'rgba(155, 161, 168, 0.6)';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
-  }
-
-  // ─── VR Comments Panel (world-space) ────────────────────────────────
-
-  function initCommentsPanelCanvas() {
-    commentsPanelCanvas = document.createElement('canvas');
-    commentsPanelCanvas.width = CPANEL_W;
-    commentsPanelCanvas.height = CPANEL_H;
-    commentsPanelCtx = commentsPanelCanvas.getContext('2d');
-  }
-
-  function getInitials(name) {
-    if (!name) return '??';
-    const parts = name.split(/[_\s]+/).filter(Boolean);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  }
-
-  function wrapTextLines(ctx, text, maxWidth, maxLines) {
-    const words = String(text || '').split(/\s+/).filter(Boolean);
-    const lines = [];
-    let cur = '';
-    for (const w of words) {
-      const test = cur ? cur + ' ' + w : w;
-      if (cur && ctx.measureText(test).width > maxWidth) {
-        lines.push(cur);
-        cur = w;
-        if (lines.length >= maxLines) break;
-      } else {
-        cur = test;
-      }
-    }
-    if (cur && lines.length < maxLines) lines.push(cur);
-    return lines;
-  }
-
-  function getPanelFilteredComments() {
-    const comments = callbacks.getComments ? callbacks.getComments() : [];
-    if (cPanelTab === 'sync') return comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    if (cPanelTab === 'general') return comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
-    return comments;
-  }
-
-  function clampPanelScroll(v) {
-    return Math.max(0, Math.min(cPanelMaxScroll, v));
-  }
-
-  // ── Panel geometry (mirrors getGuideCenter on the LEFT side) ──
-  function getCommentsPanelSize() {
-    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
-    const w = base * 0.432; // 0.36 * 1.2 → 20% larger world-space panel
-    const h = w * (CPANEL_H / CPANEL_W);
-    return { w, h };
-  }
-
-  function getCommentsPanelCenter() {
-    const { w } = getCommentsPanelSize();
-    if (lockToViewer) {
-      return {
-        x: DEFAULT_POS.x - DEFAULT_SCALE / 2 - w / 2 - 0.384,
-        y: DEFAULT_POS.y,
-        z: DEFAULT_POS.z - 0.15,
-      };
-    }
-    const offsetLocal = { x: -screenScale / 2 - w / 2 - 0.384, y: 0, z: -0.15 };
-    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
-    return vecAdd(screenPos, offsetWorld);
-  }
-
-  function getCommentsPanelQuat() {
-    return quatFaceViewerLevel(getCommentsPanelCenter(), currentHeadPos);
-  }
-
-  function getHitDistCommentsPanel(rayOrigin, rayDir) {
-    const center = getCommentsPanelCenter();
-    const normal = quatRotVec(getCommentsPanelQuat(), { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-    if (Math.abs(denom) < 0.0001) return -1;
-    const t = ((center.x - rayOrigin.x) * normal.x +
-               (center.y - rayOrigin.y) * normal.y +
-               (center.z - rayOrigin.z) * normal.z) / denom;
-    return t > 0 ? t : -1;
-  }
-
-  // ── Panel hit testing → canvas region descriptor ──
-  function resolveCommentsPanelRegion(canvasX, canvasY) {
-    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
-    const filtered = getPanelFilteredComments();
-    const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
-
-    // Header
-    if (canvasY < CP_HEADER_H) {
-      if (canvasX >= 296 && canvasX < 344 && canvasY >= 16 && canvasY < 46) return 'tab:all';
-      if (canvasX >= 352 && canvasX < 416 && canvasY >= 16 && canvasY < 46) return 'tab:sync';
-      if (canvasX >= 424 && canvasX < 502 && canvasY >= 16 && canvasY < 46) return 'tab:general';
-      if (canvasX >= 522 && canvasX < 548 && canvasY >= 16 && canvasY < 46) return 'close';
-      return 'panel';
-    }
-
-    // Footer
-    if (canvasY > CP_LIST_BOTTOM) {
-      if (canvasY >= CP_LIST_BOTTOM + 10 && canvasY < CP_LIST_BOTTOM + 44 && canvasX >= 16 && canvasX < 216) return 'account';
-      if (canvasY >= CP_LIST_BOTTOM + 54 && canvasY < CP_LIST_BOTTOM + 98 && canvasX >= 16 && canvasX < CPANEL_W - 16) return 'add';
-      return 'panel';
-    }
-
-    // Scrollbar column
-    if (canvasX >= CP_SCROLL_X) {
-      if (canvasY >= CP_LIST_TOP && canvasY < CP_LIST_TOP + 26) return 'scrollup';
-      if (canvasY >= CP_LIST_BOTTOM - 26 && canvasY < CP_LIST_BOTTOM) return 'scrolldown';
-      const trackTop = CP_LIST_TOP + 30;
-      const trackBot = CP_LIST_BOTTOM - 30;
-      if (cPanelMaxScroll > 0) {
-        const handleH = Math.max(40, (trackBot - trackTop) * (listH / contentH));
-        const frac = cPanelScrollY / cPanelMaxScroll;
-        const handleY = trackTop + frac * ((trackBot - trackTop) - handleH);
-        if (canvasY >= handleY && canvasY < handleY + handleH) return 'scrollbar';
-      }
-      return 'list';
-    }
-
-    // List content items
-    const relY = canvasY - CP_LIST_TOP + cPanelScrollY;
-    const idx = Math.floor(relY / (CP_ITEM_H + CP_ITEM_GAP));
-    if (idx >= 0 && idx < filtered.length) {
-      const c = filtered[idx];
-      const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
-      const itemX = CP_LIST_X + 10;
-      const itemW = CP_LIST_W - 20;
-      if (canvasY >= y + 8 && canvasY < y + 36) {
-        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-        if (canvasX >= itemX + 8 && canvasX < itemX + 174) return 'profile:' + (c.author_name || '');
-        if (hasTime && canvasX >= itemX + 180 && canvasX < itemX + 280) return 'seek:' + c.id;
-        if (canvasX >= itemX + itemW - 46 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
-      }
-    }
-    return 'list';
-  }
-
-  function hitTestCommentsPanel(rayOrigin, rayDir) {
-    const center = getCommentsPanelCenter();
-    const quat = getCommentsPanelQuat();
-    const { w, h } = getCommentsPanelSize();
-    const normal = quatRotVec(quat, { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-    if (Math.abs(denom) < 0.0001) return null;
-
-    const t = ((center.x - rayOrigin.x) * normal.x +
-               (center.y - rayOrigin.y) * normal.y +
-               (center.z - rayOrigin.z) * normal.z) / denom;
-    if (t < 0 || t > 20) return null;
-
-    const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
-    const invQ = quatInvert(quat);
-    const localP = quatRotVec(invQ, vecSub(hitP, center));
-    const halfW = w / 2, halfH = h / 2;
-    if (Math.abs(localP.x) > halfW || Math.abs(localP.y) > halfH) return null;
-
-    lastCommentsCanvasX = ((localP.x + halfW) / w) * CPANEL_W;
-    lastCommentsCanvasY = ((halfH - localP.y) / h) * CPANEL_H;
-    return resolveCommentsPanelRegion(lastCommentsCanvasX, lastCommentsCanvasY);
-  }
-
-  // ── Panel rendering ──
-  function renderCommentsPanelCanvas() {
-    const ctx = commentsPanelCtx;
-    if (!ctx) return;
-
-    const comments = callbacks.getComments ? callbacks.getComments() : [];
-    let filtered = comments;
-    if (cPanelTab === 'sync') filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    else if (cPanelTab === 'general') filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
-
-    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
-    const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
-    cPanelMaxScroll = Math.max(0, contentH - listH);
-    if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
-
-    const user = callbacks.getCurrentUser ? callbacks.getCurrentUser() : null;
-    const accent = '#FF3B1F';
-
-    ctx.clearRect(0, 0, CPANEL_W, CPANEL_H);
-
-    // Container
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
-    ctx.fill();
-    ctx.strokeStyle = '#343536';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
-    ctx.stroke();
-    ctx.fillStyle = accent;
-    ctx.fillRect(0, 0, CPANEL_W, 3);
-
-    // Header
-    ctx.fillStyle = '#0d0e0f';
-    ctx.fillRect(0, 3, CPANEL_W, CP_HEADER_H - 3);
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = accent;
-    ctx.fillText('💬', 18, 33);
-    ctx.font = '700 11px "JetBrains Mono", monospace';
-    ctx.fillText('COMMENTS', 40, 33);
-    ctx.fillStyle = 'rgba(255,85,58,0.7)';
-    const titleW = ctx.measureText('COMMENTS').width;
-    ctx.fillText('(' + comments.length + ')', 40 + titleW + 10, 33);
-
-    const tabs = [
-      { key: 'all', label: 'ALL', x: 296, w: 48 },
-      { key: 'sync', label: 'SYNC', x: 352, w: 64 },
-      { key: 'general', label: 'GENERAL', x: 424, w: 78 },
-    ];
-    tabs.forEach((tab) => {
-      const active = cPanelTab === tab.key;
-      const hover = cPanelHover === ('tab:' + tab.key);
-      ctx.fillStyle = active ? accent : (hover ? '#1D2126' : '#1f2021');
-      ctx.strokeStyle = active ? accent : (hover ? accent : '#343536');
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(tab.x, 16, tab.w, 30, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = active ? '#5a0600' : (hover ? '#FFFFFF' : '#ff553a');
-      ctx.font = 'bold 9px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(tab.label, tab.x + tab.w / 2, 31);
-    });
-
-    const closeHover = cPanelHover === 'close';
-    ctx.fillStyle = closeHover ? '#292a2b' : '#1f2021';
-    ctx.strokeStyle = closeHover ? accent : '#343536';
-    ctx.beginPath();
-    ctx.roundRect(522, 16, 26, 30, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = closeHover ? '#FFFFFF' : accent;
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('✕', 535, 31);
-
-    ctx.strokeStyle = '#343536';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, CP_HEADER_H);
-    ctx.lineTo(CPANEL_W, CP_HEADER_H);
-    ctx.stroke();
-
-    // List viewport
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, CP_LIST_TOP, CP_LIST_X + CP_LIST_W, listH);
-    ctx.clip();
-
-    if (filtered.length === 0) {
-      ctx.fillStyle = accent;
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(
-        cPanelTab === 'general' ? 'NO GENERAL COMMENTS' : cPanelTab === 'sync' ? 'NO TIME-SYNCED COMMENTS' : 'NO COMMENTS YET',
-        CPANEL_W / 2, CP_LIST_TOP + 40
-      );
-      ctx.fillStyle = 'rgba(155,161,168,0.6)';
-      ctx.fillText('Tap ADD COMMENT below to drop one', CPANEL_W / 2, CP_LIST_TOP + 60);
-    } else {
-      filtered.forEach((c, i) => {
-        const y = CP_LIST_TOP + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
-        if (y + CP_ITEM_H < CP_LIST_TOP || y > CP_LIST_BOTTOM) return;
-
-        const itemX = CP_LIST_X + 10;
-        const itemW = CP_LIST_W - 20;
-        const border = c.avatar_color || accent;
-        const hoveredLike = cPanelHover === ('like:' + c.id);
-        const hoveredSeek = cPanelHover === ('seek:' + c.id);
-        const highlighted = c.id === cPanelHighlightId;
-
-        ctx.fillStyle = highlighted ? '#1c1d1f' : '#121315';
-        ctx.beginPath();
-        ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
-        ctx.fill();
-        ctx.strokeStyle = highlighted ? accent : ((hoveredSeek || hoveredLike) ? 'rgba(255,85,58,0.6)' : '#343536');
-        ctx.lineWidth = highlighted ? 2.5 : 1;
-        ctx.stroke();
-        if (highlighted) {
-          ctx.shadowColor = 'rgba(255, 85, 58, 0.45)';
-          ctx.shadowBlur = 16;
-          ctx.strokeStyle = accent;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-          // "jump marker" on the right edge
-          ctx.fillStyle = accent;
-          ctx.font = 'bold 14px sans-serif';
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('◀', itemX + itemW - 10, y + CP_ITEM_H / 2);
+    const geo = new THREE.PlaneGeometry(width, height, segX, segY);
+    const pos = geo.attributes.position;
+    const halfW = width / 2;
+    const halfH = height / 2;
+    const R = SPHERE_RADIUS;
+    const alpha = ARC_ANGLE;
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      let nx = x, ny = y, nz = 0;
+
+      if (mode === 1) {
+        // DOME: Concave spherical radial cap
+        const r = Math.sqrt(x * x + y * y);
+        if (r > 0.0001) {
+          const phi = (r / halfW) * alpha;
+          const factor = (R * Math.sin(phi)) / r;
+          nx = x * factor;
+          ny = y * factor;
+          nz = R * (1 - Math.cos(phi));
         }
-
-        ctx.fillStyle = border;
-        ctx.fillRect(itemX, y, 3, CP_ITEM_H);
-
-        const isEmojiAvatar = c.author_avatar && c.author_avatar.length <= 2 && /\p{Emoji}/u.test(c.author_avatar);
-        ctx.fillStyle = '#1f2021';
-        ctx.beginPath();
-        ctx.roundRect(itemX + 8, y + 12, 40, 40, 4);
-        ctx.fill();
-        ctx.strokeStyle = border;
-        ctx.stroke();
-        if (isEmojiAvatar) {
-          ctx.font = '20px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(c.author_avatar, itemX + 28, y + 33);
-        } else {
-          ctx.fillStyle = border;
-          ctx.font = '700 11px "JetBrains Mono", monospace';
-          ctx.fillText(getInitials(c.author_name), itemX + 28, y + 33);
-        }
-
-        ctx.fillStyle = border;
-        ctx.font = '700 11px "JetBrains Mono", monospace';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        let name = c.author_name || 'Anonymous';
-        if (name.length > 16) name = name.slice(0, 15) + '…';
-        ctx.fillText(name, itemX + 56, y + 14);
-
-        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-        const pillX = itemX + 180;
-        ctx.fillStyle = hoveredSeek ? accent : '#292a2b';
-        ctx.strokeStyle = accent;
-        ctx.beginPath();
-        ctx.roundRect(pillX, y + 10, 100, 24, 3);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = hoveredSeek ? '#5a0600' : accent;
-        ctx.font = '700 10px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(hasTime ? ('⏱ ' + formatTime(c.timestamp)) : 'GENERAL', pillX + 50, y + 23);
-
-        const likeX = itemX + itemW - 46;
-        if (hoveredLike) {
-          ctx.fillStyle = '#1D2126';
-          ctx.beginPath();
-          ctx.roundRect(likeX, y + 10, 40, 24, 3);
-          ctx.fill();
-        }
-        ctx.fillStyle = accent;
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('♥ ' + (c.likes || 0), likeX + 38, y + 23);
-
-        ctx.fillStyle = '#e3e2e3';
-        ctx.font = '500 13px Archivo, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        const lines = wrapTextLines(ctx, c.text || '', itemW - 70, 2);
-        lines.forEach((line, li) => {
-          ctx.fillText(line, itemX + 56, y + 48 + li * 18);
-        });
-      });
-    }
-    ctx.restore();
-
-    // Scrollbar column
-    const upHover = cPanelHover === 'scrollup';
-    ctx.fillStyle = upHover ? '#1D2126' : '#1f2021';
-    ctx.strokeStyle = upHover ? accent : '#343536';
-    ctx.beginPath();
-    ctx.roundRect(CP_SCROLL_X, CP_LIST_TOP, CP_SCROLL_W, 26, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = upHover ? '#FFFFFF' : accent;
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('▲', CP_SCROLL_X + CP_SCROLL_W / 2, CP_LIST_TOP + 14);
-
-    const downHover = cPanelHover === 'scrolldown';
-    ctx.fillStyle = downHover ? '#1D2126' : '#1f2021';
-    ctx.strokeStyle = downHover ? accent : '#343536';
-    ctx.beginPath();
-    ctx.roundRect(CP_SCROLL_X, CP_LIST_BOTTOM - 26, CP_SCROLL_W, 26, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = downHover ? '#FFFFFF' : accent;
-    ctx.fillText('▼', CP_SCROLL_X + CP_SCROLL_W / 2, CP_LIST_BOTTOM - 12);
-
-    const trackTop = CP_LIST_TOP + 30;
-    const trackBot = CP_LIST_BOTTOM - 30;
-    ctx.strokeStyle = '#343536';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(CP_SCROLL_X + CP_SCROLL_W / 2, trackTop);
-    ctx.lineTo(CP_SCROLL_X + CP_SCROLL_W / 2, trackBot);
-    ctx.stroke();
-
-    if (cPanelMaxScroll > 0) {
-      const handleH = Math.max(40, (trackBot - trackTop) * (listH / contentH));
-      const frac = cPanelScrollY / cPanelMaxScroll;
-      const handleY = trackTop + frac * ((trackBot - trackTop) - handleH);
-      const handleHover = cPanelHover === 'scrollbar';
-      ctx.fillStyle = handleHover ? accent : '#5d3f3a';
-      ctx.beginPath();
-      ctx.roundRect(CP_SCROLL_X + CP_SCROLL_W / 2 - 4, handleY, 8, handleH, 4);
-      ctx.fill();
-    }
-
-    // Footer
-    const footerY = CP_LIST_BOTTOM + 4;
-    ctx.fillStyle = '#0d0e0f';
-    ctx.fillRect(0, footerY, CPANEL_W, CPANEL_H - footerY);
-
-    const accountHover = cPanelHover === 'account';
-    ctx.fillStyle = accountHover ? '#292a2b' : '#1f2021';
-    ctx.strokeStyle = accountHover ? accent : '#343536';
-    ctx.beginPath();
-    ctx.roundRect(16, footerY + 10, 200, 34, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.font = '700 10px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    if (user) {
-      ctx.fillStyle = user.avatar_color || accent;
-      ctx.fillText((user.display_name || user.username || '?').slice(0, 1).toUpperCase(), 28, footerY + 28);
-      ctx.fillStyle = '#e3e2e3';
-      ctx.fillText('@' + (user.username || 'account'), 52, footerY + 28);
-    } else {
-      ctx.fillStyle = accent;
-      ctx.fillText('?', 28, footerY + 28);
-      ctx.fillStyle = '#e3e2e3';
-      ctx.fillText('SIGN IN TO INTERACT', 52, footerY + 28);
-    }
-
-    ctx.fillStyle = 'rgba(155,161,168,0.8)';
-    ctx.font = '700 10px "JetBrains Mono", monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('SYNC: ' + formatTime(getVisualSource().currentTime), CPANEL_W - 16, footerY + 28);
-
-    const addHover = cPanelHover === 'add';
-    ctx.fillStyle = addHover ? '#ff6a52' : accent;
-    ctx.strokeStyle = accent;
-    ctx.beginPath();
-    ctx.roundRect(16, footerY + 54, CPANEL_W - 32, 44, 4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#5a0600';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('+ ADD COMMENT', CPANEL_W / 2, footerY + 77);
-  }
-
-  // ── Panel actions ──
-  function executeCommentAction(desc) {
-    if (!desc) return false;
-    if (desc === 'panel') return true; // consume non-interactive panel presses
-    if (desc === 'list' || desc === 'scrollbar') {
-      cPanelDrag = true;
-      cPanelDragStartCanvasY = lastCommentsCanvasY;
-      cPanelDragStartScroll = cPanelScrollY;
-      return true;
-    }
-    if (desc.indexOf('tab:') === 0) {
-      cPanelTab = desc.slice(4);
-      cPanelScrollY = 0;
-      clearPanelHighlight();
-      return true;
-    }
-    if (desc === 'close') {
-      commentsPanelVisible = false;
-      cPanelHover = null;
-      return true;
-    }
-    if (desc === 'add') {
-      openVrKeyboard();
-      return true;
-    }
-    if (desc === 'scrollup') {
-      cPanelScrollY = clampPanelScroll(cPanelScrollY - (CP_ITEM_H + CP_ITEM_GAP));
-      return true;
-    }
-    if (desc === 'scrolldown') {
-      cPanelScrollY = clampPanelScroll(cPanelScrollY + (CP_ITEM_H + CP_ITEM_GAP));
-      return true;
-    }
-    if (desc.indexOf('seek:') === 0) {
-      const id = desc.slice(5);
-      const comments = callbacks.getComments ? callbacks.getComments() : [];
-      const c = comments.find((x) => x.id === id);
-      if (c && c.timestamp !== null && c.timestamp !== undefined && callbacks.onSeekTo) {
-        callbacks.onSeekTo(Number(c.timestamp));
+      } else if (mode === 2) {
+        // SQ CURVE: Biaxial pillow curve
+        const thX = (x / halfW) * alpha;
+        const thY = (y / halfH) * alpha;
+        nx = R * Math.sin(thX);
+        ny = R * Math.sin(thY);
+        nz = R * (1 - Math.cos(thX) * Math.cos(thY));
       }
-      return true;
+
+      pos.setXYZ(i, nx, ny, nz);
     }
-    if (desc.indexOf('like:') === 0) {
-      const id = desc.slice(5);
-      if (callbacks.onLikeComment) callbacks.onLikeComment(id);
-      return true;
-    }
-    if (desc.indexOf('profile:') === 0) {
-      const username = desc.slice(8);
-      if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
-      return true;
-    }
-    if (desc === 'account') {
-      if (callbacks.onOpenAccount) callbacks.onOpenAccount();
-      return true;
-    }
-    return false;
+
+    geo.computeVertexNormals();
+    return geo;
   }
 
-  function toggleCommentsPanel() {
-    commentsPanelVisible = !commentsPanelVisible;
-    if (!commentsPanelVisible) {
-      cPanelDrag = false;
-      cPanelHover = null;
-      clearPanelHighlight();
-      closeVrKeyboard();
-    }
-  }
-
-  // Open the VR comments panel, scroll to and highlight a specific comment
-  // (usually triggered by clicking a pop-up overlay comment).
-  function openCommentsPanelToComment(commentId) {
-    commentsPanelVisible = true;
-    cPanelTab = 'all';
-    const filtered = getPanelFilteredComments();
-    const idx = filtered.findIndex((c) => c.id === commentId);
-    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
-    if (idx >= 0) {
-      const itemTop = idx * (CP_ITEM_H + CP_ITEM_GAP);
-      cPanelScrollY = Math.max(0, itemTop - (listH - CP_ITEM_H) / 2);
-    }
-    setPanelHighlight(commentId);
-  }
-
-  function setPanelHighlight(commentId) {
-    clearPanelHighlight();
-    cPanelHighlightId = commentId;
-    cPanelHighlightTimer = setTimeout(() => {
-      cPanelHighlightId = null;
-      cPanelHighlightTimer = null;
-    }, 4000);
-  }
-
-  function clearPanelHighlight() {
-    if (cPanelHighlightTimer) {
-      clearTimeout(cPanelHighlightTimer);
-      cPanelHighlightTimer = null;
-    }
-    cPanelHighlightId = null;
-  }
-
-  // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
-  function initDomOverlay() {
-    if (domOverlayRoot) return;
-    domOverlayRoot = document.createElement('div');
-    domOverlayRoot.id = 'vrCommentDomOverlay';
-    domOverlayRoot.style.cssText = 'position:fixed;left:0;right:0;bottom:0;top:auto;height:360px;z-index:2147483646;pointer-events:none;';
-    domOverlayInput = document.createElement('input');
-    domOverlayInput.type = 'text';
-    domOverlayInput.autocomplete = 'off';
-    domOverlayInput.setAttribute('enterkeyhint', 'send');
-    domOverlayInput.placeholder = 'Type a VR comment…';
-    domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#e3e2e3;background:rgba(13,14,15,0.97);border:2px solid #ff553a;border-radius:8px;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
-    domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
-    domOverlayInput.addEventListener('blur', onCommentInputBlur);
-    domOverlayRoot.appendChild(domOverlayInput);
-    (document.body || document.documentElement).appendChild(domOverlayRoot);
-  }
-
-  function openVrKeyboard() {
-    initDomOverlay();
-    if (!domOverlayInput) return;
-    const source = getVisualSource();
-    pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
-    domOverlayInput.value = '';
-    domOverlayInput.style.display = 'block';
-    try { domOverlayInput.focus(); } catch (e) {}
-  }
-
-  function closeVrKeyboard() {
-    if (domOverlayInput) {
-      domOverlayInput.style.display = 'none';
-      try { domOverlayInput.blur(); } catch (e) {}
-    }
-  }
-
-  function onCommentInputKeydown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const text = domOverlayInput ? domOverlayInput.value.trim() : '';
-      closeVrKeyboard();
-      if (text && callbacks.onPostComment) {
-        callbacks.onPostComment(text, pendingSyncTime);
-      }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      closeVrKeyboard();
-    }
-  }
-
-  function onCommentInputBlur() {
-    setTimeout(() => {
-      if (domOverlayInput && document.activeElement !== domOverlayInput) {
-        domOverlayInput.style.display = 'none';
-      }
-    }, 150);
-  }
-
-  // ─── All-Side Concave Screen Arc Geometry Math ─────────────────────
-  // ARC_ANGLE = 0.65 rad (~37.2° arc angle for immersive concave curvature)
-  // R_CURVE = 1.0 / 0.65 = 1.5385 (Direct center view is the center focal point)
-
-  const ARC_ANGLE = 0.65;
-  const R_CURVE = 1.5385;
-
-  function hitTestCurvedScreen(rayOrigin, rayDir) {
-    const halfW = screenScale / 2;
-    const halfH = screenScale / 2;
-
-    const invQ = quatInvert(screenQuat);
-    const O_loc = quatRotVec(invQ, vecSub(rayOrigin, screenPos));
-    const D_loc = quatRotVec(invQ, rayDir);
-
-    if (curvatureMode === 1 || curvatureMode === 2) {
-      const R_world = R_CURVE * screenScale;
-      const Ox = O_loc.x, Oy = O_loc.y, Oz = O_loc.z - R_world;
-      const Dx = D_loc.x, Dy = D_loc.y, Dz = D_loc.z;
-
-      const A = Dx * Dx + Dy * Dy + Dz * Dz;
-      if (A < 0.00001) return { hit: false, dist: -1 };
-
-      const B = 2 * (Ox * Dx + Oy * Dy + Oz * Dz);
-      const C = Ox * Ox + Oy * Oy + Oz * Oz - R_world * R_world;
-
-      const disc = B * B - 4 * A * C;
-      if (disc < 0) return { hit: false, dist: -1 };
-
-      let t = (-B - Math.sqrt(disc)) / (2 * A);
-      if (t < 0) t = (-B + Math.sqrt(disc)) / (2 * A);
-      if (t < 0 || t > 20) return { hit: false, dist: -1 };
-
-      const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
-      if (Math.abs(hitLocal.x) <= halfW && Math.abs(hitLocal.y) <= halfH) {
-        return { hit: true, dist: t, hitLocal };
-      }
-      return { hit: false, dist: -1 };
-    } else {
-      const denom = D_loc.z;
-      if (Math.abs(denom) < 0.0001) return { hit: false, dist: -1 };
-
-      const t = -O_loc.z / denom;
-      if (t < 0 || t > 20) return { hit: false, dist: -1 };
-
-      const hitLocal = vecAdd(O_loc, vecScale(D_loc, t));
-      if (Math.abs(hitLocal.x) <= halfW && Math.abs(hitLocal.y) <= halfH) {
-        return { hit: true, dist: t, hitLocal };
-      }
-      return { hit: false, dist: -1 };
-    }
-  }
-
-  function getControlsCenter() {
-    if (sceneMode === 'earth') {
-      return { x: earthCenter.x, y: earthCenter.y - 0.94, z: earthCenter.z + 0.08 };
-    }
-    if (lockToViewer) {
-      // Decoupled from the head-locked screen block: the transport panel stays
-      // fixed and level in the room at the default screen spot.
-      const offsetLocal = { x: 0, y: -DEFAULT_SCALE / 2 - CONTROLS_Y_OFFSET, z: 0 };
-      return vecAdd({ ...DEFAULT_POS }, offsetLocal);
-    }
-    const offsetLocal = { x: 0, y: -screenScale / 2 - CONTROLS_Y_OFFSET, z: 0 };
-    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
-    return vecAdd(screenPos, offsetWorld);
-  }
-
-  function getGuideCenter() {
-    if (lockToViewer) {
-      const guideW = DEFAULT_SCALE * 0.4212; // 0.351 * 1.2 → 20% larger (symmetric with comments panel)
-      return {
-        x: DEFAULT_POS.x + DEFAULT_SCALE / 2 + guideW / 2 + 0.384,
-        y: DEFAULT_POS.y,
-        z: DEFAULT_POS.z - 0.15,
-      };
-    }
-    const guideW = screenScale * 0.4212; // 0.351 * 1.2 → 20% larger (symmetric with comments panel)
-    const offsetLocal = { x: screenScale / 2 + guideW / 2 + 0.384, y: 0, z: -0.15 };
-    const offsetWorld = quatRotVec(screenQuat, offsetLocal);
-    return vecAdd(screenPos, offsetWorld);
-  }
-
-  function getControlsQuat() {
-    if (sceneMode === 'earth') {
-      return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
-    }
-    if (lockToViewer) {
-      return quatFaceViewerLevel(getControlsCenter(), currentHeadPos);
-    }
-    return screenQuat;
-  }
-
-  function getControlsScale() {
-    if (sceneMode === 'earth') return 1.2;
-    return lockToViewer ? DEFAULT_SCALE : screenScale;
-  }
-
-  function getHitDistControls(rayOrigin, rayDir) {
-    const ctrlCenter = getControlsCenter();
-    const normal = quatRotVec(getControlsQuat(), { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-    if (Math.abs(denom) < 0.0001) return -1;
-    const t = ((ctrlCenter.x - rayOrigin.x) * normal.x +
-               (ctrlCenter.y - rayOrigin.y) * normal.y +
-               (ctrlCenter.z - rayOrigin.z) * normal.z) / denom;
-    return t > 0 ? t : -1;
-  }
-
-  function hitTestControls(rayOrigin, rayDir) {
-    const source = getVisualSource();
-    let itemState = {};
-    if (callbacks.getCurrentItemState) {
-      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
-    }
-    const ctrlCenter = getControlsCenter();
-    const ctrlWidth = getControlsScale() * 0.82;
-    const ctrlHeight = ctrlWidth * (CONTROLS_H / CONTROLS_W);
-
-    const ctrlQuat = getControlsQuat();
-    const normal = quatRotVec(ctrlQuat, { x: 0, y: 0, z: 1 });
-    const denom = rayDir.x * normal.x + rayDir.y * normal.y + rayDir.z * normal.z;
-
-    if (Math.abs(denom) < 0.0001) return -1;
-    const t = ((ctrlCenter.x - rayOrigin.x) * normal.x +
-               (ctrlCenter.y - rayOrigin.y) * normal.y +
-               (ctrlCenter.z - rayOrigin.z) * normal.z) / denom;
-    if (t < 0 || t > 20) return -1;
-
-    const hitP = vecAdd(rayOrigin, vecScale(rayDir, t));
-    const invQ = quatInvert(ctrlQuat);
-    const localP = quatRotVec(invQ, vecSub(hitP, ctrlCenter));
-
-    const halfW = ctrlWidth / 2;
-    const halfH = ctrlHeight / 2;
-
-    if (Math.abs(localP.x) > halfW || Math.abs(localP.y) > halfH) return -1;
-
-    const u = (localP.x + halfW) / ctrlWidth;
-    const v = (halfH - localP.y) / ctrlHeight;
-    const canvasX = u * CONTROLS_W;
-    const canvasY = v * CONTROLS_H;
-
-    lastControlsCanvasX = canvasX;
-    lastControlsCanvasY = canvasY;
-
-    for (let i = 0; i < CTRL_BUTTONS.length; i++) {
-      const btn = CTRL_BUTTONS[i];
-      if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit') continue;
-      if (!isControlVisible(btn.action, source, itemState)) continue;
-      if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
-          canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  function executeControlButton(index) {
-    if (index < 0 || index >= CTRL_BUTTONS.length) return;
-    const action = CTRL_BUTTONS[index].action;
-    if (sceneMode === 'earth' && action !== 'earth' && action !== 'exit') return;
-    pressedButton = index;
-    vrLastUiUploadT = -1;
-    resetAutoHideTimer();
-    switch (action) {
-      case 'prev':  callbacks.onPrev && callbacks.onPrev(); break;
-      case 'next':  callbacks.onNext && callbacks.onNext(); break;
-      case 'play':  callbacks.onTogglePlay && callbacks.onTogglePlay(); break;
-      case 'rew':   callbacks.onSeek && callbacks.onSeek(-5); break;
-      case 'fwd':   callbacks.onSeek && callbacks.onSeek(5); break;
-      case 'mode':  callbacks.onToggleMode && callbacks.onToggleMode(); break;
-      case 'curve':
-        curvatureMode = (curvatureMode + 1) % 3;
-        isCurved = (curvatureMode !== 0);
-        break;
-      case 'lock':
-        lockToViewer = !lockToViewer;
-        if (lockToViewer) {
-          isGrabbing = false;
-          grabControllerIdx = -1;
-        }
-        break;
-      case 'mute':
-        if (callbacks.onToggleMute) callbacks.onToggleMute();
-        else if (videoElement) {
-          videoElement.muted = !videoElement.muted;
-          if (callbacks.onMuteChange) callbacks.onMuteChange(videoElement.muted);
-        }
-        break;
-      case 'seek':
-        {
-          const source = getVisualSource();
-          if (!source.duration) break;
-          const ratio = Math.max(0, Math.min(1, (lastControlsCanvasX - 24) / 752));
-          const target = ratio * source.duration;
-          if (callbacks.onSeekTo) callbacks.onSeekTo(target);
-          else if (source.kind === 'video' && source.element) source.element.currentTime = target;
-        }
-        break;
-      case 'comments': toggleCommentsPanel(); break;
-      case 'earth':
-        if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
-        else toggleEarthMode();
-        break;
-      case 'like': callbacks.onLike && callbacks.onLike(); break;
-      case 'save_reel': callbacks.onSaveReel && callbacks.onSaveReel(); break;
-      case 'share_reel': callbacks.onShareReel && callbacks.onShareReel(); break;
-      case 'follow': callbacks.onFollow && callbacks.onFollow(); break;
-      case 'profile': callbacks.onOpenCurrentProfile && callbacks.onOpenCurrentProfile(); break;
-      case 'report': callbacks.onReportReel && callbacks.onReportReel(); break;
-      case 'save_pack': callbacks.onSavePack && callbacks.onSavePack(); break;
-      case 'share_pack': callbacks.onSharePack && callbacks.onSharePack(); break;
-      case 'collect': callbacks.onCollectReel && callbacks.onCollectReel(); break;
-      case 'exit':  xrSession ? exitVR() : stopPreview(); break;
-    }
-  }
-
-  function pulseInput(source) {
-    const actuator = source && source.gamepad && source.gamepad.hapticActuators &&
-      source.gamepad.hapticActuators[0];
-    if (!actuator || typeof actuator.pulse !== 'function') return;
-    try { actuator.pulse(0.45, 120).catch(() => {}); } catch (e) {}
-  }
-
-  // ─── Controls Visibility ─────────────────────────────────────────────
-
-  function showControls() {
-    controlsVisible = true;
-    resetAutoHideTimer();
-  }
-
-  function showNotification(message) {
-    notificationText = String(message || '').slice(0, 96);
-    notificationUntil = performance.now() + 5000;
-    vrLastUiUploadT = -1;
-    if (xrSession || previewRunning) showControls();
-  }
-
-  function hideControls() {
-    controlsVisible = false;
-    clearAutoHideTimer();
-  }
-
-  function toggleControls() {
-    if (controlsVisible) hideControls();
-    else showControls();
-  }
-
-  function resetAutoHideTimer() {
-    clearAutoHideTimer();
-    if (!getVisualSource().paused) {
-      controlsAutoHideTimer = setTimeout(function() {
-        controlsVisible = false;
-      }, CONTROLS_AUTO_HIDE_MS);
-    }
-  }
-
-  function clearAutoHideTimer() {
-    if (controlsAutoHideTimer) {
-      clearTimeout(controlsAutoHideTimer);
-      controlsAutoHideTimer = null;
-    }
-  }
-
-  // ─── Earth Activity Mode ─────────────────────────────────────────────
-
-  function earthRotationQuat() {
-    // Yaw + clamped pitch so the globe can be spun horizontally AND
-    // vertically (drag up/down, thumbstick Y, wheel) without ever
-    // flipping upside down. Pitch is about the yawed local X axis.
-    const clamped = Math.max(-1.2, Math.min(1.2, earthPitch || 0));
-    earthPitch = clamped;
-    const yawQ = { x: 0, y: Math.sin(earthYaw / 2), z: 0, w: Math.cos(earthYaw / 2) };
-    const pitchQ = { x: Math.sin(clamped / 2), y: 0, z: 0, w: Math.cos(clamped / 2) };
-    return quatMul(yawQ, pitchQ);
-  }
-
+  // ─── Geographic & Spherical Math ────────────────────────────────────
   function locationToUnit(lat, lon) {
-    const latRad = Number(lat) * Math.PI / 180;
-    const lonRad = Number(lon) * Math.PI / 180;
-    const cosLat = Math.cos(latRad);
+    const phi = (Number(lat) || 0) * (Math.PI / 180);
+    const theta = (Number(lon) || 0) * (Math.PI / 180);
+    const cosPhi = Math.cos(phi);
     return {
-      x: cosLat * Math.sin(lonRad),
-      y: Math.sin(latRad),
-      z: cosLat * Math.cos(lonRad),
+      x: Math.sin(theta) * cosPhi,
+      y: Math.sin(phi),
+      z: Math.cos(theta) * cosPhi,
     };
   }
 
@@ -2343,8 +442,47 @@ window.WebXRVR = window.WebXRVR || (function () {
     return 0.11 + heat * 0.12;
   }
 
-  function drawHolographicEarthFallback(ctx) {
-    if (!ctx) return;
+  // Standard equirect canvas position (upstream verbatim): x =
+  // (lon+180)/360*W, y = (90-lat)/180*H. This matches the Natural Earth
+  // photo's own convention AND the pins/hit-test frame once the texture
+  // offset below compensates THREE.SphereGeometry's UV seam (u=0 sits on
+  // the -X axis, i.e. 90° off standard equirect): with
+  // earthMapTexture.offset.x = +0.25 and RepeatWrapping, painted texel,
+  // photo texel, pin direction, and hit-test vector all coincide.
+  function earthZoneUV(lat, lon, w, h) {
+    const lonN = ((Number(lon) + 180) % 360 + 360) % 360;
+    return { x: (lonN / 360) * w, y: ((90 - Number(lat)) / 180) * h };
+  }
+
+  function earthHeatOf(location) {
+    return Math.max(0, Math.min(1, Number(location && location.heat) || 0));
+  }
+
+  // Deterministic speckle so repaints don't reshuffle the starfield grain.
+  // Pure pixel classifier for the holographic re-style (upstream
+  // buildHolographicEarthBase verbatim). Returns 1 for land, 0 for ocean.
+  function classifyEarthPixel(r, g, b) {
+    return (((r + g) * 0.5 - b) > -10 || (r + g + b) > 720) ? 1 : 0;
+  }
+
+  // Pure heat-style lookup (upstream drawEarthHeatZone verbatim).
+  function earthHeatStyle(heat, state) {
+    const h = Math.max(0, Math.min(1, Number(heat) || 0));
+    return {
+      stops: [
+        [0, 'rgba(255,52,24,' + (0.66 + h * 0.28).toFixed(3) + ')'],
+        [0.22, 'rgba(255,119,20,' + (0.60 + h * 0.22).toFixed(3) + ')'],
+        [0.52, 'rgba(255,222,45,' + (0.28 + h * 0.20).toFixed(3) + ')'],
+        [0.78, 'rgba(34,221,255,0.18)'],
+        [1, 'rgba(16,177,255,0)'],
+      ],
+      ringCount: h > 0.72 ? 3 : (h > 0.36 ? 2 : 1),
+      ringColor: state === 2 ? '#FFFFFF' : (state === 1 ? '#9CF4FF' : 'rgba(255,221,84,0.58)'),
+    };
+  }
+
+  // Instant fallback base (upstream drawHolographicEarthFallback verbatim).
+  function paintEarthBase(ctx) {
     const gradient = ctx.createLinearGradient(0, 0, 0, EARTH_MAP_H);
     gradient.addColorStop(0, '#061D37');
     gradient.addColorStop(0.5, '#020B1A');
@@ -2353,11 +491,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.fillRect(0, 0, EARTH_MAP_W, EARTH_MAP_H);
   }
 
-  function drawHolographicGrid(ctx) {
+  // Graticule overlay (upstream drawHolographicGrid verbatim).
+  function paintEarthGrid(ctx) {
     if (!ctx) return;
-    ctx.save();
+    try { ctx.save(); } catch (e) {}
     for (let lon = -180; lon <= 180; lon += 10) {
-      const x = (lon + 180) / 360 * EARTH_MAP_W;
+      const x = ((lon + 180) / 360) * EARTH_MAP_W;
       const major = lon % 30 === 0;
       ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
       ctx.lineWidth = major ? 2 : 1;
@@ -2367,7 +506,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       ctx.stroke();
     }
     for (let lat = -80; lat <= 80; lat += 10) {
-      const y = (90 - lat) / 180 * EARTH_MAP_H;
+      const y = ((90 - lat) / 180) * EARTH_MAP_H;
       const major = lat % 30 === 0;
       ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
       ctx.lineWidth = major ? 2 : 1;
@@ -2378,12 +517,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     ctx.fillStyle = 'rgba(91, 221, 255, 0.028)';
     for (let y = 1; y < EARTH_MAP_H; y += 6) ctx.fillRect(0, y, EARTH_MAP_W, 1);
-    ctx.restore();
+    try { ctx.restore(); } catch (e) {}
   }
 
+  // Holographic re-style of the Natural Earth photo (upstream
+  // buildHolographicEarthBase, painted onto the live map canvas instead of
+  // a separate base canvas — identical output).
   function buildHolographicEarthBase(image) {
-    if (!earthBaseCtx || !earthBaseCanvas) return;
-    drawHolographicEarthFallback(earthBaseCtx);
+    if (!earthMapCtx) return false;
+    paintEarthBase(earthMapCtx);
     if (image) {
       try {
         const sourceCanvas = document.createElement('canvas');
@@ -2398,15 +540,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         const src = sourceImage.data;
         const out = outputImage.data;
         const land = new Uint8Array(sourceW * sourceH);
-
         for (let pixel = 0; pixel < land.length; pixel++) {
           const offset = pixel * 4;
-          const red = src[offset];
-          const green = src[offset + 1];
-          const blue = src[offset + 2];
-          land[pixel] = (((red + green) * 0.5 - blue) > -10 || (red + green + blue) > 720) ? 1 : 0;
+          land[pixel] = classifyEarthPixel(src[offset], src[offset + 1], src[offset + 2]);
         }
-
         for (let y = 0; y < sourceH; y++) {
           const yUp = Math.max(0, y - 1);
           const yDown = Math.min(sourceH - 1, y + 1);
@@ -2438,790 +575,1414 @@ window.WebXRVR = window.WebXRVR || (function () {
           }
         }
         sourceCtx.putImageData(outputImage, 0, 0);
-        earthBaseCtx.imageSmoothingEnabled = true;
-        earthBaseCtx.imageSmoothingQuality = 'high';
-        earthBaseCtx.drawImage(sourceCanvas, 0, 0, EARTH_MAP_W, EARTH_MAP_H);
+        earthMapCtx.imageSmoothingEnabled = true;
+        earthMapCtx.imageSmoothingQuality = 'high';
+        earthMapCtx.drawImage(sourceCanvas, 0, 0, EARTH_MAP_W, EARTH_MAP_H);
+        earthBaseSource = 'photo';
+        // Photo base is now live: prevent refreshEarthTexture() from
+        // repainting the fallback gradient over it.
+        earthBaseStale = false;
       } catch (error) {
         console.warn('[WebXRVR] Holographic Earth conversion failed; using grid fallback:', error);
-        drawHolographicEarthFallback(earthBaseCtx);
+        paintEarthBase(earthMapCtx);
+        earthBaseSource = 'fallback';
       }
+    } else {
+      earthBaseSource = 'fallback';
     }
-    drawHolographicGrid(earthBaseCtx);
+    paintEarthGrid(earthMapCtx);
     earthMapDirty = true;
-    uploadEarthHeatZones();
+    refreshEarthTexture();
+    return true;
   }
 
-  function drawEarthHeatZone(ctx, location, state) {
-    const heat = Math.max(0, Math.min(1, Number(location.heat) || 0));
-    const lat = Math.max(-89, Math.min(89, Number(location.lat) || 0));
-    const lon = Number(location.lon) || 0;
-    const angularRadius = earthZoneAngularRadius(location);
-    const centerX = ((lon + 180) / 360) * EARTH_MAP_W;
-    const centerY = ((90 - lat) / 180) * EARTH_MAP_H;
-    const radiusY = Math.max(24, angularRadius / Math.PI * EARTH_MAP_H);
-    const radiusX = Math.min(radiusY * 3.2, radiusY / Math.max(0.32, Math.cos(lat * Math.PI / 180)));
-    const centers = [centerX, centerX - EARTH_MAP_W, centerX + EARTH_MAP_W];
-
-    centers.forEach((x) => {
-      if (x + radiusX < 0 || x - radiusX > EARTH_MAP_W) return;
-      ctx.save();
-      ctx.translate(x, centerY);
-      ctx.scale(radiusX / radiusY, 1);
-      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radiusY);
-      const coreAlpha = 0.66 + heat * 0.28;
-      gradient.addColorStop(0, 'rgba(255, 52, 24, ' + coreAlpha.toFixed(3) + ')');
-      gradient.addColorStop(0.22, 'rgba(255, 119, 20, ' + (0.60 + heat * 0.22).toFixed(3) + ')');
-      gradient.addColorStop(0.52, 'rgba(255, 222, 45, ' + (0.28 + heat * 0.20).toFixed(3) + ')');
-      gradient.addColorStop(0.78, 'rgba(34, 221, 255, 0.18)');
-      gradient.addColorStop(1, 'rgba(16, 177, 255, 0)');
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(0, 0, radiusY, 0, Math.PI * 2);
-      ctx.fill();
-
-      const ringCount = heat > 0.72 ? 3 : (heat > 0.36 ? 2 : 1);
-      ctx.lineWidth = state ? 4 : 2;
-      ctx.strokeStyle = state === 2 ? '#FFFFFF' : (state === 1 ? '#9CF4FF' : 'rgba(255, 221, 84, 0.58)');
-      for (let ring = 0; ring < ringCount; ring++) {
-        const ringRadius = radiusY * (0.48 + ring * 0.18);
-        ctx.beginPath();
-        ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
+  // Photo loader: tries each URL in order, once. Never throws; the
+  // procedural fallback is always usable underneath.
+  function loadEarthBasePhoto() {
+    if (earthBaseTried || typeof Image === 'undefined') return;
+    earthBaseTried = true;
+    const urls = EARTH_TEXTURE_URLS.slice();
+    function tryNext() {
+      if (!urls.length) return;
+      const url = urls.shift();
+      try {
+        const image = new Image();
+        try { image.decoding = 'async'; } catch (e) {}
+        image.onload = function () {
+          try {
+            buildHolographicEarthBase(image);
+          } catch (e) {}
+        };
+        image.onerror = function () {
+          console.warn('[WebXRVR] Earth texture unavailable at ' + url);
+          tryNext();
+        };
+        image.src = url;
+      } catch (e) {
+        tryNext();
       }
-      ctx.restore();
-    });
+    }
+    tryNext();
   }
 
-  function setEarthStatus(message) {
-    earthStatus = String(message || '');
-    earthLabelSignature = '';
+  function earthZonePixelRadius(location) {
+    const rad = earthZoneAngularRadius(location);
+    const rY = Math.max(24, (rad / Math.PI) * EARTH_MAP_H);
+    const latRad = Math.abs(Number(location && location.lat) || 0) * (Math.PI / 180);
+    const rX = Math.min(rY * 3.2, rY / Math.max(0.32, Math.cos(latRad)));
+    return { x: rX, y: rY };
   }
 
-  function renderEarthLabelCanvas() {
-    if (!earthLabelCtx || !earthLabelCanvas) return;
-    const location = earthLocations[earthSelectedIndex] || earthLocations[earthHoveredIndex] || null;
-    const title = location ? location.name : 'EARTH ACTIVITY';
-    const detail = location
-      ? ((location.active_reel_count || 0) + ' ACTIVE · ' + (location.new_reel_count || 0) + ' NEW · HEAT ' + Math.round((location.heat || 0) * 100) + '%')
-      : earthStatus;
-    const signature = title + '|' + detail;
-    if (signature === earthLabelSignature) return;
-    earthLabelSignature = signature;
-    const ctx = earthLabelCtx;
-    ctx.clearRect(0, 0, earthLabelCanvas.width, earthLabelCanvas.height);
-    ctx.fillStyle = 'rgba(7, 12, 24, 0.94)';
-    ctx.strokeStyle = location ? '#FFB11F' : '#3A506B';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(2, 2, earthLabelCanvas.width - 4, earthLabelCanvas.height - 4, 14);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#F7FAFC';
-    ctx.font = '700 28px "Archivo", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(title, earthLabelCanvas.width / 2, 43);
-    ctx.fillStyle = '#B8C6D9';
-    ctx.font = '700 15px "JetBrains Mono", monospace';
-    ctx.fillText(detail || 'NO RECENT ACTIVITY', earthLabelCanvas.width / 2, 84);
-    if (gl && glEarthLabelTexture) {
-      gl.bindTexture(gl.TEXTURE_2D, glEarthLabelTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, earthLabelCanvas);
+  // Repaints the equirect heat map only when dirty (activity load or mode
+  // entry), never per frame. The base layer (photo re-style or fallback)
+  // is painted only when stale — repainting it here used to obliterate an
+  // asynchronously arrived photo base. Heat fill is upstream
+  // drawEarthHeatZone verbatim (4-stop gradient + state rings).
+  function refreshEarthTexture() {
+    if (!earthMapDirty || !earthMapCtx) return;
+    earthMapDirty = false;
+    const ctx = earthMapCtx;
+    try {
+      if (earthBaseStale) {
+        paintEarthBase(ctx);
+        paintEarthGrid(ctx);
+        earthBaseStale = false;
+      }
+      paintHeatZones(ctx);
+    } catch (e) {}
+    if (earthMapTexture) {
+      try { earthMapTexture.needsUpdate = true; } catch (e) {}
     }
   }
 
-  function resetEarthPreviewMedia() {
-    if (!earthPreviewVideo) return;
-    try { earthPreviewVideo.pause(); } catch (e) {}
+  function paintHeatZones(ctx) {
     try {
-      earthPreviewVideo.removeAttribute('src');
-      if (typeof earthPreviewVideo.load === 'function') earthPreviewVideo.load();
+      const zoneState = (loc) => {
+        if (earthSelectedIndex >= 0 && earthLocations[earthSelectedIndex] === loc) return 2;
+        if (earthHoveredIndex >= 0 && earthLocations[earthHoveredIndex] === loc) return 1;
+        return 0;
+      };
+      const sorted = earthLocations.slice().sort((a, b) => {
+        const sa = zoneState(a);
+        const sb = zoneState(b);
+        if (sa !== sb) return sa - sb;
+        return earthHeatOf(a) - earthHeatOf(b);
+      });
+      ctx.globalCompositeOperation = 'lighter';
+      for (const loc of sorted) {
+        const u = earthZoneUV(loc.lat, loc.lon, EARTH_MAP_W, EARTH_MAP_H);
+        const r = earthZonePixelRadius(loc);
+        const heat = earthHeatOf(loc);
+        const state = zoneState(loc);
+        const style = earthHeatStyle(heat, state);
+        for (let k = -1; k <= 1; k++) {
+          const px = u.x + k * EARTH_MAP_W;
+          if (px < -r.x || px > EARTH_MAP_W + r.x) continue;
+          ctx.save();
+          ctx.translate(px, u.y);
+          ctx.scale(Math.max(0.2, r.x / Math.max(1, r.y)), 1);
+          const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r.y);
+          for (const stop of style.stops) g.addColorStop(stop[0], stop[1]);
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(0, 0, r.y, 0, Math.PI * 2);
+          ctx.fill();
+          // State rings (upstream counts/widths/colors).
+          ctx.strokeStyle = style.ringColor;
+          ctx.lineWidth = state ? 4 : 2;
+          for (let ring = 0; ring < style.ringCount; ring++) {
+            ctx.beginPath();
+            ctx.arc(0, 0, r.y * (0.48 + ring * 0.18), 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } catch (e) {}
+    if (earthMapTexture) {
+      try { earthMapTexture.needsUpdate = true; } catch (e) {}
+    }
+  }
+
+  // 3D pulsing pins at exact location vectors (same convention as
+  // hitTestEarth, so hover and visuals can never disagree).
+  function rebuildEarthPins() {
+    if (!earthPinsGroup || !THREE) return;
+    try {
+      while (earthPinsGroup.children.length > 0) {
+        const child = earthPinsGroup.children[0];
+        earthPinsGroup.remove(child);
+        if (child.material) {
+          try { child.material.dispose(); } catch (e) {}
+        }
+      }
+      if (!pinSharedGeo) pinSharedGeo = new THREE.ConeGeometry(0.022, 0.07, 10);
+      const up = new THREE.Vector3(0, 1, 0);
+      const ranked = earthLocations.slice()
+        .sort((a, b) => earthHeatOf(b) - earthHeatOf(a))
+        .slice(0, EARTH_PIN_CAP);
+      ranked.forEach((loc, i) => {
+        const u = locationToUnit(loc.lat, loc.lon);
+        const heat = earthHeatOf(loc);
+        const color = heat > 0.66 ? 0xff5a3c : (heat > 0.33 ? 0xffb43c : 0x55e7ff);
+        const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial({ color }));
+        const dir = new THREE.Vector3(u.x, u.y, u.z);
+        mesh.position.copy(dir).multiplyScalar(EARTH_RADIUS + 0.035);
+        mesh.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+        mesh.userData.pulsePhase = i * 0.7;
+        mesh.userData.baseScale = 0.8 + heat * 0.9;
+        mesh.scale.setScalar(mesh.userData.baseScale);
+        earthPinsGroup.add(mesh);
+      });
     } catch (e) {}
   }
 
-  function cancelEarthPreview() {
-    earthPreviewGeneration += 1;
-    if (earthPreviewTimer) {
-      clearTimeout(earthPreviewTimer);
-      earthPreviewTimer = null;
-    }
-    if (earthPreviewAbort) {
-      earthPreviewAbort.abort();
-      earthPreviewAbort = null;
-    }
-    resetEarthPreviewMedia();
-    earthPreviewItems = [];
-    earthPreviewIndex = 0;
-    earthPreviewLocationIndex = -1;
-    earthPreviewStatus = 'idle';
-    earthPreviewSignature = '';
-    earthPreviewLastUpload = -1;
-  }
-
-  function ensureEarthPreviewVideo() {
-    if (earthPreviewVideo) return earthPreviewVideo;
-    const previewVideo = document.createElement('video');
-    if (!previewVideo) return null;
-    previewVideo.muted = true;
-    previewVideo.defaultMuted = true;
-    previewVideo.autoplay = true;
-    previewVideo.loop = false;
-    previewVideo.preload = 'auto';
-    previewVideo.playsInline = true;
-    if (typeof previewVideo.setAttribute === 'function') {
-      previewVideo.setAttribute('muted', '');
-      previewVideo.setAttribute('playsinline', '');
-      previewVideo.setAttribute('webkit-playsinline', '');
-    }
-    previewVideo.onloadeddata = function () {
-      if (earthPreviewLocationIndex < 0) return;
-      earthPreviewStatus = reducedMotion ? 'paused' : 'playing';
-      earthPreviewSignature = '';
-      if (reducedMotion) {
-        try { previewVideo.pause(); } catch (e) {}
-      } else if (typeof previewVideo.play === 'function') {
-        const playResult = previewVideo.play();
-        if (playResult && typeof playResult.catch === 'function') {
-          playResult.catch(() => {
-            earthPreviewStatus = 'ready';
-            earthPreviewSignature = '';
-          });
-        }
-      }
-    };
-    previewVideo.onended = function () {
-      if (earthPreviewLocationIndex < 0) return;
-      advanceEarthPreviewItem();
-    };
-    previewVideo.onerror = function () {
-      if (earthPreviewLocationIndex < 0) return;
-      if (earthPreviewItems.length > 1) advanceEarthPreviewItem();
-      else {
-        earthPreviewStatus = 'error';
-        earthPreviewSignature = '';
-      }
-    };
-    earthPreviewVideo = previewVideo;
-    return earthPreviewVideo;
-  }
-
-  function startEarthPreviewItem(index) {
-    if (!earthPreviewItems.length) return false;
-    earthPreviewIndex = ((Number(index) || 0) % earthPreviewItems.length + earthPreviewItems.length) % earthPreviewItems.length;
-    const item = earthPreviewItems[earthPreviewIndex];
-    const previewVideo = ensureEarthPreviewVideo();
-    if (!previewVideo || !item || !item.url) {
-      earthPreviewStatus = 'error';
-      earthPreviewSignature = '';
-      return false;
-    }
-    earthPreviewStatus = 'loading';
-    earthPreviewSignature = '';
+  function refreshEarthLabel() {
+    if (!earthLabelCtx || !earthLabelTexture) return;
+    const hovered = (earthHoveredIndex >= 0 && earthHoveredIndex < earthLocations.length)
+      ? earthLocations[earthHoveredIndex]
+      : null;
+    const selected = (!hovered && earthSelectedIndex >= 0 && earthSelectedIndex < earthLocations.length)
+      ? earthLocations[earthSelectedIndex]
+      : null;
+    const featured = hovered || selected;
+    const key = earthLocations.length + '|' + (featured ? featured.slug : '');
+    if (key === lastEarthLabelKey) return;
+    lastEarthLabelKey = key;
     try {
-      previewVideo.loop = earthPreviewItems.length === 1;
-      previewVideo.src = item.url;
-      if (typeof previewVideo.load === 'function') previewVideo.load();
-      if (!reducedMotion && typeof previewVideo.play === 'function') {
-        const playResult = previewVideo.play();
-        if (playResult && typeof playResult.catch === 'function') playResult.catch(() => {});
+      const ctx = earthLabelCtx;
+      const title = featured && featured.name ? featured.name : 'EARTH ACTIVITY';
+      let detail;
+      if (featured) {
+        const heat = Math.round(earthHeatOf(featured) * 100);
+        detail = heat + '% HEAT · ' + (Number(featured.active_reel_count) || 0) + ' ACTIVE';
+      } else if (earthLocations.length === 0) {
+        detail = 'NO RECENT ACTIVITY';
+      } else {
+        detail = earthLocations.length + (earthLocations.length === 1 ? ' ZONE' : ' ZONES');
       }
-      return true;
-    } catch (error) {
-      earthPreviewStatus = 'error';
-      return false;
-    }
-  }
-
-  function advanceEarthPreviewItem() {
-    if (earthPreviewItems.length < 2 || earthPreviewLocationIndex < 0) return false;
-    return startEarthPreviewItem((earthPreviewIndex + 1) % earthPreviewItems.length);
-  }
-
-  async function loadEarthPreviewForIndex(index, generation) {
-    const location = earthLocations[index];
-    if (!location || !callbacks.onPreviewLocation || generation !== earthPreviewGeneration) return;
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    earthPreviewAbort = controller;
-    try {
-      const result = await callbacks.onPreviewLocation(location, {
-        signal: controller ? controller.signal : undefined,
-        limit: 3,
-      });
-      if (generation !== earthPreviewGeneration || sceneMode !== 'earth' || earthHoveredIndex !== index) return;
-      const rows = Array.isArray(result) ? result : ((result && (result.videos || result.items)) || []);
-      earthPreviewItems = rows.slice(0, 3).map((item) => ({
-        url: String((item && (item.preview_url || item.url)) || ''),
-        title: String((item && (item.title || item.filename)) || 'Recent reel'),
-        author: String((item && item.author_name) || ''),
-      })).filter((item) => !!item.url);
-      earthPreviewIndex = 0;
-      if (!earthPreviewItems.length) {
-        earthPreviewStatus = 'empty';
-        earthPreviewSignature = '';
-        return;
-      }
-      startEarthPreviewItem(0);
-    } catch (error) {
-      if (error && error.name === 'AbortError') return;
-      if (generation !== earthPreviewGeneration || sceneMode !== 'earth') return;
-      console.warn('[WebXRVR] Location hover preview failed:', error);
-      earthPreviewStatus = 'error';
-      earthPreviewSignature = '';
-    } finally {
-      if (earthPreviewAbort === controller) earthPreviewAbort = null;
-    }
-  }
-
-  function scheduleEarthPreview(index) {
-    earthPreviewGeneration += 1;
-    const generation = earthPreviewGeneration;
-    if (earthPreviewTimer) {
-      clearTimeout(earthPreviewTimer);
-      earthPreviewTimer = null;
-    }
-    if (earthPreviewAbort) {
-      earthPreviewAbort.abort();
-      earthPreviewAbort = null;
-    }
-    resetEarthPreviewMedia();
-    earthPreviewItems = [];
-    earthPreviewIndex = 0;
-    earthPreviewLocationIndex = index;
-    earthPreviewStatus = index >= 0 ? 'loading' : 'idle';
-    earthPreviewSignature = '';
-    earthPreviewLastUpload = -1;
-    if (index < 0) return;
-    if (!callbacks.onPreviewLocation) {
-      earthPreviewStatus = 'error';
-      return;
-    }
-    earthPreviewTimer = setTimeout(function () {
-      earthPreviewTimer = null;
-      loadEarthPreviewForIndex(index, generation);
-    }, EARTH_PREVIEW_DWELL_MS);
-  }
-
-  function truncatePreviewText(value, limit) {
-    const text = String(value || '');
-    return text.length > limit ? text.slice(0, Math.max(1, limit - 1)) + '…' : text;
-  }
-
-  function drawVideoCover(ctx, video, x, y, width, height) {
-    const sourceW = Number(video && video.videoWidth) || width;
-    const sourceH = Number(video && video.videoHeight) || height;
-    const sourceRatio = sourceW / Math.max(1, sourceH);
-    const targetRatio = width / Math.max(1, height);
-    let sx = 0;
-    let sy = 0;
-    let sw = sourceW;
-    let sh = sourceH;
-    if (sourceRatio > targetRatio) {
-      sw = sourceH * targetRatio;
-      sx = (sourceW - sw) / 2;
-    } else {
-      sh = sourceW / targetRatio;
-      sy = (sourceH - sh) / 2;
-    }
-    ctx.drawImage(video, sx, sy, sw, sh, x, y, width, height);
-  }
-
-  function renderEarthPreviewCanvas(time, force) {
-    if (!earthPreviewCtx || !earthPreviewCanvas || earthPreviewLocationIndex < 0) return false;
-    const location = earthLocations[earthPreviewLocationIndex];
-    if (!location) return false;
-    const previewVideo = earthPreviewVideo;
-    const hasFrame = !!(previewVideo && previewVideo.readyState >= 2);
-    const dynamic = hasFrame && earthPreviewStatus === 'playing' && !reducedMotion;
-    const frameKey = dynamic ? Math.floor(Math.max(0, Number(time) || 0) / EARTH_PREVIEW_UPLOAD_MS) : 0;
-    const item = earthPreviewItems[earthPreviewIndex] || null;
-    const signature = [
-      location.slug || location.name,
-      earthPreviewStatus,
-      earthPreviewIndex,
-      earthPreviewItems.length,
-      frameKey,
-      reducedMotion ? 1 : 0,
-    ].join('|');
-    if (!force && signature === earthPreviewSignature) return false;
-    earthPreviewSignature = signature;
-
-    const ctx = earthPreviewCtx;
-    ctx.clearRect(0, 0, EARTH_PREVIEW_W, EARTH_PREVIEW_H);
-    const panelGradient = ctx.createLinearGradient(0, 0, 0, EARTH_PREVIEW_H);
-    panelGradient.addColorStop(0, 'rgba(8, 30, 48, 0.98)');
-    panelGradient.addColorStop(1, 'rgba(3, 8, 20, 0.98)');
-    ctx.fillStyle = panelGradient;
-    ctx.beginPath();
-    ctx.roundRect(2, 2, EARTH_PREVIEW_W - 4, EARTH_PREVIEW_H - 4, 24);
-    ctx.fill();
-    ctx.strokeStyle = '#55E7FF';
-    ctx.lineWidth = 4;
-    ctx.shadowColor = 'rgba(72, 226, 255, 0.42)';
-    ctx.shadowBlur = 18;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = '#BFF5FF';
-    ctx.font = '800 17px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('LIVE LOCATION PREVIEW', 26, 26);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 28px "Archivo", sans-serif';
-    ctx.fillText(truncatePreviewText(location.name || location.slug, 29), 26, 57);
-    ctx.fillStyle = '#8EDCEC';
-    ctx.font = '800 13px "JetBrains Mono", monospace';
-    ctx.fillText(
-      Math.round((Number(location.heat) || 0) * 100) + '% HEAT · ' +
-        (Number(location.active_reel_count) || 0) + ' ACTIVE',
-      26,
-      82
-    );
-
-    const mediaX = 24;
-    const mediaY = 104;
-    const mediaW = EARTH_PREVIEW_W - 48;
-    const mediaH = 448;
-    ctx.fillStyle = '#020713';
-    ctx.fillRect(mediaX, mediaY, mediaW, mediaH);
-    if (hasFrame) {
-      try {
-        drawVideoCover(ctx, previewVideo, mediaX, mediaY, mediaW, mediaH);
-      } catch (error) {
-        earthPreviewStatus = 'error';
-      }
-    } else {
-      ctx.strokeStyle = 'rgba(85, 231, 255, 0.18)';
-      ctx.lineWidth = 2;
-      for (let y = mediaY + 12; y < mediaY + mediaH; y += 24) {
+      ctx.clearRect(0, 0, 640, 112);
+      ctx.fillStyle = 'rgba(7,12,24,0.94)';
+      ctx.fillRect(0, 0, 640, 112);
+      ctx.strokeStyle = featured ? '#FFB11F' : '#3A506B';
+      ctx.lineWidth = 3;
+      if (ctx.roundRect) {
         ctx.beginPath();
-        ctx.moveTo(mediaX, y);
-        ctx.lineTo(mediaX + mediaW, y);
+        ctx.roundRect(2, 2, 636, 108, 14);
         ctx.stroke();
+      } else {
+        ctx.strokeRect(2, 2, 636, 108);
       }
-      ctx.fillStyle = '#8EDCEC';
-      ctx.font = '800 18px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#F7FAFC';
+      ctx.font = '700 28px Archivo, sans-serif';
       ctx.textAlign = 'center';
-      const message = earthPreviewStatus === 'empty'
-        ? 'NO RECENT VIDEO REELS'
-        : (earthPreviewStatus === 'error' ? 'PREVIEW UNAVAILABLE' : 'LOADING RECENT REELS…');
-      ctx.fillText(message, EARTH_PREVIEW_W / 2, mediaY + mediaH / 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(title).slice(0, 30), 320, 43);
+      ctx.fillStyle = '#B8C6D9';
+      ctx.font = '700 15px "JetBrains Mono", monospace';
+      ctx.fillText(String(detail).slice(0, 44), 320, 84);
+      earthLabelTexture.needsUpdate = true;
+    } catch (e) {}
+  }
+
+  function updateEarthPreviewBillboard(time) {
+    if (!earthPreviewMesh) return;
+    if (sceneMode !== 'earth') {
+      earthPreviewMesh.visible = false;
+      return;
+    }
+    if (time - lastEarthPreviewUpdate < 150) return;
+    lastEarthPreviewUpdate = time;
+    const loc = (earthPreviewLocationIndex >= 0 && earthPreviewLocationIndex < earthLocations.length)
+      ? earthLocations[earthPreviewLocationIndex]
+      : null;
+    if (!loc || !earthPreviewItems.length) {
+      earthPreviewMesh.visible = false;
+      return;
+    }
+    const ui = getUICanvas();
+    if (ui && earthPreviewCtx) {
+      try {
+        ui.renderEarthPreviewCanvas(earthPreviewCtx, {
+          location: loc,
+          previewVideo: earthPreviewVideo,
+          earthPreviewStatus,
+          earthPreviewItems,
+          earthPreviewIndex,
+          reducedMotion,
+        });
+        if (earthPreviewTexture) earthPreviewTexture.needsUpdate = true;
+      } catch (e) {}
+    }
+    earthPreviewMesh.visible = true;
+  }
+
+  // Per-frame earth dressing for both loops: billboards face the head,
+  // pins pulse (unless reduced motion), textures refresh when dirty.
+  function updateEarthDressing(time) {
+    if (!earthGroup || earthGroup.visible === false) return;
+    try {
+      const head = getHeadPosition();
+      // Deck rim keeps identity orientation (upstream flat platform).
+      if (earthLabelMesh) earthLabelMesh.lookAt(head.x, head.y, head.z);
+      if (earthPreviewMesh && earthPreviewMesh.visible) {
+        earthPreviewMesh.lookAt(head.x, head.y, head.z);
+      }
+    } catch (e) {}
+    if (!reducedMotion && earthPinsGroup) {
+      try {
+        const kids = earthPinsGroup.children;
+        for (let i = 0; i < kids.length; i++) {
+          const p = kids[i];
+          const base = p.userData.baseScale || 1;
+          const s = base * (1 + 0.22 * Math.sin(time * 0.003 + (p.userData.pulsePhase || 0)));
+          p.scale.setScalar(Math.max(0.05, s));
+        }
+      } catch (e) {}
+    }
+    refreshEarthTexture();
+    refreshEarthLabel();
+    updateEarthPreviewBillboard(time);
+  }
+
+  function raySphereHit(rayOrigin, rayDir, center, radius) {
+    const oc = { x: rayOrigin.x - center.x, y: rayOrigin.y - center.y, z: rayOrigin.z - center.z };
+    const a = rayDir.x * rayDir.x + rayDir.y * rayDir.y + rayDir.z * rayDir.z;
+    const b = 2 * (oc.x * rayDir.x + oc.y * rayDir.y + oc.z * rayDir.z);
+    const c = (oc.x * oc.x + oc.y * oc.y + oc.z * oc.z) - radius * radius;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return -1;
+    const sqrtD = Math.sqrt(disc);
+    const t1 = (-b - sqrtD) / (2 * a);
+    const t2 = (-b + sqrtD) / (2 * a);
+    if (t1 > 0) return t1;
+    if (t2 > 0) return t2;
+    return -1;
+  }
+
+  function hitTestEarth(rayOrigin, rayDir) {
+    const hitDist = raySphereHit(rayOrigin, rayDir, earthCenter, EARTH_RADIUS * 1.08);
+    if (hitDist <= 0) return { hit: false, dist: -1, zoneIndex: -1 };
+
+    const hitP = {
+      x: rayOrigin.x + rayDir.x * hitDist,
+      y: rayOrigin.y + rayDir.y * hitDist,
+      z: rayOrigin.z + rayDir.z * hitDist,
+    };
+
+    // Local sphere coordinates in the fixed geographic frame: unrotate
+    // the world hit by the globe's yaw*pitch so zones track the drag.
+    const local = earthLocalFromWorld(hitP);
+
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < earthLocations.length; i++) {
+      const u = locationToUnit(earthLocations[i].lat, earthLocations[i].lon);
+      const rad = earthZoneAngularRadius(earthLocations[i]);
+      const dist = Math.hypot(local.x - u.x, local.y - u.y, local.z - u.z);
+      if (dist < rad && dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
     }
 
-    const shade = ctx.createLinearGradient(0, mediaY + mediaH - 100, 0, mediaY + mediaH);
-    shade.addColorStop(0, 'rgba(2, 7, 19, 0)');
-    shade.addColorStop(1, 'rgba(2, 7, 19, 0.92)');
-    ctx.fillStyle = shade;
-    ctx.fillRect(mediaX, mediaY + mediaH - 100, mediaW, 100);
-
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 23px "Archivo", sans-serif';
-    ctx.fillText(truncatePreviewText(item ? item.title : 'Recent activity', 34), 26, 594);
-    ctx.fillStyle = '#AFC3D4';
-    ctx.font = '700 16px "Archivo", sans-serif';
-    ctx.fillText(truncatePreviewText(item && item.author ? '@' + item.author : 'Location-tagged reels', 42), 26, 624);
-
-    ctx.fillStyle = '#0C2637';
-    ctx.strokeStyle = '#2D91AA';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(24, 650, EARTH_PREVIEW_W - 48, 44, 12);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#C8F7FF';
-    ctx.font = '800 14px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    const reelCount = earthPreviewItems.length
-      ? 'REEL ' + (earthPreviewIndex + 1) + ' / ' + earthPreviewItems.length + ' · MUTED'
-      : 'TRIGGER TO OPEN THIS LOCATION';
-    ctx.fillText(reducedMotion && hasFrame ? 'REDUCED MOTION · STATIC PREVIEW' : reelCount, EARTH_PREVIEW_W / 2, 672);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 13px "JetBrains Mono", monospace';
-    ctx.fillText('TRIGGER / CLICK THE ZONE TO VIEW FEED', EARTH_PREVIEW_W / 2, 708);
-    return true;
-  }
-
-  function updateEarthPreviewTexture(time, force) {
-    if (!gl || !glEarthPreviewTexture || earthPreviewLocationIndex < 0) return false;
-    const previewVideo = earthPreviewVideo;
-    if (!reducedMotion && previewVideo && earthPreviewItems.length > 1 &&
-        previewVideo.readyState >= 2 && Number(previewVideo.currentTime) >= EARTH_PREVIEW_CLIP_SECONDS) {
-      advanceEarthPreviewItem();
-    }
-    const dynamic = previewVideo && previewVideo.readyState >= 2 && earthPreviewStatus === 'playing' && !reducedMotion;
-    if (!force && dynamic && earthPreviewLastUpload >= 0 && time - earthPreviewLastUpload < EARTH_PREVIEW_UPLOAD_MS) {
-      return false;
-    }
-    if (!renderEarthPreviewCanvas(time, force)) return false;
-    gl.bindTexture(gl.TEXTURE_2D, glEarthPreviewTexture);
-    if (earthPreviewTextureAllocated) {
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, earthPreviewCanvas);
-    } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, earthPreviewCanvas);
-      earthPreviewTextureAllocated = true;
-    }
-    earthPreviewLastUpload = time;
-    renderStats.earthPreviewUploads += 1;
-    return true;
-  }
-
-  function uploadEarthHeatZones() {
-    earthZoneCount = Math.min(earthLocations.length, EARTH_ZONE_LIMIT);
-    earthMapDirty = true;
-    if (!gl || !glEarthTexture || !earthMapCtx || !earthMapCanvas || !earthBaseCanvas) return;
-    earthMapCtx.globalCompositeOperation = 'source-over';
-    earthMapCtx.clearRect(0, 0, EARTH_MAP_W, EARTH_MAP_H);
-    earthMapCtx.drawImage(earthBaseCanvas, 0, 0);
-    earthMapCtx.globalCompositeOperation = 'lighter';
-    earthLocations.slice(0, EARTH_ZONE_LIMIT)
-      .map((location, index) => ({
-        location,
-        index,
-        state: index === earthSelectedIndex ? 2 : (index === earthHoveredIndex ? 1 : 0),
-      }))
-      .sort((a, b) => a.state - b.state || (Number(a.location.heat) || 0) - (Number(b.location.heat) || 0))
-      .forEach(({ location, state }) => {
-        drawEarthHeatZone(earthMapCtx, location, state);
-      });
-    earthMapCtx.globalCompositeOperation = 'source-over';
-    gl.bindTexture(gl.TEXTURE_2D, glEarthTexture);
-    if (earthMapTextureAllocated) {
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, earthMapCanvas);
-    } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, earthMapCanvas);
-      earthMapTextureAllocated = true;
-    }
-    earthMapDirty = false;
-  }
-
-  function refreshEarthMapTexture() {
-    if (earthMapDirty) uploadEarthHeatZones();
-  }
-
-  function setEarthHoveredIndex(index) {
-    const next = Number.isInteger(index) ? index : -1;
-    if (earthHoveredIndex === next) return;
-    earthHoveredIndex = next;
-    earthLabelSignature = '';
-    uploadEarthHeatZones();
-    scheduleEarthPreview(next);
-  }
-
-  function setLocationActivity(rows) {
-    cancelEarthPreview();
-    earthLocations = Array.isArray(rows)
-      ? rows.slice(0, EARTH_ZONE_LIMIT).filter((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lon)))
-      : [];
-    earthLocations.forEach((location) => { location._unit = locationToUnit(location.lat, location.lon); });
-    earthHoveredIndex = -1;
-    earthSelectedIndex = -1;
-    setEarthStatus(earthLocations.length ? 'TAP ZONE TO OPEN · HOLD & DRAG TO SPIN' : 'NO RECENT LOCATION ACTIVITY');
-    uploadEarthHeatZones();
-    return earthLocations.length;
-  }
-
-  function anchorEarthFromHead() {
-    const facing = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
-    const horizontal = vecNorm({ x: facing.x, y: 0, z: facing.z });
-    earthAnchorRight = vecNorm({ x: -horizontal.z, y: 0, z: horizontal.x });
-    earthCenter = {
-      x: currentHeadPos.x + horizontal.x * 1.3,
-      y: currentHeadPos.y - 0.4,
-      z: currentHeadPos.z + horizontal.z * 1.3,
+    return {
+      hit: true,
+      dist: hitDist,
+      zoneIndex: bestIdx,
+      point: hitP,
+      local,
     };
   }
 
-  async function loadEarthActivity() {
-    if (earthActivityAbort) earthActivityAbort.abort();
-    const generation = ++earthActivityGeneration;
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    earthActivityAbort = controller;
-    setEarthStatus('LOADING 7-DAY ACTIVITY…');
-    try {
-      const response = await fetch('/api/reels/locations/activity?window_days=7&limit=128', {
-        credentials: 'include',
-        signal: controller ? controller.signal : undefined,
-      });
-      if (!response.ok) throw new Error('Activity request failed (' + response.status + ')');
-      const payload = await response.json();
-      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
-      setLocationActivity(payload.locations || []);
-    } catch (error) {
-      if (error && error.name === 'AbortError') return;
-      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
-      console.error('[WebXRVR] Earth activity load failed:', error);
-      setEarthStatus('ACTIVITY UNAVAILABLE · TRY AGAIN');
-    } finally {
-      if (earthActivityAbort === controller) earthActivityAbort = null;
-    }
-  }
-
-  function openEarthMode() {
-    if (sceneMode === 'earth') return;
-    if (isPackExperience()) return;
-    const source = getVisualSource();
-    sceneMode = 'earth';
-    earthResumePlayback = !source.paused;
-    commentsPanelVisible = false;
-    controlsVisible = true;
-    clearAutoHideTimer();
-    anchorEarthFromHead();
-    earthLastFrameTime = -1;
-    earthDragging = false;
-    earthDragSource = null;
-    earthDragLastDir = null;
-    earthDragStartDir = null;
-    earthDragEngaged = false;
-    earthDragCumX = 0;
-    earthDragCumY = 0;
-    earthDragAxis = null;
-    earthDragInputSource = null;
-    earthPressZone = -1;
-    earthPitch = 0;
-    cancelEarthPreview();
-    earthLocations = [];
-    earthHoveredIndex = -1;
-    earthSelectedIndex = -1;
-    uploadEarthHeatZones();
-    if (source.kind === 'video' && source.element) {
-      try { source.element.pause(); } catch (e) {}
-    }
-    if (callbacks.onEarthOpen) {
-      const resumeOverride = callbacks.onEarthOpen(earthResumePlayback);
-      if (typeof resumeOverride === 'boolean') earthResumePlayback = resumeOverride;
-    }
-    if (gl) initEarthResources();
-    loadEarthActivity();
-    if (callbacks.onSceneModeChange) callbacks.onSceneModeChange('earth');
-    emitPreviewState();
-  }
-
-  function closeEarthMode(options) {
-    if (sceneMode !== 'earth') return;
-    const opts = options || {};
-    sceneMode = 'reels';
-    earthActivityGeneration += 1;
-    earthSelectionGeneration += 1;
-    cancelEarthPreview();
-    if (earthActivityAbort) {
-      earthActivityAbort.abort();
-      earthActivityAbort = null;
-    }
-    earthHoveredIndex = -1;
-    earthSelectedIndex = -1;
-    earthDragging = false;
-    earthDragSource = null;
-    earthDragLastDir = null;
-    earthDragStartDir = null;
-    earthDragEngaged = false;
-    earthDragCumX = 0;
-    earthDragCumY = 0;
-    earthDragAxis = null;
-    earthDragInputSource = null;
-    earthPressZone = -1;
-    earthLastFrameTime = -1;
-    if (callbacks.onEarthClose) callbacks.onEarthClose(opts.resume !== false && earthResumePlayback);
-    if (callbacks.onSceneModeChange) callbacks.onSceneModeChange('reels');
-    resetAutoHideTimer();
-    emitPreviewState();
-  }
-
-  function toggleEarthMode() {
-    if (isPackExperience()) {
-      if (callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
-      return;
-    }
-    if (sceneMode === 'earth') {
-      closeEarthMode();
-      return;
-    }
-    if (callbacks.isLocationFeedActive && callbacks.isLocationFeedActive()) {
-      Promise.resolve(callbacks.onRestoreAllLocations && callbacks.onRestoreAllLocations())
-        .catch((error) => console.error('[WebXRVR] All locations restore failed:', error));
-      return;
-    }
-    openEarthMode();
-  }
-
-  function selectEarthLocation(index) {
-    const location = earthLocations[index];
-    if (!location || !callbacks.onSelectLocation) return;
-    const generation = ++earthSelectionGeneration;
-    earthSelectedIndex = index;
-    uploadEarthHeatZones();
-    setEarthStatus('LOADING ' + String(location.name || location.slug || 'LOCATION').toUpperCase() + '…');
-    Promise.resolve(callbacks.onSelectLocation(location)).then((accepted) => {
-      if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return;
-      if (accepted === false) {
-        setEarthStatus('NO RECENT REELS IN THIS LOCATION');
-        return;
-      }
-      closeEarthMode({ resume: false });
-    }).catch((error) => {
-      if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return;
-      console.error('[WebXRVR] Location feed switch failed:', error);
-      setEarthStatus('LOCATION FEED UNAVAILABLE');
-    });
-  }
+  // Drag tuning (upstream constants verbatim except yaw sensitivity,
+  // reduced per owner request): pitch dy*2.24, yaw dx*1.7 (was 2.8).
+  const EARTH_DRAG_HOLD_MS = 280;
+  const EARTH_TAP_CHORD = 0.06;
+  const EARTH_DRAG_CHORD = 0.12;
+  const EARTH_AXIS_LOCK = 0.012;
+  const EARTH_YAW_SENSITIVITY = 1.7;
+  const EARTH_PITCH_SENSITIVITY = 2.24;
 
   function rotateEarth(deltaYaw, deltaPitch) {
     earthYaw = (earthYaw + deltaYaw) % (Math.PI * 2);
     earthPitch = Math.max(-1.2, Math.min(1.2, (earthPitch || 0) + (deltaPitch || 0)));
+    applyEarthRotation();
   }
 
-  function raySphereHit(rayOrigin, rayDir, center, radius) {
-    const offset = vecSub(rayOrigin, center);
-    const a = rayDir.x * rayDir.x + rayDir.y * rayDir.y + rayDir.z * rayDir.z;
-    const b = 2 * (offset.x * rayDir.x + offset.y * rayDir.y + offset.z * rayDir.z);
-    const c = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z - radius * radius;
-    const disc = b * b - 4 * a * c;
-    if (disc < 0 || a < 0.000001) return null;
-    let distance = (-b - Math.sqrt(disc)) / (2 * a);
-    if (distance < 0) distance = (-b + Math.sqrt(disc)) / (2 * a);
-    if (distance < 0 || distance > 20) return null;
-    const world = vecAdd(rayOrigin, vecScale(rayDir, distance));
-    const local = vecNorm(quatRotVec(quatInvert(earthRotationQuat()), vecSub(world, earthCenter)));
-    return { distance, world, local };
+  // Mesh rotation mirrors upstream yawQ*pitchQ (pitch about the yawed X
+  // axis): THREE euler order 'YXZ' composes R = Ry * Rx. Hit-testing
+  // applies the exact inverse so hover zones track the turned globe.
+  function applyEarthRotation() {
+    if (!earthMesh) return;
+    try {
+      earthMesh.rotation.order = 'YXZ';
+      earthMesh.rotation.set(earthPitch || 0, earthYaw || 0, 0);
+    } catch (e) {}
   }
 
-  function hitTestEarth(rayOrigin, rayDir) {
-    const hit = raySphereHit(rayOrigin, rayDir, earthCenter, EARTH_RADIUS * 1.08);
-    if (!hit) return { hit: false, dist: -1, zoneIndex: -1 };
-    let zoneIndex = -1;
-    let bestDot = -1;
-    earthLocations.forEach((location, index) => {
-      const unit = location._unit || locationToUnit(location.lat, location.lon);
-      const dot = hit.local.x * unit.x + hit.local.y * unit.y + hit.local.z * unit.z;
-      const threshold = Math.cos(earthZoneAngularRadius(location));
-      if (dot >= threshold && dot > bestDot) {
-        bestDot = dot;
-        zoneIndex = index;
-      }
-    });
-    return { hit: true, dist: hit.distance, zoneIndex, local: hit.local };
+  // Inverse of Ry(yaw)*Rx(pitch) applied to a world point, yielding
+  // normalized fixed-frame local coordinates for zone matching.
+  function earthLocalFromWorld(world) {
+    const ox = world.x - earthCenter.x;
+    const oy = world.y - earthCenter.y;
+    const oz = world.z - earthCenter.z;
+    const cosY = Math.cos(earthYaw || 0);
+    const sinY = Math.sin(earthYaw || 0);
+    const x1 = ox * cosY - oz * sinY;
+    const z1 = ox * sinY + oz * cosY;
+    const cosP = Math.cos(earthPitch || 0);
+    const sinP = Math.sin(earthPitch || 0);
+    const nx = x1;
+    const ny = oy * cosP + z1 * sinP;
+    const nz = -oy * sinP + z1 * cosP;
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    return { x: nx / l, y: ny / l, z: nz / l };
   }
-
-  function updateEarthDrag(direction) {
-    if (!direction) return;
-    const normalized = vecNorm(direction);
-    if (earthDragLastDir) {
-      const dx = normalized.x - earthDragLastDir.x;
-      const dy = normalized.y - earthDragLastDir.y;
-      // Cumulative travel decides the locked axis; tremor oscillates around
-      // zero so it roughly cancels, while deliberate motion dominates.
-      earthDragCumX += dx;
-      earthDragCumY += dy;
-      // Tap-vs-drag is measured from the press point, NOT accumulated
-      // per-frame: at 72-90fps even stationary hand tremor sums past a
-      // tight threshold when the trigger is held briefly to aim.
-      let chord = -1;
-      if (earthDragStartDir) {
-        const sx = normalized.x - earthDragStartDir.x;
-        const sy = normalized.y - earthDragStartDir.y;
-        const sz = normalized.z - earthDragStartDir.z;
-        chord = Math.sqrt(sx * sx + sy * sy + sz * sz);
-        if (!earthDragMoved && chord > EARTH_TAP_CHORD) earthDragMoved = true;
-      }
-      // Rotation engages on HOLD (press held >= EARTH_DRAG_HOLD_MS) or on a
-      // deliberate flick (moved past EARTH_DRAG_CHORD). Until engaged, the
-      // globe stays frozen so clicks can't fight zone selection. Deltas are
-      // per-frame and rotation is skipped pre-engagement, so engaging late
-      // can never cause a jump.
-      if (!earthDragEngaged) {
-        const heldLong = (performance.now() - earthPressTime) >= EARTH_DRAG_HOLD_MS;
-        if (heldLong || chord > EARTH_DRAG_CHORD) earthDragEngaged = true;
-      }
-      if (earthDragEngaged) {
-        // Single-axis lock: decide once from cumulative travel, then only
-        // the dominant axis rotates for the rest of this drag.
-        if (!earthDragAxis) {
-          const ax = Math.abs(earthDragCumX);
-          const ay = Math.abs(earthDragCumY);
-          if (ax > 0.012 || ay > 0.012) earthDragAxis = ax >= ay ? 'yaw' : 'pitch';
-        }
-        if (earthDragAxis === 'pitch') {
-          rotateEarth(0, dy * 2.24);
-        } else if (earthDragAxis === 'yaw') {
-          rotateEarth(dx * 2.8, 0);
-        } else {
-          // Engaged (held long enough) but no dominant direction yet —
-          // apply yaw only so hold-still never tilts the globe.
-          rotateEarth(dx * 2.8, 0);
-        }
-      }
-    }
-    earthDragLastDir = normalized;
-  }
-
 
   function advanceEarthSpin(time) {
+    if (reducedMotion || earthDragging) return 0;
     if (earthLastFrameTime < 0) {
       earthLastFrameTime = time;
       return 0;
     }
-    const dt = Math.max(0, Math.min(0.1, (time - earthLastFrameTime) * 0.001));
+    const dt = Math.max(0, Math.min(100, time - earthLastFrameTime));
     earthLastFrameTime = time;
-    if (reducedMotion || earthDragging || earthHoveredIndex >= 0 || time < earthInteractionUntil) return 0;
-    const delta = EARTH_IDLE_RADIANS_PER_SECOND * dt;
+    const delta = (Math.PI / 60) * (dt / 1000);
     rotateEarth(delta, 0);
     return delta;
   }
 
-  function beginEarthDrag(source, hit) {
-    if (!hit || !hit.hit) return false;
-    earthDragging = true;
-    earthDragSource = source || 'pointer';
-    earthDragInputSource = source && typeof source === 'object' ? source : null;
-    earthDragLastDir = hit.local;
-    earthDragStartDir = hit.local;
-    earthDragMoved = false;
-    earthDragEngaged = false;
-    earthDragCumX = 0;
-    earthDragCumY = 0;
-    earthDragAxis = null;
-    earthPressTime = performance.now();
-    earthPressZone = hit.zoneIndex;
-    earthInteractionUntil = performance.now() + 900;
-    return true;
-  }
+  // ─── Three.js Scene Setup ───────────────────────────────────────────
+  function initThreeScene(canvas, context) {
+    ensureThree();
+    if (!THREE) return null;
 
-  function endEarthDrag(source, hit) {
-    if (!earthDragging) return false;
-    if (earthDragInputSource && source && earthDragInputSource !== source) return false;
-    if (hit && hit.hit) updateEarthDrag(hit.local);
-    // Tap-to-select: Quest Browser often delivers selectend with ev.frame
-    // null (no fresh ray pose), so `hit` can be null even when the user
-    // tapped cleanly on a zone. Fall back to the press-time / hovered zone
-    // instead of dropping the tap. Any zone under the release ray also wins
-    // over the press zone so near-misses still open the feed.
-    const releaseZone = hit && hit.hit ? hit.zoneIndex : -1;
-    const hoverZone = earthHoveredIndex;
-    let selected = -1;
-    if (!earthDragMoved) {
-      if (releaseZone >= 0) selected = releaseZone;
-      else if (earthPressZone >= 0 && (!hit || !hit.hit)) selected = earthPressZone;
-      else if (earthPressZone >= 0 && releaseZone === earthPressZone) selected = earthPressZone;
-      else if (earthPressZone < 0 && hoverZone >= 0 && (!hit || !hit.hit)) selected = hoverZone;
+    if (context) {
+      glContext = context;
     }
-    earthDragging = false;
-    earthDragSource = null;
-    earthDragInputSource = null;
-    earthDragLastDir = null;
-    earthDragStartDir = null;
-    earthDragEngaged = false;
-    earthDragCumX = 0;
-    earthDragCumY = 0;
-    earthDragAxis = null;
-    earthPressZone = -1;
-    earthInteractionUntil = performance.now() + 900;
-    if (selected >= 0) selectEarthLocation(selected);
-    return true;
+
+    if (!vrProxyCanvas && typeof document !== 'undefined') {
+      vrProxyCanvas = document.createElement('canvas');
+      vrProxyCanvas.width = VR_TEX_CAP;
+      vrProxyCanvas.height = VR_TEX_CAP;
+      vrProxyCtx = vrProxyCanvas.getContext('2d');
+    }
+
+    if (!renderer) {
+      const opts = { canvas, alpha: true, antialias: true, powerPreference: 'high-performance' };
+      if (context) opts.context = context;
+      renderer = new THREE.WebGLRenderer(opts);
+      if (!glContext && renderer.getContext) {
+        try { glContext = renderer.getContext(); } catch (e) {}
+      }
+      renderer.setPixelRatio(typeof window !== 'undefined' ? Math.max(1, Math.min(2, window.devicePixelRatio || 1)) : 1);
+      updatePreviewSize(canvas);
+      if (renderer.xr) renderer.xr.enabled = true;
+      try {
+        if (renderer.setClearColor) renderer.setClearColor(0x020612, 1);
+      } catch (e) {}
+    }
+
+    if (!scene) {
+      scene = new THREE.Scene();
+      try {
+        scene.background = new THREE.Color(0x020612);
+      } catch (e) {}
+    }
+
+    if (!camera) {
+      const aspect = (canvas.clientWidth || 960) / Math.max(1, canvas.clientHeight || 540);
+      camera = new THREE.PerspectiveCamera(70, aspect, 0.1, 100);
+      camera.position.set(0, 1.6, 0);
+    }
+
+    // Video Screen Mesh
+    if (!videoTexture && vrProxyCanvas) {
+      videoTexture = new THREE.CanvasTexture(vrProxyCanvas);
+      try { if (THREE.SRGBColorSpace !== undefined) videoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    }
+    if (!screenMesh) {
+      const screenGeo = createScreenGeometry(curvatureMode);
+      const screenMat = new THREE.MeshBasicMaterial({
+        map: videoTexture,
+        side: THREE.DoubleSide,
+      });
+      screenMesh = new THREE.Mesh(screenGeo, screenMat);
+      screenMesh.position.set(0, 1.6, -2.2);
+      scene.add(screenMesh);
+    }
+
+    // Ambilight Glow — radial-falloff quad slightly larger than the screen
+    // (upstream: 1.34x, same curvature, additive, exp falloff). The old flat
+    // solid-color square showed a hard border behind the reels; the alphaMap
+    // gradient removes the edge entirely.
+    if (typeof document !== 'undefined' && !glowAlphaTexture && THREE) {
+      try {
+        const glowAlphaCanvas = document.createElement('canvas');
+        glowAlphaCanvas.width = 256;
+        glowAlphaCanvas.height = 256;
+        const gtx = glowAlphaCanvas.getContext('2d');
+        if (gtx) {
+          const grad = gtx.createRadialGradient(128, 128, 8, 128, 128, 128);
+          grad.addColorStop(0, '#ffffff');
+          grad.addColorStop(0.45, '#b0b0b0');
+          grad.addColorStop(0.75, '#404040');
+          grad.addColorStop(1, '#000000');
+          gtx.fillStyle = grad;
+          gtx.fillRect(0, 0, 256, 256);
+          glowAlphaTexture = new THREE.CanvasTexture(glowAlphaCanvas);
+        }
+      } catch (e) {
+        glowAlphaTexture = null;
+      }
+    }
+    if (!glowProbeCanvas && typeof document !== 'undefined') {
+      try {
+        glowProbeCanvas = document.createElement('canvas');
+        glowProbeCanvas.width = 8;
+        glowProbeCanvas.height = 8;
+        glowProbeCtx = glowProbeCanvas.getContext('2d');
+      } catch (e) {
+        glowProbeCanvas = null;
+        glowProbeCtx = null;
+      }
+    }
+    if (!ambilightMesh) {
+      const glowGeo = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+        new THREE.PlaneGeometry(3.2, 3.2);
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(glowColor[0], glowColor[1], glowColor[2]),
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      if (glowAlphaTexture) glowMat.alphaMap = glowAlphaTexture;
+      ambilightMesh = new THREE.Mesh(glowGeo, glowMat);
+      ambilightMesh.position.set(0, 1.6, -2.26);
+      scene.add(ambilightMesh);
+    }
+
+    // Controls Dock Mesh
+    const ui = getUICanvas();
+    if (!controlsCanvas && typeof document !== 'undefined') {
+      controlsCanvas = document.createElement('canvas');
+      controlsCanvas.width = ui ? ui.CONTROLS_W : 1024;
+      controlsCanvas.height = ui ? ui.CONTROLS_H : 384;
+      controlsCtx = controlsCanvas.getContext('2d');
+    }
+    if (!controlsTexture && controlsCanvas) {
+      controlsTexture = new THREE.CanvasTexture(controlsCanvas);
+      try { if (THREE.SRGBColorSpace !== undefined) controlsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    }
+    if (!controlsMesh && controlsTexture) {
+      const ctrlGeo = new THREE.PlaneGeometry(1.6, 0.6);
+      const ctrlMat = new THREE.MeshBasicMaterial({
+        map: controlsTexture,
+        transparent: true,
+        side: THREE.DoubleSide,
+      });
+      controlsMesh = new THREE.Mesh(ctrlGeo, ctrlMat);
+      controlsMesh.visible = controlsVisible;
+      scene.add(controlsMesh);
+      layoutControlsDock();
+    }
+
+    // Comments Panel Mesh
+    if (!commentsCanvas && typeof document !== 'undefined') {
+      commentsCanvas = document.createElement('canvas');
+      commentsCanvas.width = ui ? ui.CPANEL_W : 560;
+      commentsCanvas.height = ui ? ui.CPANEL_H : 680;
+      commentsCtx = commentsCanvas.getContext('2d');
+    }
+    if (!commentsTexture && commentsCanvas) {
+      commentsTexture = new THREE.CanvasTexture(commentsCanvas);
+      try { if (THREE.SRGBColorSpace !== undefined) commentsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    }
+    if (!commentsMesh && commentsTexture) {
+      const cpGeo = new THREE.PlaneGeometry(1.05, 1.28);
+      const cpMat = new THREE.MeshBasicMaterial({
+        map: commentsTexture,
+        transparent: true,
+        side: THREE.DoubleSide,
+      });
+      commentsMesh = new THREE.Mesh(cpGeo, cpMat);
+      commentsMesh.position.set(1.55, 1.6, -2.0);
+      commentsMesh.rotation.y = -0.4;
+      commentsMesh.visible = false;
+      scene.add(commentsMesh);
+    }
+
+    // Laser pointer + reticle (all-red, upstream drawLaserPointer look:
+    // thin line from the ray origin plus a billboarded dot at the hit).
+    if (!laserPositions) {
+      try {
+        laserPositions = new Float32Array(6);
+      } catch (e) {
+        laserPositions = null;
+      }
+    }
+    if (!laserLine && laserPositions && THREE) {
+      const laserGeo = new THREE.BufferGeometry();
+      laserGeo.setAttribute('position', new THREE.BufferAttribute(laserPositions, 3));
+      const laserMat = new THREE.LineBasicMaterial({
+        color: 0xff2a1a,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+      });
+      laserLine = new THREE.Line(laserGeo, laserMat);
+      laserLine.frustumCulled = false;
+      laserLine.renderOrder = 999;
+      laserLine.visible = false;
+      scene.add(laserLine);
+    }
+    if (!reticleTexture && typeof document !== 'undefined' && THREE) {
+      try {
+        const rc = document.createElement('canvas');
+        rc.width = 64;
+        rc.height = 64;
+        const rx = rc.getContext('2d');
+        if (rx) {
+          const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
+          rg.addColorStop(0, '#ffffff');
+          rg.addColorStop(0.25, '#ff2a1a');
+          rg.addColorStop(0.6, 'rgba(255,42,26,0.55)');
+          rg.addColorStop(1, 'rgba(255,42,26,0)');
+          rx.fillStyle = rg;
+          rx.fillRect(0, 0, 64, 64);
+          rx.strokeStyle = '#ff2a1a';
+          rx.lineWidth = 3;
+          rx.beginPath();
+          rx.arc(32, 32, 20, 0, Math.PI * 2);
+          rx.stroke();
+          rx.fillStyle = '#ffffff';
+          rx.beginPath();
+          rx.arc(32, 32, 5, 0, Math.PI * 2);
+          rx.fill();
+          reticleTexture = new THREE.CanvasTexture(rc);
+        }
+      } catch (e) {
+        reticleTexture = null;
+      }
+    }
+    if (!reticleMesh && reticleTexture) {
+      const reticleMat = new THREE.MeshBasicMaterial({
+        map: reticleTexture,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      reticleMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), reticleMat);
+      reticleMesh.renderOrder = 1000;
+      reticleMesh.visible = false;
+      scene.add(reticleMesh);
+    }
+
+    // Starfield Points
+    if (!starfieldPoints) {
+      const starGeo = new THREE.BufferGeometry();
+      const starCount = 1500;
+      const starPositions = new Float32Array(starCount * 3);
+      for (let i = 0; i < starCount; i++) {
+        const u = Math.random();
+        const v = Math.random();
+        const th = u * 2 * Math.PI;
+        const ph = Math.acos(2 * v - 1);
+        const r = 25 + Math.random() * 15;
+        starPositions[i * 3] = r * Math.sin(ph) * Math.cos(th);
+        starPositions[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
+        starPositions[i * 3 + 2] = r * Math.cos(ph);
+      }
+      starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+      const starMat = new THREE.PointsMaterial({ color: 0x99ccff, size: 0.08, transparent: true, opacity: 0.8 });
+      starfieldPoints = new THREE.Points(starGeo, starMat);
+      scene.add(starfieldPoints);
+    }
+
+    // Earth Subsystem — textured holographic globe (upstream visual parity):
+    // dark equirect base map + painted heat zones, 3D pulsing pins at exact
+    // location vectors, atmospheric rim, label + hover-preview billboards.
+    if (!earthMapCanvas && typeof document !== 'undefined') {
+      try {
+        earthMapCanvas = document.createElement('canvas');
+        earthMapCanvas.width = EARTH_MAP_W;
+        earthMapCanvas.height = EARTH_MAP_H;
+        earthMapCtx = earthMapCanvas.getContext('2d');
+      } catch (e) {
+        earthMapCanvas = null;
+        earthMapCtx = null;
+      }
+    }
+    if (!earthMapTexture && earthMapCanvas && THREE) {
+      earthMapTexture = new THREE.CanvasTexture(earthMapCanvas);
+      try { if (THREE.SRGBColorSpace !== undefined) earthMapTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+      try {
+        // Compensate the SphereGeometry UV seam (see earthZoneUV): shift
+        // the texture +90° so standard-equirect texels land on the matching
+        // geographic directions. Repeat wrap is mandatory — Clamp would
+        // smear the dateline edge.
+        if (THREE.RepeatWrapping !== undefined) earthMapTexture.wrapS = THREE.RepeatWrapping;
+        earthMapTexture.offset.x = 0.25;
+      } catch (e) {}
+      earthMapDirty = true;
+    }
+    // Kick off the Natural Earth photo re-style (async; fallback paints now).
+    loadEarthBasePhoto();
+    if (!earthGroup) {
+      earthGroup = new THREE.Group();
+      earthGroup.position.set(earthCenter.x, earthCenter.y, earthCenter.z);
+
+      const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 48, 32);
+      const earthMat = new THREE.MeshBasicMaterial({
+        map: earthMapTexture || null,
+        color: earthMapTexture ? 0xffffff : 0x0d2a3f,
+      });
+      earthMesh = new THREE.Mesh(earthGeo, earthMat);
+      earthGroup.add(earthMesh);
+
+      earthPinsGroup = new THREE.Group();
+      earthMesh.add(earthPinsGroup);
+      rebuildEarthPins();
+
+      // NOTE: no platform deck under the globe. An early port added a dark
+      // truncated cone here, but in-headset it read as a panel slicing the
+      // earth into a hemisphere, so it was removed per owner request. The
+      // globe floats free against the starfield.
+
+      if (!earthLabelCanvas && typeof document !== 'undefined') {
+        try {
+          earthLabelCanvas = document.createElement('canvas');
+          earthLabelCanvas.width = 640;
+          earthLabelCanvas.height = 112;
+          earthLabelCtx = earthLabelCanvas.getContext('2d');
+        } catch (e) {
+          earthLabelCanvas = null;
+          earthLabelCtx = null;
+        }
+      }
+      if (!earthLabelTexture && earthLabelCanvas && THREE) {
+        earthLabelTexture = new THREE.CanvasTexture(earthLabelCanvas);
+        try { if (THREE.SRGBColorSpace !== undefined) earthLabelTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+      }
+      if (!earthLabelMesh && earthLabelTexture) {
+        const labelMat = new THREE.MeshBasicMaterial({
+          map: earthLabelTexture,
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        earthLabelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.15), labelMat);
+        earthLabelMesh.position.set(0, EARTH_RADIUS + 0.28, 0);
+        earthGroup.add(earthLabelMesh);
+        lastEarthLabelKey = '';
+      }
+
+      if (!earthPreviewCanvas && typeof document !== 'undefined') {
+        try {
+          earthPreviewCanvas = document.createElement('canvas');
+          earthPreviewCanvas.width = 512;
+          earthPreviewCanvas.height = 512;
+          earthPreviewCtx = earthPreviewCanvas.getContext('2d');
+        } catch (e) {
+          earthPreviewCanvas = null;
+          earthPreviewCtx = null;
+        }
+      }
+      if (!earthPreviewTexture && earthPreviewCanvas && THREE) {
+        earthPreviewTexture = new THREE.CanvasTexture(earthPreviewCanvas);
+        try { if (THREE.SRGBColorSpace !== undefined) earthPreviewTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+      }
+      if (!earthPreviewMesh && earthPreviewTexture) {
+        const pvMat = new THREE.MeshBasicMaterial({
+          map: earthPreviewTexture,
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        earthPreviewMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.7), pvMat);
+        earthPreviewMesh.position.set(0.94, 0.17, 0);
+        earthPreviewMesh.visible = false;
+        earthGroup.add(earthPreviewMesh);
+      }
+
+      earthGroup.visible = (sceneMode === 'earth');
+      scene.add(earthGroup);
+      earthResourcesReady = true;
+    }
+
+    applySceneVisibility();
+    return renderer;
   }
 
+  // ─── Texture Blitting ───────────────────────────────────────────────
+  // Uploads go through THREE.CanvasTexture (vrProxyCanvas → videoTexture).
+  // The old raw-WebGL build called gl.texImage2D directly; doing that here
+  // with hand-rolled args would corrupt Three's GL state tracking, so the
+  // raw calls were removed. Uploads are gated (new frame / new visual /
+  // time moved) instead of re-uploading 16 MiB every tick.
+  // `lastUploadedSource` mirrors the upload for the Node test harness,
+  // which previously spied on mock gl.texImage2D.
+  let lastUploadedSource = null;
+  let pendingClearedFor = '';
 
-  // ─── Video Frame Tracking ───────────────────────────────────────────
+  function visualSourceSignature(source) {
+    return String(source.kind || '') + '|' + String(source.version || '');
+  }
 
+  function shouldUploadVisual(source) {
+    if (!source || !source.element) return false;
+    const sig = visualSourceSignature(source);
+    const visualChanged = source.kind !== lastVisualKind ||
+      sig !== lastVisualVersion ||
+      source.element !== lastVisualElement;
+    if (visualChanged) return true;
+    if (source.kind === 'video') {
+      if (hasNewVideoFrame) return true;
+      if (Number(source.currentTime) !== Number(lastVideoTime)) return true;
+      return false;
+    }
+    // Static cards / images only re-upload when something changed.
+    return false;
+  }
+
+  function uploadVideoFrame(force) {
+    const source = getVisualSource();
+    if (!vrProxyCtx || !source.element) return false;
+    if (!force && !shouldUploadVisual(source)) return false;
+    try {
+      if (source.kind === 'static-card' || source.kind === 'image') {
+        // Trust the caller's ready flag: a genuinely incomplete image
+        // surfaces as a drawImage exception below (→ false, retried next
+        // frame). Refusing here would stall mock/test elements that carry
+        // no complete/naturalWidth signals.
+        if (source.ready === false && !force) return false;
+        vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        try {
+          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        } catch (drawErr) {
+          return false;
+        }
+      } else if (source.element.readyState >= 2) {
+        try {
+          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        } catch (drawErr) {
+          return false;
+        }
+      } else {
+        return false;
+      }
+      if (videoTexture) videoTexture.needsUpdate = true;
+      lastUploadedSource = source.element;
+      lastVisualKind = source.kind;
+      lastVisualVersion = visualSourceSignature(source);
+      lastVisualElement = source.element;
+      if (source.kind === 'video') lastVideoTime = Number(source.currentTime) || 0;
+      hasNewVideoFrame = false;
+      pendingClearedFor = '';
+      renderStats.videoUploads += 1;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function clearPendingTexture() {
+    const source = getVisualSource();
+    const sig = visualSourceSignature(source);
+    // Clear once per pending visual (old clearPendingVisual2D semantics);
+    // clearing every frame while a video loads causes black flicker.
+    if (pendingClearedFor === sig) return;
+    pendingClearedFor = sig;
+    if (vrProxyCtx) {
+      try {
+        vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        vrProxyCtx.fillStyle = '#000';
+        vrProxyCtx.fillRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+      } catch (e) {}
+    }
+    if (videoTexture) videoTexture.needsUpdate = true;
+    lastUploadedSource = '__cleared__';
+  }
+
+  // Samples the playing video at 8x8 and steers the ambient glow color
+  // (upstream updateAmbilightColor: average, enhance, lerp 0.08/frame).
+  function updateGlowColor(time, intervalMs) {
+    if (!ambilightMesh || !glowProbeCtx) return;
+    if (time - lastGlowSample < intervalMs) return;
+    lastGlowSample = time;
+    const source = getVisualSource();
+    if (!source.ready || source.kind !== 'video' || source.paused || !source.element) return;
+    try {
+      glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
+      const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+      const n = (d.length / 4) * 255;
+      glowTarget = [
+        Math.min(1, (r / n) * 1.35 + 0.03),
+        Math.min(1, (g / n) * 1.35 + 0.05),
+        Math.min(1, (b / n) * 1.45 + 0.09),
+      ];
+    } catch (e) {}
+  }
+
+  function applyGlowColor() {
+    if (!ambilightMesh || !ambilightMesh.material || !ambilightMesh.material.color) return;
+    glowColor[0] += (glowTarget[0] - glowColor[0]) * 0.08;
+    glowColor[1] += (glowTarget[1] - glowColor[1]) * 0.08;
+    glowColor[2] += (glowTarget[2] - glowColor[2]) * 0.08;
+    try {
+      ambilightMesh.material.color.setRGB(glowColor[0], glowColor[1], glowColor[2]);
+    } catch (e) {}
+  }
+
+  function updateUiTextures() {
+    const ui = getUICanvas();
+    if (!ui) return;
+    const source = getVisualSource();
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
+    }
+
+    if (controlsCtx) {
+      ui.renderControlsCanvas(controlsCtx, {
+        source,
+        itemState,
+        packMode: isPackExperience(),
+        packContext: getPackContext(),
+        playlist: callbacks.getPlaylist ? callbacks.getPlaylist() : [],
+        idx: callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0,
+        comments: callbacks.getComments ? callbacks.getComments() : [],
+        hoveredButton,
+        pressedButton,
+        isCurved,
+        curvatureMode,
+        lockToViewer,
+        sceneMode,
+        notificationText,
+        notificationUntil,
+        callbacks,
+      });
+      if (controlsTexture) controlsTexture.needsUpdate = true;
+    }
+
+    if (commentsCtx && commentsPanelVisible) {
+      ui.renderCommentsPanelCanvas(commentsCtx, {
+        comments: callbacks.getComments ? callbacks.getComments() : [],
+        cPanelTab,
+        cPanelScrollY,
+        cPanelHover,
+        cPanelHighlightId,
+        user: callbacks.getCurrentUser ? callbacks.getCurrentUser() : null,
+        currentTime: source.currentTime,
+      });
+      if (commentsTexture) commentsTexture.needsUpdate = true;
+    }
+  }
+
+  // ─── Telemetry Event Dispatcher ─────────────────────────────────────
+  function emitPreviewState() {
+    if (typeof window === 'undefined') return;
+    const state = getPreviewState();
+    try {
+      window.dispatchEvent(new CustomEvent('echo:webxr-preview-state', { detail: state }));
+    } catch (e) {}
+  }
+
+  function getPreviewState() {
+    return {
+      running: !!previewRunning,
+      cameraMode: previewCameraMode,
+      sceneMode,
+      stereo: stereoMode,
+      reducedMotion,
+      curvatureMode: getCurvatureMode(),
+      lockToViewer,
+      controlsVisible,
+      renderStats: { ...renderStats },
+      earthState: getEarthState(),
+    };
+  }
+
+  // ─── Frame Rendering Loop ───────────────────────────────────────────
+  let vrLastUiUploadT = -1;
+  let lastRenderError = '';
+  let renderErrorWarned = false;
+
+  function renderStereoPair() {
+    const cssW = (previewCanvas && previewCanvas.clientWidth) || 960;
+    const cssH = (previewCanvas && previewCanvas.clientHeight) || 540;
+    const halfW = cssW / 2;
+    renderer.setScissorTest(true);
+    camera.position.x -= 0.032;
+    camera.updateMatrixWorld();
+    renderer.setViewport(0, 0, halfW, cssH);
+    renderer.setScissor(0, 0, halfW, cssH);
+    renderer.render(scene, camera);
+    camera.position.x += 0.064;
+    camera.updateMatrixWorld();
+    renderer.setViewport(halfW, 0, cssW - halfW, cssH);
+    renderer.setScissor(halfW, 0, cssW - halfW, cssH);
+    renderer.render(scene, camera);
+    camera.position.x -= 0.032;
+    camera.updateMatrixWorld();
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, cssW, cssH);
+  }
+
+  function onPreviewFrame(time) {
+    if (!previewRunning) return;
+
+    updatePreviewSize(previewCanvas);
+    applySceneVisibility();
+
+    if (sceneMode === 'reels') {
+      const source = getVisualSource();
+      if (source && source.ready === false) {
+        clearPendingTexture();
+      } else {
+        uploadVideoFrame();
+      }
+      updateGlowColor(time, 120);
+      applyGlowColor();
+      renderStats.earthDrawCalls = 0;
+      renderStats.reelDrawCalls = 1;
+    } else if (sceneMode === 'earth') {
+      advanceEarthSpin(time);
+      updateEarthDressing(time);
+      renderStats.earthDrawCalls = 1;
+      renderStats.starDrawCalls = 1;
+      renderStats.reelDrawCalls = 0;
+      if (earthPreviewLocationIndex >= 0 && earthPreviewItems.length > 0) {
+        renderStats.earthPreviewUploads = (renderStats.earthPreviewUploads || 0) + 1;
+      }
+    }
+
+    // UI canvases redraw at ~10 Hz (old VR_UI_MIN_INTERVAL semantics);
+    // every-frame 1024×384 redraws stall software GL.
+    if (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= 100) {
+      vrLastUiUploadT = time;
+      updateUiTextures();
+    }
+
+    if (previewCameraMode === 'orbit') {
+      if (orbitControls) orbitControls.update();
+      else applyPreviewCamera();
+    } else {
+      applyPreviewCamera();
+    }
+    layoutControlsDock();
+    updatePreviewLaser();
+
+    if (renderer && scene && camera) {
+      if (stereoMode && previewCanvas) {
+        try {
+          renderStereoPair();
+        } catch (e) {
+          lastRenderError = String((e && e.message) || e);
+          if (!renderErrorWarned) {
+            renderErrorWarned = true;
+            console.warn('[WebXRVR] Stereo preview render failed:', e);
+          }
+          try {
+            renderer.setScissorTest(false);
+            renderer.render(scene, camera);
+          } catch (e2) {
+            lastRenderError = String((e2 && e2.message) || e2);
+          }
+        }
+      } else {
+        try {
+          renderer.setScissorTest(false);
+          renderer.render(scene, camera);
+        } catch (e) {
+          lastRenderError = String((e && e.message) || e);
+          if (!renderErrorWarned) {
+            renderErrorWarned = true;
+            console.warn('[WebXRVR] Preview render failed:', e);
+          }
+        }
+      }
+    }
+
+    // Throttle telemetry event dispatches (every 250ms)
+    if (time - lastPreviewEmitTime >= 250) {
+      lastPreviewEmitTime = time;
+      emitPreviewState();
+    }
+
+    if (typeof window !== 'undefined' && previewRunning) {
+      previewAnimId = window.requestAnimationFrame(onPreviewFrame);
+    }
+  }
+
+  // ─── Preview Management ─────────────────────────────────────────────
+  function ensureOrbitControls(canvas) {
+    ensureThree();
+    if (!THREE || !THREE.OrbitControls || orbitControls || !camera) return orbitControls;
+    try {
+      const hasDocListener = typeof document !== 'undefined' && typeof document.addEventListener === 'function';
+      const hasCanvasOwner = canvas && canvas.ownerDocument && typeof canvas.ownerDocument.addEventListener === 'function';
+      if (!hasDocListener && !hasCanvasOwner) return null;
+      orbitControls = new THREE.OrbitControls(camera, canvas);
+      orbitControls.enableDamping = true;
+      orbitControls.dampingFactor = 0.05;
+      orbitControls.enabled = (previewCameraMode === 'orbit');
+    } catch (e) {
+      orbitControls = null;
+    }
+    return orbitControls;
+  }
+
+  // Raycasts a client-pixel pointer into the shared scene. Restores the old
+  // preview hover behavior (controls dock UV hit → button index, earth
+  // heat-zone hit) that the first shrink dropped.
+  function previewRayAt(clientX, clientY) {
+    if (!previewCanvas || !camera || !THREE) return null;
+    let rect = null;
+    try {
+      rect = previewCanvas.getBoundingClientRect ? previewCanvas.getBoundingClientRect() : null;
+    } catch (e) { rect = null; }
+    const w = (rect && rect.width) || previewCanvas.clientWidth || 960;
+    const h = (rect && rect.height) || previewCanvas.clientHeight || 540;
+    if (!raycaster) ensureThree();
+    if (!raycaster) return null;
+    const ndc = new THREE.Vector2(
+      (((clientX - (rect ? rect.left : 0)) / Math.max(1, w)) * 2) - 1,
+      -(((clientY - (rect ? rect.top : 0)) / Math.max(1, h)) * 2) + 1
+    );
+    try {
+      raycaster.setFromCamera(ndc, camera);
+      return { origin: raycaster.ray.origin.clone(), direction: raycaster.ray.direction.clone() };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function updatePreviewHover(clientX, clientY) {
+    const ray = previewRayAt(clientX, clientY);
+    if (!ray) return null;
+    // Cache for the persistent preview head-ray (Workstream D).
+    previewHoverRay = { origin: ray.origin, direction: ray.direction };
+    let controlIndex = -1;
+    if (controlsVisible && controlsMesh && controlsMesh.visible !== false && controlsCanvas) {
+      try {
+        raycaster.set(ray.origin, ray.direction);
+        const hits = raycaster.intersectObject(controlsMesh, false);
+        if (hits.length > 0 && hits[0].uv) {
+          controlIndex = controlIndexFromUV(hits[0].uv);
+        }
+      } catch (e) {}
+    }
+    hoveredButton = controlIndex;
+    if (sceneMode === 'earth' && controlIndex < 0) {
+      const hit = hitTestEarth(ray.origin, ray.direction);
+      setEarthHoveredIndex(hit.hit ? hit.zoneIndex : -1);
+      return { ray, hit, controlIndex };
+    }
+    return { ray, hit: null, controlIndex };
+  }
+
+  // Maps a controls-dock UV hit to a button index (shared by preview
+  // hover, XR hover, and XR select handling).
+  function controlIndexFromUV(uv) {
+    if (!uv) return -1;
+    const ui = getUICanvas();
+    if (!ui) return -1;
+    const w = controlsCanvas ? controlsCanvas.width : 1024;
+    const h = controlsCanvas ? controlsCanvas.height : 384;
+    const cx = uv.x * w;
+    const cy = (1 - uv.y) * h;
+    const source = getVisualSource();
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
+    }
+    try {
+      return ui.resolveControlsHit(cx, cy, {
+        source,
+        itemState,
+        sceneMode,
+        packMode: isPackExperience(),
+      });
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  // Shared per-frame laser updater (both loops). Raycast order mirrors
+  // upstream: reels → dock, comments panel, screen; earth → dock, globe.
+  // Returns the hovered dock button index (or -1).
+  function updateLaserPointer(origin, direction) {
+    if (!laserLine || !reticleMesh || !origin || !direction || !raycaster) return -1;
+    let dist = 3;
+    let hovering = -1;
+    let overScreen = false;
+    try {
+      raycaster.set(origin, direction);
+      if (sceneMode === 'earth') {
+        if (controlsVisible && controlsMesh && controlsMesh.visible !== false) {
+          const hits = raycaster.intersectObject(controlsMesh, false);
+          if (hits.length > 0) {
+            dist = hits[0].distance;
+            hovering = hits[0].uv ? controlIndexFromUV(hits[0].uv) : -1;
+          }
+        }
+        if (hovering < 0 && earthMesh && earthGroup && earthGroup.visible !== false) {
+          const hit = hitTestEarth(origin, direction);
+          if (hit.hit) {
+            dist = hit.dist;
+            hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
+          }
+        }
+      } else {
+        if (controlsVisible && controlsMesh && controlsMesh.visible !== false) {
+          const hits = raycaster.intersectObject(controlsMesh, false);
+          if (hits.length > 0) {
+            dist = hits[0].distance;
+            hovering = hits[0].uv ? controlIndexFromUV(hits[0].uv) : -1;
+          }
+        }
+        if (hovering < 0 && commentsMesh && commentsMesh.visible !== false) {
+          const hits = raycaster.intersectObject(commentsMesh, false);
+          if (hits.length > 0) {
+            dist = hits[0].distance;
+            hovering = -2;
+          }
+        }
+        if (hovering < 0 && screenMesh && screenMesh.visible !== false) {
+          const hits = raycaster.intersectObject(screenMesh, false);
+          if (hits.length > 0) {
+            dist = hits[0].distance;
+            overScreen = true;
+          }
+        }
+      }
+    } catch (e) {}
+    const isHover = hovering >= 0 || overScreen || hovering === -2;
+    dist = Math.max(0.2, Math.min(30, dist));
+    try {
+      laserPositions[0] = origin.x;
+      laserPositions[1] = origin.y;
+      laserPositions[2] = origin.z;
+      laserPositions[3] = origin.x + direction.x * dist;
+      laserPositions[4] = origin.y + direction.y * dist;
+      laserPositions[5] = origin.z + direction.z * dist;
+      laserLine.geometry.attributes.position.needsUpdate = true;
+      laserLine.material.opacity = isHover ? 1.0 : 0.7;
+      reticleMesh.position.set(
+        origin.x + direction.x * dist,
+        origin.y + direction.y * dist,
+        origin.z + direction.z * dist
+      );
+      if (camera) {
+        try { reticleMesh.quaternion.copy(camera.quaternion); } catch (e2) {}
+      }
+      const s = isHover ? 0.07 : 0.045;
+      reticleMesh.scale.set(s, s, 1);
+      reticleMesh.material.opacity = isHover ? 1.0 : 0.85;
+    } catch (e) {}
+    return hovering;
+  }
+
+  // Persistent preview head-ray: follows the cached mouse hover ray, else
+  // fires from the head straight ahead (always visible per requirement).
+  function updatePreviewLaser() {
+    let origin = null;
+    let direction = null;
+    if (previewHoverRay && previewHoverRay.origin && previewHoverRay.direction) {
+      origin = previewHoverRay.origin;
+      direction = previewHoverRay.direction;
+    } else if (camera && THREE) {
+      origin = camera.position;
+      try {
+        if (!scratchVec2) scratchVec2 = new THREE.Vector3();
+        direction = scratchVec2.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize().clone();
+      } catch (e) {
+        direction = null;
+      }
+    }
+    if (origin && direction) {
+      const hovered = updateLaserPointer(origin, direction);
+      if (hovered >= 0) hoveredButton = hovered;
+    }
+  }
+
+  // XR per-frame: first tracked controller drives the shared laser and
+  // dock hover highlight (upstream processInput, single active ray).
+  function updateControllerLasers() {
+    if (!renderer || !raycaster || !THREE || vrControllers.length === 0) return;
+    try {
+      if (!scratchMat4) scratchMat4 = new THREE.Matrix4();
+      if (!scratchVec) scratchVec = new THREE.Vector3();
+      if (!scratchVec2) scratchVec2 = new THREE.Vector3();
+      for (let i = 0; i < vrControllers.length; i++) {
+        const controller = vrControllers[i];
+        if (!controller) continue;
+        scratchMat4.identity().extractRotation(controller.matrixWorld);
+        scratchVec.setFromMatrixPosition(controller.matrixWorld);
+        scratchVec2.set(0, 0, -1).applyMatrix4(scratchMat4).normalize();
+        const hovered = updateLaserPointer(scratchVec, scratchVec2);
+        hoveredButton = hovered >= 0 ? hovered : -1;
+        break; // single shared laser: first controller wins
+      }
+    } catch (e) {}
+  }
+
+  function toggleControlsVisibility() {
+    controlsVisible = !controlsVisible;
+    if (controlsMesh) controlsMesh.visible = controlsVisible;
+    vrLastUiUploadT = -1;
+    emitPreviewState();
+    return controlsVisible;
+  }
+
+  function installPreviewListeners() {
+    if (!previewCanvas || previewListeners) return;
+    if (typeof previewCanvas.addEventListener !== 'function') return;
+    const onPointerDown = function (event) {
+      if (event.button !== undefined && event.button !== 0) return;
+      if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+      try { if (previewCanvas.focus) previewCanvas.focus(); } catch (e) {}
+      try { if (previewCanvas.setPointerCapture) previewCanvas.setPointerCapture(event.pointerId); } catch (e) {}
+      const target = updatePreviewHover(event.clientX, event.clientY);
+      const source = 'preview-pointer-' + (event.pointerId === undefined ? 'mouse' : event.pointerId);
+      previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
+      if (target && target.controlIndex >= 0) {
+        executeControlButton(target.controlIndex);
+        vrLastUiUploadT = -1;
+        previewPointer.control = true;
+        return;
+      }
+      if (sceneMode === 'earth' && target && target.hit) {
+        beginEarthDrag(source, target.hit);
+        previewPointer.earth = true;
+      }
+    };
+    const onPointerMove = function (event) {
+      const target = updatePreviewHover(event.clientX, event.clientY);
+      if (!previewPointer || previewPointer.id !== event.pointerId) return;
+      const dx = event.clientX - previewPointer.x;
+      const dy = event.clientY - previewPointer.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) previewPointer.moved = true;
+      previewPointer.x = event.clientX;
+      previewPointer.y = event.clientY;
+      if (previewPointer.control) return;
+      if (sceneMode === 'earth') {
+        if (previewPointer.earth && target && target.hit && target.hit.hit && target.hit.local) {
+          updateEarthDrag(target.hit.local);
+        }
+        return;
+      }
+      // In orbit mode OrbitControls owns the drag; otherwise custom yaw/pitch.
+      if (previewCameraMode === 'orbit' && orbitControls && orbitControls.enabled) return;
+      const sensitivity = 0.006;
+      if (previewCameraMode === 'orbit') {
+        previewOrbitYaw -= dx * sensitivity;
+        previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
+      } else {
+        previewYaw -= dx * sensitivity;
+        previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
+      }
+      applyPreviewCamera();
+    };
+    const finishPointer = function (event) {
+      if (!previewPointer || previewPointer.id !== event.pointerId) return;
+      const target = updatePreviewHover(event.clientX, event.clientY);
+      if (sceneMode === 'earth' && previewPointer.earth) {
+        endEarthDrag(previewPointer.source, target && target.hit);
+      } else if (!previewPointer.control && !previewPointer.moved && target) {
+        if (target.hit && target.hit.hit) {
+          if (callbacks.onTogglePlay) { try { callbacks.onTogglePlay(); } catch (e) {} }
+        } else if (target.controlIndex < 0 && raycaster && screenMesh && screenMesh.visible !== false) {
+          // Tap on the video screen toggles playback (static pack cards
+          // route through the pack select handler first).
+          let screenHit = null;
+          try {
+            const ray = previewRayAt(event.clientX, event.clientY);
+            if (ray) {
+              raycaster.set(ray.origin, ray.direction);
+              const hits = raycaster.intersectObject(screenMesh, false);
+              if (hits.length > 0) screenHit = hits[0];
+            }
+          } catch (e) {}
+          if (screenHit) {
+            const source = getVisualSource();
+            let handled = false;
+            if (source.kind === 'static-card' && callbacks.onMainScreenSelect && screenHit.uv) {
+              try {
+                handled = callbacks.onMainScreenSelect({
+                  u: screenHit.uv.x,
+                  v: 1 - screenHit.uv.y,
+                });
+              } catch (e) { handled = false; }
+            }
+            if (!handled && callbacks.onTogglePlay) {
+              try { callbacks.onTogglePlay(); } catch (e) {}
+            }
+          } else {
+            toggleControlsVisibility();
+          }
+        } else if (target.controlIndex < 0) {
+          toggleControlsVisibility();
+        }
+      }
+      pressedButton = -1;
+      vrLastUiUploadT = -1;
+      try { if (previewCanvas.releasePointerCapture) previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
+      previewPointer = null;
+    };
+    const onWheel = function (event) {
+      if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+      if (sceneMode === 'earth') {
+        rotateEarth((event.deltaX || 0) * 0.0025, (event.deltaY || 0) * 0.65 * 0.002);
+        return;
+      }
+      if (previewCameraMode === 'orbit') {
+        previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + (event.deltaY || 0) * 0.006));
+        applyPreviewCamera();
+      }
+    };
+    const onPointerLeave = function () {
+      if (previewPointer) return;
+      hoveredButton = -1;
+      if (sceneMode === 'earth') setEarthHoveredIndex(-1);
+    };
+    const onContextMenu = function (event) { if (event.preventDefault) event.preventDefault(); };
+    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu };
+    try { previewCanvas.style.touchAction = 'none'; } catch (e) {}
+    previewCanvas.addEventListener('pointerdown', onPointerDown);
+    previewCanvas.addEventListener('pointermove', onPointerMove);
+    previewCanvas.addEventListener('pointerup', finishPointer);
+    previewCanvas.addEventListener('pointercancel', finishPointer);
+    previewCanvas.addEventListener('pointerleave', onPointerLeave);
+    previewCanvas.addEventListener('wheel', onWheel, { passive: false });
+    previewCanvas.addEventListener('contextmenu', onContextMenu);
+  }
+
+  function removePreviewListeners() {
+    if (!previewCanvas || !previewListeners) {
+      previewListeners = null;
+      return;
+    }
+    const listeners = previewListeners;
+    try {
+      previewCanvas.removeEventListener('pointerdown', listeners.onPointerDown);
+      previewCanvas.removeEventListener('pointermove', listeners.onPointerMove);
+      previewCanvas.removeEventListener('pointerup', listeners.finishPointer);
+      previewCanvas.removeEventListener('pointercancel', listeners.finishPointer);
+      previewCanvas.removeEventListener('pointerleave', listeners.onPointerLeave);
+      previewCanvas.removeEventListener('wheel', listeners.onWheel);
+      previewCanvas.removeEventListener('contextmenu', listeners.onContextMenu);
+    } catch (e) {}
+    previewListeners = null;
+  }
   function stopVideoFrameTracking() {
     videoFrameTrackingGeneration += 1;
     if (videoElement && videoFrameCallbackId !== null &&
@@ -3247,1424 +2008,99 @@ window.WebXRVR = window.WebXRVR || (function () {
     videoFrameCallbackId = videoElement.requestVideoFrameCallback(onFrame);
   }
 
-  // Minimum sane stride for the current file: 4K masters start at 2 because a
-  // stride-1 4K upload (~100ms flush) can never fit an 11-14ms XR budget.
-  // Low-res files (720p/1080p/1280²) start at 1 → full frame rate.
-  function vrMinStride() {
-    const source = getVisualSource();
-    const w = source.kind === 'video' && source.element ? (source.element.videoWidth || 0) : 0;
-    if (w >= 3000) return 2;
-    return 1;
+  function startPreview(canvas, options = {}) {
+    if (!canvas || typeof canvas.getContext !== 'function') {
+      throw new Error('A canvas element is required for immersive preview.');
+    }
+    if (xrSession) {
+      throw new Error('Exit the immersive XR session before starting desktop preview.');
+    }
+    ensureThree();
+    if (!THREE) {
+      throw new Error('Three.js runtime did not load (three.min.js missing?).');
+    }
+    const opts = options || {};
+    // Tear down any previous preview so the singleton renderer/scene is
+    // rebuilt with fresh (non-disposed) textures — restarting on a disposed
+    // CanvasTexture rendered black.
+    if (previewRunning || renderer) stopPreview();
+
+    previewCanvas = canvas;
+    previewCameraMode = opts.cameraMode === 'orbit' ? 'orbit' : 'headset';
+    stereoMode = !!opts.stereo;
+    if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
+    controlsVisible = opts.showControls !== false;
+    previewYaw = 0;
+    previewPitch = 0;
+    previewOrbitYaw = 0;
+    previewOrbitPitch = -0.08;
+    previewOrbitDistance = 4.8;
+    renderStats.earthDrawCalls = 0;
+    renderStats.reelDrawCalls = 0;
+    renderStats.starDrawCalls = 0;
+    renderStats.videoUploads = 0;
+    renderStats.earthPreviewUploads = 0;
+    lastVisualKind = '';
+    lastVisualVersion = '';
+    lastVisualElement = null;
+    lastVideoTime = -1;
+    lastUploadedSource = null;
+    pendingClearedFor = '';
+    hasNewVideoFrame = true;
+    vrLastUiUploadT = -1;
+    sceneMode = 'reels';
+
+    initThreeScene(canvas, opts.gl || null);
+    if (!renderer || !scene || !camera) {
+      throw new Error('WebGL context creation failed. Enable hardware acceleration (Chrome: Settings → System → Use graphics acceleration), disable --disable-gpu, and reload. Headless/software-GL browsers need SwiftShader (`--use-gl=swiftshader`).');
+    }
+
+    ensureOrbitControls(canvas);
+    applyPreviewCamera();
+    installPreviewListeners();
+    if (typeof window !== 'undefined' && previewResizeHandler === null &&
+        typeof window.addEventListener === 'function') {
+      previewResizeHandler = function () { updatePreviewSize(previewCanvas); };
+      window.addEventListener('resize', previewResizeHandler);
+    }
+
+    setupVideoFrameTracking();
+    previewRunning = true;
+    lockToViewer = previewCameraMode === 'headset' && !isPackExperience();
+    if (controlsMesh) controlsMesh.visible = controlsVisible;
+    if (opts.sceneMode === 'earth' && !isPackExperience()) {
+      setSceneMode('earth');
+    }
+    emitPreviewState();
+
+    if (typeof window !== 'undefined') {
+      previewAnimId = window.requestAnimationFrame(onPreviewFrame);
+    }
+
+    return getPreviewState();
   }
 
-  // ─── VR Telemetry: self-report XR frame timing + texture uploads ───
-  function _postDiag(time) {
-    if (_diagLastT !== null) {
-      const dt = time - _diagLastT;
-      _diagFrames++;
-      _diagDtMin = Math.min(_diagDtMin, dt);
-      _diagDtMax = Math.max(_diagDtMax, dt);
-      _diagDtSum += dt;
-      if (dt > 20) _diagOver20++;
-      if (dt > 14) _diagOver14++; // 72Hz budget is 13.9ms: 14-20ms frames miss
-                                  // vsync (flash) without tripping over20
+  function stopPreview() {
+    previewRunning = false;
+    if (typeof window !== 'undefined' && previewAnimId) {
+      window.cancelAnimationFrame(previewAnimId);
+      previewAnimId = null;
     }
-    _diagLastT = time;
-
-    if (!_diagForce && time - _diagLastPost < 1000) return; // throttle to ~1 Hz
-    _diagLastPost = time;
-    _diagForce = false;
-
-    const source = getVisualSource();
-    const mediaElement = source.kind === 'video' ? source.element : null;
-    const pq = (mediaElement && mediaElement.getVideoPlaybackQuality)
-      ? mediaElement.getVideoPlaybackQuality() : null;
-    const pqTotal = pq ? pq.totalVideoFrames : 0;
-    const pqDropped = pq ? pq.droppedVideoFrames : 0;
-    if (_diagLastPqTotal < 0) _diagLastPqTotal = pqTotal;
-    const newDecoded = Math.max(0, pqTotal - _diagLastPqTotal);
-    _diagLastPqTotal = pqTotal;
-
-    if (!_diagGLInfo && gl) {
-      try {
-        const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-        _diagGLInfo = {
-          renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
-          maxTex: gl.getParameter(gl.MAX_TEXTURE_SIZE),
-          glVersion: String(gl.getParameter(gl.VERSION)),
-          extOES: !!gl.getExtension('OES_texture_external'),
-          texTarget: videoTexMode,
-        };
-      } catch (e) { _diagGLInfo = { err: String(e) }; }
-    }
-
-    const n = Math.max(1, _diagFrames);
-    const payload = {
-      t_ms: Math.round(time),
-      xrFrames: _diagFrames,
-      dtMedMs: +((_diagDtSum / n)).toFixed(2),
-      dtMinMs: +(_diagDtMin === Infinity ? 0 : _diagDtMin).toFixed(2),
-      dtMaxMs: +(_diagDtMax).toFixed(2),
-      over20: _diagOver20,
-      over14: _diagOver14,
-      texUploads: _diagTexUploads,
-      uploadMaxMs: +_diagUploadMaxMs.toFixed(2),
-      drawMaxMs: +_diagDrawMaxMs.toFixed(2),
-      proxyW: vrProxyCanvas ? vrProxyCanvas.width : 0,
-      newDecoded: newDecoded,
-      pqTotal: pqTotal,
-      pqDropped: pqDropped,
-      texTarget: videoTexMode,
-      upStride: vrUploadStride,
-      visualKind: source.kind,
-      videoW: mediaElement ? mediaElement.videoWidth : 0,
-      videoH: mediaElement ? mediaElement.videoHeight : 0,
-      ct: +source.currentTime.toFixed(2),
-      ready: source.ready ? 1 : 0,
-      gl: _diagGLInfo,
-    };
-    try {
-      const body = JSON.stringify(payload);
-      // keepalive so the POST survives even if the tab is backgrounded mid-XR
-      fetch('/api/reels/diag', { method: 'POST', keepalive: true,
-        headers: { 'Content-Type': 'application/json' }, body }).catch(() => {});
-    } catch (e) {}
-
-    // reset window accumulators
-    _diagFrames = 0;
-    _diagDtMin = Infinity; _diagDtMax = 0; _diagDtSum = 0; _diagOver20 = 0; _diagOver14 = 0;
-    _diagTexUploads = 0;
-    _diagUploadMaxMs = 0;
-    _diagDrawMaxMs = 0;
-  }
-
-  // ─── WebGL Setup & Shaders ──────────────────────────────────────────
-
-  /**
-   * Multi-Side Concave Screen Shader
-   * Curvature modes:
-   *  1.0: Concave Hemisphere (3D Spherical Dome Cap - All sides wrap towards viewer from direct center)
-   *  2.0: Concave Square (Biaxial Pillow Curve - Symmetrical horizontal & vertical amphitheater curve)
-   *  0.0: Flat Screen
-   */
-  const VERT = `
-    attribute vec3 aPos;
-    attribute vec2 aUV;
-    varying vec2 vUV;
-    uniform mat4 uMVP;
-    uniform float uCurvatureMode;
-
-    const float ARC_ANGLE = 0.65;
-    const float R = 1.5385; // 1.0 / ARC_ANGLE
-
-    void main() {
-      vUV = aUV;
-      vec3 pos = aPos;
-
-      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
-        // Mode 1: Concave Hemisphere (Radial Spherical Dome)
-        // Direct center (0,0) is apex / focal center; all edges curve inward toward viewer (+Z)
-        // Uses true arc length so screen dimension is identical to square & flat modes
-        float r = length(aPos.xy);
-        if (r > 0.0001) {
-          float phi = r * ARC_ANGLE;
-          float rProj = R * sin(phi);
-          vec2 dir = aPos.xy / r;
-          pos.xy = dir * rProj;
-          pos.z = R * (1.0 - cos(phi));
-        }
-      } else if (uCurvatureMode > 1.5) {
-        // Mode 2: Concave Square (Biaxial Pillow Curve)
-        // All four sides curve inward while maintaining square boundary alignment
-        float angX = aPos.x * ARC_ANGLE;
-        float angY = aPos.y * ARC_ANGLE;
-        pos.x = R * sin(angX);
-        pos.y = R * sin(angY);
-        pos.z = R * (1.0 - cos(angX) * cos(angY));
-      }
-
-      gl_Position = uMVP * vec4(pos, 1.0);
-    }
-  `;
-
-  // WebGL2 (GLSL ES 3.00) variants — required because Quest's WebGL1 context
-  // does NOT expose OES_texture_external and forbids texSubImage2D from a video,
-  // so the zero-copy / in-place update paths need a WebGL2 context.
-  const VERT_V2 = `
-    #version 300 es
-    in vec3 aPos;
-    in vec2 aUV;
-    out vec2 vUV;
-    uniform mat4 uMVP;
-    uniform float uCurvatureMode;
-
-    const float ARC_ANGLE = 0.65;
-    const float R = 1.5385; // 1.0 / ARC_ANGLE
-
-    void main() {
-      vUV = aUV;
-      vec3 pos = aPos;
-
-      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
-        float r = length(aPos.xy);
-        if (r > 0.0001) {
-          float phi = r * ARC_ANGLE;
-          float rProj = R * sin(phi);
-          vec2 dir = aPos.xy / r;
-          pos.xy = dir * rProj;
-          pos.z = R * (1.0 - cos(phi));
-        }
-      } else if (uCurvatureMode > 1.5) {
-        float angX = aPos.x * ARC_ANGLE;
-        float angY = aPos.y * ARC_ANGLE;
-        pos.x = R * sin(angX);
-        pos.y = R * sin(angY);
-        pos.z = R * (1.0 - cos(angX) * cos(angY));
-      }
-
-      gl_Position = uMVP * vec4(pos, 1.0);
-    }
-  `;
-
-  const FRAG = `
-    precision mediump float;
-    varying vec2 vUV;
-    uniform sampler2D uTex;
-    uniform float uAlpha;
-    uniform float uStereo;
-    uniform float uEyeOff;
-    void main() {
-      vec2 uv = vUV;
-      // SBS stereo: sample only this eye's half of the source frame
-      if (uStereo > 0.5) {
-        uv.x = uv.x * 0.5 + uEyeOff;
-      }
-      vec4 c = texture2D(uTex, uv);
-      gl_FragColor = vec4(c.rgb, c.a * uAlpha);
-    }
-  `;
-
-  const FRAG_V2 = `
-    #version 300 es
-    precision mediump float;
-    in vec2 vUV;
-    uniform sampler2D uTex;
-    uniform float uAlpha;
-    uniform float uStereo;
-    uniform float uEyeOff;
-    out vec4 fragColor;
-    void main() {
-      vec2 uv = vUV;
-      // SBS stereo: sample only this eye's half of the source frame
-      if (uStereo > 0.5) {
-        uv.x = uv.x * 0.5 + uEyeOff;
-      }
-      vec4 c = texture(uTex, uv);
-      fragColor = vec4(c.rgb, c.a * uAlpha);
-    }
-  `;
-
-  // External-texture variant of FRAG for the zero-copy video screen. Same
-  // geometry + SBS stereo math, but samples the decoder surface directly via
-  // samplerExternalOES (TEXTURE_EXTERNAL_OES) — no texImage2D re-spec.
-  const EXT_FRAG = `
-    #extension GL_OES_EGL_image_external : require
-    precision mediump float;
-    precision mediump samplerExternalOES;
-    varying vec2 vUV;
-    uniform samplerExternalOES uTex;
-    uniform float uAlpha;
-    uniform float uStereo;
-    uniform float uEyeOff;
-    void main() {
-      vec2 uv = vUV;
-      // SBS stereo: sample only this eye's half of the source frame
-      if (uStereo > 0.5) {
-        uv.x = uv.x * 0.5 + uEyeOff;
-      }
-      vec4 c = texture2D(uTex, uv);
-      gl_FragColor = vec4(c.rgb, c.a * uAlpha);
-    }
-  `;
-
-  const EXT_FRAG_V2 = `
-    #version 300 es
-    #extension GL_OES_EGL_image_external : require
-    precision mediump float;
-    precision mediump samplerExternalOES;
-    in vec2 vUV;
-    uniform samplerExternalOES uTex;
-    uniform float uAlpha;
-    uniform float uStereo;
-    uniform float uEyeOff;
-    out vec4 fragColor;
-    void main() {
-      vec2 uv = vUV;
-      // SBS stereo: sample only this eye's half of the source frame
-      if (uStereo > 0.5) {
-        uv.x = uv.x * 0.5 + uEyeOff;
-      }
-      vec4 c = texture(uTex, uv);
-      fragColor = vec4(c.rgb, c.a * uAlpha);
-    }
-  `;
-
-  /**
-   * Celestial Starfield Shader with Organic Breathing Oscillation
-   */
-  const STAR_VERT = `
-    attribute vec3 aPos;
-    attribute vec3 aData; // x: size, y: phase, z: colorType
-    uniform mat4 uVP;
-    uniform vec3 uHeadPos;
-    uniform float uTime;
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main() {
-      // Starfield centered around current viewer head position so it feels at infinity
-      vec3 worldPos = aPos + uHeadPos;
-      gl_Position = uVP * vec4(worldPos, 1.0);
-      
-      // Multi-frequency breathing oscillation for natural, organic twinkle
-      float breath = sin(uTime * 1.35 + aData.y) * 0.45 + sin(uTime * 0.65 + aData.y * 2.1) * 0.25;
-      float curSize = aData.x * (1.0 + breath * 0.45);
-      gl_PointSize = clamp(curSize, 1.5, 13.0);
-      
-      vAlpha = clamp(0.60 + breath * 0.45, 0.15, 1.0);
-      
-      if (aData.z < 0.5) {
-        vColor = vec3(0.92, 0.96, 1.0); // Diamond white
-      } else if (aData.z < 1.5) {
-        vColor = vec3(0.40, 0.76, 1.0); // Celestial neon cyan/blue
-      } else {
-        vColor = vec3(1.0, 0.86, 0.68); // Warm stellar amber
-      }
-    }
-  `;
-
-  const STAR_FRAG = `
-    precision mediump float;
-    varying float vAlpha;
-    varying vec3 vColor;
-
-    void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = length(coord);
-      if (dist > 0.5) discard;
-      float core = smoothstep(0.5, 0.05, dist);
-      float glow = exp(-dist * 4.5);
-      float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
-      gl_FragColor = vec4(vColor, finalAlpha);
-    }
-  `;
-
-  const STAR_VERT_V2 = `
-    #version 300 es
-    in vec3 aPos;
-    in vec3 aData; // x: size, y: phase, z: colorType
-    uniform mat4 uVP;
-    uniform vec3 uHeadPos;
-    uniform float uTime;
-    out float vAlpha;
-    out vec3 vColor;
-
-    void main() {
-      // Starfield centered around current viewer head position so it feels at infinity
-      vec3 worldPos = aPos + uHeadPos;
-      gl_Position = uVP * vec4(worldPos, 1.0);
-
-      // Multi-frequency breathing oscillation for natural, organic twinkle
-      float breath = sin(uTime * 1.35 + aData.y) * 0.45 + sin(uTime * 0.65 + aData.y * 2.1) * 0.25;
-      float curSize = aData.x * (1.0 + breath * 0.45);
-      gl_PointSize = clamp(curSize, 1.5, 13.0);
-
-      vAlpha = clamp(0.60 + breath * 0.45, 0.15, 1.0);
-
-      if (aData.z < 0.5) {
-        vColor = vec3(0.92, 0.96, 1.0); // Diamond white
-      } else if (aData.z < 1.5) {
-        vColor = vec3(0.40, 0.76, 1.0); // Celestial neon cyan/blue
-      } else {
-        vColor = vec3(1.0, 0.86, 0.68); // Warm stellar amber
-      }
-    }
-  `;
-
-  const STAR_FRAG_V2 = `
-    #version 300 es
-    precision mediump float;
-    in float vAlpha;
-    in vec3 vColor;
-    out vec4 fragColor;
-
-    void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float dist = length(coord);
-      if (dist > 0.5) discard;
-      float core = smoothstep(0.5, 0.05, dist);
-      float glow = exp(-dist * 4.5);
-      float finalAlpha = (core * 0.8 + glow * 0.4) * vAlpha;
-      fragColor = vec4(vColor, finalAlpha);
-    }
-  `;
-
-  /**
-   * Ambient Video Glow (Ambilight) Shader with Soft Radial Falloff matching multi-side curvature
-   */
-  const GLOW_VERT = `
-    attribute vec3 aPos;
-    attribute vec2 aUV;
-    varying vec2 vUV;
-    uniform mat4 uMVP;
-    uniform float uCurvatureMode;
-
-    const float ARC_ANGLE = 0.65;
-    const float R = 1.5385;
-
-    void main() {
-      vUV = aUV;
-      vec3 pos = aPos;
-
-      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
-        float r = length(aPos.xy);
-        if (r > 0.0001) {
-          float phi = r * ARC_ANGLE;
-          float rProj = R * sin(phi);
-          vec2 dir = aPos.xy / r;
-          pos.xy = dir * rProj;
-          pos.z = R * (1.0 - cos(phi));
-        }
-      } else if (uCurvatureMode > 1.5) {
-        float angX = aPos.x * ARC_ANGLE;
-        float angY = aPos.y * ARC_ANGLE;
-        pos.x = R * sin(angX);
-        pos.y = R * sin(angY);
-        pos.z = R * (1.0 - cos(angX) * cos(angY));
-      }
-
-      gl_Position = uMVP * vec4(pos, 1.0);
-    }
-  `;
-
-  const GLOW_FRAG = `
-    precision mediump float;
-    varying vec2 vUV;
-    uniform vec3 uColor;
-    uniform float uIntensity;
-
-    void main() {
-      vec2 d = abs(vUV - 0.5) * 2.0;
-      float edgeDist = length(max(vec2(0.0), d - vec2(0.68, 0.68)));
-      float falloff = exp(-edgeDist * 3.8);
-      float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
-      float alpha = falloff * borderMask * uIntensity;
-      gl_FragColor = vec4(uColor * 1.3, alpha);
-    }
-  `;
-
-  const GLOW_VERT_V2 = `
-    #version 300 es
-    in vec3 aPos;
-    in vec2 aUV;
-    out vec2 vUV;
-    uniform mat4 uMVP;
-    uniform float uCurvatureMode;
-
-    const float ARC_ANGLE = 0.65;
-    const float R = 1.5385;
-
-    void main() {
-      vUV = aUV;
-      vec3 pos = aPos;
-
-      if (uCurvatureMode > 0.5 && uCurvatureMode < 1.5) {
-        float r = length(aPos.xy);
-        if (r > 0.0001) {
-          float phi = r * ARC_ANGLE;
-          float rProj = R * sin(phi);
-          vec2 dir = aPos.xy / r;
-          pos.xy = dir * rProj;
-          pos.z = R * (1.0 - cos(phi));
-        }
-      } else if (uCurvatureMode > 1.5) {
-        float angX = aPos.x * ARC_ANGLE;
-        float angY = aPos.y * ARC_ANGLE;
-        pos.x = R * sin(angX);
-        pos.y = R * sin(angY);
-        pos.z = R * (1.0 - cos(angX) * cos(angY));
-      }
-
-      gl_Position = uMVP * vec4(pos, 1.0);
-    }
-  `;
-
-  const GLOW_FRAG_V2 = `
-    #version 300 es
-    precision mediump float;
-    in vec2 vUV;
-    uniform vec3 uColor;
-    uniform float uIntensity;
-    out vec4 fragColor;
-
-    void main() {
-      vec2 d = abs(vUV - 0.5) * 2.0;
-      float edgeDist = length(max(vec2(0.0), d - vec2(0.68, 0.68)));
-      float falloff = exp(-edgeDist * 3.8);
-      float borderMask = (1.0 - smoothstep(0.85, 1.0, d.x)) * (1.0 - smoothstep(0.85, 1.0, d.y));
-      float alpha = falloff * borderMask * uIntensity;
-      fragColor = vec4(uColor * 1.3, alpha);
-    }
-  `;
-
-  function compileShader(type, src) {
-    const s = gl.createShader(type);
-    // GLSL ES 3.00 requires `#version 300 es` to be the very first line
-    // (no leading newline/whitespace). Template literals indent it, so
-    // strip leading whitespace before compiling.
-    const normalized = typeof src === 'string' ? src.replace(/^\s+/, '') : src;
-    gl.shaderSource(s, normalized);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.error('[WebXRVR] Shader error:', gl.getShaderInfoLog(s));
-    }
-    return s;
-  }
-
-  function initReticleTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-
-    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-    grad.addColorStop(0, '#FFFFFF');
-    grad.addColorStop(0.25, '#FF3B1F');
-    grad.addColorStop(0.7, 'rgba(255, 59, 31, 0.6)');
-    grad.addColorStop(1, 'rgba(255, 59, 31, 0)');
-
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(32, 32, 30, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#FF3B1F';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(32, 32, 12, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(32, 32, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    glReticleTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glReticleTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  }
-
-  function initStarfield() {
-    const data = [];
-    for (let i = 0; i < STAR_COUNT; i++) {
-      // Random spherical distribution
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const r = 40.0 + Math.random() * 35.0; // 40m - 75m distance
-
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = r * Math.sin(phi) * Math.sin(theta);
-      const z = r * Math.cos(phi);
-
-      const size = 2.5 + Math.random() * 4.5;
-      const phase = Math.random() * Math.PI * 2;
-      const colorType = Math.random() < 0.6 ? 0.0 : (Math.random() < 0.5 ? 1.0 : 2.0);
-
-      data.push(x, y, z, size, phase, colorType);
-    }
-    glStarBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-  }
-
-  function initAmbilight() {
-    ambilightCanvas = document.createElement('canvas');
-    ambilightCanvas.width = 8;
-    ambilightCanvas.height = 8;
-    ambilightCtx = ambilightCanvas.getContext('2d', { willReadFrequently: true });
-  }
-
-  function updateAmbilightColor(now) {
-    const source = getVisualSource();
-    // Static cards (intro/queue/complete/unavailable) are canvas textures —
-    // sampling them here wastes an XR-thread readback for no glow benefit.
-    // 2D glow already samples video only; keep XR consistent.
-    if (!source.ready || !source.element || source.kind !== 'video') return;
-    if (source.kind === 'video' && source.paused) return;
-    // In-XR the drawImage+getImageData readback below runs ON the XR thread and
-    // forces a CPU sync against the playing decoder (typically 10-20ms — a
-    // missed vsync at 72Hz that never trips the >20ms tripwire, i.e. invisible
-    // flashing). Sample at 1Hz in XR; the per-frame lerp toward the target
-    // keeps the glow transition smooth. 2D keeps 80ms.
-    const interval = xrSession ? 1000 : 80;
-    if (now - lastColorSampleTime < interval) return; // Sample at ~12 FPS
-    lastColorSampleTime = now;
-
-    try {
-      ambilightCtx.drawImage(source.element, 0, 0, 8, 8);
-      const imgData = ambilightCtx.getImageData(0, 0, 8, 8).data;
-      let r = 0, g = 0, b = 0;
-      const count = 64;
-      for (let i = 0; i < imgData.length; i += 4) {
-        r += imgData[i];
-        g += imgData[i + 1];
-        b += imgData[i + 2];
-      }
-      r = (r / count) / 255.0;
-      g = (g / count) / 255.0;
-      b = (b / count) / 255.0;
-
-      // Enhance vibrant ambient glow tone while preserving dark blue cosmos vibe
-      targetGlowColor = [
-        Math.min(1.0, r * 1.35 + 0.03),
-        Math.min(1.0, g * 1.35 + 0.05),
-        Math.min(1.0, b * 1.45 + 0.09)
-      ];
-    } catch (e) {
-      // Ignore security errors if cross-origin
-    }
-  }
-
-  function initGL(session, suppliedCanvas) {
-    const isXR = !!session;
-    // WebGL2 first: the Quest WebGL1 context does NOT expose OES_texture_external
-    // and forbids texSubImage2D from a video source — both needed for the
-    // zero-copy / in-place update paths. Falls back to WebGL1 + GLSL ES 1.00
-    // (non-Quest devices / contexts the XR layer rejects) which keeps today's
-    // texImage2D behavior. Each candidate uses a FRESH canvas (a canvas can only
-    // ever bind one context type), and XRWebGLLayer construction is guarded so a
-    // rejection here returns false instead of throwing → enterVR ends the session.
-    let isGL2 = false;
-    let contextOk = false;
-    let layerOk = !isXR;
-    // Quest Browser: WebGL1 XR layers work, WebGL2 XR layers do not register a
-    // compositor client → auto-exit. Prefer WebGL1; WebGL2 only when forced.
-    const GL_TRY = isXR
-      ? (VR_GL_MODE === '2' ? [['webgl2', true]]
-        : VR_GL_MODE === '1' ? [['webgl', false]]
-        : [['webgl', false], ['webgl2', true]])
-      : [['webgl2', true], ['webgl', false]];
-    for (const [ctxt, is2] of GL_TRY) {
-      const canvas = suppliedCanvas || document.createElement('canvas');
-      let candidate = null;
-      // A canvas that already holds a *different* context type returns null
-      // for getContext (no throw). Retry with plain attributes as a last
-      // resort — some desktop configs reject antialias+xrCompatible combos.
-      const attrSets = isXR
-        ? [{ xrCompatible: isXR, alpha: false, antialias: true }]
-        : [
-            { xrCompatible: false, alpha: false, antialias: true },
-            { xrCompatible: false, alpha: false, antialias: false },
-            {},
-          ];
-      for (const attrs of attrSets) {
-        try {
-          candidate = canvas.getContext(ctxt, attrs);
-        } catch (error) {
-          candidate = null;
-          if (isXR) window.__xrErr = 'getContext ' + ctxt + ' threw: ' + String(error);
-        }
-        if (candidate) break;
-      }
-      if (!candidate) continue;
-      if (isXR) {
-        try {
-          const layer = new XRWebGLLayer(session, candidate);
-          if (!layer) continue;
-          glLayer = layer;
-          layerOk = true;
-        } catch (error) {
-          console.warn('[WebXRVR] XRWebGLLayer rejected ' + ctxt + ' context:', error);
-          window.__xrErr = 'XRWebGLLayer rejected ' + ctxt + ': ' + String(error);
-          continue;
-        }
-      }
-      gl = candidate;
-      isGL2 = is2;
-      contextOk = true;
-      break;
-    }
-    if (!contextOk || !layerOk) {
-      console.error('[WebXRVR] No compatible ' + (isXR ? 'XR ' : '') + 'WebGL context');
-      if (isXR) window.__xrErr = 'no compatible XR WebGL context (tried: ' + GL_TRY.map(x => x[0]).join(',') + ')';
-      return false;
-    }
-    glIsWebGL2 = isGL2;
-    videoTexMode = '2d';
-    if (isXR) {
-      window.__xrGL = (isGL2 ? 'webgl2' : 'webgl1') + ':' + (isGL2 ? 'glsl300' : 'glsl100');
-      session.updateRenderState({ baseLayer: glLayer });
-      if (typeof session.updateTargetFrameRate === 'function') {
-        try { session.updateTargetFrameRate(72); } catch (e) { /* optional API */ }
-      }
-    }
-    console.log('[WebXRVR] GL context:', (isGL2 ? 'WebGL 2.0' : 'WebGL 1.0') + (isXR ? ' XR' : ' preview'));
-
-    // GLSL ES 3.00 shaders for WebGL2, GLSL ES 1.00 for the WebGL1 fallback.
-    const VS = isGL2 ? VERT_V2 : VERT;
-    const FS = isGL2 ? FRAG_V2 : FRAG;
-    const EXTF = isGL2 ? EXT_FRAG_V2 : EXT_FRAG;
-    const STARV = isGL2 ? STAR_VERT_V2 : STAR_VERT;
-    const STARF = isGL2 ? STAR_FRAG_V2 : STAR_FRAG;
-    const GLOWV = isGL2 ? GLOW_VERT_V2 : GLOW_VERT;
-    const GLOWF = isGL2 ? GLOW_FRAG_V2 : GLOW_FRAG;
-
-    // Main Program
-    const vs = compileShader(gl.VERTEX_SHADER, VS);
-    const fs = compileShader(gl.FRAGMENT_SHADER, FS);
-    glProgram = gl.createProgram();
-    gl.attachShader(glProgram, vs);
-    gl.attachShader(glProgram, fs);
-    gl.linkProgram(glProgram);
-
-    if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS)) {
-      console.error('[WebXRVR] Program link error:', gl.getProgramInfoLog(glProgram));
-      return false;
-    }
-
-    loc_aPos = gl.getAttribLocation(glProgram, 'aPos');
-    loc_aUV = gl.getAttribLocation(glProgram, 'aUV');
-    loc_uMVP = gl.getUniformLocation(glProgram, 'uMVP');
-    loc_uTex = gl.getUniformLocation(glProgram, 'uTex');
-    loc_uAlpha = gl.getUniformLocation(glProgram, 'uAlpha');
-    loc_uCurvatureMode = gl.getUniformLocation(glProgram, 'uCurvatureMode');
-    loc_uStereo = gl.getUniformLocation(glProgram, 'uStereo');
-    loc_uEyeOff = gl.getUniformLocation(glProgram, 'uEyeOff');
-
-    // Video texture path selection. Priority:
-    //  1) external — OES_texture_external (zero-copy decoder-surface bind).
-    //     Re-binding each decoded frame does NOT re-specify the texture, so the
-    //     ~100ms GPU pipeline flush that caused ~22fps never fires.
-    //  2) subimage — WebGL2 only: allocate the 4K texture once, then
-    //     texSubImage2D in place per decoded frame (also avoids the re-spec).
-    //     WebGL1 forbids uploading video via texSubImage2D, hence path 3 there.
-    //  3) 2d — original texImage2D per frame (fallback, no gain expected).
-    let extOES = null;
-    if (isXR && VR_TEX_MODE !== '2d') {
-      try { extOES = gl.getExtension('OES_texture_external'); } catch (e) {}
-    }
-    if (extOES) {
-      const extVs = compileShader(gl.VERTEX_SHADER, VS);
-      const extFs = compileShader(gl.FRAGMENT_SHADER, EXTF);
-      glVideoProgram = gl.createProgram();
-      gl.attachShader(glVideoProgram, extVs);
-      gl.attachShader(glVideoProgram, extFs);
-      gl.linkProgram(glVideoProgram);
-
-      if (gl.getProgramParameter(glVideoProgram, gl.LINK_STATUS)) {
-        loc2_aPos = gl.getAttribLocation(glVideoProgram, 'aPos');
-        loc2_aUV = gl.getAttribLocation(glVideoProgram, 'aUV');
-        loc2_uMVP = gl.getUniformLocation(glVideoProgram, 'uMVP');
-        loc2_uTex = gl.getUniformLocation(glVideoProgram, 'uTex');
-        loc2_uAlpha = gl.getUniformLocation(glVideoProgram, 'uAlpha');
-        loc2_uCurvatureMode = gl.getUniformLocation(glVideoProgram, 'uCurvatureMode');
-        loc2_uStereo = gl.getUniformLocation(glVideoProgram, 'uStereo');
-        loc2_uEyeOff = gl.getUniformLocation(glVideoProgram, 'uEyeOff');
-        videoTexMode = 'external';
-        if (isXR) window.__xrGL += ':external';
-        console.log('[WebXRVR] OES_texture_external armed — zero-copy video path active');
-      } else {
-        console.error('[WebXRVR] External shader link error:', gl.getProgramInfoLog(glVideoProgram));
-        glVideoProgram = null;
-      }
-    } else if (isGL2) {
-      videoTexMode = 'subimage';
-      if (isXR) window.__xrGL += ':subimage';
-      console.log('[WebXRVR] OES_texture_external unavailable — WebGL2 in-place texSubImage2D path armed');
-    } else {
-      if (isXR) window.__xrGL += ':2d';
-      console.log('[WebXRVR] OES_texture_external unavailable on WebGL1 — using per-frame texImage2D');
-    }
-
-    // Starfield Program
-    const starVs = compileShader(gl.VERTEX_SHADER, STARV);
-    const starFs = compileShader(gl.FRAGMENT_SHADER, STARF);
-    glStarProgram = gl.createProgram();
-    gl.attachShader(glStarProgram, starVs);
-    gl.attachShader(glStarProgram, starFs);
-    gl.linkProgram(glStarProgram);
-
-    loc_star_aPos = gl.getAttribLocation(glStarProgram, 'aPos');
-    loc_star_aData = gl.getAttribLocation(glStarProgram, 'aData');
-    loc_star_uVP = gl.getUniformLocation(glStarProgram, 'uVP');
-    loc_star_uHeadPos = gl.getUniformLocation(glStarProgram, 'uHeadPos');
-    loc_star_uTime = gl.getUniformLocation(glStarProgram, 'uTime');
-
-    // Ambient Glow Program
-    const glowVs = compileShader(gl.VERTEX_SHADER, GLOWV);
-    const glowFs = compileShader(gl.FRAGMENT_SHADER, GLOWF);
-    glGlowProgram = gl.createProgram();
-    gl.attachShader(glGlowProgram, glowVs);
-    gl.attachShader(glGlowProgram, glowFs);
-    gl.linkProgram(glGlowProgram);
-
-    loc_glow_aPos = gl.getAttribLocation(glGlowProgram, 'aPos');
-    loc_glow_aUV = gl.getAttribLocation(glGlowProgram, 'aUV');
-    loc_glow_uMVP = gl.getUniformLocation(glGlowProgram, 'uMVP');
-    loc_glow_uCurvatureMode = gl.getUniformLocation(glGlowProgram, 'uCurvatureMode');
-    loc_glow_uColor = gl.getUniformLocation(glGlowProgram, 'uColor');
-    loc_glow_uIntensity = gl.getUniformLocation(glGlowProgram, 'uIntensity');
-
-    // Generate 2D Multi-Side Curvature Mesh Grid (32x32 Quads)
-    const COLS = 32;
-    const ROWS = 32;
-    const verts = [];
-    const indices = [];
-
-    for (let r = 0; r <= ROWS; r++) {
-      const v = r / ROWS;
-      const y = 0.5 - v;
-      for (let c = 0; c <= COLS; c++) {
-        const u = c / COLS;
-        const x = u - 0.5;
-        verts.push(x, y, 0.0, u, v);
-      }
-    }
-
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const i0 = r * (COLS + 1) + c;
-        const i1 = i0 + 1;
-        const i2 = (r + 1) * (COLS + 1) + c;
-        const i3 = i2 + 1;
-        indices.push(i0, i2, i1, i1, i2, i3);
-      }
-    }
-
-    glGridIndexCount = indices.length;
-    glGridBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
-
-    glGridIndexBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-
-    glLaserBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, glLaserBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(10), gl.DYNAMIC_DRAW);
-
-    glVideoTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
-
-    // Double-buffer back texture: the 2d path re-specifies via texImage2D, and
-    // re-specifying the texture currently sampled by in-flight draws stalls
-    // ~24ms (1280²) / ~100ms (4K). Uploading into the UNSAMPLED back texture
-    // then flipping avoids the pipeline bubble. (~13MB extra at 1280².)
-    glVideoTextureB = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glVideoTextureB);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
-
-    if (videoTexMode === 'external') {
-      glVideoTextureExt = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
-      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_EXTERNAL_OES, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    }
-
-    glControlsTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    glGuideTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    glOverlayTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    glCommentsTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    initReticleTexture();
-    initStarfield();
-    initAmbilight();
-
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    console.log('[WebXRVR] WebGL initialised OK with Celestial Cosmos & Dynamic Ambilight Glow');
-    return true;
-  }
-
-  function initEarthResources() {
-    if (!gl || earthResourcesReady) return earthResourcesReady;
-
-    const sphereVerts = [];
-    const sphereIndices = [];
-    const latSegments = 48;
-    const lonSegments = 96;
-    for (let row = 0; row <= latSegments; row++) {
-      const v = row / latSegments;
-      const lat = Math.PI * 0.5 - v * Math.PI;
-      const cosLat = Math.cos(lat);
-      for (let col = 0; col <= lonSegments; col++) {
-        const u = col / lonSegments;
-        const lon = u * Math.PI * 2 - Math.PI;
-        sphereVerts.push(
-          EARTH_RADIUS * cosLat * Math.sin(lon),
-          EARTH_RADIUS * Math.sin(lat),
-          EARTH_RADIUS * cosLat * Math.cos(lon),
-          u,
-          v
-        );
-      }
-    }
-    for (let row = 0; row < latSegments; row++) {
-      for (let col = 0; col < lonSegments; col++) {
-        const a = row * (lonSegments + 1) + col;
-        const b = a + lonSegments + 1;
-        sphereIndices.push(a, b, a + 1, a + 1, b, b + 1);
-      }
-    }
-    glEarthSphereBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthSphereBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereVerts), gl.STATIC_DRAW);
-    glEarthSphereIndexBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glEarthSphereIndexBuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphereIndices), gl.STATIC_DRAW);
-    glEarthSphereIndexCount = sphereIndices.length;
-
-    const rimVerts = [];
-    const rimIndices = [];
-    const rimSegments = 64;
-    const rimInner = EARTH_RADIUS * 0.94;
-    const rimOuter = EARTH_RADIUS * 1.30;
-    const rimTop = -EARTH_RADIUS * 0.10;
-    const rimBottom = -EARTH_RADIUS * 0.72;
-    function appendRimRing(radius, y) {
-      const start = rimVerts.length / 5;
-      for (let i = 0; i <= rimSegments; i++) {
-        const a = i / rimSegments * Math.PI * 2;
-        rimVerts.push(Math.sin(a) * radius, y, Math.cos(a) * radius, i / rimSegments, y === rimTop ? 0 : 1);
-      }
-      return start;
-    }
-    function appendRimStrip(first, second) {
-      for (let i = 0; i < rimSegments; i++) {
-        const a = first + i;
-        const b = second + i;
-        rimIndices.push(a, b, a + 1, a + 1, b, b + 1);
-      }
-    }
-    const topInner = appendRimRing(rimInner, rimTop);
-    const topOuter = appendRimRing(rimOuter, rimTop);
-    const bottomOuter = appendRimRing(rimOuter, rimBottom);
-    const bottomInner = appendRimRing(rimInner, rimBottom);
-    appendRimStrip(topInner, topOuter);
-    appendRimStrip(topOuter, bottomOuter);
-    appendRimStrip(bottomInner, topInner);
-    appendRimStrip(bottomOuter, bottomInner);
-    glEarthRimBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, glEarthRimBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rimVerts), gl.STATIC_DRAW);
-    glEarthRimIndexBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glEarthRimIndexBuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(rimIndices), gl.STATIC_DRAW);
-    glEarthRimIndexCount = rimIndices.length;
-
-    glEarthTexture = gl.createTexture();
-    earthMapTextureAllocated = false;
-    gl.bindTexture(gl.TEXTURE_2D, glEarthTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([17, 62, 92, 255]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    earthBaseCanvas = document.createElement('canvas');
-    earthBaseCanvas.width = EARTH_MAP_W;
-    earthBaseCanvas.height = EARTH_MAP_H;
-    earthBaseCtx = earthBaseCanvas.getContext('2d', { willReadFrequently: true });
-    earthMapCanvas = document.createElement('canvas');
-    earthMapCanvas.width = EARTH_MAP_W;
-    earthMapCanvas.height = EARTH_MAP_H;
-    earthMapCtx = earthMapCanvas.getContext('2d');
-
-    const rimCanvas = document.createElement('canvas');
-    rimCanvas.width = 64;
-    rimCanvas.height = 64;
-    const rimCtx = rimCanvas.getContext('2d');
-    const rimGradient = rimCtx.createRadialGradient(32, 32, 5, 32, 32, 32);
-    rimGradient.addColorStop(0, '#25334a');
-    rimGradient.addColorStop(0.62, '#101a2c');
-    rimGradient.addColorStop(1, '#050914');
-    rimCtx.fillStyle = rimGradient;
-    rimCtx.fillRect(0, 0, 64, 64);
-    glEarthRimTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glEarthRimTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rimCanvas);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    earthPreviewCanvas = document.createElement('canvas');
-    earthPreviewCanvas.width = EARTH_PREVIEW_W;
-    earthPreviewCanvas.height = EARTH_PREVIEW_H;
-    earthPreviewCtx = earthPreviewCanvas.getContext('2d');
-    glEarthPreviewTexture = gl.createTexture();
-    earthPreviewTextureAllocated = false;
-    gl.bindTexture(gl.TEXTURE_2D, glEarthPreviewTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    earthLabelCanvas = document.createElement('canvas');
-    earthLabelCanvas.width = 640;
-    earthLabelCanvas.height = 112;
-    earthLabelCtx = earthLabelCanvas.getContext('2d');
-    glEarthLabelTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, glEarthLabelTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    earthResourcesReady = true;
-    buildHolographicEarthBase(null);
-    renderEarthLabelCanvas();
-
-    const context = gl;
-    const texture = glEarthTexture;
-    const image = new Image();
-    image.decoding = 'async';
-    image.onload = function () {
-      if (gl !== context || glEarthTexture !== texture) return;
-      buildHolographicEarthBase(image);
-    };
-    image.onerror = function () {
-      console.warn('[WebXRVR] Bundled Earth texture could not be loaded:', EARTH_TEXTURE_URL);
-    };
-    image.src = EARTH_TEXTURE_URL;
-    return true;
-  }
-
-
-  // ─── Matrix & Transformation Math ────────────────────────────────────
-
-  function mat4FromRotationTranslationScale(q, p, sW, sH) {
-    const sZ = sW; // Uniform Z scale matching screen width scale
-    const x = q.x, y = q.y, z = q.z, w = q.w;
-    const x2 = x + x, y2 = y + y, z2 = z + z;
-    const xx = x * x2, xy = x * y2, xz = x * z2;
-    const yy = y * y2, yz = y * z2, zz = z * z2;
-    const wx = w * x2, wy = w * y2, wz = w * z2;
-
-    const m00 = (1 - (yy + zz)) * sW;
-    const m10 = (xy + wz) * sW;
-    const m20 = (xz - wy) * sW;
-
-    const m01 = (xy - wz) * sH;
-    const m11 = (1 - (xx + zz)) * sH;
-    const m21 = (yz + wx) * sH;
-
-    const m02 = (xz + wy) * sZ;
-    const m12 = (yz - wx) * sZ;
-    const m22 = (1 - (xx + yy)) * sZ;
-
-    return new Float32Array([
-      m00, m10, m20, 0,
-      m01, m11, m21, 0,
-      m02, m12, m22, 0,
-      p.x, p.y, p.z, 1
-    ]);
-  }
-
-  function mat4Mul(a, b) {
-    const r = new Float32Array(16);
-    for (let i = 0; i < 4; i++) {
-      for (let j = 0; j < 4; j++) {
-        r[i * 4 + j] = 0;
-        for (let k = 0; k < 4; k++) {
-          r[i * 4 + j] += a[k * 4 + j] * b[i * 4 + k];
-        }
-      }
-    }
-    return r;
-  }
-
-  function mat4Perspective(fovY, aspect, near, far) {
-    const f = 1 / Math.tan(fovY / 2);
-    const nf = 1 / (near - far);
-    return new Float32Array([
-      f / aspect, 0, 0, 0,
-      0, f, 0, 0,
-      0, 0, (far + near) * nf, -1,
-      0, 0, (2 * far * near) * nf, 0,
-    ]);
-  }
-
-  function vecDot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-  function vecCross(a, b) {
-    return {
-      x: a.y * b.z - a.z * b.y,
-      y: a.z * b.x - a.x * b.z,
-      z: a.x * b.y - a.y * b.x,
-    };
-  }
-
-  function mat4LookAt(eye, target, up) {
-    const z = vecNorm(vecSub(eye, target));
-    const x = vecNorm(vecCross(up, z));
-    const y = vecCross(z, x);
-    return new Float32Array([
-      x.x, y.x, z.x, 0,
-      x.y, y.y, z.y, 0,
-      x.z, y.z, z.z, 0,
-      -vecDot(x, eye), -vecDot(y, eye), -vecDot(z, eye), 1,
-    ]);
-  }
-
-  function quatFromYawPitch(yaw, pitch) {
-    const yawQ = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
-    const pitchQ = { x: Math.sin(pitch / 2), y: 0, z: 0, w: Math.cos(pitch / 2) };
-    return quatMul(yawQ, pitchQ);
-  }
-
-  function quatFromForward(direction) {
-    const forward = vecNorm(direction);
-    const yaw = Math.atan2(-forward.x, -forward.z);
-    const pitch = Math.asin(Math.max(-1, Math.min(1, forward.y)));
-    return quatFromYawPitch(yaw, pitch);
-  }
-
-  function previewSceneTarget() {
-    return sceneMode === 'earth' ? earthCenter : screenPos;
-  }
-
-  function getPreviewCamera() {
-    if (previewCameraMode === 'orbit') {
-      const target = previewSceneTarget();
-      const cosPitch = Math.cos(previewOrbitPitch);
-      const position = {
-        x: target.x + Math.sin(previewOrbitYaw) * cosPitch * previewOrbitDistance,
-        y: target.y + Math.sin(previewOrbitPitch) * previewOrbitDistance,
-        z: target.z + Math.cos(previewOrbitYaw) * cosPitch * previewOrbitDistance,
-      };
-      const forward = vecNorm(vecSub(target, position));
-      return { position, quat: quatFromForward(forward), target };
-    }
-    const position = { x: 0, y: 1.52, z: 0 };
-    const quat = quatFromYawPitch(previewYaw, previewPitch);
-    return {
-      position,
-      quat,
-      target: vecAdd(position, quatRotVec(quat, { x: 0, y: 0, z: -1 })),
-    };
-  }
-
-  function previewRayAt(clientX, clientY) {
-    if (!previewCanvas) return null;
-    const rect = previewCanvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    let localX = clientX - rect.left;
-    let viewWidth = rect.width;
-    if (previewStereo) {
-      viewWidth *= 0.5;
-      localX = localX >= viewWidth ? localX - viewWidth : localX;
-    }
-    const nx = (localX / viewWidth) * 2 - 1;
-    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
-    const camera = getPreviewCamera();
-    const forward = quatRotVec(camera.quat, { x: 0, y: 0, z: -1 });
-    const right = quatRotVec(camera.quat, { x: 1, y: 0, z: 0 });
-    const up = quatRotVec(camera.quat, { x: 0, y: 1, z: 0 });
-    const aspect = viewWidth / rect.height;
-    const tanHalf = Math.tan(65 * Math.PI / 360);
-    const direction = vecNorm(vecAdd(forward, vecAdd(vecScale(right, nx * aspect * tanHalf), vecScale(up, ny * tanHalf))));
-    return { origin: camera.position, direction };
-  }
-
-  function getPreviewState() {
-    return {
-      running: previewRunning,
-      cameraMode: previewCameraMode,
-      stereo: previewStereo,
-      reducedMotion,
-      sceneMode,
-      renderStats: { ...renderStats },
-      views: previewLastViews.slice(),
-    };
-  }
-
-  function emitPreviewState() {
-    try {
-      window.dispatchEvent(new CustomEvent('echo:webxr-preview-state', { detail: getPreviewState() }));
-    } catch (e) {}
-  }
-
-  function resizePreviewCanvas() {
-    if (!previewCanvas || !gl) return false;
-    const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    const width = Math.max(2, Math.round((previewCanvas.clientWidth || 1) * ratio));
-    const height = Math.max(2, Math.round((previewCanvas.clientHeight || 1) * ratio));
-    if (previewCanvas.width === width && previewCanvas.height === height) return false;
-    previewCanvas.width = width;
-    previewCanvas.height = height;
-    return true;
-  }
-
-  function uploadPreviewTextures(time) {
-    let hasOverlayComments = false;
-    if (sceneMode === 'earth') {
-      advanceEarthSpin(time);
-      initEarthResources();
-      refreshEarthMapTexture();
-      renderEarthLabelCanvas();
-      updateEarthPreviewTexture(time, false);
-    } else {
-      updateAmbilightColor(time);
-      curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
-      curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
-      curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
-
-      const source = getVisualSource();
-      const visualChanged = source.kind !== lastVisualKind ||
-        visualSourceSignature(source) !== lastVisualVersion ||
-        source.element !== lastVisualElement;
-      if (source.ready && (source.kind !== 'video' ? visualChanged :
-          (hasNewVideoFrame || source.currentTime !== lastVideoTime))) {
-        uploadVisual2D(source);
-        hasNewVideoFrame = false;
-        lastVideoTime = source.currentTime;
-      } else if (!source.ready && visualChanged) {
-        clearPendingVisual2D(source);
-      }
-
-      hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
-      if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
-        gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
-      }
-      if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture &&
-          (vrLastPanelUploadT < 0 || time - vrLastPanelUploadT >= VR_UI_MIN_INTERVAL)) {
-        vrLastPanelUploadT = time;
-        renderCommentsPanelCanvas();
-        gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
-      }
-    }
-
-    if (controlsVisible && glControlsTexture &&
-        (vrLastUiUploadT < 0 || time - vrLastUiUploadT >= VR_UI_MIN_INTERVAL)) {
-      vrLastUiUploadT = time;
-      renderControlsCanvas();
-      gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
-    }
-    if (sceneMode === 'reels' && controlsVisible && guideCanvas && glGuideTexture && !vrGuideUploaded) {
-      renderGuideCanvas();
-      gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
-      vrGuideUploaded = true;
-    }
-    return hasOverlayComments;
-  }
-
-  function onPreviewFrame(time) {
-    if (!previewRunning || !previewCanvas || !gl) return;
-    previewRaf = window.requestAnimationFrame(onPreviewFrame);
-    resizePreviewCanvas();
-
-    const camera = getPreviewCamera();
-    currentHeadPos = { ...camera.position };
-    currentHeadQuat = { ...camera.quat };
-    // Pack cards stay room-stable like in XR; do not head-lock the desktop
-    // preview while a pack experience is active.
-    if (sceneMode === 'reels' && previewCameraMode === 'headset' && !isPackExperience()) applyLockToViewer();
-
-    const hasOverlayComments = uploadPreviewTextures(time);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.clearColor(0.0095, 0.0175, 0.052, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    const width = previewCanvas.width;
-    const height = previewCanvas.height;
-    const viewWidth = previewStereo ? Math.floor(width / 2) : width;
-    const forward = quatRotVec(camera.quat, { x: 0, y: 0, z: -1 });
-    const right = quatRotVec(camera.quat, { x: 1, y: 0, z: 0 });
-    const up = quatRotVec(camera.quat, { x: 0, y: 1, z: 0 });
-    const eyes = previewStereo
-      ? [{ eye: 'left', offset: -0.032, x: 0 }, { eye: 'right', offset: 0.032, x: viewWidth }]
-      : [{ eye: 'none', offset: 0, x: 0 }];
-    const projection = mat4Perspective(65 * Math.PI / 180, viewWidth / Math.max(1, height), 0.05, 100);
-    previewLastViews = [];
-    for (const view of eyes) {
-      const eyePos = vecAdd(camera.position, vecScale(right, view.offset));
-      const viewMat = mat4LookAt(eyePos, vecAdd(eyePos, forward), up);
-      gl.viewport(view.x, 0, viewWidth, height);
-      renderSceneView(viewMat, projection, view.eye, time * 0.001, hasOverlayComments);
-      previewLastViews.push({ eye: view.eye, viewport: [view.x, 0, viewWidth, height] });
-    }
-  }
-
-  function updatePreviewPointer(clientX, clientY) {
-    const ray = previewRayAt(clientX, clientY);
-    if (!ray) return null;
-    activeRayOrigin = ray.origin;
-    activeRayDir = ray.direction;
-    hoveredButton = controlsVisible ? hitTestControls(ray.origin, ray.direction) : -1;
-    let hit = null;
-    if (hoveredButton >= 0) {
-      activeHitDist = getHitDistControls(ray.origin, ray.direction);
-      activeIsHovering = true;
-    } else if (sceneMode === 'earth') {
-      hit = hitTestEarth(ray.origin, ray.direction);
-      activeHitDist = hit.hit ? hit.dist : 3;
-      activeIsHovering = !!hit.hit;
-      setEarthHoveredIndex(hit.hit ? hit.zoneIndex : -1);
-    } else {
-      hit = hitTestCurvedScreen(ray.origin, ray.direction);
-      activeHitDist = hit.hit ? hit.dist : 3;
-      activeIsHovering = !!hit.hit;
-    }
-    return { ray, hit, controlIndex: hoveredButton };
-  }
-
-  function installPreviewListeners() {
-    if (!previewCanvas || previewListeners) return;
-    const onPointerDown = function (event) {
-      if (event.button !== undefined && event.button !== 0) return;
-      event.preventDefault();
-      previewCanvas.focus();
-      try { previewCanvas.setPointerCapture(event.pointerId); } catch (e) {}
-      const target = updatePreviewPointer(event.clientX, event.clientY);
-      const source = 'preview-pointer-' + event.pointerId;
-      previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
-      if (target && target.controlIndex >= 0) {
-        executeControlButton(target.controlIndex);
-        previewPointer.control = true;
-        return;
-      }
-      if (sceneMode === 'earth' && target) {
-        previewPointer.earth = beginEarthDrag(source, target.hit);
-      }
-    };
-    const onPointerMove = function (event) {
-      const target = updatePreviewPointer(event.clientX, event.clientY);
-      if (!previewPointer || previewPointer.id !== event.pointerId) return;
-      const dx = event.clientX - previewPointer.x;
-      const dy = event.clientY - previewPointer.y;
-      if (Math.abs(dx) + Math.abs(dy) > 2) previewPointer.moved = true;
-      previewPointer.x = event.clientX;
-      previewPointer.y = event.clientY;
-      if (previewPointer.control) return;
-      if (sceneMode === 'earth') {
-        if (previewPointer.earth && target && target.hit && target.hit.hit) updateEarthDrag(target.hit.local);
-        return;
-      }
-      const sensitivity = 0.006;
-      if (previewCameraMode === 'orbit') {
-        previewOrbitYaw -= dx * sensitivity;
-        previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
-      } else {
-        previewYaw -= dx * sensitivity;
-        previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
-      }
-    };
-    const finishPointer = function (event) {
-      if (!previewPointer || previewPointer.id !== event.pointerId) return;
-      const target = updatePreviewPointer(event.clientX, event.clientY);
-      if (sceneMode === 'earth' && previewPointer.earth) {
-        endEarthDrag(previewPointer.source, target && target.hit);
-      } else if (!previewPointer.control && !previewPointer.moved && target) {
-        if (target.hit && target.hit.hit) {
-          const source = getVisualSource();
-          const handled = source.kind === 'static-card' && callbacks.onMainScreenSelect
-            ? callbacks.onMainScreenSelect(visualPointFromHit(target.hit.hitLocal))
-            : false;
-          if (!handled) callbacks.onTogglePlay && callbacks.onTogglePlay();
-        }
-        else toggleControls();
-      }
-      pressedButton = -1;
-      vrLastUiUploadT = -1;
-      try { previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
-      previewPointer = null;
-    };
-    const onWheel = function (event) {
-      event.preventDefault();
-      if (sceneMode === 'earth') {
-        // Wheel X = yaw, wheel Y / trackpad vertical = pitch (20% softer).
-        rotateEarth(event.deltaX * 0.0025, (event.deltaY * 0.65) * 0.002);
-        earthInteractionUntil = performance.now() + 900;
-      } else if (previewCameraMode === 'orbit') {
-        previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + event.deltaY * 0.006));
-      }
-    };
-    const onPointerLeave = function () {
-      if (previewPointer) return;
-      hoveredButton = -1;
-      if (sceneMode === 'earth') setEarthHoveredIndex(-1);
-    };
-    const onContextMenu = function (event) { event.preventDefault(); };
-    const onResize = function () { resizePreviewCanvas(); };
-    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu, onResize };
-    previewCanvas.style.touchAction = 'none';
-    previewCanvas.addEventListener('pointerdown', onPointerDown);
-    previewCanvas.addEventListener('pointermove', onPointerMove);
-    previewCanvas.addEventListener('pointerup', finishPointer);
-    previewCanvas.addEventListener('pointercancel', finishPointer);
-    previewCanvas.addEventListener('pointerleave', onPointerLeave);
-    previewCanvas.addEventListener('wheel', onWheel, { passive: false });
-    previewCanvas.addEventListener('contextmenu', onContextMenu);
-    window.addEventListener('resize', onResize);
-  }
-
-  function removePreviewListeners() {
-    if (!previewCanvas || !previewListeners) return;
-    const listeners = previewListeners;
-    previewCanvas.removeEventListener('pointerdown', listeners.onPointerDown);
-    previewCanvas.removeEventListener('pointermove', listeners.onPointerMove);
-    previewCanvas.removeEventListener('pointerup', listeners.finishPointer);
-    previewCanvas.removeEventListener('pointercancel', listeners.finishPointer);
-    previewCanvas.removeEventListener('pointerleave', listeners.onPointerLeave);
-    previewCanvas.removeEventListener('wheel', listeners.onWheel);
-    previewCanvas.removeEventListener('contextmenu', listeners.onContextMenu);
-    window.removeEventListener('resize', listeners.onResize);
-    previewListeners = null;
+    stopVideoFrameTracking();
+    cleanup();
+    // Reset to the known-good baseline so the next mount, route, or XR
+    // session never inherits stale mode, canvas, or camera state. The SPA
+    // keeps this module singleton across routes (upstream forced
+    // sceneMode='reels' in cleanup for the same reason).
+    sceneMode = 'reels';
+    previewCanvas = null;
+    controlsVisible = true;
+    commentsPanelVisible = false;
+    previewCameraMode = 'headset';
+    stereoMode = false;
+    previewYaw = 0;
+    previewPitch = 0;
+    emitPreviewState();
   }
 
   function resetPreview() {
@@ -4673,67 +2109,50 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewOrbitYaw = 0;
     previewOrbitPitch = -0.08;
     previewOrbitDistance = 4.8;
-    earthYaw = -0.35;
+    earthYaw = 0;
     earthPitch = 0;
-    screenPos = { ...DEFAULT_POS };
-    screenQuat = { x: 0, y: 0, z: 0, w: 1 };
-    screenScale = DEFAULT_SCALE;
-    currentHeadPos = { x: 0, y: 1.52, z: 0 };
-    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
-    if (sceneMode === 'earth') anchorEarthFromHead();
+    earthLastFrameTime = -1;
+    applyEarthRotation();
+    if (orbitControls && typeof orbitControls.reset === 'function') {
+      try { orbitControls.reset(); } catch (e) {}
+    }
+    applyPreviewCamera();
     emitPreviewState();
   }
 
   function setPreviewCameraMode(mode) {
     previewCameraMode = mode === 'orbit' ? 'orbit' : 'headset';
     lockToViewer = previewCameraMode === 'headset' && !isPackExperience();
-    if (lockToViewer) applyLockToViewer();
+    if (previewCanvas) ensureOrbitControls(previewCanvas);
+    if (orbitControls) {
+      orbitControls.enabled = (previewCameraMode === 'orbit');
+      if (previewCameraMode === 'orbit' && camera) {
+        camera.position.set(0, 1.6, 2.5);
+        try {
+          orbitControls.target.set(0, 1.4, -2.0);
+          orbitControls.update();
+        } catch (e) {}
+      } else {
+        previewYaw = 0;
+        previewPitch = 0;
+      }
+    }
+    applyPreviewCamera();
     emitPreviewState();
     return previewCameraMode;
-  }
-
-  function setPreviewStereo(enabled) {
-    previewStereo = !!enabled;
-    emitPreviewState();
-    return previewStereo;
-  }
-
-  function setReducedMotion(enabled) {
-    reducedMotion = !!enabled;
-    if (earthPreviewVideo && earthPreviewLocationIndex >= 0) {
-      if (reducedMotion) {
-        try { earthPreviewVideo.pause(); } catch (e) {}
-        earthPreviewStatus = earthPreviewVideo.readyState >= 2 ? 'paused' : earthPreviewStatus;
-      } else if (earthPreviewItems.length && typeof earthPreviewVideo.play === 'function') {
-        const playResult = earthPreviewVideo.play();
-        earthPreviewStatus = 'playing';
-        if (playResult && typeof playResult.catch === 'function') {
-          playResult.catch(() => { earthPreviewStatus = 'ready'; });
-        }
-      }
-      earthPreviewSignature = '';
-      earthPreviewLastUpload = -1;
-    }
-    emitPreviewState();
-    return reducedMotion;
-  }
-
-  function setSceneMode(mode) {
-    const next = mode === 'earth' && !isPackExperience() ? 'earth' : 'reels';
-    if (next === sceneMode) return sceneMode;
-    if (next === 'earth') openEarthMode();
-    else closeEarthMode();
-    emitPreviewState();
-    return sceneMode;
   }
 
   async function requestPreviewFullscreen(target) {
     const element = target || (previewCanvas && previewCanvas.parentElement) || previewCanvas;
     if (!element) return false;
     try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if (element.requestFullscreen) await element.requestFullscreen();
-      else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
+      if (typeof document !== 'undefined' && document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      } else if (element.webkitRequestFullscreen) {
+        element.webkitRequestFullscreen();
+      }
       return true;
     } catch (error) {
       console.warn('[WebXRVR] Preview fullscreen request failed:', error);
@@ -4741,1432 +2160,787 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
-  function startPreview(canvas, options) {
-    if (!canvas || typeof canvas.getContext !== 'function') {
-      throw new Error('A canvas element is required for immersive preview.');
+  function setCurvatureMode(mode) {
+    if (typeof mode === 'string') {
+      const key = mode.toLowerCase();
+      // 'curved' is the legacy alias kept for older CDP probes/callers.
+      mode = key === 'dome' ? 1 : (key === 'sq_curve' || key === 'curved' ? 2 : 0);
     }
-    if (xrSession) throw new Error('Exit the immersive XR session before starting desktop preview.');
-    if (previewRunning || gl) stopPreview();
-    const opts = options || {};
-    previewCanvas = canvas;
-    previewRunning = true;
-    previewCameraMode = opts.cameraMode === 'orbit' ? 'orbit' : 'headset';
-    previewStereo = !!opts.stereo;
-    if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
-    sceneMode = 'reels';
-    // Pack intro/queue/complete cards are room-stable in XR; keep desktop
-    // preview consistent instead of head-locking them.
-    lockToViewer = previewCameraMode === 'headset' && !isPackExperience();
-    controlsVisible = opts.showControls !== false;
-    renderStats.earthDrawCalls = 0;
-    renderStats.reelDrawCalls = 0;
-    renderStats.starDrawCalls = 0;
-    renderStats.videoUploads = 0;
-    renderStats.earthPreviewUploads = 0;
-    resetPreview();
-    initControlsCanvas();
-    initOverlayCanvas();
-    initCommentsPanelCanvas();
-    if (!initGL(null, canvas)) {
-      cleanup({ preview: true });
-      previewCanvas = null;
-      throw new Error('WebGL is unavailable for immersive preview.');
+    curvatureMode = Number(mode) || 0;
+    isCurved = (curvatureMode !== 0);
+    if (screenMesh) {
+      if (screenMesh.geometry) screenMesh.geometry.dispose();
+      screenMesh.geometry = createScreenGeometry(curvatureMode);
     }
-    initGuideCanvas();
-    setupVideoFrameTracking();
-    if (videoElement) {
-      videoElement.addEventListener('pause', onVideoPause);
-      videoElement.addEventListener('play', onVideoPlay);
+    if (ambilightMesh) {
+      if (ambilightMesh.geometry) ambilightMesh.geometry.dispose();
+      ambilightMesh.geometry = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+        new THREE.PlaneGeometry(3.2, 3.2);
     }
-    installPreviewListeners();
-    resizePreviewCanvas();
-    if (opts.sceneMode === 'earth') openEarthMode();
-    previewRaf = window.requestAnimationFrame(onPreviewFrame);
-    emitPreviewState();
-    return getPreviewState();
-  }
-
-  function stopPreview() {
-    if (!previewRunning && !previewCanvas) return;
-    previewRunning = false;
-    if (previewRaf) window.cancelAnimationFrame(previewRaf);
-    previewRaf = 0;
-    removePreviewListeners();
-    cleanup({ preview: true });
-    previewCanvas = null;
-    previewPointer = null;
-    previewLastViews = [];
     emitPreviewState();
   }
 
-
-  // ─── Draw Mesh Grid ──────────────────────────────────────────────────
-
-  function drawGrid(viewMat, projMat, texture, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
-    gl.useProgram(glProgram);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
-    gl.enableVertexAttribArray(loc_aPos);
-    gl.enableVertexAttribArray(loc_aUV);
-    gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
-    gl.vertexAttribPointer(loc_aUV, 2, gl.FLOAT, false, 20, 12);
-
-    const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
-    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
-
-    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
-    gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurvatureMode, modeVal);
-
-    const isStereo = typeof eyeOff === 'number';
-    gl.uniform1f(loc_uStereo, isStereo && stereoMode ? 1.0 : 0.0);
-    gl.uniform1f(loc_uEyeOff, isStereo ? eyeOff : 0.0);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(loc_uTex, 0);
-    gl.uniform1f(loc_uAlpha, alpha);
-
-    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
+  function getCurvatureMode() {
+    return curvatureMode === 1 ? 'dome' : (curvatureMode === 2 ? 'sq_curve' : 'flat');
   }
 
-  function drawTexturedMesh(viewMat, projMat, buffer, indexBuffer, indexCount, texture, pos, quat, alpha) {
-    if (!buffer || !indexBuffer || !indexCount || !texture) return;
-    gl.useProgram(glProgram);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    gl.enableVertexAttribArray(loc_aPos);
-    gl.enableVertexAttribArray(loc_aUV);
-    gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
-    gl.vertexAttribPointer(loc_aUV, 2, gl.FLOAT, false, 20, 12);
-    const modelMat = mat4FromRotationTranslationScale(quat, pos, 1, 1);
-    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
-    gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurvatureMode, 0);
-    gl.uniform1f(loc_uStereo, 0);
-    gl.uniform1f(loc_uEyeOff, 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(loc_uTex, 0);
-    gl.uniform1f(loc_uAlpha, alpha);
-    gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0);
-  }
-
-  function drawEarthScene(viewMat, projMat) {
-    if (!initEarthResources()) return;
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    drawTexturedMesh(
-      viewMat, projMat, glEarthSphereBuf, glEarthSphereIndexBuf, glEarthSphereIndexCount,
-      glEarthTexture, earthCenter, earthRotationQuat(), 1
-    );
-    drawTexturedMesh(
-      viewMat, projMat, glEarthRimBuf, glEarthRimIndexBuf, glEarthRimIndexCount,
-      glEarthRimTexture, earthCenter, { x: 0, y: 0, z: 0, w: 1 }, 1
-    );
-    gl.disable(gl.DEPTH_TEST);
-    if (glEarthLabelTexture) {
-      const labelPos = { x: earthCenter.x, y: earthCenter.y + 0.95, z: earthCenter.z };
-      drawGrid(viewMat, projMat, glEarthLabelTexture, labelPos, quatFaceViewerLevel(labelPos, currentHeadPos), 0.86, 0.15, 0.98, 0);
+  function setSceneMode(mode) {
+    const next = mode === 'earth' && !isPackExperience() ? 'earth' : 'reels';
+    const prev = sceneMode;
+    sceneMode = next;
+    applySceneVisibility();
+    if (next === 'earth' && prev !== 'earth') {
+      openEarthPlayback();
+    } else if (next !== 'earth' && prev === 'earth') {
+      closeEarthPlayback();
     }
-    if (glEarthPreviewTexture && earthPreviewLocationIndex >= 0) {
-      const previewPos = vecAdd(
-        { x: earthCenter.x, y: earthCenter.y + 0.17, z: earthCenter.z },
-        vecScale(earthAnchorRight, 0.94)
-      );
-      drawGrid(
-        viewMat,
-        projMat,
-        glEarthPreviewTexture,
-        previewPos,
-        quatFaceViewerLevel(previewPos, currentHeadPos),
-        0.50,
-        0.70,
-        0.99,
-        0
-      );
-    }
-    renderStats.earthDrawCalls += 1;
+    emitPreviewState();
+    return sceneMode;
   }
 
-
-  // Front video texture of the double-buffer pair (the back one is being
-  // uploaded to). Falls back to A if B failed to allocate.
-  function frontVideoTexture() {
-    if (videoTexFront === 1 && glVideoTextureB) return glVideoTextureB;
-    return glVideoTexture;
-  }
-
-  function visualSourceSignature(source) {
-    return source.kind + ':' + source.version;
-  }
-
-  function clearPendingVisual2D(source) {
-    if (!gl || !glVideoTexture || !source) return false;
-    const signature = visualSourceSignature(source);
-    if (lastVisualKind === 'pending:' + source.kind &&
-        lastVisualVersion === signature &&
-        lastVisualElement === source.element) return false;
-    const blank = new Uint8Array([0, 0, 0, 255]);
-    gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blank);
-    if (glVideoTextureB) {
-      gl.bindTexture(gl.TEXTURE_2D, glVideoTextureB);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blank);
-    }
-    videoTexAllocated = true;
-    videoTexFront = 0;
-    lastVisualKind = 'pending:' + source.kind;
-    lastVisualVersion = signature;
-    lastVisualElement = source.element;
-    return true;
-  }
-
-  function uploadVisual2D(source) {
-    if (!gl || !glVideoTexture || !source || !source.ready || !source.element) return false;
-    const signature = visualSourceSignature(source);
-    if (source.kind !== 'video' &&
-        lastVisualKind === source.kind &&
-        lastVisualVersion === signature &&
-        lastVisualElement === source.element) return false;
-
-    if (source.kind === 'video' && videoTexMode === 'subimage') {
-      gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-      if (videoTexAllocated) {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
-      } else {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
-        videoTexAllocated = true;
-      }
-      videoTexFront = 0;
-    } else if (source.kind === 'video' && videoTexMode === '2d' && glVideoTextureB) {
-      const backTex = videoTexFront === 0 ? glVideoTextureB : glVideoTexture;
-      gl.bindTexture(gl.TEXTURE_2D, backTex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
-      videoTexFront = videoTexFront === 0 ? 1 : 0;
-    } else {
-      // Images and generated static cards always use a regular TEXTURE_2D.
-      // Uploading them once avoids treating canvas/image sources like videos
-      // while preserving the external-texture fast path for actual video.
-      gl.bindTexture(gl.TEXTURE_2D, glVideoTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.element);
-      videoTexAllocated = true;
-      videoTexFront = 0;
-    }
-
-    lastVisualKind = source.kind;
-    lastVisualVersion = signature;
-    lastVisualElement = source.element;
-    renderStats.videoUploads += 1;
-    return true;
-  }
-
-  // Video-screen draw. Uses the OES external-texture program + target when the
-  // zero-copy path is armed; otherwise delegates to the standard 2D path.
-  function drawVideoGrid(viewMat, projMat, pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff) {
+  // Playback handoff (upstream openEarthMode/closeEarthMode parity): earth
+  // entry freezes whatever is actually playing (video element, image dwell
+  // handled by the host via onEarthOpen) and records whether to resume;
+  // reels return resumes exactly that via onEarthClose.
+  function openEarthPlayback() {
     const source = getVisualSource();
-    if (source.kind === 'video' && videoTexMode === 'external' && glVideoProgram && glVideoTextureExt) {
-      gl.useProgram(glVideoProgram);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
-      gl.enableVertexAttribArray(loc2_aPos);
-      gl.enableVertexAttribArray(loc2_aUV);
-      gl.vertexAttribPointer(loc2_aPos, 3, gl.FLOAT, false, 20, 0);
-      gl.vertexAttribPointer(loc2_aUV, 2, gl.FLOAT, false, 20, 12);
-
-      const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
-      const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
-
-      const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
-      gl.uniformMatrix4fv(loc2_uMVP, false, mvp);
-      gl.uniform1f(loc2_uCurvatureMode, modeVal);
-
-      const isStereo = typeof eyeOff === 'number';
-      gl.uniform1f(loc2_uStereo, isStereo && stereoMode ? 1.0 : 0.0);
-      gl.uniform1f(loc2_uEyeOff, isStereo ? eyeOff : 0.0);
-
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
-      gl.uniform1i(loc2_uTex, 0);
-      gl.uniform1f(loc2_uAlpha, alpha);
-
-      gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
-      return;
+    earthResumePlayback = (source.kind === 'video' || source.kind === 'image') && !source.paused;
+    const el = source.element;
+    if (el && typeof el.pause === 'function' && !source.paused) {
+      try { el.pause(); } catch (e) {}
     }
-    drawGrid(viewMat, projMat, frontVideoTexture(), pos, quat, scaleW, scaleH, alpha, curveMode, eyeOff);
+    if (callbacks.onPause) {
+      try { callbacks.onPause(); } catch (e) {}
+    }
+    if (callbacks.onEarthOpen) {
+      try { callbacks.onEarthOpen(earthResumePlayback); } catch (e) {}
+    }
+    loadEarthActivity();
   }
 
-  // ─── Draw Celestial Starfield & Dynamic Ambilight Glow ───────────────
-
-  function drawStarfield(viewMat, projMat, timeSec) {
-    if (!glStarProgram || !glStarBuf) return;
-    gl.useProgram(glStarProgram);
-
-    gl.depthMask(false);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending for stars
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, glStarBuf);
-    gl.enableVertexAttribArray(loc_star_aPos);
-    gl.enableVertexAttribArray(loc_star_aData);
-    gl.vertexAttribPointer(loc_star_aPos, 3, gl.FLOAT, false, 24, 0);
-    gl.vertexAttribPointer(loc_star_aData, 3, gl.FLOAT, false, 24, 12);
-
-    const vp = mat4Mul(projMat, viewMat);
-    gl.uniformMatrix4fv(loc_star_uVP, false, vp);
-    gl.uniform3f(loc_star_uHeadPos, currentHeadPos.x, currentHeadPos.y, currentHeadPos.z);
-    gl.uniform1f(loc_star_uTime, timeSec);
-
-    gl.drawArrays(gl.POINTS, 0, STAR_COUNT);
-    renderStats.starDrawCalls += 1;
-
-    gl.depthMask(true);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  }
-
-  function drawAmbientGlow(viewMat, projMat, pos, quat, scaleW, scaleH, curveMode) {
-    if (!glGlowProgram || !glGridBuf || !glGridIndexBuf) return;
-    gl.useProgram(glGlowProgram);
-
-    gl.depthMask(false);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive glow against dark blue sky
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, glGridBuf);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glGridIndexBuf);
-    gl.enableVertexAttribArray(loc_glow_aPos);
-    gl.enableVertexAttribArray(loc_glow_aUV);
-    gl.vertexAttribPointer(loc_glow_aPos, 3, gl.FLOAT, false, 20, 0);
-    gl.vertexAttribPointer(loc_glow_aUV, 2, gl.FLOAT, false, 20, 12);
-
-    const modelMat = mat4FromRotationTranslationScale(quat, pos, scaleW, scaleH);
-    const mvp = mat4Mul(projMat, mat4Mul(viewMat, modelMat));
-
-    const modeVal = typeof curveMode === 'number' ? curveMode : (curveMode ? 1.0 : 0.0);
-    gl.uniformMatrix4fv(loc_glow_uMVP, false, mvp);
-    gl.uniform1f(loc_glow_uCurvatureMode, modeVal);
-    gl.uniform3f(loc_glow_uColor, curGlowColor[0], curGlowColor[1], curGlowColor[2]);
-    gl.uniform1f(loc_glow_uIntensity, 0.78);
-
-    gl.drawElements(gl.TRIANGLES, glGridIndexCount, gl.UNSIGNED_SHORT, 0);
-
-    gl.depthMask(true);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  }
-
-  // ─── Draw Laser Pointer Beam & Target Reticle Dot ────────────────────
-
-  function drawLaserPointer(viewMat, projMat) {
-    if (!activeRayOrigin || !activeRayDir) return;
-
-    const hitDist = (activeHitDist > 0) ? activeHitDist : 3.0;
-    const hitP = vecAdd(activeRayOrigin, vecScale(activeRayDir, hitDist));
-
-    const lineVerts = new Float32Array([
-      activeRayOrigin.x, activeRayOrigin.y, activeRayOrigin.z, 0.5, 0.5,
-      hitP.x, hitP.y, hitP.z, 0.5, 0.5
-    ]);
-
-    gl.useProgram(glProgram);
-    gl.bindBuffer(gl.ARRAY_BUFFER, glLaserBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, lineVerts);
-
-    gl.enableVertexAttribArray(loc_aPos);
-    gl.enableVertexAttribArray(loc_aUV);
-    gl.vertexAttribPointer(loc_aPos, 3, gl.FLOAT, false, 20, 0);
-    gl.vertexAttribPointer(loc_aUV, 2, gl.FLOAT, false, 20, 12);
-
-    const mvp = mat4Mul(projMat, viewMat);
-    gl.uniformMatrix4fv(loc_uMVP, false, mvp);
-    gl.uniform1f(loc_uCurvatureMode, 0.0);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, glReticleTexture);
-    gl.uniform1i(loc_uTex, 0);
-    gl.uniform1f(loc_uAlpha, 0.85);
-
-    gl.drawArrays(gl.LINES, 0, 2);
-
-    const dotScale = activeIsHovering ? 0.06 : 0.04;
-    drawGrid(viewMat, projMat, glReticleTexture, hitP, screenQuat, dotScale, dotScale, 0.95, false);
-  }
-
-  function drawControlsDock(viewMat, projMat, includeGuide) {
-    if (!controlsVisible || !glControlsTexture) return;
-    const ctrlPos = getControlsCenter();
-    const ctrlScale = getControlsScale();
-    const ctrlW = ctrlScale * 0.82;
-    const ctrlH = ctrlW * (CONTROLS_H / CONTROLS_W);
-    const ctrlQuat = getControlsQuat();
-    drawGrid(viewMat, projMat, glControlsTexture, ctrlPos, ctrlQuat, ctrlW, ctrlH, 0.96, 0);
-    if (includeGuide && glGuideTexture) {
-      const guidePos = getGuideCenter();
-      const guideQuat = quatFaceViewerLevel(guidePos, currentHeadPos);
-      const guideW = ctrlScale * 0.4212;
-      const guideH = guideW * (GUIDE_H / GUIDE_W);
-      drawGrid(viewMat, projMat, glGuideTexture, guidePos, guideQuat, guideW, guideH, 0.92, 0);
-    }
-  }
-
-  function renderSceneView(viewMat, projMat, eye, timeSec, hasOverlayComments) {
-    drawStarfield(viewMat, projMat, reducedMotion ? 0 : timeSec);
-
-    if (sceneMode === 'earth') {
-      drawEarthScene(viewMat, projMat);
-      drawControlsDock(viewMat, projMat, false);
-      drawLaserPointer(viewMat, projMat);
-      return;
-    }
-
-    drawAmbientGlow(viewMat, projMat, screenPos, screenQuat, screenScale * 1.34, screenScale * 1.34, curvatureMode);
-    const source = getVisualSource();
-    const videoEye = source.kind === 'video' && stereoMode ? (eye === 'right' ? 0.5 : 0.0) : undefined;
-    drawVideoGrid(viewMat, projMat, screenPos, screenQuat, screenScale, screenScale, 1, curvatureMode, videoEye);
-    if (hasOverlayComments && glOverlayTexture) {
-      drawGrid(viewMat, projMat, glOverlayTexture, screenPos, screenQuat, screenScale, screenScale, 0.98, curvatureMode);
-    }
-    drawControlsDock(viewMat, projMat, true);
-    if (commentsPanelVisible && glCommentsTexture) {
-      const cpPos = getCommentsPanelCenter();
-      const cpQuat = getCommentsPanelQuat();
-      const cpSize = getCommentsPanelSize();
-      drawGrid(viewMat, projMat, glCommentsTexture, cpPos, cpQuat, cpSize.w, cpSize.h, 0.96, 0);
-    }
-    drawLaserPointer(viewMat, projMat);
-    renderStats.reelDrawCalls += 1;
-  }
-
-
-  // ─── XR Frame Loop ──────────────────────────────────────────────────
-
-  function onXRFrame(time, frame) {
-    if (!xrSession) return;
-    window.__xrPresented = window.__xrPresented || 1;
-    xrSession.requestAnimationFrame(onXRFrame);
-    try {
-      _postDiag(time);
-
-      // Adaptive stride bookkeeping: sustained frame misses → back off the
-      // video-upload rate; sustained calm → ease back toward the file's floor.
-      if (vrLastFrameT >= 0) {
-        const fdt = time - vrLastFrameT;
-        if (fdt > 25) { vrStallFrames += 1; vrCalmFrames = 0; }
-        else if (fdt < 18) { vrCalmFrames += 1; }
-        else { vrCalmFrames = 0; }
-        if (vrStallFrames >= 8) {
-          const activeSource = getVisualSource();
-          const maxStride = (activeSource.kind === 'video' && activeSource.element &&
-            (activeSource.element.videoWidth || 0) >= 3000) ? 3 : 2;
-          if (vrUploadStride < maxStride) vrUploadStride += 1;
-          vrStallFrames = 0; vrCalmFrames = 0;
-        } else if (vrCalmFrames >= 240 && vrUploadStride > vrMinStride()) {
-          vrUploadStride -= 1;
-          vrCalmFrames = 0; vrStallFrames = 0;
-        }
-      }
-      vrLastFrameT = time;
-
-    const pose = frame.getViewerPose(xrRefSpace);
-    if (!pose) return;
-
-    if (pose.transform) {
-      currentHeadPos = {
-        x: pose.transform.position.x,
-        y: pose.transform.position.y,
-        z: pose.transform.position.z,
-      };
-      currentHeadQuat = {
-        x: pose.transform.orientation.x,
-        y: pose.transform.orientation.y,
-        z: pose.transform.orientation.z,
-        w: pose.transform.orientation.w,
-      };
-
-      if (!isInitialPoseSet) {
-        if (!lockToViewer) {
-          const initDir = quatRotVec(currentHeadQuat, { x: 0, y: 0, z: -1 });
-          screenQuat = quatLevelFromDir(initDir);
-          screenPos = {
-            x: currentHeadPos.x + initDir.x * 2.24,
-            y: currentHeadPos.y,
-            z: currentHeadPos.z + initDir.z * 2.24,
-          };
-        }
-        isInitialPoseSet = true;
-      }
-
-      if (lockToViewer) {
-        applyLockToViewer();
-      }
-    }
-
-    processInput(frame);
-
-    if (sceneMode === 'reels' && getVisualSource().paused && !controlsVisible) {
-      showControls();
-    }
-
-    if (!glLayer || !gl) return;
-
-    let hasOverlayComments = false;
-    if (sceneMode === 'earth') {
-      advanceEarthSpin(time);
-      initEarthResources();
-      refreshEarthMapTexture();
-      renderEarthLabelCanvas();
-      updateEarthPreviewTexture(time, false);
-      if (controlsVisible && (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= VR_UI_MIN_INTERVAL)) {
-        vrLastUiUploadT = time;
-        renderControlsCanvas();
-        gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
-      }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-      gl.clearColor(0.0095, 0.0175, 0.052, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    } else {
-    // Update real-time Ambilight video color extraction and smooth interpolation
-    updateAmbilightColor(time);
-    curGlowColor[0] += (targetGlowColor[0] - curGlowColor[0]) * 0.08;
-    curGlowColor[1] += (targetGlowColor[1] - curGlowColor[1]) * 0.08;
-    curGlowColor[2] += (targetGlowColor[2] - curGlowColor[2]) * 0.08;
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-    // Deep midnight blue celestial background (20% darker for enhanced contrast)
-    gl.clearColor(0.0095, 0.0175, 0.052, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    const source = getVisualSource();
-    if (source.kind === 'video' && source.ready && source.element) {
-      const mediaElement = source.element;
-      // Strict gate: upload ONLY on a newly decoded frame. totalVideoFrames
-      // ticks once per decoded frame (~video fps). The old `hasNewVideoFrame
-      // ||` bypass re-fired from rVFC with zero new decoded frames (live
-      // telemetry: 49 uploads/sec, 0 decoded) — that bypass is removed.
-      // Adaptive stride then drops intermediate frames on high-res/stalled
-      // sessions so the re-spec flush fires less often (low-res keeps every
-      // frame → full motion; 4K backs off to 1/2–1/3 rate → far fewer flashes).
-      const vf = (mediaElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1);
-      // Fallback: if the browser lacks getVideoPlaybackQuality, vf stays -1
-      // and we must trust the rVFC flag as before.
-      const vChanged = (vf === -1) ? hasNewVideoFrame : (vf !== lastVideoFrameCount);
-      if (vChanged) vrSkipCounter += 1;
-      if (vChanged && vrSkipCounter >= vrUploadStride) {
-        vrSkipCounter = 0;
-        const _u0 = performance.now();
-        let uploaded = false;
-        if (videoTexMode === 'external' && glVideoTextureExt) {
-          // Zero-copy bind: points the external texture at the decoder surface.
-          // No re-spec of a sampled 2D texture → no GPU pipeline flush.
-          gl.bindTexture(gl.TEXTURE_EXTERNAL_OES, glVideoTextureExt);
-          gl.texImage2D(gl.TEXTURE_EXTERNAL_OES, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, mediaElement);
-          lastVisualKind = source.kind;
-          lastVisualVersion = visualSourceSignature(source);
-          lastVisualElement = mediaElement;
-          renderStats.videoUploads += 1;
-          uploaded = true;
-        } else {
-          uploaded = uploadVisual2D(source);
-        }
-        if (uploaded) {
-          _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
-          _diagTexUploads++;
-        }
-        hasNewVideoFrame = false;
-        lastVideoTime = source.currentTime;
-        lastVideoFrameCount = vf;
-      } else if (vChanged) {
-        // Skipped by stride: advance the counter so frames never backlog —
-        // this decoded frame is dropped from the VR texture, the next one
-        // within stride gets uploaded.
-        hasNewVideoFrame = false;
-        lastVideoTime = source.currentTime;
-        lastVideoFrameCount = vf;
-      } else {
-        // Stale rVFC ping with no decoded frame: clear the flag, never upload.
-        hasNewVideoFrame = false;
-      }
-    } else if (source.ready && source.element) {
-      const _u0 = performance.now();
-      if (uploadVisual2D(source)) {
-        _diagUploadMaxMs = Math.max(_diagUploadMaxMs, performance.now() - _u0);
-        _diagTexUploads++;
-      }
-      hasNewVideoFrame = false;
-      lastVideoTime = source.currentTime;
-      lastVideoFrameCount = -1;
-    } else {
-      const visualChanged = source.kind !== lastVisualKind ||
-        visualSourceSignature(source) !== lastVisualVersion ||
-        source.element !== lastVisualElement;
-      if (visualChanged) clearPendingVisual2D(source);
-    }
-
-    // Transport controls: 10Hz re-upload is visually smooth in VR and removes
-    // ~70 re-spec flushes/sec vs the old every-XR-frame upload.
-    if (controlsVisible && (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= VR_UI_MIN_INTERVAL)) {
-      vrLastUiUploadT = time;
-      renderControlsCanvas();
-      gl.bindTexture(gl.TEXTURE_2D, glControlsTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, controlsCanvas);
-    }
-
-    // Guide panel is static artwork: render + upload once per session (and
-    // once more if the controller image finishes loading late).
-    if (controlsVisible && guideCanvas && glGuideTexture && !vrGuideUploaded) {
-      renderGuideCanvas();
-      gl.bindTexture(gl.TEXTURE_2D, glGuideTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, guideCanvas);
-      vrGuideUploaded = true;
-    }
-
-    // Suppress the live in-screen time-synced overlay while the comments panel is open
-    hasOverlayComments = commentsPanelVisible ? false : renderOverlayCanvas();
-    if (hasOverlayComments && glOverlayTexture && overlayCanvas) {
-      gl.bindTexture(gl.TEXTURE_2D, glOverlayTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, overlayCanvas);
-    }
-
-    // Upload VR comments panel texture (throttled to 10Hz: keeps the SYNC
-    // clock fresh; the old per-frame re-raster was another full re-spec
-    // flush on every XR frame while the panel was open).
-    if (commentsPanelVisible && commentsPanelCanvas && glCommentsTexture &&
-        (vrLastPanelUploadT < 0 || (time - vrLastPanelUploadT) >= VR_UI_MIN_INTERVAL)) {
-      vrLastPanelUploadT = time;
-      renderCommentsPanelCanvas();
-      gl.bindTexture(gl.TEXTURE_2D, glCommentsTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, commentsPanelCanvas);
-    }
-    }
-
-    const timeSec = time * 0.001;
-
-    for (const view of pose.views) {
-      const vp = glLayer.getViewport(view);
-      gl.viewport(vp.x, vp.y, vp.width, vp.height);
-
-      const viewMat = view.transform.inverse.matrix;
-      const projMat = view.projectionMatrix;
-
-      renderSceneView(viewMat, projMat, view.eye, timeSec, hasOverlayComments);
-    }
-    } catch (err) {
-      // Record the first render-loop error so post-abort CDP can read WHY the
-      // session died (runtime abort vs our exception). Loop stays alive — the
-      // next frame was already scheduled at the top of this callback.
-      if (!window.__xrErr) {
-        window.__xrErr = 'onXRFrame: ' + String(err);
-        console.error('[WebXRVR] onXRFrame error:', err);
+  function closeEarthPlayback(resume) {
+    const shouldResume = resume !== false && earthResumePlayback;
+    earthResumePlayback = false;
+    if (callbacks.onEarthClose) {
+      try { callbacks.onEarthClose(shouldResume); } catch (e) {}
+    } else if (shouldResume) {
+      const source = getVisualSource();
+      const el = source.element;
+      if (el && typeof el.play === 'function' && source.kind === 'video') {
+        try {
+          const r = el.play();
+          if (r && typeof r.catch === 'function') r.catch(() => {});
+        } catch (e) {}
       }
     }
   }
 
-  // ─── Controller Input Processing ─────────────────────────────────────
-
-  function processInput(frame) {
-    if (!xrSession) return;
-    const hasRightInput = Array.from(xrSession.inputSources || []).some((source) => source.handedness === 'right');
-    let nextEarthHover = -1;
-    let earthRayPriority = -1;
-    if (sceneMode === 'earth') {
-      activeRayOrigin = null;
-      activeRayDir = null;
-    }
-
-    for (const source of xrSession.inputSources) {
-      const gp = source.gamepad || null;
-      const hand = source.handedness;
-
-      let controllerPos = null;
-      let controllerDir = null;
-      let controllerQuat = { x: 0, y: 0, z: 0, w: 1 };
-
-      if (source.targetRaySpace) {
-        const rayPose = frame.getPose(source.targetRaySpace, xrRefSpace);
-        if (rayPose) {
-          const t = rayPose.transform;
-          controllerPos = { x: t.position.x, y: t.position.y, z: t.position.z };
-          controllerQuat = { x: t.orientation.x, y: t.orientation.y, z: t.orientation.z, w: t.orientation.w };
-          const m = t.matrix || rayPose.transform.matrix;
-          if (m) controllerDir = { x: -m[8], y: -m[9], z: -m[10] };
-        }
-
-      }
-      if (sceneMode === 'earth') {
-        const priority = earthDragInputSource === source ? 3 : (hand === 'right' ? 2 : (hand === 'left' ? 1 : 0));
-        if (controllerPos && controllerDir && priority >= earthRayPriority) {
-          earthRayPriority = priority;
-          activeRayOrigin = controllerPos;
-          activeRayDir = controllerDir;
-          let hitDist = -1;
-          let isHover = false;
-          let zoneIndex = -1;
-          if (controlsVisible) {
-            const btnIdx = hitTestControls(controllerPos, controllerDir);
-            hoveredButton = btnIdx;
-            if (btnIdx >= 0) {
-              hitDist = getHitDistControls(controllerPos, controllerDir);
-              isHover = true;
-            }
-          }
-          if (!isHover) {
-            const earthHit = hitTestEarth(controllerPos, controllerDir);
-            if (earthHit.hit) {
-              hitDist = earthHit.dist;
-              zoneIndex = earthHit.zoneIndex;
-              isHover = true;
-              if (earthDragging && (!earthDragInputSource || earthDragInputSource === source)) {
-                updateEarthDrag(earthHit.local);
-                earthInteractionUntil = performance.now() + 900;
-              }
-            }
-          }
-          nextEarthHover = zoneIndex;
-          activeHitDist = hitDist > 0 ? hitDist : 3;
-          activeIsHovering = isHover;
-        }
-        if (gp) {
-          const axes = gp.axes || [];
-          const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
-          const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
-          if (Math.abs(thumbX) > 0.12 || Math.abs(thumbY) > 0.12) {
-            // Single-axis like drags: follow the dominant stick direction
-            // only so diagonal holds can't spin yaw + pitch together.
-            const yawMag = Math.abs(thumbX) > 0.12 ? Math.abs(thumbX) : -1;
-            const pitchMag = Math.abs(thumbY) > 0.12 ? Math.abs(thumbY) : -1;
-            if (yawMag >= pitchMag) rotateEarth(thumbX * 0.035, 0);
-            else rotateEarth(0, -thumbY * 0.024);
-            earthInteractionUntil = performance.now() + 900;
-          }
-          if (hand === 'right') {
-            const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
-            if (bPressed && !prevBtnState.rightB) toggleControls();
-            prevBtnState.rightB = bPressed;
-          }
-        }
-        continue;
-      }
-
-      const pointerEligible = hand === 'right' || (!hasRightInput && (hand === 'left' || hand === 'none' || !hand));
-      if (!gp) {
-        if (pointerEligible && controllerPos && controllerDir) {
-          activeRayOrigin = controllerPos;
-          activeRayDir = controllerDir;
-          let hitDist = -1;
-          let isHover = false;
-          if (commentsPanelVisible) {
-            cPanelHover = hitTestCommentsPanel(controllerPos, controllerDir);
-            if (cPanelHover) {
-              hitDist = getHitDistCommentsPanel(controllerPos, controllerDir);
-              isHover = true;
-            }
-          }
-          if (!isHover && controlsVisible) {
-            hoveredButton = hitTestControls(controllerPos, controllerDir);
-            if (hoveredButton >= 0) {
-              hitDist = getHitDistControls(controllerPos, controllerDir);
-              isHover = true;
-            }
-          }
-          if (!isHover) {
-            const mainHit = hitTestCurvedScreen(controllerPos, controllerDir);
-            if (mainHit.hit) {
-              hitDist = mainHit.dist;
-              isHover = true;
-            }
-          }
-          activeHitDist = hitDist > 0 ? hitDist : 3;
-          activeIsHovering = isHover;
-        }
-        continue;
-      }
-
-      // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
-      const gripPressed = gp.buttons.length > 1 && gp.buttons[1].pressed;
-      if (lockToViewer) {
-        isGrabbing = false;
-        grabControllerIdx = -1;
-      } else if (gripPressed && controllerPos && controllerDir) {
-        if (!isGrabbing) {
-          isGrabbing = true;
-          grabControllerIdx = hand === 'right' ? 1 : 0;
-          const qCtrlInv = quatInvert(controllerQuat);
-          const pDiff = vecSub(screenPos, controllerPos);
-          grabRelPos = quatRotVec(qCtrlInv, pDiff);
-          grabRelQuat = quatMul(qCtrlInv, screenQuat);
-        }
-        if ((hand === 'right' && grabControllerIdx === 1) || (hand === 'left' && grabControllerIdx === 0)) {
-          const rotatedRel = quatRotVec(controllerQuat, grabRelPos);
-          screenPos = vecAdd(controllerPos, rotatedRel);
-
-          // Rotate screen tangent to viewer POV (facing head, 100% horizontally level)
-          screenQuat = quatFaceViewerLevel(screenPos, currentHeadPos);
-        }
-      } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
-                                 (hand === 'left' && grabControllerIdx === 0))) {
-        isGrabbing = false;
-        grabControllerIdx = -1;
-      }
-
-      // Prefer the right controller, but keep every core action usable with
-      // only a left controller connected.
-      if (!pointerEligible) continue;
-
-      // Active pointer ray tracking
-      if (controllerPos && controllerDir) {
-        activeRayOrigin = controllerPos;
-        activeRayDir = controllerDir;
-
-        let hitDist = -1;
-        let isHover = false;
-
-        // Comments panel has ray priority over controls & screen
-        if (commentsPanelVisible) {
-          const cpHit = hitTestCommentsPanel(controllerPos, controllerDir);
-          if (cpHit) {
-            cPanelHover = cpHit;
-            hoveredButton = -1;
-            hitDist = getHitDistCommentsPanel(controllerPos, controllerDir);
-            isHover = true;
-          } else {
-            cPanelHover = null;
-          }
-        }
-
-        if (!isHover && controlsVisible) {
-          const btnIdx = hitTestControls(controllerPos, controllerDir);
-          if (btnIdx >= 0) {
-            hoveredButton = btnIdx;
-            hitDist = getHitDistControls(controllerPos, controllerDir);
-            isHover = true;
-          } else {
-            hoveredButton = -1;
-          }
-        }
-
-        if (!isHover) {
-          const mainHit = hitTestCurvedScreen(controllerPos, controllerDir);
-          if (mainHit.hit) {
-            hitDist = mainHit.dist;
-            isHover = true;
-          }
-        }
-
-        activeHitDist = (hitDist > 0) ? hitDist : 3.0;
-        activeIsHovering = isHover;
-
-        // Track hover over a pop-up comment on the reels screen (only when panel closed)
-        activeOverlayHoverId = null;
-        if (!commentsPanelVisible) {
-          const ovHit = hitTestCurvedScreen(controllerPos, controllerDir);
-          if (ovHit.hit) activeOverlayHoverId = overlayCommentAtHit(ovHit.hitLocal);
-        }
-
-        // Continue a trigger-drag scroll on the comments list (content follows the hand)
-        if (cPanelDrag) {
-          const trigNow = gp.buttons.length > 0 && gp.buttons[0].pressed;
-          if (trigNow) {
-            const dy = lastCommentsCanvasY - cPanelDragStartCanvasY;
-            cPanelScrollY = clampPanelScroll(cPanelDragStartScroll - dy);
-          } else {
-            cPanelDrag = false;
-          }
-        }
-      }
-
-      // ── 2. Right Joystick Handling ──
-      const thumbY = gp.axes[3] || 0;
-      const thumbX = gp.axes[2] || 0;
-      const pointerOverPanel = commentsPanelVisible && cPanelHover;
-
-      if (gripPressed) {
-        // A) GRIP HELD + Joystick Y Up/Down -> Scale Screen Larger / Smaller
-        if (Math.abs(thumbY) > FLICK_THRESHOLD) {
-          screenScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE,
-            screenScale + (-thumbY) * SCALE_SPEED
-          ));
-        }
-      } else if (pointerOverPanel) {
-        // B1) Pointing at the comments panel -> scroll the list with Y
-        if (Math.abs(thumbY) > 0.18) {
-          cPanelScrollY = clampPanelScroll(cPanelScrollY + thumbY * 6);
-          flickedY = false;
-        }
-      } else {
-        // B2) NORMAL Joystick Y Up/Down -> Next / Previous Reel Navigation.
-        // Static cards own their queue UI — thumbstick must not skip behind
-        // the card's back while intro/queue/complete is shown.
-        const cardOpen = getVisualSource().kind === 'static-card';
-        if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
-          flickedY = true;
-          if (!cardOpen) {
-            if (thumbY > 0) {
-              callbacks.onNext && callbacks.onNext();
-            } else {
-              callbacks.onPrev && callbacks.onPrev();
-            }
-          }
-          showControls();
-        } else if (Math.abs(thumbY) < FLICK_RESET) {
-          flickedY = false;
-        }
-      }
-
-      // C) Joystick X Left/Right -> Seek ±5s (disabled on static cards).
-      const seekBlocked = getVisualSource().kind === 'static-card';
-      if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
-        flickedX = true;
-        if (!seekBlocked) callbacks.onSeek && callbacks.onSeek(thumbX > 0 ? 5 : -5);
-        showControls();
-      } else if (Math.abs(thumbX) < FLICK_RESET) {
-        flickedX = false;
-      }
-
-      // ── 3. A Button: Toggle Play / Pause (disabled on static cards) ──
-      const aPressed = gp.buttons.length > 4 && gp.buttons[4].pressed;
-      if (aPressed && !prevBtnState.rightA) {
-        const cardOpen = getVisualSource().kind === 'static-card';
-        if (!cardOpen) callbacks.onTogglePlay && callbacks.onTogglePlay();
-        showControls();
-      }
-      prevBtnState.rightA = aPressed;
-
-      // ── 4. B Button: Toggle Guide & UI Controls Panel ──
-      const bPressed = gp.buttons.length > 5 && gp.buttons[5].pressed;
-      if (bPressed && !prevBtnState.rightB) {
-        toggleControls();
-      }
-      prevBtnState.rightB = bPressed;
-    }
-    if (sceneMode === 'earth') setEarthHoveredIndex(nextEarthHover);
+  // ─── Scene visibility (single source of truth) ──────────────────────
+  // Mirrors upstream renderSceneView branches: reels shows screen + glow +
+  // dock; earth shows globe + dock. Previously flags were written in three
+  // places (creation, setSceneMode, mesh defaults) and enterVR inherited
+  // stale state — the globe leaked into reels mode in-headset. Enforced
+  // here, from setSceneMode, initThreeScene, and both frame loops.
+  function applySceneVisibility() {
+    const isEarth = (sceneMode === 'earth');
+    if (earthGroup) earthGroup.visible = isEarth;
+    if (screenMesh) screenMesh.visible = !isEarth;
+    if (ambilightMesh) ambilightMesh.visible = !isEarth;
+    if (controlsMesh) controlsMesh.visible = controlsVisible;
+    if (commentsMesh) commentsMesh.visible = (!isEarth && commentsPanelVisible);
+    if (starfieldPoints) starfieldPoints.visible = true;
+    const pointerActive = !!(xrSession || previewRunning);
+    if (laserLine) laserLine.visible = pointerActive;
+    if (reticleMesh) reticleMesh.visible = pointerActive;
   }
 
-  // ─── XR Availability ───────────────────────────────────────────────
-
-  function getXR() {
-    try { if (window.top && window.top.navigator && window.top.navigator.xr) return window.top.navigator.xr; } catch (e) {}
-    try { if (window.parent && window.parent.navigator && window.parent.navigator.xr) return window.parent.navigator.xr; } catch (e) {}
-    return navigator.xr;
+  function setPreviewStereo(enabled) {
+    stereoMode = !!enabled;
+    emitPreviewState();
   }
 
-  // ─── Session Management ──────────────────────────────────────────────
-
-  async function enterVR() {
-    if (previewRunning) stopPreview();
-    if (xrSession) return;
-    window.__xrErr = null;
-    window.__xrGL = null;
-    window.__xrPresented = 0;
-    console.log('[WebXRVR] enterVR() called —', VR_VERSION);
-
-    const xr = getXR();
-    if (!xr) {
-      alert('WebXR not available. Requires HTTPS or localhost.');
-      return;
-    }
-
-    // DOM overlay root must exist before the session request so the Quest
-    // virtual keyboard can be summoned for VR comment posting.
-    initDomOverlay();
-
-    const sessionOpts = {
-      optionalFeatures: ['local-floor', 'local', 'dom-overlay', 'hand-tracking'],
-    };
-    if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
-
-    try {
-      xrSession = await xr.requestSession('immersive-vr', sessionOpts);
-    } catch (e) {
-      try {
-        xrSession = await xr.requestSession('immersive-vr');
-      } catch (e2) {
-        console.error('[WebXRVR] Session request failed:', e2);
-        alert('Could not start VR: ' + e2.message);
-        return;
-      }
-    }
-
-    screenPos = { ...DEFAULT_POS };
-    screenQuat = { x: 0, y: 0, z: 0, w: 1 };
-    screenScale = DEFAULT_SCALE;
-    currentHeadPos = { x: 0, y: 1.52, z: 0 };
-    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
-    isInitialPoseSet = false;
-    // Pack intro/queue/completion cards remain stable in the room instead of
-    // following the user's head. Existing feed playback keeps its prior lock.
-    lockToViewer = !isPackExperience();
-    controlsVisible = false;
-    commentsPanelVisible = false;
-    cPanelScrollY = 0;
-    cPanelTab = 'all';
-    cPanelMaxScroll = 0;
-    cPanelHover = null;
-    cPanelDrag = false;
-    clearPanelHighlight();
-    activeOverlayRegions = [];
-    activeOverlayHoverId = null;
-    hasNewVideoFrame = true;
-    lastVideoTime = -1;
-    lastVideoFrameCount = -1;
-    videoTexAllocated = false;
-    vrSkipCounter = 0;
-    vrStallFrames = 0;
-    vrCalmFrames = 0;
-    vrLastFrameT = -1;
-    vrLastUiUploadT = -1;
-    vrLastPanelUploadT = -1;
-    vrGuideUploaded = false;
-    vrUploadStride = vrMinStride();
-    hoveredButton = -1;
-    pressedButton = -1;
-    isGrabbing = false;
-    activeRayOrigin = null;
-    activeRayDir = null;
-    flickedX = false;
-    flickedY = false;
-
-    initControlsCanvas();
-    initOverlayCanvas();
-    initCommentsPanelCanvas();
-    // Note: initGuideCanvas() is called after initGL() since it needs glGuideTexture
-
-    try {
-      xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
-    } catch {
-      xrRefSpace = await xrSession.requestReferenceSpace('local');
-    }
-
-    let glOk = false;
-    try {
-      glOk = !!initGL(xrSession);
-    } catch (err) {
-      console.error('[WebXRVR] initGL threw — ending session:', err);
-      window.__xrErr = 'initGL threw: ' + String(err);
-      glOk = false;
-    }
-    if (!glOk) {
-      console.error('[WebXRVR] VR GL setup failed — releasing session');
-      window.__xrErr = window.__xrErr || 'initGL returned false';
-      try { xrSession.end().catch(() => {}); } catch (e) {}
-      xrSession = null;
-      return;
-    }
-
-    // Init guide canvas AFTER initGL so glGuideTexture exists
-    try {
-      initGuideCanvas();
-      setupVideoFrameTracking();
-
-      xrSession.addEventListener('selectstart', onSelectStart);
-      xrSession.addEventListener('selectend', onSelectEnd);
-      xrSession.addEventListener('end', onSessionEnd);
-
-      if (videoElement) {
-        videoElement.addEventListener('pause', onVideoPause);
-        videoElement.addEventListener('play', onVideoPlay);
-      }
-
-      const frameEl = document.getElementById('reelsFrame');
-      if (frameEl) frameEl.classList.add('vr-active');
-
-      // Notify host SPA so the global Top Bar can auto-hide for immersive Reels
-      notifyVrEnter();
-
-      // Force an immediate telemetry snapshot on the first XR frame so we catch
-      // the armed GL path + GL version even if the runtime aborts within seconds.
-      _diagForce = true;
-      xrSession.requestAnimationFrame(onXRFrame);
-    } catch (err) {
-      // Never leave an immersive session half-set-up — end it so the runtime
-      // doesn't keep reporting "an active immersive XRSession" on retry.
-      console.error('[WebXRVR] VR setup threw — releasing session:', err);
-      window.__xrErr = 'post-GL setup threw: ' + String(err);
-      try { xrSession.end().catch(() => {}); } catch (e) {}
-      xrSession = null;
-      cleanup();
-    }
+  function setReducedMotion(enabled) {
+    reducedMotion = !!enabled;
+    emitPreviewState();
   }
 
-  function onVideoPause() {
-    if (xrSession || previewRunning) showControls();
+  function showNotification(message) {
+    notificationText = String(message || '');
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    notificationUntil = (Number(now) || 0) + 5000;
   }
 
-  function onVideoPlay() {
-    if (xrSession && controlsVisible) resetAutoHideTimer();
-  }
-
-  /**
-   * Primary Trigger Click Handler
-   */
-  function onSelectStart(ev) {
-    const source = ev.inputSource;
-    if (!source) return;
-
-    const frame = ev.frame;
-    let rayOrigin = null, rayDir = null;
-    if (source.targetRaySpace && frame && xrRefSpace) {
-      const rayPose = frame.getPose(source.targetRaySpace, xrRefSpace);
-      if (rayPose) {
-        const t = rayPose.transform;
-        rayOrigin = { x: t.position.x, y: t.position.y, z: t.position.z };
-        const m = t.matrix || rayPose.transform.matrix;
-        if (m) rayDir = { x: -m[8], y: -m[9], z: -m[10] };
-      }
-
-    }
-    if (sceneMode === 'earth') {
-      if (controlsVisible && rayOrigin && rayDir) {
-        const controlIndex = hitTestControls(rayOrigin, rayDir);
-        if (controlIndex >= 0) {
-          executeControlButton(controlIndex);
-          pulseInput(source);
-          return;
-        }
-      }
-      if (rayOrigin && rayDir) beginEarthDrag(source, hitTestEarth(rayOrigin, rayDir));
-      return;
-    }
-
-    // 1. VR Comments Panel — highest priority
-    const directCommentHit = commentsPanelVisible && rayOrigin && rayDir
-      ? hitTestCommentsPanel(rayOrigin, rayDir)
-      : cPanelHover;
-    if (directCommentHit) {
-      executeCommentAction(directCommentHit);
-      pulseInput(source);
-      return;
-    }
-
-    // 2. Check UI Controls Button Click
-    if (controlsVisible) {
-      const directControlIndex = rayOrigin && rayDir ? hitTestControls(rayOrigin, rayDir) : hoveredButton;
-      if (directControlIndex >= 0) {
-        executeControlButton(directControlIndex);
-        pulseInput(source);
-        return;
-      }
-    }
-
-    // 2. Check Click on Main Video Screen
-    if (rayOrigin && rayDir) {
-      const mainHit = hitTestCurvedScreen(rayOrigin, rayDir);
-      if (mainHit.hit) {
-        // Clicking a pop-up comment opens the panel and jumps to it
-        if (!commentsPanelVisible) {
-          const cid = overlayCommentAtHit(mainHit.hitLocal);
-          if (cid) {
-            openCommentsPanelToComment(cid);
-            pulseInput(source);
-            return;
-          }
-        }
-        const visualSource = getVisualSource();
-        if (visualSource.kind === 'static-card' && callbacks.onMainScreenSelect) {
-          const handled = callbacks.onMainScreenSelect(visualPointFromHit(mainHit.hitLocal));
-          if (handled) {
-            pulseInput(source);
-            showControls();
-            return;
-          }
-          // Card shown but tap missed all card buttons — show controls only.
-          // Do not toggle the hidden video clock behind the card.
-          pulseInput(source);
-          showControls();
-          return;
-        }
-        if (visualSource.kind === 'static-card') {
-          pulseInput(source);
-          showControls();
-          return;
-        }
-        callbacks.onTogglePlay && callbacks.onTogglePlay();
-        pulseInput(source);
-        toggleControls();
-        return;
-      }
-    }
-
-    // 3. Click outside screen -> toggle controls visibility
-    toggleControls();
-  }
-
-  function onSelectEnd(ev) {
-    pressedButton = -1;
-    vrLastUiUploadT = -1;
-    if (sceneMode !== 'earth') return;
-    const source = ev.inputSource;
-    if (source && earthDragInputSource && earthDragInputSource !== source) return;
-    let hit = null;
-    if (source && source.targetRaySpace && ev.frame && xrRefSpace) {
-      const rayPose = ev.frame.getPose(source.targetRaySpace, xrRefSpace);
-      if (rayPose) {
-        const t = rayPose.transform;
-        const matrix = t.matrix || rayPose.transform.matrix;
-        if (matrix) {
-          hit = hitTestEarth(
-            { x: t.position.x, y: t.position.y, z: t.position.z },
-            { x: -matrix[8], y: -matrix[9], z: -matrix[10] }
-          );
-        }
-      }
-    }
-    if (earthDragging) {
-      endEarthDrag(source, hit);
-      return;
-    }
-    // Trigger was pressed/released without an active drag (e.g. selectstart
-    // ray missed or was never delivered on Quest Browser). Treat a clean
-    // release over a zone — or the last hovered zone when no fresh pose is
-    // available — as a tap.
-    const zone = hit && hit.hit ? hit.zoneIndex : earthHoveredIndex;
-    if (zone >= 0) selectEarthLocation(zone);
-  }
-
-
-  function onSessionEnd() {
-    cleanup();
-  }
-
-  async function exitVR() {
-    const session = xrSession;
-    if (!session) {
-      if (previewRunning) stopPreview();
-      return;
-    }
-    try {
-      await session.end();
-    } catch (e) {}
-  }
-
-  function releaseGLResources() {
-    if (!gl) return;
-    const buffers = [
-      glGridBuf, glGridIndexBuf, glLaserBuf, glStarBuf,
-      glEarthSphereBuf, glEarthSphereIndexBuf, glEarthRimBuf,
-      glEarthRimIndexBuf,
-    ];
-    const textures = [
-      glVideoTexture, glVideoTextureB, glVideoTextureExt, glControlsTexture,
-      glOverlayTexture, glGuideTexture, glCommentsTexture, glReticleTexture,
-      glEarthTexture, glEarthRimTexture, glEarthLabelTexture, glEarthPreviewTexture,
-    ];
-    const programs = [glProgram, glVideoProgram, glStarProgram, glGlowProgram];
-    buffers.forEach((buffer) => { if (buffer) try { gl.deleteBuffer(buffer); } catch (e) {} });
-    textures.forEach((texture) => { if (texture) try { gl.deleteTexture(texture); } catch (e) {} });
-    programs.forEach((program) => { if (program) try { gl.deleteProgram(program); } catch (e) {} });
-  }
-
-  function cleanup(options) {
-    const opts = options || {};
-    const session = xrSession;
-    const wasXR = !!session && !opts.preview;
-    const wasEarth = sceneMode === 'earth';
-    const resumeAfterEarth = earthResumePlayback;
-    if (session) {
-      try { session.removeEventListener('selectstart', onSelectStart); } catch (e) {}
-      try { session.removeEventListener('selectend', onSelectEnd); } catch (e) {}
-      try { session.removeEventListener('end', onSessionEnd); } catch (e) {}
-    }
-    previewRunning = false;
-    if (previewRaf) window.cancelAnimationFrame(previewRaf);
-    previewRaf = 0;
-    removePreviewListeners();
-    earthActivityGeneration += 1;
-    earthSelectionGeneration += 1;
-    if (earthActivityAbort) {
-      earthActivityAbort.abort();
-      earthActivityAbort = null;
-    }
-    cancelEarthPreview();
-    if (videoElement) {
-      videoElement.removeEventListener('pause', onVideoPause);
-      videoElement.removeEventListener('play', onVideoPlay);
-    }
-    stopVideoFrameTracking();
-    clearAutoHideTimer();
-    releaseGLResources();
-    xrSession = null;
-    xrRefSpace = null;
-    gl = null;
-    glLayer = null;
-    glProgram = null;
-    glVideoTexture = null;
-    glVideoTextureB = null;
-    videoTexFront = 0;
-    glVideoTextureExt = null;
-    glVideoProgram = null;
-    loc2_aPos = -1;
-    loc2_aUV = -1;
-    loc2_uMVP = null;
-    loc2_uTex = null;
-    loc2_uAlpha = null;
-    loc2_uCurvatureMode = null;
-    loc2_uStereo = null;
-    loc2_uEyeOff = null;
-    videoTexMode = '2d';
-    videoTexAllocated = false;
-    vrUploadStride = 1;
-    vrSkipCounter = 0;
-    vrStallFrames = 0;
-    vrCalmFrames = 0;
-    vrLastFrameT = -1;
-    vrLastUiUploadT = -1;
-    vrLastPanelUploadT = -1;
-    vrGuideUploaded = false;
-    vrProxyCanvas = null;
-    vrProxyCtx = null;
-    glControlsTexture = null;
-    glOverlayTexture = null;
-    glGuideTexture = null;
-    glCommentsTexture = null;
-    glReticleTexture = null;
-    overlayCanvas = null;
-    overlayCtx = null;
-    commentsPanelVisible = false;
-    commentsPanelCanvas = null;
-    commentsPanelCtx = null;
-    cPanelScrollY = 0;
-    cPanelTab = 'all';
-    cPanelMaxScroll = 0;
-    cPanelHover = null;
-    cPanelDrag = false;
-    clearPanelHighlight();
-    activeOverlayRegions = [];
-    activeOverlayHoverId = null;
-    glGridBuf = null;
-    glGridIndexBuf = null;
-    glGridIndexCount = 0;
-    glLaserBuf = null;
-    loc_aPos = -1;
-    loc_aUV = -1;
-    loc_uMVP = null;
-    loc_uTex = null;
-    loc_uAlpha = null;
-    loc_uCurvatureMode = null;
-    glStarProgram = null;
-    glStarBuf = null;
-    glGlowProgram = null;
-    glEarthSphereBuf = null;
-    glEarthSphereIndexBuf = null;
-    glEarthSphereIndexCount = 0;
-    glEarthRimBuf = null;
-    glEarthRimIndexBuf = null;
-    glEarthRimIndexCount = 0;
-    earthZoneCount = 0;
-    glEarthTexture = null;
-    glEarthRimTexture = null;
-    glEarthLabelTexture = null;
-    glEarthPreviewTexture = null;
-    earthBaseCanvas = null;
-    earthBaseCtx = null;
-    earthMapCanvas = null;
-    earthMapCtx = null;
+  // ─── Earth Mode Logic ───────────────────────────────────────────────
+  function setLocationActivity(rows) {
+    earthLocations = Array.isArray(rows) ? rows.slice(0, 128) : [];
     earthMapDirty = true;
-    earthMapTextureAllocated = false;
-    earthLabelCanvas = null;
-    earthLabelCtx = null;
-    earthLabelSignature = '';
-    earthPreviewCanvas = null;
-    earthPreviewCtx = null;
-    earthPreviewVideo = null;
-    earthPreviewItems = [];
-    earthPreviewIndex = 0;
-    earthPreviewLocationIndex = -1;
-    earthPreviewStatus = 'idle';
-    earthPreviewSignature = '';
-    earthPreviewLastUpload = -1;
-    earthPreviewTextureAllocated = false;
-    earthResourcesReady = false;
-    earthHoveredIndex = -1;
+    lastEarthLabelKey = '';
     earthSelectedIndex = -1;
+    earthSelectionGeneration += 1;
+    rebuildEarthPins();
+  }
+
+  async function loadEarthActivity() {
+    if (earthActivityAbort) {
+      try { earthActivityAbort.abort(); } catch (e) {}
+    }
+    const generation = ++earthActivityGeneration;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    earthActivityAbort = controller;
+    try {
+      const fetchFn = typeof fetch !== 'undefined' ? fetch : null;
+      if (!fetchFn) return;
+      const response = await fetchFn('/api/reels/locations/activity?window_days=7&limit=128', {
+        credentials: 'include',
+        signal: controller ? controller.signal : undefined,
+      });
+      if (!response.ok) throw new Error('Activity request failed (' + response.status + ')');
+      const payload = await response.json();
+      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
+      setLocationActivity(payload.locations || []);
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      if (generation !== earthActivityGeneration || sceneMode !== 'earth') return;
+      console.error('[WebXRVR] Earth activity load failed:', error);
+    } finally {
+      if (earthActivityAbort === controller) earthActivityAbort = null;
+    }
+  }
+
+  function setEarthHoveredIndex(index) {
+    index = Number(index);
+    const changed = index !== earthHoveredIndex;
+    earthHoveredIndex = index;
+    earthPreviewLocationIndex = index;
+    if (index < 0) {
+      if (earthPreviewAbortController) {
+        try { earthPreviewAbortController.abort(); } catch (e) {}
+        earthPreviewAbortController = null;
+      }
+      earthPreviewStatus = 'idle';
+      earthPreviewItems = [];
+    } else if (changed && sceneMode === 'earth') {
+      // Hovering a new zone fetches its reels for the 3D billboard
+      // (upstream scheduleEarthPreview; change-guarded, no per-move spam).
+      earthPreviewGeneration += 1;
+      loadEarthPreviewForIndex(index, earthPreviewGeneration);
+    }
+  }
+
+  function loadEarthPreviewForIndex(index, generation) {
+    if (index < 0 || index >= earthLocations.length) return Promise.resolve([]);
+    if (earthPreviewAbortController) {
+      try { earthPreviewAbortController.abort(); } catch (e) {}
+    }
+    earthPreviewAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const signal = earthPreviewAbortController ? earthPreviewAbortController.signal : null;
+    const loc = earthLocations[index];
+    earthPreviewStatus = 'loading';
+    if (callbacks.onPreviewLocation) {
+      return Promise.resolve(callbacks.onPreviewLocation(loc, { signal }))
+        .then((items) => {
+          if (earthPreviewGeneration === generation && (!signal || !signal.aborted)) {
+            earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
+            earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
+          }
+          return earthPreviewItems;
+        })
+        .catch(() => {
+          if (earthPreviewGeneration === generation) {
+            earthPreviewStatus = 'error';
+          }
+          return [];
+        });
+    }
+    return Promise.resolve([]);
+  }
+
+  // Zone tap → location reel playlist (upstream selectEarthLocation
+  // parity): the host page swaps the feed (2D switchToLocationFeed); on
+  // accept we return to reels mode so the new playlist plays in-VR, on
+  // reject we stay on the globe with a status message.
+  function selectEarthLocation(index) {
+    const location = earthLocations[index];
+    if (!location || typeof callbacks.onSelectLocation !== 'function') {
+      return Promise.resolve(false);
+    }
+    const generation = ++earthSelectionGeneration;
+    earthSelectedIndex = index;
+    earthMapDirty = true;
+    lastEarthLabelKey = '';
+    let accepted;
+    try {
+      accepted = callbacks.onSelectLocation(location);
+    } catch (error) {
+      console.error('[WebXRVR] Location feed switch failed:', error);
+      showNotification('LOCATION FEED ERROR');
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(accepted).then(
+      (result) => {
+        if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return result;
+        if (result === false) {
+          showNotification('NO RECENT REELS IN THIS LOCATION');
+          return false;
+        }
+        showNotification('📍 ' + String(location.name || location.slug || '').toUpperCase().slice(0, 30));
+        // The new location feed takes over playback; never resume the old reel.
+        earthResumePlayback = false;
+        setSceneMode('reels');
+        return true;
+      },
+      (error) => {
+        if (generation !== earthSelectionGeneration || sceneMode !== 'earth') return false;
+        console.error('[WebXRVR] Location feed switch failed:', error);
+        showNotification('LOCATION FEED ERROR');
+        return false;
+      }
+    );
+  }
+
+  function beginEarthDrag(source, hit) {    if (!hit || !hit.hit) return false;
+    earthDragging = true;
+    earthDragSource = source || 'pointer';
+    earthDragLastDir = hit.local ? { ...hit.local } : null;
+    earthDragStartDir = hit.local ? { ...hit.local } : null;
+    earthDragMoved = false;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
+    try {
+      earthPressTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    } catch (e) {
+      earthPressTime = 0;
+    }
+    earthPressZone = (hit && hit.zoneIndex >= 0) ? hit.zoneIndex : -1;
+    return true;
+  }
+
+  function updateEarthDrag(direction) {
+    if (!earthDragging || !direction) return;
+    const len = Math.sqrt(
+      (direction.x || 0) * (direction.x || 0) +
+      (direction.y || 0) * (direction.y || 0) +
+      (direction.z || 0) * (direction.z || 0)
+    ) || 1;
+    const normalized = { x: (direction.x || 0) / len, y: (direction.y || 0) / len, z: (direction.z || 0) / len };
+    if (earthDragLastDir) {
+      const dx = normalized.x - earthDragLastDir.x;
+      const dy = normalized.y - earthDragLastDir.y;
+      // Cumulative travel decides the locked axis; tremor roughly cancels
+      // while deliberate motion dominates.
+      earthDragCumX += dx;
+      earthDragCumY += dy;
+      // Tap-vs-drag is measured from the press point, not accumulated.
+      let chord = -1;
+      if (earthDragStartDir) {
+        const sx = normalized.x - earthDragStartDir.x;
+        const sy = normalized.y - earthDragStartDir.y;
+        const sz = normalized.z - earthDragStartDir.z;
+        chord = Math.sqrt(sx * sx + sy * sy + sz * sz);
+        if (!earthDragMoved && chord > EARTH_TAP_CHORD) earthDragMoved = true;
+      }
+      // Rotation engages on hold (>=280 ms) or deliberate flick; until
+      // then the globe stays frozen so clicks can't fight zone selection.
+      if (!earthDragEngaged) {
+        let heldLong = false;
+        try {
+          heldLong = (typeof performance !== 'undefined' && performance.now)
+            ? (performance.now() - earthPressTime) >= EARTH_DRAG_HOLD_MS
+            : false;
+        } catch (e) {}
+        if (heldLong || chord > EARTH_DRAG_CHORD) earthDragEngaged = true;
+      }
+      if (earthDragEngaged) {
+        // Single-axis lock decided once per drag from cumulative travel.
+        if (!earthDragAxis) {
+          const ax = Math.abs(earthDragCumX);
+          const ay = Math.abs(earthDragCumY);
+          if (ax > EARTH_AXIS_LOCK || ay > EARTH_AXIS_LOCK) {
+            earthDragAxis = ax >= ay ? 'yaw' : 'pitch';
+          }
+        }
+        if (earthDragAxis === 'pitch') {
+          rotateEarth(0, dy * EARTH_PITCH_SENSITIVITY);
+        } else if (earthDragAxis === 'yaw') {
+          rotateEarth(dx * EARTH_YAW_SENSITIVITY, 0);
+        } else {
+          // Engaged but no dominant direction yet: yaw only, so
+          // hold-still never tilts the globe.
+          rotateEarth(dx * EARTH_YAW_SENSITIVITY, 0);
+        }
+      }
+    }
+    earthDragLastDir = normalized;
+  }
+
+  function endEarthDrag(source, hit) {
+    if (!earthDragging) return false;
+    if (hit && hit.hit) updateEarthDrag(hit.local);
+    // Tap-to-select with press/hover/release fallback: a clean tap (never
+    // moved past the tap chord) selects the release zone, else the press
+    // zone, else the hovered zone.
+    const releaseZone = (hit && hit.hit && hit.zoneIndex >= 0) ? hit.zoneIndex : -1;
+    let selected = -1;
+    if (!earthDragMoved) {
+      if (releaseZone >= 0) selected = releaseZone;
+      else if (earthPressZone >= 0) selected = earthPressZone;
+      else if (earthHoveredIndex >= 0) selected = earthHoveredIndex;
+    }
     earthDragging = false;
     earthDragSource = null;
     earthDragLastDir = null;
-    earthDragInputSource = null;
+    earthDragStartDir = null;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
     earthPressZone = -1;
-    earthLastFrameTime = -1;
-    earthInteractionUntil = 0;
-    earthAnchorRight = { x: 1, y: 0, z: 0 };
-    earthPitch = 0;
-    sceneMode = 'reels';
-    ambilightCanvas = null;
-    ambilightCtx = null;
+    if (selected >= 0) {
+      selectEarthLocation(selected);
+      return true;
+    }
+    return false;
+  }
+
+  function getEarthState() {
+    return {
+      center: { ...earthCenter },
+      yaw: earthYaw,
+      pitch: earthPitch,
+      dragging: earthDragging,
+      zoneCount: earthLocations.length,
+      visualStyle: 'holographic-zones',
+      previewLocationIndex: earthPreviewLocationIndex,
+      previewStatus: earthPreviewStatus,
+      previewItemCount: earthPreviewItems.length,
+      resourcesReady: earthResourcesReady,
+      locationSlugs: earthLocations.map((l) => l.slug),
+      renderStats: { ...renderStats },
+      notificationText,
+      notificationUntil,
+    };
+  }
+
+  // ─── WebXR Lifecycle ────────────────────────────────────────────────
+  let vrControllers = [];
+  // Dedicated immersive canvas (rebuilt per entry, removed on rebuild).
+  // Never reuse the preview canvas: it may be detached after SPA route
+  // changes, which made entry succeed-or-fail depending on browse history.
+  let xrCanvas = null;
+
+  function setupVRControllers() {
+    if (!renderer || !renderer.xr || vrControllers.length > 0) return;
+    for (let i = 0; i < 2; i++) {
+      const controller = renderer.xr.getController(i);
+      controller.addEventListener('selectstart', onVRSelectStart);
+      controller.addEventListener('selectend', onVRSelectEnd);
+      controller.addEventListener('select', onVRSelect);
+      scene.add(controller);
+      vrControllers.push(controller);
+    }
+  }
+
+  function onVRSelectStart() {
+    pressedButton = hoveredButton;
+    emitPreviewState();
+  }
+
+  function onVRSelectEnd() {
+    pressedButton = -1;
+    emitPreviewState();
+  }
+
+  function onVRSelect(ev) {
+    const controller = ev.target;
+    let handled = false;
+    if (raycaster && controller && scene) {
+      const tempMatrix = new THREE.Matrix4();
+      tempMatrix.identity().extractRotation(controller.matrixWorld);
+      const rayOrigin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+      const rayDir = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+      raycaster.set(rayOrigin, rayDir);
+
+      if (sceneMode === 'earth' && earthMesh) {
+        const hit = hitTestEarth(rayOrigin, rayDir);
+        if (hit.hit && hit.zoneIndex >= 0) {
+          selectEarthLocation(hit.zoneIndex);
+          handled = true;
+        }
+      } else if (controlsMesh && controlsMesh.visible) {
+        const hits = raycaster.intersectObject(controlsMesh);
+        if (hits.length > 0 && hits[0].uv) {
+          const index = controlIndexFromUV(hits[0].uv);
+          if (index >= 0) {
+            executeControlButton(index);
+            handled = true;
+          }
+        }
+      }
+    }
+
+    if (!handled && ev.data && ev.data.handedness) {
+      if (ev.data.handedness === 'right') {
+        if (callbacks.onNext) callbacks.onNext();
+      } else if (ev.data.handedness === 'left') {
+        if (callbacks.onPrev) callbacks.onPrev();
+      }
+    }
+  }
+
+  // Machine-readable entry failure: logs, notifies the host page via
+  // callbacks.onVRError(reason, detail) for user-visible feedback, and
+  // returns null (legacy callers only check truthiness).
+  function notifyVRError(reason, detail) {
+    try {
+      console.error('[WebXRVR] enterVR failed (' + reason + '):', detail || '');
+    } catch (e) {}
+    if (callbacks && typeof callbacks.onVRError === 'function') {
+      try {
+        callbacks.onVRError(reason, detail ? String((detail && detail.message) || detail) : '');
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  async function enterVR(options = {}) {
+    if (xrSession) return xrSession;
+    // A desktop preview owns the singleton renderer/loop; tear it down so
+    // the immersive session starts from a clean slate (upstream parity).
+    if (previewRunning) {
+      try { stopPreview(); } catch (e) {}
+    }
+    const xr = (options && options.xr) || getXR();
+    if (!xr) {
+      return notifyVRError('webxr-unavailable', 'navigator.xr is absent (needs HTTPS or localhost)');
+    }
+
+    ensureThree();
+    if (!THREE) {
+      return notifyVRError('three-missing', 'three.min.js did not load');
+    }
+
+    // Always build a fresh XR canvas. Never reuse previewCanvas (possibly
+    // detached after SPA route changes) and never render blind: an
+    // unattached canvas still renders, attachment is best-effort.
+    if (xrCanvas) {
+      try {
+        if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
+      } catch (e) {}
+      xrCanvas = null;
+    }
+    let canvas = null;
+    if (typeof document !== 'undefined') {
+      try {
+        const old = document.getElementById ? document.getElementById('webxrVrCanvas') : null;
+        if (old && old.parentNode) {
+          try { old.parentNode.removeChild(old); } catch (e) {}
+        }
+        canvas = document.createElement('canvas');
+        canvas.id = 'webxrVrCanvas';
+        canvas.width = 1280;
+        canvas.height = 720;
+        canvas.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;pointer-events:none;';
+        try {
+          if (document.body) document.body.appendChild(canvas);
+        } catch (e) {}
+      } catch (e) {
+        canvas = null;
+      }
+    }
+    if (!canvas) {
+      return notifyVRError('canvas-unavailable', 'could not create XR canvas');
+    }
+    xrCanvas = canvas;
+    try {
+      initThreeScene(canvas);
+    } catch (e) {
+      return notifyVRError('webgl-unavailable', e);
+    }
+    if (!renderer || !scene || !camera) {
+      return notifyVRError('webgl-unavailable', 'WebGL context creation failed');
+    }
+
+    let session = null;
+    const sessionOpts = {
+      optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'],
+    };
+
+    try {
+      session = await xr.requestSession('immersive-vr', sessionOpts);
+    } catch (e1) {
+      console.warn('[WebXRVR] Session request with optionalFeatures failed, trying minimal:', e1);
+      try {
+        session = await xr.requestSession('immersive-vr');
+      } catch (e2) {
+        return notifyVRError('session-rejected', e2);
+      }
+    }
+
+    xrSession = session;
+
+    if (renderer && renderer.xr) {
+      renderer.xr.enabled = true;
+      try {
+        renderer.xr.setReferenceSpaceType('local-floor');
+      } catch (e) {
+        try { renderer.xr.setReferenceSpaceType('local'); } catch (e2) {}
+      }
+
+      try {
+        await renderer.xr.setSession(session);
+      } catch (e) {
+        try {
+          renderer.xr.setReferenceSpaceType('local');
+          await renderer.xr.setSession(session);
+        } catch (e2) {
+          try { session.end(); } catch (e3) {}
+          xrSession = null;
+          return notifyVRError('bind-failed', e2);
+        }
+      }
+
+      xrRefSpace = renderer.xr.getReferenceSpace();
+      setupVRControllers();
+      setupVideoFrameTracking();
+      // Explicit entry mode (default reels): never inherit a stale mode
+      // from a previous preview, route, or session.
+      const entryMode = (options && options.mode === 'earth' && !isPackExperience()) ? 'earth' : 'reels';
+      setSceneMode(entryMode);
+      console.log('[WebXRVR] Entered immersive session in scene mode:', sceneMode);
+
+      if (sceneMode === 'reels') {
+        if (videoElement) {
+          videoElement.muted = false;
+          if (callbacks.onUnmute) callbacks.onUnmute();
+          if (videoElement.paused) videoElement.play().catch(() => {});
+        }
+      }
+
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.add('sx-vr-active');
+        if (document.body) document.body.classList.add('sx-vr-active');
+      }
+
+      renderer.setAnimationLoop((time, frame) => {
+        applySceneVisibility();
+        if (sceneMode === 'reels') {
+          const source = getVisualSource();
+          if (source && source.ready === false) {
+            clearPendingTexture();
+          } else {
+            uploadVideoFrame();
+          }
+          updateGlowColor(time, 800);
+          applyGlowColor();
+        } else {
+          advanceEarthSpin(time);
+          updateEarthDressing(time);
+        }
+        updateUiTextures();
+        layoutControlsDock();
+        updateControllerLasers();
+        renderer.render(scene, camera);
+      });
+    }
+
+    session.addEventListener('end', () => {
+      xrSession = null;
+      if (renderer) renderer.setAnimationLoop(null);
+      stopVideoFrameTracking();
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.remove('sx-vr-active');
+        if (document.body) document.body.classList.remove('sx-vr-active');
+      }
+      if (callbacks.onExitVR) callbacks.onExitVR();
+    });
+
+    return session;
+  }
+
+  function exitVR() {
+    if (xrSession) {
+      try { xrSession.end(); } catch (e) {}
+      xrSession = null;
+    }
+  }
+
+  // ─── Resource Cleanup ───────────────────────────────────────────────
+  function cleanup() {
+    removePreviewListeners();
+    if (typeof window !== 'undefined' && previewResizeHandler) {
+      try { window.removeEventListener('resize', previewResizeHandler); } catch (e) {}
+      previewResizeHandler = null;
+    }
+    // Dispose Three-managed GPU resources. Textures are nulled (not just
+    // disposed) so the next startPreview() rebuilds them — reusing a
+    // disposed CanvasTexture rendered black after restart.
+    if (scene) {
+      try {
+        scene.traverse((obj) => {
+          if (obj.geometry) { try { obj.geometry.dispose(); } catch (e) {} }
+          if (obj.material) {
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach((m) => {
+              if (m) {
+                if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
+                    m.map !== commentsTexture && m.map !== earthPreviewTexture) {
+                  try { m.map.dispose(); } catch (e) {}
+                }
+                try { m.dispose(); } catch (e) {}
+              }
+            });
+          }
+        });
+      } catch (e) {}
+    }
+    if (videoTexture) { try { videoTexture.dispose(); } catch (e) {} videoTexture = null; }
+    if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
+    if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
+    if (earthPreviewTexture) { try { earthPreviewTexture.dispose(); } catch (e) {} earthPreviewTexture = null; }
+    const gl = glContext || (renderer && renderer.getContext ? renderer.getContext() : null);
+    if (gl && gl.deleteBuffer) {
+      try {
+        gl.deleteBuffer({});
+        gl.deleteTexture({});
+        gl.deleteProgram({});
+      } catch (e) {}
+    }
+    if (renderer) {
+      try { renderer.dispose(); } catch (e) {}
+      renderer = null;
+    }
+    glContext = null;
+    scene = null;
+    camera = null;
+    orbitControls = null;
+    raycaster = null;
+    screenMesh = null;
+    ambilightMesh = null;
+    controlsMesh = null;
+    commentsMesh = null;
+    starfieldPoints = null;
+    earthGroup = null;
+    earthMesh = null;
+    earthPinsGroup = null;
+    earthPreviewMesh = null;
+    reticleMesh = null;
+    laserLine = null;
     controlsCanvas = null;
     controlsCtx = null;
-    guideCanvas = null;
-    guideCtx = null;
-    controlsVisible = false;
-    notificationText = '';
-    notificationUntil = 0;
-    isGrabbing = false;
-    currentHeadQuat = { x: 0, y: 0, z: 0, w: 1 };
-    hasNewVideoFrame = true;
-    lastVideoTime = -1;
-    lastVideoFrameCount = -1;
-    lastVisualKind = '';
-    lastVisualVersion = '';
-    lastVisualElement = null;
+    commentsCanvas = null;
+    commentsCtx = null;
+    earthPreviewCanvas = null;
+    earthPreviewCtx = null;
+    glowAlphaTexture = null;
+    glowProbeCanvas = null;
+    glowProbeCtx = null;
+    glowColor = [0.10, 0.24, 0.62];
+    glowTarget = [0.10, 0.24, 0.62];
+    lastGlowSample = -1;
+    earthMapTexture = null;
+    earthMapCanvas = null;
+    earthMapCtx = null;
+    earthMapDirty = true;
+    earthBaseSource = 'fallback';
+    earthBaseTried = false;
+    earthBaseStale = true;
+    earthLabelTexture = null;
+    earthLabelCanvas = null;
+    earthLabelCtx = null;
+    earthLabelMesh = null;
+    lastEarthLabelKey = '';
+    lastEarthPreviewUpdate = -1;
+    pinSharedGeo = null;
+    laserPositions = null;
+    reticleTexture = null;
+    previewHoverRay = null;
+    scratchMat4 = null;
+    scratchVec = null;
+    scratchVec2 = null;
+    scratchVec3 = null;
+    earthResourcesReady = false;
+    vrControllers = [];
+    previewPointer = null;
+    previewListeners = null;
     hoveredButton = -1;
-    activeRayOrigin = null;
-    activeRayDir = null;
-    flickedX = false;
-    flickedY = false;
-    _diagGLInfo = null;
-
-    if (wasXR && wasEarth && callbacks.onEarthClose) {
-      try { callbacks.onEarthClose(resumeAfterEarth); } catch (e) {}
-    }
-
-    const frameEl = document.getElementById('reelsFrame');
-    if (frameEl) frameEl.classList.remove('vr-active');
-
-    if (wasXR) {
-      // Final telemetry: record why the session ended, best-effort before teardown.
-      try {
-        fetch('/api/reels/diag', { method: 'POST', keepalive: true,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event: 'session_end',
-            xrErr: window.__xrErr || null,
-            glPath: window.__xrGL || null,
-            presented: window.__xrPresented || 0,
-          }) }).catch(() => {});
-      } catch (e) {}
-      notifyVrExit();
-    }
-  }
-
-  function onVideoChange() {
-    hasNewVideoFrame = true;
-    lastVideoTime = -1;
-    lastVideoFrameCount = -1;
+    pressedButton = -1;
+    lastUploadedSource = null;
     lastVisualKind = '';
     lastVisualVersion = '';
     lastVisualElement = null;
-    videoTexFront = 0;
-    videoTexAllocated = false;
-    // New file → re-derive stride from its resolution (guide art is static,
-    // so its uploaded flag survives across videos).
-    vrUploadStride = vrMinStride();
-    vrSkipCounter = 0;
-    vrStallFrames = 0;
-    vrCalmFrames = 0;
-    cPanelScrollY = 0;
-    cPanelMaxScroll = 0;
-    clearPanelHighlight();
-    activeOverlayRegions = [];
-    activeOverlayHoverId = null;
-    console.log('[WebXRVR] Video source changed — picking up new frame');
+    lastVideoTime = -1;
+    pendingClearedFor = '';
+    vrLastUiUploadT = -1;
   }
 
-  // ─── Public API ──────────────────────────────────────────────────────
+  function isPackExperience() {
+    return !!(callbacks.isPackMode && callbacks.isPackMode());
+  }
 
+  function getPackContext() {
+    return callbacks.getPackContext ? callbacks.getPackContext() : null;
+  }
+
+  // Screen mesh defaults in createScreenGeometry(): 2.4 × 2.4 m.
+  const SCREEN_HALF_W = 1.2;
+  const SCREEN_HALF_H = 1.2;
+
+  function visualPointFromHit(hitLocal) {
+    if (!hitLocal) return null;
+    return {
+      u: Math.max(0, Math.min(1, (hitLocal.x / (SCREEN_HALF_W * 2)) + 0.5)),
+      v: Math.max(0, Math.min(1, 0.5 - (hitLocal.y / (SCREEN_HALF_H * 2)))),
+    };
+  }
+
+  function executeControlButton(index) {
+    const ui = getUICanvas();
+    const btns = ui ? ui.CTRL_BUTTONS : [];
+    if (index < 0 || index >= btns.length) return;
+    const action = btns[index].action;
+    pressedButton = index;
+    switch (action) {
+      case 'prev': callbacks.onPrev && callbacks.onPrev(); break;
+      case 'next': callbacks.onNext && callbacks.onNext(); break;
+      case 'play': callbacks.onTogglePlay && callbacks.onTogglePlay(); break;
+      case 'rew':  callbacks.onSeek && callbacks.onSeek(-5); break;
+      case 'fwd':  callbacks.onSeek && callbacks.onSeek(5); break;
+      case 'mode': callbacks.onToggleMode && callbacks.onToggleMode(); break;
+      case 'curve': setCurvatureMode((curvatureMode + 1) % 3); break;
+      case 'lock': lockToViewer = !lockToViewer; break;
+      case 'mute':
+        if (callbacks.onToggleMute) callbacks.onToggleMute();
+        else if (videoElement) videoElement.muted = !videoElement.muted;
+        break;
+      case 'comments':
+        commentsPanelVisible = !commentsPanelVisible;
+        if (commentsMesh) commentsMesh.visible = commentsPanelVisible;
+        break;
+      case 'earth':
+        if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
+        else setSceneMode(sceneMode === 'earth' ? 'reels' : 'earth');
+        break;
+      case 'like': callbacks.onLike && callbacks.onLike(); break;
+      case 'save_reel': callbacks.onSaveReel && callbacks.onSaveReel(); break;
+      case 'share_reel': callbacks.onShareReel && callbacks.onShareReel(); break;
+      case 'follow': callbacks.onFollow && callbacks.onFollow(); break;
+      case 'profile': callbacks.onOpenCurrentProfile && callbacks.onOpenCurrentProfile(); break;
+      case 'report': callbacks.onReportReel && callbacks.onReportReel(); break;
+      case 'save_pack': callbacks.onSavePack && callbacks.onSavePack(); break;
+      case 'share_pack': callbacks.onSharePack && callbacks.onSharePack(); break;
+      case 'collect': callbacks.onCollectReel && callbacks.onCollectReel(); break;
+      case 'exit': xrSession ? exitVR() : stopPreview(); break;
+    }
+  }
+
+  // ─── Public Module API ──────────────────────────────────────────────
   return {
     init(video, cbs) {
       videoElement = video;
       callbacks = cbs || {};
+      lockToViewer = !isPackExperience();
       console.log('[WebXRVR] Initialised', VR_VERSION);
     },
 
@@ -6188,31 +2962,213 @@ window.WebXRVR = window.WebXRVR || (function () {
     setReducedMotion,
     setSceneMode,
     requestPreviewFullscreen,
+    toggleControls: toggleControlsVisibility,
+    version: VR_VERSION,
+    getCurvatureMode,
+    setCurvatureMode,
+    getThree() { return THREE || (typeof window !== 'undefined' && window.THREE) || null; },
+    get THREE() { return THREE || (typeof window !== 'undefined' && window.THREE) || null; },
     getPreviewState,
-    onVideoChange,
-    showNotification,
-
-    /** Enable/disable SBS stereoscopic sampling of the video frame. */
-    setStereo(enabled) {
-      stereoMode = !!enabled;
-      console.log('[WebXRVR] Stereo (SBS) mode:', stereoMode ? 'ON' : 'OFF');
+    onVideoChange() {
+      hasNewVideoFrame = true;
+      const source = getVisualSource();
+      if (source && source.ready === false) {
+        clearPendingTexture();
+      }
+      if (videoTexture) videoTexture.needsUpdate = true;
     },
+    showNotification,
+    setStereo(enabled) { stereoMode = !!enabled; },
 
     __test: {
       locationToUnit,
       earthZoneAngularRadius,
+      earthZoneUV,
+      classifyEarthPixel,
+      earthHeatStyle,
+      computeDockPose,
+      controlIndexFromUV,
+      // Test seam: invoke a stored preview pointer handler with a synthetic
+      // event (the mock canvas swallows listeners, so this drives the
+      // pointer→raycast→action chain in Node).
+      firePreviewPointer(type, event) {
+        if (!previewListeners) return false;
+        const map = {
+          pointerdown: 'onPointerDown',
+          pointermove: 'onPointerMove',
+          pointerup: 'finishPointer',
+          pointercancel: 'finishPointer',
+          wheel: 'onWheel',
+        };
+        const fn = previewListeners[map[type]];
+        if (typeof fn !== 'function') return false;
+        fn(event || {});
+        return true;
+      },
+      getLastUploadedSource() { return lastUploadedSource; },
+      getLastRenderError() { return lastRenderError; },
+      // Downsampled mean/variance of the earth base canvas: photo re-style
+      // has high variance (land/ocean/edges), flat fallback has low variance.
+      // Proves an arrived photo survives subsequent zone repaints.
+      getEarthBaseSample() {
+        try {
+          if (!earthMapCtx || typeof document === 'undefined') return { err: 'no-canvas' };
+          const probe = document.createElement('canvas');
+          probe.width = 8;
+          probe.height = 8;
+          const pctx = probe.getContext('2d');
+          if (!pctx) return { err: 'no-2d' };
+          pctx.drawImage(earthMapCanvas, 0, 0, 8, 8);
+          const d = pctx.getImageData(0, 0, 8, 8).data;
+          let n = 0, sum = 0, sum2 = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            const v = (d[i] + d[i + 1] + d[i + 2]) / 3;
+            sum += v;
+            sum2 += v * v;
+            n++;
+          }
+          const mean = sum / n;
+          return { mean: Math.round(mean), variance: Math.round(sum2 / n - mean * mean) };
+        } catch (e) {
+          return { err: String((e && e.message) || e) };
+        }
+      },
+      // Pixel-level proof for CDP probes: renders once and reads back the
+      // center 8x8 synchronously in the same task (works without
+      // preserveDrawingBuffer, unlike readPixels-after-present or screenshots
+      // in headless compositing where WebGL layers may not be captured).
+      readCenterPixels() {
+        try {
+          if (!renderer || !scene || !camera) return { err: 'no-renderer' };
+          renderer.render(scene, camera);
+          const gl = renderer.getContext();
+          const w = gl.drawingBufferWidth || 1;
+          const h = gl.drawingBufferHeight || 1;
+          const px = new Uint8Array(8 * 8 * 4);
+          gl.readPixels(Math.floor(w / 2) - 4, Math.floor(h / 2) - 4, 8, 8, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          let r = 0, g = 0, b = 0;
+          for (let i = 0; i < px.length; i += 4) { r += px[i]; g += px[i + 1]; b += px[i + 2]; }
+          const n = px.length / 4;
+          return { mean: [Math.round(r / n), Math.round(g / n), Math.round(b / n)], size: [w, h] };
+        } catch (e) {
+          return { err: String((e && e.message) || e) };
+        }
+      },
+      // CDP/manual diagnosis only: tint the video screen a solid color
+      // (pass null/undefined to restore the video texture). Proves whether
+      // the mesh+camera path renders when the picture stays black.
+      setScreenDebugColor(hex) {
+        if (!screenMesh || !screenMesh.material) return false;
+        try {
+          if (hex === null || hex === undefined) {
+            screenMesh.material.color.set(0xffffff);
+            screenMesh.material.map = videoTexture;
+          } else {
+            screenMesh.material.map = null;
+            screenMesh.material.color.set(hex);
+          }
+          screenMesh.material.needsUpdate = true;
+          return true;
+        } catch (e) {
+          return false;
+        }
+      },
+      // Scene-graph introspection for the Node harness and live CDP probes:
+      // reports real THREE renderer stats (not the telemetry counters).
+      getSceneInfo() {
+        const info = { hasRenderer: !!renderer, hasScene: !!scene, hasCamera: !!camera };
+        try {
+          if (renderer && THREE) {
+            const sz = new THREE.Vector2();
+                            try { renderer.getSize(sz); } catch (e) {}
+            info.rendererSize = [sz.x, sz.y];
+            try { info.pixelRatio = renderer.getPixelRatio ? renderer.getPixelRatio() : 1; } catch (e) {}
+            info.drawCalls = renderer.info && renderer.info.render ? { ...renderer.info.render } : null;
+          }
+          if (camera) {
+            info.camera = {
+              pos: [camera.position.x, camera.position.y, camera.position.z],
+              rot: [camera.rotation.x, camera.rotation.y, camera.rotation.z],
+              fov: camera.fov,
+              aspect: camera.aspect,
+            };
+          }
+          if (scene) info.sceneChildren = scene.children.length;
+          if (screenMesh) {
+            info.screen = {
+              visible: screenMesh.visible,
+              pos: [screenMesh.position.x, screenMesh.position.y, screenMesh.position.z],
+              verts: screenMesh.geometry && screenMesh.geometry.attributes && screenMesh.geometry.attributes.position
+                ? screenMesh.geometry.attributes.position.count
+                : -1,
+              hasMap: !!(screenMesh.material && screenMesh.material.map),
+              mapSize: (screenMesh.material && screenMesh.material.map && screenMesh.material.map.image)
+                ? [screenMesh.material.map.image.width, screenMesh.material.map.image.height]
+                : null,
+            };
+          }
+          if (controlsMesh) info.controls = { visible: controlsMesh.visible };
+          if (commentsMesh) info.comments = { visible: commentsMesh.visible };
+          if (earthGroup) info.earth = { visible: earthGroup.visible };
+          if (controlsMesh) {
+            info.dock = {
+              pos: [controlsMesh.position.x, controlsMesh.position.y, controlsMesh.position.z],
+              rot: [controlsMesh.rotation.x, controlsMesh.rotation.y, controlsMesh.rotation.z],
+            };
+          }
+          info.glow = {
+            visible: !!(ambilightMesh && ambilightMesh.visible),
+            color: glowColor.map((c) => Math.round(c * 1000) / 1000),
+          };
+          info.laser = { visible: !!(laserLine && laserLine.visible) };
+          info.earthMap = {
+            hasTexture: !!(earthMesh && earthMesh.material && earthMesh.material.map),
+            base: earthBaseSource,
+            baseTried: !!earthBaseTried,
+            mapOffset: earthMapTexture ? earthMapTexture.offset.x : null,
+            pinCount: earthPinsGroup ? earthPinsGroup.children.length : 0,
+            hasLabel: !!earthLabelMesh,
+          };
+          // Mean brightness of the 2048^2 proxy canvas (16x16 downsample).
+          // Distinguishes "proxy never painted" from "texture/mesh path broken".
+          try {
+            if (vrProxyCanvas && typeof document !== 'undefined' && document.createElement) {
+              const probe = document.createElement('canvas');
+              probe.width = 16;
+              probe.height = 16;
+              const pctx = probe.getContext('2d');
+              if (pctx && vrProxyCtx) {
+                pctx.drawImage(vrProxyCanvas, 0, 0, 16, 16);
+                const d = pctx.getImageData(0, 0, 16, 16).data;
+                let sum = 0;
+                for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+                info.proxyMean = Math.round(sum / ((d.length / 4) * 3));
+              }
+            }
+          } catch (e) {
+            info.proxyMean = 'err:' + String((e && e.message) || e);
+          }
+        } catch (e) {
+          info.error = String((e && e.message) || e);
+        }
+        return info;
+      },
       getControlButton(action) {
-        const button = CTRL_BUTTONS.find((item) => item.action === action);
+        const ui = getUICanvas();
+        const btns = ui ? ui.CTRL_BUTTONS : [];
+        const button = btns.find((item) => item.action === action);
         return button ? { ...button } : null;
       },
       getVisibleControlActions() {
+        const ui = getUICanvas();
+        const btns = ui ? ui.CTRL_BUTTONS : [];
         const source = getVisualSource();
         let itemState = {};
         if (callbacks.getCurrentItemState) {
-          try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) { itemState = {}; }
+          try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
         }
-        return CTRL_BUTTONS
-          .filter((button) => isControlVisible(button.action, source, itemState))
+        return btns
+          .filter((button) => ui.isControlVisible(button.action, source, itemState, isPackExperience()))
           .map((button) => button.action);
       },
       getVisualSourceState() {
@@ -6229,13 +3185,16 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       visualPointFromHit,
       executeControl(action) {
-        const index = CTRL_BUTTONS.findIndex((button) => button.action === action);
+        const ui = getUICanvas();
+        const btns = ui ? ui.CTRL_BUTTONS : [];
+        const index = btns.findIndex((b) => b.action === action);
         if (index >= 0) executeControlButton(index);
       },
       raySphereHit,
       hitTestEarth,
       setLocationActivity,
       setEarthHoveredIndex,
+      selectEarthLocation,
       beginEarthDrag,
       updateEarthDrag,
       endEarthDrag,
@@ -6243,10 +3202,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       cleanup,
       loadEarthPreviewNow(index) {
         setEarthHoveredIndex(index);
-        if (earthPreviewTimer) {
-          clearTimeout(earthPreviewTimer);
-          earthPreviewTimer = null;
-        }
+        earthPreviewGeneration += 1;
         return loadEarthPreviewForIndex(index, earthPreviewGeneration);
       },
       setEarthPose(yaw, pitch, center) {
@@ -6254,25 +3210,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthPitch = Math.max(-1.2, Math.min(1.2, Number(pitch) || 0));
         if (center) earthCenter = { x: center.x, y: center.y, z: center.z };
         earthLastFrameTime = -1;
+        applyEarthRotation();
       },
-      getEarthState() {
-        return {
-          center: { ...earthCenter },
-          yaw: earthYaw,
-          pitch: earthPitch,
-          dragging: earthDragging,
-          zoneCount: earthZoneCount,
-          visualStyle: 'holographic-zones',
-          previewLocationIndex: earthPreviewLocationIndex,
-          previewStatus: earthPreviewStatus,
-          previewItemCount: earthPreviewItems.length,
-          resourcesReady: earthResourcesReady,
-          locationSlugs: earthLocations.map((location) => location.slug),
-          renderStats: { ...renderStats },
-          notificationText,
-          notificationUntil,
-        };
-      },
+      getEarthState,
     },
   };
 })();

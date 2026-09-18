@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -1748,6 +1748,28 @@ def list_reel_locations(q: str = "", limit: int = 8):
     }
 
 
+EARTH_TEXTURE_FILE = (
+    Path(__file__).resolve().parent.parent.parent
+    / "web" / "public" / "assets" / "earth-natural-1024x512.jpg"
+)
+
+
+@router.get("/earth-texture")
+def reels_earth_texture():
+    """Serve the Natural Earth base photo for the WebXR globe hologram.
+
+    The VR engine re-styles it per-pixel client-side; procedural fallback
+    covers a missing file (never 500 — the globe must always render).
+    """
+    if not EARTH_TEXTURE_FILE.is_file():
+        raise HTTPException(status_code=404, detail="Earth texture missing")
+    return FileResponse(
+        str(EARTH_TEXTURE_FILE),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
 @router.get("/locations/activity")
 def list_reel_location_activity(
     window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
@@ -2252,6 +2274,12 @@ def reels_player(
     pack_state_js = ASSETS_DIR / "reels_pack_state.js"
     if pack_state_js.exists():
         html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js.read_text(encoding="utf-8"))
+    three_js = ASSETS_DIR / "three.min.js"
+    if three_js.exists():
+        html = html.replace("__THREE_JS__", three_js.read_text(encoding="utf-8"))
+    vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
+    if vr_ui_js.exists():
+        html = html.replace("__VR_UI_CANVAS_JS__", vr_ui_js.read_text(encoding="utf-8"))
     vr_js = ASSETS_DIR / "webxr_vr.js"
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
@@ -2422,6 +2450,8 @@ def reels_player_inline(
     feed_state_js = ASSETS_DIR / "reels_feed_state.js"
     rewards_js = ASSETS_DIR / "reels_rewards.js"
     pack_state_js = ASSETS_DIR / "reels_pack_state.js"
+    three_js = ASSETS_DIR / "three.min.js"
+    vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"
 
     scripts: list[str] = []
@@ -2439,6 +2469,12 @@ def reels_player_inline(
         elif stripped.startswith("__REELS_PACK_STATE_JS__"):
             if pack_state_js.exists():
                 scripts.append(pack_state_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__THREE_JS__"):
+            if three_js.exists():
+                scripts.append(three_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__VR_UI_CANVAS_JS__"):
+            if vr_ui_js.exists():
+                scripts.append(vr_ui_js.read_text(encoding="utf-8"))
         elif stripped.startswith("__WEBXR_VR_JS__"):
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))

@@ -1597,7 +1597,7 @@
         <span class="action-btn-label">FULL</span>
       </button>
       <div id="vrBtnWrap" style="display:none;">
-        <button class="action-btn" id="vrBtn" title="Enter VR Mode">
+        <button class="action-btn" id="vrBtn" title="Enter VR Mode — requires WebXR device or Chrome emulator extension">
           <span class="btn-icon">
             __ICON_VR__
           </span>
@@ -1737,9 +1737,12 @@
 <script>__REELS_FEED_STATE_JS__</script>
 <script>__REELS_REWARDS_JS__</script>
 <script>__REELS_PACK_STATE_JS__</script>
+<script>__THREE_JS__</script>
+<script>__VR_UI_CANVAS_JS__</script>
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
+    window.__sxReelsReady = false;
     let videoData = __VIDEO_DATA_JSON__;
     const initialFeedState = __FEED_STATE_JSON__;
     const FeedState = window.ReelsFeedState;
@@ -5240,18 +5243,51 @@
         },
         onLikeComment: function(id) { return likeComment(id); },
         onPostComment: function(text, timestamp) { return postComment(text, timestamp); },
+        onVRError: function(reason, detail) {
+          const messages = {
+            'webxr-unavailable': 'WEBXR NOT AVAILABLE — REQUIRES HTTPS OR LOCALHOST',
+            'three-missing': 'VR ENGINE FAILED TO LOAD — RELOAD THE PAGE',
+            'canvas-unavailable': 'VR CANVAS FAILED — RELOAD THE PAGE',
+            'webgl-unavailable': 'WEBGL FAILED — ENABLE GRAPHICS ACCELERATION',
+            'session-rejected': 'VR SESSION REJECTED — CHECK HEADSET/EMULATOR',
+            'bind-failed': 'VR BIND FAILED — CHECK CONSOLE',
+          };
+          showFlash(messages[reason] || ('VR ERROR: ' + (detail || reason || 'SESSION FAILED')));
+        },
       });
+      // The VR button must not fire before this mount's init() completed;
+      // otherwise enterVR runs against a stale video element from a prior
+      // SPA route. Set after init() returns above.
+      window.__sxReelsReady = true;
 
-      // Per Meta WebXR guidance, only offer the immersive session when the
-      // runtime reports support — don't infer it from script presence.
-      if (vrBtnWrap && packImmersiveEnabled && typeof WebXRVR.isSupported === 'function') {
-        WebXRVR.isSupported().then((supported) => {
-          if (supported) vrBtnWrap.style.display = '';
-        }).catch(() => {});
+      // Per Meta WebXR guidance, offer immersive session when runtime reports support
+      // or in localhost simulation mode. Also listen to devicechange events.
+      function refreshVrButton() {
+        if (!vrBtnWrap || !packImmersiveEnabled) return;
+        const isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        if (typeof WebXRVR !== 'undefined' && typeof WebXRVR.isSupported === 'function') {
+          WebXRVR.isSupported().then((supported) => {
+            if (supported || isLocalHost) {
+              vrBtnWrap.style.display = '';
+            }
+          }).catch(() => {
+            if (isLocalHost) vrBtnWrap.style.display = '';
+          });
+        } else if (isLocalHost) {
+          vrBtnWrap.style.display = '';
+        }
+      }
+      refreshVrButton();
+      if (typeof navigator !== 'undefined' && navigator.xr && navigator.xr.addEventListener) {
+        navigator.xr.addEventListener('devicechange', refreshVrButton);
       }
 
       if (vrBtn) {
-        vrBtn.addEventListener('click', function() {
+        vrBtn.addEventListener('click', async function() {
+          if (!window.__sxReelsReady) {
+            showFlash('PLAYER STILL LOADING — TRY AGAIN');
+            return;
+          }
           if (!packImmersiveEnabled) {
             showFlash('PACK VR DISABLED');
             return;
@@ -5259,7 +5295,52 @@
           // Avoid background preload contending with the XR decoder/texture
           // upload path for the active pack item.
           try { clearPreloadVideo(); } catch (e) {}
-          WebXRVR.enterVR();
+
+          const isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          const hasXRApi = typeof navigator !== 'undefined' && !!navigator.xr;
+
+          // Check support before attempting to request a session
+          let isSupported = false;
+          if (hasXRApi) {
+            try { isSupported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) {}
+          }
+
+          if (!hasXRApi) {
+            // No WebXR API at all
+            showFlash('WEBXR NOT AVAILABLE — REQUIRES HTTPS OR LOCALHOST');
+            console.warn('[WebXRVR] navigator.xr is absent — load over HTTPS or localhost');
+            return;
+          }
+
+          if (!isSupported && isLocalHost) {
+            // On localhost without a headset: prompt the user to set up emulator
+            showFlash('INSTALL WEBXR EMULATOR — chrome://flags or Meta extension');
+            console.info(
+              '[WebXRVR] VR not supported on this device.\n' +
+              'To simulate in Chrome desktop:\n' +
+              '  1. Install the "Immersive Web Emulator" Chrome extension, OR\n' +
+              '  2. Enable chrome://flags/#enable-webxr-device-simulation\n' +
+              '  3. Or connect a Quest via Air Link / Link cable'
+            );
+            return;
+          }
+
+          if (!isSupported) {
+            showFlash('VR HEADSET NOT DETECTED');
+            return;
+          }
+
+          try {
+            const session = await WebXRVR.enterVR();
+            if (!session) {
+              showFlash('VR SESSION FAILED — CHECK CONSOLE');
+            } else {
+              showFlash('ENTERING IMMERSIVE VR');
+            }
+          } catch (err) {
+            console.error('[WebXRVR] enterVR error:', err);
+            showFlash('VR ERROR: ' + (err.message || 'SESSION FAILED'));
+          }
         });
       }
     }
