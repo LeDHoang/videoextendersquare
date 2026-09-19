@@ -240,7 +240,7 @@ adb reverse tcp:5173 tcp:5173
 adb reverse --list
 ```
 
-For CDP remote inspection of Quest Browser from the host, forward the DevTools port the other way: `adb forward tcp:9222 tcp:9222` (Quest Browser must have remote debugging enabled; `debug-quest-targets.cjs` lists discoverable targets).
+For CDP remote inspection of Quest Browser from the host, forward the DevTools port the other way: `adb forward tcp:9222 tcp:9222` (Quest Browser must have remote debugging enabled; `scripts/debug-quest-targets.cjs` lists discoverable targets).
 
 ### 6.3 Step 3: Launch Quest Browser
 1. In the Quest headset, open **Meta Quest Browser**.
@@ -258,10 +258,10 @@ The repository includes dedicated Chrome DevTools Protocol (CDP) probes to monit
 
 ```bash
 # Probe active Quest Browser tabs
-node debug-quest-targets.cjs
+node scripts/debug-quest-targets.cjs
 
 # Connect CDP bridge and stream live video decode stats
-node debug-quest.cjs
+node scripts/debug-quest.cjs
 ```
 
 The output displays:
@@ -363,7 +363,7 @@ Owner decisions: (1) Phase 1+2 first, Phase 3+4 after confirmation; (2) keep v8 
 ### ⏳ Remaining (device-side, cannot verify headless)
 - Quest Browser session: confirm `makeXRCompatible` + `setSession` succeed on-device and report `xrCompat` via `getPreviewState()`; check 72 FPS + upload stride on Adreno (desktop uploads ~27/s — re-check on device).
 - Emulator-enabled Chrome click-through: with Immersive Web Emulator / device-simulation flag on, the 2D VR button should now attempt and enter (previously hard-blocked); confirm preview restores after session end.
-- USB workflow in §6 unchanged (`adb reverse`, `debug-quest.cjs`).
+- USB workflow in §6 unchanged (`adb reverse`, `scripts/debug-quest.cjs`).
 
 ### ✅ Issues 1–3 (2026-09-19, done — sim bug reports)
 - **Issue 2 (entry + mode leaks)**: `stopPreview` resets to reels baseline (`sceneMode`, `previewCanvas`, camera, stereo, controls); `enterVR` tears down preview, builds a fresh XR canvas every entry (no `previewCanvas` reuse), validates each stage with reason codes (`webxr-unavailable`/`three-missing`/`canvas-unavailable`/`webgl-unavailable`/`session-rejected`/`bind-failed`) surfaced via `callbacks.onVRError` → 2D toast; explicit `enterVR({mode})` defaulting to reels; 2D button gated on `__sxReelsReady`. Live matrix: 2D page ready + button visible + XR present; preview-earth → back-to-/reels ⇒ mode reels, preview stopped (leak closed). Full immersive click needs an emulator-enabled Chrome (this automation profile reports `isSessionSupported=false`, correctly gated with emulator guidance).

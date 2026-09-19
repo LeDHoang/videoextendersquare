@@ -422,8 +422,8 @@ curl http://localhost:9222/json/version                            # Chromium ve
 curl http://localhost:9222/json | python3 -m json.tool            # list tabs
 ```
 Connect a CDP client to a tab's `webSocketDebuggerUrl` to evaluate JS, read
-console logs, etc. A zero-dependency probe lives at `debug-quest.cjs`
-(node 26 global `fetch` + `WebSocket`); `debug-quest-newtab.cjs` spawns a fresh
+console logs, etc. A zero-dependency probe lives at `scripts/debug-quest.cjs`
+(node 26 global `fetch` + `WebSocket`); `scripts/debug-quest-newtab.cjs` spawns a fresh
 controllable tab via `Target.createTarget` (existing VR tabs are hidden).
 
 ⚠️ **Limitation:** while a tab is in an **immersive WebXR session**, it is hidden
@@ -485,4 +485,4 @@ curl -s http://localhost:8000/api/reels/diag | python3 -m json.tool
 - Diag endpoint: `server/routers/reels.py` `post_diag` / `get_diag`
 - Encoder bitrate: `core/tooling.py` `HEVC_CANDIDATES`
 - Preload window: `ui/assets/reels.html` `preloadAllVideos` / `updatePreloadStatus`
-- CDP probes: `debug-quest.cjs`, `debug-quest-newtab.cjs`, `debug-quest-targets.cjs`
+- CDP probes: `scripts/debug-quest.cjs`, `scripts/debug-quest-newtab.cjs`, `scripts/debug-quest-targets.cjs`

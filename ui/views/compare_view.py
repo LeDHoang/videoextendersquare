@@ -120,7 +120,7 @@ def render(ctx: dict) -> None:
                 [f"Missing {' and '.join(missing)}. Pairs must be generated "
                  "elsewhere and copied in."],
                 code=["pip install vapoursynth  + vsznedi3 plugin",
-                      f"venv\\Scripts\\python.exe batch_upscale.py"],
+                      f".venv/bin/python scripts/batch_upscale.py"],
             )
 
         if st.button("↻  RESCAN", key="sx.cmp.rescan"):

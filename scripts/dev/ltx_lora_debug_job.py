@@ -5,7 +5,7 @@ Runs a single real fal.ai request (9 frames @ 480p ≈ $0.005–0.01) against
 verify that fal's SSRF-safe downloader accepts the Civitai token URL.
 
 Usage:
-    .venv/bin/python test_ltx_lora_job.py [civitai_download_url] [source_video]
+    .venv/bin/python scripts/dev/ltx_lora_debug_job.py [civitai_download_url] [source_video]
 
 Defaults are the Pixar Toon LoRA and the smallest clip in input/.
 """
@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import fal_client  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root
 
 from pipeline.utils import attach_civitai_token, get_video_dimensions_and_duration  # noqa: E402
 

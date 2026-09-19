@@ -1,15 +1,18 @@
 """Batch-spatialize every HEVC master in output/testpipeline -> output/testpipeline-3d.
 
 Standalone CLI twin of the /api/reels/spatialize endpoint — run without the
-server:
-    python batch_spatialize.py            # default dirs
-    python batch_spatialize.py --half     # half-SBS (3840x3840 output)
+server (from the repo root):
+    .venv/bin/python scripts/batch_spatialize.py            # default dirs
+    .venv/bin/python scripts/batch_spatialize.py --half     # half-SBS (3840x3840)
 """
 
 import argparse
 import os
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 
 from pipeline.spatial_worker import (
     SpatializeError,

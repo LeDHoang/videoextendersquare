@@ -148,8 +148,8 @@ adb reverse tcp:5173 tcp:5173
 To inspect hardware HEVC decoder cadence and dropped frames via Chrome DevTools Protocol:
 ```bash
 # Probe active Quest Browser tabs and inspect WebGL renderer stats
-node debug-quest-targets.cjs
-node debug-quest.cjs
+node scripts/debug-quest-targets.cjs
+node scripts/debug-quest.cjs
 ```
 
 ### 3. Wi-Fi / LAN Mode

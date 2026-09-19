@@ -2,7 +2,7 @@
 // enable Runtime+Log, evaluate a playback/perf probe, and capture console logs.
 // Zero dependencies — uses Node 26 global fetch + WebSocket.
 
-const REELS_HOST = 'localhost:5173/reels';
+const REELS_HOST = process.env.REELS_HOST || '/reels';
 
 async function probeTab(wsUrl) {
   return new Promise((resolve) => {

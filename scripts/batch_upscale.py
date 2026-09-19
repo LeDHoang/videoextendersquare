@@ -1,5 +1,10 @@
 import os
 import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+
 from pipeline.video_worker import process_video
 
 # Reads sources from, and writes _fast/_studio pairs into, this directory —

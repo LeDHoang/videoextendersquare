@@ -1,6 +1,6 @@
 # Beta Launch Checklist
 
-Last updated: 2026-09-19 (audit round 2: four-agent codebase re-verification — statuses corrected, ~30 new findings added)
+Last updated: 2026-09-19 (audit round 2 + planned-feature scope inventory)
 
 Status: **Blocked for public beta.** Complete every item in "Public beta release blockers" before opening registration or exposing the deployment publicly. An invite-only beta must still protect paid processing endpoints and private user media.
 
@@ -39,6 +39,44 @@ These are the settled architecture decisions for beta and the reasoning behind e
 
 ### What these verdicts do NOT remove from this checklist
 The blockers below are unchanged and still gate public beta. The verdicts pick *where* things run; they do not implement the security/ownership/anti-abuse controls (auth on processing endpoints, FAL spend limits, per-user quotas, ownership checks, retention/deletion, backups + restore drill, monitoring/alerting) that remain required regardless of host.
+
+## Beta feature scope — planned but missing features (2026-09-19)
+
+This section answers "is this supposed to exist yet?" for every planned feature. **In scope for beta:** the current shipped feature set (reels, packs, explore/tag/location/Earth, comments/likes/saves, DMs, credits wallet + Stripe, rewards, WebXR/Quest mode) plus the release blockers below. **Out of scope by design:** the VR roadmap phases and the items tabled here — with the single exception of the P1 features listed, which gate public registration or payments.
+
+### Features missing that intersect with beta
+
+| Feature | Priority | State | Where it lands |
+|---|---|---|---|
+| Email verification flow | **P1** (or stay invite-only via `SX_REGISTRATION_ENABLED=0`) | Zero machinery — no model, route, or template | Registration blockers above |
+| Job cancellation endpoint | **P1** | No cancel endpoint exists in any router (verified 2026-09-19) | Ownership section above |
+| DSAR data export (`GET /api/users/me/export`) | P2 (P1 if EU users allowed) | Absent | Privacy section above |
+| Report dialog UI (replace `window.prompt`) | P2 | API complete incl. packs; UX missing | Privacy section above |
+| In-app support/contact surface | P2 | No footer/help link in `AppShell.jsx` | Health/support section above |
+| Cookie-consent banner (ePrivacy) | P2 (EU-scoped) | 1-year anon cookie writes on load | Privacy section above |
+| Credits nav icon final art | P2 cosmetic | `web/src/components/icons/svg/credits.svg` marked TEMP | todolist.md near-term |
+| Captions/WebVTT | **Decision needed: declare out-of-scope for beta** | No `<track>`/VTT capability anywhere | A11y item above |
+| Alt-text field on upload | P3 | No field; avatars render `alt=""` | Deferred |
+
+### VR roadmap phases — out of beta scope by design (source: `docs/todolist.md`)
+
+- **Phase 0 — playback foundation:** remove normal-path decoded-frame skipping (today the VR uploader intentionally drops the 30fps source to 10–15fps via stride — the choppy-motion workaround documented in `vr-reels-playback-investigation.md:94–157`); standardize one Quest-appropriate rendition with auto-selection (today: single `-preview.mp4` proxy, `reels.py:1194`); texture-upload contention control (video/controls/comments/earth/glow `needsUpdate` calls + hidden preload competing per frame — `webxr_vr.js`); bounded cache/memory/thermal on-device validation.
+- **Phase 1 — immersive-media contract:** stored projection/stereo-layout/orientation/comfort metadata; per-rendition codec/bitrate/fps records; caption + AI-provenance metadata; replace filename-based SBS detection (`reels.html:4255–4262` regexes `sbs|3d` against filename/folder — renaming a file silently breaks stereo) with metadata + legacy inference fallback; guaranteed mono-flat fallback for invalid/missing metadata.
+- **Phase 2 tail:** open city/event Packs directly from Earth (with location privacy + preview safety filtering).
+- **Phase 3:** world/body-lock default, recenter + `COMFORT`/`CINEMA`/`IMMERSIVE` presets, timed captions + transcription/translation.
+- **Phase 4:** World Shell PoC (keyframe → panorama/depth shell at upload, `ENTER WORLD`/`EXIT WORLD`, provenance labels).
+- **Phases 5–6:** commercial pilots (property/travel/city), synchronized viewing, voice nav, 2.5D reels, splats/volumetric research.
+- **Funding-doc guardrails (settled, no action):** creator view-payouts deferred; gaze-data resale, casino-style retention, stolen IP, fake-memories, bots-as-humans all rejected.
+
+> [!IMPORTANT]
+> **Accepted beta limitation:** the Quest device gate below validates the *frame-skipping* playback path as it exists today. Beta ships with stride-reduced VR playback (30fps source → ~10–15fps in headset) as a known limitation; Phase 0 is the follow-up that removes it. Do not treat the device gate as failing against Phase 0 expectations.
+
+### Known unfinished engineering (tracked in `docs/todolist.md` — verified still open 2026-09-19)
+
+- `MessagingContext.jsx:248–256`: send-reconcile builds `reconciled` but discards it (possible duplicate bubbles on key migration); optimistic GIF sends render empty until server echo.
+- Reporting an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
+- Staged uploads are process-memory (consistent with the single-worker verdict; documented in RUNNING.md).
+- Reward threshold trusts client-reported duration (documented accepted risk: server-elapsed gate + foreground telemetry + caps bound farming).
 
 ## Public beta release blockers
 
