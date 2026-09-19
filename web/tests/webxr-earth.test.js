@@ -1048,3 +1048,131 @@ test('engine reports a parseable version stamp for stale-client checks', () => {
   const renderer = loadRenderer();
   assert.ok(/^v\d+\.\d+-/.test(renderer.version), `version: ${renderer.version}`);
 });
+
+test('shouldAttemptXR gates emulator attempts without blocking localhost', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.shouldAttemptXR({ isSupported: true, hostname: 'example.com' }), true);
+  assert.equal(api.shouldAttemptXR({ isSupported: false, hostname: 'localhost' }), true);
+  assert.equal(api.shouldAttemptXR({ isSupported: false, hostname: '127.0.0.1' }), true);
+  assert.equal(api.shouldAttemptXR({ isSupported: false, hostname: 'example.com' }), false);
+  assert.equal(api.shouldAttemptXR({ isSupported: false, hostname: 'example.com', forceXR: true }), true);
+  assert.equal(api.shouldAttemptXR({}), false);
+});
+
+test('session rejection leaves a running preview untouched (fail-fast)', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const errors = [];
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, { onVRError: (reason) => errors.push(reason) });
+  const canvas = makePreviewCanvas(gl);
+  renderer.startPreview(canvas);
+  assert.equal(renderer.isPreviewRunning(), true);
+  const xr = {
+    async requestSession() { throw new Error('no headset'); },
+  };
+  const session = await renderer.enterVR({ xr });
+  assert.equal(session, null);
+  assert.deepEqual(errors, ['session-rejected']);
+  assert.equal(renderer.isPreviewRunning(), true);
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  assert.equal(renderer.__test.hasPreviewResume(), false);
+  renderer.stopPreview();
+});
+
+test('bind failure tears down then restores the preview', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const errors = [];
+  let ended = false;
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, { onVRError: (reason) => errors.push(reason) });
+  const canvas = makePreviewCanvas(gl);
+  renderer.startPreview(canvas);
+  const xr = {
+    async requestSession() {
+      return { addEventListener() {}, end() { ended = true; } };
+    },
+  };
+  const session = await renderer.enterVR({ xr });
+  assert.equal(session, null);
+  assert.deepEqual(errors, ['bind-failed']);
+  assert.equal(ended, true);
+  assert.equal(renderer.isPresenting(), false);
+  // Preview was torn down for the attempt, then restored from snapshot.
+  assert.equal(renderer.isPreviewRunning(), true);
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  assert.equal(renderer.__test.hasPreviewResume(), false);
+  renderer.stopPreview();
+});
+
+test('xrCompatible outcome is recorded for diagnostics', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  assert.equal(renderer.__test.getXrCompatStatus(), 'unknown');
+  const xr = {
+    async requestSession() {
+      return { addEventListener() {}, end() {} };
+    },
+  };
+  await renderer.enterVR({ xr });
+  // Mock GL's proxy answers every prop with a noop, so makeXRCompatible
+  // "exists" and resolves: recorded as made-compatible. Real browsers
+  // without the API record compatible; failures record failed:*.
+  const compat = renderer.__test.getXrCompatStatus();
+  assert.ok(compat === 'compatible' || compat === 'made-compatible', `compat: ${compat}`);
+  const info = renderer.__test.getSceneInfo();
+  assert.equal(info.xr.presenting, false);
+  assert.equal(info.xr.compat, compat);
+  assert.equal(renderer.getPreviewState().xrCompat, compat);
+});
+
+test('reels.html localhost gate attempts instead of blocking', () => {  const html = readFileSync(new URL('../../ui/assets/reels.html', import.meta.url), 'utf8');
+  assert.ok(html.includes('TRYING EMULATED SESSION'), 'emulator attempt flash present');
+  assert.ok(html.includes('forceXR=1'), '?forceXR=1 override present');
+  assert.ok(html.includes('attemptXR'), 'attempt flag gates the session call');
+  assert.ok(!html.includes("showFlash('INSTALL WEBXR EMULATOR"), 'old localhost block removed');
+});
+
+test('preview ray seam hits the globe and misses the sky', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  const canvas = makePreviewCanvas(gl);
+  renderer.startPreview(canvas);
+  renderer.__runScheduledFrame(16);
+  // Canvas center ray fires forward into the scene.
+  const center = renderer.__test.previewRayFor(480, 270);
+  assert.ok(center, 'center ray exists');
+  const hit = renderer.__test.hitTestEarth(center.origin, center.direction);
+  assert.equal(hit.hit, true);
+  // Top-left corner ray escapes into the starfield.
+  const corner = renderer.__test.previewRayFor(10, 10);
+  assert.ok(corner, 'corner ray exists');
+  assert.equal(renderer.__test.hitTestEarth(corner.origin, corner.direction).hit, false);
+  renderer.stopPreview();
+});
+
+test('pointer cycle leaves no captured error and reports hover state', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    getVisualSource: () => ({
+      kind: 'video', element: { readyState: 4 }, ready: true,
+      paused: false, muted: true, currentTime: 1, duration: 10, version: 'v1',
+    }),
+    isPackMode: () => false,
+    getCurrentItemState: () => ({ available: true }),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  assert.equal(renderer.__test.getLastPointerError(), '');
+  const state = renderer.getPreviewState();
+  assert.equal(state.hoveredButton, -1);
+  assert.equal(state.pressedButton, -1);
+  assert.equal(state.presenting, false);
+  // Full down/move/up at canvas center runs cleanly end to end.
+  assert.equal(renderer.__test.firePreviewPointer('pointerdown', { clientX: 480, clientY: 270, pointerId: 1, button: 0 }), true);
+  assert.equal(renderer.__test.firePreviewPointer('pointermove', { clientX: 480, clientY: 260, pointerId: 1, button: 0 }), true);
+  assert.equal(renderer.__test.firePreviewPointer('pointerup', { clientX: 480, clientY: 260, pointerId: 1, button: 0 }), true);
+  assert.equal(renderer.__test.getLastPointerError(), '');
+  renderer.stopPreview();
+});

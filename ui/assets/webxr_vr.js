@@ -1,5 +1,5 @@
 /**
- * ECHO WebXR VR Module for Reels — v8.0 (Pure Three.js Engine with Path A Curvature)
+ * ECHO WebXR VR Module for Reels — v8.2 (Pure Three.js Engine with Path A Curvature)
  *
  * Fully overhauled using Three.js (r186) scene graph, THREE.OrbitControls,
  * and decoupled 2D In-VR UI Canvas (window.VRUICanvas).
@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.1-20260919-entry-drag-hologram';
+  const VR_VERSION = 'v8.2-20260919-phase4-session';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -146,8 +146,16 @@ window.WebXRVR = window.WebXRVR || (function () {
   let laserPositions = null;
   let reticleMesh = null;
   let reticleTexture = null;
+  // Last pointer-handler exception (never let a canvas handler die
+  // silently: surface it for telemetry instead).
+  let lastPointerError = '';
   // Last mouse-driven hover ray in preview (persistent head-ray endpoint).
   let previewHoverRay = null;
+
+  function capturePointerError(where, e) {
+    lastPointerError = where + ': ' + String((e && e.message) || e).slice(0, 200);
+    try { console.warn('[WebXRVR] Pointer handler failed (' + where + '):', e); } catch (e2) {}
+  }
   let scratchMat4 = null;
   let scratchVec2 = null;
   let scratchVec3 = null;
@@ -1498,6 +1506,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   function getPreviewState() {
     return {
       running: !!previewRunning,
+      presenting: !!xrSession,
+      xrCompat: xrCompatStatus,
       cameraMode: previewCameraMode,
       sceneMode,
       stereo: stereoMode,
@@ -1505,6 +1515,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       curvatureMode: getCurvatureMode(),
       lockToViewer,
       controlsVisible,
+      hoveredButton,
+      pressedButton,
       renderStats: { ...renderStats },
       earthState: getEarthState(),
     };
@@ -1847,6 +1859,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!previewCanvas || previewListeners) return;
     if (typeof previewCanvas.addEventListener !== 'function') return;
     const onPointerDown = function (event) {
+      try {
       if (event.button !== undefined && event.button !== 0) return;
       if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
       try { if (previewCanvas.focus) previewCanvas.focus(); } catch (e) {}
@@ -1864,8 +1877,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         beginEarthDrag(source, target.hit);
         previewPointer.earth = true;
       }
+      } catch (e) { capturePointerError('pointerdown', e); }
     };
     const onPointerMove = function (event) {
+      try {
       const target = updatePreviewHover(event.clientX, event.clientY);
       if (!previewPointer || previewPointer.id !== event.pointerId) return;
       const dx = event.clientX - previewPointer.x;
@@ -1891,8 +1906,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
       }
       applyPreviewCamera();
+      } catch (e) { capturePointerError('pointermove', e); }
     };
     const finishPointer = function (event) {
+      try {
       if (!previewPointer || previewPointer.id !== event.pointerId) return;
       const target = updatePreviewHover(event.clientX, event.clientY);
       if (sceneMode === 'earth' && previewPointer.earth) {
@@ -1937,8 +1954,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       vrLastUiUploadT = -1;
       try { if (previewCanvas.releasePointerCapture) previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
       previewPointer = null;
+      } catch (e) { capturePointerError('pointerup', e); }
     };
     const onWheel = function (event) {
+      try {
       if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
       if (sceneMode === 'earth') {
         rotateEarth((event.deltaX || 0) * 0.0025, (event.deltaY || 0) * 0.65 * 0.002);
@@ -1948,6 +1967,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + (event.deltaY || 0) * 0.006));
         applyPreviewCamera();
       }
+      } catch (e) { capturePointerError('wheel', e); }
     };
     const onPointerLeave = function () {
       if (previewPointer) return;
@@ -2529,6 +2549,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Never reuse the preview canvas: it may be detached after SPA route
   // changes, which made entry succeed-or-fail depending on browse history.
   let xrCanvas = null;
+  // Preview resume snapshot: captured before enterVR tears the preview
+  // down, restored on session end so the desktop inspector comes back.
+  let previewResumeOpts = null;
+  // Last xrCompatible outcome for diagnostics ('unknown' | 'compatible' |
+  // 'made-compatible' | 'unavailable' | 'failed:<msg>').
+  let xrCompatStatus = 'unknown';
 
   function setupVRControllers() {
     if (!renderer || !renderer.xr || vrControllers.length > 0) return;
@@ -2589,6 +2615,54 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // Phase 4 gate logic (mirrored in ui/assets/reels.html click handler):
+  // supported → always attempt; localhost/127.0.0.1 or ?forceXR=1 →
+  // attempt anyway so DevTools / Immersive Web Emulator sessions that
+  // report isSessionSupported=false can still try requestSession;
+  // otherwise block with HEADSET NOT DETECTED.
+  function shouldAttemptXR(opts) {
+    const o = opts || {};
+    if (o.isSupported) return true;
+    if (o.forceXR) return true;
+    const host = String(o.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return true;
+    return false;
+  }
+
+  // Quest Browser requires an XR-compatible GL context. Three.js r186
+  // creates a WebGL2 context internally, so the supported path is:
+  // renderer.getContext().makeXRCompatible() before setSession.
+  // Best-effort: records outcome in xrCompatStatus, never throws.
+  async function ensureXRCompatibleContext() {
+    let gl = null;
+    try {
+      gl = renderer && renderer.getContext ? renderer.getContext() : (glContext || null);
+    } catch (e) { gl = null; }
+    if (!gl) {
+      xrCompatStatus = 'unavailable';
+      return false;
+    }
+    try {
+      if (typeof gl.makeXRCompatible === 'function') {
+        await gl.makeXRCompatible();
+        xrCompatStatus = 'made-compatible';
+        return true;
+      }
+      const attrs = (typeof gl.getContextAttributes === 'function') ? gl.getContextAttributes() : null;
+      if (attrs && attrs.xrCompatible) {
+        xrCompatStatus = 'compatible';
+        return true;
+      }
+      // No makeXRCompatible API (e.g. mock contexts in tests): treat the
+      // existing context as usable rather than blocking entry.
+      xrCompatStatus = 'compatible';
+      return true;
+    } catch (e) {
+      xrCompatStatus = 'failed:' + String((e && e.message) || e).slice(0, 120);
+      return false;
+    }
+  }
+
   // Machine-readable entry failure: logs, notifies the host page via
   // callbacks.onVRError(reason, detail) for user-visible feedback, and
   // returns null (legacy callers only check truthiness).
@@ -2604,13 +2678,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     return null;
   }
 
+  // Best-effort restore of the desktop preview torn down on entry.
+  // Clears the snapshot; skips silently if the canvas detached (SPA
+  // navigated away). Shared by the bind-failure path and session end.
+  function restorePreviewSnapshot() {
+    const resume = previewResumeOpts;
+    previewResumeOpts = null;
+    if (resume && resume.canvas && typeof resume.canvas.getContext === 'function') {
+      try {
+        if (resume.canvas.isConnected === false) return false;
+        startPreview(resume.canvas, resume.options || {});
+        return true;
+      } catch (e) {
+        console.warn('[WebXRVR] Preview restore after XR session failed:', e);
+        return false;
+      }
+    }
+    return false;
+  }
+
   async function enterVR(options = {}) {
     if (xrSession) return xrSession;
-    // A desktop preview owns the singleton renderer/loop; tear it down so
-    // the immersive session starts from a clean slate (upstream parity).
-    if (previewRunning) {
-      try { stopPreview(); } catch (e) {}
-    }
     const xr = (options && options.xr) || getXR();
     if (!xr) {
       return notifyVRError('webxr-unavailable', 'navigator.xr is absent (needs HTTPS or localhost)');
@@ -2619,6 +2707,49 @@ window.WebXRVR = window.WebXRVR || (function () {
     ensureThree();
     if (!THREE) {
       return notifyVRError('three-missing', 'three.min.js did not load');
+    }
+
+    // Fail fast: request the session BEFORE tearing down the desktop
+    // preview or building GL resources, so a rejection leaves any running
+    // preview untouched.
+    let session = null;
+    const sessionOpts = {
+      optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'],
+    };
+
+    try {
+      session = await xr.requestSession('immersive-vr', sessionOpts);
+    } catch (e1) {
+      console.warn('[WebXRVR] Session request with optionalFeatures failed, trying minimal:', e1);
+      try {
+        session = await xr.requestSession('immersive-vr');
+      } catch (e2) {
+        return notifyVRError('session-rejected', e2);
+      }
+    }
+
+    // Snapshot a running desktop preview BEFORE teardown so the session
+    // end handler (or a bind failure) can restore it. Null when entering
+    // from the 2D page (no preview to restore).
+    previewResumeOpts = null;
+    if (previewRunning && previewCanvas) {
+      try {
+        previewResumeOpts = {
+          canvas: previewCanvas,
+          options: {
+            cameraMode: previewCameraMode,
+            sceneMode: sceneMode,
+            stereo: stereoMode,
+            reducedMotion: reducedMotion,
+            showControls: controlsVisible,
+          },
+        };
+      } catch (e) { previewResumeOpts = null; }
+    }
+    // A desktop preview owns the singleton renderer/loop; tear it down so
+    // the immersive session starts from a clean slate (upstream parity).
+    if (previewRunning) {
+      try { stopPreview(); } catch (e) {}
     }
 
     // Always build a fresh XR canvas. Never reuse previewCanvas (possibly
@@ -2662,20 +2793,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       return notifyVRError('webgl-unavailable', 'WebGL context creation failed');
     }
 
-    let session = null;
-    const sessionOpts = {
-      optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'],
-    };
-
+    // Quest Browser rejects setSession on a non-XR-compatible context.
+    // Standard Three.js path: makeXRCompatible() before setSession.
+    // Non-blocking on failure: record status and let setSession decide,
+    // so desktops without the API still enter.
     try {
-      session = await xr.requestSession('immersive-vr', sessionOpts);
-    } catch (e1) {
-      console.warn('[WebXRVR] Session request with optionalFeatures failed, trying minimal:', e1);
-      try {
-        session = await xr.requestSession('immersive-vr');
-      } catch (e2) {
-        return notifyVRError('session-rejected', e2);
-      }
+      await ensureXRCompatibleContext();
+    } catch (e) {
+      xrCompatStatus = 'failed:' + String((e && e.message) || e).slice(0, 120);
     }
 
     xrSession = session;
@@ -2697,6 +2822,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         } catch (e2) {
           try { session.end(); } catch (e3) {}
           xrSession = null;
+          restorePreviewSnapshot();
           return notifyVRError('bind-failed', e2);
         }
       }
@@ -2723,6 +2849,11 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (document.body) document.body.classList.add('sx-vr-active');
       }
 
+      // Single animation loop: clear any stale loop before installing the
+      // XR one (preview uses rAF and was torn down above, but be explicit).
+      try {
+        if (renderer.setAnimationLoop) renderer.setAnimationLoop(null);
+      } catch (e) {}
       renderer.setAnimationLoop((time, frame) => {
         applySceneVisibility();
         if (sceneMode === 'reels') {
@@ -2747,13 +2878,26 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     session.addEventListener('end', () => {
       xrSession = null;
-      if (renderer) renderer.setAnimationLoop(null);
+      if (renderer) {
+        try { renderer.setAnimationLoop(null); } catch (e) {}
+      }
       stopVideoFrameTracking();
+      if (xrCanvas) {
+        try {
+          if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
+        } catch (e) {}
+        xrCanvas = null;
+      }
       if (typeof document !== 'undefined') {
         document.documentElement.classList.remove('sx-vr-active');
         if (document.body) document.body.classList.remove('sx-vr-active');
       }
-      if (callbacks.onExitVR) callbacks.onExitVR();
+      if (callbacks.onExitVR) {
+        try { callbacks.onExitVR(); } catch (e) {}
+      }
+      // Restore the desktop preview torn down on entry, if its canvas is
+      // still attached (SPA may have navigated away — then skip silently).
+      restorePreviewSnapshot();
     });
 
     return session;
@@ -2866,6 +3010,21 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewListeners = null;
     hoveredButton = -1;
     pressedButton = -1;
+    lastPointerError = '';
+    // Reset the earth drag machine: a teardown mid-drag (route change,
+    // preview restart, XR entry) must never strand dragging=true, which
+    // would freeze idle spin and swallow the next gesture.
+    earthDragging = false;
+    earthDragLastDir = null;
+    earthDragStartDir = null;
+    earthDragMoved = false;
+    earthDragEngaged = false;
+    earthDragCumX = 0;
+    earthDragCumY = 0;
+    earthDragAxis = null;
+    earthPressTime = 0;
+    earthPressZone = -1;
+    earthDragSource = null;
     lastUploadedSource = null;
     lastVisualKind = '';
     lastVisualVersion = '';
@@ -2988,6 +3147,19 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHeatStyle,
       computeDockPose,
       controlIndexFromUV,
+      shouldAttemptXR,
+      getXrCompatStatus() { return xrCompatStatus; },
+      hasPreviewResume() { return !!previewResumeOpts; },
+      getLastPointerError() { return lastPointerError; },
+      // Test seam: engine ray for a client pixel (null when no preview).
+      previewRayFor(clientX, clientY) {
+        const ray = previewRayAt(clientX, clientY);
+        if (!ray) return null;
+        return {
+          origin: { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z },
+          direction: { x: ray.direction.x, y: ray.direction.y, z: ray.direction.z },
+        };
+      },
       // Test seam: invoke a stored preview pointer handler with a synthetic
       // event (the mock canvas swallows listeners, so this drives the
       // pointer→raycast→action chain in Node).
@@ -3121,6 +3293,12 @@ window.WebXRVR = window.WebXRVR || (function () {
             color: glowColor.map((c) => Math.round(c * 1000) / 1000),
           };
           info.laser = { visible: !!(laserLine && laserLine.visible) };
+          info.xr = {
+            presenting: !!xrSession,
+            previewRunning: !!previewRunning,
+            compat: xrCompatStatus,
+            hasResume: !!previewResumeOpts,
+          };
           info.earthMap = {
             hasTexture: !!(earthMesh && earthMesh.material && earthMesh.material.map),
             base: earthBaseSource,

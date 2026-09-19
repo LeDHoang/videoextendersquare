@@ -5298,6 +5298,10 @@
 
           const isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
           const hasXRApi = typeof navigator !== 'undefined' && !!navigator.xr;
+          let forceXR = false;
+          try {
+            forceXR = /(?:\?|&)forceXR=1/.test(location.search || '');
+          } catch (e) {}
 
           // Check support before attempting to request a session
           let isSupported = false;
@@ -5312,20 +5316,23 @@
             return;
           }
 
-          if (!isSupported && isLocalHost) {
-            // On localhost without a headset: prompt the user to set up emulator
-            showFlash('INSTALL WEBXR EMULATOR — chrome://flags or Meta extension');
+          // Phase 4 emulator unblock: mirror WebXRVR.shouldAttemptXR —
+          // localhost (or ?forceXR=1) always attempts requestSession even
+          // when isSessionSupported reports false, since DevTools and the
+          // Immersive Web Emulator only materialize a session on request.
+          let attemptXR = isSupported || forceXR || isLocalHost;
+          if (!isSupported && isLocalHost && !forceXR) {
+            showFlash('TRYING EMULATED SESSION…');
             console.info(
-              '[WebXRVR] VR not supported on this device.\n' +
-              'To simulate in Chrome desktop:\n' +
-              '  1. Install the "Immersive Web Emulator" Chrome extension, OR\n' +
-              '  2. Enable chrome://flags/#enable-webxr-device-simulation\n' +
-              '  3. Or connect a Quest via Air Link / Link cable'
+              '[WebXRVR] isSessionSupported=false on localhost — attempting requestSession anyway.\n' +
+              'If this fails: 1. Install the "Immersive Web Emulator" Chrome extension, OR\n' +
+              '  2. Enable chrome://flags/#enable-webxr-device-simulation, OR\n' +
+              '  3. Connect a Quest via Air Link / Link cable, OR\n' +
+              '  4. Append ?forceXR=1 to skip this guidance.'
             );
-            return;
           }
 
-          if (!isSupported) {
+          if (!attemptXR) {
             showFlash('VR HEADSET NOT DETECTED');
             return;
           }
