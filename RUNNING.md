@@ -77,7 +77,16 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 | `SX_STRIPE_PRICE_2750` | Stripe Price ID for the $25 / 2,750-credit pack | — |
 | `SX_PUBLIC_BASE_URL` | Browser origin used for Stripe Checkout return URLs (required for Checkout; no `Host` fallback) | — |
 | `SX_BILLING_RESERVED_TTL_MIN` | Age after which never-submitted credit reservations are reaped (minimum 5) | `30` |
-| `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `10`) |
+| `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `1`) |
+| `SX_FAL_MAX_QUOTE_USD` | Per-job fal spend cap enforced at quote time (`0` disables) | `10` |
+| `SX_STRIPE_WEBHOOK_MAX_BYTES` | Max Stripe webhook body (minimum 1024) | `1048576` |
+| `SX_STRIPE_WEBHOOK_RPM` | Stripe webhook requests per IP per minute | `120` |
+| `SX_QUOTE_RPM` | Billing quotes per user per minute | `15` |
+| `SX_PACK_CREATE_HOURLY` | Reel Pack creations per user per hour | `10` |
+| `SX_PUBLISH_HOURLY_MAX` / `SX_PUBLISH_DAILY_MAX` | Upload publishes per user per hour / day | `5` / `20` |
+| `SX_SSE_MAX_CONN` / `SX_SSE_MAX_MIN` | Message SSE streams per user / max stream lifetime minutes | `3` / `30` |
+| `SX_REGISTRATION_ENABLED` | `0` closes public registration (invite-only); `SX_REGISTRATION_ALLOWLIST` emails can still register | `1` |
+| `SX_REGISTRATION_ALLOWLIST` | Comma-separated invite emails honored while registration is closed (case-insensitive) | empty (fully closed) |
 | `DATABASE_URL` | Shared social/messaging/billing database URL | `sqlite:///./data/echo.db` |
 | `SX_PUBLIC_URL` | Public origin used for reset and canonical reel-share links | `http://localhost:5173` |
 | `SX_SECURITY_SECRET` | Session and rate-limit HMAC secret; required in production | insecure development fallback |

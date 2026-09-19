@@ -2,10 +2,41 @@ import io
 import json
 import os
 import subprocess
+import urllib.parse
 import urllib.request
 from PIL import Image
 
 MAX_FAL_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB — generous ceiling for a 4K master
+
+# Explicit Pillow decompression-bomb ceiling for staged processing uploads
+# (avatars separately guard at 25 MP in social.py). Set explicitly instead
+# of relying on Pillow's default so the bound is a deliberate product
+# decision, visible here.
+MAX_STAGED_IMAGE_PIXELS = 50_000_000
+Image.MAX_IMAGE_PIXELS = MAX_STAGED_IMAGE_PIXELS
+
+
+_CIVITAI_HOSTS = {"civitai.com", "www.civitai.com"}
+_CIVITAI_PATH_PREFIX = "/api/download/models"
+
+
+def _is_civitai_download_url(url: str) -> bool:
+    """True only for real Civitai model-download URLs (hostname allowlist).
+
+    The previous substring check spliced the server-held CIVITAI_KEY onto
+    any URL merely *containing* ``civitai.com/api/download/models``
+    (e.g. ``https://evil.example/?x=civitai.com/api/download/models``),
+    exfiltrating the key to an attacker host.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except (ValueError, AttributeError):
+        return False
+    if parts.scheme.lower() != "https":
+        return False
+    if parts.hostname is None or parts.hostname.lower() not in _CIVITAI_HOSTS:
+        return False
+    return parts.path.lower().startswith(_CIVITAI_PATH_PREFIX)
 
 
 def attach_civitai_token(url: str, api_key: str | None = None) -> str:
@@ -24,7 +55,7 @@ def attach_civitai_token(url: str, api_key: str | None = None) -> str:
         api_key = os.environ.get("CIVITAI_KEY")
     if not api_key or not url:
         return url
-    if "civitai.com/api/download/models" not in url.lower():
+    if not _is_civitai_download_url(url):
         return url
     if "token=" in url.lower():
         return url
@@ -75,7 +106,12 @@ def get_image_dimensions(image_path_or_bytes):
         image_file = image_path_or_bytes
 
     with Image.open(image_file) as img:
-        return img.size  # (width, height)
+        width, height = img.size
+    if width * height > MAX_STAGED_IMAGE_PIXELS:
+        raise ValueError(
+            f"Image dimensions {width}x{height} exceed the {MAX_STAGED_IMAGE_PIXELS} pixel limit"
+        )
+    return width, height
 
 def get_video_dimensions_and_duration(video_path):
     """

@@ -33,7 +33,7 @@ export default function App() {
           <Route path="/video" element={<VideoPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/reels" element={<ReelsPage />} />
-          <Route path="/reels/immersive-preview" element={<ImmersivePreviewPage />} />
+          <Route path="/reels/immersive-preview" element={<RequireAuth><ImmersivePreviewPage /></RequireAuth>} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
           <Route path="/explore/location/:key" element={<LocationExplorePage />} />

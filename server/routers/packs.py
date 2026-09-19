@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from server.features import reel_pack_features
-from server.social.auth import AuthContext, get_optional_auth, normalize_username, public_user, require_auth, require_auth_csrf
+from server.social.auth import AuthContext, get_optional_auth, normalize_username, public_user, rate_limiter, require_auth, require_auth_csrf
 from server.social.database import get_db
 from server.social.models import (
     Comment,
@@ -572,6 +572,11 @@ def create_pack(
 ):
     if not reel_pack_features()["creation"]:
         fail(503, "PACK_CREATION_DISABLED", "Creating Reel Packs is temporarily unavailable.")
+    try:
+        create_cap = max(1, int(os.environ.get("SX_PACK_CREATE_HOURLY", "10")))
+    except (TypeError, ValueError):
+        create_cap = 10
+    rate_limiter.check(db, f"pack-create:{context.user.id}", create_cap, 60 * 60)
     title = req.title.strip()
     if not title:
         fail(422, "PACK_TITLE_REQUIRED", "Enter a title for this Reel Pack.", "title")
@@ -742,6 +747,7 @@ def publish_pack(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    rate_limiter.check(db, f"pack-write:{context.user.id}", 100, 60 * 60)
     pack = get_owned_pack(db, pack_id, context.user.id)
     claim_revision(db, pack, req.expected_revision)
     count = len(playable_items(pack))
@@ -766,6 +772,7 @@ def unpublish_pack(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    rate_limiter.check(db, f"pack-write:{context.user.id}", 100, 60 * 60)
     pack = get_owned_pack(db, pack_id, context.user.id)
     claim_revision(db, pack, req.expected_revision)
     pack.status = "draft"
@@ -790,6 +797,7 @@ def add_pack_item(
 ):
     """Append one public reel to the pack creator's collection (save-to-
     collection flow). Idempotent on duplicates; optional stale-revision 409."""
+    rate_limiter.check(db, f"pack-write:{context.user.id}", 100, 60 * 60)
     pack = get_owned_pack(db, pack_id, context.user.id)
     if any(item.post_id == req.post_id for item in pack.items if item.post_id):
         return {"pack": serialize_pack(db, pack, context.user.id, include_items=True), "added": False}
@@ -814,6 +822,7 @@ def remove_pack_item(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    rate_limiter.check(db, f"pack-write:{context.user.id}", 100, 60 * 60)
     pack = get_owned_pack(db, pack_id, context.user.id)
     item = next((row for row in pack.items if row.post_id == post_id), None)
     if not item:
@@ -903,6 +912,7 @@ def save_pack(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    rate_limiter.check(db, f"pack-react:{context.user.id}", 120, 60 * 60)
     return set_pack_save(db, get_pack_for_viewer(db, pack_id, context.user.id), context.user.id, True)
 
 
@@ -932,6 +942,7 @@ def like_pack(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    rate_limiter.check(db, f"pack-react:{context.user.id}", 120, 60 * 60)
     pack = get_pack_for_viewer(db, pack_id, context.user.id)
     existing = db.query(ReelPackLike.id).filter(
         ReelPackLike.user_id == context.user.id,
@@ -974,6 +985,9 @@ def update_progress(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
+    # Watch-tick progress updates arrive per playback tick; coalesce to at
+    # most one write per 5s per viewer+pack (12/min) to bound DB pressure.
+    rate_limiter.check(db, f"pack-progress:{context.user.id}:{pack_id}", 12, 60)
     pack = get_pack_for_viewer(db, pack_id, context.user.id)
     item = None
     if req.current_item_id:

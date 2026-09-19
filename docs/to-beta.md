@@ -48,7 +48,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 
 | Feature | Priority | State | Where it lands |
 |---|---|---|---|
-| Email verification flow | **P1** (or stay invite-only via `SX_REGISTRATION_ENABLED=0`) | Zero machinery — no model, route, or template | Registration blockers above |
+| Email verification flow | **P1** (or stay invite-only via `SX_REGISTRATION_ENABLED=0`) | Zero machinery — no model, route, or template (invite-only path now supports `SX_REGISTRATION_ALLOWLIST`, 2026-09-20) | Registration blockers above |
 | Job cancellation endpoint | **P1** | No cancel endpoint exists in any router (verified 2026-09-19) | Ownership section above |
 | DSAR data export (`GET /api/users/me/export`) | P2 (P1 if EU users allowed) | Absent | Privacy section above |
 | Report dialog UI (replace `window.prompt`) | P2 | API complete incl. packs; UX missing | Privacy section above |
@@ -84,29 +84,29 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 
 - [~] ~~Require authentication and CSRF protection for image/video upload and processing endpoints~~ — **partially done (verified 2026-09-19):** cloud (FAL-funded) processing requires auth + origin + CSRF + stage ownership (`image.py:139–142`, `video.py:266–269`); uploads carry owner identity. **Remaining:** the *free/local* path (`upscale_engine="fast"`/`"studio"`, no FAL) runs 4K ffmpeg with **no auth, no CSRF, no rate limit** in both routers — decide: require auth for all jobs, or strict per-IP quota + global queued-job cap with 429.
 - [x] Remove runtime platform-key mutation and restrict `PUT /api/config/models` to administrator sessions with CSRF protection.
-- [ ] Protect CPU/GPU-intensive Reels and comparison endpoints — **sharpened by audit (2026-09-19):** `POST /api/reels/proxy` runs up to **50 synchronous ffmpeg transcodes per call with zero auth** (`reels.py:2073–2098`); `POST /api/reels/spatialize` creates owner-less jobs that can download model weights, with an unvalidated `strength` float (`reels.py:2113–2171`). Admin-gate or remove both from the public router; also covers Explore preview generation, comparison preparation, and forced health refreshes.
+- [~] Protect CPU/GPU-intensive Reels and comparison endpoints — **sharpened by audit (2026-09-19):** `POST /api/reels/proxy` runs up to **50 synchronous ffmpeg transcodes per call with zero auth** (`reels.py:2073–2098`); `POST /api/reels/spatialize` creates owner-less jobs that can download model weights, with an unvalidated `strength` float (`reels.py:2113–2171`). Admin-gate or remove both from the public router; also covers Explore preview generation, comparison preparation, and forced health refreshes. **Partially done (2026-09-20):** proxy + spatialize (+ status) now require admin session with CSRF + per-admin rate limit; `strength` clamped 0–2 via pydantic; anon/non-admin denied with regression tests. **Remaining:** Explore preview generation, comparison preparation, forced health refreshes.
 - [ ] Add per-user and per-IP upload, processing, event, and storage quotas. **Uploads:** anonymous staging accepts 50 MB image / 500 MB video per file (caps exist and are enforced mid-stream — `media.py:15–19`) but with **no per-identity rate limit and no global staged-bytes ceiling**; a bot can fill the disk. Add staged-bytes ceiling + 429/507 on overflow.
 - [ ] Add bounded job queues, global and per-user concurrency limits, and overload responses — **confirmed still open:** `JobManager._jobs` has no global cap; `cleanup_old` only evicts *terminal* jobs, so queued-job count is unbounded (`server/jobs.py`).
-- [ ] Add hard FAL spending limits and alerts — **confirmed still open; sharpened:** `normalize_model_id` (`core/models.py:235–254`) accepts *any* fal model ID (BYOK-only for credits, but no per-job cost cap/confirmation), and the `ltx_loras` validator only checks the string starts with `http(s)://` while `attach_civitai_token` (`pipeline/utils.py:12–34`) splices the server-held `CIVITAI_KEY` onto any URL **containing the substring** `civitai.com/api/download/models` — a crafted URL exfiltrates the token. Parse hostnames + allowlist; cap custom-model BYOK spend.
+- [ ] Add hard FAL spending limits and alerts — **confirmed still open; sharpened:** `normalize_model_id` (`core/models.py:235–254`) accepts *any* fal model ID (BYOK-only for credits, but no per-job cost cap/confirmation), and the `ltx_loras` validator only checks the string starts with `http(s)://` while `attach_civitai_token` (`pipeline/utils.py:12–34`) splices the server-held `CIVITAI_KEY` onto any URL **containing the substring** `civitai.com/api/download/models` — a crafted URL exfiltrates the token. Parse hostnames + allowlist; cap custom-model BYOK spend. **Partially done (2026-09-20):** `attach_civitai_token` now parses `urlsplit` against an exact hostname allowlist (`civitai.com`, `www.civitai.com`) + https-only (substring exfil closed, unit-tested); per-job spend cap `SX_FAL_MAX_QUOTE_USD` (default $10, `0` disables) enforced in `create_quote`. **Remaining:** global spend alerts.
 - [ ] Configure reverse-proxy request-body limits and timeouts that match the application upload limits. **Note (2026-09-19):** Cloudflare's free-plan body limit is 100 MB vs the app's 500 MB video cap — lower the app cap or document the plan requirement.
-- [ ] Add regression tests proving logged-out users and ordinary users cannot access administrator or cost-bearing operations.
-- [ ] **New (2026-09-19 audit):** Cap the Stripe webhook body (currently `await request.body()` with no size limit — `billing.py:178–189`) and IP-rate-limit the path with 429.
-- [ ] **New:** `packs.py` has **no rate limits at all** — pack creation, items, save, like, and a DB write on every watch-tick progress update are unthrottled. Add per-user limits mirroring like/comment limits; debounce/coalesce progress writes.
-- [ ] **New:** Publish endpoint (`uploads.py:137–246`) has no rate limit — each call copies up to 500 MB and runs up to 3 ffmpeg/Pillow passes while creating a public post. Add a per-user daily publish cap.
-- [ ] **New:** Rate-limit `POST /api/billing/quote` (spawns two ffprobe subprocesses per call) and cache probe results per stage fingerprint.
-- [ ] **New:** Login timing enumeration — `social.py:400–406` short-circuits unknown accounts before the argon2 delay; verify against a dummy hash when the user is missing.
-- [ ] **New:** Decompression-bomb headroom — set `Image.MAX_IMAGE_PIXELS` explicitly and reject oversized pixel dimensions at upload (avatars are guarded at 25 MP; staged processing is not).
-- [ ] **New:** Assert minimum length/entropy for `SX_FAL_KEY_ENCRYPTION_KEY` inside `billing/crypto.py:_key()` itself (currently sha256s any value; the ≥16-char rule lives only in the startup check).
+- [~] Add regression tests proving logged-out users and ordinary users cannot access administrator or cost-bearing operations. **Partially covered (2026-09-20):** admin-gate tests for proxy/spatialize (anon/non-admin denied) + cross-user publish tests green (`test_security_money.py`). **Remaining:** systematic coverage of the remaining cost-bearing ops.
+- [x] **New (2026-09-19 audit):** Cap the Stripe webhook body (currently `await request.body()` with no size limit — `billing.py:178–189`) and IP-rate-limit the path with 429. **Done (2026-09-20):** `SX_STRIPE_WEBHOOK_MAX_BYTES` (default 1 MB, floor 1 KB → 413) + per-IP `SX_STRIPE_WEBHOOK_RPM` (default 120/min → 429); generic 400 preserved.
+- [x] **New:** `packs.py` has **no rate limits at all** — pack creation, items, save, like, and a DB write on every watch-tick progress update are unthrottled. Add per-user limits mirroring like/comment limits; debounce/coalesce progress writes. **Done (2026-09-20):** create 10/hr, writes 100/hr, save/like 120/hr, progress 12/min per viewer+pack (all rate-limited, regression-tested).
+- [x] **New:** Publish endpoint (`uploads.py:137–246`) has no rate limit — each call copies up to 500 MB and runs up to 3 ffmpeg/Pillow passes while creating a public post. Add a per-user daily publish cap. **Done (2026-09-20):** `SX_PUBLISH_HOURLY_MAX` (5) + `SX_PUBLISH_DAILY_MAX` (20).
+- [x] **New:** Rate-limit `POST /api/billing/quote` (spawns two ffprobe subprocesses per call) and cache probe results per stage fingerprint. **Done (2026-09-20):** `SX_QUOTE_RPM` (15/min/user + 4×/IP) + 5-min mtime/size-validated probe cache.
+- [x] **New:** Login timing enumeration — `social.py:400–406` short-circuits unknown accounts before the argon2 delay; verify against a dummy hash when the user is missing. **Done (2026-09-20):** lazily-cached dummy argon2 verification on unknown users; identical 401 text.
+- [x] **New:** Decompression-bomb headroom — set `Image.MAX_IMAGE_PIXELS` explicitly and reject oversized pixel dimensions at upload (avatars are guarded at 25 MP; staged processing is not). **Done (2026-09-20):** explicit 50 MP ceiling (`MAX_STAGED_IMAGE_PIXELS`) enforced in `get_image_dimensions`, mapped to 413 at image staging + quote.
+- [x] **New:** Assert minimum length/entropy for `SX_FAL_KEY_ENCRYPTION_KEY` inside `billing/crypto.py:_key()` itself (currently sha256s any value; the ≥16-char rule lives only in the startup check). **Done (2026-09-20):** `_key()` requires ≥16 chars and rejects placeholders.
 
 ### Job, upload, and media ownership
 
 - [x] Add an owner identity to staged uploads and job records — **done (verified 2026-09-19):** `STAGED_UPLOADS` stores `(path, timestamp, stage_owner_identity(...))` with fail-closed matching (`auth.py:206–230`); owner tests pass (`test_cloud_routes.py`).
-- [~] Enforce ownership on job status, SSE progress, results, downloads, cancellation, and publication — **partial:** status/SSE/result/download all enforced via `_owned_job`. **Gaps:** no cancel endpoint exists at all; **publication is NOT owner-enforced** — `uploads.py:_resolve_source` (`:101–135`) checks neither `rec.owner_id` nor `stage_owner_matches`.
-- [ ] Prevent one authenticated user from publishing another user's `stage_id` or `job_id` — **confirmed still open (2026-09-19):** `publish_upload` requires only auth. Fix `_resolve_source` to verify stage/job ownership before publish.
+- [~] Enforce ownership on job status, SSE progress, results, downloads, cancellation, and publication — **partial:** status/SSE/result/download all enforced via `_owned_job`. **Update (2026-09-20):** publication is now owner-enforced (`_resolve_source` verifies `rec.owner_id` / `stage_owner_matches`; owner-less free jobs keep legacy behavior). **Remaining gap:** no cancel endpoint exists at all.
+- [x] Prevent one authenticated user from publishing another user's `stage_id` or `job_id` — **fixed (2026-09-20):** cross-user stage/job publish returns 403 with regression tests (`test_security_money.py`); same-browser anon→authed migration still works via `stage_owner_matches`.
 - [ ] Separate private/unpublished job artifacts from public published media — **confirmed still open:** `server/app.py:113–115` mounts the entire `output/` tree at `/media`; unpublished job artifacts persist into that tree (`pipeline/utils.py:208–212` documents the leak).
 - [ ] Ensure every item returned by public Reels, Explore, tag, location, profile, and canonical-link routes corresponds to an active, published database post.
 - [ ] Disable directory-style legacy media discovery in production — **confirmed still open:** `reels.py:997–1002` `rglob`s `output/` (`_scan_cached` → `scan_output_media`) with no production-mode gate; consumed by feed hydration fallback at `:1241–1251`, `:1433`, `:1590`.
-- [~] Add multi-user authorization tests covering guessed, stolen, expired, and cross-user stage/job identifiers — **partial:** stage + job status/download tests exist and pass; add publish-path tests once publication ownership lands.
+- [~] Add multi-user authorization tests covering guessed, stolen, expired, and cross-user stage/job identifiers — **partial:** stage + job status/download tests exist and pass; publish-path cross-user/expired/pointer-matrix tests added 2026-09-20 (`test_security_money.py`, `test_security_edge.py`).
 
 ### Recommendation correctness and abuse resistance
 
@@ -117,8 +117,8 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Limit the serialized size and accepted keys of event `context` and `playback_quality` objects.
 - [ ] Cap repeated actor/item contributions so event replay cannot manipulate affinities, co-watch data, or global popularity statistics.
 - [ ] Preserve valid impression/session attribution checks and add tests for fabricated events without delivery provenance.
-- [ ] **New (2026-09-19 audit):** The anonymous cookie is **unsigned** — `ensure_anonymous_cookie` (`auth.py:295–309`) accepts any client-supplied `echo_anon` value, so a bot rotates unlimited anonymous actors (view-count inflation, replay-cap evasion, recommendation poisoning). HMAC-sign it with `SX_SECURITY_SECRET`; reject unsigned/forged values.
-- [ ] **New:** SSE `/api/messages/events` connection exhaustion — each connection polls the DB every 1s with no per-user connection cap and no max stream lifetime (`messages.py:901–960`). Cap concurrent streams per user; force reconnect after N minutes.
+- [x] **New (2026-09-19 audit):** The anonymous cookie is **unsigned** — `ensure_anonymous_cookie` (`auth.py:295–309`) accepts any client-supplied `echo_anon` value, so a bot rotates unlimited anonymous actors (view-count inflation, replay-cap evasion, recommendation poisoning). HMAC-sign it with `SX_SECURITY_SECRET`; reject unsigned/forged values. **Done (2026-09-20):** `echo_anon` is now `raw.signature` (HMAC via `keyed_hash`); forged/legacy values rotate-and-continue (never honored); `stage_owner_matches` verifies the signature. One-time invalidation of pre-existing anon cookies.
+- [x] **New:** SSE `/api/messages/events` connection exhaustion — each connection polls the DB every 1s with no per-user connection cap and no max stream lifetime (`messages.py:901–960`). Cap concurrent streams per user; force reconnect after N minutes. **Done (2026-09-20):** `SX_SSE_MAX_CONN` (3/user → 429) + `SX_SSE_MAX_MIN` (30-min lifetime with `reconnect` frame); slots released on close (concurrency + lifetime regression-tested).
 - [ ] Decide whether an already materialized page should refill after a post or creator becomes ineligible. Currently it safely removes the item but can return an underfilled page with stale `has_more`.
 - [ ] Refactor recommendation scope reads to use the request's dependency-injected database session rather than opening a second global session.
 
@@ -127,7 +127,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Publish a privacy policy, terms of service, and community/content rules — **build task, not just writing (2026-09-19):** no `/privacy`, `/terms`, or `/rules` routes or page components exist anywhere in `web/src`; add a `LegalPage` + routes + footer links first.
 - [ ] **New:** Add a GDPR data-export (DSAR) endpoint — `GET /api/users/me/export` returning posts, packs, comments, and ledger as a JSON archive. Currently absent.
 - [ ] **New:** Account deletion leaves **DMs and conversation state intact** — `delete_account` (`account_safety.py:499–608`) predates the messaging and billing subsystems: it never touches `DirectMessage`/`Conversation`/`ConversationMember`/`MessageEvent` (deleted users' messages persist verbatim in recipients' inboxes). Either document "DMs retained, author tombstoned" in the privacy policy or crypto-shred per-user keys.
-- [ ] **New:** Account deletion leaves **billing tables untouched** — `CreditLedgerEntry`/`StripePurchase`/`ReelRewardClaim` retention is defensible under financial-record law but must be a documented decision; `FalCredential` (encrypted BYOK keys) should be hard-deleted on account closure.
+- [~] **New:** Account deletion leaves **billing tables untouched** — `CreditLedgerEntry`/`StripePurchase`/`ReelRewardClaim` retention is defensible under financial-record law but must be a documented decision; `FalCredential` (encrypted BYOK keys) should be hard-deleted on account closure. **Done (2026-09-20):** `delete_account` hard-deletes the `FalCredential` row in-transaction (regression-tested); ledger/financial rows retained as legal records, DM retention still a documented decision per the item above.
 - [ ] Disclose which media and metadata are sent to FAL or other third-party processors before users submit content. **Extend to WebXR:** Quest sessions implicitly process head/hand pose data — the policy must name it, with a first-run notice on VR entry.
 - [ ] Define retention periods for staged uploads, job artifacts, published media, raw engagement events, recommendation sessions, impressions, dismissals, affinities, co-watch rows, messages, reports, logs, and anonymous identifiers.
 - [ ] Extend account deletion to delete or irreversibly anonymize all recommendation sessions, impressions, requests, dismissals, affinities, co-watch data, and retained actor keys associated with the account.
@@ -144,9 +144,9 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 ### Registration and anti-abuse
 
 - [ ] For a public beta, add email verification and bot protection to registration. **Confirmed absent (2026-09-19):** zero email-verification machinery in the codebase.
-- [ ] Until those controls exist, operate as invite-only/allowlisted or set `SX_REGISTRATION_ENABLED=0`.
-- [ ] Verify account, messaging, reporting, following, upload, and recommendation-event rate limits under coordinated abuse. **Note:** comments/likes/follows/blocks/message-send/reports already carry limiters (verified); **packs and publish do not** (see cost-controls items above).
-- [ ] **New:** Gate reel-reward claims on verified email + minimum account age; the per-IP cap has a `max(10, …)` floor that silently overrides lower config (`billing/service.py:894`) — remove the floor. Record a rewards-economics cost ceiling and go/no-go before enabling `SX_REEL_REWARDS_ENABLED`.
+- [ ] Until those controls exist, operate as invite-only/allowlisted or set `SX_REGISTRATION_ENABLED=0`. **Update (2026-09-20):** invite path implemented — `SX_REGISTRATION_ALLOWLIST` (comma-separated emails, case-insensitive) is honored while registration is closed (`social.py:80–121`, tested in `test_registration_allowlist.py`).
+- [ ] Verify account, messaging, reporting, following, upload, and recommendation-event rate limits under coordinated abuse. **Note:** comments/likes/follows/blocks/message-send/reports already carry limiters (verified); **packs and publish do not** (see cost-controls items above). **Update (2026-09-20):** packs and publish now carry limiters (those items checked off above); coordinated-abuse verification still open.
+- [~] **New:** Gate reel-reward claims on verified email + minimum account age; the per-IP cap has a `max(10, …)` floor that silently overrides lower config (`billing/service.py:894`) — remove the floor. Record a rewards-economics cost ceiling and go/no-go before enabling `SX_REEL_REWARDS_ENABLED`. **Partially done (2026-09-20):** floor removed (`reel_reward_ip_cap()`, min 1, tested). **Remaining:** email/age gating + economics ceiling + go/no-go.
 - [ ] Add moderator alerts and dashboards for report spikes, spam registrations, abusive messaging, unusual generation spend, and storage growth.
 
 ## Production deployment and operations
@@ -167,7 +167,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Keep `SX_PASSWORD_RESET_EXPOSE_TOKEN=0` outside local development.
 - [~] ~~Keep `SX_TRUST_PROXY_HEADERS=0`~~ — **corrected 2026-09-19:** behind Cloudflare (the decided topology) every client IP is a CF egress IP, which collapses all IP-keyed rate limits into shared buckets. Set `SX_TRUST_PROXY_HEADERS=1` **and** restrict origin traffic to Cloudflare IP ranges so client-supplied forwarding headers can't be spoofed from the open internet.
 - [~] Confirm `.env`, database files, keys, and generated secrets are excluded from version control and container images — **`.dockerignore` fixed 2026-09-19** (typo `venv/` → `.venv/`; added `data/`, `logs/`, `.models/`, `.stitch/`, tests/docs and other non-runtime trees). **Remaining:** verify the built image contents (`docker run --rm img ls /app`) in CI.
-- [ ] **New:** Set `load_dotenv(override=False)` semantics — `server/app.py:26` currently uses `override=True`, so a stray `.env` in the image would beat `docker -e` secrets.
+- [x] **New:** Set `load_dotenv(override=False)` semantics — `server/app.py:26` currently uses `override=True`, so a stray `.env` in the image would beat `docker -e` secrets. **Done (2026-09-20):** environment now wins over `.env`.
 
 ### Database, storage, and workers
 
@@ -227,7 +227,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Test current Chrome, Safari, Firefox, mobile browsers, and the supported Quest Browser/device matrix.
 - [ ] Validate Reels autoplay/manual navigation, audio, next-page preloading, negative feedback, creator suggestions, canonical links, and profile navigation on a physical Quest device.
 - [ ] Verify keyboard navigation, focus visibility, reduced-motion behavior, readable contrast, captions/accessible alternatives where applicable, and responsive layouts. **Decision needed:** no caption/WebVTT capability exists anywhere (`ReelsPlayer.jsx`, VR modules) — declare captions out-of-scope for beta or build VTT support.
-- [ ] **New:** Gate `/reels/immersive-preview` — it is currently unauthenticated (`App.jsx:36`, no `RequireAuth` wrapper) despite being a creator desktop tool; wrap it or tie it to `SX_REEL_PACK_IMMERSIVE_ENABLED`.
+- [x] **New:** Gate `/reels/immersive-preview` — it is currently unauthenticated (`App.jsx:36`, no `RequireAuth` wrapper) despite being a creator desktop tool; wrap it or tie it to `SX_REEL_PACK_IMMERSIVE_ENABLED`. **Done (2026-09-20):** wrapped in the existing `RequireAuth` (logged-out redirects to login); `vite build` clean.
 - [ ] Run a final moderation drill using real reports, blocks, content removal, account suspension, appeal handling, and audit evidence.
 
 Automated Meta documentation and device verification remain unavailable on the current Linux host because `metavr` does not publish a `linux-x64` binary. Physical Quest verification remains a release gate. This document does not claim current Meta Horizon Store compliance requirements.
@@ -253,9 +253,22 @@ SX_SECURITY_SECRET=<long-random-secret>
 SX_MESSAGE_ENCRYPTION_KEY=<different-long-random-secret>
 SX_FAL_KEY_ENCRYPTION_KEY=<third-independent-long-random-secret>
 SX_REGISTRATION_ENABLED=0
+SX_REGISTRATION_ALLOWLIST=<invited-email-1,invited-email-2>
 SX_STRIPE_ENABLED=0
 SX_CREDITS_ENABLED=0
 SX_REEL_REWARDS_ENABLED=0
+
+# Cost/abuse controls (all have code defaults; set explicitly per launch)
+SX_FAL_MAX_QUOTE_USD=10
+SX_QUOTE_RPM=15
+SX_PACK_CREATE_HOURLY=10
+SX_PUBLISH_HOURLY_MAX=5
+SX_PUBLISH_DAILY_MAX=20
+SX_STRIPE_WEBHOOK_MAX_BYTES=1048576
+SX_STRIPE_WEBHOOK_RPM=120
+SX_SSE_MAX_CONN=3
+SX_SSE_MAX_MIN=30
+SX_REEL_REWARD_IP_DAILY_CLAIMS=50
 
 # Stripe (only needed when SX_STRIPE_ENABLED=1; test mode first — see RUNNING.md)
 STRIPE_SECRET_KEY=
@@ -314,13 +327,22 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - [x] Responsive messages page, compact dock, profile entry point, and immersive-mode hiding.
 - [x] Personalized Reels pagination, recommendation impressions, explicit negative feedback, and creator-suggestion APIs.
 - [x] Recommendation attribution defenses for stolen cursors, cross-actor impressions, duplicate visibility, and duplicate terminal events.
+- [x] Invite-only registration allowlist (`SX_REGISTRATION_ALLOWLIST` honored while closed; 2026-09-20).
+- [x] Security/money hardening batch (2026-09-20): admin-gated reels proxy/spatialize, publish ownership + caps, Civitai hostname allowlist + per-job quote cap, signed anon cookies, webhook caps, quote/pack/publish/SSE rate limits + probe cache, login timing alignment, staged-image pixel ceiling, Fal-key entropy assert, `FalCredential` deletion on account closure.
+- [x] Prod-env fixes (2026-09-20): `load_dotenv(override=False)`, immersive-preview behind auth, rewards IP floor removal.
 
 ## Latest recorded automated verification
+
+**2026-09-20 security/money + edge verification (uncommitted working tree):**
+
+- Backend regression suite: **158 passed** (`pytest -q tests`, ~27s) — includes 66 pre-existing hardening-adjacent tests plus 6 registration-allowlist, 24 security/money, and 36 edge-case tests (all SQLite fixtures; Postgres re-run remains a listed gate above).
+- Frontend: 13 vitest passed; `vite build` clean.
+- Publication-path ownership now enforced (the 2026-09-19 "remains open" note above is resolved); no job-cancel endpoint yet.
 
 **2026-09-19 audit round 2 (four-agent codebase re-verification):**
 
 - Recommendation concurrency regression tests: **passing** — `test_concurrent_page_materialization_replays_winner` + `test_concurrent_affinity_upsert_dedupes` (4 passed, ~1.5s, SQLite fixtures; Postgres re-run is a listed gate above). The 2026-09-12 "failed with HTTP 500s" record below is **historical** — the fix (winner-replay on `uq_recommendation_request_session_page`) landed and is dual-dialect.
-- Staged-upload/job ownership tests: **passing** (`tests/test_cloud_routes.py` — owner-private staging, owned job status/download). Publication-path ownership remains open (listed above).
+- Staged-upload/job ownership tests: **passing** (`tests/test_cloud_routes.py` — owner-private staging, owned job status/download). Publication-path ownership was open at audit time — **fixed 2026-09-20** (see verification entry above).
 - `.venv` recreated (CPython 3.14.6); the 2026-09-12 ".venv absent" note is resolved.
 - Current schema head: `20260913_0010` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
 - Build fixes landed 2026-09-19: `.dockerignore` rewritten (`.venv/` typo fixed; `data/` + `logs/` + model caches excluded — previously baked the dev DB into the image); `vapoursynth==78` scoped off Linux (no manylinux wheel — previously broke `docker build`).

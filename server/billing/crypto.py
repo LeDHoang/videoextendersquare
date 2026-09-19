@@ -17,6 +17,10 @@ def _key() -> bytes:
     secret = os.environ.get("SX_FAL_KEY_ENCRYPTION_KEY", "").strip()
     if not secret:
         raise FalKeyConfigurationError("SX_FAL_KEY_ENCRYPTION_KEY is required to store personal Fal keys")
+    if len(secret) < 16 or "change-this" in secret.casefold():
+        raise FalKeyConfigurationError(
+            "SX_FAL_KEY_ENCRYPTION_KEY must be at least 16 characters (independent secret; rotating it orphans saved keys)"
+        )
     return hashlib.sha256(("echo-fal-key-v1:" + secret).encode("utf-8")).digest()
 
 

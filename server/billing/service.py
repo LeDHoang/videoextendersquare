@@ -54,6 +54,15 @@ def flag_enabled(name: str) -> bool:
 
 _BILLING_FLAGS = ("SX_CREDITS_ENABLED", "SX_STRIPE_ENABLED", "SX_REEL_REWARDS_ENABLED")
 _DEV_SECURITY_SECRET = "echo-development-secret-change-me"
+_REEL_REWARD_IP_DAILY_DEFAULT = 50
+
+
+def reel_reward_ip_cap() -> int:
+    """Daily per-IP reward cap. Honors low operator values (min 1)."""
+    try:
+        return max(1, int(os.environ.get("SX_REEL_REWARD_IP_DAILY_CLAIMS", str(_REEL_REWARD_IP_DAILY_DEFAULT))))
+    except (TypeError, ValueError):
+        return _REEL_REWARD_IP_DAILY_DEFAULT
 
 
 def require_billing_secrets() -> None:
@@ -382,6 +391,15 @@ def create_quote(
         raise QuoteError(str(exc)) from exc
     if snapshot is None:
         raise QuoteError("Unsupported quote kind")
+    try:
+        max_quote_usd = float(os.environ.get("SX_FAL_MAX_QUOTE_USD", "10"))
+    except (TypeError, ValueError):
+        max_quote_usd = 10.0
+    if max_quote_usd > 0 and float(snapshot.get("provider_cost_microusd", 0)) > max_quote_usd * 1_000_000:
+        raise QuoteError(
+            f"Quote exceeds the per-job spend cap (${max_quote_usd:g}); "
+            "reduce duration/resolution or choose a cheaper model."
+        )
     now = utcnow()
     db.query(BillingQuote).filter(
         BillingQuote.user_id == user_id,
@@ -891,7 +909,7 @@ def claim_reel_reward(
     ip_count = db.query(func.count(ReelRewardClaim.id)).filter(
         ReelRewardClaim.ip_hash == ip_hash, ReelRewardClaim.utc_date == today
     ).scalar() or 0
-    ip_cap = max(10, int(os.environ.get("SX_REEL_REWARD_IP_DAILY_CLAIMS", "50")))
+    ip_cap = reel_reward_ip_cap()
     if user_count >= 50 or awarded_count >= 5:
         return _reward_payload(user_count, awarded_count, False, daily_cap=True)
     if ip_count >= ip_cap:

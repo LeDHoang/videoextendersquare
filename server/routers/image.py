@@ -69,7 +69,15 @@ def upload_image(
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
 
-    w, h = get_image_dimensions(dest_path)
+    try:
+        w, h = get_image_dimensions(dest_path)
+    except ValueError as ex:
+        STAGED_UPLOADS.pop(stage_id, None)
+        try:
+            os.unlink(dest_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=413, detail=f"Image dimensions are too large: {ex}") from ex
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
 

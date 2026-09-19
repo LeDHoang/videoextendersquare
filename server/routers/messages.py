@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -898,6 +899,12 @@ def delete_message(
     return {"ok": True}
 
 
+# In-memory SSE connection tracking (single-worker verdict: process-local is
+# correct here; multi-machine later needs a shared counter).
+_SSE_STREAMS: dict[str, int] = {}
+_SSE_LOCK = asyncio.Lock()
+
+
 @router.get("/events")
 async def message_events(
     request: Request,
@@ -905,6 +912,22 @@ async def message_events(
     context: AuthContext = Depends(require_auth),
 ):
     require_messaging_user(context.user)
+    try:
+        max_conn = max(1, int(os.environ.get("SX_SSE_MAX_CONN", "3")))
+    except (TypeError, ValueError):
+        max_conn = 3
+    try:
+        max_minutes = max(1, int(os.environ.get("SX_SSE_MAX_MIN", "30")))
+    except (TypeError, ValueError):
+        max_minutes = 30
+    async with _SSE_LOCK:
+        active = _SSE_STREAMS.get(context.user.id, 0)
+        if active >= max_conn:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "RATE_LIMITED", "message": "Too many live message streams. Close a tab and retry."},
+            )
+        _SSE_STREAMS[context.user.id] = active + 1
     header_cursor = request.headers.get("last-event-id", "").strip()
     if header_cursor:
         try:
@@ -912,41 +935,49 @@ async def message_events(
         except ValueError:
             pass
     user_id = context.user.id
+    deadline = time.monotonic() + max_minutes * 60
 
     async def stream():
         cursor = max(0, int(after))
         idle_ticks = 0
-        while not await request.is_disconnected():
-            with SessionLocal() as event_db:
-                rows = event_db.query(MessageEvent).filter(
-                    MessageEvent.recipient_id == user_id,
-                    MessageEvent.id > cursor,
-                ).order_by(MessageEvent.id.asc()).limit(100).all()
-                payloads = [
-                    {
-                        "id": row.id,
-                        "type": row.event_type,
-                        "conversation_id": row.conversation_id,
-                        "message_id": row.message_id,
-                        "created_at": row.created_at.isoformat() if row.created_at else None,
-                    }
-                    for row in rows
-                ]
-            if payloads:
-                idle_ticks = 0
-                for payload in payloads:
-                    cursor = payload["id"]
-                    yield (
-                        f"id: {cursor}\n"
-                        f"event: {payload['type']}\n"
-                        f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
-                    )
-            else:
-                idle_ticks += 1
-                if idle_ticks >= 15:
+        try:
+            while not await request.is_disconnected():
+                if time.monotonic() >= deadline:
+                    yield "event: reconnect\ndata: {\"reason\":\"max-stream-lifetime\"}\n\n"
+                    break
+                with SessionLocal() as event_db:
+                    rows = event_db.query(MessageEvent).filter(
+                        MessageEvent.recipient_id == user_id,
+                        MessageEvent.id > cursor,
+                    ).order_by(MessageEvent.id.asc()).limit(100).all()
+                    payloads = [
+                        {
+                            "id": row.id,
+                            "type": row.event_type,
+                            "conversation_id": row.conversation_id,
+                            "message_id": row.message_id,
+                            "created_at": row.created_at.isoformat() if row.created_at else None,
+                        }
+                        for row in rows
+                    ]
+                if payloads:
                     idle_ticks = 0
-                    yield ": keep-alive\n\n"
-            await asyncio.sleep(1)
+                    for payload in payloads:
+                        cursor = payload["id"]
+                        yield (
+                            f"id: {cursor}\n"
+                            f"event: {payload['type']}\n"
+                            f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+                        )
+                else:
+                    idle_ticks += 1
+                    if idle_ticks >= 15:
+                        idle_ticks = 0
+                        yield ": keep-alive\n\n"
+                await asyncio.sleep(1)
+        finally:
+            async with _SSE_LOCK:
+                _SSE_STREAMS[user_id] = max(0, _SSE_STREAMS.get(user_id, 1) - 1)
 
     return StreamingResponse(
         stream(),

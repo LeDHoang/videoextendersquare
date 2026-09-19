@@ -9,6 +9,7 @@ reels.upsert_upload_meta so the item appears in Explore + Reels with
 zeroed engagement instead of fake seeded numbers.
 """
 
+import os
 import re
 import shutil
 import uuid
@@ -16,13 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import JobStatus, job_manager
-from server.social.auth import AuthContext, require_auth_csrf
+from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
 from server.social.services import create_or_update_post, post_card
 
@@ -98,7 +99,13 @@ def _slugify(text: str, fallback: str = "upload") -> str:
     return (slug[:60] or fallback)
 
 
-def _resolve_source(kind: str, stage_id: str | None, job_id: str | None) -> tuple[str, str]:
+def _resolve_source(
+    kind: str,
+    stage_id: str | None,
+    job_id: str | None,
+    request: Request,
+    context: AuthContext,
+) -> tuple[str, str]:
     """Return (source_path, original_filename) for exactly one pointer."""
     if bool(stage_id) == bool(job_id):
         raise HTTPException(
@@ -109,6 +116,11 @@ def _resolve_source(kind: str, stage_id: str | None, job_id: str | None) -> tupl
         rec = job_manager.get_job(job_id)
         if not rec or rec.status != JobStatus.COMPLETE or not rec.result:
             raise HTTPException(status_code=400, detail="job_id has no completed result")
+        # Paid (cloud) jobs carry an owner — cross-user publish is forbidden.
+        # Owner-less free/local jobs keep the legacy behavior (12-hex
+        # unguessable job_id + completed-result requirement).
+        if rec.owner_id and rec.owner_id != context.user.id:
+            raise HTTPException(status_code=403, detail="job_id does not belong to this account")
         worker_path = rec.result.get("path")
         if not worker_path or not Path(worker_path).is_file():
             raise HTTPException(status_code=400, detail="job result file is missing")
@@ -122,6 +134,9 @@ def _resolve_source(kind: str, stage_id: str | None, job_id: str | None) -> tupl
         staged = video_router.STAGED_UPLOADS.get(stage_id or "")
     if staged is None:
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
+    staged_owner = staged[2] if len(staged) > 2 else None
+    if not stage_owner_matches(staged_owner, request, context):
+        raise HTTPException(status_code=403, detail="stage_id does not belong to this account")
     src_path = staged[0]
     if not Path(src_path).is_file():
         raise HTTPException(status_code=400, detail="Staged file is missing")
@@ -138,13 +153,24 @@ def _resolve_source(kind: str, stage_id: str | None, job_id: str | None) -> tupl
 @router.post("/publish")
 def publish_upload(
     req: PublishRequest,
+    request: Request,
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
     """Copy the chosen file into output/uploads/ and create an owned post."""
     from server.routers import reels as reels_router
 
-    src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id)
+    try:
+        hourly_cap = max(1, int(os.environ.get("SX_PUBLISH_HOURLY_MAX", "5")))
+    except (TypeError, ValueError):
+        hourly_cap = 5
+    try:
+        daily_cap = max(1, int(os.environ.get("SX_PUBLISH_DAILY_MAX", "20")))
+    except (TypeError, ValueError):
+        daily_cap = 20
+    rate_limiter.check(db, f"publish-hour:{context.user.id}", hourly_cap, 60 * 60)
+    rate_limiter.check(db, f"publish-day:{context.user.id}", daily_cap, 24 * 60 * 60)
+    src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     src_ext = Path(src_path).suffix.lstrip(".").lower() or ("png" if req.kind == "image" else "mp4")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

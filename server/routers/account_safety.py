@@ -49,6 +49,7 @@ from server.social.models import (
     ConversationMember,
     DirectMessage,
     EngagementEvent,
+    FalCredential,
     Follow,
     MessageEvent,
     PasswordResetToken,
@@ -546,6 +547,10 @@ def delete_account(
         synchronize_session=False
     )
     db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete(synchronize_session=False)
+    # Encrypted BYOK credentials must not survive account closure: unlike
+    # financial ledger rows (retained as legal records), a usable third-party
+    # API key has no retention basis once the account is gone.
+    db.query(FalCredential).filter(FalCredential.user_id == user.id).delete(synchronize_session=False)
     db.query(Report).filter(Report.reporter_id == user.id).update(
         {Report.reporter_id: None}, synchronize_session=False
     )

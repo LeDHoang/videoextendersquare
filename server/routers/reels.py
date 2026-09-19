@@ -13,12 +13,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from server import media as SM
 from server.jobs import job_manager
-from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_auth_csrf
+from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
@@ -2071,8 +2071,15 @@ MAX_PROXY_PATHS = 50
 
 
 @router.post("/proxy")
-def generate_proxies(paths: list[str]):
-    """Generate H.264 preview proxies for the given output-relative paths."""
+def generate_proxies(
+    paths: list[str],
+    request: Request,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    """Generate H.264 preview proxies for the given output-relative paths (admin only)."""
+    validate_origin(request)
+    rate_limiter.check(db, f"reels-proxy:{context.user.id}", 10, 60)
     if len(paths) > MAX_PROXY_PATHS:
         raise HTTPException(
             status_code=400,
@@ -2106,13 +2113,20 @@ SPATIALIZE_OUT_DIR = "output/testpipeline-3d"
 
 class SpatializeRequest(BaseModel):
     paths: list[str] | None = None  # output-relative; defaults to all HEVC masters in testpipeline
-    strength: float = 1.0
+    strength: float = Field(default=1.0, ge=0.0, le=2.0)
     half_sbs: bool = False
 
 
 @router.post("/spatialize")
-def spatialize(req: SpatializeRequest):
-    """Queue local depth-based SBS conversion of HEVC masters as a background job."""
+def spatialize(
+    req: SpatializeRequest,
+    request: Request,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    """Queue local depth-based SBS conversion of HEVC masters as a background job (admin only)."""
+    validate_origin(request)
+    rate_limiter.check(db, f"reels-spatialize:{context.user.id}", 10, 60)
     from pipeline.spatial_worker import SpatializeError, discover_hevc_sources
 
     if req.paths:
@@ -2171,7 +2185,10 @@ def spatialize(req: SpatializeRequest):
 
 
 @router.get("/spatialize/jobs/{job_id}")
-def spatialize_status(job_id: str):
+def spatialize_status(
+    job_id: str,
+    context: AuthContext = Depends(require_admin_csrf),
+):
     rec = job_manager.get_job(job_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Unknown job")

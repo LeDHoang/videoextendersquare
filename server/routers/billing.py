@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -26,11 +27,38 @@ from server.billing.service import (
 )
 from server.billing.stripe_service import catalog as pack_catalog
 from server.billing.stripe_service import create_checkout, process_webhook
-from server.social.auth import AuthContext, require_auth, require_auth_csrf, stage_owner_matches, validate_origin
+from server.social.auth import AuthContext, rate_limiter, request_identity, require_auth, require_auth_csrf, stage_owner_matches, validate_origin
 from server.social.database import get_db
 from server.social.models import FalCredential, utcnow
 
 router = APIRouter(tags=["billing"])
+
+
+# Probe cache: ffprobe subprocess results keyed by (path, size, mtime_ns)
+# with a short TTL so repeated quotes on the same staged file skip the
+# two subprocess spawns per call (master + preview metadata).
+_PROBE_CACHE: dict[str, tuple[float, tuple]] = {}
+_PROBE_CACHE_TTL_S = 300
+
+
+def _cached_probe(cache_key: str, path: str, probe):
+    try:
+        stat = os.stat(path)
+        fingerprint = (path, stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return probe()
+    now = time.monotonic()
+    cached = _PROBE_CACHE.get(cache_key)
+    if cached and cached[0] > now and cached[1][0] == fingerprint:
+        return cached[1][1]
+    result = probe()
+    _PROBE_CACHE[cache_key] = (now + _PROBE_CACHE_TTL_S, (fingerprint, result))
+    # Bound memory: evict expired entries opportunistically.
+    if len(_PROBE_CACHE) > 512:
+        expired = [k for k, (exp, _) in _PROBE_CACHE.items() if exp <= now]
+        for k in expired:
+            _PROBE_CACHE.pop(k, None)
+    return result
 
 
 class QuoteRequest(BaseModel):
@@ -69,7 +97,10 @@ def _staged_metadata(kind: str, stage_id: str, request: Request, context: AuthCo
         owner = staged[2] if staged and len(staged) > 2 else None
         if not path or not os.path.exists(path) or not stage_owner_matches(owner, request, context):
             raise HTTPException(status_code=400, detail={"code": "INVALID_STAGE", "message": "Upload is invalid or expired."})
-        width, height = get_image_dimensions(path)
+        try:
+            width, height = _cached_probe(f"img:{stage_id}", path, lambda: get_image_dimensions(path))
+        except ValueError as ex:
+            raise HTTPException(status_code=413, detail={"code": "IMAGE_DIMENSIONS_TOO_LARGE", "message": str(ex)}) from ex
         return path, width, height, None, None, None
     if kind == "video":
         from server.routers.video import STAGED_UPLOADS
@@ -79,8 +110,8 @@ def _staged_metadata(kind: str, stage_id: str, request: Request, context: AuthCo
         owner = staged[2] if staged and len(staged) > 2 else None
         if not path or not os.path.exists(path) or not stage_owner_matches(owner, request, context):
             raise HTTPException(status_code=400, detail={"code": "INVALID_STAGE", "message": "Upload is invalid or expired."})
-        width, height, duration = get_video_dimensions_and_duration(path)
-        fps, frames = get_video_frame_metadata(path)
+        width, height, duration = _cached_probe(f"vid:{stage_id}", path, lambda: get_video_dimensions_and_duration(path))
+        fps, frames = _cached_probe(f"frames:{stage_id}", path, lambda: get_video_frame_metadata(path))
         return path, width, height, duration, fps, frames
     raise HTTPException(status_code=422, detail={"code": "INVALID_KIND", "message": "kind must be image or video."})
 
@@ -132,6 +163,12 @@ def quote(
     if not flag_enabled("SX_CREDITS_ENABLED"):
         raise HTTPException(status_code=503, detail={"code": "CREDITS_DISABLED", "message": "ECHO Credits are disabled."})
     try:
+        quote_rpm = max(1, int(os.environ.get("SX_QUOTE_RPM", "15")))
+    except (TypeError, ValueError):
+        quote_rpm = 15
+    rate_limiter.check(db, f"quote:{context.user.id}", quote_rpm, 60)
+    rate_limiter.check(db, f"quote-ip:{request_identity(request)}", max(quote_rpm * 4, 60), 60)
+    try:
         require_billing_secrets()
     except BillingError as exc:
         _billing_http_error(exc)
@@ -179,7 +216,18 @@ def checkout_session(
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     import logging
 
+    try:
+        webhook_max_bytes = max(1024, int(os.environ.get("SX_STRIPE_WEBHOOK_MAX_BYTES", "1048576")))
+    except (TypeError, ValueError):
+        webhook_max_bytes = 1048576
+    try:
+        webhook_rpm = max(1, int(os.environ.get("SX_STRIPE_WEBHOOK_RPM", "120")))
+    except (TypeError, ValueError):
+        webhook_rpm = 120
+    rate_limiter.check(db, f"stripe-webhook:{request_identity(request)}", webhook_rpm, 60)
     payload = await request.body()
+    if len(payload) > webhook_max_bytes:
+        raise HTTPException(status_code=413, detail={"code": "WEBHOOK_TOO_LARGE", "message": "Stripe event body is too large."})
     signature = request.headers.get("stripe-signature", "")
     try:
         return process_webhook(db, payload=payload, signature=signature)

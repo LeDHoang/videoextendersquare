@@ -226,8 +226,8 @@ def stage_owner_matches(staged_owner: str | None, request: Request, context: Aut
         return False
     if context is not None and staged_owner == f"user:{context.user.id}":
         return True
-    anon = request.cookies.get(ANON_COOKIE, "")
-    return bool(anon) and staged_owner == "anon:" + token_hash(anon)
+    raw_anon = _verify_anon_cookie(request.cookies.get(ANON_COOKIE, ""))
+    return bool(raw_anon) and staged_owner == "anon:" + token_hash(raw_anon)
 
 
 def require_auth_csrf(
@@ -292,21 +292,47 @@ def require_admin_csrf(context: AuthContext = Depends(require_auth_csrf)) -> Aut
 
 
 
+def _sign_anon_cookie(raw: str) -> str:
+    return f"{raw}.{keyed_hash('anon:' + raw)}"
+
+
+def _verify_anon_cookie(value: str | None) -> str | None:
+    """Return the raw cookie value if HMAC-valid, else None.
+
+    Unsigned legacy values and forged signatures are rejected so bots
+    cannot mint arbitrary anonymous actors (rotate-and-continue: callers
+    issue a fresh signed cookie on rejection).
+    """
+    if not value or "." not in value:
+        return None
+    raw, _, sig = value.rpartition(".")
+    if not raw or not sig:
+        return None
+    try:
+        expected = keyed_hash("anon:" + raw)
+    except Exception:
+        return None
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return raw
+
+
 def ensure_anonymous_cookie(request: Request, response: Response) -> str:
     value = request.cookies.get(ANON_COOKIE)
-    if value:
-        return token_hash(value)
-    value = secrets.token_urlsafe(24)
+    raw = _verify_anon_cookie(value)
+    if raw:
+        return token_hash(raw)
+    raw = secrets.token_urlsafe(24)
     response.set_cookie(
         ANON_COOKIE,
-        value,
+        _sign_anon_cookie(raw),
         max_age=365 * 24 * 60 * 60,
         httponly=True,
         secure=COOKIE_SECURE,
         samesite="lax",
         path="/",
     )
-    return token_hash(value)
+    return token_hash(raw)
 
 
 def validate_origin(request: Request) -> None:

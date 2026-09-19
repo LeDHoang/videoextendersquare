@@ -77,6 +77,47 @@ PACK_VIEW_WINDOW_MINUTES = 10
 REGISTRATION_ENABLED = os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
 
 
+def registration_enabled() -> bool:
+    """Runtime read of the invite-only flag (module constant is import-time)."""
+    return os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
+
+
+def registration_allowlist() -> set[str]:
+    """Explicit invite allowlist: comma-separated emails, casefolded."""
+    return {
+        normalize_email(value)
+        for value in os.environ.get("SX_REGISTRATION_ALLOWLIST", "").split(",")
+        if value.strip()
+    }
+
+
+def is_registration_allowlisted(email_norm: str) -> bool:
+    try:
+        return bool(email_norm) and normalize_email(str(email_norm)) in registration_allowlist()
+    except Exception:
+        return False
+
+
+_DUMMY_PASSWORD_HASH: str | None = None
+
+
+def _verify_dummy_password(password: str) -> None:
+    """Run an argon2 verification so unknown-user logins cost the same time.
+
+    Prevents account-enumeration via response timing: without this, unknown
+    identifiers short-circuit before the argon2 delay while known users pay
+    it. The result is always discarded; the caller still returns the generic
+    INVALID_CREDENTIALS error.
+    """
+    global _DUMMY_PASSWORD_HASH
+    if _DUMMY_PASSWORD_HASH is None:
+        _DUMMY_PASSWORD_HASH = hash_password("dummy-timing-alignment-password")
+    try:
+        verify_password(_DUMMY_PASSWORD_HASH, password or "")
+    except Exception:
+        pass
+
+
 def configured_role(email: str, username: str) -> str:
     identities = {email.casefold(), username.casefold()}
     admins = {
@@ -351,7 +392,9 @@ class RecommendationFeedbackRequest(BaseModel):
 @router.post("/api/auth/register")
 def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
-    if not REGISTRATION_ENABLED:
+    email_for_gate = normalize_email(str(req.email))
+    is_open = REGISTRATION_ENABLED and registration_enabled()
+    if not is_open and not is_registration_allowlisted(email_for_gate):
         error(403, "REGISTRATION_DISABLED", "New account registration is disabled.")
     rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
     email = normalize_email(str(req.email))
@@ -402,7 +445,10 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         User.account_type == "real",
         or_(User.email_norm == identifier, User.username_norm == identifier),
     ).first()
-    if not user or not verify_password(user.password_hash, req.password):
+    if not user:
+        _verify_dummy_password(req.password)
+        error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
+    if not verify_password(user.password_hash, req.password):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
     assigned_role = configured_role(user.email or "", user.username)
     if user.role != assigned_role:
