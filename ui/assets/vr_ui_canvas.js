@@ -14,7 +14,7 @@
   const CONTROLS_W = 1024;
   const CONTROLS_H = 384;
   const GUIDE_W = 440;
-  const GUIDE_H = 560;
+  const GUIDE_H = 760;
   const CPANEL_W = 560;
   const CPANEL_H = 680;
   const OVERLAY_W = 1024;
@@ -171,9 +171,11 @@
       item = null,
       comments = [],
       hoveredButton = -1,
+      pressedButton = -1,
       isCurved = true,
       curvatureMode = 1,
       lockToViewer = false,
+      autoNext = true,
       sceneMode = 'reels',
       notificationText = '',
       notificationUntil = 0,
@@ -278,35 +280,115 @@
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('✕', exitBtn.x + exitBtn.w / 2, exitBtn.y + exitBtn.h / 2);
 
-    // Transport buttons
+    // Transport buttons (upstream v5.2 pill styles: left-column mode/curve pills
+    // carry a left label + right icon; right-column lock/mute pills show an
+    // active accent while engaged).
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek') continue;
       if (!isControlVisible(btn.action, source, itemState, packMode)) continue;
 
       const isHover = (hoveredButton === i);
-      let btnLabel = btn.label;
-      if (btn.action === 'play') btnLabel = isPaused ? '▶' : '❚❚';
-      if (btn.action === 'mute') btnLabel = isMuted ? 'UNMUTE' : 'MUTE';
-      if (btn.action === 'lock') btnLabel = lockToViewer ? 'LOCKED' : 'UNLOCKED';
-      if (btn.action === 'curve') {
-        btnLabel = curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT');
+      const isPressed = (pressedButton === i);
+
+      // Left column pills (AUTO / DOME)
+      if (btn.action === 'mode' || btn.action === 'curve') {
+        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
+        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = isHover ? '#FFFFFF' : '#E7BDB5';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const label = btn.action === 'mode'
+          ? (packMode ? 'AUTHORED' : (autoNext ? 'AUTO' : 'LOOP'))
+          : (curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT'));
+        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
+
+        ctx.font = '15px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = isHover ? '#FF3B1F' : '#C5C6C8';
+        const icon = btn.action === 'mode' ? (packMode ? '≡' : '⟳') : '🌐';
+        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+        continue;
       }
 
-      ctx.fillStyle = isHover ? '#FF3B1F' : '#141619';
-      ctx.strokeStyle = isHover ? '#FFFFFF' : '#3A4047';
-      ctx.lineWidth = 1;
+      // Right column pills (LOCK / AUDIO)
+      if (btn.action === 'lock' || btn.action === 'mute') {
+        const isLockActive = (btn.action === 'lock' && lockToViewer);
+        ctx.fillStyle = isPressed ? '#07090C' : ((isLockActive || isHover) ? '#1D2126' : '#101214');
+        ctx.strokeStyle = (isLockActive || isHover) ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = (isLockActive || isHover) ? '#FFFFFF' : '#E7BDB5';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const label = btn.action === 'lock'
+          ? (lockToViewer ? 'LOCK' : 'FREE')
+          : (isMuted ? 'MUTED' : 'AUDIO');
+        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
+
+        ctx.font = '15px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = (isLockActive || isHover) ? '#FF3B1F' : '#C5C6C8';
+        const icon = btn.action === 'lock'
+          ? (lockToViewer ? '🔒' : '🔓')
+          : (isMuted ? '🔇' : '🔊');
+        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+        continue;
+      }
+
+      // Center secondary buttons (rew, prev, next, fwd)
+      if (btn.action !== 'play') {
+        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
+        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isHover ? '#FFFFFF' : '#E3E2E3';
+        ctx.font = (btn.action === 'prev' || btn.action === 'next') ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let lbl = btn.label;
+        if (btn.action === 'rew') lbl = '◀◀';
+        if (btn.action === 'fwd') lbl = '▶▶';
+        if (btn.action === 'prev') lbl = '⏮';
+        if (btn.action === 'next') lbl = '⏭';
+        ctx.fillText(lbl, btn.x + btn.w / 2, btn.y + btn.h / 2);
+        continue;
+      }
+
+      // Center primary play/pause glow button
+      ctx.fillStyle = isPressed ? '#C93420' : '#FF3B1F';
+      ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
+      ctx.shadowBlur = isHover ? 28 : 20;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
       else ctx.rect(btn.x, btn.y, btn.w, btn.h);
       ctx.fill();
-      ctx.stroke();
+      ctx.shadowBlur = 0;
 
-      ctx.fillStyle = isHover ? '#000000' : '#E3E2E3';
-      ctx.font = btn.action === 'play' ? 'bold 24px sans-serif' : 'bold 11px "JetBrains Mono", monospace';
+      ctx.fillStyle = '#0A0A0A';
+      ctx.font = 'bold 30px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(btnLabel, btn.x + btn.w / 2, btn.y + btn.h / 2);
+      ctx.fillText(isPaused ? '▶' : '⏸', btn.x + btn.w / 2, btn.y + btn.h / 2);
     }
 
     // Scrubber track
@@ -590,6 +672,447 @@
     ctx.fillText('+ ADD COMMENT', CPANEL_W / 2, footerY + 77);
   }
 
+  // ─── Render In-Screen Popup Comment Overlay ─────────────────────────
+  // Upstream v5.2 renderOverlayCanvas verbatim: time-synced comments in the
+  // active window [timestamp, timestamp + 4.2s], up to 3 stacked on the
+  // middle-left of the 1:1 square canvas. Returns the clickable hitbox list
+  // (empty when nothing is active); the engine keeps it for hover/click.
+  // Time-synced comments inside the active window [timestamp, timestamp +
+  // 4.2s]. Shared by renderOverlayCanvas and the engine's dirty check so the
+  // overlay only re-renders when the visible set actually changes.
+  function filterOverlayComments(comments, currentTime) {
+    return (comments || []).filter((c) => {
+      if (!c || c.timestamp === null || c.timestamp === undefined) return false;
+      const t = Number(c.timestamp);
+      return currentTime >= t && currentTime <= (t + 4.2);
+    });
+  }
+
+  function renderOverlayCanvas(ctx, options = {}) {
+    const { comments = [], currentTime = 0, overlayHoverId = null } = options;
+    const regions = [];
+    if (!ctx) return regions;
+
+    const active = filterOverlayComments(comments, currentTime);
+
+    ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
+    if (active.length === 0) return regions;
+
+    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
+    const maxShow = Math.min(3, active.length);
+    const itemHeight = 60;
+    const gap = 11;
+    const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
+    const startY = (OVERLAY_H / 2) - (totalH / 2);
+
+    for (let i = 0; i < maxShow; i++) {
+      const c = active[i];
+      const y = startY + i * (itemHeight + gap);
+      const x = 0.10 * OVERLAY_W; // 10% gap from the left side of the reels
+      const isHovered = (c.id === overlayHoverId);
+
+      // Progress fade-in / fade-out alpha
+      const elapsed = currentTime - Number(c.timestamp);
+      let alpha = 1.0;
+      if (elapsed < 0.35) {
+        alpha = Math.max(0, elapsed / 0.35);
+      } else if (elapsed > 3.6) {
+        alpha = Math.max(0, (4.2 - elapsed) / 0.6);
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Shadow for high-contrast legibility over video — no background box,
+      // but with the 2D twitch-comment-pill typography AND its left accent line.
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2;
+
+      const authorColor = c.avatar_color || '#FF3B1F';
+      const authorName = c.author_name || 'Anonymous';
+      const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+      const timeStr = hasTime ? '⏱️ ' + formatTime(c.timestamp) : '';
+
+      // Vertical accent line (mirrors the 3px border-left of .twitch-comment-pill)
+      const barW = 3;
+      const contentX = x + barW + 10; // gap like pill border-left + padding
+
+      // Prepare display text early so the hover pill can be sized and drawn
+      // FIRST (behind) so it never covers the accent bar, avatar or name.
+      ctx.font = '500 14px "Archivo", sans-serif';
+      let dispText = c.text;
+      if (dispText.length > 46) {
+        dispText = dispText.slice(0, 44) + '…';
+      }
+      const textW = ctx.measureText(dispText).width;
+      const regionW = Math.max(260, textW + 90);
+      const regionX = x - 12;
+      const regionY = y - 6;
+      const regionH = itemHeight + 12;
+
+      // Hover / click affordance background — drawn behind all pill content
+      if (isHovered) {
+        ctx.fillStyle = 'rgba(18, 19, 21, 0.78)';
+        ctx.strokeStyle = '#FF3B1F';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(regionX, regionY, regionW, regionH, 4);
+        else ctx.rect(regionX, regionY, regionW, regionH);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = authorColor;
+      ctx.fillRect(x, y + 8, barW, itemHeight - 16);
+
+      const avatarX = contentX + 25;
+      const nameX = contentX + 50;
+      const textX = contentX + 50;
+      const nameY = y + 11;
+      const timeY = y + 14;
+      const textY = y + 32;
+
+      // Avatar Icon / Emoji (Middle-Left, like .twitch-avatar)
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(c.author_avatar || '👤', avatarX, y + itemHeight / 2);
+
+      // Author Name — bold colored like .twitch-author
+      ctx.font = '800 13px "Archivo", sans-serif';
+      ctx.fillStyle = authorColor;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(authorName, nameX, nameY);
+      const nameW = ctx.measureText(authorName).width;
+
+      // Timestamp tag — muted monospace like .twitch-tag
+      if (hasTime) {
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#A4ABB3';
+        ctx.fillText(timeStr, nameX + nameW + 8, timeY);
+      }
+
+      // Comment Text — light Archivo like .twitch-text
+      ctx.font = '500 14px "Archivo", sans-serif';
+      ctx.fillStyle = '#F2F3F5';
+      ctx.textBaseline = 'top';
+      ctx.fillText(dispText, textX, textY);
+
+      // Record the clickable hitbox for this pop-up comment
+      regions.push({ id: c.id, x: regionX, y: regionY, w: regionW, h: regionH });
+
+      ctx.restore();
+    }
+
+    return regions;
+  }
+
+  // Map an overlay-canvas hit point to a pop-up comment id, if any
+  // (upstream overlayCommentAtHit, regions threaded from renderOverlayCanvas).
+  function resolveOverlayCommentAt(canvasX, canvasY, regions) {
+    if (!regions || regions.length === 0) return null;
+    for (let i = 0; i < regions.length; i++) {
+      const r = regions[i];
+      if (canvasX >= r.x && canvasX <= r.x + r.w && canvasY >= r.y && canvasY <= r.y + r.h) return r.id;
+    }
+    return null;
+  }
+
+  // ─── Render Controller Guide Panel ────────────────────────────────────
+  // Upstream v5.2 renderGuideCanvas verbatim: the Quest controller PHOTO
+  // (`window.QUEST_CONTROLLER_B64`, injected by the backend from
+  // `ui/assets/quest_controller_img.js`) with the vector drawing as the
+  // fallback. Card text updated to the v8.3 control mapping.
+  let guidePhoto = null;
+  let guidePhotoState = 'idle'; // 'idle' | 'loading' | 'ready' | 'missing'
+  let guideArtworkDirty = false;
+
+  function ensureGuidePhoto() {
+    if (guidePhotoState !== 'idle') return;
+    let src = '';
+    try {
+      src = (typeof window !== 'undefined' && window.QUEST_CONTROLLER_B64) || '';
+    } catch (e) { src = ''; }
+    if (!src || typeof Image === 'undefined') {
+      guidePhotoState = 'missing';
+      return;
+    }
+    guidePhotoState = 'loading';
+    try {
+      const img = new Image();
+      img.onload = () => {
+        guidePhoto = img;
+        guidePhotoState = 'ready';
+        guideArtworkDirty = true; // engine re-renders + re-uploads once
+      };
+      img.onerror = () => { guidePhotoState = 'missing'; };
+      img.src = src;
+    } catch (e) {
+      guidePhotoState = 'missing';
+    }
+  }
+
+  function isGuideArtworkDirty() { return guideArtworkDirty; }
+  function clearGuideArtworkDirty() { guideArtworkDirty = false; }
+  function drawQuestController(ctx, cx, cy, scale) {
+    const s = scale || 1.0;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+
+    // ── Controller Handle (ergonomic curved grip) ──
+    ctx.fillStyle = '#1A1B1F';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-16, 20);
+    ctx.bezierCurveTo(-18, 55, -20, 100, -16, 140);
+    ctx.bezierCurveTo(-14, 155, 14, 155, 16, 140);
+    ctx.bezierCurveTo(20, 100, 18, 55, 16, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Handle texture lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 6; i++) {
+      const ly = 50 + i * 16;
+      ctx.beginPath();
+      ctx.moveTo(-12, ly);
+      ctx.lineTo(12, ly);
+      ctx.stroke();
+    }
+
+    // ── Tracking Ring (circular halo around top) ──
+    ctx.strokeStyle = '#2A2C32';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 52, 42, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Ring inner highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 50, 40, 0, Math.PI * 0.9, Math.PI * 1.9);
+    ctx.stroke();
+
+    // ── Top Face Plate ──
+    ctx.fillStyle = '#222428';
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 38, 28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#333640';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // ── Thumbstick (left position on face) ──
+    ctx.fillStyle = '#0D0E11';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#18191D';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(-14, -12, 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    ctx.arc(-14, -12, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── A Button (lower right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.5)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(14, -2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('A', 14, -2);
+
+    // ── B Button (upper right) ──
+    ctx.fillStyle = '#FF3B1F';
+    ctx.shadowColor = 'rgba(255, 59, 31, 0.35)';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(20, -22, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('B', 20, -22);
+
+    // ── Index Trigger (front curved) ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = '#FF3B1F';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, 18);
+    ctx.bezierCurveTo(-14, 28, -10, 36, -2, 38);
+    ctx.bezierCurveTo(4, 36, 8, 28, 6, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Side Grip Button ──
+    ctx.fillStyle = '#2A2C32';
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-24, 55, 8, 30, 3);
+    else ctx.rect(-24, 55, 8, 30);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function renderGuideCanvas(ctx) {
+    if (!ctx) return;
+    ensureGuidePhoto();
+
+    ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
+
+    // Dark Glass Container Background
+    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
+    ctx.fill();
+
+    // Signature Red Glow Border
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
+    ctx.stroke();
+
+    // Header Badge
+    ctx.fillStyle = '#FF3B1F';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(16, 14, 140, 24, 4);
+    else ctx.rect(16, 14, 140, 24);
+    ctx.fill();
+
+    ctx.fillStyle = '#0A0A0A';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CONTROLLER GUIDE', 86, 26);
+
+    ctx.fillStyle = 'rgba(255, 59, 31, 0.85)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('META QUEST 3', GUIDE_W - 16, 26);
+
+    // ── TOP SECTION: Centered Controller Graphic ──
+    // Photo when loaded (upstream: 210 px wide slot), vector fallback.
+    if (guidePhotoState === 'ready' && guidePhoto) {
+      try {
+        const imgW = 210;
+        const natW = guidePhoto.naturalWidth || guidePhoto.width || imgW;
+        const natH = guidePhoto.naturalHeight || guidePhoto.height || imgW;
+        const imgH = natW > 0 ? imgW * (natH / natW) : imgW;
+        const imgX = (GUIDE_W - imgW) / 2;
+        ctx.drawImage(guidePhoto, imgX, 46, imgW, imgH);
+      } catch (e) {
+        drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
+      }
+    } else {
+      drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
+    }
+
+    // Divider Line
+    ctx.strokeStyle = 'rgba(255, 59, 31, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(20, 405);
+    ctx.lineTo(GUIDE_W - 20, 405);
+    ctx.stroke();
+
+    // ── BOTTOM SECTION: 2-Column Cards Grid ──
+    const accentColor = '#FF3B1F';
+    const dimText = 'rgba(242, 243, 245, 0.85)';
+    const cards = [
+      { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Left/Right → Seek ±5s' },
+      { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
+      { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
+      { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
+      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED (🎯)' },
+      { title: 'GRIP + STICK', desc: '↕ Zoom Screen In / Out|↔ Screen Closer / Further' },
+    ];
+    const colW = 198;
+    const cardH = 88;
+    const gapX = 12;
+    const gapY = 10;
+    const startX = 16;
+    const startY = 418;
+
+    cards.forEach((card, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const cx = startX + col * (colW + gapX);
+      const cy = startY + row * (cardH + gapY);
+
+      // Card background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, 8);
+      else ctx.rect(cx, cy, colW, cardH);
+      ctx.fill();
+
+      // Left accent bar
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx, cy, 3, cardH, 2);
+      else ctx.rect(cx, cy, 3, cardH);
+      ctx.fill();
+
+      // Card border
+      ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, 8);
+      else ctx.rect(cx, cy, colW, cardH);
+      ctx.stroke();
+
+      // Title
+      ctx.fillStyle = accentColor;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(card.title, cx + 10, cy + 10);
+
+      // Desc lines
+      ctx.fillStyle = dimText;
+      ctx.font = '10px sans-serif';
+      const lines = card.desc.split('|');
+      lines.forEach((line, li) => {
+        ctx.fillText(line, cx + 10, cy + 30 + li * 16);
+      });
+    });
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(155, 161, 168, 0.6)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
+  }
+
   // ─── Render Earth Preview ───────────────────────────────────────────
   function renderEarthPreviewCanvas(ctx, options = {}) {
     if (!ctx) return;
@@ -657,6 +1180,10 @@
     GUIDE_H,
     CPANEL_W,
     CPANEL_H,
+    CP_LIST_TOP,
+    CP_LIST_BOTTOM,
+    CP_ITEM_H,
+    CP_ITEM_GAP,
     OVERLAY_W,
     OVERLAY_H,
     EARTH_PREVIEW_W,
@@ -670,6 +1197,13 @@
     resolveControlsHit,
     renderCommentsPanelCanvas,
     resolveCommentsPanelRegion,
+    renderOverlayCanvas,
+    resolveOverlayCommentAt,
+    filterOverlayComments,
+    drawQuestController,
+    renderGuideCanvas,
+    isGuideArtworkDirty,
+    clearGuideArtworkDirty,
     renderEarthPreviewCanvas,
   };
 });

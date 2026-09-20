@@ -1,5 +1,5 @@
 /**
- * ECHO WebXR VR Module for Reels — v8.2 (Pure Three.js Engine with Path A Curvature)
+ * ECHO WebXR VR Module for Reels — v8.10 (Pure Three.js Engine with Path A Curvature)
  *
  * Fully overhauled using Three.js (r186) scene graph, THREE.OrbitControls,
  * and decoupled 2D In-VR UI Canvas (window.VRUICanvas).
@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.2-20260919-phase4-session';
+  const VR_VERSION = 'v8.10-20260920-firstframe-hold';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -40,8 +40,72 @@ window.WebXRVR = window.WebXRVR || (function () {
   let stereoMode = false;
   let lockToViewer = false;
   let reducedMotion = !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  let screenScale = 1.0;
+
+  // ─── Screen transform (v8.3 lock-to-viewer + PlayVR scale/distance) ──
+  // Upstream v5.2 screen state verbatim, plus the v8.3 screenDistance control
+  // (grip + stick X): locked pose = head-forward × screenDistance.
+  const DEFAULT_POS = { x: 0, y: 1.52, z: -2.24 };
+  const DEFAULT_SCALE = 4.0;
+  const MIN_SCALE = 1.0;
+  const MAX_SCALE = 10.0;
+  const SCALE_SPEED = 0.04;
+  const SCREEN_CENTER_Y = 1.52; // used by the locked-mode dock anchor
+  const MIN_DIST = 1.2;
+  const MAX_DIST = 6.0;
+  const DIST_SPEED = 0.03;
+  const FLICK_THRESHOLD = 0.5;
+  const FLICK_RESET = 0.3;
+  const VR_UI_MIN_INTERVAL = 100; // ms between UI texture re-renders
+  const CONTROLS_AUTO_HIDE_MS = 5000;
+  // Side-panel layout (upstream factors): side gap from the screen edge and
+  // the slight forward (viewer-side) offset, in screen-local meters.
+  const PANEL_SIDE_GAP = 0.384;
+  const PANEL_FWD_OFFSET = -0.15;
+  const CPANEL_SCALE_FACTOR = 0.432;
+  const GUIDE_SCALE_FACTOR = 0.4212;
+
+  // v8.4 video upload path A/B: 'subimage' (three same-size updates, default)
+  // vs 'respec' (force full texImage2D re-spec per upload, legacy behavior).
+  let videoUploadMode = 'subimage';
+
+  // v8.5 on-device bisection flags (URL query, read once in init()):
+  // ?lock=0 (no face-following — pre-lock builds), ?overlay=0, ?guide=0,
+  // ?glow=0 (+ ?vrTexMode=respec). Each flag removes exactly one v8.3+
+  // addition so the black-square source can be isolated in-headset.
+  // v8.6 additions: ?dockfreeze=1 (paint the dock once, then freeze its
+  // texture re-uploads — isolates dock/panel sub-image tears), ?glowprobe=0
+  // (keep the glow mesh, kill the getImageData readback sync).
+  const debugFlags = {
+    lock: true, overlay: true, guide: true, glow: true,
+    dockfreeze: false, glowprobe: true, domoverlay: true,
+  };
+  function readDebugFlags() {
+    try {
+      const q = (typeof location !== 'undefined' && location.search) || '';
+      const has = (k, v) => new RegExp('(?:\\?|&)' + k + '=' + v + '(?:&|$)').test(q);
+      if (has('lock', '0')) debugFlags.lock = false;
+      if (has('overlay', '0')) debugFlags.overlay = false;
+      if (has('guide', '0')) debugFlags.guide = false;
+      if (has('glow', '0')) debugFlags.glow = false;
+      if (has('dockfreeze', '1')) debugFlags.dockfreeze = true;
+      if (has('glowprobe', '0')) debugFlags.glowprobe = false;
+      if (has('domoverlay', '0')) debugFlags.domoverlay = false;
+    } catch (e) {}
+  }
+  // Face-following applies only when locked AND not bisected off.
+  function lockApplies() { return lockToViewer && debugFlags.lock; }
+  let screenPos = { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+  let screenQuat = null; // THREE.Quaternion once Three loads (identity until then)
+  let screenScale = DEFAULT_SCALE;
+  let screenDistance = -DEFAULT_POS.z; // 2.24
+  let isInitialPoseSet = false;
   let controlsVisible = true;
+
+  // 6DOF Grab state (upstream DeoVR / Skybox style)
+  let isGrabbing = false;
+  let grabControllerIdx = -1;
+  let grabRelPos = null;
+  let grabRelQuat = null;
 
   // Preview camera state (restored custom drag-look; OrbitControls only in orbit mode)
   let previewYaw = 0;
@@ -99,9 +163,36 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastCommentsCanvasY = 0;
   let cPanelTab = 'all';
   let cPanelScrollY = 0;
+  let cPanelMaxScroll = 0;
   let cPanelHover = '';
   let cPanelHighlightId = null;
+  let cPanelHighlightTimer = null;
+  let cPanelDrag = false;
+  let cPanelDragStartCanvasY = 0;
+  let cPanelDragStartScroll = 0;
+  let cPanelDragMoved = false;
   let commentsPanelVisible = false;
+  // XR gamepad edge-trigger bookkeeping (upstream processInput state)
+  let prevBtnState = { rightA: false, rightB: false };
+  let flickedX = false;
+  let flickedY = false;
+  // Controls auto-hide (upstream: dock hides 5s after last interaction
+  // while playing; B / tap / pause reveals it again).
+  let controlsAutoHideTimer = null;
+  // In-screen popup comment overlay state
+  let overlayRegions = [];
+  let overlayHoverId = null;
+  let overlayHasPopups = false;
+  let lastOverlayUploadT = -1;
+  let lastOverlayKey = '';
+  // Guide panel upload-once state
+  let vrGuideUploaded = false;
+  // ?dockfreeze=1 painted flag (reset per session in cleanup).
+  let dockFreezePainted = false;
+  // VR comment keyboard (DOM overlay) state
+  let domOverlayRoot = null;
+  let domOverlayInput = null;
+  let pendingSyncTime = null;
 
   // Telemetry & Render Stats
   const renderStats = {
@@ -110,6 +201,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     starDrawCalls: 0,
     videoUploads: 0,
     earthPreviewUploads: 0,
+    overlayUploads: 0,
+    dockUploads: 0,
+    panelUploads: 0,
+    guideUploads: 0,
+    // Transition diagnostics (v8.6 black-square attribution): source-change
+    // notifications, black-clear fills, and video uploads skipped while the
+    // element is still buffering.
+    transChanges: 0,
+    transClears: 0,
+    transNotReady: 0,
   };
   let lastPreviewEmitTime = 0;
 
@@ -118,6 +219,20 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastVisualVersion = '';
   let lastVisualElement = null;
   let lastVideoTime = -1;
+  let lastVideoFrameCount = -1;
+
+  // Decoded-frame counter for upload gating (legacy Fix #1 verbatim): the
+  // currentTime float advances every XR frame while playing, so keying on it
+  // re-uploaded every frame (~90/s). totalVideoFrames ticks once per decoded
+  // frame (~source fps) instead. -1 when the API is absent (old browsers,
+  // mocks) → falls back to the currentTime check.
+  function decodedFrameCount(element) {
+    try {
+      const q = element && element.getVideoPlaybackQuality ? element.getVideoPlaybackQuality() : null;
+      const vf = q ? Number(q.totalVideoFrames) : NaN;
+      return Number.isFinite(vf) && vf >= 0 ? Math.floor(vf) : -1;
+    } catch (e) { return -1; }
+  }
 
   // Three.js Core Instances
   let THREE = (typeof window !== 'undefined' && window.THREE) || null;
@@ -142,6 +257,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // 3D Objects & Meshes
   let screenMesh = null;
   let ambilightMesh = null;
+  let overlayMesh = null;
+  let guideMesh = null;
   let laserLine = null;
   let laserPositions = null;
   let reticleMesh = null;
@@ -151,6 +268,13 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastPointerError = '';
   // Last mouse-driven hover ray in preview (persistent head-ray endpoint).
   let previewHoverRay = null;
+  // Reticle hover offset off the hit surface (meters along the ray).
+  const RETICLE_PULLBACK = 0.02;
+  // Active XR ray shown by the shared laser (per-frame copy + source hand).
+  // Trigger clicks from the same hand reuse it (see chooseSelectRay).
+  let activeRayOrigin = null;
+  let activeRayDir = null;
+  let activeRayHandedness = '';
 
   function capturePointerError(where, e) {
     lastPointerError = where + ': ' + String((e && e.message) || e).slice(0, 200);
@@ -159,6 +283,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let scratchMat4 = null;
   let scratchVec2 = null;
   let scratchVec3 = null;
+  let headQuat = null;
   let glowAlphaTexture = null;
   let glowProbeCanvas = null;
   let glowProbeCtx = null;
@@ -199,6 +324,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   let commentsCanvas = null;
   let commentsCtx = null;
   let commentsTexture = null;
+  let overlayCanvas = null;
+  let overlayCtx = null;
+  let overlayTexture = null;
+  let guideCanvas = null;
+  let guideCtx = null;
+  let guideTexture = null;
   let earthPreviewCanvas = null;
   let earthPreviewCtx = null;
   let earthPreviewTexture = null;
@@ -219,6 +350,24 @@ window.WebXRVR = window.WebXRVR || (function () {
       raycaster = new THREE.Raycaster();
     }
     return THREE;
+  }
+
+  // Legacy-identical texture sampling (v5.2 set LINEAR / no mipmaps on every
+  // texture): crisper UI text than three's mipmapped CanvasTexture default,
+  // and no mipmap regeneration cost on every re-upload. Applied to every
+  // CanvasTexture the engine creates.
+  function applyLinearSampling(tex) {
+    if (!tex) return tex;
+    try {
+      if (THREE) {
+        if (THREE.LinearFilter !== undefined) {
+          tex.minFilter = THREE.LinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+        }
+        tex.generateMipmaps = false;
+      }
+    } catch (e) {}
+    return tex;
   }
 
   // ─── Preview sizing & camera ──────────────────────────────────────
@@ -255,27 +404,164 @@ window.WebXRVR = window.WebXRVR || (function () {
     return resized;
   }
 
-  // ─── Below-screen console dock layout ───────────────────────────────
+  // ─── v8.3 Screen-anchored UI layout ─────────────────────────────────
   // Upstream-faithful: the dock hangs below the screen bottom edge and
-  // faces the viewer with locked roll, so the curved screen (DOME edges
-  // reach z≈-1.6) can never occlude it. Pure math in computeDockPose so
-  // the Node harness can assert the clearances without GL.
-  const DOCK_W = 1.6;
-  const DOCK_H = 0.6;
+  // faces the viewer with locked roll; the comments panel flanks the
+  // screen on the LEFT and the guide on the RIGHT (upstream geometry
+  // verbatim). Pure math so the Node harness can assert clearances
+  // without GL. v8.3 deviation: the locked-mode anchor tracks
+  // screenDistance and all sizes track the live screenScale, so scale +
+  // distance changes keep the control panel on the reel player.
   const DOCK_GAP = 0.08;
-  const DOCK_Z = -1.9;
-  const SCREEN_CENTER_Y = 1.6;
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
   // the tilted top edge still clears the sphere (see dock test).
   const EARTH_DOCK_POS = { x: 0, y: 0.20, z: -0.85 };
 
+  // Target world sizes (meters) for a given screen base size.
+  function dockTargetSize(base) {
+    const w = base * 0.82;
+    return { w, h: w * (384 / 1024) };
+  }
+  function commentsPanelTargetSize(base) {
+    const ui = getUICanvas();
+    const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (680 / 560);
+    const w = base * CPANEL_SCALE_FACTOR;
+    return { w, h: w * aspect };
+  }
+  function guideTargetSize(base) {
+    const ui = getUICanvas();
+    const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+    const w = base * GUIDE_SCALE_FACTOR;
+    return { w, h: w * aspect };
+  }
+
+  // Legacy-exact lock semantics (v5.2 verbatim, owner-confirmed 2026-09-20):
+  // LOCKED = head-locked screen, room-fixed UI (dock/panels stay at the
+  // default screen spot, sized at DEFAULT_SCALE). UNLOCKED = free screen with
+  // UI derived screen-relative at live screenScale. (The v8.4 tandem rig was
+  // reverted per owner request.)
+  function getLockedAnchor() {
+    return { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+  }
+
+  function ensureScreenQuat() {
+    ensureThree();
+    if (!screenQuat && THREE) {
+      try { screenQuat = new THREE.Quaternion(); } catch (e) { screenQuat = null; }
+    }
+    return screenQuat;
+  }
+
+  // Screen-local offset → world offset via the screen orientation
+  // (identity when Three is unavailable, e.g. early Node harness calls).
+  function rotateOffsetByScreenQuat(off) {
+    ensureScreenQuat();
+    try {
+      if (screenQuat && THREE) {
+        if (!scratchVec) scratchVec = new THREE.Vector3();
+        scratchVec.set(off.x, off.y, off.z).applyQuaternion(screenQuat);
+        return { x: scratchVec.x, y: scratchVec.y, z: scratchVec.z };
+      }
+    } catch (e) {}
+    return { x: off.x, y: off.y, z: off.z };
+  }
+
+  function screenNormalWorld() {
+    ensureScreenQuat();
+    try {
+      if (screenQuat && THREE) {
+        if (!scratchVec2) scratchVec2 = new THREE.Vector3();
+        scratchVec2.set(0, 0, 1).applyQuaternion(screenQuat);
+        return { x: scratchVec2.x, y: scratchVec2.y, z: scratchVec2.z };
+      }
+    } catch (e) {}
+    return { x: 0, y: 0, z: 1 };
+  }
+
+  // Head orientation as a THREE.Quaternion (camera world quaternion).
+  // Null when Three is unavailable; callers fall back to forward −Z.
+  function getHeadQuaternion() {
+    ensureThree();
+    try {
+      if (!headQuat && THREE) headQuat = new THREE.Quaternion();
+      if (camera && headQuat && camera.getWorldQuaternion) {
+        camera.getWorldQuaternion(headQuat);
+        return headQuat;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // Head-locked screen mode (upstream applyLockToViewer, Three.js port):
+  // keeps the screen at screenDistance in front of the face, perpendicular
+  // to the view direction, so the user always looks into the center.
+  function applyLockToViewer() {
+    const head = getHeadPosition();
+    const q = getHeadQuaternion();
+    ensureScreenQuat();
+    let fx = 0, fy = 0, fz = -1;
+    if (q && THREE) {
+      try {
+        if (!scratchVec) scratchVec = new THREE.Vector3();
+        scratchVec.set(0, 0, -1).applyQuaternion(q);
+        fx = scratchVec.x; fy = scratchVec.y; fz = scratchVec.z;
+      } catch (e) {}
+    }
+    screenPos = {
+      x: head.x + fx * screenDistance,
+      y: head.y + fy * screenDistance,
+      z: head.z + fz * screenDistance,
+    };
+    if (screenQuat && q) {
+      try { screenQuat.copy(q); } catch (e) {}
+    }
+  }
+
+  // Pure pose math for the locked screen (head pos + head forward unit
+  // vector + distance). Test seam for the lock geometry (no THREE needed).
+  function computeLockedPose(headPos, headFwd, dist) {
+    const hx = (headPos && Number(headPos.x)) || 0;
+    const hy = (headPos && Number(headPos.y)) || 1.52;
+    const hz = (headPos && Number(headPos.z)) || 0;
+    const fx = (headFwd && Number(headFwd.x)) || 0;
+    const fy = (headFwd && Number(headFwd.y)) || 0;
+    const fz = (headFwd && Number(headFwd.z) !== undefined) ? Number(headFwd.z) : -1;
+    const d = (dist === undefined || dist === null) ? screenDistance : Number(dist);
+    return {
+      x: hx + fx * d,
+      y: hy + fy * d,
+      z: hz + fz * d,
+    };
+  }
+
+  function clampScreenScale(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return screenScale;
+    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, n));
+  }
+
+  function clampScreenDistance(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return screenDistance;
+    return Math.max(MIN_DIST, Math.min(MAX_DIST, n));
+  }
+
   function computeDockPose(headPos, mode) {
     const m = mode || sceneMode;
-    const pos = (m === 'earth')
-      ? { x: EARTH_DOCK_POS.x, y: EARTH_DOCK_POS.y, z: EARTH_DOCK_POS.z }
-      : { x: 0, y: SCREEN_CENTER_Y - SCREEN_HALF_H - DOCK_GAP - DOCK_H / 2, z: DOCK_Z };
+    let pos;
+    if (m === 'earth') {
+      pos = { x: EARTH_DOCK_POS.x, y: EARTH_DOCK_POS.y, z: EARTH_DOCK_POS.z };
+    } else if (lockToViewer) {
+      // Legacy-exact: the transport panel stays fixed and level in the room
+      // at the default screen spot while the locked screen follows the gaze.
+      const a = getLockedAnchor();
+      pos = { x: a.x, y: a.y - DEFAULT_SCALE / 2 - DOCK_GAP, z: a.z };
+    } else {
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - DOCK_GAP, z: 0 });
+      pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
+    }
     const hx = (headPos && Number(headPos.x)) || 0;
     const hy = (headPos && Number(headPos.y)) || 1.6;
     const hz = (headPos && Number(headPos.z)) || 0;
@@ -287,6 +573,51 @@ window.WebXRVR = window.WebXRVR || (function () {
       yaw: Math.atan2(dx, dz),
       pitch: -Math.atan2(dy, Math.hypot(dx, dz)),
     };
+  }
+
+  // Side-panel world layout (upstream getCommentsPanelCenter/Size +
+  // getGuideCenter verbatim, LEFT comments / RIGHT guide).
+  // Legacy-exact panel geometry: locked = room-fixed at the default screen
+  // spot sized at DEFAULT_SCALE; unlocked = screen-relative at live scale
+  // (upstream getCommentsPanelCenter/Size + getGuideCenter verbatim).
+  function getCommentsPanelLayout() {
+    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const size = commentsPanelTargetSize(base);
+    let center;
+    if (lockToViewer) {
+      const a = getLockedAnchor();
+      center = {
+        x: a.x - base / 2 - size.w / 2 - PANEL_SIDE_GAP,
+        y: a.y,
+        z: a.z + PANEL_FWD_OFFSET,
+      };
+    } else {
+      const off = rotateOffsetByScreenQuat({
+        x: -base / 2 - size.w / 2 - PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+      });
+      center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
+    }
+    return { center, w: size.w, h: size.h };
+  }
+
+  function getGuidePanelLayout() {
+    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const size = guideTargetSize(base);
+    let center;
+    if (lockToViewer) {
+      const a = getLockedAnchor();
+      center = {
+        x: a.x + base / 2 + size.w / 2 + PANEL_SIDE_GAP,
+        y: a.y,
+        z: a.z + PANEL_FWD_OFFSET,
+      };
+    } else {
+      const off = rotateOffsetByScreenQuat({
+        x: base / 2 + size.w / 2 + PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+      });
+      center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
+    }
+    return { center, w: size.w, h: size.h };
   }
 
   function getHeadPosition() {
@@ -325,14 +656,82 @@ window.WebXRVR = window.WebXRVR || (function () {
     );
   }
 
+  // Commits the screen transform to the screen + glow + overlay meshes
+  // (called every frame after lock/grab/scale/distance updates).
+  function commitScreenTransform() {
+    if (!screenMesh || !THREE) return;
+    ensureScreenQuat();
+    // Uniform scale (upstream: the dome scales as R_world = R·screenScale —
+    // scaling x/y only would leave the curvature depth baked at the 2.4 m
+    // base and flatten the dome at larger sizes).
+    try {
+      screenMesh.position.set(screenPos.x, screenPos.y, screenPos.z);
+      if (screenQuat) screenMesh.quaternion.copy(screenQuat);
+      const s = screenScale / 2.4; // geometry is built at 2.4 m
+      screenMesh.scale.set(s, s, s);
+    } catch (e) {}
+    if (ambilightMesh) {
+      try {
+        const n = screenNormalWorld();
+        ambilightMesh.position.set(
+          screenPos.x - n.x * 0.06,
+          screenPos.y - n.y * 0.06,
+          screenPos.z - n.z * 0.06
+        );
+        if (screenQuat) ambilightMesh.quaternion.copy(screenQuat);
+        const s = screenScale / 2.4; // glow geometry is pre-sized 1.34x
+        ambilightMesh.scale.set(s, s, s);
+      } catch (e) {}
+    }
+    if (overlayMesh) {
+      try {
+        overlayMesh.position.set(screenPos.x, screenPos.y, screenPos.z);
+        if (screenQuat) overlayMesh.quaternion.copy(screenQuat);
+        const s = screenScale / 2.4;
+        overlayMesh.scale.set(s, s, s);
+      } catch (e) {}
+    }
+  }
+
+  function layoutCommentsPanel(headPos) {
+    if (!commentsMesh) return;
+    const layout = getCommentsPanelLayout();
+    commentsMesh.position.set(layout.center.x, layout.center.y, layout.center.z);
+    try { commentsMesh.scale.set(layout.w / 1.05, layout.h / 1.28, 1); } catch (e) {}
+    faceViewerLevel(commentsMesh, headPos);
+  }
+
+  function layoutGuidePanel(headPos) {
+    if (!guideMesh) return;
+    const layout = getGuidePanelLayout();
+    guideMesh.position.set(layout.center.x, layout.center.y, layout.center.z);
+    try {
+      const ui = getUICanvas();
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      guideMesh.scale.set(layout.w, layout.h / aspect, 1);
+    } catch (e) {}
+    faceViewerLevel(guideMesh, headPos);
+  }
+
   function layoutControlsDock() {
     if (!controlsMesh) return;
-    const pose = computeDockPose(getHeadPosition());
+    const headPos = getHeadPosition();
+    const pose = computeDockPose(headPos);
     controlsMesh.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
-    controlsMesh.rotation.order = 'YXZ';
-    controlsMesh.rotation.set(pose.pitch, pose.yaw, 0);
-    // Side comments panel keeps its station but faces the viewer too.
-    if (commentsMesh) faceViewerLevel(commentsMesh, getHeadPosition());
+    if (!lockToViewer && sceneMode !== 'earth' && screenQuat) {
+      // Unlocked: the dock rides with the screen (upstream getControlsQuat).
+      try { controlsMesh.quaternion.copy(screenQuat); } catch (e) {}
+    } else {
+      controlsMesh.rotation.order = 'YXZ';
+      controlsMesh.rotation.set(pose.pitch, pose.yaw, 0);
+    }
+    // Legacy-exact dock sizing: earth 1.2, locked DEFAULT_SCALE, else live.
+    const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? DEFAULT_SCALE : screenScale);
+    const size = dockTargetSize(base);
+    try { controlsMesh.scale.set(size.w / 1.6, size.h / 0.6, 1); } catch (e) {}
+    // Side panels keep their stations but face the viewer too.
+    layoutCommentsPanel(headPos);
+    layoutGuidePanel(headPos);
   }
 
   // Applies headset yaw/pitch or orbit spherical position to the camera.
@@ -1008,18 +1407,19 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     // Video Screen Mesh
     if (!videoTexture && vrProxyCanvas) {
-      videoTexture = new THREE.CanvasTexture(vrProxyCanvas);
+      videoTexture = applyLinearSampling(new THREE.CanvasTexture(vrProxyCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) videoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!screenMesh) {
+      ensureScreenQuat();
       const screenGeo = createScreenGeometry(curvatureMode);
       const screenMat = new THREE.MeshBasicMaterial({
         map: videoTexture,
         side: THREE.DoubleSide,
       });
       screenMesh = new THREE.Mesh(screenGeo, screenMat);
-      screenMesh.position.set(0, 1.6, -2.2);
       scene.add(screenMesh);
+      commitScreenTransform();
     }
 
     // Ambilight Glow — radial-falloff quad slightly larger than the screen
@@ -1040,7 +1440,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           grad.addColorStop(1, '#000000');
           gtx.fillStyle = grad;
           gtx.fillRect(0, 0, 256, 256);
-          glowAlphaTexture = new THREE.CanvasTexture(glowAlphaCanvas);
+          glowAlphaTexture = applyLinearSampling(new THREE.CanvasTexture(glowAlphaCanvas));
         }
       } catch (e) {
         glowAlphaTexture = null;
@@ -1057,7 +1457,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         glowProbeCtx = null;
       }
     }
-    if (!ambilightMesh) {
+    // ?glow=0 skips the ambient glow entirely (fill-rate bisection).
+    if (!ambilightMesh && debugFlags.glow) {
       const glowGeo = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
       const glowMat = new THREE.MeshBasicMaterial({
@@ -1070,8 +1471,40 @@ window.WebXRVR = window.WebXRVR || (function () {
       });
       if (glowAlphaTexture) glowMat.alphaMap = glowAlphaTexture;
       ambilightMesh = new THREE.Mesh(glowGeo, glowMat);
-      ambilightMesh.position.set(0, 1.6, -2.26);
       scene.add(ambilightMesh);
+      commitScreenTransform();
+    }
+
+    // In-screen popup comment overlay mesh (upstream overlay quad): shares
+    // the screen pose/scale, drawn transparently just above the video.
+    // ?overlay=0 skips it entirely (pre-overlay builds).
+    const uiOverlay = getUICanvas();
+    if (!overlayCanvas && typeof document !== 'undefined' && debugFlags.overlay) {
+      overlayCanvas = document.createElement('canvas');
+      overlayCanvas.width = uiOverlay ? uiOverlay.OVERLAY_W : 1024;
+      overlayCanvas.height = uiOverlay ? uiOverlay.OVERLAY_H : 1024;
+      overlayCtx = overlayCanvas.getContext('2d');
+    }
+    if (!overlayTexture && overlayCanvas && debugFlags.overlay) {
+      overlayTexture = applyLinearSampling(new THREE.CanvasTexture(overlayCanvas));
+      try { if (THREE.SRGBColorSpace !== undefined) overlayTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    }
+    if (!overlayMesh && overlayTexture && debugFlags.overlay) {
+      const ovGeo = createScreenGeometry(curvatureMode);
+      const ovMat = new THREE.MeshBasicMaterial({
+        map: overlayTexture,
+        transparent: true,
+        // Legacy painter's order: UI quads always paint over the video
+        // screen regardless of geometry (v5.2 drew with DEPTH_TEST off).
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      overlayMesh = new THREE.Mesh(ovGeo, ovMat);
+      overlayMesh.renderOrder = 2;
+      overlayMesh.visible = false;
+      scene.add(overlayMesh);
+      commitScreenTransform();
     }
 
     // Controls Dock Mesh
@@ -1083,7 +1516,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       controlsCtx = controlsCanvas.getContext('2d');
     }
     if (!controlsTexture && controlsCanvas) {
-      controlsTexture = new THREE.CanvasTexture(controlsCanvas);
+      controlsTexture = applyLinearSampling(new THREE.CanvasTexture(controlsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) controlsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!controlsMesh && controlsTexture) {
@@ -1091,9 +1524,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       const ctrlMat = new THREE.MeshBasicMaterial({
         map: controlsTexture,
         transparent: true,
+        // Legacy painter's order (v5.2 drew with DEPTH_TEST off): the dock
+        // always paints over the video screen (renderOrder ladder below).
+        depthTest: false,
         side: THREE.DoubleSide,
       });
       controlsMesh = new THREE.Mesh(ctrlGeo, ctrlMat);
+      controlsMesh.renderOrder = 3;
       controlsMesh.visible = controlsVisible;
       scene.add(controlsMesh);
       layoutControlsDock();
@@ -1107,7 +1544,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       commentsCtx = commentsCanvas.getContext('2d');
     }
     if (!commentsTexture && commentsCanvas) {
-      commentsTexture = new THREE.CanvasTexture(commentsCanvas);
+      commentsTexture = applyLinearSampling(new THREE.CanvasTexture(commentsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) commentsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!commentsMesh && commentsTexture) {
@@ -1115,13 +1552,51 @@ window.WebXRVR = window.WebXRVR || (function () {
       const cpMat = new THREE.MeshBasicMaterial({
         map: commentsTexture,
         transparent: true,
+        // Legacy painter's order: the panel always paints over the video.
+        depthTest: false,
         side: THREE.DoubleSide,
       });
       commentsMesh = new THREE.Mesh(cpGeo, cpMat);
-      commentsMesh.position.set(1.55, 1.6, -2.0);
-      commentsMesh.rotation.y = -0.4;
+      commentsMesh.renderOrder = 4;
       commentsMesh.visible = false;
       scene.add(commentsMesh);
+      layoutCommentsPanel(getHeadPosition());
+    }
+
+    // Controller guide mesh (upstream guide panel, RIGHT of the player).
+    // ?guide=0 skips it entirely.
+    if (!guideCanvas && typeof document !== 'undefined' && debugFlags.guide) {
+      guideCanvas = document.createElement('canvas');
+      guideCanvas.width = uiOverlay ? uiOverlay.GUIDE_W : 440;
+      guideCanvas.height = uiOverlay ? uiOverlay.GUIDE_H : 760;
+      guideCtx = guideCanvas.getContext('2d');
+    }
+    if (!guideTexture && guideCanvas && debugFlags.guide) {
+      guideTexture = applyLinearSampling(new THREE.CanvasTexture(guideCanvas));
+      try { if (THREE.SRGBColorSpace !== undefined) guideTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    }
+    if (!guideMesh && guideTexture && debugFlags.guide) {
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      const gGeo = new THREE.PlaneGeometry(1, aspect);
+      const gMat = new THREE.MeshBasicMaterial({
+        map: guideTexture,
+        transparent: true,
+        // Legacy painter's order: the guide always paints over the video.
+        depthTest: false,
+        side: THREE.DoubleSide,
+      });
+      guideMesh = new THREE.Mesh(gGeo, gMat);
+      guideMesh.renderOrder = 4;
+      guideMesh.visible = false;
+      scene.add(guideMesh);
+      if (guideCtx && ui && typeof ui.renderGuideCanvas === 'function') {
+        try {
+          ui.renderGuideCanvas(guideCtx);
+          guideTexture.needsUpdate = true;
+          vrGuideUploaded = true;
+        } catch (e) {}
+      }
+      layoutGuidePanel(getHeadPosition());
     }
 
     // Laser pointer + reticle (all-red, upstream drawLaserPointer look:
@@ -1140,6 +1615,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         color: 0xff2a1a,
         transparent: true,
         opacity: 0.8,
+        // Legacy parity: the beam always paints over the scene (v5.2 drew
+        // the laser last with DEPTH_TEST off).
+        depthTest: false,
         depthWrite: false,
       });
       laserLine = new THREE.Line(laserGeo, laserMat);
@@ -1171,7 +1649,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           rx.beginPath();
           rx.arc(32, 32, 5, 0, Math.PI * 2);
           rx.fill();
-          reticleTexture = new THREE.CanvasTexture(rc);
+          reticleTexture = applyLinearSampling(new THREE.CanvasTexture(rc));
         }
       } catch (e) {
         reticleTexture = null;
@@ -1182,6 +1660,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         map: reticleTexture,
         transparent: true,
         opacity: 0.9,
+        // Never depth-clipped: with the pullback above, oblique hits on the
+        // curved screen can't bury half the dot (the reported half circle).
+        depthTest: false,
         depthWrite: false,
         side: THREE.DoubleSide,
       });
@@ -1227,7 +1708,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     if (!earthMapTexture && earthMapCanvas && THREE) {
-      earthMapTexture = new THREE.CanvasTexture(earthMapCanvas);
+      earthMapTexture = applyLinearSampling(new THREE.CanvasTexture(earthMapCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) earthMapTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       try {
         // Compensate the SphereGeometry UV seam (see earthZoneUV): shift
@@ -1274,7 +1755,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
       if (!earthLabelTexture && earthLabelCanvas && THREE) {
-        earthLabelTexture = new THREE.CanvasTexture(earthLabelCanvas);
+        earthLabelTexture = applyLinearSampling(new THREE.CanvasTexture(earthLabelCanvas));
         try { if (THREE.SRGBColorSpace !== undefined) earthLabelTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       }
       if (!earthLabelMesh && earthLabelTexture) {
@@ -1302,7 +1783,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
       if (!earthPreviewTexture && earthPreviewCanvas && THREE) {
-        earthPreviewTexture = new THREE.CanvasTexture(earthPreviewCanvas);
+        earthPreviewTexture = applyLinearSampling(new THREE.CanvasTexture(earthPreviewCanvas));
         try { if (THREE.SRGBColorSpace !== undefined) earthPreviewTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       }
       if (!earthPreviewMesh && earthPreviewTexture) {
@@ -1337,6 +1818,26 @@ window.WebXRVR = window.WebXRVR || (function () {
   // which previously spied on mock gl.texImage2D.
   let lastUploadedSource = null;
   let pendingClearedFor = '';
+  // v8.10 first-frame hold: monotonic start of the current fresh (just-
+  // switched) video visual. 0 when no fresh visual is pending.
+  let freshVisualSince = 0;
+  // Max time to hold the previous frame waiting for clean first frames
+  // before showing whatever the decoder has (safety valve on slow tunnels).
+  const FRESH_VISUAL_MAX_HOLD_MS = 2500;
+
+  function nowMs() {
+    try {
+      if (typeof performance !== 'undefined' && performance.now) return performance.now();
+    } catch (e) {}
+    try {
+      if (typeof Date !== 'undefined' && Date.now) return Date.now();
+    } catch (e) {}
+    return 0;
+  }
+  // v8.9 hold-last-frame: once a visual has displayed, reel switches keep
+  // showing it until the new source is ready (no black-clear flash mid-
+  // playlist). Clears happen only with nothing displayed yet (session start).
+  let hasDisplayedVisual = false;
 
   function visualSourceSignature(source) {
     return String(source.kind || '') + '|' + String(source.version || '');
@@ -1351,6 +1852,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (visualChanged) return true;
     if (source.kind === 'video') {
       if (hasNewVideoFrame) return true;
+      const vf = decodedFrameCount(source.element);
+      if (vf >= 0) {
+        if (vf !== lastVideoFrameCount) return true;
+        // Paused seeks can land on cached frames without new decodes or
+        // rVFC pings — catch time jumps so the texture never goes stale.
+        if (Math.abs(Number(source.currentTime) - Number(lastVideoTime)) > 0.25) return true;
+        return false;
+      }
       if (Number(source.currentTime) !== Number(lastVideoTime)) return true;
       return false;
     }
@@ -1376,6 +1885,22 @@ window.WebXRVR = window.WebXRVR || (function () {
           return false;
         }
       } else if (source.element.readyState >= 2) {
+        // v8.10 first-frame hold: a just-switched visual waits for forward-
+        // buffered data (HAVE_FUTURE_DATA) so the first shown frames are
+        // past decoder resync garbage — HAVE_CURRENT_DATA alone can be a
+        // corrupt partial. Steady visuals upload as before. A wall-clock
+        // cap bounds the hold on slow tunnels. `force` bypasses the hold.
+        const justSwitched = !force && (
+          visualSourceSignature(source) !== lastVisualVersion ||
+          source.element !== lastVisualElement
+        );
+        if (justSwitched && source.element.readyState < 3) {
+          if (!freshVisualSince) freshVisualSince = nowMs();
+          if (nowMs() - freshVisualSince < FRESH_VISUAL_MAX_HOLD_MS) {
+            renderStats.transNotReady += 1;
+            return false;
+          }
+        }
         try {
           vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
         } catch (drawErr) {
@@ -1384,14 +1909,28 @@ window.WebXRVR = window.WebXRVR || (function () {
       } else {
         return false;
       }
-      if (videoTexture) videoTexture.needsUpdate = true;
+      if (videoTexture) {
+        // v8.4 A/B: 'respec' forces a full texImage2D re-specification per
+        // upload (legacy behavior) instead of three's same-size
+        // texSubImage2D path — decisive test for the Quest sub-image driver
+        // suspicion behind the black-square glitches. Default stays subimage.
+        if (videoUploadMode === 'respec') {
+          try { videoTexture.dispose(); } catch (e) {}
+        }
+        videoTexture.needsUpdate = true;
+      }
       lastUploadedSource = source.element;
       lastVisualKind = source.kind;
       lastVisualVersion = visualSourceSignature(source);
       lastVisualElement = source.element;
-      if (source.kind === 'video') lastVideoTime = Number(source.currentTime) || 0;
+      if (source.kind === 'video') {
+        lastVideoTime = Number(source.currentTime) || 0;
+        lastVideoFrameCount = decodedFrameCount(source.element);
+      }
       hasNewVideoFrame = false;
       pendingClearedFor = '';
+      freshVisualSince = 0;
+      hasDisplayedVisual = true;
       renderStats.videoUploads += 1;
       return true;
     } catch (e) {
@@ -1406,6 +1945,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     // clearing every frame while a video loads causes black flicker.
     if (pendingClearedFor === sig) return;
     pendingClearedFor = sig;
+    // Hold the last displayed frame across switches instead of flashing
+    // black (v8.9: the black clear is now session-start-only).
+    if (hasDisplayedVisual) return;
+    renderStats.transClears += 1;
     if (vrProxyCtx) {
       try {
         vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
@@ -1421,6 +1964,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // (upstream updateAmbilightColor: average, enhance, lerp 0.08/frame).
   function updateGlowColor(time, intervalMs) {
     if (!ambilightMesh || !glowProbeCtx) return;
+    // ?glowprobe=0 keeps the glow mesh but kills the getImageData readback
+    // sync (diagnostic: isolates readback stalls from fill-rate cost).
+    if (!debugFlags.glowprobe) return;
     if (time - lastGlowSample < intervalMs) return;
     lastGlowSample = time;
     const source = getVisualSource();
@@ -1449,6 +1995,109 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
+  function getAutoNext() {
+    try {
+      if (callbacks.getAutoNext) return callbacks.getAutoNext() !== false;
+    } catch (e) {}
+    return true;
+  }
+
+  // Max scroll for the comments list (upstream renderCommentsPanelCanvas math).
+  function refreshPanelScrollBounds(comments) {
+    const ui = getUICanvas();
+    if (!ui || ui.CP_LIST_TOP === undefined) return;
+    let filtered = comments;
+    if (cPanelTab === 'sync') {
+      filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
+    } else if (cPanelTab === 'general') {
+      filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+    }
+    const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
+    const contentH = filtered.length * (ui.CP_ITEM_H + ui.CP_ITEM_GAP);
+    cPanelMaxScroll = Math.max(0, contentH - listH);
+    if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
+    if (cPanelScrollY < 0) cPanelScrollY = 0;
+  }
+
+  function clampPanelScroll(v) {
+    return Math.max(0, Math.min(cPanelMaxScroll, Number(v) || 0));
+  }
+
+  function clearPanelHighlight() {
+    if (cPanelHighlightTimer) {
+      try { clearTimeout(cPanelHighlightTimer); } catch (e) {}
+      cPanelHighlightTimer = null;
+    }
+    cPanelHighlightId = null;
+  }
+
+  // Re-renders + re-uploads the popup-comment overlay ONLY when dirty: the
+  // visible popup set changed, or the hover changed. Fade animation repaints
+  // at the UI interval while popups are visible; with zero popups nothing
+  // re-renders and the texture is never re-uploaded (v8.4: the old
+  // currentTime-driven key re-spec'd 1024² ~10×/s during ALL playback —
+  // the exact upload-churn class flagged in the playback investigation).
+  function refreshOverlayTexture(time, force) {
+    const ui = getUICanvas();
+    if (!debugFlags.overlay) {
+      if (overlayHasPopups) {
+        overlayHasPopups = false;
+        overlayRegions = [];
+        overlayHoverId = null;
+        applySceneVisibility();
+      }
+      return false;
+    }
+    if (!ui || !overlayCtx || typeof ui.renderOverlayCanvas !== 'function' ||
+        typeof ui.filterOverlayComments !== 'function') {
+      if (overlayHasPopups) {
+        overlayHasPopups = false;
+        overlayRegions = [];
+        overlayHoverId = null;
+        applySceneVisibility();
+      }
+      return false;
+    }
+    const source = getVisualSource();
+    // Suppressed while the comments panel is open (upstream parity).
+    const comments = (commentsPanelVisible || source.kind !== 'video' || !callbacks.getComments)
+      ? []
+      : (callbacks.getComments() || []);
+    let activeIds = '';
+    try {
+      activeIds = ui.filterOverlayComments(comments, source.currentTime)
+        .map((c) => String(c.id)).join(',');
+    } catch (e) { activeIds = ''; }
+    const key = activeIds + '|' + (overlayHoverId || '');
+    const hasActive = activeIds.length > 0;
+    const due = (time === undefined) || (lastOverlayUploadT < 0) ||
+      ((time - lastOverlayUploadT) >= VR_UI_MIN_INTERVAL);
+    if (!force && key === lastOverlayKey) {
+      // Same set, same hover: repaint only for the fade while visible.
+      if (!hasActive || !due) return overlayHasPopups;
+    }
+    lastOverlayKey = key;
+    if (time !== undefined) lastOverlayUploadT = time;
+    let regions = [];
+    try {
+      regions = ui.renderOverlayCanvas(overlayCtx, {
+        comments,
+        currentTime: source.currentTime,
+        overlayHoverId,
+      }) || [];
+    } catch (e) { regions = []; }
+    overlayRegions = regions;
+    if (overlayHoverId && !regions.some((r) => r.id === overlayHoverId)) overlayHoverId = null;
+    const had = overlayHasPopups;
+    overlayHasPopups = regions.length > 0;
+    if (overlayTexture) {
+      overlayTexture.needsUpdate = true;
+      renderStats.overlayUploads = (renderStats.overlayUploads || 0) + 1;
+    }
+    if (had !== overlayHasPopups) applySceneVisibility();
+    return overlayHasPopups;
+  }
+
   function updateUiTextures() {
     const ui = getUICanvas();
     if (!ui) return;
@@ -1458,7 +2107,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
     }
 
-    if (controlsCtx) {
+    // ?dockfreeze=1 paints the dock once per session, then freezes its
+    // texture re-uploads (diagnostic: isolates dock sub-image tears).
+    if (controlsCtx && !(debugFlags.dockfreeze && dockFreezePainted)) {
       ui.renderControlsCanvas(controlsCtx, {
         source,
         itemState,
@@ -1472,17 +2123,43 @@ window.WebXRVR = window.WebXRVR || (function () {
         isCurved,
         curvatureMode,
         lockToViewer,
+        autoNext: getAutoNext(),
         sceneMode,
         notificationText,
         notificationUntil,
         callbacks,
       });
-      if (controlsTexture) controlsTexture.needsUpdate = true;
+      if (controlsTexture) {
+        controlsTexture.needsUpdate = true;
+        renderStats.dockUploads += 1;
+      }
+      dockFreezePainted = true;
+    }
+
+    // Guide panel is static artwork: render once (covers late creation
+    // ordering; vrGuideUploaded is reset on session entry/cleanup). The
+    // controller photo arrives asynchronously — re-render + re-upload while
+    // the artwork-dirty flag is set (legacy vrGuideUploaded=false semantics).
+    let guideDirty = false;
+    try {
+      guideDirty = !!(ui.isGuideArtworkDirty && ui.isGuideArtworkDirty());
+    } catch (e) { guideDirty = false; }
+    if (guideCtx && guideTexture && (!vrGuideUploaded || guideDirty) &&
+        typeof ui.renderGuideCanvas === 'function') {
+      try {
+        ui.renderGuideCanvas(guideCtx);
+        guideTexture.needsUpdate = true;
+        renderStats.guideUploads += 1;
+        vrGuideUploaded = true;
+        if (ui.clearGuideArtworkDirty) ui.clearGuideArtworkDirty();
+      } catch (e) {}
     }
 
     if (commentsCtx && commentsPanelVisible) {
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      refreshPanelScrollBounds(comments);
       ui.renderCommentsPanelCanvas(commentsCtx, {
-        comments: callbacks.getComments ? callbacks.getComments() : [],
+        comments,
         cPanelTab,
         cPanelScrollY,
         cPanelHover,
@@ -1490,7 +2167,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         user: callbacks.getCurrentUser ? callbacks.getCurrentUser() : null,
         currentTime: source.currentTime,
       });
-      if (commentsTexture) commentsTexture.needsUpdate = true;
+      if (commentsTexture) {
+        commentsTexture.needsUpdate = true;
+        renderStats.panelUploads += 1;
+      }
     }
   }
 
@@ -1557,12 +2237,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (sceneMode === 'reels') {
       const source = getVisualSource();
       if (source && source.ready === false) {
+        // Frames spent waiting for data (buffering/seeking at transitions):
+        // counted so on-device telemetry attributes stalls to buffering.
+        if (source.element) renderStats.transNotReady += 1;
         clearPendingTexture();
       } else {
         uploadVideoFrame();
       }
       updateGlowColor(time, 120);
       applyGlowColor();
+      refreshOverlayTexture(time);
       renderStats.earthDrawCalls = 0;
       renderStats.reelDrawCalls = 1;
     } else if (sceneMode === 'earth') {
@@ -1589,6 +2273,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     } else {
       applyPreviewCamera();
     }
+    // Headset POV mirrors the XR lock: the screen stays perpendicular and
+    // centered on the simulated gaze (upstream parity).
+    if (sceneMode === 'reels' && lockApplies() && previewCameraMode === 'headset' && !isPackExperience()) {
+      applyLockToViewer();
+    }
+    commitScreenTransform();
     layoutControlsDock();
     updatePreviewLaser();
 
@@ -1693,12 +2383,26 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {}
     }
     hoveredButton = controlIndex;
+    // Comments panel hover (shared region resolver; also feeds cPanelHover
+    // for stick-scroll targeting in preview).
+    let panelDesc = '';
+    if (sceneMode !== 'earth' && controlIndex < 0 && commentsPanelVisible &&
+        commentsMesh && commentsMesh.visible !== false && raycaster) {
+      try {
+        raycaster.set(ray.origin, ray.direction);
+        const hits = raycaster.intersectObject(commentsMesh, false);
+        if (hits.length > 0 && hits[0].uv) {
+          panelDesc = commentsRegionFromUV(hits[0].uv);
+          cPanelHover = panelDesc;
+        }
+      } catch (e) {}
+    }
     if (sceneMode === 'earth' && controlIndex < 0) {
       const hit = hitTestEarth(ray.origin, ray.direction);
       setEarthHoveredIndex(hit.hit ? hit.zoneIndex : -1);
-      return { ray, hit, controlIndex };
+      return { ray, hit, controlIndex, panelDesc };
     }
-    return { ray, hit: null, controlIndex };
+    return { ray, hit: null, controlIndex, panelDesc };
   }
 
   // Maps a controls-dock UV hit to a button index (shared by preview
@@ -1736,6 +2440,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     let dist = 3;
     let hovering = -1;
     let overScreen = false;
+    let screenHitUv = null;
+    // Panel hover region is recomputed from the ray every frame (drives
+    // hover highlighting + stick-scroll targeting in both loops).
+    cPanelHover = '';
     try {
       raycaster.set(origin, direction);
       if (sceneMode === 'earth') {
@@ -1766,6 +2474,20 @@ window.WebXRVR = window.WebXRVR || (function () {
           if (hits.length > 0) {
             dist = hits[0].distance;
             hovering = -2;
+            // Resolve the panel region (tab / scroll / like / seek / ...).
+            try {
+              const ui = getUICanvas();
+              if (hits[0].uv && ui && typeof ui.resolveCommentsPanelRegion === 'function') {
+                const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
+                const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+                lastCommentsCanvasX = hits[0].uv.x * w;
+                lastCommentsCanvasY = (1 - hits[0].uv.y) * h;
+                const comments = callbacks.getComments ? callbacks.getComments() : [];
+                cPanelHover = ui.resolveCommentsPanelRegion(
+                  lastCommentsCanvasX, lastCommentsCanvasY,
+                  { comments, cPanelTab, cPanelScrollY }) || '';
+              }
+            } catch (e) {}
           }
         }
         if (hovering < 0 && screenMesh && screenMesh.visible !== false) {
@@ -1773,8 +2495,22 @@ window.WebXRVR = window.WebXRVR || (function () {
           if (hits.length > 0) {
             dist = hits[0].distance;
             overScreen = true;
+            screenHitUv = hits[0].uv || null;
           }
         }
+      }
+      // Track hover over a pop-up comment on the reels screen (panel closed).
+      overlayHoverId = null;
+      if (!commentsPanelVisible && overScreen && screenHitUv && overlayRegions.length > 0) {
+        try {
+          const ui = getUICanvas();
+          if (ui && typeof ui.resolveOverlayCommentAt === 'function') {
+            const w = overlayCanvas ? overlayCanvas.width : ui.OVERLAY_W;
+            const h = overlayCanvas ? overlayCanvas.height : ui.OVERLAY_H;
+            overlayHoverId = ui.resolveOverlayCommentAt(
+              screenHitUv.x * w, (1 - screenHitUv.y) * h, overlayRegions);
+          }
+        } catch (e) {}
       }
     } catch (e) {}
     const isHover = hovering >= 0 || overScreen || hovering === -2;
@@ -1788,10 +2524,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       laserPositions[5] = origin.z + direction.z * dist;
       laserLine.geometry.attributes.position.needsUpdate = true;
       laserLine.material.opacity = isHover ? 1.0 : 0.7;
+      // The billboarded reticle floats just off the surface (never buried in
+      // it) and ignores depth like the legacy always-on-top dot, so oblique
+      // hits on the curved screen can never clip it into a half circle.
+      const pull = Math.min(RETICLE_PULLBACK, Math.max(0, dist - 0.05));
       reticleMesh.position.set(
-        origin.x + direction.x * dist,
-        origin.y + direction.y * dist,
-        origin.z + direction.z * dist
+        origin.x + direction.x * (dist - pull),
+        origin.y + direction.y * (dist - pull),
+        origin.z + direction.z * (dist - pull)
       );
       if (camera) {
         try { reticleMesh.quaternion.copy(camera.quaternion); } catch (e2) {}
@@ -1826,33 +2566,199 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
-  // XR per-frame: first tracked controller drives the shared laser and
-  // dock hover highlight (upstream processInput, single active ray).
-  function updateControllerLasers() {
-    if (!renderer || !raycaster || !THREE || vrControllers.length === 0) return;
+  // Shared-laser source preference (upstream pointerEligible): the right
+  // hand drives the laser/hover when tracked, else the first source. Pure
+  // (testable) — handedness comes straight from the XR input source.
+  function pickPointerSource(sources) {
+    const list = (sources || []).filter(Boolean);
+    if (list.length === 0) return null;
+    const right = list.find((s) => s && s.handedness === 'right');
+    return right || list[0];
+  }
+
+  // The ray the laser currently shows (per-frame copy). Trigger clicks from
+  // the same hand reuse it, so a click always honors the visible highlight
+  // instead of a fresh (moved) ray.
+  function chooseSelectRay(evHandedness) {
     try {
-      if (!scratchMat4) scratchMat4 = new THREE.Matrix4();
-      if (!scratchVec) scratchVec = new THREE.Vector3();
-      if (!scratchVec2) scratchVec2 = new THREE.Vector3();
-      for (let i = 0; i < vrControllers.length; i++) {
-        const controller = vrControllers[i];
-        if (!controller) continue;
-        scratchMat4.identity().extractRotation(controller.matrixWorld);
-        scratchVec.setFromMatrixPosition(controller.matrixWorld);
-        scratchVec2.set(0, 0, -1).applyMatrix4(scratchMat4).normalize();
-        const hovered = updateLaserPointer(scratchVec, scratchVec2);
-        hoveredButton = hovered >= 0 ? hovered : -1;
-        break; // single shared laser: first controller wins
+      if (activeRayOrigin && activeRayDir && activeRayHandedness &&
+          evHandedness && evHandedness === activeRayHandedness) {
+        return { origin: activeRayOrigin, direction: activeRayDir, reused: true };
       }
+    } catch (e) {}
+    return null;
+  }
+
+  // XR per-frame: the preferred controller drives the shared laser and
+  // hover highlight (upstream processInput, single active ray). The ray is
+  // stored so onVRSelect can reuse exactly what the user saw highlighted.
+  function updateControllerLasers(frame, sessionOverride) {
+    if (!renderer || !raycaster || !THREE) return;
+    try {
+      if (!activeRayOrigin) activeRayOrigin = new THREE.Vector3();
+      if (!activeRayDir) activeRayDir = new THREE.Vector3();
+      const session = sessionOverride || xrSession;
+      let origin = null, direction = null, handedness = '';
+      if (session) {
+        let sources = [];
+        try { sources = Array.from(session.inputSources || []); } catch (e) {}
+        const preferred = pickPointerSource(sources);
+        if (preferred) {
+          const pose = sourceTargetPose(preferred, frame);
+          if (pose && pose.dir) {
+            origin = pose.pos;
+            direction = pose.dir;
+            handedness = preferred.handedness || '';
+          }
+        }
+      }
+      if ((!origin || !direction) && vrControllers.length > 0) {
+        // Fallback: first tracked controller matrix (frame pose unavailable).
+        const controller = vrControllers[0];
+        if (controller) {
+          if (!scratchMat4) scratchMat4 = new THREE.Matrix4();
+          if (!scratchVec) scratchVec = new THREE.Vector3();
+          if (!scratchVec2) scratchVec2 = new THREE.Vector3();
+          scratchMat4.identity().extractRotation(controller.matrixWorld);
+          scratchVec.setFromMatrixPosition(controller.matrixWorld);
+          scratchVec2.set(0, 0, -1).applyMatrix4(scratchMat4).normalize();
+          origin = { x: scratchVec.x, y: scratchVec.y, z: scratchVec.z };
+          direction = { x: scratchVec2.x, y: scratchVec2.y, z: scratchVec2.z };
+          handedness = '';
+        }
+      }
+      if (!origin || !direction) return;
+      activeRayOrigin.set(origin.x, origin.y, origin.z);
+      activeRayDir.set(direction.x, direction.y, direction.z).normalize();
+      activeRayHandedness = handedness;
+      const hovered = updateLaserPointer(activeRayOrigin, activeRayDir);
+      hoveredButton = hovered >= 0 ? hovered : -1;
     } catch (e) {}
   }
 
   function toggleControlsVisibility() {
     controlsVisible = !controlsVisible;
-    if (controlsMesh) controlsMesh.visible = controlsVisible;
+    applySceneVisibility();
     vrLastUiUploadT = -1;
     emitPreviewState();
     return controlsVisible;
+  }
+
+  // ─── Controls visibility (upstream show/hide + 5 s auto-hide) ────────
+  // The B button (and empty-space taps) toggle the dock + guide together.
+  function resetAutoHideTimer() {
+    clearAutoHideTimer();
+    if (!getVisualSource().paused) {
+      try {
+        controlsAutoHideTimer = setTimeout(function() {
+          controlsVisible = false;
+          applySceneVisibility();
+        }, CONTROLS_AUTO_HIDE_MS);
+      } catch (e) { controlsAutoHideTimer = null; }
+    }
+  }
+
+  function clearAutoHideTimer() {
+    if (controlsAutoHideTimer) {
+      try { clearTimeout(controlsAutoHideTimer); } catch (e) {}
+      controlsAutoHideTimer = null;
+    }
+  }
+
+  function showControls() {
+    controlsVisible = true;
+    applySceneVisibility();
+    resetAutoHideTimer();
+  }
+
+  function hideControls() {
+    controlsVisible = false;
+    applySceneVisibility();
+    clearAutoHideTimer();
+  }
+
+  function toggleControls() {
+    if (controlsVisible) hideControls();
+    else showControls();
+  }
+
+  // v8.4 XR telemetry (playback-investigation §4 workflow): per-frame
+  // intervals + upload counters POSTed ~1 Hz to the existing
+  // /api/reels/diag endpoint while presenting. dtMaxMs spikes attribute
+  // stalls to upload vs idle frames (uploadMaxMs measures JS return only).
+  let xrDiagFrames = 0;
+  let xrDiagMaxDt = 0;
+  let xrDiagLastT = -1;
+  let xrDiagLastPost = 0;
+  const xrDiagBases = {};
+
+  function resetXRDiag() {
+    xrDiagFrames = 0;
+    xrDiagMaxDt = 0;
+    xrDiagLastT = -1;
+    xrDiagLastPost = 0;
+    for (const k of ['videoUploads', 'overlayUploads', 'dockUploads', 'panelUploads',
+                     'guideUploads', 'transChanges', 'transClears', 'transNotReady']) {
+      xrDiagBases[k] = renderStats[k] || 0;
+    }
+  }
+
+  function xrDiagDelta(k) {
+    return (renderStats[k] || 0) - (xrDiagBases[k] || 0);
+  }
+
+  function postXRDiag(time) {
+    try {
+      if (xrDiagLastT >= 0) {
+        const dt = time - xrDiagLastT;
+        xrDiagFrames += 1;
+        if (dt > xrDiagMaxDt) xrDiagMaxDt = dt;
+      }
+      xrDiagLastT = time;
+      if (time - xrDiagLastPost < 1000) return;
+      const payload = {
+        engine: VR_VERSION,
+        xrFrames: xrDiagFrames,
+        dtMaxMs: Math.round(xrDiagMaxDt * 10) / 10,
+        videoUploads: xrDiagDelta('videoUploads'),
+        overlayUploads: xrDiagDelta('overlayUploads'),
+        dockUploads: xrDiagDelta('dockUploads'),
+        panelUploads: xrDiagDelta('panelUploads'),
+        guideUploads: xrDiagDelta('guideUploads'),
+        transChanges: xrDiagDelta('transChanges'),
+        transClears: xrDiagDelta('transClears'),
+        transNotReady: xrDiagDelta('transNotReady'),
+        screenScale,
+        screenDistance,
+        uploadMode: videoUploadMode,
+        locked: lockToViewer,
+        flags: { ...debugFlags },
+      };
+      xrDiagFrames = 0;
+      xrDiagMaxDt = 0;
+      resetXRDiag();
+      xrDiagLastT = time;
+      xrDiagLastPost = time;
+      if (typeof fetch === 'function') {
+        fetch('/api/reels/diag', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+
+  // Haptic click on XR interactions (upstream pulseInput).
+  function pulseInput(source) {
+    const actuator = source && source.gamepad && source.gamepad.hapticActuators &&
+      source.gamepad.hapticActuators[0];
+    if (!actuator || typeof actuator.pulse !== 'function') return;
+    try {
+      const r = actuator.pulse(0.45, 120);
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch (e) {}
   }
 
   function installPreviewListeners() {
@@ -1873,6 +2779,18 @@ window.WebXRVR = window.WebXRVR || (function () {
         previewPointer.control = true;
         return;
       }
+      // Press on the comments panel: list/scrollbar begins a drag-scroll,
+      // every other region clicks on release.
+      if (sceneMode !== 'earth' && target && target.panelDesc) {
+        previewPointer.panel = true;
+        previewPointer.panelDesc = target.panelDesc;
+        if (target.panelDesc === 'list' || target.panelDesc === 'scrollbar') {
+          executeCommentAction(target.panelDesc);
+          cPanelDragMoved = false;
+        }
+        vrLastUiUploadT = -1;
+        return;
+      }
       if (sceneMode === 'earth' && target && target.hit) {
         beginEarthDrag(source, target.hit);
         previewPointer.earth = true;
@@ -1889,6 +2807,20 @@ window.WebXRVR = window.WebXRVR || (function () {
       previewPointer.x = event.clientX;
       previewPointer.y = event.clientY;
       if (previewPointer.control) return;
+      // Continue a mouse-drag scroll on the comments list (content follows
+      // the cursor); the drag owns the gesture until release.
+      if (previewPointer.panel && sceneMode !== 'earth') {
+        if (cPanelDrag && cPanelHover) {
+          const before = cPanelScrollY;
+          cPanelScrollY = clampPanelScroll(cPanelDragStartScroll - (lastCommentsCanvasY - cPanelDragStartCanvasY));
+          if (cPanelScrollY !== before) {
+            cPanelDragMoved = true;
+            previewPointer.moved = true;
+            vrLastUiUploadT = -1;
+          }
+        }
+        return;
+      }
       if (sceneMode === 'earth') {
         if (previewPointer.earth && target && target.hit && target.hit.hit && target.hit.local) {
           updateEarthDrag(target.hit.local);
@@ -1914,43 +2846,66 @@ window.WebXRVR = window.WebXRVR || (function () {
       const target = updatePreviewHover(event.clientX, event.clientY);
       if (sceneMode === 'earth' && previewPointer.earth) {
         endEarthDrag(previewPointer.source, target && target.hit);
-      } else if (!previewPointer.control && !previewPointer.moved && target) {
-        if (target.hit && target.hit.hit) {
-          if (callbacks.onTogglePlay) { try { callbacks.onTogglePlay(); } catch (e) {} }
-        } else if (target.controlIndex < 0 && raycaster && screenMesh && screenMesh.visible !== false) {
-          // Tap on the video screen toggles playback (static pack cards
-          // route through the pack select handler first).
-          let screenHit = null;
-          try {
-            const ray = previewRayAt(event.clientX, event.clientY);
-            if (ray) {
-              raycaster.set(ray.origin, ray.direction);
-              const hits = raycaster.intersectObject(screenMesh, false);
-              if (hits.length > 0) screenHit = hits[0];
+      } else if (!previewPointer.control && target) {
+        if (previewPointer.panel) {
+          // Release on the panel: a real drag scroll consumes the gesture,
+          // otherwise the pressed region clicks.
+          const wasDrag = cPanelDragMoved;
+          cPanelDrag = false;
+          cPanelDragMoved = false;
+          if (!wasDrag) {
+            const desc = (target && target.panelDesc) || previewPointer.panelDesc || cPanelHover;
+            if (desc) executeCommentAction(desc);
+          }
+          vrLastUiUploadT = -1;
+        } else if (!previewPointer.moved) {
+          if (target.hit && target.hit.hit) {
+            if (callbacks.onTogglePlay) { try { callbacks.onTogglePlay(); } catch (e) {} }
+          } else if (target.controlIndex < 0 && raycaster && screenMesh && screenMesh.visible !== false) {
+            // Tap on the video screen: a pop-up comment opens the panel at
+            // it, otherwise playback toggles (static pack cards route
+            // through the pack select handler first).
+            let screenHit = null;
+            try {
+              const ray = previewRayAt(event.clientX, event.clientY);
+              if (ray) {
+                raycaster.set(ray.origin, ray.direction);
+                const hits = raycaster.intersectObject(screenMesh, false);
+                if (hits.length > 0) screenHit = hits[0];
+              }
+            } catch (e) {}
+            if (screenHit) {
+              const source = getVisualSource();
+              let handled = false;
+              if (!commentsPanelVisible && screenHit.uv) {
+                const cid = overlayCommentFromUV(screenHit.uv);
+                if (cid) {
+                  openCommentsPanelToComment(cid);
+                  handled = true;
+                }
+              }
+              if (!handled && source.kind === 'static-card' && callbacks.onMainScreenSelect && screenHit.uv) {
+                try {
+                  handled = callbacks.onMainScreenSelect({
+                    u: screenHit.uv.x,
+                    v: 1 - screenHit.uv.y,
+                  });
+                } catch (e) { handled = false; }
+              }
+              if (!handled && callbacks.onTogglePlay) {
+                try { callbacks.onTogglePlay(); } catch (e) {}
+              }
+            } else {
+              toggleControlsVisibility();
             }
-          } catch (e) {}
-          if (screenHit) {
-            const source = getVisualSource();
-            let handled = false;
-            if (source.kind === 'static-card' && callbacks.onMainScreenSelect && screenHit.uv) {
-              try {
-                handled = callbacks.onMainScreenSelect({
-                  u: screenHit.uv.x,
-                  v: 1 - screenHit.uv.y,
-                });
-              } catch (e) { handled = false; }
-            }
-            if (!handled && callbacks.onTogglePlay) {
-              try { callbacks.onTogglePlay(); } catch (e) {}
-            }
-          } else {
+          } else if (target.controlIndex < 0) {
             toggleControlsVisibility();
           }
-        } else if (target.controlIndex < 0) {
-          toggleControlsVisibility();
         }
       }
       pressedButton = -1;
+      cPanelDrag = false;
+      cPanelDragMoved = false;
       vrLastUiUploadT = -1;
       try { if (previewCanvas.releasePointerCapture) previewCanvas.releasePointerCapture(event.pointerId); } catch (e) {}
       previewPointer = null;
@@ -1961,6 +2916,12 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
       if (sceneMode === 'earth') {
         rotateEarth((event.deltaX || 0) * 0.0025, (event.deltaY || 0) * 0.65 * 0.002);
+        return;
+      }
+      // Wheel over the comments panel scrolls the list (upstream parity).
+      if (commentsPanelVisible && cPanelHover) {
+        cPanelScrollY = clampPanelScroll(cPanelScrollY + (event.deltaY || 0) * 0.5);
+        vrLastUiUploadT = -1;
         return;
       }
       if (previewCameraMode === 'orbit') {
@@ -2120,6 +3081,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     stereoMode = false;
     previewYaw = 0;
     previewPitch = 0;
+    // Reset the screen transform + panel state to the known-good baseline.
+    screenPos = { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+    screenScale = DEFAULT_SCALE;
+    screenDistance = -DEFAULT_POS.z;
+    lockToViewer = false;
+    cPanelTab = 'all';
+    cPanelScrollY = 0;
+    cPanelMaxScroll = 0;
+    cPanelHover = '';
+    clearPanelHighlight();
     emitPreviewState();
   }
 
@@ -2192,11 +3163,16 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
       screenMesh.geometry = createScreenGeometry(curvatureMode);
     }
+    if (overlayMesh) {
+      if (overlayMesh.geometry) overlayMesh.geometry.dispose();
+      overlayMesh.geometry = createScreenGeometry(curvatureMode);
+    }
     if (ambilightMesh) {
       if (ambilightMesh.geometry) ambilightMesh.geometry.dispose();
       ambilightMesh.geometry = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
     }
+    commitScreenTransform();
     emitPreviewState();
   }
 
@@ -2265,9 +3241,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     const isEarth = (sceneMode === 'earth');
     if (earthGroup) earthGroup.visible = isEarth;
     if (screenMesh) screenMesh.visible = !isEarth;
-    if (ambilightMesh) ambilightMesh.visible = !isEarth;
+    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
+    if (overlayMesh) {
+      const source = getVisualSource();
+      overlayMesh.visible = !isEarth && !commentsPanelVisible && overlayHasPopups &&
+        source.kind === 'video' && debugFlags.overlay;
+    }
     if (controlsMesh) controlsMesh.visible = controlsVisible;
     if (commentsMesh) commentsMesh.visible = (!isEarth && commentsPanelVisible);
+    if (guideMesh) guideMesh.visible = (!isEarth && controlsVisible && debugFlags.guide);
     if (starfieldPoints) starfieldPoints.visible = true;
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
@@ -2556,6 +3538,241 @@ window.WebXRVR = window.WebXRVR || (function () {
   // 'made-compatible' | 'unavailable' | 'failed:<msg>').
   let xrCompatStatus = 'unknown';
 
+  // Roll-free quaternion facing the head from a world position
+  // (upstream quatFaceViewerLevel, Three.js port).
+  function levelQuatFacingHead(pos, head) {
+    ensureThree();
+    if (!THREE) return null;
+    try {
+      const dx = head.x - pos.x, dy = head.y - pos.y, dz = head.z - pos.z;
+      const e = new THREE.Euler(
+        -Math.atan2(dy, Math.hypot(dx, dz)), Math.atan2(dx, dz), 0, 'YXZ');
+      return new THREE.Quaternion().setFromEuler(e);
+    } catch (e2) { return null; }
+  }
+
+  function sourceTargetPose(source, frame) {
+    if (!source || !source.targetRaySpace || !frame || !xrRefSpace) return null;
+    try {
+      const rayPose = frame.getPose(source.targetRaySpace, xrRefSpace);
+      if (!rayPose) return null;
+      const t = rayPose.transform;
+      const m = t.matrix;
+      return {
+        pos: { x: t.position.x, y: t.position.y, z: t.position.z },
+        quat: { x: t.orientation.x, y: t.orientation.y, z: t.orientation.z, w: t.orientation.w },
+        dir: m ? { x: -m[8], y: -m[9], z: -m[10] } : null,
+      };
+    } catch (e) { return null; }
+  }
+
+  // ─── Controller Input Processing (upstream processInput, v8.3) ──────
+  // Gamepad mappings: grip+stickY = scale, grip+stickX = distance (v8.3),
+  // stickY flick = next/prev, stickX flick = seek, A = play/pause,
+  // B = toggle dock+guide, grip = 6DOF grab when unlocked. Pointer hover
+  // itself stays in updateControllerLasers (shared laser path).
+  function processXRInput(frame, sessionOverride) {
+    const session = sessionOverride || xrSession;
+    if (!session) return;
+    let sources = [];
+    try { sources = Array.from(session.inputSources || []); } catch (e) { sources = []; }
+    if (sources.length === 0) return;
+    ensureThree();
+    const headPos = getHeadPosition();
+    const hasRightInput = sources.some((s) => s && s.handedness === 'right');
+
+    if (sceneMode === 'earth') {
+      for (const source of sources) {
+        const gp = source && source.gamepad;
+        if (!gp) continue;
+        const axes = gp.axes || [];
+        const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
+        const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+        if (Math.abs(thumbX) > 0.12 || Math.abs(thumbY) > 0.12) {
+          // Single-axis like drags: follow the dominant stick direction.
+          const yawMag = Math.abs(thumbX) > 0.12 ? Math.abs(thumbX) : -1;
+          const pitchMag = Math.abs(thumbY) > 0.12 ? Math.abs(thumbY) : -1;
+          if (yawMag >= pitchMag) rotateEarth(thumbX * 0.035, 0);
+          else rotateEarth(0, -thumbY * 0.024);
+        }
+      }
+    } else {
+      // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
+      for (const source of sources) {
+        const gp = source && source.gamepad;
+        if (!gp || !THREE) continue;
+        const hand = source.handedness;
+        const pose = sourceTargetPose(source, frame);
+        const gripPressed = gp.buttons.length > 1 && !!gp.buttons[1].pressed;
+        if (lockToViewer) {
+          isGrabbing = false;
+          grabControllerIdx = -1;
+        } else if (gripPressed && pose) {
+          const idx = hand === 'right' ? 1 : 0;
+          if (!isGrabbing) {
+            isGrabbing = true;
+            grabControllerIdx = idx;
+            try {
+              const cq = new THREE.Quaternion(pose.quat.x, pose.quat.y, pose.quat.z, pose.quat.w);
+              const inv = cq.clone().invert();
+              const rel = new THREE.Vector3(
+                screenPos.x - pose.pos.x, screenPos.y - pose.pos.y, screenPos.z - pose.pos.z
+              ).applyQuaternion(inv);
+              grabRelPos = { x: rel.x, y: rel.y, z: rel.z };
+              ensureScreenQuat();
+              const relQ = screenQuat ? inv.clone().multiply(screenQuat) : inv.clone();
+              grabRelQuat = { x: relQ.x, y: relQ.y, z: relQ.z, w: relQ.w };
+            } catch (e) { isGrabbing = false; grabControllerIdx = -1; }
+          }
+          if ((hand === 'right' && grabControllerIdx === 1) ||
+              (hand === 'left' && grabControllerIdx === 0)) {
+            try {
+              const cq = new THREE.Quaternion(pose.quat.x, pose.quat.y, pose.quat.z, pose.quat.w);
+              const rotated = new THREE.Vector3(grabRelPos.x, grabRelPos.y, grabRelPos.z)
+                .applyQuaternion(cq);
+              screenPos = {
+                x: pose.pos.x + rotated.x,
+                y: pose.pos.y + rotated.y,
+                z: pose.pos.z + rotated.z,
+              };
+              // Rotate screen tangent to viewer POV (facing head, level).
+              ensureScreenQuat();
+              const lq = levelQuatFacingHead(screenPos, headPos);
+              if (lq && screenQuat) screenQuat.copy(lq);
+            } catch (e) {}
+          }
+        } else if (isGrabbing && ((hand === 'right' && grabControllerIdx === 1) ||
+                   (hand === 'left' && grabControllerIdx === 0))) {
+          isGrabbing = false;
+          grabControllerIdx = -1;
+        }
+      }
+    }
+
+    // Prefer the right controller, but keep every core action usable with
+    // only a left controller connected.
+    const eligible = sources.find((s) => s && s.handedness === 'right' && s.gamepad) ||
+      (!hasRightInput ? sources.find((s) => s && s.gamepad) : null);
+    if (!eligible || !eligible.gamepad) return;
+    const gp = eligible.gamepad;
+    const axes = gp.axes || [];
+    const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+    const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
+    const gripPressed = gp.buttons.length > 1 && !!gp.buttons[1].pressed;
+    const pointerOverPanel = commentsPanelVisible && !!cPanelHover;
+    const cardOpen = sceneMode !== 'earth' && getVisualSource().kind === 'static-card';
+
+    if (sceneMode !== 'earth') {
+      if (gripPressed) {
+        // A) GRIP HELD + stick Y up/down -> scale screen larger / smaller.
+        if (Math.abs(thumbY) > FLICK_THRESHOLD) {
+          screenScale = clampScreenScale(screenScale + (-thumbY) * SCALE_SPEED);
+        }
+        // A2) GRIP HELD + stick X right/left -> screen further / closer.
+        if (Math.abs(thumbX) > 0.18) {
+          if (lockToViewer) {
+            screenDistance = clampScreenDistance(screenDistance + thumbX * DIST_SPEED);
+          } else {
+            const hx = headPos.x, hy = headPos.y, hz = headPos.z;
+            const dx = screenPos.x - hx, dy = screenPos.y - hy, dz = screenPos.z - hz;
+            const len = Math.hypot(dx, dy, dz) || screenDistance;
+            const newLen = clampScreenDistance(len + thumbX * DIST_SPEED);
+            const k = newLen / len;
+            screenPos = { x: hx + dx * k, y: hy + dy * k, z: hz + dz * k };
+          }
+        }
+        // While gripped, stick X drives distance — never a seek flick.
+        if (Math.abs(thumbX) >= FLICK_RESET) flickedX = true;
+        else if (Math.abs(thumbX) < FLICK_RESET) flickedX = false;
+      } else if (pointerOverPanel) {
+        // B1) Pointing at the comments panel -> scroll the list with Y.
+        if (Math.abs(thumbY) > 0.18) {
+          cPanelScrollY = clampPanelScroll(cPanelScrollY + thumbY * 6);
+          vrLastUiUploadT = -1;
+        }
+      } else {
+        // B2) NORMAL stick Y up/down -> next / previous reel navigation.
+        if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
+          flickedY = true;
+          if (!cardOpen) {
+            if (thumbY > 0) {
+              if (callbacks.onNext) callbacks.onNext();
+            } else {
+              if (callbacks.onPrev) callbacks.onPrev();
+            }
+          }
+          showControls();
+        } else if (Math.abs(thumbY) < FLICK_RESET) {
+          flickedY = false;
+        }
+      }
+
+      // C) Stick X left/right -> seek ±5s (never while gripped: distance).
+      if (!gripPressed) {
+        if (Math.abs(thumbX) > FLICK_THRESHOLD && !flickedX) {
+          flickedX = true;
+          if (!cardOpen && callbacks.onSeek) callbacks.onSeek(thumbX > 0 ? 5 : -5);
+          showControls();
+        } else if (Math.abs(thumbX) < FLICK_RESET) {
+          flickedX = false;
+        }
+      }
+
+      // ── A button: toggle play / pause (disabled on static cards) ──
+      const aPressed = gp.buttons.length > 4 && !!gp.buttons[4].pressed;
+      if (aPressed && !prevBtnState.rightA) {
+        if (!cardOpen && callbacks.onTogglePlay) callbacks.onTogglePlay();
+        showControls();
+      }
+      prevBtnState.rightA = aPressed;
+
+      // Continue a trigger-drag scroll on the comments list (content
+      // follows the hand; the laser pass refreshes lastCommentsCanvasY).
+      if (cPanelDrag && cPanelHover) {
+        const before = cPanelScrollY;
+        cPanelScrollY = clampPanelScroll(cPanelDragStartScroll - (lastCommentsCanvasY - cPanelDragStartCanvasY));
+        if (cPanelScrollY !== before) {
+          cPanelDragMoved = true;
+          vrLastUiUploadT = -1;
+        }
+      }
+    }
+
+    // ── B button: toggle guide & controls panel ──
+    const bPressed = gp.buttons.length > 5 && !!gp.buttons[5].pressed;
+    if (bPressed && !prevBtnState.rightB) {
+      toggleControls();
+    }
+    prevBtnState.rightB = bPressed;
+  }
+
+  // Screen UV → comments-panel region descriptor (shared XR/preview).
+  function commentsRegionFromUV(uv) {
+    const ui = getUICanvas();
+    if (!uv || !ui || typeof ui.resolveCommentsPanelRegion !== 'function') return '';
+    try {
+      const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
+      const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+      lastCommentsCanvasX = uv.x * w;
+      lastCommentsCanvasY = (1 - uv.y) * h;
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      return ui.resolveCommentsPanelRegion(lastCommentsCanvasX, lastCommentsCanvasY,
+        { comments, cPanelTab, cPanelScrollY }) || '';
+    } catch (e) { return ''; }
+  }
+
+  // Screen UV → pop-up overlay comment id (shared XR/preview).
+  function overlayCommentFromUV(uv) {
+    const ui = getUICanvas();
+    if (!uv || !ui || typeof ui.resolveOverlayCommentAt !== 'function') return null;
+    if (!overlayRegions || overlayRegions.length === 0) return null;
+    try {
+      const w = overlayCanvas ? overlayCanvas.width : ui.OVERLAY_W;
+      const h = overlayCanvas ? overlayCanvas.height : ui.OVERLAY_H;
+      return ui.resolveOverlayCommentAt(uv.x * w, (1 - uv.y) * h, overlayRegions);
+    } catch (e) { return null; }
+  }
+
   function setupVRControllers() {
     if (!renderer || !renderer.xr || vrControllers.length > 0) return;
     for (let i = 0; i < 2; i++) {
@@ -2570,49 +3787,134 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function onVRSelectStart() {
     pressedButton = hoveredButton;
+    // Begin a trigger-drag scroll when pressing on the panel list/scrollbar.
+    if (commentsPanelVisible && cPanelHover &&
+        (cPanelHover === 'list' || cPanelHover === 'scrollbar')) {
+      executeCommentAction(cPanelHover);
+      cPanelDragMoved = false;
+    }
     emitPreviewState();
   }
 
   function onVRSelectEnd() {
     pressedButton = -1;
+    cPanelDrag = false;
+    cPanelDragMoved = false;
     emitPreviewState();
   }
 
+  // XR click priority (upstream onSelectStart): comments panel → dock →
+  // pop-up overlay comment → video screen → empty space. Clicks from the
+  // hand the laser is showing reuse that exact ray, so the action always
+  // matches the visible highlight; other hands raycast fresh.
   function onVRSelect(ev) {
     const controller = ev.target;
     let handled = false;
-    if (raycaster && controller && scene) {
-      const tempMatrix = new THREE.Matrix4();
-      tempMatrix.identity().extractRotation(controller.matrixWorld);
-      const rayOrigin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-      const rayDir = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+    const evHand = ev.data && ev.data.handedness;
+    const stored = chooseSelectRay(evHand);
+    let rayOrigin = stored ? stored.origin : null;
+    let rayDir = stored ? stored.direction : null;
+    if ((!rayOrigin || !rayDir) && raycaster && controller && scene) {
+      try {
+        const tempMatrix = new THREE.Matrix4();
+        tempMatrix.identity().extractRotation(controller.matrixWorld);
+        rayOrigin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+        rayDir = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+      } catch (e) { rayOrigin = null; rayDir = null; }
+    }
+    if (raycaster && scene && rayOrigin && rayDir) {
       raycaster.set(rayOrigin, rayDir);
 
       if (sceneMode === 'earth' && earthMesh) {
         const hit = hitTestEarth(rayOrigin, rayDir);
         if (hit.hit && hit.zoneIndex >= 0) {
           selectEarthLocation(hit.zoneIndex);
+          pulseInput(ev.data);
           handled = true;
         }
-      } else if (controlsMesh && controlsMesh.visible) {
-        const hits = raycaster.intersectObject(controlsMesh);
-        if (hits.length > 0 && hits[0].uv) {
-          const index = controlIndexFromUV(hits[0].uv);
-          if (index >= 0) {
-            executeControlButton(index);
-            handled = true;
+      } else {
+        // 1. Comments panel — highest priority.
+        if (!handled && commentsPanelVisible && commentsMesh && commentsMesh.visible !== false) {
+          const hits = raycaster.intersectObject(commentsMesh, false);
+          if (hits.length > 0 && hits[0].uv) {
+            const desc = commentsRegionFromUV(hits[0].uv) || cPanelHover;
+            if (desc) {
+              if ((desc === 'list' || desc === 'scrollbar') && cPanelDragMoved) {
+                // A scroll drag just ended — consume, don't click.
+                cPanelDragMoved = false;
+                cPanelDrag = false;
+              } else {
+                executeCommentAction(desc);
+                pulseInput(ev.data);
+                vrLastUiUploadT = -1;
+              }
+              handled = true;
+            }
+          }
+        }
+        // 2. Controls dock buttons.
+        if (!handled && controlsMesh && controlsMesh.visible) {
+          const hits = raycaster.intersectObject(controlsMesh);
+          if (hits.length > 0 && hits[0].uv) {
+            const index = controlIndexFromUV(hits[0].uv);
+            if (index >= 0) {
+              executeControlButton(index);
+              pulseInput(ev.data);
+              handled = true;
+            }
+          }
+        }
+        // 3. Pop-up overlay comment (panel closed) → open the panel at it.
+        // 4. Main video screen tap; 5. empty space toggles the UI.
+        if (!handled && screenMesh && screenMesh.visible !== false) {
+          const hits = raycaster.intersectObject(screenMesh, false);
+          if (hits.length > 0) {
+            if (!commentsPanelVisible && hits[0].uv) {
+              const cid = overlayCommentFromUV(hits[0].uv);
+              if (cid) {
+                openCommentsPanelToComment(cid);
+                pulseInput(ev.data);
+                handled = true;
+              }
+            }
+            if (!handled) {
+              const visualSource = getVisualSource();
+              if (visualSource.kind === 'static-card' && callbacks.onMainScreenSelect && hits[0].uv) {
+                let cardHandled = false;
+                try {
+                  cardHandled = callbacks.onMainScreenSelect({
+                    u: hits[0].uv.x,
+                    v: 1 - hits[0].uv.y,
+                  });
+                } catch (e) { cardHandled = false; }
+                if (cardHandled) {
+                  pulseInput(ev.data);
+                  showControls();
+                  handled = true;
+                } else {
+                  // Card shown but tap missed all card buttons — show
+                  // controls only (upstream: never toggle the hidden clock).
+                  pulseInput(ev.data);
+                  showControls();
+                  handled = true;
+                }
+              } else if (visualSource.kind === 'static-card') {
+                pulseInput(ev.data);
+                showControls();
+                handled = true;
+              } else {
+                if (callbacks.onTogglePlay) callbacks.onTogglePlay();
+                pulseInput(ev.data);
+                toggleControls();
+                handled = true;
+              }
+            }
           }
         }
       }
     }
 
-    if (!handled && ev.data && ev.data.handedness) {
-      if (ev.data.handedness === 'right') {
-        if (callbacks.onNext) callbacks.onNext();
-      } else if (ev.data.handedness === 'left') {
-        if (callbacks.onPrev) callbacks.onPrev();
-      }
-    }
+    if (!handled) toggleControls();
   }
 
   // Phase 4 gate logic (mirrored in ui/assets/reels.html click handler):
@@ -2678,6 +3980,46 @@ window.WebXRVR = window.WebXRVR || (function () {
     return null;
   }
 
+  // Fresh-session state (upstream enterVR reset block): the screen returns
+  // to its default pose/scale, feed playback keeps its head lock while
+  // pack cards stay room-stable, and all interaction state is cleared.
+  function resetXRSessionState() {
+    screenPos = { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+    ensureScreenQuat();
+    if (screenQuat) {
+      try { screenQuat.identity(); } catch (e) {}
+    }
+    screenScale = DEFAULT_SCALE;
+    screenDistance = -DEFAULT_POS.z;
+    isInitialPoseSet = false;
+    lockToViewer = !isPackExperience();
+    controlsVisible = false;
+    commentsPanelVisible = false;
+    cPanelScrollY = 0;
+    cPanelMaxScroll = 0;
+    cPanelTab = 'all';
+    cPanelHover = '';
+    cPanelDrag = false;
+    clearPanelHighlight();
+    overlayRegions = [];
+    overlayHoverId = null;
+    overlayHasPopups = false;
+    lastOverlayKey = '';
+    lastOverlayUploadT = -1;
+    hoveredButton = -1;
+    pressedButton = -1;
+    isGrabbing = false;
+    grabControllerIdx = -1;
+    flickedX = false;
+    flickedY = false;
+    prevBtnState.rightA = false;
+    prevBtnState.rightB = false;
+    vrGuideUploaded = false;
+    clearAutoHideTimer();
+    resetXRDiag();
+    commitScreenTransform();
+  }
+
   // Best-effort restore of the desktop preview torn down on entry.
   // Clears the snapshot; skips silently if the canvas detached (SPA
   // navigated away). Shared by the bind-failure path and session end.
@@ -2712,10 +4054,18 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Fail fast: request the session BEFORE tearing down the desktop
     // preview or building GL resources, so a rejection leaves any running
     // preview untouched.
+    // DOM overlay root must exist before the session request so the Quest
+    // virtual keyboard can be summoned for VR comment posting (?domoverlay=0
+    // skips it entirely — diagnostic for compositor-layer glitch suspects).
+    if (debugFlags.domoverlay) initDomOverlay();
     let session = null;
     const sessionOpts = {
       optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'],
     };
+    if (debugFlags.domoverlay) {
+      sessionOpts.optionalFeatures.push('dom-overlay');
+      if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
+    }
 
     try {
       session = await xr.requestSession('immersive-vr', sessionOpts);
@@ -2804,6 +4154,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     xrSession = session;
+    resetXRSessionState();
 
     if (renderer && renderer.xr) {
       renderer.xr.enabled = true;
@@ -2859,20 +4210,35 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (sceneMode === 'reels') {
           const source = getVisualSource();
           if (source && source.ready === false) {
+            if (source.element) renderStats.transNotReady += 1;
             clearPendingTexture();
           } else {
             uploadVideoFrame();
           }
           updateGlowColor(time, 800);
           applyGlowColor();
+          // Head lock: the screen follows the gaze every frame
+          // (skipped under ?lock=0 for bisection).
+          if (lockApplies()) applyLockToViewer();
+          // Paused reels reveal the dock (upstream parity).
+          if (getVisualSource().paused && !controlsVisible) showControls();
         } else {
           advanceEarthSpin(time);
           updateEarthDressing(time);
         }
-        updateUiTextures();
+        updateControllerLasers(frame);
+        processXRInput(frame);
+        commitScreenTransform();
         layoutControlsDock();
-        updateControllerLasers();
+        refreshOverlayTexture(time);
+        // Transport controls: 10Hz re-render is smooth in VR and avoids a
+        // full canvas re-raster on every XR frame (upstream stride).
+        if (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= VR_UI_MIN_INTERVAL) {
+          vrLastUiUploadT = time;
+          updateUiTextures();
+        }
         renderer.render(scene, camera);
+        postXRDiag(time);
       });
     }
 
@@ -2913,6 +4279,24 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ─── Resource Cleanup ───────────────────────────────────────────────
   function cleanup() {
     removePreviewListeners();
+    clearAutoHideTimer();
+    closeVrKeyboard();
+    dockFreezePainted = false;
+    hasDisplayedVisual = false;
+    freshVisualSince = 0;
+    cPanelDrag = false;
+    cPanelDragMoved = false;
+    cPanelHover = '';
+    isGrabbing = false;
+    grabControllerIdx = -1;
+    flickedX = false;
+    flickedY = false;
+    prevBtnState.rightA = false;
+    prevBtnState.rightB = false;
+    overlayRegions = [];
+    overlayHoverId = null;
+    overlayHasPopups = false;
+    lastOverlayKey = '';
     if (typeof window !== 'undefined' && previewResizeHandler) {
       try { window.removeEventListener('resize', previewResizeHandler); } catch (e) {}
       previewResizeHandler = null;
@@ -2929,7 +4313,8 @@ window.WebXRVR = window.WebXRVR || (function () {
             mats.forEach((m) => {
               if (m) {
                 if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
-                    m.map !== commentsTexture && m.map !== earthPreviewTexture) {
+                    m.map !== commentsTexture && m.map !== overlayTexture &&
+                    m.map !== guideTexture && m.map !== earthPreviewTexture) {
                   try { m.map.dispose(); } catch (e) {}
                 }
                 try { m.dispose(); } catch (e) {}
@@ -2942,6 +4327,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (videoTexture) { try { videoTexture.dispose(); } catch (e) {} videoTexture = null; }
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
+    if (overlayTexture) { try { overlayTexture.dispose(); } catch (e) {} overlayTexture = null; }
+    if (guideTexture) { try { guideTexture.dispose(); } catch (e) {} guideTexture = null; }
     if (earthPreviewTexture) { try { earthPreviewTexture.dispose(); } catch (e) {} earthPreviewTexture = null; }
     const gl = glContext || (renderer && renderer.getContext ? renderer.getContext() : null);
     if (gl && gl.deleteBuffer) {
@@ -2962,6 +4349,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     raycaster = null;
     screenMesh = null;
     ambilightMesh = null;
+    overlayMesh = null;
+    guideMesh = null;
     controlsMesh = null;
     commentsMesh = null;
     starfieldPoints = null;
@@ -2975,6 +4364,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     controlsCtx = null;
     commentsCanvas = null;
     commentsCtx = null;
+    overlayCanvas = null;
+    overlayCtx = null;
+    guideCanvas = null;
+    guideCtx = null;
     earthPreviewCanvas = null;
     earthPreviewCtx = null;
     glowAlphaTexture = null;
@@ -3042,15 +4435,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     return callbacks.getPackContext ? callbacks.getPackContext() : null;
   }
 
-  // Screen mesh defaults in createScreenGeometry(): 2.4 × 2.4 m.
-  const SCREEN_HALF_W = 1.2;
-  const SCREEN_HALF_H = 1.2;
-
+  // Screen-local hit (meters, upstream overlayCommentAtHit convention) →
+  // normalized UV. Divided by the live screenScale so grip-scaled screens
+  // keep mapping the full canvas.
   function visualPointFromHit(hitLocal) {
     if (!hitLocal) return null;
+    const s = (Number(screenScale) > 0 ? Number(screenScale) : DEFAULT_SCALE);
     return {
-      u: Math.max(0, Math.min(1, (hitLocal.x / (SCREEN_HALF_W * 2)) + 0.5)),
-      v: Math.max(0, Math.min(1, 0.5 - (hitLocal.y / (SCREEN_HALF_H * 2)))),
+      u: Math.max(0, Math.min(1, (hitLocal.x / s) + 0.5)),
+      v: Math.max(0, Math.min(1, 0.5 - (hitLocal.y / s))),
     };
   }
 
@@ -3060,6 +4453,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (index < 0 || index >= btns.length) return;
     const action = btns[index].action;
     pressedButton = index;
+    vrLastUiUploadT = -1;
+    resetAutoHideTimer();
     switch (action) {
       case 'prev': callbacks.onPrev && callbacks.onPrev(); break;
       case 'next': callbacks.onNext && callbacks.onNext(); break;
@@ -3068,15 +4463,22 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'fwd':  callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mode': callbacks.onToggleMode && callbacks.onToggleMode(); break;
       case 'curve': setCurvatureMode((curvatureMode + 1) % 3); break;
-      case 'lock': lockToViewer = !lockToViewer; break;
+      case 'lock':
+        if (!debugFlags.lock) {
+          showNotification('LOCK DISABLED (?lock=0)');
+          break;
+        }
+        lockToViewer = !lockToViewer;
+        if (lockToViewer) {
+          isGrabbing = false;
+          grabControllerIdx = -1;
+        }
+        break;
       case 'mute':
         if (callbacks.onToggleMute) callbacks.onToggleMute();
         else if (videoElement) videoElement.muted = !videoElement.muted;
         break;
-      case 'comments':
-        commentsPanelVisible = !commentsPanelVisible;
-        if (commentsMesh) commentsMesh.visible = commentsPanelVisible;
-        break;
+      case 'comments': toggleCommentsPanel(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
         else setSceneMode(sceneMode === 'earth' ? 'reels' : 'earth');
@@ -3094,14 +4496,202 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // ─── Comments panel actions (upstream executeCommentAction verbatim) ─
+  function executeCommentAction(desc) {
+    if (!desc) return false;
+    if (desc === 'panel') return true; // consume non-interactive panel presses
+    if (desc === 'list' || desc === 'scrollbar') {
+      cPanelDrag = true;
+      cPanelDragStartCanvasY = lastCommentsCanvasY;
+      cPanelDragStartScroll = cPanelScrollY;
+      return true;
+    }
+    if (desc.indexOf('tab:') === 0) {
+      cPanelTab = desc.slice(4);
+      cPanelScrollY = 0;
+      clearPanelHighlight();
+      vrLastUiUploadT = -1;
+      return true;
+    }
+    if (desc === 'close') {
+      commentsPanelVisible = false;
+      cPanelHover = null;
+      applySceneVisibility();
+      return true;
+    }
+    if (desc === 'add') {
+      openVrKeyboard();
+      return true;
+    }
+    if (desc === 'scrollup') {
+      const ui = getUICanvas();
+      const step = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
+      cPanelScrollY = clampPanelScroll(cPanelScrollY - step);
+      vrLastUiUploadT = -1;
+      return true;
+    }
+    if (desc === 'scrolldown') {
+      const ui = getUICanvas();
+      const step = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
+      cPanelScrollY = clampPanelScroll(cPanelScrollY + step);
+      vrLastUiUploadT = -1;
+      return true;
+    }
+    if (desc.indexOf('seek:') === 0) {
+      const id = desc.slice(5);
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      const c = comments.find((x) => x.id === id);
+      if (c && c.timestamp !== null && c.timestamp !== undefined && callbacks.onSeekTo) {
+        callbacks.onSeekTo(Number(c.timestamp));
+      }
+      return true;
+    }
+    if (desc.indexOf('like:') === 0) {
+      const id = desc.slice(5);
+      if (callbacks.onLikeComment) callbacks.onLikeComment(id);
+      return true;
+    }
+    if (desc.indexOf('profile:') === 0) {
+      const username = desc.slice(8);
+      if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
+      return true;
+    }
+    if (desc === 'account') {
+      if (callbacks.onOpenAccount) callbacks.onOpenAccount();
+      return true;
+    }
+    return false;
+  }
+
+  function toggleCommentsPanel() {
+    commentsPanelVisible = !commentsPanelVisible;
+    if (!commentsPanelVisible) {
+      cPanelDrag = false;
+      cPanelHover = null;
+      clearPanelHighlight();
+      closeVrKeyboard();
+    }
+    applySceneVisibility();
+    vrLastUiUploadT = -1;
+  }
+
+  // Open the comments panel, scroll to and highlight a specific comment
+  // (usually triggered by clicking a pop-up overlay comment).
+  function openCommentsPanelToComment(commentId) {
+    commentsPanelVisible = true;
+    cPanelTab = 'all';
+    const ui = getUICanvas();
+    const comments = callbacks.getComments ? callbacks.getComments() : [];
+    const idx = comments.findIndex((c) => c.id === commentId);
+    const listH = ui ? (ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP) : 520;
+    const itemH = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
+    if (idx >= 0) {
+      const itemTop = idx * itemH;
+      cPanelScrollY = Math.max(0, itemTop - (listH - (itemH - 8)) / 2);
+    }
+    setPanelHighlight(commentId);
+    applySceneVisibility();
+    vrLastUiUploadT = -1;
+  }
+
+  function setPanelHighlight(commentId) {
+    clearPanelHighlight();
+    cPanelHighlightId = commentId;
+    try {
+      cPanelHighlightTimer = setTimeout(() => {
+        cPanelHighlightId = null;
+        cPanelHighlightTimer = null;
+      }, 4000);
+    } catch (e) { cPanelHighlightTimer = null; }
+  }
+
+  // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
+  function initDomOverlay() {
+    if (domOverlayRoot || typeof document === 'undefined') return;
+    try {
+      domOverlayRoot = document.createElement('div');
+      domOverlayRoot.id = 'vrCommentDomOverlay';
+      domOverlayRoot.style.cssText = 'position:fixed;left:0;right:0;bottom:0;top:auto;height:360px;z-index:2147483646;pointer-events:none;';
+      domOverlayInput = document.createElement('input');
+      domOverlayInput.type = 'text';
+      domOverlayInput.autocomplete = 'off';
+      domOverlayInput.setAttribute('enterkeyhint', 'send');
+      domOverlayInput.placeholder = 'Type a VR comment…';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#e3e2e3;background:rgba(13,14,15,0.97);border:2px solid #ff553a;border-radius:8px;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
+      domOverlayInput.addEventListener('blur', onCommentInputBlur);
+      domOverlayRoot.appendChild(domOverlayInput);
+      (document.body || document.documentElement).appendChild(domOverlayRoot);
+    } catch (e) { domOverlayRoot = null; domOverlayInput = null; }
+  }
+
+  function openVrKeyboard() {
+    if (!debugFlags.domoverlay) {
+      showNotification('KEYBOARD DISABLED (?domoverlay=0)');
+      return;
+    }
+    initDomOverlay();
+    if (!domOverlayInput) return;
+    const source = getVisualSource();
+    pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
+    domOverlayInput.value = '';
+    domOverlayInput.style.display = 'block';
+    try { domOverlayInput.focus(); } catch (e) {}
+  }
+
+  function closeVrKeyboard() {
+    if (domOverlayInput) {
+      domOverlayInput.style.display = 'none';
+      try { domOverlayInput.blur(); } catch (e) {}
+    }
+  }
+
+  function onCommentInputKeydown(e) {
+    if (e.key === 'Enter') {
+      if (e.preventDefault) e.preventDefault();
+      const text = domOverlayInput ? domOverlayInput.value.trim() : '';
+      closeVrKeyboard();
+      if (text && callbacks.onPostComment) {
+        callbacks.onPostComment(text, pendingSyncTime);
+      }
+    } else if (e.key === 'Escape') {
+      if (e.preventDefault) e.preventDefault();
+      closeVrKeyboard();
+    }
+  }
+
+  function onCommentInputBlur() {
+    setTimeout(() => {
+      try {
+        if (domOverlayInput && document.activeElement !== domOverlayInput) {
+          domOverlayInput.style.display = 'none';
+        }
+      } catch (e) {}
+    }, 150);
+  }
+
+  // v8.4 video upload path A/B ('subimage' default | 'respec' forces full
+  // texImage2D re-spec per upload — decisive on-device test for the Quest
+  // sub-image driver suspicion). Also honours ?vrTexMode=respec.
+  function setVideoUploadMode(mode) {
+    videoUploadMode = (mode === 'respec') ? 'respec' : 'subimage';
+    return videoUploadMode;
+  }
+
   // ─── Public Module API ──────────────────────────────────────────────
   return {
     init(video, cbs) {
       videoElement = video;
       callbacks = cbs || {};
       lockToViewer = !isPackExperience();
+      try {
+        const q = (typeof location !== 'undefined' && location.search) || '';
+        if (/(?:\?|&)vrTexMode=respec(?:&|$)/.test(q)) videoUploadMode = 'respec';
+      } catch (e) {}
+      readDebugFlags();
       console.log('[WebXRVR] Initialised', VR_VERSION);
     },
+    setVideoUploadMode,
 
     async isSupported() {
       const xr = getXR();
@@ -3130,11 +4720,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     getPreviewState,
     onVideoChange() {
       hasNewVideoFrame = true;
+      renderStats.transChanges += 1;
       const source = getVisualSource();
       if (source && source.ready === false) {
+        // Held when a visual is already displayed (no black flash, no
+        // wasteful re-upload of the unchanged canvas).
         clearPendingTexture();
+      } else if (videoTexture) {
+        videoTexture.needsUpdate = true;
       }
-      if (videoTexture) videoTexture.needsUpdate = true;
     },
     showNotification,
     setStereo(enabled) { stereoMode = !!enabled; },
@@ -3147,6 +4741,99 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHeatStyle,
       computeDockPose,
       controlIndexFromUV,
+      // v8.3 lock/scale/distance/panel seams.
+      computeLockedPose,
+      clampScreenScale,
+      clampScreenDistance,
+      dockTargetSize,
+      commentsPanelTargetSize,
+      guideTargetSize,
+      getCommentsPanelLayout,
+      getGuidePanelLayout,
+      applyLockToViewer,
+      commitScreenTransform,
+      lockApplies,
+      pickPointerSource,
+      updateLaserPointer,
+      updateControllerLasers,
+      getActiveRay() {
+        return {
+          origin: activeRayOrigin
+            ? { x: activeRayOrigin.x, y: activeRayOrigin.y, z: activeRayOrigin.z } : null,
+          direction: activeRayDir
+            ? { x: activeRayDir.x, y: activeRayDir.y, z: activeRayDir.z } : null,
+          handedness: activeRayHandedness,
+        };
+      },
+      setActiveRay(origin, direction, handedness) {
+        ensureThree();
+        if (!THREE) return false;
+        try {
+          if (!activeRayOrigin) activeRayOrigin = new THREE.Vector3();
+          if (!activeRayDir) activeRayDir = new THREE.Vector3();
+          if (origin) activeRayOrigin.set(origin.x, origin.y, origin.z);
+          if (direction) activeRayDir.set(direction.x, direction.y, direction.z).normalize();
+          activeRayHandedness = handedness || '';
+          return true;
+        } catch (e) { return false; }
+      },
+      fireVRSelect(ev) { onVRSelect(ev || {}); },
+      getDebugFlags() { return { ...debugFlags }; },
+      setDebugFlags(patch) {
+        const p = patch || {};
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay']) {
+          if (p[k] !== undefined) debugFlags[k] = !!p[k];
+        }
+        return { ...debugFlags };
+      },
+      processXRInput,
+      executeCommentAction,
+      toggleCommentsPanel,
+      openCommentsPanelToComment,
+      refreshPanelScrollBounds,
+      commentsRegionFromUV,
+      overlayCommentFromUV,
+      refreshOverlayTexture,
+      getTextureFilterInfo() {
+        const describe = (tex) => tex ? {
+          minFilter: tex.minFilter,
+          magFilter: tex.magFilter,
+          generateMipmaps: !!tex.generateMipmaps,
+        } : null;
+        return {
+          video: describe(videoTexture),
+          controls: describe(controlsTexture),
+          comments: describe(commentsTexture),
+          overlay: describe(overlayTexture),
+          guide: describe(guideTexture),
+        };
+      },
+      getScreenState() {
+        return {
+          pos: { ...screenPos },
+          scale: screenScale,
+          distance: screenDistance,
+          locked: lockToViewer,
+          grabbing: isGrabbing,
+          uploadMode: videoUploadMode,
+          overlayUploads: renderStats.overlayUploads || 0,
+          controlsVisible,
+          commentsPanelVisible,
+          cPanelTab,
+          cPanelScrollY,
+          cPanelMaxScroll,
+          cPanelHover,
+          overlayPopups: overlayRegions.length,
+          guideUploaded: vrGuideUploaded,
+        };
+      },
+      setScreenState(patch) {
+        const p = patch || {};
+        if (p.pos) screenPos = { x: p.pos.x, y: p.pos.y, z: p.pos.z };
+        if (p.scale !== undefined) screenScale = clampScreenScale(p.scale);
+        if (p.distance !== undefined) screenDistance = clampScreenDistance(p.distance);
+        if (p.locked !== undefined) lockToViewer = !!p.locked;
+      },
       shouldAttemptXR,
       getXrCompatStatus() { return xrCompatStatus; },
       hasPreviewResume() { return !!previewResumeOpts; },
@@ -3279,8 +4966,28 @@ window.WebXRVR = window.WebXRVR || (function () {
                 : null,
             };
           }
-          if (controlsMesh) info.controls = { visible: controlsMesh.visible };
-          if (commentsMesh) info.comments = { visible: commentsMesh.visible };
+          // UI paint-order ladder (legacy painter's order): screen 0, overlay
+          // 2, dock 3, comments/guide 4 — all UI quads depthTest:false so they
+          // always paint over the video screen.
+          const paintFlags = (mesh) => mesh ? {
+            visible: mesh.visible,
+            renderOrder: mesh.renderOrder,
+            depthTest: !!(mesh.material && mesh.material.depthTest),
+          } : null;
+          if (screenMesh) info.screen.paint = paintFlags(screenMesh);
+          if (controlsMesh) info.controls = paintFlags(controlsMesh);
+          if (commentsMesh) info.comments = paintFlags(commentsMesh);
+          if (overlayMesh) {
+            info.overlay = paintFlags(overlayMesh);
+            info.overlay.popups = overlayRegions.length;
+          }
+          if (guideMesh) info.guide = paintFlags(guideMesh);
+          info.screenState = {
+            pos: { ...screenPos },
+            scale: screenScale,
+            distance: screenDistance,
+            locked: lockToViewer,
+          };
           if (earthGroup) info.earth = { visible: earthGroup.visible };
           if (controlsMesh) {
             info.dock = {
@@ -3293,6 +5000,29 @@ window.WebXRVR = window.WebXRVR || (function () {
             color: glowColor.map((c) => Math.round(c * 1000) / 1000),
           };
           info.laser = { visible: !!(laserLine && laserLine.visible) };
+          // Pointer diagnostics: beam endpoints, always-on-top flags, and
+          // the reticle pose (proves the pullback + billboard live).
+          try {
+            if (laserLine) {
+              info.pointer = {
+                renderOrder: laserLine.renderOrder,
+                depthTest: !!(laserLine.material && laserLine.material.depthTest),
+                beam: laserPositions ? {
+                  start: [laserPositions[0], laserPositions[1], laserPositions[2]],
+                  end: [laserPositions[3], laserPositions[4], laserPositions[5]],
+                } : null,
+              };
+            }
+            if (reticleMesh) {
+              info.reticle = {
+                visible: reticleMesh.visible,
+                renderOrder: reticleMesh.renderOrder,
+                depthTest: !!(reticleMesh.material && reticleMesh.material.depthTest),
+                pos: [reticleMesh.position.x, reticleMesh.position.y, reticleMesh.position.z],
+                scale: [reticleMesh.scale.x, reticleMesh.scale.y],
+              };
+            }
+          } catch (e) {}
           info.xr = {
             presenting: !!xrSession,
             previewRunning: !!previewRunning,

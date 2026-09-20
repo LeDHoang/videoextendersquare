@@ -311,7 +311,7 @@ test('Reels frames skip Earth draws and Earth frames pause video texture uploads
   const canvas = makePreviewCanvas(gl);
   const video = {
     paused: false,
-    readyState: 2,
+    readyState: 4,
     currentTime: 1,
     duration: 10,
     muted: true,
@@ -506,11 +506,11 @@ test('static pack cards upload through the proxy canvas and expose normalized hi
   renderer.stopPreview();
 });
 
-test('a pending image source clears the prior reel texture before it becomes ready', () => {
+test('a pending image source holds the prior reel texture before it becomes ready', () => {
   const counters = { deleted: 0, textureSources: [] };
   const gl = makeMockGl(counters);
   const videoElement = {
-    readyState: 2,
+    readyState: 4,
     paused: false,
     currentTime: 1,
     duration: 10,
@@ -555,7 +555,9 @@ test('a pending image source clears the prior reel texture before it becomes rea
   };
   renderer.onVideoChange();
   renderer.__runScheduledFrame(32);
-  assert.equal(renderer.__test.getLastUploadedSource(), '__cleared__');
+  // Hold-last-frame: the prior video stays up while the image loads (no
+  // black flash mid-playlist); clears happen only with nothing displayed.
+  assert.equal(renderer.__test.getLastUploadedSource(), videoElement);
 
   source = { ...source, ready: true };
   renderer.__runScheduledFrame(48);
@@ -584,7 +586,7 @@ test('startPreview honors caller options and rejects a missing canvas', () => {
 test('restarting preview after stop rebuilds textures instead of rendering black', () => {
   const gl = makeMockGl({ deleted: 0 });
   const videoElement = {
-    readyState: 2,
+    readyState: 4,
     paused: false,
     currentTime: 1,
     duration: 10,
@@ -696,14 +698,199 @@ test('mode switches gate scene membership from a single source of truth', () => 
 test('below-screen dock clears the curved screen with margin', () => {
   const renderer = loadRenderer();
   const pose = renderer.__test.computeDockPose({ x: 0, y: 1.6, z: 0 });
-  // Dock center sits below the 2.4 m screen bottom edge (y = 0.4).
-  closeTo(pose.pos.y, 0.02);
-  assert.equal(pose.pos.z, -1.9);
-  // Dock top edge (0.6 m tall) stays below the screen bottom edge.
-  assert.ok(pose.pos.y + 0.3 < 0.4);
+  // Dock center hangs below the 4.0 m default screen bottom edge
+  // (1.52 − 2.0 − 0.08 = −0.56) at the default 2.24 m station.
+  closeTo(pose.pos.y, -0.56);
+  assert.equal(pose.pos.z, -2.24);
+  // Dock center sits below the screen bottom edge (y = −0.48).
+  assert.ok(pose.pos.y < -0.48);
   // Faces a centered viewer: zero yaw, upward pitch, no roll component.
   closeTo(pose.yaw, 0);
   assert.ok(pose.pitch < -0.5 && pose.pitch > -1.0);
+});
+
+test('locked mode keeps UI room-fixed at the default screen spot', () => {
+  const renderer = loadRenderer();
+  const api = renderer.__test;
+  // Legacy-exact: move the screen while locked — dock + panels stay at the
+  // default spot, sized at DEFAULT_SCALE.
+  api.setScreenState({ locked: true, pos: { x: 1, y: 1.5, z: -3 }, distance: 3.0 });
+  const dock = api.computeDockPose({ x: 0, y: 1.6, z: 0 });
+  closeTo(dock.pos.x, 0);
+  closeTo(dock.pos.y, 1.52 - 2.0 - 0.08);
+  closeTo(dock.pos.z, -2.24);
+  const comments = api.getCommentsPanelLayout();
+  const guide = api.getGuidePanelLayout();
+  assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
+  assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
+  closeTo(comments.center.z, -2.39);
+  // Unlocked at the moved pose: UI follows the screen instead.
+  api.setScreenState({ locked: false });
+  const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
+  closeTo(dock2.pos.x, 1);
+  closeTo(dock2.pos.y, 1.5 - 2.0 - 0.08);
+  closeTo(dock2.pos.z, -3);
+});
+
+test('bisection flags gate lock, overlay, guide, and glow', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  const api = renderer.__test;
+  // NOTE: cross-realm objects fail deepStrictEqual on prototypes — compare
+  // fields explicitly.
+  const flagsOf = () => {
+    const f = api.getDebugFlags();
+    return [f.lock, f.overlay, f.guide, f.glow, f.dockfreeze, f.glowprobe, f.domoverlay];
+  };
+  assert.deepEqual(flagsOf(), [true, true, true, true, false, true, true]);
+  api.setDebugFlags({ lock: false, overlay: false, guide: false, glow: false });
+  assert.deepEqual(flagsOf(), [false, false, false, false, false, true, true]);
+  api.setDebugFlags({ dockfreeze: true, glowprobe: false });
+  assert.deepEqual(flagsOf(), [false, false, false, false, true, false, true]);
+  // ?lock=0: the lock flag no longer applies face-following.
+  api.setScreenState({ locked: true });
+  assert.equal(api.lockApplies(), false);
+  api.setScreenState({ locked: false });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const info = renderer.__test.getSceneInfo();
+  // Bisected-off subsystems never build meshes.
+  assert.equal(info.overlay, undefined);
+  assert.equal(info.guide, undefined);
+  assert.equal(info.glow.visible, false);
+  // Overlay refresh is a no-op with the flag off.
+  assert.equal(api.refreshOverlayTexture(1000, true), false);
+  renderer.stopPreview();
+  api.setDebugFlags({ lock: true, overlay: true, guide: true, glow: true, dockfreeze: false, glowprobe: true, domoverlay: true });
+  assert.deepEqual(flagsOf(), [true, true, true, true, false, true, true]);
+  api.setScreenState({ locked: true });
+  assert.equal(api.lockApplies(), true);
+});
+
+test('dockfreeze stops dock texture re-uploads after the first paint', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const uploadsOf = () => renderer.getPreviewState().renderStats.dockUploads;
+  renderer.__runScheduledFrame(0);
+  assert.ok(uploadsOf() >= 1, 'first paint uploads');
+  const painted = uploadsOf();
+  api.setDebugFlags({ dockfreeze: true });
+  renderer.__runScheduledFrame(200);
+  renderer.__runScheduledFrame(400);
+  assert.equal(uploadsOf(), painted, 'frozen: no further dock uploads');
+  api.setDebugFlags({ dockfreeze: false });
+  renderer.__runScheduledFrame(600);
+  assert.ok(uploadsOf() > painted, 'unfrozen: uploads resume');
+  renderer.stopPreview();
+});
+
+test('transition counters attribute source changes, clears, and buffering', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: true, readyState: 1, currentTime: 0, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {});
+  const statsOf = () => renderer.getPreviewState().renderStats;
+  renderer.onVideoChange();
+  assert.equal(statsOf().transChanges, 1);
+  assert.equal(statsOf().transClears, 1);
+  // Not-ready video element: preview frames count buffering, not uploads.
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(0);
+  renderer.__runScheduledFrame(200);
+  const stats = statsOf();
+  assert.ok(stats.transNotReady >= 2, `buffering frames counted: ${stats.transNotReady}`);
+  assert.equal(stats.videoUploads, 0);
+  // Ready element uploads instead of waiting.
+  video.readyState = 4;
+  video.paused = false;
+  renderer.__runScheduledFrame(400);
+  assert.ok(statsOf().videoUploads >= 1, 'ready video uploads');
+  renderer.stopPreview();
+});
+
+test('shared laser prefers the right hand', () => {
+  const api = loadRenderer().__test;
+  const left = { handedness: 'left' };
+  const right = { handedness: 'right' };
+  assert.equal(api.pickPointerSource([]), null);
+  assert.equal(api.pickPointerSource([left]), left);
+  assert.equal(api.pickPointerSource([left, right]), right);
+  assert.equal(api.pickPointerSource([right, left]), right);
+  assert.equal(api.pickPointerSource([right]), right);
+});
+
+function makeIdentityController(THREE) {
+  return { matrixWorld: new THREE.Matrix4() };
+}
+
+function makeVideoMock(time = 1) {
+  return {
+    paused: false, readyState: 4, currentTime: time, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+}
+
+test('trigger clicks reuse the laser ray of the same hand', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const toggles = [];
+  renderer.init(makeVideoMock(), { onTogglePlay: () => toggles.push('play') });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const THREE = renderer.getThree();
+  assert.equal(api.getScreenState().controlsVisible, true);
+  // Stored sky ray on the right hand: a right trigger acts on empty space
+  // (toggles UI only) even though a fresh ray would hit the screen.
+  api.setActiveRay({ x: 0, y: 5, z: 0 }, { x: 0, y: 1, z: 0 }, 'right');
+  api.fireVRSelect({ target: makeIdentityController(THREE), data: { handedness: 'right' } });
+  assert.deepEqual(toggles, []);
+  assert.equal(api.getScreenState().controlsVisible, false);
+  // The other hand raycasts fresh from its own pose: identity controller at
+  // the origin faces the screen center → toggles playback.
+  api.fireVRSelect({ target: makeIdentityController(THREE), data: { handedness: 'left' } });
+  assert.deepEqual(toggles, ['play']);
+  assert.equal(api.getScreenState().controlsVisible, true);
+  renderer.stopPreview();
+});
+
+test('laser beam ends at the surface, reticle floats just off it', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(makeVideoMock(), {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  // Gaze-parallel ray into the screen center.
+  const ret = api.updateLaserPointer({ x: 0, y: 1.6, z: 0 }, { x: 0, y: 0, z: -1 });
+  assert.equal(ret, -1); // screen hover, no dock button
+  const info = api.getSceneInfo();
+  const beam = info.pointer.beam;
+  const rpos = info.reticle.pos;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const len = (v) => Math.hypot(v[0], v[1], v[2]);
+  const beamLen = len(sub(beam.end, beam.start));
+  const retLen = len(sub(rpos, beam.start));
+  assert.ok(beamLen > 1.5 && beamLen < 3.5, `beam reaches the screen: ${beamLen}`);
+  // Reticle sits 0.02 m back along the ray — never buried in the surface.
+  closeTo(beamLen - retLen, 0.02, 1e-4);
+  // Collinear with the ray.
+  const dir = sub(rpos, beam.start).map((c) => c / retLen);
+  closeTo(Math.abs(dir[0]), 0, 1e-6);
+  closeTo(Math.abs(dir[1]), 0, 1e-6);
+  closeTo(dir[2], -1, 1e-6);
+  // Always-on-top flags (legacy drew the laser last with depth off).
+  assert.equal(info.pointer.depthTest, false);
+  assert.equal(info.pointer.renderOrder, 999);
+  assert.equal(info.reticle.depthTest, false);
+  assert.equal(info.reticle.renderOrder, 1000);
+  renderer.stopPreview();
 });
 
 test('laser is built and visible while preview runs', () => {
@@ -1175,4 +1362,521 @@ test('pointer cycle leaves no captured error and reports hover state', () => {
   assert.equal(renderer.__test.firePreviewPointer('pointerup', { clientX: 480, clientY: 260, pointerId: 1, button: 0 }), true);
   assert.equal(renderer.__test.getLastPointerError(), '');
   renderer.stopPreview();
+});
+
+// ─── v8.3 lock-to-viewer + PlayVR scale/distance + panel/guide parity ──
+
+function mockGamepad(axes, pressed) {
+  return {
+    axes: axes.slice(),
+    buttons: pressed.map((p) => ({ pressed: !!p })),
+    hapticActuators: [],
+  };
+}
+
+function mockXRSession(sources) {
+  return { inputSources: sources };
+}
+
+function rightSource(gamepad) {
+  return { handedness: 'right', gamepad, targetRaySpace: null };
+}
+
+function loadUICanvasStandalone() {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(uiCanvasSource, sandbox, { filename: 'vr_ui_canvas.js' });
+  return sandbox.VRUICanvas;
+}
+
+function makeRecordingCtx() {
+  const texts = [];
+  const ctx = makeCanvas2dContext();
+  ctx.fillText = (...args) => { texts.push(args.map(String).join(' ')); };
+  return { ctx, texts };
+}
+
+function dockRenderOptions(overrides = {}) {
+  return {
+    source: { paused: true, muted: false, currentTime: 0, duration: 10 },
+    itemState: { available: true },
+    packMode: false,
+    playlist: [],
+    idx: 0,
+    comments: [],
+    hoveredButton: -1,
+    pressedButton: -1,
+    isCurved: true,
+    curvatureMode: 1,
+    lockToViewer: true,
+    autoNext: true,
+    sceneMode: 'reels',
+    ...overrides,
+  };
+}
+
+test('lock pose math centers the screen on the head forward axis', () => {
+  const api = loadRenderer().__test;
+  const forward = api.computeLockedPose({ x: 0, y: 1.6, z: 0 }, { x: 0, y: 0, z: -1 }, 2.24);
+  closeTo(forward.x, 0);
+  closeTo(forward.y, 1.6);
+  closeTo(forward.z, -2.24);
+  // Looking 90° right parks the screen on +X.
+  const right = api.computeLockedPose({ x: 1, y: 1.6, z: 2 }, { x: 1, y: 0, z: 0 }, 2.24);
+  closeTo(right.x, 3.24);
+  closeTo(right.y, 1.6);
+  closeTo(right.z, 2);
+  // Default distance falls back to the live screenDistance.
+  const api2 = loadRenderer().__test;
+  api2.setScreenState({ distance: 3 });
+  const def = api2.computeLockedPose({ x: 0, y: 1.6, z: 0 }, { x: 0, y: 0, z: -1 });
+  closeTo(def.z, -3);
+});
+
+test('screen scale and distance clamp to the PlayVR travel limits', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.clampScreenScale(0.5), 1.0);
+  assert.equal(api.clampScreenScale(4.0), 4.0);
+  assert.equal(api.clampScreenScale(20), 10.0);
+  assert.equal(api.clampScreenDistance(0.5), 1.2);
+  assert.equal(api.clampScreenDistance(2.24), 2.24);
+  assert.equal(api.clampScreenDistance(9), 6.0);
+  assert.equal(api.dockTargetSize(4).w, 3.28);
+});
+
+test('head lock poses the live screen perpendicular and centered', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.setScreenState({ locked: true });
+  api.applyLockToViewer();
+  api.commitScreenTransform();
+  const info = api.getSceneInfo();
+  closeTo(info.screen.pos[0], 0);
+  closeTo(info.screen.pos[1], 1.6);
+  closeTo(info.screen.pos[2], -2.24);
+  const state = api.getScreenState();
+  assert.equal(state.locked, true);
+  assert.equal(state.scale, 4.0);
+  assert.equal(state.distance, 2.24);
+  renderer.stopPreview();
+});
+
+test('grip plus stick Y scales the screen up and down', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  assert.equal(api.getScreenState().scale, 4.0);
+  // Grip held + stick pushed up (axes[3] = −1) grows the screen.
+  const gripUp = mockXRSession([rightSource(mockGamepad([0, 0, 0, -1], [false, true, false, false, false, false]))]);
+  api.processXRInput(null, gripUp);
+  closeTo(api.getScreenState().scale, 4.04);
+  // Grip held + stick pulled down shrinks it back.
+  const gripDown = mockXRSession([rightSource(mockGamepad([0, 0, 0, 1], [false, true, false, false, false, false]))]);
+  api.processXRInput(null, gripDown);
+  closeTo(api.getScreenState().scale, 4.0);
+  // No grip: stick Y alone never touches the scale.
+  const bare = mockXRSession([rightSource(mockGamepad([0, 0, 0, -1], [false, false, false, false, false, false]))]);
+  api.processXRInput(null, bare);
+  closeTo(api.getScreenState().scale, 4.0);
+});
+
+test('grip plus stick X moves the screen further and closer', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  api.setScreenState({ locked: false });
+  // Unlocked: the screen translates along its head-facing axis.
+  const gripRight = mockXRSession([rightSource(mockGamepad([0, 0, 1, 0], [false, true, false, false, false, false]))]);
+  api.processXRInput(null, gripRight);
+  const moved = api.getScreenState();
+  assert.ok(moved.pos.z < -2.24, `screen moved further: ${moved.pos.z}`);
+  // Locked: the distance state itself changes (lock pose consumes it).
+  api.setScreenState({ locked: true });
+  const before = api.getScreenState().distance;
+  api.processXRInput(null, gripRight);
+  closeTo(api.getScreenState().distance, before + 0.03);
+  const gripLeft = mockXRSession([rightSource(mockGamepad([0, 0, -1, 0], [false, true, false, false, false, false]))]);
+  api.processXRInput(null, gripLeft);
+  closeTo(api.getScreenState().distance, before);
+});
+
+test('A and B buttons toggle playback and the control panels', () => {
+  const toggles = [];
+  const renderer = loadRenderer();
+  renderer.init(null, { onTogglePlay: () => toggles.push('play') });
+  const api = renderer.__test;
+  assert.equal(api.getScreenState().controlsVisible, true);
+  // A button edge-triggers play/pause exactly once per press.
+  const aDown = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, true, false]))]);
+  api.processXRInput(null, aDown);
+  assert.deepEqual(toggles, ['play']);
+  api.processXRInput(null, aDown);
+  assert.deepEqual(toggles, ['play']);
+  const released = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, false, false]))]);
+  api.processXRInput(null, released);
+  api.processXRInput(null, aDown);
+  assert.deepEqual(toggles, ['play', 'play']);
+  // B button toggles the dock + guide visibility.
+  const bDown = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, false, true]))]);
+  api.processXRInput(null, bDown);
+  assert.equal(api.getScreenState().controlsVisible, false);
+  api.processXRInput(null, released);
+  api.processXRInput(null, bDown);
+  assert.equal(api.getScreenState().controlsVisible, true);
+});
+
+test('bare stick flicks navigate and seek with latch and reset', () => {
+  const calls = [];
+  const renderer = loadRenderer();
+  renderer.init(null, {
+    onNext: () => calls.push('next'),
+    onPrev: () => calls.push('prev'),
+    onSeek: (d) => calls.push('seek:' + d),
+  });
+  const api = renderer.__test;
+  const flickDown = mockXRSession([rightSource(mockGamepad([0, 0, 0, 1], [false, false, false, false, false, false]))]);
+  api.processXRInput(null, flickDown);
+  assert.deepEqual(calls, ['next']);
+  // Held deflection does not repeat (flick latch).
+  api.processXRInput(null, flickDown);
+  assert.deepEqual(calls, ['next']);
+  // Returning to neutral resets the latch.
+  const neutral = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, false, false]))]);
+  api.processXRInput(null, neutral);
+  api.processXRInput(null, flickDown);
+  assert.deepEqual(calls, ['next', 'next']);
+  // Stick X flicks seek ±5 s.
+  const flickRight = mockXRSession([rightSource(mockGamepad([0, 0, 1, 0], [false, false, false, false, false, false]))]);
+  api.processXRInput(null, flickRight);
+  assert.deepEqual(calls, ['next', 'next', 'seek:5']);
+});
+
+test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
+  const api = loadRenderer().__test;
+  const comments = api.getCommentsPanelLayout();
+  const guide = api.getGuidePanelLayout();
+  assert.ok(comments.center.x < 0, `comments LEFT: ${comments.center.x}`);
+  assert.ok(guide.center.x > 0, `guide RIGHT: ${guide.center.x}`);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
+  // Legacy-exact: locked mode anchors both to the room spot tracking the
+  // default screen (NOT the live screenDistance).
+  api.setScreenState({ locked: true, distance: 3.0 });
+  const lockedComments = api.getCommentsPanelLayout();
+  const lockedGuide = api.getGuidePanelLayout();
+  assert.ok(lockedComments.center.x < 0);
+  assert.ok(lockedGuide.center.x > 0);
+  closeTo(lockedComments.center.z, -2.39);
+  closeTo(lockedGuide.center.z, -2.39);
+});
+
+test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
+  const liked = [];
+  const sought = [];
+  const renderer = loadRenderer();
+  const comments = [
+    { id: 'c1', author_name: 'ann', text: 'first', timestamp: 1 },
+    { id: 'c2', author_name: 'bob', text: 'second', timestamp: 2 },
+    { id: 'c3', author_name: 'cat', text: 'third', timestamp: null },
+    { id: 'c4', author_name: 'dan', text: 'fourth', timestamp: 4 },
+    { id: 'c5', author_name: 'eve', text: 'fifth', timestamp: null },
+  ];
+  renderer.init(null, {
+    getComments: () => comments,
+    onLikeComment: (id) => liked.push(id),
+    onSeekTo: (t) => sought.push(t),
+  });
+  const api = renderer.__test;
+  api.toggleCommentsPanel();
+  assert.equal(api.getScreenState().commentsPanelVisible, true);
+  // Tabs switch the filter and reset the scroll.
+  assert.equal(api.executeCommentAction('tab:sync'), true);
+  assert.equal(api.getScreenState().cPanelTab, 'sync');
+  // Scroll bounds follow the filtered list (3 sync × 112 − 520 = −184 → 0).
+  api.refreshPanelScrollBounds(comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined));
+  assert.equal(api.executeCommentAction('scrolldown'), true);
+  assert.equal(api.getScreenState().cPanelScrollY, 0);
+  // All tab: 5 × 112 − 520 = 40 max scroll.
+  assert.equal(api.executeCommentAction('tab:all'), true);
+  api.refreshPanelScrollBounds(comments);
+  assert.equal(api.getScreenState().cPanelMaxScroll, 40);
+  assert.equal(api.executeCommentAction('scrolldown'), true);
+  assert.equal(api.getScreenState().cPanelScrollY, 40);
+  assert.equal(api.executeCommentAction('scrollup'), true);
+  assert.equal(api.getScreenState().cPanelScrollY, 0);
+  // Item actions route to host callbacks.
+  assert.equal(api.executeCommentAction('like:c2'), true);
+  assert.deepEqual(liked, ['c2']);
+  assert.equal(api.executeCommentAction('seek:c4'), true);
+  assert.deepEqual(sought, [4]);
+  assert.equal(api.executeCommentAction('panel'), true);
+  assert.equal(api.executeCommentAction('bogus'), false);
+  // Close hides the panel.
+  assert.equal(api.executeCommentAction('close'), true);
+  assert.equal(api.getScreenState().commentsPanelVisible, false);
+});
+
+test('popup overlay regions resolve to the clicked comment', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 4, currentTime: 2, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {
+    getComments: () => ([
+      { id: 'c1', author_name: 'ann', text: 'hello world', timestamp: 1, avatar_color: '#fff' },
+    ]),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  assert.equal(api.refreshOverlayTexture(1000), true);
+  assert.equal(api.getScreenState().overlayPopups, 1);
+  // Middle-left popup hit (canvas ~200,512 of the 1024² overlay).
+  assert.equal(api.overlayCommentFromUV({ x: 200 / 1024, y: 0.5 }), 'c1');
+  assert.equal(api.overlayCommentFromUV({ x: 0.95, y: 0.5 }), null);
+  // Opening the panel at the comment shows and highlights it.
+  api.openCommentsPanelToComment('c1');
+  const state = api.getScreenState();
+  assert.equal(state.commentsPanelVisible, true);
+  renderer.stopPreview();
+});
+
+test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
+  const ui = loadUICanvasStandalone();
+  assert.equal(ui.GUIDE_H, 760);
+  // Recording ctx captures fillText(text, x, y) joined with spaces.
+  const firstToken = (texts, label) => texts.some((t) => t.split(' ')[0] === label);
+  const loop = makeRecordingCtx();
+  ui.renderControlsCanvas(loop.ctx, dockRenderOptions({ autoNext: false }));
+  assert.ok(firstToken(loop.texts, 'LOOP'), `has LOOP label: ${loop.texts.join('|')}`);
+  const auto = makeRecordingCtx();
+  ui.renderControlsCanvas(auto.ctx, dockRenderOptions({ autoNext: true }));
+  assert.ok(firstToken(auto.texts, 'AUTO'), `has AUTO label: ${auto.texts.join('|')}`);
+  const locked = makeRecordingCtx();
+  ui.renderControlsCanvas(locked.ctx, dockRenderOptions({ lockToViewer: true }));
+  assert.ok(firstToken(locked.texts, 'LOCK'), `has LOCK label: ${locked.texts.join('|')}`);
+  const free = makeRecordingCtx();
+  ui.renderControlsCanvas(free.ctx, dockRenderOptions({ lockToViewer: false }));
+  assert.ok(firstToken(free.texts, 'FREE'), `has FREE label: ${free.texts.join('|')}`);
+});
+
+test('guide panel renders the controller artwork without errors', () => {
+  const ui = loadUICanvasStandalone();
+  const { ctx, texts } = makeRecordingCtx();
+  ui.renderGuideCanvas(ctx);
+  const joined = texts.join('\n');
+  assert.ok(joined.includes('CONTROLLER GUIDE'), 'guide header drawn');
+  assert.ok(joined.includes('GRIP + STICK'), 'grip+stick card drawn');
+  assert.ok(joined.includes('THUMBSTICK'), 'thumbstick card drawn');
+});
+
+test('UI meshes paint over the video screen in legacy order', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const info = renderer.__test.getSceneInfo();
+  // Opaque screen first with depth testing on ...
+  assert.equal(info.screen.paint.renderOrder, 0);
+  assert.equal(info.screen.paint.depthTest, true);
+  // ... then the UI ladder, all depth-test-free like the legacy
+  // DEPTH_TEST-off painter's order.
+  assert.equal(info.overlay.renderOrder, 2);
+  assert.equal(info.overlay.depthTest, false);
+  assert.equal(info.controls.renderOrder, 3);
+  assert.equal(info.controls.depthTest, false);
+  assert.equal(info.comments.renderOrder, 4);
+  assert.equal(info.comments.depthTest, false);
+  assert.equal(info.guide.renderOrder, 4);
+  assert.equal(info.guide.depthTest, false);
+  renderer.stopPreview();
+});
+
+test('guide artwork falls back to vector without the photo asset', () => {
+  const ui = loadUICanvasStandalone();
+  // No window.QUEST_CONTROLLER_B64 in the sandbox → vector path, no crash,
+  // and no phantom dirty flag that would spam texture re-uploads.
+  const { ctx, texts } = makeRecordingCtx();
+  ui.renderGuideCanvas(ctx);
+  assert.ok(texts.join('\n').includes('CONTROLLER GUIDE'));
+  assert.equal(ui.isGuideArtworkDirty(), false);
+  ui.clearGuideArtworkDirty();
+});
+
+test('overlay re-renders only when the popup set is dirty', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 4, currentTime: 2, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, { getComments: () => [] });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  // No comments: advancing time never re-renders or re-uploads after the
+  // first (empty) paint — the v8.3 10 Hz churn is gone.
+  assert.equal(api.refreshOverlayTexture(1000), false);
+  assert.equal(api.getScreenState().overlayUploads, 1);
+  assert.equal(api.refreshOverlayTexture(2000), false);
+  assert.equal(api.refreshOverlayTexture(10000), false);
+  assert.equal(api.getScreenState().overlayUploads, 1);
+  renderer.stopPreview();
+});
+
+test('overlay fade repaints while visible, bounded at the UI interval', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 4, currentTime: 2, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {
+    getComments: () => ([
+      { id: 'c1', author_name: 'ann', text: 'hi', timestamp: 1 },
+    ]),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  assert.equal(api.refreshOverlayTexture(1000), true);
+  assert.equal(api.getScreenState().overlayUploads, 1);
+  // Same set 50 ms later: no repaint (fade ticks at ≤10 Hz).
+  assert.equal(api.refreshOverlayTexture(1050), true);
+  assert.equal(api.getScreenState().overlayUploads, 1);
+  // Same set past the interval: fade repaint.
+  assert.equal(api.refreshOverlayTexture(1200), true);
+  assert.equal(api.getScreenState().overlayUploads, 2);
+  renderer.stopPreview();
+});
+
+test('canvas textures use legacy linear sampling without mipmaps', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const THREE = renderer.getThree();
+  const filters = renderer.__test.getTextureFilterInfo();
+  for (const [name, f] of Object.entries(filters)) {
+    assert.ok(f, `${name} texture exists`);
+    assert.equal(f.minFilter, THREE.LinearFilter, `${name} minFilter`);
+    assert.equal(f.generateMipmaps, false, `${name} no mipmaps`);
+  }
+  renderer.stopPreview();
+});
+
+test('domoverlay flag omits the overlay layer from session options', async () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  api.setDebugFlags({ domoverlay: false });
+  let captured = null;
+  const xr = {
+    // NOTE: enterVR retries with a minimal no-opts call after rejection —
+    // only capture the full-options call.
+    async requestSession(mode, opts) { if (opts) captured = opts; throw new Error('no headset'); },
+  };
+  await renderer.enterVR({ xr });
+  assert.ok(captured, 'session requested');
+  assert.equal(captured.domOverlay, undefined);
+  assert.ok(!(captured.optionalFeatures || []).includes('dom-overlay'), 'no dom-overlay feature');
+  // Flag on (default): overlay layer requested again.
+  api.setDebugFlags({ domoverlay: true });
+  captured = null;
+  await renderer.enterVR({ xr });
+  assert.ok((captured.optionalFeatures || []).includes('dom-overlay'), 'dom-overlay feature requested');
+});
+
+test('reel switches hold the last frame instead of flashing black', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: true, readyState: 1, currentTime: 0, duration: 10, muted: true,
+    src: 'a', currentSrc: 'a', addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {});
+  // Session start with nothing displayed: pending source clears to black.
+  renderer.onVideoChange();
+  assert.equal(renderer.__test.getLastUploadedSource(), '__cleared__');
+  // First frames arrive → displayed.
+  video.readyState = 4;
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(0);
+  assert.equal(renderer.__test.getLastUploadedSource(), video);
+  // Switch while the new source buffers: the old frame is held, no re-clear.
+  video.currentSrc = 'b';
+  video.readyState = 1;
+  renderer.onVideoChange();
+  assert.equal(renderer.__test.getLastUploadedSource(), video);
+  const stats = renderer.getPreviewState().renderStats;
+  assert.equal(stats.transChanges, 2);
+  assert.equal(stats.transClears, 1);
+  renderer.stopPreview();
+});
+
+test('video uploads gate on decoded frames, not wall-clock time', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  let decoded = 10;
+  const video = {
+    paused: false, readyState: 4, currentTime: 1.0, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: decoded }),
+  };
+  renderer.init(video, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const uploadsOf = () => renderer.getPreviewState().renderStats.videoUploads;
+  renderer.__runScheduledFrame(0);
+  assert.equal(uploadsOf(), 1);
+  // Same decoded frame, clock creeping (normal 90 Hz playback): no re-upload.
+  video.currentTime = 1.1;
+  renderer.__runScheduledFrame(200);
+  assert.equal(uploadsOf(), 1);
+  // New decoded frame: upload.
+  decoded = 11;
+  renderer.__runScheduledFrame(400);
+  assert.equal(uploadsOf(), 2);
+  // Paused seek jump lands without new decodes: upload (no stale frame).
+  video.currentTime = 5.0;
+  renderer.__runScheduledFrame(600);
+  assert.equal(uploadsOf(), 3);
+  renderer.stopPreview();
+});
+
+test('fresh visuals wait for forward-buffered data, steady visuals do not', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 2, currentTime: 0, duration: 10, muted: true,
+    src: 'a', currentSrc: 'a', addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const uploadsOf = () => renderer.getPreviewState().renderStats.videoUploads;
+  renderer.__runScheduledFrame(0);
+  // Fresh visual at HAVE_CURRENT_DATA only: held, nothing uploaded (the
+  // decoder-resync garbage window is skipped, not shown).
+  assert.equal(uploadsOf(), 0);
+  // Forward-buffered: uploads.
+  video.readyState = 3;
+  renderer.__runScheduledFrame(200);
+  assert.equal(uploadsOf(), 1);
+  // Steady visual back at HAVE_CURRENT_DATA: uploads (no regression).
+  video.readyState = 2;
+  video.currentTime = 0.5;
+  renderer.__runScheduledFrame(400);
+  assert.equal(uploadsOf(), 2);
+  renderer.stopPreview();
+});
+
+test('video upload path A/B switch is honored', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  assert.equal(api.getScreenState().uploadMode, 'subimage');
+  assert.equal(renderer.setVideoUploadMode('respec'), 'respec');
+  assert.equal(api.getScreenState().uploadMode, 'respec');
+  assert.equal(renderer.setVideoUploadMode('bogus'), 'subimage');
 });

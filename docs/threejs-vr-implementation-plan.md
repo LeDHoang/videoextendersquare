@@ -1,8 +1,9 @@
 # ECHO WebXR VR Reels Player: Three.js Full Architectural Overhaul & USB Debugging Guide
 
-**Document Status**: v8.2 PURE THREE.JS ACTIVE — PHASE 4 LANDED 2026-09-19
-**Engine Version**: `v8.2-20260919-phase4-session` (+ restoration + scene parity A–E + issues-1–3 + Phase 4)
-**Current Line Count**: `ui/assets/webxr_vr.js` (~3,400 lines) + `ui/assets/vr_ui_canvas.js` (675 lines) + `ui/assets/three.min.js` (797 KB IIFE, r186)
+**Document Status**: v8.10 PURE THREE.JS ACTIVE — FIRST-FRAME HOLD LANDED 2026-09-20
+**Engine Version**: `v8.10-20260920-firstframe-hold` (+ v8.9 scope + fresh visuals wait for
+HAVE_FUTURE_DATA before cutting in)
+**Current Line Count**: `ui/assets/webxr_vr.js` (~4,750 lines) + `ui/assets/vr_ui_canvas.js` (~1,100 lines) + `ui/assets/three.min.js` (797 KB IIFE, r186)
 **Primary Platform Targets**: Meta Quest 3, Meta Quest 3S (Horizon OS / Quest Browser), Desktop WebXR Parity Inspector (`/reels/immersive-preview`)
 **Core Features**: Path A Custom Curvature (`DOME`, `SQ CURVE`, `FLAT`), Three.js r186, `OrbitControls` (orbit mode) + custom drag-look (headset mode), Live Telemetry Streaming  
 
@@ -12,8 +13,8 @@
 
 ECHO's WebXR VR mode delivers high-fidelity 1:1 square master reels inside a floating 3D cosmic cinema environment, complemented by an interactive 3D **Earth View** for geographic reel discovery and an **Immersive Desktop Preview** for desktop development and debugging.
 
-### 1.1 Current Architecture State: v8.2 Pure Three.js (Phases 0–4 Landed)
-The current system in [`ui/assets/webxr_vr.js`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js) is a **pure Three.js engine** (the 6,278-line raw-WebGL v5.2 was fully replaced; working-tree file is ~3,400 lines after Phase 4):
+### 1.1 Current Architecture State: v8.6 Pure Three.js (Phases 0–4 + Parity + Device + Laser Fixes Landed)
+The current system in [`ui/assets/webxr_vr.js`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js) is a **pure Three.js engine** (the 6,278-line raw-WebGL v5.2 was fully replaced; working-tree file is ~5,050 lines):
 - **Three.js (r186) Runtime**: Bundled offline in `ui/assets/three.min.js` and loaded ahead of the VR engine.
 - **Three.js Integration**: `THREE.WebGLRenderer` (XR enabled) owns the GL context; `THREE.OrbitControls` drives ORBIT INSPECT mode; custom yaw/pitch drag-look drives HEADSET POV mode; Path A curvature switching (`DOME`, `SQ CURVE`, `FLAT`) rebuilds `PlaneGeometry`; `WebXRVR.getThree()` exposes the runtime.
 - **Decoupled UI**: 2D in-VR canvas OS (comments, controls dock) lives in `ui/assets/vr_ui_canvas.js` (`window.VRUICanvas`) and feeds `THREE.CanvasTexture`s.
@@ -42,7 +43,7 @@ The current system in [`ui/assets/webxr_vr.js`](file:///Users/hoangleduc/Documen
 | **Earth Geometry & Raycast** | Custom vertex loop + quadratic solver | CPU `raySphereHit` + textured `SphereGeometry`, standard-equirect zones (seam-compensated), 3D pins, billboards | Same (done 2026-09-19) |
 | **Desktop Preview Controls** | Custom mouse Euler drag | Custom yaw/pitch drag (headset POV) + `THREE.OrbitControls` (orbit inspect) + wheel + tap-play | Same (done 2026-09-19) |
 | **Three.js Runtime** | None | Three.js r186 (797 KB offline IIFE) | Same (done) |
-| **Test Pass Rate** | (v5.2-era harness retired) | 43/43 Node tests pass (incl. session lifecycle, gate, drag, earth, pointer-chain tests) | Target: keep green |
+| **Test Pass Rate** | (v5.2-era harness retired) | 69/69 Node tests pass (43 carried + 13 v8.3 + 6 v8.4 + 1 v8.5 + 3 v8.6 + 2 v8.7 + 1 v8.8) | Target: keep green |
 
 ### 2.2 Root Causes of Current Technical Debt (Why the First Shrink Broke)
 
@@ -172,8 +173,60 @@ The desktop preview inspector (`/reels/immersive-preview`) allows complete testi
 - **All-Red Laser + Head-Ray** (2026-09-19): `THREE.Line` ray + billboarded radial reticle (0.045 idle / 0.07 hover), updated per frame in both loops (controllers in XR, cached mouse-hover ray — else head-forward — in preview, always visible).
 - **Single-Source Visibility** (2026-09-19): `applySceneVisibility()` gates all six memberships from `sceneMode`, enforced from `setSceneMode`, scene init, and both frame loops; `enterVR` re-asserts the mode on entry.
 
-### 4.3 Path A: Screen Curvature Mathematics
-The video screen mesh uses a subdivided quad grid ($48 \times 48$ tessellation) whose vertices are deformed on the **CPU** once per curvature-mode switch — `createScreenGeometry()` bakes the deform into a rebuilt `THREE.PlaneGeometry` (rendered with `THREE.MeshBasicMaterial`, no custom shaders) — preserving sharp 1:1 square master proportions. Coordinates are normalized by half-extent ($\hat{x} = x/halfW$, etc.), which is mathematically identical to the upstream v5.2 GPU vertex shader that operated on $[-1, 1]$ coordinates:
+### 4.3 v8.3 Lock-to-Viewer, Controller Input & Comment Surfaces (2026-09-20)
+Restores the v5.2 interaction model in the Three.js engine (full checklist in
+[`docs/v8.3-vr-parity-restore-plan.md`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/v8.3-vr-parity-restore-plan.md)):
+- **Head lock** (`applyLockToViewer`): screen at `screenDistance` (default 2.24 m) along head
+  forward, orientation = head quaternion — perpendicular, centered, 4.0 m wide so it fills the
+  horizontal view. Per-frame in the XR loop and in headset-POV preview; re-posed via
+  `commitScreenTransform()` (screen + 1.34× glow + overlay share the pose; curvature scales
+  uniformly through `mesh.scale = screenScale/2.4`). Unlock → free 6DOF grip-drag, level-facing.
+- **Controller map** (`processXRInput`, per `XRSession.inputSources`): grip+stickY = scale
+  (0.04/frame, clamp 1–10 m); **grip+stickX = distance** (v8.3 addition, right = further, 0.03/frame,
+  clamp 1.2–6 m); stickY flick = next/prev; stickY-on-panel = list scroll; stickX flick = seek ±5 s;
+  A = play/pause; B = toggle dock+guide; trigger chain = panel → dock → popup → screen → empty.
+  Earth mode keeps stick-rotate + B-toggle. Haptics on interactions.
+- **Dock/panels track the screen**: locked anchor `{0, 1.52, −screenDistance}` (level, room-stable);
+  unlocked = screen-local offsets (upstream factors: dock width `scale·0.82`, panels `±(scale/2+w/2+0.384)`,
+  `z −0.15`). Below-screen dock, **comments LEFT**, **guide RIGHT**, all `faceViewerLevel`.
+- **AUTO/LOOP + LOCK/FREE labels**: dock pills render live `getAutoNext()` state (`AUTO`/`LOOP` + ⟳)
+  and lock state (`LOCK`/`FREE` + 🔒/🔓) with active accents — upstream pill styles.
+- **Popup overlay** (`renderOverlayCanvas`): time-synced comments `[t, t+4.2s]`, max 3 middle-left,
+  fade in/out, hover pill; separate transparent quad sharing the screen pose; click → panel opens
+  scrolled + highlighted. Suppressed while the panel is open.
+- **Comments panel interaction**: hover regions, tabs, close, scroll buttons, trigger/mouse/wheel
+  drag-scroll, `seek:`/`like:`/`profile:`/`account` actions, DOM-overlay Quest keyboard posting via
+  the wired `onPostComment` host callback.
+- **Guide panel**: 440×760 canvas (vector controller artwork), six mapping cards, rendered once per
+  session, toggled with the dock (B button, 5 s auto-hide while playing).
+
+### 4.4 v8.4 Device Fixes (2026-09-20, from on-device Quest testing)
+Full checklist in [`docs/v8.4-vr-device-fixes-plan.md`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/v8.4-vr-device-fixes-plan.md):
+- **Tandem rig** (owner-confirmed): dock + comments + guide always derive from the *live* screen
+  transform — locked, the whole rig follows the head in tandem; unlocked, it freezes in the room.
+  Screen takes the full head quaternion; panels stay roll-free (`faceViewerLevel`).
+- **Paint-order ladder** (legacy parity): `depthTest: false` + `renderOrder` — screen 0, overlay 2,
+  dock 3, comments/guide 4. Legacy drew the reels view with `DEPTH_TEST` effectively off
+  (painter's algorithm); the port's depth-tested UI was culled behind the head-swept screen.
+- **Curvature z-scale fix**: uniform `scale.set(s,s,s)` so the dome depth scales with the screen
+  (upstream `R_world = R·scale`).
+- **Controller photo**: `renderGuideCanvas` uses the live `window.QUEST_CONTROLLER_B64`
+  (542×900, injected by `reels.py` from `quest_controller_img.js`) with vector fallback and a
+  dirty-flag re-upload when the photo arrives late.
+- **Dirty-only overlay**: re-render/re-upload only when the popup ID-set or hover changes; fade
+  repaints ≤10 Hz only while visible; zero popups → zero uploads (kills the v8.3 10 Hz 1024² churn
+  flagged in the playback investigation).
+- **Legacy sampling**: `LinearFilter` + `generateMipmaps: false` on all 10 `CanvasTexture`s
+  (legacy set `LINEAR`/no-mipmaps everywhere) — crisper text, no mipmap regen per re-upload.
+- **Respec A/B**: `WebXRVR.setVideoUploadMode('subimage'|'respec')` (+ `?vrTexMode=respec` auto-read);
+  `respec` disposes the video texture per upload to force full `texImage2D` re-specs (legacy path) —
+  decisive on-device test for the Quest `texSubImage2D` driver suspicion (three r186 uses
+  sub-image updates for same-size canvas re-uploads).
+- **XR telemetry**: frame-interval + upload counters POSTed ~1 Hz to the existing `/api/reels/diag`
+  while presenting (playback-investigation §4 workflow).
+
+### 4.5 Path A: Screen Curvature Mathematics
+The video screen mesh uses a subdivided quad grid ($48 \times 48$ tessellation, 2.4 m base, live-scaled by `screenScale/2.4`) whose vertices are deformed on the **CPU** once per curvature-mode switch — `createScreenGeometry()` bakes the deform into a rebuilt `THREE.PlaneGeometry` (rendered with `THREE.MeshBasicMaterial`, no custom shaders) — preserving sharp 1:1 square master proportions. Coordinates are normalized by half-extent ($\hat{x} = x/halfW$, etc.), which is mathematically identical to the upstream v5.2 GPU vertex shader that operated on $[-1, 1]$ coordinates:
 
 ```
        🌐 DOME (Mode 1)               🔲 SQ CURVE (Mode 2)               📺 FLAT (Mode 0)
@@ -274,9 +327,11 @@ The output displays:
 
 ## 7. Verification & Quality Assurance
 
-### 7.1 Automated Test Results (2026-09-19, Phase 4 complete)
+### 7.1 Automated Test Results (2026-09-20, v8.4 device fixes complete)
 - **Node Test Suite** (`web/tests/webxr-earth.test.js`):
-  - **43 tests passed (100% green)** in ~600 ms.
+  - **62 tests passed (100% green)** in ~800 ms (43 carried + 13 v8.3 + 6 v8.4:
+    tandem rig, paint-order ladder, guide photo fallback, overlay dirty-only,
+    overlay fade bound, linear sampling, respec switch).
   - Coverage includes: geographic spherical projection (`locationToUnit`), heat-zone raycasting, drag-to-rotate + click-to-select, heat scaling / pitch bounds, controls-dock Earth action, reduced-motion spin gating, preview start/stop + GPU cleanup, reels-vs-earth draw gating + video-upload pausing, cancellable 3-item location previews, stale-activity rejection, credit notifications, pack vs reel actions, proxy-canvas static-card upload + normalized hit coords, pending-image clear-then-upload, `startPreview` options + canvas validation, **restart-after-stop texture rebuild**, camera modes, `curved` alias, controls toggle, fullscreen, `version` export, scene-graph inspection, **plus A–E + issues-1–3 regression tests**: visibility matrix; dock clearances; laser build/visibility; earth texture/label/pins + standard-equirect `earthZoneUV` + seam offset; select-accept/select-reject flows; dock-UV→action; pointer-tap raycast chain; stopPreview reels-baseline reset; enterVR reason codes; 2-axis drag (pitch verbatim / reduced yaw / clamp / tap fallback); earth playback handshake; pack earth refusal; earth-station clearance; hologram classifier + heat-style constants; version stamp.
   - Harness note: uploads are observed via `__test.getLastUploadedSource()` (values: element / `'__cleared__'`) instead of spying on mock `gl.texImage2D` — the engine no longer issues raw GL calls outside Three's state tracker.
 - **Static Syntax Check**:
@@ -294,7 +349,7 @@ Executed on live FastAPI endpoint `http://localhost:8000/api/reels/player`:
 - `curvatureTest: { orig, dome: 'dome', flat: 'flat', curved: 'sq_curve' }` — probe uses **`sq_curve`** (the `curved` alias is still accepted by `setCurvatureMode` for backward compatibility)
 - `vrButtonPresent`: checks `#vrBtn` (actual id in `reels.html`) with legacy `#vr-button`/`.vr-btn` fallbacks
 - Live screenshot saved to `threejs_reels_player_live.png`.
-- Companion probes: `scripts/verify_threejs_cdp.cjs` (same `sq_curve` fix), `scripts/verify_threejs_parity_live.cjs` + `scripts/test_vr_simulation.cjs` (orbit/earth/scene exercisers for immersive-preview).
+- Companion probes: `scripts/verify_threejs_cdp.cjs` (same `sq_curve` fix), `scripts/verify_threejs_parity_live.cjs` + `scripts/test_vr_simulation.cjs` (orbit/earth/scene exercisers for immersive-preview), **`scripts/verify_v83_parity_live.cjs`** (v8.4: 20/20 green — v8.3 scope + tandem dock, paint ladder, linear sampling, dirty-only overlay, respec switch).
 
 ---
 
@@ -303,10 +358,62 @@ Executed on live FastAPI endpoint `http://localhost:8000/api/reels/player`:
 > [!NOTE]
 > This section is a chronological log: figures like line counts, test totals, and
 > pin counts are **at-the-time snapshots** of the entry they appear in. Live values
-> (v8.2, ~3,400 lines, 43/43 tests, dock `(0, 0.20, −0.85)`, no deck) are in
+> (v8.3, ~4,650 lines, 56/56 tests, comments LEFT / guide RIGHT, popup overlay) are in
 > §1–§7. Entries superseded later in the log are marked *superseded* inline.
 
-Owner decisions: (1) Phase 1+2 first, Phase 3+4 after confirmation; (2) keep v8 Three.js, revisit raw WebGL (`e3f7de1:ui/assets/webxr_vr.js` — the commit before the Three.js overhaul; HEAD itself is already v8) for guidance when lost; (3) fix CDP scripts + doc drift alongside code; keep this doc updated as the crash-safe progress tracker.
+Owner decisions: (1) Phase 1+2 first, Phase 3+4 after confirmation; (2) keep v8 Three.js, revisit raw WebGL (`e3f7de1:ui/assets/webxr_vr.js` — the commit before the Three.js overhaul; HEAD itself is already v8) for guidance when lost; (3) fix CDP scripts + doc drift alongside code; keep this doc updated as the crash-safe progress tracker; (4) v8.3: legacy stick-Y behavior kept (next/prev flick) + grip+stickX = distance (right = further); legacy comments-LEFT/guide-RIGHT layout kept.
+
+### ✅ v8.3 Parity Restore (2026-09-20, done — the 5 reported VR regressions)
+- **Screen lock/scale/distance**: `screenPos/screenQuat/screenScale (4.0)/screenDistance (2.24)` state, per-frame `applyLockToViewer()` + `commitScreenTransform()` (screen/glow/overlay share pose; curvature scales via `mesh.scale`), locked anchor `{0,1.52,−screenDistance}` with screen-sized dock/panels, unlocked screen-local derivation (upstream factors verbatim). Default screen fills the horizontal view, perpendicular + centered. (`ui/assets/webxr_vr.js`: screen-transform block, XR/preview loops, `enterVR` reset)
+- **Controller input**: `processXRInput()` over `XRSession.inputSources` — grip+stickY scale (0.04, 1–10 m), grip+stickX distance (0.03, 1.2–6 m; right = further), stickY flick next/prev (latch/reset), stickX seek ±5 s, panel-pointing stickY scroll, A play/pause, B dock+guide toggle, 6DOF grip-drag unlocked, earth stick-rotate, haptics. Trigger `select` chain: panel → dock → popup → screen → empty (legacy priority).
+- **Labels**: dock `AUTO/LOOP` (+⟳) from live `getAutoNext()`, `LOCK/FREE` (+🔒/🔓) with active accents, `MUTED/AUDIO` — upstream pill styles in `vr_ui_canvas.js`.
+- **Popup overlay**: `renderOverlayCanvas` + `resolveOverlayCommentAt` (max 3, middle-left, `[t,t+4.2s]`, fades, hover pill), transparent quad sharing the screen pose, click → panel scroll+highlight; suppressed while panel open.
+- **Comments LEFT + guide RIGHT**: screen-tracking poses/sizes replace the hardcoded right-side panel; full panel interaction (hover regions, tabs, drag/wheel scroll, seek/like/profile/account, DOM-overlay Quest keyboard → `onPostComment`); guide 440×760 with vector controller + six mapping cards, B-coupled with 5 s auto-hide.
+- **Verification**: 56/56 node tests; `npm run build --prefix web` clean; `npm test --prefix web` green (13 vitest + node suite); live `scripts/verify_v83_parity_live.cjs` 16/16 green on `/reels/immersive-preview` (locked screen `(0,1.6,−2.24)`, comments −3.248 / guide +3.226, live input drive, red-tint paint proof, zero page errors). Full headset session still needs on-device confirmation (USB workflow in §6 unchanged).
+- **Checklist**: [`docs/v8.3-vr-parity-restore-plan.md`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/v8.3-vr-parity-restore-plan.md) (all workstreams A–G green).
+
+### ✅ v8.4 Device Fixes (2026-09-20, done — 4 on-device Quest reports)
+- **Panels in front + tandem**: paint-order ladder (`depthTest:false`, screen 0 / overlay 2 / dock 3 / comments+guide 4 — legacy drew with `DEPTH_TEST` effectively off); lock special-cases deleted so dock/panels always derive from the live screen transform (locked = head tandem, unlocked = room freeze, per owner model); curvature `scale.set(s,s,s)` (upstream uniform dome scaling).
+- **Controller photo**: guide uses live `window.QUEST_CONTROLLER_B64` (542×900, already injected) with vector fallback + dirty-flag re-upload on late arrival.
+- **Glitch fixes**: dirty-only overlay (ID-set/hover key, fade ≤10 Hz only while visible, zero uploads when empty — kills the v8.3 10 Hz 1024² churn); `LinearFilter` + no-mipmaps on all 10 canvas textures (legacy sampling); `setVideoUploadMode('subimage'|'respec')` + `?vrTexMode=respec` (forces full `texImage2D` re-specs — decisive sub-image driver test); ~1 Hz XR telemetry POST to `/api/reels/diag` while presenting.
+- **Verification**: 62/62 node tests; build + web tests green; live probe 20/20 green (tandem dock, paint ladder, linear sampling, dirty-only overlay, respec switch, red-tint paint proof, zero page errors). **Open: owner on-device A/B** (head-turn ±40°, photo check, comment-heavy reel in both upload modes, diag watch) — see `docs/v8.4-vr-device-fixes-plan.md` W5.5.
+- **Checklist**: [`docs/v8.4-vr-device-fixes-plan.md`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/v8.4-vr-device-fixes-plan.md) (W1–W4 green, W5.5 owner-side open).
+
+### ✅ v8.5 Legacy-Lock Revert + Bisection Flags (2026-09-20, done)
+- **Exact legacy locked/unlocked restored** (owner reversal of the tandem rig): locked = head-locked
+  screen + room-fixed UI at the default spot sized at `DEFAULT_SCALE` (`getLockedAnchor` + lock
+  branches reinstated verbatim); unlocked = screen-relative UI at live scale. Paint-order ladder,
+  uniform z-scale, photo, dirty-only overlay, linear sampling, respec mode, telemetry all kept.
+- **On-device bisection flags** (URL query, read once in `init()`): `?lock=0` (no face-following —
+  pre-lock builds), `?overlay=0`, `?guide=0`, `?glow=0`, plus `?vrTexMode=respec`. Each removes
+  exactly one v8.3+ addition. Seams: `__test.getDebugFlags/setDebugFlags`, `lockApplies()`.
+- **Black-square debugging theory**: if the squares appeared only once the screen started
+  following the face, two prime suspects — (a) HEVC macroblocking newly visible on the 4 m
+  screen (v8.2's 2.4 m screen hid it; starved masters like Travis 5.8 Mbps vs King Von 28.8 Mbps
+  per the playback investigation §6); (b) texture-upload hazard from three's `texSubImage2D`
+  re-upload path. Distinguishing tests below.
+- **Verification**: 63/63 node tests; build + web tests green; live probe 20/20 green (v8.5 stamp,
+  legacy anchor dock `(0,−0.56,−2.24)`, panels room-fixed while screen follows gaze).
+- **Owner on-device protocol**: full tab close + reopen, then in VR — (1) shrink the screen with
+  grip+stickY to ~half size: squares shrink with the picture → source macroblocking (fix = use
+  high-bitrate masters / Quest rendition); squares stay fixed-size → compositor/texture bug →
+  (2) flag bisection in order `?overlay=0`, `?glow=0`, `?lock=0`, `?vrTexMode=respec`, one at a
+  time, ~1 min playback each on the same reel; (3) compare King Von (28.8 Mbps) vs Travis
+  (5.8 Mbps) reels; (4) `watch curl …/api/reels/diag` during each — report `dtMaxMs` + which
+  combination is clean.
+
+### ✅ v8.6 Laser Ray Unification + Reticle Fix (2026-09-20, done — 2 on-device laser reports)
+- **Mismatch**: hover tracked `vrControllers[0]` (connection order, unknown hand) while clicks used
+  the pressing hand. Now the shared laser prefers the **right** hand (legacy `pointerEligible`
+  priority) via XR `frame` poses, stores the shown ray per frame (`activeRayOrigin/Dir/Handedness`),
+  and `onVRSelect` reuses it when the pressing hand matches (falls back to a fresh raycast
+  otherwise) — clicks always honor the visible highlight.
+- **Half-circle reticle**: the billboarded dot sat exactly on the hit surface with depth testing
+  on — oblique/curved hits buried half of it. Now `depthTest: false` on beam (999) + reticle
+  (1000) with a 0.02 m pullback off the surface (legacy drew the laser/dot last with depth off).
+- **Verification**: 66/66 node tests (incl. right-preference, stored-ray vs fresh-ray select paths,
+  beam/reticle geometry + flags); live probe 23/23 green (beam hits posed screen at 2.24 m,
+  reticle exactly 0.02 back). Owner to confirm in-headset.
 
 ### ✅ Phase 0: Baseline (2026-09-19, done)
 - Locked reality vs doc: working tree is v8.0 / 1,261 lines / 14 tests — doc's "v7.1 / 6,361 lines / 58 tests" was stale.
@@ -378,3 +485,52 @@ Owner decisions: (1) Phase 1+2 first, Phase 3+4 after confirmation; (2) keep v8 
 - This doc: status/metrics/verification sections corrected; §8 converted to progress log.
 - **Doc drift round 2 (2026-09-19)**: fixed the raw-WebGL reference (`HEAD:` → `e3f7de1:`/`HEAD^:` — HEAD is already Three.js); §4.3 now describes the actual CPU `createScreenGeometry` path (48×48, no custom shaders) with normalized-coordinate formulas; earth dock station updated to `(0, 0.20, −0.85)` in §4.2; mermaid fixed (duplicate `EarthPins`/undefined `EarthRings` node, R=0.676 m, v8.2 label); §2.3 ~1,000-line target marked superseded; `xrCompatStatus` enum gained `unavailable`; §6.2 `:9222` corrected to `adb forward`; engine file header bumped v8.0 → v8.2 to match `VR_VERSION`.
 
+
+### ✅ v8.7 UI-Transition Diagnostics (2026-09-20, done — black-square elimination round)
+- **Device evidence**: squares are fixed-size (macroblocking dead), bitrate-independent,
+  immune to overlay/glow/lock/respec flags, clustered at reel starts + rapid prev/next.
+  Exonerated: overlay, glow, face-following, video sub-image path. Surviving theory:
+  dock/panel sub-image upload tears colliding with video re-specs at transition frames
+  (only textures without flag coverage; locked UI sizes ignore screenScale — explains
+  the shrink test).
+- **New diagnostics**: `?dockfreeze=1` (dock paints once then freezes — isolates dock tears),
+  `?glowprobe=0` (kills the 800 ms `getImageData` readback sync), per-texture counters
+  (`dockUploads/panelUploads/guideUploads`) + transition counters (`transChanges/transClears/
+  transNotReady`, the last counting buffering frames) in the ~1 Hz `/api/reels/diag` payload.
+- **Verification**: 68/68 node tests; build + web tests green; live probe 25/25 green.
+- **Owner on-device protocol v2**: full tab close + reopen, comments panel CLOSED, then —
+  (1) `?dockfreeze=1`: squares gone → dock/panel upload path confirmed (fix = re-spec routing
+  for UI textures); squares persist → UI innocent → (2) `?glowprobe=0`: gone → readback sync
+  (fix = drop the 800 ms probe or move off-frame); persist → (3) report
+  `watch curl …/api/reels/diag` (`dtMaxMs` + per-texture deltas) during a glitchy transition.
+  Also needed: feed or pack mode? panel open or closed during tests? precise square
+  description (where in view, size, duration, every transition or sometimes)?
+
+### ✅ v8.9 Hold-Frame + Decoded Gating (2026-09-20, done — rapid-switch telemetry verdict)
+- **Live verdict**: rapid-switch telemetry (frames mid-70s, dtMax 55–93 ms, `transNotReady`
+  21–42/s, clears 4–8/s, video uploads *dropping* to 25–60/s) attributes the glitch
+  windows to a loading-pipeline buffering storm — perpetual `src` swaps + prune/refetch +
+  preload contention over USB — not GL upload contention (which would need spikes *with*
+  high upload counts). Every GL path is exonerated by flags; `?domoverlay=0` test pending.
+- **Hold-last-frame**: black clears are now session-start-only; switches hold the prior
+  visual until the new source is ready (no mid-playlist black flash).
+- **Decoded-frame gating** (legacy Fix #1 port): uploads key on `totalVideoFrames` with a
+  0.25 s seek-jump backstop (~90/s → ~source fps; paused seeks never go stale).
+- **Rapid-flight preload backoff** (`reels.html`): `preloadNext` skips background transfers
+  within 1500 ms of navigation (`lastSwitchTime` in `nextVideo`/`prevVideo`).
+- **Verification**: 71/71 node tests; build + web tests green; live probe 26/26 green.
+- **Owner on-device protocol v3**: full tab close + reopen → rapid-switch 1 min → expect
+  brief freezes on the old reel instead of black flashes, `transClears` ≈ 1/session,
+  `videoUploads` ≈ 30/s, lower `dtMaxMs`. Then `?domoverlay=0` for the compositor layer.
+
+### ✅ v8.10 First-Frame Hold (2026-09-20, done — owner: freeze-then-cut works, first frames still square)
+> Full evidence record: [`docs/vr-black-squares-investigation.md`](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/vr-black-squares-investigation.md) (telemetry captures, elimination matrix, per-version fixes, open items, on-device protocol).
+- **Diagnosis**: a just-switched visual cut in on the first `HAVE_CURRENT_DATA` frame, which
+  after a src-swap/seek can be decoder resync garbage (corrupt references → blocky first
+  frames until the decoder settles). Matches the owner report exactly (clean between
+  switches, squares only in new reels' first frames).
+- **Fix**: fresh video visuals wait for `HAVE_FUTURE_DATA` (readyState ≥ 3) before the
+  first upload, holding the previous frame meanwhile; steady visuals upload at ≥ 2 as
+  before. Wall-clock cap 2.5 s bounds the hold on slow tunnels; `force` bypasses.
+- **Verification**: 72/72 node tests (incl. fresh-hold at rs2, cut-in at rs3, steady rs2
+  unaffected); live probe green. Owner to confirm first frames are clean on-device.
