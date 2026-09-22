@@ -4,6 +4,7 @@ and the full Reels/VR player page (replaces the Streamlit reels_view iframe)."""
 import hashlib
 import json
 import math
+import os
 import random
 import re
 import time
@@ -764,17 +765,204 @@ def _location_activity_rows(
         row["_coord_count"] += 1
 
     rows = list(catalog.values())
-    scores = sorted(row["score"] for row in rows if row["score"] > 0.0)
-    p95 = scores[max(0, math.ceil(len(scores) * 0.95) - 1)] if scores else 0.0
-    heat_denominator = math.log1p(p95) if p95 > 0.0 else 1.0
+    _normalize_row_heat(rows)
     for row in rows:
         count = max(1, row.pop("_coord_count"))
         row["lat"] = round(row.pop("_lat_sum") / count, 6)
         row["lon"] = round(row.pop("_lon_sum") / count, 6)
-        row["score"] = round(row["score"], 6)
-        row["heat"] = round(min(1.0, math.log1p(row["score"]) / heat_denominator), 6)
     rows.sort(key=lambda row: (-row["score"], row["name"]))
     return rows[:max(1, min(int(limit), 128))]
+
+
+def _normalize_row_heat(rows: list[dict]) -> None:
+    """In-place log1p/p95 heat normalization over one result set.
+
+    Snap Map renormalizes heat per zoom window (what is on screen defines the
+    'hot' ceiling); clustering re-runs this over the clustered rows so deep
+    zooms always span the full ramp.
+    """
+    scores = sorted(row["score"] for row in rows if row["score"] > 0.0)
+    p95 = scores[max(0, math.ceil(len(scores) * 0.95) - 1)] if scores else 0.0
+    heat_denominator = math.log1p(p95) if p95 > 0.0 else 1.0
+    for row in rows:
+        row["score"] = round(row["score"], 6)
+        row["heat"] = round(min(1.0, math.log1p(row["score"]) / heat_denominator), 6)
+
+
+# ─── Z3 zoom-aware heat clustering (docs/earth-zoom-map-plan.md §8) ─────
+GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+# K-anonymity floor for true sub-city cells (geohash length ≥ 6). City-level
+# cells (≤ 5 chars, built from published city centroids) need no extra
+# suppression: they are never finer than the shipped city unit.
+MAP_MIN_CELL_REELS = max(1, int(os.environ.get("SX_MAP_MIN_CELL_REELS", "3")))
+
+
+def _geohash_encode(lat: float, lon: float, precision: int) -> str:
+    """Standard base-32 geohash (bit interleave: lon first, then lat)."""
+    lat = max(-90.0, min(90.0, float(lat)))
+    lon = max(-180.0, min(180.0, float(lon)))
+    precision = max(1, min(12, int(precision)))
+    lat_lo, lat_hi = -90.0, 90.0
+    lon_lo, lon_hi = -180.0, 180.0
+    bits = (16, 8, 4, 2, 1)
+    bit = 0
+    ch = 0
+    even = True
+    out: list[str] = []
+    while len(out) < precision:
+        if even:
+            mid = (lon_lo + lon_hi) / 2
+            if lon >= mid:
+                ch |= bits[bit]
+                lon_lo = mid
+            else:
+                lon_hi = mid
+        else:
+            mid = (lat_lo + lat_hi) / 2
+            if lat >= mid:
+                ch |= bits[bit]
+                lat_lo = mid
+            else:
+                lat_hi = mid
+        even = not even
+        if bit < 4:
+            bit += 1
+        else:
+            out.append(GEOHASH_BASE32[ch])
+            bit = 0
+            ch = 0
+    return "".join(out)
+
+
+def _geohash_cell_center(geohash: str) -> tuple[float, float]:
+    """Decode a geohash back to its cell center (lat, lon).
+
+    Cluster centroids are cell centers, never raw means — the privacy-safe
+    quantization the plan requires (§8.2).
+    """
+    lat_lo, lat_hi = -90.0, 90.0
+    lon_lo, lon_hi = -180.0, 180.0
+    even = True
+    for char in str(geohash):
+        idx = GEOHASH_BASE32.find(char)
+        if idx < 0:
+            continue
+        for mask in (16, 8, 4, 2, 1):
+            if even:
+                mid = (lon_lo + lon_hi) / 2
+                if idx & mask:
+                    lon_lo = mid
+                else:
+                    lon_hi = mid
+            else:
+                mid = (lat_lo + lat_hi) / 2
+                if idx & mask:
+                    lat_lo = mid
+                else:
+                    lat_hi = mid
+            even = not even
+    return ((lat_lo + lat_hi) / 2, (lon_lo + lon_hi) / 2)
+
+
+def _cluster_precision(zoom: int) -> int:
+    """Geohash precision per zoom band (continent → country → region → city)."""
+    z = max(0, min(17, int(zoom)))
+    if z <= 2:
+        return 2
+    if z <= 5:
+        return 3
+    if z <= 8:
+        return 4
+    return 5
+
+
+def _parse_bbox(value) -> tuple[float, float, float, float] | None:
+    """Parse 'west,south,east,north' — malformed input degrades to None."""
+    if not value:
+        return None
+    try:
+        parts = [float(part) for part in str(value).split(",")]
+    except (TypeError, ValueError):
+        return None
+    if len(parts) != 4:
+        return None
+    west, south, east, north = parts
+    if not (-180.0 <= west <= 180.0 and -180.0 <= east <= 180.0):
+        return None
+    if not (-90.0 <= south <= 90.0 and -90.0 <= north <= 90.0):
+        return None
+    if west > east or south > north:
+        return None
+    return (west, south, east, north)
+
+
+def _in_bbox(lat: float, lon: float, bbox) -> bool:
+    if not bbox:
+        return True
+    west, south, east, north = bbox
+    return west <= float(lon) <= east and south <= float(lat) <= north
+
+
+def _cluster_activity_rows(
+    rows: list[dict],
+    precision: int,
+    bbox=None,
+    min_reels: int = MAP_MIN_CELL_REELS,
+) -> list[dict]:
+    """Aggregate city rows into geohash cells for one zoom band.
+
+    Privacy contract (§8.2): cluster coordinates are geohash CELL CENTERS
+    (quantized, never raw means); cells finer than city level (length ≥ 6)
+    are suppressed below the k-anonymity floor; no media paths or actor
+    fields are ever copied into the rows.
+    """
+    cells: dict[str, dict] = {}
+    top_scores: dict[str, float] = {}
+    for row in rows:
+        lat = float(row.get("lat") or 0.0)
+        lon = float(row.get("lon") or 0.0)
+        if not _in_bbox(lat, lon, bbox):
+            continue
+        gh = _geohash_encode(lat, lon, precision)
+        cell = cells.get(gh)
+        if cell is None:
+            cell = {
+                "kind": "cluster",
+                "geohash": gh,
+                "name": str(row.get("name") or ""),
+                "primary_slug": str(row.get("slug") or ""),
+                "location_count": 0,
+                "active_reel_count": 0,
+                "new_reel_count": 0,
+                "score": 0.0,
+                "sample_names": [],
+            }
+            cells[gh] = cell
+        cell["location_count"] += 1
+        cell["active_reel_count"] += int(row.get("active_reel_count") or 0)
+        cell["new_reel_count"] += int(row.get("new_reel_count") or 0)
+        cell["score"] += float(row.get("score") or 0.0)
+        if str(row.get("name") or "") and len(cell["sample_names"]) < 3:
+            cell["sample_names"].append(str(row.get("name")))
+        # The label name follows the hottest member city.
+        member_score = float(row.get("score") or 0.0)
+        if member_score >= top_scores.get(gh, 0.0):
+            top_scores[gh] = member_score
+            cell["name"] = str(row.get("name") or cell["name"])
+            cell["primary_slug"] = str(row.get("slug") or cell["primary_slug"])
+
+    out: list[dict] = []
+    floor = max(1, int(min_reels))
+    for cell in cells.values():
+        if len(cell["geohash"]) >= 6 and int(cell["active_reel_count"]) < floor:
+            continue  # sub-city cell below the k-anonymity floor
+        clat, clon = _geohash_cell_center(cell["geohash"])
+        cell["lat"] = round(clat, 6)
+        cell["lon"] = round(clon, 6)
+        out.append(cell)
+    _normalize_row_heat(out)
+    out.sort(key=lambda row: (-row["score"], row["name"]))
+    return out
 
 
 def _rank_tag_catalog(
@@ -1774,10 +1962,24 @@ def reels_earth_texture():
 def list_reel_location_activity(
     window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     limit: int = 128,
+    zoom: int | None = None,
+    bbox: str | None = None,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
-    """Return privacy-safe city heat markers for recent positive reel activity."""
+    """Return privacy-safe city heat markers for recent positive reel activity.
+
+    Z3 (docs/earth-zoom-map-plan.md §8): an optional `zoom` (0-17) aggregates
+    the city rows into geohash cells at a precision matched to the zoom band,
+    so heat resolves finer as the viewer zooms in (Snap Map mechanic). `bbox`
+    ('west,south,east,north') narrows the window; heat is renormalized within
+    the returned set. No `zoom` → the legacy city-row payload, verbatim.
+
+    Privacy: cluster coordinates are quantized geohash CELL CENTERS, never raw
+    means; zoom ≥ 12 keeps the city rows (the published privacy floor) and
+    sub-city cells (length ≥ 6) are suppressed below the k-anonymity floor
+    (`SX_MAP_MIN_CELL_REELS`). Media paths/actors are never returned.
+    """
     days = _bounded_activity_window(window_days)
     bounded_limit = max(1, min(int(limit), 128))
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
@@ -1785,12 +1987,34 @@ def list_reel_location_activity(
     raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     activity = _recent_activity_by_path(db, raw, days)
     locations = _location_activity_rows(raw, activity, limit=bounded_limit)
+    if zoom is None:
+        return {
+            "strategy": "recent-activity-v1",
+            "window_days": days,
+            "half_life_hours": RECENT_ACTIVITY_HALF_LIFE_HOURS,
+            "count": len(locations),
+            "locations": locations,
+        }
+
+    z = max(0, min(17, int(zoom)))
+    bounds = _parse_bbox(bbox)
+    if z >= 12 or not locations:
+        # City granularity is the privacy floor: deep zooms keep exact city
+        # rows instead of emitting sub-city clusters.
+        rows = [row for row in locations if _in_bbox(row["lat"], row["lon"], bounds)]
+        precision = None
+    else:
+        precision = _cluster_precision(z)
+        rows = _cluster_activity_rows(locations, precision, bounds, MAP_MIN_CELL_REELS)
     return {
-        "strategy": "recent-activity-v1",
+        "strategy": "zoom-cluster-v1",
+        "zoom": z,
+        "cluster_precision": precision,
+        "bbox": list(bounds) if bounds else None,
         "window_days": days,
         "half_life_hours": RECENT_ACTIVITY_HALF_LIFE_HOURS,
-        "count": len(locations),
-        "locations": locations,
+        "count": len(rows),
+        "locations": rows,
     }
 
 

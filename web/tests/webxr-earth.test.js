@@ -213,7 +213,7 @@ test('ray hit testing selects a visible city heat zone', () => {
   closeTo(hit.dist, 1.3 - (0.676 * 1.08));
 });
 
-test('drag rotates the globe while a click selects the heat zone', () => {
+test('drag rotates the globe; zone tap zooms first, selects at city band (Z1)', () => {
   const renderer = loadRenderer();
   let selected = null;
   renderer.init(null, { onSelectLocation: (location) => { selected = location.slug; return true; } });
@@ -221,16 +221,35 @@ test('drag rotates the globe while a click selects the heat zone', () => {
   api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
   api.setLocationActivity([{ slug: 'greenwich-gb', name: 'Greenwich, GB', lat: 0, lon: 0, heat: 1 }]);
   const press = { hit: true, zoneIndex: 0, local: { x: 0, y: 0, z: 1 } };
+
+  // Z1: at globe scale a zone tap zooms into the zone instead of selecting.
+  api.beginEarthDrag('mouse', press);
+  api.endEarthDrag('mouse', press);
+  assert.equal(selected, null);
+  assert.equal(api.getEarthState().zoomTarget, api.earthZoomConstants().city);
+  // getEarthState copies live inside the vm realm — compare fields, not
+  // prototypes (cross-realm deepStrictEqual rejects structurally equal
+  // objects from a different context).
+  const focus = api.getEarthState().focus;
+  assert.ok(focus, 'focus set');
+  assert.equal(focus.lat, 0);
+  assert.equal(focus.lon, 0);
+
+  // At/above the city band the same tap keeps the legacy select flow.
+  api.setEarthZoom(api.earthZoomConstants().city, { lat: 0, lon: 0 });
   api.beginEarthDrag('mouse', press);
   api.endEarthDrag('mouse', press);
   assert.equal(selected, 'greenwich-gb');
 
+  // Drag rotation is unchanged, and never dispatches a tap on release.
+  api.setEarthZoom(1);
   api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
   api.beginEarthDrag('mouse', press);
   api.updateEarthDrag({ x: 0.2, y: 0.1, z: 0.97 });
   api.endEarthDrag('mouse', { ...press, local: { x: 0.2, y: 0.1, z: 0.97 } });
   assert.notEqual(api.getEarthState().yaw, 0);
   assert.equal(api.getEarthState().pitch, 0);
+  assert.equal(api.getEarthState().zoomTarget, 1);
 });
 
 test('heat zones scale with activity while pitch remains bounded', () => {
@@ -1999,3 +2018,889 @@ test('video upload path A/B switch is honored', () => {
   assert.equal(api.getScreenState().uploadMode, 'respec');
   assert.equal(renderer.setVideoUploadMode('bogus'), 'subimage');
 });
+
+
+// ─── Z1: Earth zoom map (docs/earth-zoom-map-plan.md) ─────────────────
+
+test('Z1 unitToLatLon round-trips locationToUnit across the globe', () => {
+  const api = loadRenderer().__test;
+  const spots = [[0, 0], [35.67, 139.65], [-33.86, 151.2], [51.5, -0.12], [90, 0], [-90, 45], [21.02, 105.85]];
+  for (const [lat, lon] of spots) {
+    const back = api.unitToLatLon(api.locationToUnit(lat, lon));
+    closeTo(back.lat, lat, 1e-6);
+    closeTo(back.lon, ((lon + 540) % 360) - 180, 1e-6);
+  }
+});
+
+test('Z1 focus rotation solver faces the target direction', () => {
+  const api = loadRenderer().__test;
+  const norm = (v) => {
+    const l = Math.hypot(v.x, v.y, v.z) || 1;
+    return { x: v.x / l, y: v.y / l, z: v.z / l };
+  };
+  const DEG = Math.PI / 180; // (kept for future spot tuning in degrees)
+  // Reachability mirror (same closed form as the solver, unclamped): a
+  // facing is exactly achievable iff some pitch branch lands inside ±1.2.
+  // locationToUnit: x = sinθcosφ, y = sinφ, z = cosθcosφ.
+  const reachable = (lat, lon, t) => {
+    const v = api.locationToUnit(lat, lon);
+    const r = Math.hypot(v.y, v.z);
+    if (r < 1e-6) return false;
+    const ratio = t.y / r;
+    if (Math.abs(ratio) > 1 + 1e-9) return false; // beyond any pitch (acos would clamp)
+    const phi0 = Math.atan2(v.z, v.y);
+    const a = Math.acos(Math.max(-1, Math.min(1, ratio)));
+    return [a - phi0, -a - phi0].some((p) => Math.abs(p) <= 1.2 + 1e-9);
+  };
+  // View axes: gentle tilts, some deliberately beyond the ±1.2 pitch clamp.
+  const targets = [norm({ x: 0, y: -0.3, z: -1 }), norm({ x: 0.4, y: 0.2, z: -0.9 }), norm({ x: -0.2, y: 0.6, z: -0.7 })];
+  const spots = [[0, 0], [35.67, 139.65], [-33.86, 151.2], [21.02, 105.85], [60, -60]];
+  let exactCases = 0;
+  let clampedCases = 0;
+  let saturatingCases = 0;
+  for (const [lat, lon] of spots) {
+    for (const t of targets) {
+      const solved = api.solveEarthFocusRotation(lat, lon, t);
+      const dir = api.rotateEarthDir(api.locationToUnit(lat, lon), solved.yaw, solved.pitch);
+      assert.ok(Math.abs(solved.pitch) <= 1.2 + 1e-9, 'pitch stays inside the drag clamp');
+      if (reachable(lat, lon, t)) {
+        exactCases += 1;
+        closeTo(dir.x, t.x, 1e-6);
+        closeTo(dir.y, t.y, 1e-6);
+        closeTo(dir.z, t.z, 1e-6);
+      } else {
+        // Clamp- or geometry-limited (target y beyond pitch reach): stays
+        // finite inside the clamp; some cases saturate at exactly ±1.2.
+        clampedCases += 1;
+        assert.ok(Number.isFinite(solved.pitch), 'clamped branch stays finite');
+        if (Math.abs(solved.pitch) === 1.2) saturatingCases += 1;
+      }
+    }
+  }
+  assert.ok(exactCases >= 8, `exact facing covers the reachable set (${exactCases})`);
+  assert.ok(clampedCases >= 3, `clamp behavior is exercised (${clampedCases})`);
+  assert.ok(saturatingCases >= 2, `clamp saturation is exercised (${saturatingCases})`);
+});
+
+test('Z1 zoom clamps and maps onto slippy tile zoom bands', () => {
+  const api = loadRenderer().__test;
+  const C = api.earthZoomConstants();
+  assert.equal(C.max, 16384);
+  assert.equal(api.clampEarthZoom(0.5), 1);
+  assert.equal(api.clampEarthZoom(100), 100);
+  assert.equal(api.clampEarthZoom(999999), C.max);
+  assert.equal(api.clampEarthZoom('junk'), 1);
+  // tileZ mapping (log2(S)+3.3): constant ~4.6 tiles across the FOV.
+  api.setEarthZoom(1); assert.equal(api.earthTileZoom(), 3);
+  api.setEarthZoom(4); assert.equal(api.earthTileZoom(), 5);
+  api.setEarthZoom(8); assert.equal(api.earthTileZoom(), 6);
+  api.setEarthZoom(512); assert.equal(api.earthTileZoom(), 12);
+  api.setEarthZoom(16384); assert.equal(api.earthTileZoom(), 17);
+});
+
+test('Z1 continuous zoom locks a facing focus and releases it back at globe', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  assert.equal(api.getEarthState().focus, null);
+  api.adjustEarthZoom(2);
+  let state = api.getEarthState();
+  assert.equal(state.zoomTarget, 2);
+  assert.ok(state.focus && typeof state.focus.lat === 'number', 'focus = facing lat/lon');
+  assert.ok(state.anchor, 'comfort anchor locked');
+  // Harness head defaults to (0, 1.6, 0): anchor sits 1.15 m toward the globe.
+  const d = Math.hypot(state.anchor.x - 0, state.anchor.y - 1.6, state.anchor.z - 0);
+  closeTo(d, api.earthZoomConstants().surfaceDist, 1e-6);
+  api.adjustEarthZoom(0.5);
+  state = api.getEarthState();
+  assert.equal(state.zoomTarget, 1);
+  assert.equal(state.focus, null);
+  assert.equal(state.anchor, null);
+});
+
+test('Z1 tap on open globe zooms one step toward the tapped point', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  const action = api.handleEarthTap(-1, { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  assert.equal(action, 'zoom-point');
+  const state = api.getEarthState();
+  closeTo(state.zoomTarget, api.earthZoomConstants().step);
+  // Field-wise compare: focus lives in the vm realm (prototype differs).
+  assert.ok(state.focus, 'focus set');
+  assert.equal(state.focus.lat, 0);
+  assert.equal(state.focus.lon, 0);
+  assert.equal(api.handleEarthTap(-1, null), 'none');
+});
+
+
+
+test('Z1 tap animation lands the focus on the view axis at comfort distance', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  const api = renderer.__test;
+  const C = api.earthZoomConstants();
+  api.zoomEarthTo(35.67, 139.65, C.city);
+  api.advanceEarthZoom(100000); // way past the 450 ms ease → settles
+  const state = api.getEarthState();
+  assert.equal(state.zoom, C.city);
+  assert.equal(state.animating, false);
+  // Focus surface point = groupPos + R·S·rotatedDir(focus).
+  const dir = api.rotateEarthDir(api.locationToUnit(35.67, 139.65), state.yaw, state.pitch);
+  const R = 0.676 * state.zoom;
+  const surf = {
+    x: state.liveCenter.x + dir.x * R,
+    y: state.liveCenter.y + dir.y * R,
+    z: state.liveCenter.z + dir.z * R,
+  };
+  const dist = Math.hypot(surf.x - 0, surf.y - 1.6, surf.z - 0);
+  closeTo(dist, C.surfaceDist, 1e-6);
+  renderer.stopPreview();
+});
+
+test('Z1 pins counter-scale with zoom: constant world size, surface hug', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.setReducedMotion(true); // freeze the pulse so scales are deterministic
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.setLocationActivity([{ slug: 'tokyo-japan', name: 'Tokyo, Japan', lat: 35.67, lon: 139.65, heat: 0.9 }]);
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(16);
+  let info = api.getSceneInfo();
+  assert.equal(info.earthMap.pinCount, 1);
+  const baseWorld = info.earthMap.pinScale * info.earthMap.groupScale;
+  closeTo(info.earthMap.pinRadius, 0.676 + 0.035, 1e-9);
+  api.setEarthZoom(8, { lat: 35.67, lon: 139.65 });
+  renderer.__runScheduledFrame(32);
+  info = api.getSceneInfo();
+  assert.equal(info.earthMap.groupScale, 8);
+  closeTo(info.earthMap.pinScale * info.earthMap.groupScale, baseWorld, 1e-9);
+  closeTo(info.earthMap.pinRadius, 0.676 + 0.035 / 8, 1e-9);
+  renderer.stopPreview();
+});
+
+test('Z1 label and preview billboards stay world-sized while zoomed', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(16);
+  // Globe scale: legacy label spot, verbatim (0, 1.12 + 0.676 + 0.28, −1.3).
+  let info = api.getSceneInfo();
+  closeTo(info.earthMap.labelWorldPos.x, 0);
+  closeTo(info.earthMap.labelWorldPos.y, 2.076, 1e-9);
+  closeTo(info.earthMap.labelWorldPos.z, -1.3);
+  // Zoomed: label anchors at the surface point facing the head (+0.3 up),
+  // NOT 8× further out (the reparent + re-station regression guard).
+  api.setEarthZoom(8, { lat: 0, lon: 0 });
+  renderer.__runScheduledFrame(32);
+  info = api.getSceneInfo();
+  const headDist = Math.hypot(
+    info.earthMap.labelWorldPos.x - 0,
+    info.earthMap.labelWorldPos.y - 1.6,
+    info.earthMap.labelWorldPos.z - 0
+  );
+  assert.ok(headDist < 2.0, `label stays near the head at zoom 8 (dist ${headDist})`);
+  renderer.stopPreview();
+});
+
+test('Z2 mercator row math round-trips and matches the slippy scheme', () => {
+  const api = loadRenderer().__test;
+  // y fraction at the equator / top edge of the Mercator square.
+  closeTo(api.earthMercatorYFrac(0), 0.5);
+  closeTo(api.earthMercatorYToLat(0.5), 0, 1e-9);
+  closeTo(api.earthMercatorYToLat(api.earthMercatorYFrac(35.67)), 35.67, 1e-9);
+  closeTo(api.earthMercatorYToLat(api.earthMercatorYFrac(-33.86)), -33.86, 1e-9);
+  closeTo(api.earthMercatorYToLat(0), 85.05112878, 1e-6);
+  // Equator/prime-meridian at z1 lands inside tile (1,1).
+  const a = api.earthTileXY(0, 0, 1);
+  assert.equal(Math.floor(a.x), 1);
+  assert.equal(Math.floor(a.y), 1);
+  // Known address: Da Nang (16.0544, 108.2022) at z10 → x=819, y=465.
+  const dn = api.earthTileXY(16.0544, 108.2022, 10);
+  assert.equal(Math.floor(dn.x), 819);
+  assert.equal(Math.floor(dn.y), 465);
+  assert.equal(api.earthTileKey(3, 6, 5), '3/6/5');
+});
+
+test('Z2 visible set stays bounded and center-led at every band', () => {
+  const api = loadRenderer().__test;
+  for (const z of [0, 1, 5, 8, 12, 17]) {
+    const set = api.earthTileVisibleSet(z, 21.02, 105.85, 3);
+    assert.ok(set.length > 0 && set.length <= 49, `z${z}: ${set.length} tiles`);
+    // Center tile is first after the distance sort.
+    const n = 1 << z;
+    const c = api.earthTileXY(21.02, 105.85, z);
+    const cx = Math.max(0, Math.min(n - 1, Math.floor(c.x)));
+    const cy = Math.max(0, Math.min(n - 1, Math.floor(c.y)));
+    assert.equal(set[0].key, api.earthTileKey(z, cx, cy));
+    // All keys in range; distances sorted ascending.
+    for (let i = 0; i < set.length; i++) {
+      const t = set[i];
+      assert.ok(t.x >= 0 && t.x < n && t.y >= 0 && t.y < n, `tile ${t.key} in range`);
+      assert.ok(t.dist >= 0 && t.dist <= 6, `tile ${t.key} dist in ring`);
+      if (i > 0) assert.ok(set[i - 1].dist <= t.dist, 'sorted by ring distance');
+    }
+  }
+  // z1 globe corner: (0,0) is inside tile (1,1) — first in the set.
+  const corner = api.earthTileVisibleSet(1, 0, 0, 3);
+  assert.equal(corner[0].key, '1/1/1');
+  // Pole edges: no out-of-range tiles leak through the clamp.
+  const polar = api.earthTileVisibleSet(2, 85, 0, 3);
+  assert.ok(polar.length > 0 && polar.length <= 49);
+  for (const t of polar) assert.ok(t.y >= 0 && t.y < 4, `polar tile ${t.key} in range`);
+});
+
+test('Z2 crossfade weight follows the S ∈ [4, 8] smoothstep band', () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  const api = renderer.__test;
+  api.setEarthZoom(1);
+  assert.equal(api.earthTileFade(), 0);
+  api.setEarthZoom(4);
+  assert.equal(api.earthTileFade(), 0);
+  api.setEarthZoom(8);
+  assert.equal(api.earthTileFade(), 1);
+  api.setEarthZoom(6);
+  closeTo(api.earthTileFade(), 0.5);
+  api.setEarthZoom(48);
+  assert.equal(api.earthTileFade(), 1);
+  // ?earthmap=0 kills the fade outright (offline hologram stays).
+  api.setDebugFlags({ earthmap: false });
+  assert.equal(api.earthTileFade(), 0);
+  api.setDebugFlags({ earthmap: true });
+  assert.equal(api.getEarthState().tiles.available, true);
+});
+
+test('Z2 tile geometry drapes one slippy tile on the sphere', () => {
+  const api = loadRenderer().__test;
+  // Tile (z=2, x=3, y=2) spans lon 90°→180°, lat 0°→−66.5133° (Mercator row
+  // 1/2 → 3/4 of the square). Verify vertices sit on the sphere and both
+  // grid corners coincide with locationToUnit's own mapping (lat, lon).
+  const R = 0.676 + 0.005 / 8;
+  const geo = api.buildEarthTileGeometry(2, 3, 2, R);
+  const pos = geo.attributes.position;
+  assert.equal(pos.count, 81);
+  for (let i = 0; i < pos.count; i++) {
+    const r = Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i));
+    closeTo(r, R, 1e-6); // float32 attribute precision
+  }
+  // NW grid corner (i=0, j=0) = lon 90°, lat 0° → locationToUnit(0, 90).
+  const nw = api.locationToUnit(0, 90);
+  const dNW = Math.hypot(pos.getX(0) - nw.x * R, pos.getY(0) - nw.y * R, pos.getZ(0) - nw.z * R);
+  assert.ok(dNW < 1e-3, `NW corner coincides (err ${dNW})`);
+  // SE grid corner (i=8, j=8) = lon 180°, lat −66.5133 → locationToUnit(−66.5133, 180).
+  const se = api.locationToUnit(-66.5133, 180);
+  const last = pos.count - 1;
+  const dSE = Math.hypot(pos.getX(last) - se.x * R, pos.getY(last) - se.y * R, pos.getZ(last) - se.z * R);
+  assert.ok(dSE < 1e-3, `SE corner coincides (err ${dSE})`);
+  assert.ok(pos.getY(0) > pos.getY(last), 'grid descends north → south');
+  // Tri winding is consistent: every index triple is finite, UVs in [0, 1].
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    assert.ok(uv.getX(i) >= 0 && uv.getX(i) <= 1, 'u in range');
+    assert.ok(uv.getY(i) >= 0 && uv.getY(i) <= 1, 'v in range');
+  }
+  assert.ok(Array.isArray(geo.index.array) || geo.index.count === 8 * 8 * 6);
+});
+
+test('Z2 zooming past the band materializes tiles through the stub loader', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(16);
+  // Stub the image pipeline: tile bytes arrive synchronously.
+  let loadedUrls = [];
+  api.setEarthTileImageLoader((url, onLoad) => { loadedUrls.push(url); onLoad({ width: 256, height: 256 }); });
+  // Zoom to S=8 → tileZ 6 (band 5–7 → fade 1). Run frames past the 150 ms gate.
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  renderer.__runScheduledFrame(200);
+  renderer.__runScheduledFrame(400);
+  const stats = api.earthTileStats();
+  assert.equal(stats.band, 6);
+  assert.ok(stats.tracked > 0 && stats.tracked <= 49, `tracked ${stats.tracked} ≤ 49`);
+  assert.equal(stats.ready, stats.tracked);
+  assert.ok(loadedUrls.every((u) => u.startsWith('/api/reels/map-tiles/')), `same-origin proxy: ${loadedUrls[0]}`);
+  const band6 = loadedUrls.filter((u) => u.startsWith('/api/reels/map-tiles/6/'));
+  assert.equal(band6.length, stats.tracked); // every visible tile fetched exactly once
+  // Z4 idle prefetch warms at most the 4 center children one band down.
+  const band7 = loadedUrls.filter((u) => u.startsWith('/api/reels/map-tiles/7/'));
+  assert.ok(band7.length <= 4, `prefetch warms ≤4 children (${band7.length})`);
+  // Fade fully in: base gone, every tile at opacity 1.
+  closeTo(api.earthTileFade(), 1);
+  // Zoom out: the layer retires completely.
+  api.setEarthZoom(1);
+  renderer.__runScheduledFrame(600);
+  assert.equal(api.earthTileStats().tracked, 0);
+  assert.equal(api.earthTileStats().band, -1);
+  renderer.stopPreview();
+});
+
+test('Z2 tile failures degrade to the hologram with the offline label', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  // Every fetch errors — after 4 consecutive failures the layer degrades.
+  let errors = 0;
+  api.setEarthTileImageLoader((url, onLoad, onError) => { errors += 1; onError(new Error('boom')); });
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  for (let t = 200; t < 1200; t += 200) renderer.__runScheduledFrame(t);
+  const stats = api.earthTileStats();
+  assert.ok(errors >= 4, `retried through the queue (${errors} errors)`);
+  assert.equal(stats.available, false);
+  assert.equal(stats.tracked, 0);
+  assert.equal(api.earthTileFade(), 0);
+  // Z1 hologram behavior survives: zoom + focus intact, label shows offline.
+  assert.equal(api.getEarthState().zoom, 8);
+  assert.ok(api.getEarthLabelDetail().includes('MAP OFFLINE'), `label: ${api.getEarthLabelDetail()}`);
+  // Recovery: the degraded layer re-probes on the slow cadence (5 s of frame
+  // clock) and re-attaches once fetches succeed again.
+  api.setEarthTileImageLoader((url, onLoad) => onLoad({ width: 256, height: 256 }));
+  for (let t = 1400; t < 9400; t += 400) renderer.__runScheduledFrame(t);
+  assert.equal(api.earthTileStats().ready > 0, true);
+  assert.ok(api.getEarthLabelDetail().includes('OPENSTREETMAP'), `label: ${api.getEarthLabelDetail()}`);
+  renderer.stopPreview();
+});
+
+// ─── Z3: Zoom-aware heat clustering (docs/earth-zoom-map-plan.md §8) ───
+
+function z3ClusterRow(overrides = {}) {
+  return {
+    kind: 'cluster',
+    geohash: 'xn7m',
+    name: 'Tokyo',
+    slug: 'tokyo--japan',
+    lat: 35.6,
+    lon: 139.7,
+    heat: 0.9,
+    score: 9,
+    active_reel_count: 5,
+    new_reel_count: 1,
+    location_count: 3,
+    sample_names: ['Tokyo', 'Yokohama', 'Chiba'],
+    ...overrides,
+  };
+}
+
+function z3CityRow(overrides = {}) {
+  return {
+    slug: 'seattle--usa',
+    name: 'Seattle',
+    lat: 47.6,
+    lon: -122.3,
+    heat: 0.4,
+    score: 1,
+    active_reel_count: 1,
+    new_reel_count: 0,
+    ...overrides,
+  };
+}
+
+function z3Harness(fetchImpl) {
+  const gl = makeMockGl({ deleted: 0 });
+  const requests = [];
+  const fetch = fetchImpl || (async (url) => {
+    requests.push(String(url));
+    return { ok: true, json: async () => ({ locations: [] }) };
+  });
+  const renderer = loadRenderer({ gl, fetch });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  return { gl, requests, renderer, api: renderer.__test };
+}
+
+test('Z3 activity request follows the zoom band: globe omits zoom, slippy band sends it', () => {
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  assert.equal(requests.length, 1);
+  assert.ok(!requests[0].includes('zoom='), `globe request: ${requests[0]}`);
+  assert.equal(api.earthActivityRequestZoom(), null);
+  assert.ok(!api.earthActivityUrl(null).includes('zoom='), api.earthActivityUrl(null));
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  // S=8 → tileZ round(log2(8)+3.3) = 6 (region band).
+  assert.equal(api.earthActivityRequestZoom(), 6);
+  assert.equal(api.getEarthState().tileZoom, 6);
+  assert.ok(api.earthActivityUrl(6).includes('&zoom=6'), api.earthActivityUrl(6));
+  renderer.stopPreview();
+});
+
+test('Z3 crossing a zoom band refetches cluster heat once after the debounce', async () => {
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  assert.equal(requests.length, 1);
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  assert.equal(api.earthActivityFetchState().pending, true);
+  api.scheduleEarthActivityRefetch(); // repeat schedules are no-ops: one countdown
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(requests.length, 2);
+  assert.ok(requests[1].includes('&zoom=6'), `band request: ${requests[1]}`);
+  // earthActivityFetchState crosses the vm realm — compare fields, not objects.
+  assert.equal(api.earthActivityFetchState().zoom, 6);
+  assert.equal(api.earthActivityFetchState().pending, false);
+  renderer.stopPreview();
+});
+
+test('Z3 per-frame scheduling still fires the band fetch (no re-arm starvation)', async () => {
+  // updateEarthTiles calls scheduleEarthActivityRefetch() every frame: the
+  // countdown must survive repeat scheduling and fire once with the live
+  // band (re-arming every frame would starve the fetch while frames run).
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  api.scheduleEarthActivityRefetch();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  api.scheduleEarthActivityRefetch();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(requests.length, 2);
+  assert.ok(requests[1].includes('&zoom=6'), `band request: ${requests[1]}`);
+  renderer.stopPreview();
+});
+
+test('Z3 zooming back before the window skips the band fetch', async () => {
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  assert.equal(api.earthActivityFetchState().pending, true);
+  api.setEarthZoom(1); // back to globe before the window elapses
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  // Fire-time band matches the landed band: nothing to fetch.
+  assert.equal(requests.length, 1);
+  assert.equal(api.earthActivityFetchState().pending, false);
+  renderer.stopPreview();
+});
+
+test('Z3 settling inside the same band triggers no activity refetch', async () => {
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(requests.length, 2);
+  // S=6 → tileZ round(log2(6)+3.3) = 6: same band, no new request.
+  api.setEarthZoom(6, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  assert.equal(api.earthActivityFetchState().pending, false);
+  assert.equal(api.earthActivityFetchState().zoom, 6);
+  assert.equal(requests.length, 2);
+  renderer.stopPreview();
+});
+
+test('Z3 stale activity responses lose to the newest generation', async () => {
+  const resolvers = [];
+  const signals = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    fetch: (_url, opts = {}) => new Promise((resolve) => {
+      signals.push(opts.signal || null);
+      resolvers.push(resolve);
+    }),
+  });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.loadEarthActivity();
+  assert.equal(resolvers.length, 2);
+  // The superseded request is aborted outright, not just ignored on arrival.
+  assert.equal(signals[0] && signals[0].aborted, true);
+  resolvers[1]({
+    ok: true,
+    json: async () => ({ locations: [{ slug: 'new', lat: 1, lon: 1, heat: 1 }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(api.getEarthState().locationSlugs, ['new']);
+  resolvers[0]({
+    ok: true,
+    json: async () => ({ locations: [{ slug: 'stale', lat: 2, lon: 2, heat: 1 }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(api.getEarthState().locationSlugs, ['new']);
+  renderer.stopPreview();
+});
+
+test('Z3 activity resolving after leaving earth mode never lands', async () => {
+  const resolvers = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, fetch: () => new Promise((resolve) => resolvers.push(resolve)) });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  renderer.setSceneMode('reels');
+  resolvers[0]({
+    ok: true,
+    json: async () => ({ locations: [{ slug: 'ghost', lat: 1, lon: 1, heat: 1 }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  // Length, not deepEqual: untouched module state is a vm-realm array and
+  // strict deep-equal rejects cross-realm prototypes (see the Z1 note above).
+  assert.equal(api.getEarthState().locationSlugs.length, 0);
+  // Re-entry refetches and lands normally.
+  renderer.setSceneMode('earth');
+  assert.equal(resolvers.length, 2);
+  resolvers[1]({
+    ok: true,
+    json: async () => ({ locations: [{ slug: 'back', lat: 1, lon: 1, heat: 1 }] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(api.getEarthState().locationSlugs, ['back']);
+  renderer.stopPreview();
+});
+
+test('Z3 heat sprites rebuild from cluster rows and hide below the tile band', () => {
+  const { renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([
+    z3ClusterRow(),
+    z3ClusterRow({ geohash: 'ww8p', name: 'Shanghai', slug: 'shanghai--china', lat: 31.2, lon: 121.5, heat: 0.5, location_count: 2 }),
+    z3CityRow(),
+  ]);
+  assert.equal(api.earthHeatStats().count, 3);
+  assert.equal(api.earthHeatStats().visible, false);
+  api.updateEarthHeatSprites(0);
+  assert.equal(api.earthHeatStats().visible, false);
+  api.updateEarthHeatSprites(1);
+  assert.equal(api.earthHeatStats().visible, true);
+  // Unhovered base opacity is the tile fade times the sprite alpha.
+  closeTo(api.earthHeatStats().opacity, 0.85);
+  renderer.stopPreview();
+});
+
+test('Z3 hovered clusters brighten and grow their heat sprite', () => {
+  const { renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3ClusterRow(), z3CityRow()]);
+  api.updateEarthHeatSprites(1);
+  const baseScale = api.earthHeatStats().scale;
+  api.setEarthHoveredIndex(0);
+  api.updateEarthHeatSprites(1);
+  // Sprite[0] is the hottest row; the hover boost is 1.18x size, 1.15x alpha.
+  closeTo(api.earthHeatStats().scale, baseScale * 1.18);
+  closeTo(api.earthHeatStats().opacity, 0.85 * 1.15);
+  api.setEarthHoveredIndex(-1);
+  api.updateEarthHeatSprites(1);
+  closeTo(api.earthHeatStats().scale, baseScale);
+  closeTo(api.earthHeatStats().opacity, 0.85);
+  renderer.stopPreview();
+});
+
+test('Z3 cluster taps always drill deeper; city taps keep the select flow', () => {
+  const selected = [];
+  const renderer = loadRenderer();
+  renderer.init(null, { onSelectLocation: (location) => { selected.push(location.slug); return true; } });
+  const api = renderer.__test;
+  const C = api.earthZoomConstants();
+  api.setLocationActivity([
+    z3ClusterRow(),
+    z3CityRow(),
+    z3ClusterRow({ geohash: 'u4pr', name: 'Solo City', slug: 'solo--usa', lat: 40, lon: -100, location_count: 1 }),
+  ]);
+  const hit = { hit: true, local: { x: 0, y: 0, z: 1 } };
+  // Below the city band a cluster tap zooms to the city band, centered on the cell.
+  assert.equal(api.handleEarthTap(0, hit), 'zoom-cluster');
+  assert.equal(api.getEarthState().zoomTarget, C.city);
+  const focus = api.getEarthState().focus;
+  assert.equal(focus.lat, 35.6);
+  assert.equal(focus.lon, 139.7);
+  assert.deepEqual(selected, []);
+  // At/above the band clusters keep drilling instead of selecting.
+  api.setEarthZoom(C.city, { lat: 0, lon: 0 });
+  assert.equal(api.handleEarthTap(0, hit), 'zoom-cluster');
+  assert.equal(api.getEarthState().zoomTarget, Math.min(C.max, C.city * C.step));
+  assert.deepEqual(selected, []);
+  // A lone city row below the band zooms; at the band it selects.
+  api.setEarthZoom(1);
+  assert.equal(api.handleEarthTap(1, hit), 'zoom-zone');
+  assert.deepEqual(selected, []);
+  api.setEarthZoom(C.city, { lat: 47.6, lon: -122.3 });
+  assert.equal(api.handleEarthTap(1, hit), 'select');
+  assert.deepEqual(selected, ['seattle--usa']);
+  // A single-city "cluster" behaves like a city row: selectable at the band.
+  assert.equal(api.handleEarthTap(2, hit), 'select');
+  assert.deepEqual(selected, ['seattle--usa', 'solo--usa']);
+});
+
+test('Z3 OPEN FEED drills into clusters and opens city feeds', async () => {
+  const selected = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  // Reject the feed swap so the globe stays up for the rest of the test.
+  renderer.init(null, { onSelectLocation: (location) => { selected.push(location.slug); return false; } });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3ClusterRow(), z3CityRow()]);
+  const C = api.earthZoomConstants();
+  api.setEarthHoveredIndex(0);
+  api.executeControl('earth_open_feed');
+  // Clusters have no feed of their own — the dock drills into the cell.
+  assert.deepEqual(selected, []);
+  assert.equal(api.getEarthState().zoomTarget, C.city);
+  api.setEarthHoveredIndex(1);
+  api.executeControl('earth_open_feed');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(selected, ['seattle--usa']);
+  // Nothing under the cursor → the dock asks the user to point at a zone.
+  api.setEarthHoveredIndex(-1);
+  api.executeControl('earth_open_feed');
+  assert.equal(api.getEarthState().notificationText, 'POINT AT A ZONE FIRST');
+  renderer.stopPreview();
+});
+
+test('Z3 label reads clusters as city counts with heat', () => {
+  const { renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([
+    z3ClusterRow({ heat: 0.8 }),
+    z3ClusterRow({ geohash: 'ww8p', name: 'Shanghai', slug: 'shanghai--china', lat: 31.2, lon: 121.5, heat: 0.4, location_count: 2 }),
+  ]);
+  renderer.__runScheduledFrame(32);
+  assert.ok(api.getEarthLabelDetail().includes('2 CLUSTERS'), `label: ${api.getEarthLabelDetail()}`);
+  api.setEarthHoveredIndex(0);
+  renderer.__runScheduledFrame(64);
+  assert.ok(api.getEarthLabelDetail().includes('3 CITIES'), `label: ${api.getEarthLabelDetail()}`);
+  assert.ok(api.getEarthLabelDetail().includes('80% HEAT'), `label: ${api.getEarthLabelDetail()}`);
+  renderer.stopPreview();
+});
+
+test('Z3 cleanup resets the zoom-tracked fetch and heat overlay', async () => {
+  const { requests, renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3ClusterRow()]);
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  api.scheduleEarthActivityRefetch();
+  assert.equal(api.earthActivityFetchState().pending, true);
+  assert.equal(api.earthHeatStats().count, 1);
+  api.cleanup();
+  assert.equal(api.getEarthState().zoom, 1);
+  assert.equal(api.earthActivityFetchState().zoom, null);
+  assert.equal(api.earthActivityFetchState().pending, false);
+  assert.equal(api.earthHeatStats().count, 0);
+  // The cleared debounce timer never fires its band fetch.
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(requests.length, 1);
+  renderer.stopPreview();
+});
+
+test('Z3 geohash cells decode to bounds containing the encoded point', () => {
+  const api = loadRenderer().__test;
+  // Reference vector shared with the server suite: (42.6, -5.6) → 'ezs42'.
+  const cell = api.earthGeohashCellBounds('ezs42');
+  assert.ok(cell, 'decodable');
+  assert.ok(cell.latLo < 42.6 && 42.6 < cell.latHi, JSON.stringify(cell));
+  assert.ok(cell.lonLo < -5.6 && -5.6 < cell.lonHi, JSON.stringify(cell));
+  // Finer prefixes nest: the angular half-extent strictly shrinks.
+  const r2 = api.earthGeohashCellAngularRadius('ez');
+  const r3 = api.earthGeohashCellAngularRadius('ezs');
+  const r4 = api.earthGeohashCellAngularRadius('ezs4');
+  const r5 = api.earthGeohashCellAngularRadius('ezs42');
+  assert.ok(r2 > r3 && r3 > r4 && r4 > r5 && r5 > 0, `${r2} > ${r3} > ${r4} > ${r5}`);
+  // A precision-5 cell is sub-kilometer-scale: well under a hundredth of a radian.
+  assert.ok(r5 < 0.01, `p5 extent ${r5}`);
+  // Undecodable input degrades to null / zero, never throws.
+  assert.equal(api.earthGeohashCellBounds(''), null);
+  assert.equal(api.earthGeohashCellBounds('ezs42!'), null);
+  assert.equal(api.earthGeohashCellBounds('ezs42ezs42ezs'), null);
+  assert.equal(api.earthGeohashCellBounds(null), null);
+  assert.equal(api.earthGeohashCellAngularRadius('!'), 0);
+});
+
+test('Z3 cluster radius covers the cell but never drops below the heat floor', () => {
+  const api = loadRenderer().__test;
+  // Continent cell (p2 ≈ 0.11 rad) at zero heat: the floor holds exactly.
+  assert.equal(api.earthZoneAngularRadius({ kind: 'cluster', geohash: 'ez', heat: 0 }), 0.11);
+  // City cell (p5, sub-milliradian): the heat base dominates, unchanged.
+  closeTo(api.earthZoneAngularRadius({ kind: 'cluster', geohash: 'ezs42', heat: 0.9 }), 0.11 + 0.9 * 0.12);
+  // City rows and geohash-less clusters keep the legacy heat ramp verbatim.
+  closeTo(api.earthZoneAngularRadius({ heat: 0.5 }), 0.11 + 0.5 * 0.12);
+  closeTo(api.earthZoneAngularRadius({ kind: 'cluster', heat: 0.5 }), 0.11 + 0.5 * 0.12);
+  closeTo(api.earthZoneAngularRadius({ kind: 'cluster', geohash: 123, heat: 0.5 }), 0.11 + 0.5 * 0.12);
+});
+
+test('Z3 visible bbox tracks the zoomed patch and feeds the activity URL', () => {
+  const { renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  assert.equal(api.earthVisibleBbox(), null);
+  assert.ok(!api.earthActivityUrl(null).includes('bbox='));
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  const bbox = api.earthVisibleBbox();
+  assert.ok(bbox, 'bbox inside the tile band');
+  assert.ok(bbox.west < 105.85 && 105.85 < bbox.east, JSON.stringify(bbox));
+  assert.ok(bbox.south < 21.02 && 21.02 < bbox.north, JSON.stringify(bbox));
+  assert.ok(bbox.west >= -180 && bbox.east <= 180 && bbox.south >= -90 && bbox.north <= 90);
+  assert.ok(bbox.east - bbox.west < 100, `tile-ring span: ${bbox.east - bbox.west}`);
+  const url = api.earthActivityUrl(6);
+  const match = url.match(/&bbox=([^&]+)/);
+  assert.ok(match, url);
+  const parts = match[1].split(',').map(Number);
+  assert.equal(parts.length, 4);
+  assert.ok(parts.every(Number.isFinite), match[1]);
+  assert.equal(parts[0], bbox.west);
+  assert.equal(parts[3], bbox.north);
+  // Dateline clip: the tile set stops at x=n-1, so the box stays a small
+  // valid sliver instead of wrapping.
+  api.setEarthZoom(16384, { lat: 0, lon: 179.999 });
+  const edge = api.earthVisibleBbox();
+  assert.ok(edge && edge.west > 179.9 && edge.east <= 180, JSON.stringify(edge));
+  renderer.stopPreview();
+});
+
+// ─── Z4: Polish — breadcrumb + idle prefetch (docs/earth-zoom-map-plan.md §9) ──
+
+test('Z4 zoom percent maps the exponential range onto 0–100', () => {
+  const api = loadRenderer().__test;
+  api.setEarthZoom(1);
+  assert.equal(api.earthZoomPercent(), 0);
+  api.setEarthZoom(8);
+  assert.equal(api.earthZoomPercent(), 21); // round(100·3/14)
+  api.setEarthZoom(16384);
+  assert.equal(api.earthZoomPercent(), 100);
+});
+
+test('Z4 breadcrumb titles the zoomed globe; globe scale keeps the legacy title', () => {
+  const { renderer, api } = z3Harness();
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3CityRow()]);
+  api.setEarthHoveredIndex(0);
+  renderer.__runScheduledFrame(32);
+  assert.equal(api.getEarthLabelTitle(), 'Seattle');
+  // The detail line is untouched by the breadcrumb (license suffix safe).
+  assert.ok(!api.getEarthLabelDetail().includes('WORLD'));
+  api.setEarthZoom(8, { lat: 47.6, lon: -122.3 });
+  renderer.__runScheduledFrame(64);
+  assert.equal(api.getEarthLabelTitle(), 'WORLD › Seattle · 21%');
+  api.setEarthHoveredIndex(-1);
+  renderer.__runScheduledFrame(96);
+  assert.equal(api.getEarthLabelTitle(), 'WORLD · 21%');
+  renderer.stopPreview();
+});
+
+test('Z4 idle prefetch warms the next band so zoom-in starts textured', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const loadedUrls = [];
+  api.setEarthTileImageLoader((url, onLoad) => { loadedUrls.push(url); onLoad({ width: 256, height: 256 }); });
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  for (let t = 200; t <= 1200; t += 200) renderer.__runScheduledFrame(t);
+  assert.equal(api.earthTileStats().band, 6);
+  // The side cache never counts toward the visible-set bound.
+  assert.ok(api.earthTileStats().tracked <= 49);
+  const pre = api.earthTilePrefetchStats();
+  assert.equal(pre.size, 4);
+  assert.equal(pre.ready, 4);
+  // The 4 warmed children of the z6 center tile…
+  const c = api.earthTileXY(21.02, 105.85, 6);
+  const cx = Math.floor(c.x), cy = Math.floor(c.y);
+  const warmed = [];
+  for (let oy = 0; oy <= 1; oy++) {
+    for (let ox = 0; ox <= 1; ox++) {
+      warmed.push(`/api/reels/map-tiles/7/${2 * cx + ox}/${2 * cy + oy}.png`);
+    }
+  }
+  const countOf = (u) => loadedUrls.filter((v) => v === u).length;
+  assert.ok(warmed.every((u) => countOf(u) === 1), 'each warmed child fetched exactly once');
+  // …materialize with zero new fetches on zoom-in.
+  api.setEarthZoom(16, { lat: 21.02, lon: 105.85 });
+  for (let t = 1400; t <= 2400; t += 200) renderer.__runScheduledFrame(t);
+  assert.equal(api.earthTileStats().band, 7);
+  assert.ok(warmed.every((u) => countOf(u) === 1), 'no refetch of warmed children');
+  assert.ok(api.earthTileStats().ready >= 4, `warmed children ready (${api.earthTileStats().ready})`);
+  api.cleanup(); // clear the band-change refetch timer before teardown
+  renderer.stopPreview();
+});
+
+// ─── Holo tile restyle: OSM raster graded into the globe palette ───
+
+test('holo tile class separates water, land, ink, and paper', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.earthHoloTileClass(170, 211, 223), 0); // OSM water #aad3df
+  assert.equal(api.earthHoloTileClass(242, 239, 233), 1); // OSM land beige
+  assert.equal(api.earthHoloTileClass(200, 250, 204), 1); // park green
+  assert.equal(api.earthHoloTileClass(0, 0, 0), 2); // label black
+  assert.equal(api.earthHoloTileClass(0, 120, 168), 2); // water-label blue
+  assert.equal(api.earthHoloTileClass(255, 255, 255), 3); // road white
+  assert.equal(api.earthHoloTileClass(232, 232, 232), 3); // urban gray glows (city blocks lit)
+  assert.equal(api.earthHoloTileClass(78, 155, 71), 2); // trunk green reads as feature-dark
+  assert.equal(api.earthHoloTileClass(118, 120, 188), 0); // motorway blue reads as water-dark
+  assert.equal(api.earthHoloTileClass(119, 119, 119), 2); // rail gray joins ink (fringe-swallow)
+  assert.equal(api.earthHoloTileClass(140, 140, 140), 1); // light gray stays land
+});
+
+test('holo tile pixel matches the globe ramp per class', () => {
+  const api = loadRenderer().__test;
+  // Pixel fn returns vm-realm arrays: spread into host arrays first (see Z1 note).
+  assert.deepEqual([...api.earthHoloTilePixel(170, 211, 223)], [4, 18, 43]); // ocean formula
+  assert.deepEqual([...api.earthHoloTilePixel(242, 239, 233)], [20, 117, 180]); // land formula
+  assert.deepEqual([...api.earthHoloTilePixel(0, 0, 0)], [200, 240, 255]); // full glow
+  assert.deepEqual([...api.earthHoloTilePixel(255, 255, 255)], [245, 252, 255]); // ice road
+  // Ink is uniformly bright by design (legibility over gradient continuity):
+  // fringe grays render as bold glyph, not hollow ringing.
+  assert.deepEqual([...api.earthHoloTilePixel(114, 114, 114)], [200, 240, 255]);
+  assert.deepEqual([...api.earthHoloTilePixel(51, 51, 51)], [200, 240, 255]);
+});
+
+test('holo tile composer paints interiors, edges, glow, and paper', () => {
+  const api = loadRenderer().__test;
+  const W = 6, H = 2;
+  const buf = new Uint8Array(W * H * 4);
+  const paint = (x, y, r, g, b, a = 255) => {
+    const o = (y * W + x) * 4;
+    buf[o] = r; buf[o + 1] = g; buf[o + 2] = b; buf[o + 3] = a;
+  };
+  for (let y = 0; y < H; y++) {
+    paint(0, y, 170, 211, 223); // water interior
+    paint(1, y, 170, 211, 223); // water at the coast
+    paint(2, y, 242, 239, 233); // land at the coast
+    paint(3, y, 242, 239, 233); // land interior
+    paint(4, y, 51, 51, 51, 128); // dark label, half alpha
+    paint(5, y, 255, 255, 255); // paper road
+  }
+  const out = api.styleEarthTilePixels(buf, W, H);
+  assert.equal(out.length, buf.length);
+  const px = (x, y) => [out[(y * W + x) * 4], out[(y * W + x) * 4 + 1], out[(y * W + x) * 4 + 2], out[(y * W + x) * 4 + 3]];
+  assert.deepEqual(px(0, 0).slice(0, 3), [4, 18, 43]); // water interior: ocean ramp
+  assert.deepEqual(px(1, 0).slice(0, 3), [42, 222, 255]); // coastline glows cyan
+  assert.deepEqual(px(2, 1).slice(0, 3), [42, 222, 255]); // both sides of the coast
+  assert.deepEqual(px(3, 0).slice(0, 3), [20, 117, 180]); // land interior: land ramp
+  const ink = px(4, 0);
+  assert.deepEqual(ink.slice(0, 3), [200, 240, 255]); // label glows bright, no cyan box
+  assert.equal(ink[3], 128); // alpha preserved
+  assert.deepEqual(px(5, 1).slice(0, 3), [245, 252, 255]); // road glows ice
+});
+
+test('holo tile style falls back to raw without pixel access, mode switchable', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.earthTileStyleMode(), 'holo');
+  // Stub images (no canvas pixels, like the tile-loader stubs) degrade to raw.
+  assert.equal(api.styleEarthTileImage({ width: 256, height: 256 }), null);
+  assert.equal(api.styleEarthTileImage(null), null);
+  api.setDebugFlags({ earthstyle: 'raw' });
+  assert.equal(api.earthTileStyleMode(), 'raw');
+  api.setDebugFlags({ earthstyle: 'holo' });
+  assert.equal(api.earthTileStyleMode(), 'holo');
+});
+

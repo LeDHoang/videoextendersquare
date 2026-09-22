@@ -75,6 +75,12 @@
     // Feed-mode collection shortcut (opens the SAVE TO card).
     { label: 'COLLECT',    action: 'collect',    x: 24,  y: 238, w: 174, h: 42 },
 
+    // Earth-mode zoom map controls (docs/earth-zoom-map-plan.md Z1): share
+    // the pack/collect row slots; visible + hittable only in earth scene mode.
+    { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 238, w: 174, h: 42 },
+    { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 238, w: 174, h: 42 },
+    { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 238, w: 174, h: 42 },
+
     // Bottom progress scrub track
     { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
   ];
@@ -126,9 +132,15 @@
     return action === 'save_pack' || action === 'share_pack';
   }
 
-  function isControlVisible(action, source, itemState, isPackExp) {
+  // Earth zoom map dock actions (Z1) — only meaningful in earth scene mode.
+  function isEarthAction(action) {
+    return action === 'earth_open_feed' || action === 'earth_zoom_out' || action === 'earth_reset';
+  }
+
+  function isControlVisible(action, source, itemState, isPackExp, sceneMode) {
+    if (isEarthAction(action)) return sceneMode === 'earth';
     if (isPackAction(action)) return !!isPackExp;
-    if (action === 'collect') return !isPackExp;
+    if (action === 'collect') return !isPackExp && sceneMode !== 'earth';
     if (isReelAction(action)) return source.kind !== 'static-card' && (!itemState || itemState.available !== false);
     if (source.kind === 'static-card' &&
         (action === 'rew' || action === 'prev' || action === 'play' ||
@@ -286,7 +298,7 @@
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek') continue;
-      if (!isControlVisible(btn.action, source, itemState, packMode)) continue;
+      if (!isControlVisible(btn.action, source, itemState, packMode, sceneMode)) continue;
 
       const isHover = (hoveredButton === i);
       const isPressed = (pressedButton === i);
@@ -428,8 +440,10 @@
     const { source = {}, itemState = {}, sceneMode = 'reels', packMode = false } = options;
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
-      if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit') continue;
-      if (!isControlVisible(btn.action, source, itemState, packMode)) continue;
+      // Earth mode hit-allowlist: the mode toggle, exit, and the zoom-map
+      // actions (Z1). Everything else stays decorative behind the globe.
+      if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit' && !isEarthAction(btn.action)) continue;
+      if (!isControlVisible(btn.action, source, itemState, packMode, sceneMode)) continue;
       if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
           canvasY >= btn.y && canvasY <= btn.y + btn.h) {
         return i;

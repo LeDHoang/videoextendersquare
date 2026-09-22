@@ -26,7 +26,7 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 
 ## Still open
 
-- [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign.
+- [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
 - [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
 - [ ] Review the Explore page reels loading priority.
 - [ ] Review VR immersive-mode reel playback and loading. (Earth interaction reworked, but full playback/loading review still open.)

@@ -100,6 +100,12 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 | `SX_MEDIA_PORT` | Legacy mediaserver port (unused by new stack) | 8502 |
 | `SX_LIBX264` | `0` disables libx264 proxies (forces HEVC masters) | `1` |
 | `SX_DEBUG` | Streamlit sidebar debug output | off |
+| `SX_MAP_TILES_ENABLED` | `0` disables the OSM tile proxy (VR globe falls back to the holographic look, label shows `MAP OFFLINE — CITY VIEW`) | `1` |
+| `SX_MAP_TILES_URL` | Upstream tile template swapped without code change (pre-launch: stay on OSM policy limits or point at a paid MapTiler/Mapbox endpoint — see `docs/to-beta.md`) | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` |
+| `SX_MAP_TILES_CACHE_DIR` | Disk cache for proxied tiles (immutable, `Cache-Control: public, max-age=604800`) — persist this alongside `output/` or repeat zooms refetch upstream | `data/map_tiles/` |
+| `SX_MAP_MIN_CELL_REELS` | K-anonymity floor: sub-city heat cells (geohash ≥ 6) are suppressed below this many active reels (city-level rows are unaffected — already the published privacy unit) | `3` |
+
+VR globe debugging: append `?earthmap=0` to disable the slippy-map tile layer on-device (bisection alongside `?lock=0`, `?overlay=0`). Tiles are re-graded into the holographic palette at load (navy oceans, glowing roads/labels); append `?earthstyle=raw` to compare against the unstyled OSM raster. The tile proxy requires outbound HTTPS to the `SX_MAP_TILES_URL` host with a policy-compliant `User-Agent: EchoVR-MapTiles/1.0`; upstream failures return 502 with `Retry-After` (never 500 — the globe always renders).
 
 ## Credits, Stripe, and reel-reward deployment notes
 
