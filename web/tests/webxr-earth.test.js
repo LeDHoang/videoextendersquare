@@ -565,6 +565,80 @@ test('a pending image source holds the prior reel texture before it becomes read
   renderer.stopPreview();
 });
 
+test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static sources', () => {
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
+  const makeVideo = (tag, w, h, frames) => ({
+    readyState: 4,
+    paused: false,
+    currentTime: 1,
+    duration: 10,
+    muted: true,
+    width: w,
+    height: h,
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: frames }),
+    addEventListener() {},
+    removeEventListener() {},
+    requestVideoFrameCallback() { return 1; },
+    cancelVideoFrameCallback() {},
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); },
+  });
+  const videoA = makeVideo('a', 3840, 3840, 31);
+  let source = {
+    kind: 'video', element: videoA, ready: true,
+    paused: false, currentTime: 1, duration: 10, version: 'video-direct-1',
+  };
+  const renderer = loadRenderer({ gl });
+  renderer.init(videoA, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.__test.setDebugFlags({ vrtex: true });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  // Direct texture bound: native video dims, not the 2048 proxy canvas.
+  assert.equal(renderer.__test.getSceneInfo().screen.mapSize.join(','), '3840,3840');
+  assert.equal(renderer.__test.getLastUploadedSource(), videoA);
+  assert.equal(renderer.getPreviewState().renderStats.videoUploads, 1);
+  renderer.__runScheduledFrame(32);
+  // Same decoded frame: no re-count.
+  assert.equal(renderer.getPreviewState().renderStats.videoUploads, 1);
+
+  // A fresh element rebinds a new direct texture once ready.
+  const videoB = makeVideo('b', 1920, 1080, 12);
+  source = {
+    kind: 'video', element: videoB, ready: true,
+    paused: false, currentTime: 0.5, duration: 10, version: 'video-direct-2',
+  };
+  renderer.onVideoChange();
+  renderer.__runScheduledFrame(48);
+  assert.equal(renderer.__test.getSceneInfo().screen.mapSize.join(','), '1920,1080');
+  assert.equal(renderer.__test.getLastUploadedSource(), videoB);
+
+  // Static cards fall back to the canvas proxy (map rebound to 2048 canvas).
+  const imageElement = { complete: true, naturalWidth: 64 };
+  source = {
+    kind: 'image', element: imageElement, ready: true,
+    paused: true, currentTime: 0, duration: 8, version: 'image-direct-1',
+  };
+  renderer.onVideoChange();
+  renderer.__runScheduledFrame(64);
+  assert.equal(renderer.__test.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  renderer.stopPreview();
+});
+
+test('session defaults are minimal with xrfull opt-out (v8.15 flash fix)', () => {
+  const renderer = loadRenderer({});
+  renderer.init(null, {});
+  const flags = renderer.__test.getDebugFlags();
+  assert.equal(flags.xrminimal, false);
+  assert.equal(flags.xrfull, false);
+  assert.equal(renderer.__test.setDebugFlags({ xrfull: true }).xrfull, true);
+  assert.equal(renderer.__test.setDebugFlags({ xrfull: false }).xrfull, false);
+});
+
 test('startPreview honors caller options and rejects a missing canvas', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -1782,11 +1856,56 @@ test('domoverlay flag omits the overlay layer from session options', async () =>
   assert.ok(captured, 'session requested');
   assert.equal(captured.domOverlay, undefined);
   assert.ok(!(captured.optionalFeatures || []).includes('dom-overlay'), 'no dom-overlay feature');
-  // Flag on (default): overlay layer requested again.
+  // v8.15: minimal session is the default — dom-overlay is only requested in
+  // full-session mode (?xrfull=1), even with the domoverlay flag on.
   api.setDebugFlags({ domoverlay: true });
   captured = null;
   await renderer.enterVR({ xr });
+  assert.ok(!(captured.optionalFeatures || []).includes('dom-overlay'), 'minimal session omits dom-overlay');
+  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'local,local-floor');
+  // Legacy full session (?xrfull=1) restores the overlay layer request.
+  api.setDebugFlags({ xrfull: true });
+  captured = null;
+  await renderer.enterVR({ xr });
   assert.ok((captured.optionalFeatures || []).includes('dom-overlay'), 'dom-overlay feature requested');
+});
+
+test('default session request is minimal, xrfull restores legacy (v8.15+)', async () => {
+  const renderer = loadRenderer();
+  renderer.init(null, {});
+  let captured = null;
+  const xr = {
+    async requestSession(mode, opts) { if (opts) captured = opts; throw new Error('no headset'); },
+  };
+  await renderer.enterVR({ xr });
+  assert.ok(captured, 'session requested');
+  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'local,local-floor');
+  renderer.__test.setDebugFlags({ xrfull: true });
+  captured = null;
+  await renderer.enterVR({ xr });
+  assert.ok((captured.optionalFeatures || []).includes('bounded-floor'), 'legacy bounded-floor restored');
+  assert.ok((captured.optionalFeatures || []).includes('hand-tracking'), 'legacy hand-tracking restored');
+});
+
+test('default renderer opts are minimal AA-off (v8.17 flash fix)', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  const T = renderer.getThree();
+  const seen = [];
+  const Orig = T.WebGLRenderer;
+  T.WebGLRenderer = function (opts) {
+    seen.push({ alpha: !!opts.alpha, antialias: !!opts.antialias });
+    return new Orig(opts);
+  };
+  try {
+    renderer.startPreview(makePreviewCanvas(gl));
+  } finally {
+    T.WebGLRenderer = Orig;
+  }
+  assert.ok(seen.length > 0, 'renderer created');
+  assert.deepEqual(seen[0], { alpha: false, antialias: false });
+  renderer.stopPreview();
 });
 
 test('reel switches hold the last frame instead of flashing black', () => {

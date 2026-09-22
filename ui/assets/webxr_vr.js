@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.10-20260920-firstframe-hold';
+  const VR_VERSION = 'v8.17-20260922-full-minimal';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -75,10 +75,35 @@ window.WebXRVR = window.WebXRVR || (function () {
   // v8.6 additions: ?dockfreeze=1 (paint the dock once, then freeze its
   // texture re-uploads — isolates dock/panel sub-image tears), ?glowprobe=0
   // (keep the glow mesh, kill the getImageData readback sync).
+  // v8.13 additions: ?vrtex=video (bind a direct THREE.VideoTexture of the
+  // video element to the screen instead of the canvas-proxy blit + re-upload
+  // — the path other Quest video sites use; §3.7 A/B verdict).
+  // v8.14 additions: ?xrminimal=1 (request the minimal session options the
+  // three.js webxr_vr_video standard uses — local-floor/local only, no
+  // bounded-floor/hand-tracking/dom-overlay, antialias/alpha off. The AB
+  // page (§3.8, flash-free) differs from the engine only by these + UI
+  // meshes; Godot's 2024 Quest black-void regression was triggered by
+  // bounded-floor in session options).
+  // v8.15: the minimal session request is the DEFAULT (§3.10 verdict — the
+  // xrminimal session fixed the flashes; the engine never consumes hand
+  // joints, bounds geometry, or the overlay layer except the VR keyboard
+  // path, which degrades to a dock notification). ?xrfull=1 restores the
+  // legacy request.
+  // v8.17: the full xrminimal stack is the default — the v8.15 split (minimal
+  // session, legacy AA-on renderer) flashed identically to pre-fix, while the
+  // proven-clean xrminimal run had minimal session AND antialias/alpha off.
+  // three r186 forces alpha:true on the XR layer regardless, so antialias
+  // (MSAA resolve on the XR layer) is the isolated variable. ?xrfull=1
+  // restores the entire legacy stack (session + renderer).
   const debugFlags = {
     lock: true, overlay: true, guide: true, glow: true,
-    dockfreeze: false, glowprobe: true, domoverlay: true,
+    dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
+    xrminimal: false, xrfull: false,
   };
+  // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
+  // by explicit minimal (?xrminimal=1). Everything else runs the minimal
+  // stack that proved flash-free on-device.
+  function useFullStack() { return debugFlags.xrfull && !debugFlags.xrminimal; }
   function readDebugFlags() {
     try {
       const q = (typeof location !== 'undefined' && location.search) || '';
@@ -90,6 +115,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('dockfreeze', '1')) debugFlags.dockfreeze = true;
       if (has('glowprobe', '0')) debugFlags.glowprobe = false;
       if (has('domoverlay', '0')) debugFlags.domoverlay = false;
+      if (has('vrtex', 'video')) debugFlags.vrtex = true;
+      if (has('xrminimal', '1')) debugFlags.xrminimal = true;
+      if (has('xrfull', '1')) debugFlags.xrfull = true;
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -220,6 +248,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastVisualElement = null;
   let lastVideoTime = -1;
   let lastVideoFrameCount = -1;
+  // v8.11: monotonic ms of the last successful video upload (throttle gate).
+  let lastVideoUploadMs = 0;
+  // ~30/s ceiling for video uploads (30fps masters; §3.6 gate-leak fix).
+  const VR_VIDEO_UPLOAD_MIN_MS = 33;
 
   // Decoded-frame counter for upload gating (legacy Fix #1 verbatim): the
   // currentTime float advances every XR frame while playing, so keying on it
@@ -237,6 +269,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Three.js Core Instances
   let THREE = (typeof window !== 'undefined' && window.THREE) || null;
   let renderer = null;
+  let lastRendererOpts = null; // effective {alpha, antialias} at creation (diag + tests)
+  let lastSessionRequestedFeatures = null; // optionalFeatures sent with the session request (diag proof)
   let scene = null;
   let camera = null;
   let orbitControls = null;
@@ -318,6 +352,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let vrProxyCanvas = null;
   let vrProxyCtx = null;
   let videoTexture = null;
+  // v8.13 direct path (?vrtex=video): THREE.VideoTexture bound straight to
+  // the screen material, bypassing the canvas blit + re-upload entirely.
+  let directVideoTexture = null;
+  let directVideoElement = null;
+  let screenMapBeforeDebug = null;
   let controlsCanvas = null;
   let controlsCtx = null;
   let controlsTexture = null;
@@ -1378,7 +1417,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     if (!renderer) {
-      const opts = { canvas, alpha: true, antialias: true, powerPreference: 'high-performance' };
+      // v8.17: the renderer follows the full/minimal stack like the session
+      // (the v8.15 session-only split flashed; the proven-clean xrminimal run
+      // had antialias/alpha off). ?xrfull=1 restores legacy AA-on.
+      const fullStack = useFullStack();
+      const opts = fullStack
+        ? { canvas, alpha: true, antialias: true, powerPreference: 'high-performance' }
+        : { canvas, alpha: false, antialias: false, powerPreference: 'high-performance' };
+      lastRendererOpts = { alpha: !!opts.alpha, antialias: !!opts.antialias };
       if (context) opts.context = context;
       renderer = new THREE.WebGLRenderer(opts);
       if (!glContext && renderer.getContext) {
@@ -1451,7 +1497,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         glowProbeCanvas = document.createElement('canvas');
         glowProbeCanvas.width = 8;
         glowProbeCanvas.height = 8;
-        glowProbeCtx = glowProbeCanvas.getContext('2d');
+        // v8.11: willReadFrequently forces a software-backed canvas, so the
+        // 120ms ambilight getImageData can no longer flush/sync the GPU
+        // command queue inside the XR frame loop (black-flash suspect, §3.6).
+        glowProbeCtx = glowProbeCanvas.getContext('2d', { willReadFrequently: true });
       } catch (e) {
         glowProbeCanvas = null;
         glowProbeCtx = null;
@@ -1843,6 +1892,67 @@ window.WebXRVR = window.WebXRVR || (function () {
     return String(source.kind || '') + '|' + String(source.version || '');
   }
 
+  function bindScreenMap(tex) {
+    try {
+      if (screenMesh && screenMesh.material && screenMesh.material.map !== tex) {
+        screenMesh.material.map = tex;
+        screenMesh.material.needsUpdate = true;
+      }
+    } catch (e) {}
+  }
+
+  function directVideoEligible(source) {
+    return !!(debugFlags.vrtex && source && source.kind === 'video' && source.element &&
+      typeof THREE !== 'undefined' && THREE.VideoTexture && screenMesh && screenMesh.material);
+  }
+
+  // v8.13 (?vrtex=video): keep a direct THREE.VideoTexture of the video
+  // element bound to the screen — the same hardware path other Quest video
+  // sites use. Fresh elements wait for HAVE_FUTURE_DATA (v8.10 rule) so the
+  // previous map holds until clean frames exist; steady elements stay bound
+  // (three uploads the current frame per render, no app gating). Static
+  // cards/images keep the canvas path. Returns true when this source is
+  // showing through the direct texture.
+  function updateDirectVideoBinding(source, force) {
+    if (!directVideoEligible(source)) return false;
+    const el = source.element;
+    if (directVideoTexture && directVideoElement === el &&
+        screenMesh.material.map === directVideoTexture) {
+      return true;
+    }
+    const rs = Number((el && el.readyState) || 0);
+    const isFresh = !directVideoTexture || directVideoElement !== el;
+    const need = isFresh ? 3 : 2;
+    if (rs < need && !force) return false; // hold previous map
+    try {
+      if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
+      directVideoTexture = applyLinearSampling(new THREE.VideoTexture(el));
+      try { if (THREE.SRGBColorSpace !== undefined) directVideoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    } catch (e) {
+      directVideoTexture = null;
+      return false;
+    }
+    directVideoElement = el;
+    bindScreenMap(directVideoTexture);
+    lastUploadedSource = el;
+    lastVisualKind = source.kind;
+    lastVisualVersion = visualSourceSignature(source);
+    lastVisualElement = el;
+    lastVideoTime = Number(source.currentTime) || 0;
+    // NOTE: lastVideoFrameCount is intentionally NOT updated here — the
+    // caller compares it to count newly decoded frames into videoUploads.
+    hasNewVideoFrame = false;
+    pendingClearedFor = '';
+    freshVisualSince = 0;
+    return true;
+  }
+
+  function releaseDirectVideoBinding() {
+    if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
+    directVideoTexture = null;
+    directVideoElement = null;
+  }
+
   function shouldUploadVisual(source) {
     if (!source || !source.element) return false;
     const sig = visualSourceSignature(source);
@@ -1851,13 +1961,24 @@ window.WebXRVR = window.WebXRVR || (function () {
       source.element !== lastVisualElement;
     if (visualChanged) return true;
     if (source.kind === 'video') {
+      // v8.11 upload throttle: steady-playback telemetry measured 41–73/s
+      // uploads against 30fps masters (~1.2 GB/s texture traffic loading the
+      // GL queue behind the glow readback; §3.6). Cap video uploads at ~30/s;
+      // visual changes and seek jumps bypass so nothing goes stale.
+      // Frozen/unchanged clocks (test mocks) never throttle: only a positive
+      // sub-interval gap blocks.
+      const seekJump = Math.abs(Number(source.currentTime) - Number(lastVideoTime)) > 0.25;
+      const sinceUploadMs = nowMs() - lastVideoUploadMs;
+      if (!hasNewVideoFrame && !seekJump && sinceUploadMs > 0 && sinceUploadMs < VR_VIDEO_UPLOAD_MIN_MS) {
+        return false;
+      }
       if (hasNewVideoFrame) return true;
       const vf = decodedFrameCount(source.element);
       if (vf >= 0) {
         if (vf !== lastVideoFrameCount) return true;
         // Paused seeks can land on cached frames without new decodes or
         // rVFC pings — catch time jumps so the texture never goes stale.
-        if (Math.abs(Number(source.currentTime) - Number(lastVideoTime)) > 0.25) return true;
+        if (seekJump) return true;
         return false;
       }
       if (Number(source.currentTime) !== Number(lastVideoTime)) return true;
@@ -1870,6 +1991,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   function uploadVideoFrame(force) {
     const source = getVisualSource();
     if (!vrProxyCtx || !source.element) return false;
+    // v8.13: sources that don't use the direct texture (static cards/images,
+    // or the flag off) render through the canvas proxy — make sure it is bound.
+    if (!(debugFlags.vrtex && source.kind === 'video')) bindScreenMap(videoTexture);
     if (!force && !shouldUploadVisual(source)) return false;
     try {
       if (source.kind === 'static-card' || source.kind === 'image') {
@@ -1926,6 +2050,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (source.kind === 'video') {
         lastVideoTime = Number(source.currentTime) || 0;
         lastVideoFrameCount = decodedFrameCount(source.element);
+        lastVideoUploadMs = nowMs();
       }
       hasNewVideoFrame = false;
       pendingClearedFor = '';
@@ -2236,7 +2361,23 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     if (sceneMode === 'reels') {
       const source = getVisualSource();
-      if (source && source.ready === false) {
+      if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
+        // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
+        // the current frame per render. Telemetry counts decoded frames.
+        if (updateDirectVideoBinding(source, false)) {
+          const vf = decodedFrameCount(source.element);
+          if (vf >= 0 && vf !== lastVideoFrameCount) {
+            renderStats.videoUploads += 1;
+            lastVideoFrameCount = vf;
+          }
+          lastVideoTime = Number(source.currentTime) || 0;
+          hasDisplayedVisual = true;
+        } else {
+          // Fresh element below HAVE_FUTURE_DATA or source not ready: hold
+          // the previous map (v8.9 semantics), count the wait.
+          renderStats.transNotReady += 1;
+        }
+      } else if (source && source.ready === false) {
         // Frames spent waiting for data (buffering/seeking at transitions):
         // counted so on-device telemetry attributes stalls to buffering.
         if (source.element) renderStats.transNotReady += 1;
@@ -2716,8 +2857,29 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       xrDiagLastT = time;
       if (time - xrDiagLastPost < 1000) return;
+      // v8.12: current video source basename so capture sessions are
+      // self-describing (condition + file need no out-of-band narration).
+      // v8.17: requested vs granted session features — on-device proof of
+      // the session configuration behind each run.
+      let visualSrc = '';
+      try {
+        const vs = typeof getVisualSource === 'function' ? getVisualSource() : null;
+        const raw = (vs && vs.element && (vs.element.currentSrc || vs.element.src)) || '';
+        visualSrc = String(raw).split('?')[0].split('/').pop().slice(-80);
+      } catch (e) { visualSrc = ''; }
+      let grantedFeatures = null;
+      try {
+        const ef = xrSession && xrSession.enabledFeatures;
+        grantedFeatures = ef ? Array.from(ef) : null;
+      } catch (e) { grantedFeatures = null; }
       const payload = {
         engine: VR_VERSION,
+        src: visualSrc,
+        sessionFeatures: {
+          requested: lastSessionRequestedFeatures,
+          granted: grantedFeatures,
+          renderer: lastRendererOpts,
+        },
         xrFrames: xrDiagFrames,
         dtMaxMs: Math.round(xrDiagMaxDt * 10) / 10,
         videoUploads: xrDiagDelta('videoUploads'),
@@ -4057,15 +4219,25 @@ window.WebXRVR = window.WebXRVR || (function () {
     // DOM overlay root must exist before the session request so the Quest
     // virtual keyboard can be summoned for VR comment posting (?domoverlay=0
     // skips it entirely — diagnostic for compositor-layer glitch suspects).
-    if (debugFlags.domoverlay) initDomOverlay();
+    // ?xrminimal=1 requests the minimal feature set the three.js
+    // webxr_vr_video standard uses — the AB page (§3.8) proved it clean.
+    // v8.15: minimal is the default (§3.10); ?xrfull=1 restores legacy.
+    // v8.17: the whole stack (session + renderer) follows useFullStack().
+    const useFullSession = useFullStack();
+    if (debugFlags.domoverlay && useFullSession) initDomOverlay();
     let session = null;
-    const sessionOpts = {
-      optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'],
-    };
-    if (debugFlags.domoverlay) {
+    const sessionOpts = useFullSession
+      ? { optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'] }
+      : { optionalFeatures: ['local-floor', 'local'] };
+    if (debugFlags.domoverlay && useFullSession) {
       sessionOpts.optionalFeatures.push('dom-overlay');
       if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
     }
+    // v8.17: device-grounded proof of what was requested (answers "is the
+    // flag applied" permanently — see diag sessionFeatures).
+    try {
+      lastSessionRequestedFeatures = (sessionOpts.optionalFeatures || []).slice();
+    } catch (e) { lastSessionRequestedFeatures = null; }
 
     try {
       session = await xr.requestSession('immersive-vr', sessionOpts);
@@ -4325,6 +4497,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {}
     }
     if (videoTexture) { try { videoTexture.dispose(); } catch (e) {} videoTexture = null; }
+    releaseDirectVideoBinding();
+    screenMapBeforeDebug = null;
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
     if (overlayTexture) { try { overlayTexture.dispose(); } catch (e) {} overlayTexture = null; }
@@ -4630,6 +4804,19 @@ window.WebXRVR = window.WebXRVR || (function () {
       showNotification('KEYBOARD DISABLED (?domoverlay=0)');
       return;
     }
+    // v8.16: the minimal session (v8.15 default) doesn't request the
+    // dom-overlay layer, so focusing the input would summon no keyboard —
+    // fail explicitly instead of stranding the user on an invisible field.
+    // ?xrfull=1 restores the layer.
+    let overlayGranted = false;
+    try {
+      overlayGranted = !!(xrSession && xrSession.enabledFeatures &&
+        xrSession.enabledFeatures.includes('dom-overlay'));
+    } catch (e) { overlayGranted = false; }
+    if (!overlayGranted) {
+      showNotification('KEYBOARD NEEDS FULL SESSION (?xrfull=1)');
+      return;
+    }
     initDomOverlay();
     if (!domOverlayInput) return;
     const source = getVisualSource();
@@ -4781,7 +4968,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         return { ...debugFlags };
@@ -4921,8 +5108,12 @@ window.WebXRVR = window.WebXRVR || (function () {
         try {
           if (hex === null || hex === undefined) {
             screenMesh.material.color.set(0xffffff);
-            screenMesh.material.map = videoTexture;
+            // Restore whichever map the current path uses (v8.13 direct or
+            // canvas proxy) instead of assuming the canvas texture.
+            screenMesh.material.map = screenMapBeforeDebug || videoTexture;
+            screenMapBeforeDebug = null;
           } else {
+            if (!screenMapBeforeDebug) screenMapBeforeDebug = screenMesh.material.map;
             screenMesh.material.map = null;
             screenMesh.material.color.set(hex);
           }

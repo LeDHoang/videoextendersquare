@@ -2389,6 +2389,43 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
     return "\n".join(out)
 
 
+@router.get("/vr-video-path-ab", response_class=HTMLResponse)
+def vr_video_path_ab(
+    master: str | None = None,
+):
+    """Temporary diagnostic page (black-square investigation §3.6+): plays one
+    master through a direct THREE.VideoTexture — the path other Quest video
+    sites use — with no canvas proxy, no UI meshes, no readbacks.
+    `master` picks a path under the media root; defaults to the largest
+    master. The page's own `?src=` overrides the video URL client-side."""
+    try:
+        html = (ASSETS_DIR / "vr_video_path_ab.html").read_text(encoding="utf-8")
+    except OSError as ex:
+        raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
+    default_rel = master
+    if not default_rel:
+        try:
+            candidates = [
+                p for p in OUTPUT_DIR.rglob("*.mp4")
+                if not any(s in p.name for s in ("-preview", "-explore", "-quest"))
+            ]
+            if candidates:
+                biggest = max(candidates, key=lambda p: p.stat().st_size)
+                default_rel = biggest.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+        except (OSError, ValueError):
+            default_rel = None
+    default_src = f"/media/{default_rel}" if default_rel else ""
+    three_js = ASSETS_DIR / "three.min.js"
+    if three_js.exists():
+        html = html.replace("__THREE_JS__", three_js.read_text(encoding="utf-8"))
+    html = html.replace("__DEFAULT_SRC__", default_src)
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
 @router.get("/player-inline")
 def reels_player_inline(
     request: Request,

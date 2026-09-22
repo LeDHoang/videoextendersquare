@@ -162,7 +162,7 @@ async function main() {
     })()`);
     console.log('\n=== STEP 1: v8.3 live state ===');
     console.log(JSON.stringify(s1, null, 2));
-    check('engine is v8.10', typeof s1.version === 'string' && s1.version.indexOf('v8.10') === 0, s1.version);
+    check('engine is v8.17', typeof s1.version === 'string' && s1.version.indexOf('v8.17') === 0, s1.version);
     check('preview running', s1.running === true, s1.running);
     check('default screen scale 4.0 (fills view)', s1.screenState && s1.screenState.scale === 4.0, s1.screenState && s1.screenState.scale);
     check('default distance 2.24', s1.screenState && Math.abs(s1.screenState.distance - 2.24) < 1e-9, s1.screenState && s1.screenState.distance);
