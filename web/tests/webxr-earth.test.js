@@ -210,7 +210,7 @@ test('ray hit testing selects a visible city heat zone', () => {
   const hit = api.hitTestEarth({ x: 0, y: 1.12, z: 0 }, { x: 0, y: 0, z: -1 });
   assert.equal(hit.hit, true);
   assert.equal(hit.zoneIndex, 0);
-  closeTo(hit.dist, 1.3 - (0.676 * 1.08));
+  closeTo(hit.dist, 1.3 - (0.676 + 0.05));
 });
 
 test('drag rotates the globe; zone tap zooms first, selects at city band (Z1)', () => {
@@ -2160,6 +2160,13 @@ test('Z1 tap animation lands the focus on the view axis at comfort distance', ()
   };
   const dist = Math.hypot(surf.x - 0, surf.y - 1.6, surf.z - 0);
   closeTo(dist, C.surfaceDist, 1e-6);
+  // Outside view: the center is farther than one radius (in front of the
+  // viewer), and the outward normal at the surface points at the head.
+  const headDist = Math.hypot(state.liveCenter.x - 0, state.liveCenter.y - 1.6, state.liveCenter.z - 0);
+  assert.ok(headDist > R, `center outside the globe (dist ${headDist} > R ${R})`);
+  const toHead = { x: 0 - surf.x, y: 1.6 - surf.y, z: 0 - surf.z };
+  const facing = dir.x * toHead.x + dir.y * toHead.y + dir.z * toHead.z;
+  assert.ok(facing > 0, 'surface normal points at the head');
   renderer.stopPreview();
 });
 
@@ -2683,6 +2690,30 @@ test('Z3 label reads clusters as city counts with heat', () => {
   renderer.stopPreview();
 });
 
+test('Z3 hovering a cluster loads previews for its slug', async () => {  // Regression: server cluster rows must carry a usable slug end to end —
+  // the host resolves previews (and feeds) by slug, so a slug-less row
+  // silently shows no preview on hover.
+  const gl = makeMockGl({ deleted: 0 });
+  let requestedLocation = null;
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    onPreviewLocation: async (location) => {
+      requestedLocation = location.slug;
+      return [{ url: '/media/one.mp4', title: 'One' }];
+    },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  renderer.__test.setLocationActivity([
+    z3ClusterRow({ slug: 'tokyo--japan', primary_slug: 'tokyo--japan' }),
+  ]);
+  await renderer.__test.loadEarthPreviewNow(0);
+  assert.equal(requestedLocation, 'tokyo--japan');
+  assert.equal(renderer.__test.getEarthState().previewItemCount, 1);
+  renderer.stopPreview();
+});
+
 test('Z3 cleanup resets the zoom-tracked fetch and heat overlay', async () => {
   const { requests, renderer, api } = z3Harness();
   renderer.setSceneMode('earth');
@@ -2902,5 +2933,195 @@ test('holo tile style falls back to raw without pixel access, mode switchable', 
   assert.equal(api.earthTileStyleMode(), 'raw');
   api.setDebugFlags({ earthstyle: 'holo' });
   assert.equal(api.earthTileStyleMode(), 'holo');
+});
+
+// ─── Top-down street experiment (?topdown=1) ───
+
+function topdownHarness() {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  return { renderer, api: renderer.__test };
+}
+
+test('topdown engages only with the flag at city zoom and deeper', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(64, { lat: 35.67, lon: 139.65 });
+  assert.equal(api.earthTopdownActive(), false); // flag off: legacy rotate everywhere
+  api.setDebugFlags({ topdown: true });
+  assert.equal(api.earthTopdownActive(), true);
+  api.setEarthZoom(4, { lat: 0, lon: 0 });
+  assert.equal(api.earthTopdownActive(), false); // below the city band: tilted globe intact
+  api.setEarthZoom(8, { lat: 0, lon: 0 });
+  assert.equal(api.earthTopdownActive(), true); // city band is the threshold
+  api.cleanup();
+  renderer.stopPreview();
+});
+
+test('topdown relaxed clamp faces high-latitude foci exactly', () => {
+  const api = loadRenderer().__test;
+  const norm = (v) => {
+    const l = Math.hypot(v.x, v.y, v.z) || 1;
+    return { x: v.x / l, y: v.y / l, z: v.z / l };
+  };
+  // Negated view axis (surface->head): the outside-view solve target.
+  const t = norm({ x: 0, y: 0.281, z: 0.960 });
+  for (const [lat, lon] of [[70, 0], [80, 10], [-75, -60]]) {
+    const v = api.locationToUnit(lat, lon);
+    const legacy = api.solveEarthFocusRotation(lat, lon, t); // ±1.2 clamp
+    const dl = api.rotateEarthDir(v, legacy.yaw, legacy.pitch);
+    const legacyRes = 1 - (dl.x * t.x + dl.y * t.y + dl.z * t.z);
+    const wide = api.solveEarthFocusRotation(lat, lon, t, 2.9);
+    const dw = api.rotateEarthDir(v, wide.yaw, wide.pitch);
+    const wideRes = 1 - (dw.x * t.x + dw.y * t.y + dw.z * t.z);
+    assert.ok(Math.abs(wide.pitch) <= 2.9 + 1e-9, `relaxed clamp holds at (${lat},${lon})`);
+    closeTo(wideRes, 0, 1e-6); // exact facing with the relaxed clamp
+    assert.ok(legacyRes >= wideRes, `legacy never beats relaxed at (${lat},${lon})`);
+  }
+  // The legacy clamp binds near the pole (documents why the param exists).
+  const polar = api.solveEarthFocusRotation(87, 0, t);
+  assert.equal(Math.abs(polar.pitch), 1.2);
+});
+
+test('topdown zoom lands perpendicular even near the pole', () => {
+  const { renderer, api } = topdownHarness();
+  api.setDebugFlags({ topdown: true });
+  api.zoomEarthTo(80, 10, 512);
+  api.advanceEarthZoom(100000); // settle the animation
+  const st = api.getEarthState();
+  assert.equal(st.zoom, 512);
+  // View dir from the live anchor (head defaults to (0,1.6,0) headless).
+  const A = st.anchor;
+  const l = Math.hypot(A.x - 0, A.y - 1.6, A.z - 0) || 1;
+  const vd = { x: (0 - A.x) / l, y: (1.6 - A.y) / l, z: (0 - A.z) / l };
+  const dir = api.rotateEarthDir(api.locationToUnit(80, 10), st.yaw, st.pitch);
+  closeTo(dir.x * vd.x + dir.y * vd.y + dir.z * vd.z, 1, 1e-3);
+  renderer.stopPreview();
+});
+
+test('topdown drag pans the focus and stays perpendicular', () => {
+  const { renderer, api } = topdownHarness();
+  api.setDebugFlags({ topdown: true });
+  api.setEarthZoom(64, { lat: 35.67, lon: 139.65 });
+  const press = { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } };
+  api.beginEarthDrag('mouse', press);
+  // First engaged update only establishes the grab point (no motion).
+  api.updateEarthDrag({ x: 0.2, y: 0.1, z: 0.97 });
+  assert.equal(api.getEarthState().focus.lon, 139.65);
+  // Second update pans: cursor moved east, so the focus moves west (grab).
+  api.updateEarthDrag({ x: 0.3, y: 0.15, z: 0.94 });
+  const focus = api.getEarthState().focus;
+  assert.ok(focus.lon < 139.65, `focus panned west: ${focus.lon}`);
+  closeTo(focus.lon, 133.6, 0.15);
+  assert.equal(focus.lat, 35.67); // yaw axis lock: longitude only
+  // Perpendicular through the pan: solved normal matches the live view dir.
+  const A = api.getEarthState().anchor;
+  const l = Math.hypot(A.x - 0, A.y - 1.6, A.z - 0) || 1;
+  const vd = { x: (0 - A.x) / l, y: (1.6 - A.y) / l, z: (0 - A.z) / l };
+  const dir = api.rotateEarthDir(api.locationToUnit(focus.lat, focus.lon), api.getEarthState().yaw, api.getEarthState().pitch);
+  closeTo(dir.x * vd.x + dir.y * vd.y + dir.z * vd.z, 1, 1e-6);
+  // Release after a real move: drag release, never a tap.
+  assert.equal(api.endEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0.3, y: 0.15, z: 0.94 } }), false);
+  renderer.stopPreview();
+});
+
+test('topdown tap still zooms on open globe', () => {
+  const { renderer, api } = topdownHarness();
+  api.setDebugFlags({ topdown: true });
+  api.setEarthZoom(64, { lat: 0, lon: 0 });
+  const press = { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } };
+  api.beginEarthDrag('mouse', press);
+  assert.equal(api.endEarthDrag('mouse', press), true); // zoom-point dispatched
+  assert.ok(api.getEarthState().zoomTarget > 64);
+  renderer.stopPreview();
+});
+
+// ─── Hover at every zoom: laser/mouse choke point + street precision ───
+
+test('hover choke point resolves zones and fires previews on any ray', async () => {
+  // The XR laser path previously collapsed every hit to "globe" without a
+  // zone, so hover highlight + previews never fired on Quest. Both input
+  // paths now share updateEarthHoverFromRay.
+  const gl = makeMockGl({ deleted: 0 });
+  let requestedLocation = null;
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    onPreviewLocation: async (location) => {
+      requestedLocation = location.slug;
+      return [{ url: '/media/one.mp4', title: 'One' }];
+    },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  const api = renderer.__test;
+  api.setLocationActivity([
+    { slug: 'zone-a', name: 'Zone A', lat: 20, lon: 10, heat: 1 },
+  ]);
+  // Enter through the production zoom flow so facing/anchor/center are
+  // consistent, then read every vector back from live state (no defaults
+  // assumed). Ray starts outside the globe along the zone normal.
+  api.zoomEarthTo(20, 10, 1);
+  api.advanceEarthZoom(100000);
+  const st = api.getEarthState();
+  const R = 0.676 * st.zoom;
+  const u = api.locationToUnit(20, 10);
+  const n = api.rotateEarthDir(u, st.yaw, st.pitch);
+  const surf = { x: st.liveCenter.x + n.x * R, y: st.liveCenter.y + n.y * R, z: st.liveCenter.z + n.z * R };
+  const origin = { x: surf.x + n.x * 2, y: surf.y + n.y * 2, z: surf.z + n.z * 2 };
+  const ray = { x: -n.x, y: -n.y, z: -n.z };
+  assert.equal(api.updateEarthHoverFromRay(origin, ray), 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requestedLocation, 'zone-a');
+  renderer.__runScheduledFrame(48); // label repaints in the frame loop
+  assert.ok(api.getEarthLabelDetail().length > 0);
+  // Sky ray (radially outward from outside the globe): guaranteed miss.
+  requestedLocation = null;
+  assert.equal(api.updateEarthHoverFromRay(origin, { x: n.x, y: n.y, z: n.z }), -1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requestedLocation, null);
+  assert.equal(api.getEarthState().previewLocationIndex, -1);
+  renderer.stopPreview();
+});
+
+test('street zoom attenuates zone radii so hover stays precise', () => {
+  const { renderer, api } = topdownHarness();
+  const city = { heat: 0.9 };
+  api.setEarthZoom(1);
+  const globe = api.earthZoneAngularRadius(city);
+  closeTo(globe, 0.11 + 0.9 * 0.12);
+  api.setEarthZoom(256);
+  closeTo(api.earthZoneAngularRadius(city), globe); // factor kicks in above 256
+  api.setEarthZoom(16384);
+  closeTo(api.earthZoneAngularRadius(city), globe / 64); // 16384/256
+  // At street scale a between-cities hover misses (empty globe stays
+  // tappable) while a direct hover still hits.
+  api.setLocationActivity([
+    { slug: 'tokyo--japan', name: 'Tokyo', lat: 35.67, lon: 139.65, heat: 0.9 },
+    { slug: 'osaka--japan', name: 'Osaka', lat: 34.69, lon: 135.5, heat: 0.7 },
+  ]);
+  // Enter through the production zoom flow so facing/anchor/center are
+  // consistent, then read every vector back from live state.
+  api.zoomEarthTo(35.67, 139.65, 16384);
+  api.advanceEarthZoom(100000);
+  const center = api.getEarthState().liveCenter;
+  const R = 0.676 * 16384;
+  const st = api.getEarthState();
+  const aim = (lat, lon) => {
+    // Outward normal at the target, then a ray from 2 m outside straight in.
+    const u = api.locationToUnit(lat, lon);
+    const n = api.rotateEarthDir(u, st.yaw, st.pitch);
+    const s = { x: center.x + n.x * R, y: center.y + n.y * R, z: center.z + n.z * R };
+    return { origin: { x: s.x + n.x * 2, y: s.y + n.y * 2, z: s.z + n.z * 2 }, dir: { x: -n.x, y: -n.y, z: -n.z } };
+  };
+  const direct = aim(35.67, 139.65);
+  assert.equal(api.hitTestEarth(direct.origin, direct.dir).zoneIndex, 0);
+  const gap = aim(35.67, 137.5);
+  const gapHit = api.hitTestEarth(gap.origin, gap.dir);
+  assert.equal(gapHit.hit, true);
+  assert.equal(gapHit.zoneIndex, -1); // ~0.03 rad from both cities, radius ~0.003
+  renderer.stopPreview();
 });
 

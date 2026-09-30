@@ -111,6 +111,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     lock: true, overlay: true, guide: true, glow: true,
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
+    topdown: false,
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -132,6 +133,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('xrfull', '1')) debugFlags.xrfull = true;
       if (has('earthmap', '0')) debugFlags.earthmap = false;
       if (has('earthstyle', 'raw')) debugFlags.earthstyle = 'raw';
+      if (has('topdown', '1')) debugFlags.topdown = true;
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -203,6 +205,34 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthZoomApplied = -1;
   let earthLabelDetail = '';
   let earthLabelTitle = '';
+  // Top-down street experiment (?topdown=1): at city zoom and deeper the
+  // globe stops tilting — drag pans the focus across the surface (grab
+  // feel) while the solver keeps the focus normal aligned to the view
+  // (zero obliquity, Google-Maps-style). Bearing (north-up) is NOT
+  // corrected: yaw+pitch facing leaves 0–50° of map rotation depending on
+  // the target, and true north-up needs a roll DOF the globe has never had.
+  const EARTH_TOPDOWN_MIN_ZOOM = 8; // city band and deeper
+  const EARTH_TOPDOWN_MAX_PITCH = 2.9; // relaxed clamp so polar foci still face exactly
+  let earthTopdownPanPrev = null; // fixed-frame local of the last pan update (grab reference)
+  function earthTopdownActive() {
+    return !!debugFlags.topdown && sceneMode === 'earth' &&
+      !!earthFocus && earthZoomTarget >= EARTH_TOPDOWN_MIN_ZOOM;
+  }
+  function earthTopdownWillBeActive(toZoom) {
+    return !!debugFlags.topdown && sceneMode === 'earth' &&
+      clampEarthZoom(toZoom) >= EARTH_TOPDOWN_MIN_ZOOM;
+  }
+  // Live view direction the focus normal must match: surface→head. Null
+  // when there is nothing to align (no focus/anchor yet).
+  function earthTopdownViewDir() {
+    if (!earthFocus || !earthZoomAnchor) return null;
+    const head = getHeadPosition();
+    const dx = head.x - earthZoomAnchor.x;
+    const dy = head.y - earthZoomAnchor.y;
+    const dz = head.z - earthZoomAnchor.z;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    return { x: dx / len, y: dy / len, z: dz / len };
+  }
   // Z3 clustering state (docs/earth-zoom-map-plan.md §8): the activity fetch
   // follows the slippy tile band so heat resolves finer as the viewer zooms.
   let earthActivityZoom = null;      // zoom param of the last successful fetch
@@ -974,10 +1004,16 @@ window.WebXRVR = window.WebXRVR || (function () {
   function earthZoneAngularRadius(location) {
     const heat = Math.max(0, Math.min(1, Number(location && location.heat) || 0));
     const base = 0.11 + heat * 0.12;
+    // Street-zoom attenuation: past the city band (S > 256, tileZ ≥ 12)
+    // the fixed heat radius would swallow the whole viewport, so hover
+    // and tap always match the nearest city and empty-globe zoom dies.
+    // Shrinking with zoom keeps zones tappable (~20 km at z17) while the
+    // visible patch stays selectable. Globe/city bands unaffected.
+    const attenuate = Math.max(1, Math.max(1, earthZoom) / 256);
     if (location && location.kind === 'cluster' && typeof location.geohash === 'string') {
-      return Math.max(base, earthGeohashCellAngularRadius(location.geohash));
+      return Math.max(base, earthGeohashCellAngularRadius(location.geohash)) / attenuate;
     }
-    return base;
+    return base / attenuate;
   }
 
   // Standard equirect canvas position (upstream verbatim): x =
@@ -1675,7 +1711,13 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function hitTestEarth(rayOrigin, rayDir) {
     const liveCenter = earthLiveCenter();
-    const liveRadius = EARTH_RADIUS * Math.max(1, earthZoom) * 1.08;
+    // Absolute (not relative) hover shell: the old 8%-of-radius inflation
+    // put the head INSIDE the hit sphere past S≈21 (shell depth 0.08·R·S
+    // dwarfs the 1.15 m viewing distance), so every head-origin ray
+    // returned the far-side exit and hover/tap could never match nearby
+    // zones at city/street zoom. A constant 5 cm shell keeps the globe-
+    // scale generosity (~7%) at every zoom while the head stays outside it.
+    const liveRadius = EARTH_RADIUS * Math.max(1, earthZoom) + 0.05;
     const hitDist = raySphereHit(rayOrigin, rayDir, liveCenter, liveRadius);
     if (hitDist <= 0) return { hit: false, dist: -1, zoneIndex: -1 };
 
@@ -1811,12 +1853,14 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // Solve yaw/pitch so the rotated focus unit vector faces targetDir (unit,
   // world frame). Pitch candidates are clamped to the existing ±1.2 drag
-  // clamp; the one nearest the current pitch wins. Degenerate polar foci
-  // keep the current pose (the clamp makes exact polar centering impossible).
-  function solveEarthFocusRotation(lat, lon, targetDir) {
+  // clamp unless the caller passes a wider maxPitch; the one nearest the
+  // current pitch wins. Degenerate polar foci keep the current pose (the
+  // clamp makes exact polar centering impossible).
+  function solveEarthFocusRotation(lat, lon, targetDir, maxPitch) {
     const v = locationToUnit(lat, lon);
     const t = targetDir;
-    const clampPitch = (p) => Math.max(-1.2, Math.min(1.2, p));
+    const bound = Math.max(0.5, Math.min(Math.PI, Number(maxPitch) || 1.2));
+    const clampPitch = (p) => Math.max(-bound, Math.min(bound, p));
     const r = Math.hypot(v.y, v.z);
     let pitch = earthPitch || 0;
     if (r > 1e-6) {
@@ -1892,7 +1936,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     const toZoom = clampEarthZoom(targetZoom);
     const viewAxis = lockEarthZoomAnchor();
     earthFocus = { lat: Number(lat) || 0, lon: Number(lon) || 0 };
-    const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon, viewAxis);
+    // Aim the focus's outward normal BACK along the view axis (toward the
+    // head), not along it: with groupPos = anchor − focusDir·R·S this puts
+    // the globe center on the far side of the anchor, so the viewer stays
+    // outside looking at the near wall head-on. Aiming +viewAxis would
+    // strand the center behind the head (inside the ball, map invisible).
+    // Top-down mode also relaxes the pitch clamp so high-latitude foci
+    // still face exactly.
+    const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon,
+      { x: -viewAxis.x, y: -viewAxis.y, z: -viewAxis.z },
+      earthTopdownWillBeActive(toZoom) ? EARTH_TOPDOWN_MAX_PITCH : undefined);
     let dYaw = solved.yaw - (earthYaw || 0);
     dYaw = ((dYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI; // shortest arc
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
@@ -1987,6 +2040,22 @@ window.WebXRVR = window.WebXRVR || (function () {
         : earthZoom + (earthZoomTarget - earthZoom) * 0.18;
       earthZoom = Math.abs(next - earthZoomTarget) < 0.004 ? earthZoomTarget : next;
       applyEarthZoom();
+    }
+    // Top-down tracking: while active (and no animation or drag owns the
+    // pose), ease yaw/pitch toward exact normal alignment so residual tilt
+    // — from drags, head motion, or clamp limits — converges back to a
+    // perpendicular street view. Object motion only; the head never moves.
+    if (earthTopdownActive() && !earthZoomAnim && !earthDragging) {
+      const viewDir = earthTopdownViewDir();
+      if (viewDir && earthFocus) {
+        const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon,
+          viewDir, EARTH_TOPDOWN_MAX_PITCH);
+        let dYaw = solved.yaw - (earthYaw || 0);
+        dYaw = ((dYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        earthYaw = (earthYaw || 0) + dYaw * 0.12;
+        earthPitch = (earthPitch || 0) + (solved.pitch - (earthPitch || 0)) * 0.12;
+        applyEarthRotation(); // also re-pins the focus to the anchor
+      }
     }
     return false;
   }
@@ -3644,7 +3713,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (sceneMode === 'earth' && controlIndex < 0) {
       const hit = hitTestEarth(ray.origin, ray.direction);
-      setEarthHoveredIndex(hit.hit ? hit.zoneIndex : -1);
+      updateEarthHoverFromRay(ray.origin, ray.direction);
       return { ray, hit, controlIndex, panelDesc };
     }
     return { ray, hit: null, controlIndex, panelDesc };
@@ -3878,6 +3947,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       activeRayHandedness = handedness;
       const hovered = updateLaserPointer(activeRayOrigin, activeRayDir);
       hoveredButton = hovered >= 0 ? hovered : -1;
+      // XR hover highlight + preview fetch follow the same controller ray
+      // (the laser helper only reports globe-vs-dock for its visuals).
+      // Change-guarded inside: holding still never refetches.
+      updateEarthHoverFromRay(activeRayOrigin, activeRayDir);
     } catch (e) {}
   }
 
@@ -4658,6 +4731,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // Single choke point for hover detection on every input path (desktop
+  // mouse ray, XR controller lasers): ray-cast the globe, publish the
+  // hovered zone index, and let setEarthHoveredIndex drive the label
+  // highlight + preview fetch (change-guarded, so per-frame calls are
+  // cheap). Returns the zone index or -1. Previously only the desktop
+  // path resolved zones — the XR laser collapsed everything to "globe",
+  // so hover highlight + previews never fired on Quest.
+  function updateEarthHoverFromRay(origin, direction) {
+    if (sceneMode !== 'earth' || !origin || !direction) return -1;
+    let hit = null;
+    try {
+      hit = hitTestEarth(origin, direction);
+    } catch (e) {
+      return -1;
+    }
+    const idx = hit && hit.hit ? hit.zoneIndex : -1;
+    setEarthHoveredIndex(idx);
+    return idx;
+  }
+
   function setEarthHoveredIndex(index) {
     index = Number(index);
     const changed = index !== earthHoveredIndex;
@@ -4768,6 +4861,41 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
 
+  // Top-down pan step: move the focus opposite the cursor's geographic
+  // motion (grab feel — content follows the cursor), then re-face exactly
+  // so the street view stays perpendicular. Only runs past the engage
+  // thresholds, so tap safety is unchanged. Returns true when consumed.
+  function updateEarthTopdownPan(local) {
+    if (!earthFocus) return false;
+    if (!earthTopdownPanPrev) {
+      earthTopdownPanPrev = { ...local };
+      return true; // grab point established; no motion yet
+    }
+    const prev = earthTopdownPanPrev;
+    earthTopdownPanPrev = { ...local };
+    const a = unitToLatLon(prev);
+    const b = unitToLatLon(local);
+    let dLon = b.lon - a.lon;
+    dLon = ((dLon + 540) % 360) - 180; // shortest arc across the dateline
+    const dLat = b.lat - a.lat;
+    if (earthDragAxis === 'pitch') {
+      earthFocus.lat = Math.max(-85, Math.min(85, earthFocus.lat - dLat));
+    } else {
+      // Yaw axis (or undecided): longitude only, mirroring legacy rotate.
+      earthFocus.lon = ((earthFocus.lon - dLon + 540) % 360) - 180;
+    }
+    earthZoomAnim = null; // the drag owns the pose now (cancels any tap anim)
+    const viewDir = earthTopdownViewDir();
+    if (viewDir) {
+      const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon,
+        viewDir, EARTH_TOPDOWN_MAX_PITCH);
+      earthYaw = solved.yaw;
+      earthPitch = solved.pitch;
+      applyEarthRotation(); // re-pins the moved focus to the anchor
+    }
+    return true;
+  }
+
   function updateEarthDrag(direction) {
     if (!earthDragging || !direction) return;
     const len = Math.sqrt(
@@ -4812,7 +4940,11 @@ window.WebXRVR = window.WebXRVR || (function () {
             earthDragAxis = ax >= ay ? 'yaw' : 'pitch';
           }
         }
-        if (earthDragAxis === 'pitch') {
+        // Top-down experiment: pan the focus instead of rotating (keeps
+        // the street view perpendicular); otherwise the legacy rotate.
+        if (earthTopdownActive() && updateEarthTopdownPan(normalized)) {
+          // consumed
+        } else if (earthDragAxis === 'pitch') {
           rotateEarth(0, dy * EARTH_PITCH_SENSITIVITY);
         } else if (earthDragAxis === 'yaw') {
           rotateEarth(dx * EARTH_YAW_SENSITIVITY, 0);
@@ -4848,6 +4980,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthDragCumY = 0;
     earthDragAxis = null;
     earthPressZone = -1;
+    earthTopdownPanPrev = null; // next drag re-grabs
     if (selected >= 0) {
       // Z1 tap dispatch: below the city band this zooms into the zone;
       // at/above the band it selects the location feed (legacy behavior).
@@ -5820,6 +5953,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthZoomTarget = 1;
     earthFocus = null;
     earthZoomAnchor = null;
+    earthTopdownPanPrev = null;
     earthZoomAnim = null;
     earthZoomApplied = -1;
     // Z2 tile teardown: dispose every patch + texture; the layer rebuilds
@@ -6244,7 +6378,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -6585,6 +6719,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       raySphereHit,
       hitTestEarth,
+      updateEarthHoverFromRay,
       setLocationActivity,
       setEarthHoveredIndex,
       selectEarthLocation,
@@ -6620,6 +6755,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthTileImageLoader = (typeof fn === 'function') ? fn : null;
       },
       // Z3 seams: band-tracked activity fetch + heat overlay.
+      earthTopdownActive,
       earthGeohashCellBounds,
       earthGeohashCellAngularRadius,
       earthVisibleBbox,

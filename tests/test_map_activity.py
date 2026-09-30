@@ -160,6 +160,11 @@ class ClusterTests(unittest.TestCase):
         self.assertNotEqual((cell["lat"], cell["lon"]), (tokyo_city["lat"], tokyo_city["lon"]))
         center = reels._geohash_cell_center(gh)
         self.assertEqual((cell["lat"], cell["lon"]), (round(center[0], 6), round(center[1], 6)))
+        # Slug alias: hover previews, feed selects, and label keys all
+        # address rows by slug — clusters expose the hottest member city's.
+        self.assertTrue(cell["slug"], "cluster rows must carry a slug")
+        self.assertEqual(cell["slug"], cell["primary_slug"])
+        self.assertEqual(cell["slug"], tokyo_city["slug"])
         # Heat is renormalized within the returned set, ramp bounded.
         self.assertTrue(all(0.0 <= row["heat"] <= 1.0 for row in response["locations"]))
         hottest = max(response["locations"], key=lambda row: row["score"])

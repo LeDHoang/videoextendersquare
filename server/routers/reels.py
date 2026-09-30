@@ -959,6 +959,12 @@ def _cluster_activity_rows(
         clat, clon = _geohash_cell_center(cell["geohash"])
         cell["lat"] = round(clat, 6)
         cell["lon"] = round(clon, 6)
+        # Slug alias: every downstream consumer (hover preview, feed select,
+        # label repaint keys) addresses rows by slug. Clusters expose the
+        # hottest member city's slug so previews/feeds resolve to real
+        # content; multi-city clusters still drill down on tap via
+        # kind/location_count and never select.
+        cell["slug"] = cell["primary_slug"]
         out.append(cell)
     _normalize_row_heat(out)
     out.sort(key=lambda row: (-row["score"], row["name"]))
