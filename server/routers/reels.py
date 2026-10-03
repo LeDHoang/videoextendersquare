@@ -877,7 +877,12 @@ def _cluster_precision(zoom: int) -> int:
 
 
 def _parse_bbox(value) -> tuple[float, float, float, float] | None:
-    """Parse 'west,south,east,north' — malformed input degrades to None."""
+    """Parse 'west,south,east,north' — malformed input degrades to None.
+
+    R4 dateline wrap: west > east is a valid *crossing* box meaning
+    lon >= west OR lon <= east (emitted by earthVisibleBbox for Pacific
+    views). Only south > north is malformed.
+    """
     if not value:
         return None
     try:
@@ -891,7 +896,7 @@ def _parse_bbox(value) -> tuple[float, float, float, float] | None:
         return None
     if not (-90.0 <= south <= 90.0 and -90.0 <= north <= 90.0):
         return None
-    if west > east or south > north:
+    if south > north:
         return None
     return (west, south, east, north)
 
@@ -900,7 +905,9 @@ def _in_bbox(lat: float, lon: float, bbox) -> bool:
     if not bbox:
         return True
     west, south, east, north = bbox
-    return west <= float(lon) <= east and south <= float(lat) <= north
+    lon = float(lon)
+    in_lon = (lon >= west or lon <= east) if west > east else (west <= lon <= east)
+    return in_lon and south <= float(lat) <= north
 
 
 def _cluster_activity_rows(

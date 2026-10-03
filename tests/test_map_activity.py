@@ -100,14 +100,22 @@ class BboxTests(unittest.TestCase):
         self.assertIsNone(reels._parse_bbox(""))
         self.assertIsNone(reels._parse_bbox("1,2,3"))
         self.assertIsNone(reels._parse_bbox("a,b,c,d"))
-        self.assertIsNone(reels._parse_bbox("150,-10,100,45"))  # west > east
         self.assertIsNone(reels._parse_bbox("0,90,10,-90"))     # south > north
+        # R4 dateline wrap: west > east is a valid crossing box.
+        self.assertEqual(reels._parse_bbox("179,-10,-179,10"), (179.0, -10.0, -179.0, 10.0))
 
     def test_in_bbox_bounds(self):
         bounds = (100.0, -10.0, 150.0, 45.0)
         self.assertTrue(reels._in_bbox(35.0, 139.0, bounds))
         self.assertFalse(reels._in_bbox(47.6, -122.3, bounds))
         self.assertTrue(reels._in_bbox(35.0, 139.0, None))
+
+    def test_in_bbox_crossing_box(self):
+        crossing = (179.0, -10.0, -179.0, 10.0)
+        self.assertTrue(reels._in_bbox(0.0, 179.5, crossing))
+        self.assertTrue(reels._in_bbox(0.0, -179.5, crossing))
+        self.assertFalse(reels._in_bbox(0.0, 0.0, crossing))
+        self.assertFalse(reels._in_bbox(45.0, 179.5, crossing))  # lat outside
 
 
 class ClusterTests(unittest.TestCase):

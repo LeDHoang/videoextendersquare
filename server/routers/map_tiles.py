@@ -1,16 +1,22 @@
 """Map tile proxy for the VR earth zoom map (docs/earth-zoom-map-plan.md, Phase Z0).
 
 Serves slippy-map raster tiles same-origin so the WebXR globe can drape real
-basemap geography on the sphere past the holographic crossfade band. Upstream
-defaults to the OpenStreetMap tile CDN; every tile is fetched upstream at most
-once (disk cache), then served immutable — Cloudflare edge caching (topology in
+basemap geography on the sphere past the holographic crossfade band. Two layers
+(Earth Zoom v2): ``base`` (geography) and ``labels`` (text-only, transparent)
+so the client can tint geography toward the holographic palette without
+touching glyphs. Upstream defaults to keyless OSM standard raster (labels baked
+in; labels layer disabled by default → client renders base-only); CARTO dark
+@2x split layers are opt-in via SX_MAP_TILES_URL / SX_MAP_LABELS_URL with a
+keyed template (anonymous CARTO returns key-wall placeholders). Every tile is
+fetched upstream at most once (disk cache keyed per layer and per upstream
+template), then served immutable — Cloudflare edge caching (topology in
 docs/to-beta.md) absorbs repeat traffic.
 
 Hard contracts:
 - Never 500 for tile content: disabled → 404, upstream failure → 502 with a
   short Retry-After. The globe must always render (client falls back to the
   holographic canvas, same contract as /api/reels/earth-texture).
-- OSM tile-usage policy: compliant User-Agent upstream, per-IP fetch guard
+- Provider usage policy: compliant User-Agent upstream, per-IP fetch guard
   against planetary enumeration through the proxy.
 - Attribution is a license requirement: every tile response carries the
   X-Map-Attribution header and /attribution exposes it as JSON for the UI.
@@ -18,34 +24,78 @@ Hard contracts:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import time
 import urllib.request
+import urllib3
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/api/reels/map-tiles", tags=["reels"])
 
 MAX_ZOOM = 17
+# Keyless default that works TODAY: OSM standard raster (labels baked in, light
+# theme — the client GPU-tints it toward holo cyan). CARTO's anonymous
+# basemaps now return "API KEY REQUIRED" placeholders for every tile (verified
+# 2026-10-03), so CARTO is opt-in via SX_MAP_TILES_URL / SX_MAP_LABELS_URL with
+# a keyed template, not the default. An empty labels template disables the
+# labels layer (404 fast-path; the client renders base-only, non-fatal).
 DEFAULT_UPSTREAM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+DEFAULT_LABELS_UPSTREAM = ""
+UPSTREAM_SUBDOMAINS = ("a", "b", "c", "d")
+LAYERS = ("base", "labels")
 DEFAULT_CACHE_DIR = "data/map_tiles"
 USER_AGENT = "EchoVR-MapTiles/1.0 (https://github.com/LeDHoang/videoextendersquare)"
-FETCH_TIMEOUT_S = 5.0
+FETCH_TIMEOUT_S = 10.0
 MAX_TILE_BYTES = 1 << 20  # 1 MB — a legit 256px raster tile is ~10-60 KB
-OSM_ATTRIBUTION = "© OpenStreetMap contributors"
+OSM_ATTRIBUTION_BASE = "© OpenStreetMap contributors"
 OSM_ATTRIBUTION_URL = "https://www.openstreetmap.org/copyright"
+
+_pool: urllib3.PoolManager | None = None
+_pool_lock = threading.Lock()
+
+
+def _get_http_pool() -> urllib3.PoolManager:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = urllib3.PoolManager(
+                    num_pools=10,
+                    maxsize=32,
+                    timeout=urllib3.Timeout(connect=3.0, read=FETCH_TIMEOUT_S),
+                    headers={"User-Agent": USER_AGENT, "Accept": "image/png,image/*;q=0.8"},
+                )
+    return _pool
+
+
+def _attribution_text() -> str:
+    """Credit data actually served: OSM always (base default), plus CARTO only
+    when a CARTO template is configured (keyed opt-in)."""
+    text = OSM_ATTRIBUTION_BASE
+    try:
+        configured = (_upstream_template("base"), _upstream_template("labels"))
+    except Exception:
+        configured = ()
+    if any("carto" in (t or "").lower() for t in configured):
+        text += " © CARTO"
+    return text
+
+
+def _attribution_header() -> str:
+    return _attribution_text().replace("©", "(C)")
 CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
 # Header-safe copy of the attribution: HTTP headers are latin-1/ASCII tooling
 # territory, so the © glyph stays in the JSON route (UTF-8) and headers use (C).
-OSM_ATTRIBUTION_HEADER = "(C) OpenStreetMap contributors"
 
 # Per-IP sliding-window guard counted on upstream fetches only (cache hits are
-# free). A heavy VR zoom session pulls bursts of ≤ ~200 tiles; the cap blocks
-# whole-planet enumeration through the proxy without touching legit play.
-RATE_LIMIT_COUNT = 360
+# free). A heavy VR zoom session pulls bursts of ≤ ~200 tile slots × 2 layers;
+# the cap blocks whole-planet enumeration without touching legit play.
+RATE_LIMIT_COUNT = 720
 RATE_LIMIT_WINDOW_S = 60.0
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, list[float]] = {}
@@ -63,8 +113,18 @@ def _tiles_enabled() -> bool:
     return os.environ.get("SX_MAP_TILES_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 
 
-def _upstream_template() -> str:
+def _upstream_template(layer: str = "base") -> str:
+    if layer == "labels":
+        return os.environ.get("SX_MAP_LABELS_URL", DEFAULT_LABELS_UPSTREAM).strip() or DEFAULT_LABELS_UPSTREAM
     return os.environ.get("SX_MAP_TILES_URL", DEFAULT_UPSTREAM).strip() or DEFAULT_UPSTREAM
+
+
+def _upstream_url(layer: str, z: int, x: int, y: int) -> str:
+    """Expand {z}/{x}/{y} plus an optional {s} subdomain (deterministic per tile
+    so the browser/edge cache and our disk cache agree on one URL)."""
+    template = _upstream_template(layer)
+    sub = UPSTREAM_SUBDOMAINS[(x + y) % len(UPSTREAM_SUBDOMAINS)]
+    return template.replace("{s}", sub).format(z=z, x=x, y=y)
 
 
 def _cache_dir() -> Path:
@@ -72,21 +132,22 @@ def _cache_dir() -> Path:
 
 
 def _fetch_upstream(url: str) -> tuple[bytes, str]:
-    """Fetch one tile upstream. Blocking is fine: sync routes run in the pool."""
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": USER_AGENT, "Accept": "image/png,image/*;q=0.8"},
-    )
+    """Fetch one tile upstream using connection-pooled HTTP keep-alive."""
+    pool = _get_http_pool()
     try:
-        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_S) as resp:
-            status = getattr(resp, "status", 200) or 200
-            if status != 200:
-                raise UpstreamTileError(f"upstream status {status}")
-            content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            data = resp.read(MAX_TILE_BYTES + 1)
+        resp = pool.request(
+            "GET",
+            url,
+            retries=urllib3.util.Retry(total=1, connect=1, read=1, status=1, backoff_factor=0.2),
+        )
+        status = getattr(resp, "status", 200) or 200
+        if status != 200:
+            raise UpstreamTileError(f"upstream status {status}")
+        content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        data = resp.data
     except UpstreamTileError:
         raise
-    except Exception as exc:  # urllib raises a zoo of URLError/TimeoutError/OSError
+    except Exception as exc:
         raise UpstreamTileError(f"upstream unreachable: {exc}") from exc
     return data, content_type
 
@@ -115,8 +176,11 @@ def _check_fetch_rate(identity: str) -> bool:
     return True
 
 
-def _tile_cache_path(z: int, x: int, y: int) -> Path:
-    return _cache_dir() / str(z) / str(x) / f"{y}.png"
+def _tile_cache_path(z: int, x: int, y: int, layer: str = "base") -> Path:
+    # Keyed by a short hash of the upstream template: swapping provider (e.g.
+    # the legacy light OSM raster → CARTO dark) never serves stale-style tiles.
+    tag = hashlib.sha1(_upstream_template(layer).encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+    return _cache_dir() / layer / tag / str(z) / str(x) / f"{y}.png"
 
 
 def _store_tile(cache_file: Path, data: bytes) -> None:
@@ -131,7 +195,7 @@ def _store_tile(cache_file: Path, data: bytes) -> None:
 
 
 def _tile_headers() -> dict[str, str]:
-    return {**CACHE_HEADERS, "X-Map-Attribution": OSM_ATTRIBUTION_HEADER}
+    return {**CACHE_HEADERS, "X-Map-Attribution": _attribution_header()}
 
 
 def _validate_tile_coords(z: int, x: int, y: int) -> None:
@@ -152,24 +216,48 @@ def _validate_tile_coords(z: int, x: int, y: int) -> None:
 def map_tile_attribution():
     """Attribution metadata for the VR globe UI (license requirement)."""
     return {
-        "attribution": OSM_ATTRIBUTION,
+        "attribution": _attribution_text(),
         "url": OSM_ATTRIBUTION_URL,
         "enabled": _tiles_enabled(),
         "max_zoom": MAX_ZOOM,
+        "layers": list(LAYERS),
     }
 
 
 @router.get("/{z}/{x}/{y}.png")
 def get_map_tile(z: int, x: int, y: int, request: Request):
+    """Legacy single-layer route: alias for the ``base`` layer."""
+    return _serve_tile("base", z, x, y, request)
+
+
+@router.get("/{layer}/{z}/{x}/{y}.png")
+def get_map_layer_tile(layer: str, z: int, x: int, y: int, request: Request):
+    """Serve one tile of a named layer (``base`` geography or ``labels`` text)."""
+    if layer not in LAYERS:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "MAP_TILE_LAYER_INVALID", "message": f"Layer must be one of {', '.join(LAYERS)}."},
+        )
+    return _serve_tile(layer, z, x, y, request)
+
+
+def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
     """Serve one slippy-map raster tile, disk-cached and upstream-guarded."""
     if not _tiles_enabled():
         raise HTTPException(
             status_code=404,
             detail={"code": "MAP_TILES_DISABLED", "message": "Map tiles are disabled on this server."},
         )
+    if layer == "labels" and not _upstream_template("labels"):
+        # Labels opt-in: no labels upstream configured (default) → fast 404.
+        # The client treats labels failure as non-fatal and renders base-only.
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "MAP_TILE_LAYER_DISABLED", "message": "Labels layer has no upstream configured."},
+        )
     _validate_tile_coords(z, x, y)
 
-    cache_file = _tile_cache_path(z, x, y)
+    cache_file = _tile_cache_path(z, x, y, layer)
     if cache_file.is_file():
         return FileResponse(str(cache_file), media_type="image/png", headers=_tile_headers())
 
@@ -181,7 +269,7 @@ def get_map_tile(z: int, x: int, y: int, request: Request):
             headers={"Retry-After": str(int(RATE_LIMIT_WINDOW_S))},
         )
 
-    url = _upstream_template().format(z=z, x=x, y=y)
+    url = _upstream_url(layer, z, x, y)
     try:
         data, content_type = _fetch_upstream(url)
         _validate_tile_payload(data, content_type)

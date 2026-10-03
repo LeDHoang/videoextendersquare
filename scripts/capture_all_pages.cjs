@@ -34,7 +34,7 @@ async function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function waitForPort(port, maxTries = 30) {
+async function waitForPort(port, maxTries = 60) {
   for (let i = 0; i < maxTries; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`);

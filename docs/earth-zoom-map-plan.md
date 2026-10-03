@@ -1,13 +1,355 @@
 # Earth Zoom Map Plan — Google-Maps-Style Zoom for the VR Globe
 
-Status: **implementation complete 2026-09-22** — all of Z0–Z4 coded, tested (`make test` green), and documented; pending the manual on-device Quest pass and owner review/commit (uncommitted tree held per instruction).
+Status: **v1 implementation complete 2026-09-22** (Z0–Z4 below); **v2 refinement in progress
+2026-10-02** — see §0 for the review findings and build order driving the current work.
 Supersedes nothing; extends the Earth View Subsystem (§4.1 of
 `docs/threejs-vr-implementation-plan.md`).
 Aligns with `docs/todolist.md` items "Open city/event Packs directly from Earth while
 retaining city-level location privacy" and "Pilot travel, restaurant, and city packs
 connected to Earth".
 
-## Progress Log (updated per phase — resume here after a crash)
+---
+
+## 0. Earth Zoom v2 — keep it a globe, make the text readable (2026-10-02)
+
+### Review findings that triggered v2
+
+The v1 zoom (Z0–Z4, commits `04a64ce` + `075a909`) works end-to-end but reads as "raw" on
+review:
+
+1. **Curvature disappears.** `applyEarthZoom` scaled the real sphere by `S` up to 16384,
+   pinning the focus 1.15 m from the head. At S=64 the radius is already 43 m; by street
+   zoom it's 11 km. Inside the ~49-tile view that's a flat wall, not a globe.
+2. **Face-on wall posture.** The focus normal pointed straight at the head
+   (`zoomEarthTo`). No horizon, no limb, no atmosphere — the cues that say "you're on a
+   planet" were absent.
+3. **Text was unreadable, structurally:**
+   - OSM standard tiles are 256 px with dark glyphs in white halos; the CPU per-pixel
+     restyle (`earthHoloTile*`) thresholded these into bright blobs that rang and fattened
+     no matter how it was tuned.
+   - Tile textures used `LinearFilter` with no mipmaps/anisotropy — text shimmered and
+     aliased under VR resampling, worse at oblique angles.
+   - Tile zoom selection (`log2(S)+3.3`) gave ~4.6 tiles across the FOV — too low a pixel
+     density for 256 px labels.
+4. **Motion feel.** Linear-in-S easing (tap: 450 ms lerp; continuous: 0.18/frame lerp) over
+   a 1→16384 range front-loads badly: it jumps then crawls. Needs log-space easing.
+5. **Holes while streaming.** Zoom-band changes left new tiles empty with only the 25%
+   hologram showing through; no parent-level fallback.
+6. **Commit hygiene.** `075a909` bundled unrelated capture/upload scripts — flagged to the
+   owner, not touched without approval. Top-down was still `?topdown=1`-gated with a known
+   0–48° bearing error (no roll DOF in yaw/pitch).
+
+Decisions locked in with the owner: tile source → CARTO `dark_nolabels` +
+`dark_only_labels` @2x; posture → past country zoom the globe tilts down "like a table"
+with a curved horizon and atmosphere glow.
+
+### v2 approach (implementation contract and verification gates below)
+
+- **A. Curvature-preserving zoom ("tiny planet" warp).** Decouple map scale `S` (drives
+  tile zoom/text size) from the rendered sphere radius: `R_vis(S) = R0 · S^0.45` (capped
+  ~6 m). Angular magnification `k = R0·S / R_vis` warps surface points around the focus
+  (`earthWarpLocal`/`earthUnwarpLocal`, mirrored in GLSL via `onBeforeCompile`) so the map
+  is pixel-accurate at the focus while the sphere's curvature stays visible (horizon
+  falloff past ~100°, far side never drawn). At S=1, k=1 and R_vis=R0 — the legacy globe
+  reproduces exactly.
+- **B. Tilted "table" posture, quaternion pose.** Replace yaw/pitch with a quaternion
+  `earthQuat` while zoomed; tilt ramps 0°→~55° over S∈[2,16] (map sits ~35° below eye
+  level), full basis (normal + north tangent) so bearing is exact — resolves the 075a909
+  0–48° bearing bug. Grab-pan rotates about the axis ⟂ (prevHit, curHit) so the grabbed
+  point stays under the laser; `?topdown=1` retires as the new default zoomed-drag
+  behavior; dock gets a `NORTH UP` reset.
+- **C. Legible map:** CARTO @2x split into `base`/`labels` layers, composited client-side
+  per tile slot (no CPU pixel loop), GPU shader tint toward holo cyan on the base only,
+  mipmaps + anisotropic filtering for oblique legibility, `?earthstyle=raw` bisection kept.
+- **D. Horizon LOD, no holes.** Multi-level visible set (ring 2 at `tileZ`, `tileZ−2`,
+  `tileZ−4`), parent-tile UV-subrect fallback instead of the hologram linger, additive
+  Fresnel atmosphere rim at `R_vis·1.03`.
+- **E. Motion polish.** Log-space zoom easing, zoom-about-the-pointer, breadcrumb +
+  scale-bar label.
+- **F. Commit hygiene.** Capture/upload scripts in `075a909` flagged, not moved without
+  owner approval.
+
+This document is the repository source of truth for v2. The remaining-work plan below
+supersedes conflicting v1 formulas, budgets, and interaction descriptions in §§1–12.
+Those sections and the older progress log are historical context, not v2 acceptance evidence.
+
+### v2 progress log
+
+| Step | Status | Verification | Notes |
+|---|---|---|---|
+| 1. Server: layered tile routes + CARTO defaults | ✅ **done** (2026-10-02) | `pytest tests/test_map_tiles.py` 17/17 green | `server/routers/map_tiles.py`: `/api/reels/map-tiles/{layer}/{z}/{x}/{y}.png` with `layer ∈ {base, labels}`, legacy route aliases `base`; `SX_MAP_TILES_URL`/`SX_MAP_LABELS_URL` default to CARTO `dark_nolabels`/`dark_only_labels` @2x (`{s}` a–d rotation); disk cache keyed per layer + upstream-template hash (provider swap invalidates stale-style tiles); attribution → "© OpenStreetMap contributors © CARTO", `layers` field added to `/attribution` |
+| 2. Client: dual-texture GPU tint, mipmaps/anisotropy, drop CPU restyle | ✅ **done** (2026-10-03, owner decision: GPU) | node 144/144 (R5 shader-string + coarse-base-only + sampling tests); headless-Chrome raw-vs-holo bisection captures | `installEarthTileShader`: base tinted in-shader (screen-lift + multiply-hue, `earth-tile-holo-v1`), labels sampled untinted by own alpha; canvas draws raw base only (size cap); `?earthstyle=raw` = strength 0. Coarse parent bands skip labels fetch (base-only). `applyEarthTileSampling` unchanged (mips + aniso ≤8, tile-only) |
+| 3. Warp math (CPU) + GLSL + pins/heat/hit-test through the warp | ✅ **done** (2026-10-03) | warp-contract tests (derivative=k, monotonic, ≤1e-6 rad round-trip, S=1 identity); R2 coincidence test; headless-Chrome WebGL2 zero-error run (99/99 tiles live) | Half-angle `2·atan(k·tan(θ/2))` CPU+GLSL contract was already landed (plan's clamp note was stale); added `uEarthCapStart/End` uniforms (was hardcoded), `earth-half-angle-adaptive-v4`, `frustumCulled=false` on deformed meshes, overlay/hit coincidence across scales |
+| 4. Quaternion pose, table tilt, grab-pan, north-up | ✅ **done** (2026-10-03, owner decision: `?topdown=1` alias) | tilt-ramp + alias-parity + hand-switch/antipode tests; dock suite 6/6 | `earthQuat` + North Up full-basis path kept; yaw/pitch remain legacy telemetry at S=1. Added: tilt endpoint/monotonic tests, alias-parity (flag off/on identical), controller-switch guard, antipodal-delta reject. Quat-authoritative core preserved via North Up guard |
+| 5. Multi-level LOD, parent fallback, atmosphere rim | ✅ **done** (2026-10-03, owner decisions: wrap, 12-at-once, 128 MB) | quadrant-UV test, wrap + crossing-bbox tests (client + `test_map_activity.py`), memory-bound test, stale-slot test; live 99/99 | Dateline `x`-wrap in visible set + crossing `west>east` bbox (server `_parse_bbox`/`_in_bbox` wrap-aware); numbered-quadrant fallback UV fixture; ≤6 slots / ≤12 HTTP documented; 128 MB byte budget w/ LRU tiebreak + budget-hold parking (fallback covers, no churn); Fresnel rim spec (BackSide + depthTest, renderOrder 4, 1.03·Rvis) |
+| 6. Log easing, zoom-about-pointer, breadcrumb/scale bar, HUD, docs | ✅ **done** (2026-10-03) | long-frame + miss-stability + truncation/license + bar-hide tests; full suite below | 100 ms dt clamp; miss keeps focus (documented stable-center); attribution + zoom-share reservation (never truncated); scale-bar UNAVAILABLE hide contract. Docs reconciled in R8 |
+| 7. Verification evidence (2026-10-03) | ✅ automated + browser done; **headset blocked** | `node --check` ×2; node 144/144 + dock 6/6; pytest 190/190; vitest 13/13; `diff --check`; headless Chrome (SwiftShader WebGL2) globe + street + raw + orbit captures in `logs/`, harness + stub in `reports/` | Live S=512 Da Nang: band 12, 99/99 ready, 49 dual-label, 51.7 MB, 0 failures, 0 errors. **Blocked:** Quest HTTPS pass (`adb devices` empty, no hardware); comfort/frame-budget on device unmeasured — not claimed |
+| 8. Warp-visibility fix (2026-10-03, owner review: warp smear + halos) | ✅ **done** | node 146/146 (ramp + stand-down tests); headless fix-vs-repro captures `logs/earth-fix2-*.png` | Root causes: full-k warp smeared the low-res base wherever tiles were absent (pre-tile zooms + offline), and heat rendered k× too big. (a) `earthEffectiveK`: exact globe at S≤2, log-blend to full k over S∈[2,4]; stands down to 1 whenever tiles are degraded/disabled (zoom then grows a clean globe; cap lifts so far side stays hittable; geometry keys + uniforms follow live). (b) Heat canvas radii + sprite scales divide by k_eff (hit-testing already geographic, unchanged). Owner screenshots also showed MAP OFFLINE with working activity ⇒ tile-upstream failure in their backend runtime, not client code: proxy + CARTO verified healthy live (`/attribution` 200 with `layers`, base/labels 200s, vite → :8000 correct). If it recurs: hard-reload, then `curl localhost:8000/api/reels/map-tiles/attribution` — no `layers` field means a pre-v2 backend is serving (restart uvicorn); `SX_MAP_TILES_ENABLED=0` or no outbound HTTPS to `*.basemaps.cartocdn.com` gives the same label |
+| 9. Provider switch: keyless OSM default (2026-10-03, owner: still offline) | OK done | pytest 17/17 (rewritten defaults); node 147/147; live OSM tile viewed (Norwich/Haarlem labels); end-to-end headless vs fresh backend 99/99 + logs/earth-osm-real-orbit.png (Da Nang streets on the curved globe) | Root cause found in pixels: anonymous CARTO returns API KEY REQUIRED placeholders for every tile (verified dark_nolabels 200 + PNG text) - the v2 CARTO default could never show streets. Fix: DEFAULT_UPSTREAM back to keyless OSM standard (labels baked in); labels default empty = fast 404, client renders base-only via the tested nonfatal path; CARTO split layers opt-in with a keyed template. Attribution now dynamic (OSM-only unless a CARTO template is configured; client upgrades its HUD credit from /attribution). GPU tint deepened (EARTH_TILE_TINT_DEPTH 0.55) so light OSM raster lands steel-cyan, pixel-verified (132,170,182) in-headless. BE+FE restarted (both were stale: backend predated layered routes); owner tab needs a hard reload for the new bundle |
+| Historical note | — | — | Steps 3–6 rows above dated 2026-10-02 described the pre-build partial state and are superseded by the 2026-10-03 rows. Original R0–R8 checklist (§below) is retained as the acceptance spec; all gates pass except the explicitly blocked headset gate |
+
+---
+
+## Remaining v2 implementation plan — ordered work and acceptance gates
+
+### Scope, evidence, and execution rules
+
+- Planning update: **2026-10-02**. No implementation completion is implied by this checklist.
+- Latest independently executed review command: `node --test web/tests/webxr-earth.test.js`
+  **120/120 passed**. Existing mocked tests do not prove shader compilation, visual
+  alignment, true pointer anchoring, north-up accuracy, or headset performance.
+- Backend 17/17 and older browser captures in the logs above are historical evidence;
+  rerun relevant checks against the final v2 build. Do not combine historical counts
+  into a new validation claim.
+- Inspect the current diff before editing; preserve owner changes. No billing changes,
+  unrelated VR roadmap work, automatic commits, or capture-script relocation.
+- For Quest-specific API/device work, verify current authoritative Meta documentation
+  first. Previous CLI verification did not complete; record unavailable tooling or
+  access explicitly rather than claiming verification. Discover actual connected devices
+  before any device commands. Generic CPU math and desktop browser tests are separate gates.
+- Keep implementation and evidence resumable: for each R-step record files changed,
+  exact commands/results, screenshots where relevant, unresolved issues, and next action.
+  Status vocabulary: **pending → implemented → automated verified → browser verified →
+  headset verified**. Mark complete only when its applicable gates pass.
+
+### R0 — Establish reproducible baseline and audit the partial implementation
+
+**Files:** `ui/assets/webxr_vr.js`, `ui/assets/vr_ui_canvas.js`,
+`web/tests/webxr-earth.test.js`, `server/routers/map_tiles.py`, `tests/test_map_tiles.py`.
+
+- [ ] Inventory every radius, scale, pose, forward/inverse geography, tile geometry,
+  ray-hit, overlay, cleanup, and fetch-generation assumption. Trace mouse and XR paths.
+- [ ] Verify actual THREE version/material chunks and existing browser-probe tooling;
+  do not assume shader injection points or invent launch commands.
+- [ ] Run Earth tests and baseline `make test`; record pre-existing failures separately.
+- [ ] Capture the actual served asset/build identity to prevent stale-bundle verification.
+- [ ] Audit current tile layer composition, parent/LOD code, atmosphere material, and
+  pointer/drag paths before deciding which partial changes to retain.
+
+**Exit:** a concrete call-site inventory and reproducible baseline; no unsupported
+claims that existing helpers mean an end-to-end feature is complete.
+
+### R1 — Define and test an invertible warp contract
+
+**Files:** renderer math helpers and Earth tests. **Depends on:** R0.
+
+Use `R0 = 0.676 m`, `S ∈ [1,16384]`, `Rvis = min(R0*S^0.45,6 m)`,
+`k = R0*S/Rvis`. Keep geographic unit directions distinct from rendered unit directions.
+The local derivative of angular magnification at the focus must equal `k`.
+
+- [ ] Replace the present `atan(k*tan(min(theta,0.49π)))` clamp. It is not global identity
+  at S=1 and collapses far-side geography into a near-side band.
+- [ ] Recommended contract to implement/test: `theta' = 2*atan(k*tan(theta/2))`, inverse
+  `theta = 2*atan(tan(theta'/2)/k)`. Prefer equivalent `atan2`/dot-product forms to avoid
+  singular arithmetic. With `d = dot(f,n)`, a stable forward cosine is
+  `d' = ((1+d)-k*k*(1-d))/((1+d)+k*k*(1-d))`; reconstruct the tangent robustly.
+- [ ] Special-case identity S=1, focus, antipode, and degenerate tangents. No NaNs,
+  arbitrary normalized zero vectors, angular folding, or invented antipode tangents.
+- [ ] Separate math validity from visibility: identity globe is unrestricted at S=1;
+  zoomed map uses a rendered cap with proposed soft fade 90°→100°. Define a continuous
+  transition into cap clipping, and reject outside-cap interaction. The cap is not a
+  substitute for camera backface/occlusion tests. Tune cap appearance only after R7.
+- [ ] Lock tests for identity, focus invariance, monotonicity, round trips, local
+  derivative, and finite results at every selected scale and geographic edge case.
+
+**Exit:** one explicit CPU/GLSL contract; CPU round-trip angular error ≤1e-6 rad on
+valid nondegenerate samples; identity holds over the full sphere, including far side.
+
+### R2 — Integrate the warp across rendering, overlays, and hit-testing
+
+**Files:** renderer, Earth tests, browser probe if needed. **Depends on:** R1.
+
+- [ ] Apply matching GLSL math to base-globe material through actual supported shader
+  chunks; update focus/k/cap uniforms as live state changes. Preserve base texture UVs
+  in geographic space. Handle normals, cap fade/discard, material program caching, and
+  reset/cleanup. CPU-reference comparisons alone do not prove GLSL execution.
+- [ ] Choose exactly one deformation path per drawable: shader-deformed geographic
+  geometry or CPU-deformed geometry, never both. Base-globe tessellation must resolve
+  the shrinking source cap at maximum zoom; if it cannot, use a focus-local adaptive
+  patch or another explicitly tested representation rather than trusting coarse triangles.
+- [ ] Forward-warp pins, heat centers/extents, selection rings, and all surface anchors.
+  Orient overlays to rendered surface normals; hold intended world sizes/offsets
+  constant using Rvis, not S. Keep labels/previews outside globe scaling as appropriate.
+- [ ] Raycast the actual visible sphere, select nearest valid positive hit, inverse
+  rotate and inverse warp into geography. Reject hidden cap/back-side hits, then use
+  geographic zone matching with zoom-aware hit radii. Audit +5 cm hit-shell parallax.
+- [ ] Refresh geometry/uniforms on focus and scale changes even within the same tile
+  band; protect asynchronously loaded tiles against stale pose/geometry generations.
+- [ ] Fix bounding spheres/frustum culling for shader deformation. Audit maximum-zoom
+  float precision and tile seams; use focus-local coordinates if required by measurements.
+
+**Exit:** known geographic samples coincide across base, tiles, pins, heat, and hits;
+real browser shaders compile with no errors; world-size variation ≤2% for fixed-size
+pins; selected overlay centers hit their expected zones at every test scale.
+
+### R3 — Make quaternion pose authoritative; finish tilt, North Up, and grab-pan
+
+**Files:** renderer, `ui/assets/vr_ui_canvas.js`, Earth and relevant dock tests.
+**Depends on:** R2.
+
+- [ ] Preserve legacy globe rotation at S=1, but use a normalized quaternion as the
+  authoritative zoomed pose; stop reconstructing away roll from yaw/pitch each frame.
+- [ ] Derive geographic east/north from focus latitude/longitude. Map normal and north
+  tangent to a right-handed table/view basis; define deterministic polar behavior.
+- [ ] Ramp tilt smoothly 0°→55° over S=2→16 without changing the locked comfort anchor.
+  Test that the viewer stays outside the sphere and the viewed surface faces the viewer.
+- [ ] Wire `earth_north_up` to a visible **NORTH UP** Earth-only dock button. Reflow
+  controls without collisions, test hit rectangles/visibility/dispatch, and leave reels
+  controls unchanged. Keep north-up pose through subsequent frames and zoom changes.
+- [ ] Implement grab-pan from ray/surface geometry and an anchored geographic grabbed
+  point. Account for warp/translation, not just Euler deltas or an unwarped cross product.
+  Normalize quaternion updates; handle misses, antipodal deltas, and controller changes.
+- [ ] Make zoomed pan default; document whether `?topdown=1` is retained as a compatible
+  alias or retired. Drag threshold/release must not trigger a tap or open feed.
+
+**Exit:** north-bearing error ≤0.5° on nonpolar fixtures; deterministic poles; grab
+anchor reprojection error ≤2 desktop pixels for valid hits; no jumps on release,
+North Up, reset, scene exit, or rapid changes. Headset feel remains an R7 gate.
+
+### R4 — Complete LOD coverage and true parent-tile fallback
+
+**Files:** renderer tile scheduler/materializer/cache and Earth tests. **Depends on:** R2.
+
+- [ ] Use ring-2 sets at z, z−2, z−4 as the starting budget, not a proof of coverage.
+  Derive visible warped-cap coverage from camera/pose; deduplicate low zoom levels and
+  handle Mercator limits, x wrapping, and dateline crossing. Polar regions outside
+  Mercator coverage must deliberately use the base globe, not broken tile requests.
+- [ ] For each missing fine tile, find the nearest ready ancestor at zp. For
+  `q=2^(z-zp)`, ancestor coordinates are `floor(x/q), floor(y/q)` and subrect origin
+  `(x mod q)/q, (y mod q)/q`, extent `1/q`. Verify the actual texture V orientation
+  with a numbered-quadrant fixture; do not guess flipY semantics.
+- [ ] Share ancestor textures without mutating shared UV state or double-disposing.
+  Keep fallback until child readiness, then transition without blank frames. Parent
+  base/labels must stay paired; label failures remain nonfatal.
+- [ ] Avoid overlapping opaque coarse/fine surfaces: explicit coverage masks/patch
+  ownership or verified depth ordering and transitions. Radius offsets alone are not
+  accepted as a cure for z-fighting at oblique views.
+- [ ] Prioritize visible/fallback work over prefetch; bound **HTTP requests**, not just
+  tile slots (each pair can issue two requests). Start with ≤6 simultaneous requests.
+- [ ] Recompute memory budget for 512² RGBA + mips (~1.33 MiB per composite texture),
+  plus retained source layers, canvases, fallback and prefetch. Use a proposed ≤128 MiB
+  tile-texture working budget, with explicit count/byte eviction; validate/tune on device.
+- [ ] Preserve offline recovery, stale-generation cancellation, abort/disposal, cache
+  adoption, attribution, `?earthmap=0`, and scene cleanup. Audit immutable URL/provider
+  cache behavior: disk template hashes alone do not invalidate browser/edge caches;
+  document purge requirements or add tested URL versioning if provider switching needs it.
+
+**Exit:** quadrant/subrect tests pass; fine-tile failures retain geographic parent
+coverage; no unintended holes or z-fighting within tiled coverage; bounded traffic and
+memory; no retained tile resources after cleanup or repeated scene cycles.
+
+### R5 — Finish legible tile styling and a real atmosphere rim
+
+**Files:** renderer materials/composer and Earth/browser tests. **Depends on:** R2, R4.
+
+- [ ] Resolve the step-2 mismatch explicitly: implement base-only GPU tint as originally
+  planned, retaining separate untinted labels, OR record canvas compositing as an
+  intentional accepted deviation after visual/performance evidence. Do not label canvas
+  operations as shader tint. Do not restore per-pixel CPU restyling.
+- [ ] Verify color space, label alpha, mipmap/filter settings, anisotropy availability,
+  base-only fallback, raw-style bypass, and OSM/CARTO attribution in the actual renderer.
+- [ ] Replace any uniformly additive shell with view-dependent Fresnel rim behavior at
+  approximately 1.03*Rvis. Specify sidedness, depth test/write, opacity, cap handling,
+  and render ordering. Avoid glow over label centers or through hidden globe surfaces.
+
+**Exit:** labels remain readable without halos/shimmer; raw and styled comparisons
+confirm label preservation; atmosphere is strongest at the limb, not a washed-out disk.
+
+### R6 — Finish anchored motion, breadcrumb, and calibrated scale bar
+
+**Files:** renderer/dock tests and docs. **Depends on:** R3–R5.
+
+- [ ] Preserve log interpolation `exp(lerp(log(S0),log(S1),ease(t)))`; make continuous
+  smoothing elapsed-time based, not frame-count based. Test 30/60/90 Hz equivalence,
+  exact endpoints, reversals, cancellation, min/max clamping, and long-frame recovery.
+- [ ] Before pointer zoom, capture geographic hit and target ray/screen point. Solve
+  pose/translation each animation step so that point remains projected under pointer
+  while enforcing outside-sphere and comfort constraints. Do not silently substitute
+  focus-to-center zoom. Define a stable center fallback when the pointer misses.
+- [ ] Verify identical behavior for mouse wheel and XR grip/stick; no focus reset mid
+  gesture, no head-motion-following world anchor, no effect on reels input mappings.
+- [ ] Show WORLD → location/region breadcrumb with zoom progress, North Up/reset access,
+  offline status, and attribution. Prevent truncation from dropping critical information.
+- [ ] Replace uncalibrated kilometre copy with a visible scale bar: inverse-project its
+  surface endpoints and compute great-circle distance using Earth radius 6371 km.
+  Pick a 1/2/5 nice distance and size the bar accordingly; show metres below 1 km.
+  Hide/label unavailable when endpoints miss the valid surface. Normalize rendered units
+  by R0 if using a local analytic approximation, and verify against the inverse geometry.
+
+**Exit:** pointer anchor stays within 2 desktop pixels through valid zoom gestures;
+scale distance agrees with endpoint geography within 2%; readable bar and breadcrumb
+without collisions at supported panel sizes; no tap/drag/feed regressions.
+
+### R7 — Extensive function, form, and performance verification
+
+**Depends on:** each preceding implementation gate. Evidence goes in gitignored
+`reports/` or `logs/`; reusable browser probes go in `scripts/` and are documented in
+`scripts/README.md`. Inspect existing tooling before choosing browser commands.
+
+| Dimension | Required fixtures / actions | Pass evidence |
+|---|---|---|
+| Warp/precision | S=1,2,4,8,16,64,256,512,4096,16384; focus, near focus, limb, antipode; equator, ±60°, poles, ±180° | New math tests, CPU/GLSL sampled agreement, no NaNs/folding, finite seam geometry |
+| Rendering alignment | Known geographic markers over numbered tiles and real CARTO coast/city/street samples | Real WebGL compilation and captures; tiles, overlays and laser hits agree |
+| Pose/input | North Up, reset, tap, drag/release, wheel, XR grip+stick, misses, pan across dateline, changing focus mid-animation | Assertions on bearing/anchor; interaction trace; no accidental feed opens |
+| Streaming | Delay/fail base, fail labels, delay children, ancestor substitution, rapid z changes, offline→online | Network fixture tests; no stale tiles/holes; no uncontrolled refetch loops |
+| Visual form | Globe/regional/city/street, raw/styled, face-on/table-oblique; dense labels, low-activity region, selected/hovered heat | Before/after screenshots at identical camera/viewport; readable text, curved horizon, subtle limb glow, no seams/z-fighting |
+| HUD | Long names, offline label, attribution, North Up and scale bar | Full-panel captures and hit-rectangle tests; no overlap or clipped required copy |
+| Lifecycle/budget | Repeated Earth↔reels transitions, reset during loads, canceled gestures; maximum zoom | Resource/request counters and trace; disposal, bounded texture bytes and concurrency |
+| Privacy/regression | Clustering band/bbox/dateline, city privacy floor, open feed, Earth disabled, raw mode, reels controls | Existing and new tests pass; no precision leakage or unrelated behavior change |
+| Headset | HTTPS build on an actually discovered Quest device; globe→street→globe and oblique pan/zoom | Recorded device/browser/build, screenshots, comfort observations and frame/memory measurements |
+
+**Automated validation sequence:**
+1. `node --check ui/assets/webxr_vr.js` and `node --check ui/assets/vr_ui_canvas.js`.
+2. `node --test web/tests/webxr-earth.test.js`, plus discovered relevant dock tests.
+3. `make test` (repository-supported backend/full web suite; never repo-wide pytest).
+4. `git --no-pager diff --check`.
+5. Run finite browser verification against the identified current build, recording shader
+   errors, network fixture results, screenshots, and counters. Mock THREE tests cannot
+   replace this step.
+
+**Visual acceptance:** readable street names at normal viewing distance; recognizable
+curvature/horizon in zoomed views; no pin/heat drift, flashing seams, flat glow wash,
+clipped HUD, or accidental far-side selections. Review captures, not merely file existence.
+
+**Headset acceptance:** no observed discomfort during repeated full zoom/pan/reset trips;
+text/laser targets usable; scene stays within the measured device/browser frame budget.
+Record refresh rate and p50/p95 frame timings, draw calls, memory estimates, and request
+peaks. Do not invent a universal Quest FPS target or certify comfort from desktop emulation.
+If hardware/access is unavailable, mark **headset gate blocked**, not done.
+
+### R8 — Reconcile documentation and hand off for owner review
+
+**Depends on:** R7 results (including explicit blocked gates).
+
+- [ ] Update this progress table with actual per-step evidence and outstanding items;
+  correct historical contradictions without rewriting historical test results.
+- [ ] Update current architecture summary in `docs/threejs-vr-implementation-plan.md`
+  and operator controls/provider flags in `RUNNING.md`; reconcile relevant beta/roadmap
+  references only where this requested work changes their stated behavior.
+- [ ] Document final warp/cap math, authoritative pose, tile coverage/fallback semantics,
+  real request/memory budgets, scale bar, raw/disabled compatibility, and offline behavior.
+- [ ] Document probe invocation, served build identification, validation limitations,
+  intentional deviations (especially canvas vs GPU tint), and remaining device gates.
+- [ ] Review the diff for accidental owner-work changes and unrelated scripts; provide
+  owner a concise feature/evidence/blocker summary. **Do not commit automatically.**
+
+### Remaining-work checklist summary
+
+| Order | Deliverable | Initial state | Required completion gate |
+|---|---|---|---|
+| R0 | Baseline + code-path audit | pending | reproducible baseline and inventory |
+| R1 | Invertible identity-safe warp contract | partial helpers | new numerical tests |
+| R2 | Matching GLSL + overlay/hit integration | partial | numerical + real WebGL alignment |
+| R3 | Quaternion/table/North Up/grab-pan | partial | bearing/anchor tests + UI/browser interaction |
+| R4 | Coverage + parent subrect fallback + budgets | partial/unconfirmed | streaming fixtures + browser seams/resources |
+| R5 | Styling decision + Fresnel atmosphere | partial | shader/material tests + visual comparison |
+| R6 | Anchored zoom + calibrated HUD | partial | frame-rate/anchor/scale tests + browser interaction |
+| R7 | Full function/form/device verification | pending beyond 120-test baseline | recorded tests, captures, measurements; blockers explicit |
+| R8 | Current docs + owner handoff | this plan updated; rest pending | truthful evidence and owner review, no auto-commit |
+
+---
+
+## Historical v1 Progress Log (not v2 completion evidence)
 
 | Phase | Status | Verification | Notes |
 |---|---|---|---|
@@ -18,7 +360,7 @@ connected to Earth".
 | Z3 client code (§8.3, no tests yet) | ✅ **done** (2026-09-22) | code only — `node webxr-earth` 90/90 has zero Z3 coverage | `webxr_vr.js`: heat sprites (individual meshes ≤64, **not** InstancedMesh), band-tracked refetch (300 ms debounce, abort+generation), `zoom-cluster` tap dispatch, OPEN FEED drill-in, cluster label copy; `__test` seams exposed |
 | Z3a client tests | ✅ **done** (2026-09-22) | `node webxr-earth` **101/101** (11 new Z3); pytest 185/185; vitest 13/13 | `web/tests/webxr-earth.test.js` `─── Z3` block: band mapping, 300 ms debounce (single timer), stale-generation drop + explicit abort assert, scene-exit drop, sprite rebuild/fade/hover-boost, `zoom-cluster` tap drill, OPEN FEED routing, cluster label copy, cleanup teardown. Deviations locked in: sprites are individual meshes ≤64 (not InstancedMesh/256); 3-step tint, not full `earthHeatStyle` ramp |
 | Z3b geohash-extent sizing + bbox | ✅ **done** (2026-09-22) | `node webxr-earth` **104/104** (3 new); client cell centers bit-exact vs server (`ezs42`/`xn7m`/`ww8p`/`u4pr`); pytest 185/185; vitest 13/13 | `earthGeohashCellBounds/AngularRadius` + `max(cell, heat floor)` blend; `earthVisibleBbox()` (tile-set anchor/ring, dateline-clip safe) wired into `earthActivityUrl`. **Measured finding:** for all server-emitted precisions (2–5) the heat base dominates (p2 cell ≈ 0.1098 rad ≈ floor 0.11), so sizing is behavior-preserving — heat already covered every cell. Open follow-up (not started): city-row radius at street zoom (0.11–0.23 rad blobs swallow the ~0.015 rad view; empty-globe taps mis-hit) — needs a zoom-aware cap + on-device feel check |
-| Z3b geohash-extent sizing + bbox | ⬜ pending | — | `earthZoneAngularRadius`: `max(cell extent, 0.11 floor)` for clusters; `earthVisibleBbox()` → `&bbox=` in tile band |
+
 | Z4a breadcrumb + idle prefetch (code) | ✅ **done** (2026-09-22) | `node webxr-earth` **107/107** (3 new Z4 + Z2 materialize updated for prefetch traffic); pytest 185/185; vitest 13/13; `emulate_webxr_session.cjs` success (session lifecycle; note: long-running dev browser served a stale cached v8.17 bundle — needs hard reload, unrelated to this change) | `earthZoomPercent` (log-scale 0–100) + `WORLD › NAME · %` titles via new `getEarthLabelTitle` seam (detail line + license suffix untouched); `maintainEarthTilePrefetch` side-cache (4 center children, idle-gated, silent errors, cleared on retire/degrade/flag-off/cleanup) adopted with zero refetch on zoom-in; `materializeEarthTile` shared builder (+ prefetch-race guard). Deliberately skipped: next-zoom cluster prefetch (payloads ≤128 rows; debounced band fetch is fast) |
 | Z4b docs | ✅ **done** (2026-09-22) | — | §4.1 Earth Zoom Map summary, RUNNING.md env table (`SX_MAP_TILES_*`, `SX_MAP_MIN_CELL_REELS`, `?earthmap=0`), to-beta.md provider decision + Quest pass, todolist.md comfort entry |
 | Intensive verification pass | ✅ **done** (2026-09-22) | pytest 185/185, node 109/109, vitest 13/13; 52 server probe checks + 30 client probe checks green; 4/4 mutations caught | Found + fixed **refetch starvation**: per-frame `scheduleEarthActivityRefetch` re-armed the 300 ms timer, so band fetches never fired while frames ran (cluster heat stuck at globe granularity in production) — now fires once per band entry + skips when settled back; 2 regression tests added (`webxr-earth.test.js`). Also removed a dead queue-push on failed prefetch adoption. Probe scripts live outside the repo (tmp); mutations applied + reverted, tree verified clean |
@@ -391,4 +733,16 @@ current response verbatim).
 5. **Z4** (½–1 day) — polish + docs + Quest pass.
 
 Each phase is demoable on its own and leaves `make test` green.
+
+---
+
+## 13. Earth Zoom V3 Implementation & Verification
+
+The v2 map zoom architecture underwent a comprehensive review and v3 upgrade (see [earth-zoom-v3-plan.md](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/docs/earth-zoom-v3-plan.md)):
+1. **Full-Globe Drag Fix**: Resolved pointer drag direction unwrapping in `updateEarthDrag` so full-globe rotation is preserved at $S=1$.
+2. **Network Resilience & Offline Tripwire Fix**: Raised consecutive failure tripwire to 8 and upstream timeout to 10s. Wheel zoom no longer triggers spurious "MAP OFFLINE" events.
+3. **LOD Z-Fighting Elimination**: Coarse fallback parent tiles assigned `renderOrder = 1` and $0.2\text{ mm}$ inward offset, while fine child tiles render at `renderOrder = 2`, preventing blurry ancestor tiles from rendering over sharp street maps.
+4. **BufferGeometry Churn Elimination**: Added 50ms interval clamping to tile geometry updates in `updateEarthTiles`, eliminating ~6,000 BufferGeometries/sec churn during active zoom.
+5. **Architectural Tabletop Pan & Orbit Reset**: Verified smooth $55^\circ$ table tilt posture at street zoom ($S=512$, $z=12$), tabletop grab-pan, and clean reset back to full orbital globe view with post-reset drag responsiveness.
+6. **Full Test Suite & Live CDP Probes Green**: 185 web node tests + 13 vitest tests passing; 190 backend pytest tests passing; live headless Chrome probe passing with visual evidence in `logs/debug-earth-danang-screenshot.png` and `logs/debug-earth-reset-screenshot.png`.
 

@@ -80,6 +80,7 @@
     { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 238, w: 174, h: 42 },
     { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 238, w: 174, h: 42 },
     { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 238, w: 174, h: 42 },
+    { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 238, w: 174, h: 42 },
 
     // Bottom progress scrub track
     { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
@@ -134,7 +135,8 @@
 
   // Earth zoom map dock actions (Z1) — only meaningful in earth scene mode.
   function isEarthAction(action) {
-    return action === 'earth_open_feed' || action === 'earth_zoom_out' || action === 'earth_reset';
+    return action === 'earth_open_feed' || action === 'earth_zoom_out' ||
+          action === 'earth_reset' || action === 'earth_north_up';
   }
 
   function isControlVisible(action, source, itemState, isPackExp, sceneMode) {

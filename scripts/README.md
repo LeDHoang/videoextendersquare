@@ -1,5 +1,19 @@
 # scripts/ — operational & development tooling
 #
+# R7 Earth Zoom headless-browser gate (2026-10-03): the reusable harness +
+# stub tile server live in ../reports/ (gitignored one-off zone, kept with
+# the captures they produced):
+#   reports/earth-r7-harness.html  — loads the REAL bundle under SwiftShader
+#     WebGL2 (?mode=globe|street & ?cam=orbit & ?earthstyle=raw); result JSON
+#     in #r7result + document.title
+#   reports/earth-r7-stub-server.py — stub tiles/activity on :8471
+#     (.venv/bin/python reports/earth-r7-stub-server.py 8471)
+#   headless Chrome: --headless=new --use-angle=swiftshader
+#     --enable-unsafe-swiftshader --virtual-time-budget=25000
+#     --screenshot=../logs/earth-r7-<mode>.png "<url>?mode=street&cam=orbit"
+# Captures: ../logs/earth-r7-globe.png, earth-r7-street(-orbit,-raw).png.
+# Headset (Quest HTTPS) gate remains blocked — no device on adb.
+#
 # Layout:
 #   *.cjs              — Chrome DevTools Protocol probes (Quest Browser debugging,
 #                        reels player live verification, WebXR emulation)

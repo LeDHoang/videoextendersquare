@@ -44,8 +44,9 @@ def test_tile_fetch_caches_and_serves_attribution(client, monkeypatch):
     assert first.status_code == 200
     assert first.headers["content-type"] == "image/png"
     assert "immutable" in first.headers["cache-control"]
-    assert first.headers["x-map-attribution"] == map_tiles.OSM_ATTRIBUTION_HEADER
+    assert first.headers["x-map-attribution"] == map_tiles._attribution_header()
     assert first.content == FAKE_TILE_PNG
+    # Keyless OSM standard default (CARTO needs an API key since 2025).
     assert client.fetch_calls == ["https://tile.openstreetmap.org/3/4/2.png"]
 
     # Second request: disk cache hit — upstream never called again.
@@ -54,7 +55,7 @@ def test_tile_fetch_caches_and_serves_attribution(client, monkeypatch):
     assert second.content == FAKE_TILE_PNG
     assert len(client.fetch_calls) == 1
 
-    # Cache file layout is {z}/{x}/{y}.png under the configured dir.
+    # Cache file layout is {layer}/{template-hash}/{z}/{x}/{y}.png under the configured dir.
     cached = map_tiles._tile_cache_path(3, 4, 2)
     assert cached.is_file()
     assert str(map_tiles._cache_dir()).endswith("tiles")
@@ -145,9 +146,58 @@ def test_attribution_route(client, monkeypatch):
     response = client.get("/api/reels/map-tiles/attribution")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["attribution"] == map_tiles.OSM_ATTRIBUTION
+    assert payload["attribution"] == map_tiles._attribution_text()
     assert payload["enabled"] is True
     assert payload["max_zoom"] == map_tiles.MAX_ZOOM
     monkeypatch.setenv("SX_MAP_TILES_ENABLED", "0")
     assert client.get("/api/reels/map-tiles/attribution").json()["enabled"] is False
 
+
+
+def test_layer_routes_fetch_and_cache_independently(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    base = client.get("/api/reels/map-tiles/base/3/4/2.png")
+    assert base.status_code == 200
+    assert client.fetch_calls == ["https://tile.openstreetmap.org/3/4/2.png"]
+    # Labels layer has no upstream by default → fast 404, no fetch. The VR
+    # client treats labels failure as non-fatal and renders base-only.
+    labels = client.get("/api/reels/map-tiles/labels/3/4/2.png")
+    assert labels.status_code == 404
+    assert labels.json()["detail"]["code"] == "MAP_TILE_LAYER_DISABLED"
+    assert len(client.fetch_calls) == 1
+    assert map_tiles._tile_cache_path(3, 4, 2, "base").is_file()
+    # Legacy route aliases the base layer: cache hit, no new upstream call.
+    assert client.get("/api/reels/map-tiles/3/4/2.png").status_code == 200
+    assert len(client.fetch_calls) == 1
+
+
+def test_unknown_layer_rejected(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    response = client.get("/api/reels/map-tiles/satellite/3/4/2.png")
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "MAP_TILE_LAYER_INVALID"
+    assert client.fetch_calls == []
+
+
+def test_labels_template_env_and_provider_swap_invalidates_cache(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    monkeypatch.setenv("SX_MAP_LABELS_URL", "https://labels.example.com/{z}/{x}/{y}.png")
+    assert client.get("/api/reels/map-tiles/labels/1/1/0.png").status_code == 200
+    assert client.fetch_calls[-1] == "https://labels.example.com/1/1/0.png"
+    first_path = map_tiles._tile_cache_path(1, 1, 0, "labels")
+    monkeypatch.setenv("SX_MAP_LABELS_URL", "https://other.example.com/{z}/{x}/{y}.png")
+    assert map_tiles._tile_cache_path(1, 1, 0, "labels") != first_path
+    assert client.get("/api/reels/map-tiles/labels/1/1/0.png").status_code == 200
+    assert client.fetch_calls[-1] == "https://other.example.com/1/1/0.png"
+
+
+def test_attribution_credits_carto_only_when_configured_and_lists_layers(client, monkeypatch):
+    payload = client.get("/api/reels/map-tiles/attribution").json()
+    assert payload["attribution"] == "© OpenStreetMap contributors"
+    assert "CARTO" not in payload["attribution"]
+    assert payload["layers"] == ["base", "labels"]
+    assert map_tiles._attribution_header().isascii()
+    # Keyed CARTO opt-in restores the CARTO credit.
+    monkeypatch.setenv("SX_MAP_TILES_URL", "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png?api_key=K")
+    payload = client.get("/api/reels/map-tiles/attribution").json()
+    assert "OpenStreetMap" in payload["attribution"] and "CARTO" in payload["attribution"]
