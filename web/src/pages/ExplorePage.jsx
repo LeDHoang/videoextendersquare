@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { Hero, EmptyState, Mono } from '../components/ui/primitives.jsx';
+import { EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { Button, Dropdown, Pills } from '../components/ui/controls.jsx';
+import {
+  ChipRow,
+  DensityToggle,
+  ExploreHeader,
+  HeaderButton,
+  StatStrip,
+  TabGroup,
+  Toolbar,
+  gridClassName,
+  useGridDensity,
+} from '../components/explore/ExploreChrome.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
-import ExploreTile from '../components/explore/ExploreTile.jsx';
+import ExploreTile, { locationKey } from '../components/explore/ExploreTile.jsx';
+import { LocationIcon } from '../components/icons/index.jsx';
 import PackTile from '../components/packs/PackTile.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
@@ -23,6 +35,8 @@ const CONTENT_OPTS = [
   { label: 'PACKS', value: 'packs' },
 ];
 const PACK_PAGE_SIZE = 24;
+const TRENDING_TAGS = 8;
+const TRENDING_PLACES = 4;
 const PACK_ALL_LIMIT = 12;
 
 function shuffled(items) {
@@ -56,6 +70,7 @@ export default function ExplorePage() {
   const [search, setSearch] = useState(routeSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(routeSearch);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [density, setDensity] = useGridDensity();
   const { items: order, setItems: setOrder, previewMessage } = useExplorePreviews(data?.videos);
 
   useEffect(() => {
@@ -128,6 +143,54 @@ export default function ExplorePage() {
     [data],
   );
 
+  // MOST TRENDING: the tags and places used by the most reels in the current
+  // result set, so the chips always lead to a non-empty destination page.
+  const trendingChips = useMemo(() => {
+    const counts = new Map();
+    const bump = (id, entry) => {
+      const row = counts.get(id) || { ...entry, count: 0 };
+      row.count += 1;
+      counts.set(id, row);
+    };
+    for (const video of data?.videos || []) {
+      const seenTags = new Set();
+      for (const raw of video.tags || []) {
+        const slug = String(raw || '').replace(/^#+/, '').trim().toLowerCase();
+        if (!slug || seenTags.has(slug)) continue;
+        seenTags.add(slug);
+        bump('tag:' + slug, {
+          to: '/explore/tag/' + encodeURIComponent(slug),
+          label: slug,
+          prefix: '#',
+          hint: 'Tag',
+        });
+      }
+      const key = locationKey(video.location?.city, video.location?.country);
+      if (key) {
+        bump('loc:' + key, {
+          to: '/explore/location/' + encodeURIComponent(key),
+          label: [video.location.city, video.location.country].filter(Boolean).join(', '),
+          prefix: <LocationIcon className="sx-xh-chip-pin" />,
+          hint: 'Place',
+        });
+      }
+    }
+    // Tags are used far more often than places, so rank each kind separately
+    // and interleave (2 tags : 1 place) to keep both visible in the row.
+    const ranked = (prefix, limit) => [...counts.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .sort(([, a], [, b]) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, limit)
+      .map(([key, row]) => ({ key, ...row }));
+    const tags = ranked('tag:', TRENDING_TAGS);
+    const places = ranked('loc:', TRENDING_PLACES);
+    const mixed = [];
+    for (let i = 0; tags.length > i * 2 || places.length > i; i += 1) {
+      mixed.push(...tags.slice(i * 2, i * 2 + 2), ...places.slice(i, i + 1));
+    }
+    return mixed;
+  }, [data]);
+
   const setType = (value) => {
     setContentType(value);
     const next = new URLSearchParams(searchParams);
@@ -184,28 +247,53 @@ export default function ExplorePage() {
 
   return (
     <div>
-      <Hero title="EXPLORE" kicker={packDiscoveryEnabled ? 'ECHO · REELS AND AUTHORED REEL PACKS' : 'ECHO · REELS'}>
-        <div className="sx-stats-pill">
-          <span>REELS: <strong>{data ? order.length : '—'}</strong></span>
-          {packDiscoveryEnabled ? <span>PACKS: <strong>{packData ? packData.total : '—'}</strong></span> : null}
-          <span>FOLDERS: <strong>{data ? (data.folders || []).length : '—'}</strong></span>
-          <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
-        </div>
-      </Hero>
+      <ExploreHeader
+        title="EXPLORE"
+        kicker={packDiscoveryEnabled ? 'ECHO · REELS AND AUTHORED REEL PACKS' : 'ECHO · REELS'}
+        actions={(
+          <>
+            {user && packCreationEnabled ? (
+              <HeaderButton primary icon="+" onClick={() => navigate('/packs/new')}>CREATE PACK</HeaderButton>
+            ) : null}
+            {contentType !== 'packs' ? (
+              <HeaderButton icon="⇄" onClick={() => setOrder((current) => shuffled(current))} title="Re-randomize gallery order">
+                SHUFFLE
+              </HeaderButton>
+            ) : null}
+          </>
+        )}
+      />
+      <StatStrip
+        stats={[
+          { label: 'TOTAL REELS', value: data ? order.length : '—' },
+          ...(packDiscoveryEnabled ? [{ label: 'CURATED PACKS', value: packData ? packData.total : '—' }] : []),
+          { label: 'FOLDERS', value: data ? (data.folders || []).length : '—' },
+          { label: 'CODEC', value: codecParam.toUpperCase(), accent: true },
+        ]}
+      />
 
-      <div className="sx-control-rail-stacked">
-        <div className="sx-control-rail-row">
-          <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
-            <Pills options={contentOptions} value={contentType} onChange={setType} ariaLabel="Content type" />
+      {contentType !== 'packs' ? (
+        <ChipRow
+          label="MOST TRENDING:"
+          chips={trendingChips.map((chip) => ({
+            ...chip,
+            hint: chip.hint + ' · ' + chip.count + ' post' + (chip.count === 1 ? '' : 's'),
+          }))}
+        />
+      ) : null}
+
+      <Toolbar
+        filters={(
+          <>
             {contentType !== 'packs' ? (
               <>
-                <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+                <div style={{ flex: '1 1 150px', minWidth: 0, maxWidth: 260 }}>
                   <Dropdown value={folder} options={folderOptions} onChange={setFolder} placeholder="Target folder…" />
                 </div>
                 <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} ariaLabel="Codec" />
               </>
             ) : null}
-            <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
+            <div style={{ flex: '2 1 200px', minWidth: 0, position: 'relative' }}>
               <input
                 className="sx-input"
                 style={{ paddingRight: search ? '28px' : undefined }}
@@ -218,14 +306,27 @@ export default function ExplorePage() {
                 <button type="button" className="sx-search-clear" onClick={() => setSearch('')} aria-label="Clear search filter">✕</button>
               ) : null}
             </div>
-            {contentType !== 'packs' ? (
-              <Button onClick={() => setOrder((current) => shuffled(current))} title="Re-randomize gallery order">⇄ SHUFFLE</Button>
-            ) : null}
             <Button onClick={() => setRefreshKey((key) => key + 1)} title="Refresh discovery">↻</Button>
-            {user && packCreationEnabled ? <Button primary onClick={() => navigate('/packs/new')}>+ CREATE PACK</Button> : null}
-          </div>
+          </>
+        )}
+      >
+        <TabGroup
+          tabs={contentOptions.map((row) => ({
+            label: row.label,
+            value: row.value,
+            count: !data ? null
+              : row.value === 'reels' ? order.length
+              : row.value === 'packs' ? (packData ? packData.total : null)
+              : order.length + (packDiscoveryEnabled ? packData?.total ?? 0 : 0),
+          }))}
+          value={contentType}
+          onChange={setType}
+          ariaLabel="Content type"
+        />
+        <div className="sx-xh-ctl-group">
+          <DensityToggle value={density} onChange={setDensity} />
         </div>
-      </div>
+      </Toolbar>
 
       {previewMessage && reelsVisible ? <Mono>{previewMessage}</Mono> : null}
       {packError && packsVisible ? (
@@ -249,7 +350,7 @@ export default function ExplorePage() {
             <p className="sx-mono" role="status">No Reel Packs match this filter yet — try another search or publish a collection.</p>
           ) : null}
           {packsVisible || reelsVisible ? (
-            <div className="sx-explore-grid" aria-label="Explore results">
+            <div className={gridClassName(density)} aria-label="Explore results">
               {packsVisible ? packs.map((pack) => (
                 <PackTile
                   key={pack.id}

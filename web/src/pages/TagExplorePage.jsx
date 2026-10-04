@@ -3,8 +3,20 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
 import PackTile from '../components/packs/PackTile.jsx';
-import { Button, Pills } from '../components/ui/controls.jsx';
-import { EmptyState, Hero, Mono } from '../components/ui/primitives.jsx';
+import {
+  ChipRow,
+  DensityToggle,
+  ExploreHeader,
+  HeaderButton,
+  Segmented,
+  StatStrip,
+  TabGroup,
+  Toolbar,
+  gridClassName,
+  useGridDensity,
+} from '../components/explore/ExploreChrome.jsx';
+import { Button } from '../components/ui/controls.jsx';
+import { EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
@@ -48,6 +60,8 @@ export default function TagExplorePage() {
   const requestedTag = readableTag(routeTag);
   const [sort, setSort] = useState('trending');
   const [codec, setCodec] = useState('hevc');
+  const [contentType, setContentType] = useState('all');
+  const [density, setDensity] = useGridDensity();
   const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState(null);
   const [packData, setPackData] = useState(null);
@@ -138,6 +152,22 @@ export default function TagExplorePage() {
     openReel(videos[0]);
   };
 
+  const reelsVisible = contentType !== 'packs';
+  const packsVisible = packDiscoveryEnabled && contentType !== 'reels';
+  const loading = data === null || (packDiscoveryEnabled && packData === null);
+  const tabs = [
+    { label: 'ALL', value: 'all', count: data ? videos.length + (packDiscoveryEnabled ? packData?.total ?? 0 : 0) : null },
+    { label: 'REELS', value: 'reels', count: data ? videos.length : null },
+    ...(packDiscoveryEnabled ? [{ label: 'PACKS', value: 'packs', count: packData ? packData.total : null }] : []),
+  ];
+  const stats = [
+    { label: 'TOTAL REELS', value: data ? videos.length : '—' },
+    ...(packDiscoveryEnabled ? [{ label: 'CURATED PACKS', value: packData ? packData.total : '—' }] : []),
+    { label: 'VIEWS', value: tag ? formatCompactCount(tag.views) : '—', accent: true },
+    { label: 'LIKES', value: tag ? formatCompactCount(tag.likes) : '—' },
+    { label: 'RELATED TAGS', value: data ? relatedTags.length : '—' },
+  ];
+
   return (
     <div className="sx-tag-page">
       <nav className="sx-tag-breadcrumb" aria-label="Explore breadcrumb">
@@ -146,72 +176,45 @@ export default function TagExplorePage() {
         <span aria-current="page">#{displayTag}</span>
       </nav>
 
-      <Hero
-        title={'#' + displayTag}
+      <ExploreHeader
+        prefix="#"
+        title={displayTag}
         kicker="TAG EXPLORE · EXACT MATCH FEED · RELATED BY SHARED REEL TAGS"
-      >
-        <div className="sx-stats-pill">
-          <span>REELS: <strong>{data ? videos.length : '—'}</strong></span>
-          {packDiscoveryEnabled ? <span>PACKS: <strong>{packData ? packData.total : '—'}</strong></span> : null}
-          <span>VIEWS: <strong>{tag ? formatCompactCount(tag.views) : '—'}</strong></span>
-          <span>LIKES: <strong>{tag ? formatCompactCount(tag.likes) : '—'}</strong></span>
-          <span>RELATED: <strong>{data ? relatedTags.length : '—'}</strong></span>
-        </div>
-      </Hero>
+        actions={(
+          <>
+            <HeaderButton primary icon="▶" disabled={!videos.length} onClick={playTagFeed}>
+              PLAY TAG FEED
+            </HeaderButton>
+            <HeaderButton
+              icon="↻"
+              onClick={() => setRefreshKey((key) => key + 1)}
+              title="Rescan reel metadata and shuffle feed order"
+            >
+              SHUFFLE
+            </HeaderButton>
+          </>
+        )}
+      />
+      <StatStrip stats={stats} />
+      <ChipRow
+        label="CO-OCCURRING TAGS:"
+        chips={relatedTags.map((related) => ({
+          key: related.slug,
+          to: '/explore/tag/' + encodeURIComponent(related.slug),
+          label: related.name,
+          count: related.shared_reels,
+          hint: related.shared_reels + ' shared reel' + (related.shared_reels === 1 ? '' : 's'),
+        }))}
+      />
 
-      <section className="sx-tag-overview" aria-labelledby="tag-overview-title">
-        <div>
-          <div className="sx-eyebrow" id="tag-overview-title">DISCOVERY SIGNAL</div>
-          <p className="sx-tag-description">
-            Showing media explicitly tagged <strong>#{displayTag}</strong>. Related tags are ranked by how often
-            they appear on the same reels, creating a transparent baseline for future recommendation ranking.
-          </p>
+      <Toolbar>
+        <TabGroup tabs={tabs} value={contentType} onChange={setContentType} ariaLabel="Content type" />
+        <div className="sx-xh-ctl-group">
+          <Segmented label="RANK:" options={SORT_OPTIONS} value={sort} onChange={setSort} />
+          <Segmented label="SOURCE:" options={CODEC_OPTIONS} value={codec} onChange={setCodec} />
+          <DensityToggle value={density} onChange={setDensity} />
         </div>
-        <div className="sx-tag-overview-actions">
-          <Button primary disabled={!videos.length} onClick={playTagFeed}>
-            ▶ PLAY TAG FEED
-          </Button>
-          <Button onClick={() => setRefreshKey((key) => key + 1)} title="Rescan reel metadata and shuffle feed order">
-            ↻ SHUFFLE
-          </Button>
-        </div>
-      </section>
-
-      {relatedTags.length ? (
-        <section className="sx-related-tags" aria-labelledby="related-tags-title">
-          <div className="sx-related-tags-head">
-            <span className="sx-eyebrow" id="related-tags-title">RELATED TAGS</span>
-            <span>{'CO-OCCURRENCE FROM ' + videos.length + ' MATCHING REEL' + (videos.length === 1 ? '' : 'S')}</span>
-          </div>
-          <div className="sx-related-tags-list">
-            {relatedTags.map((related) => (
-              <Link
-                key={related.slug}
-                to={'/explore/tag/' + encodeURIComponent(related.slug)}
-                className="sx-related-tag"
-              >
-                <span>{'#' + related.name}</span>
-                <small>{related.shared_reels + ' SHARED'}</small>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <div className="sx-control-rail-stacked sx-tag-controls">
-        <div className="sx-control-rail-row">
-          <div className="sx-control-group sx-tag-control-group">
-            <div>
-              <div className="sx-control-caption">RANK</div>
-              <Pills options={SORT_OPTIONS} value={sort} onChange={setSort} />
-            </div>
-            <div>
-              <div className="sx-control-caption">PLAYBACK SOURCE</div>
-              <Pills options={CODEC_OPTIONS} value={codec} onChange={setCodec} />
-            </div>
-          </div>
-        </div>
-      </div>
+      </Toolbar>
 
       {previewMessage ? <Mono>{previewMessage}</Mono> : null}
       {error ? <Mono>{'TAG FEED ERROR · ' + error}</Mono> : null}
@@ -222,7 +225,7 @@ export default function TagExplorePage() {
         </div>
       ) : null}
 
-      {data === null || (packDiscoveryEnabled && packData === null) ? (
+      {loading ? (
         <ExploreGridSkeleton label={'Loading #' + displayTag + ' reels and packs'} />
       ) : !videos.length && !packs.length ? (
         <EmptyState
@@ -232,7 +235,7 @@ export default function TagExplorePage() {
         />
       ) : (
         <>
-          {packs.length ? (
+          {packsVisible && packs.length ? (
             <section className="sx-pack-explore-section" aria-labelledby="sx-tag-pack-title">
               <div className="sx-pack-section-head">
                 <div><span>CURATED FOR #{displayTag.toUpperCase()}</span><h2 id="sx-tag-pack-title">REEL PACKS</h2></div>
@@ -254,13 +257,13 @@ export default function TagExplorePage() {
               </div>
             </section>
           ) : null}
-          {videos.length ? (
+          {reelsVisible && videos.length ? (
             <>
               <div className="sx-tag-grid-heading">
                 <h2>{sort === 'trending' ? 'TOP REELS' : 'TAG REELS'}</h2>
                 <span>{videos.length + ' RESULT' + (videos.length === 1 ? '' : 'S')}</span>
               </div>
-              <div className="sx-explore-grid">
+              <div className={gridClassName(density)}>
                 {videos.map((video) => (
                   <ExploreTile
                     key={video.path}
@@ -272,6 +275,11 @@ export default function TagExplorePage() {
                 ))}
               </div>
             </>
+          ) : null}
+          {(!reelsVisible || !videos.length) && (!packsVisible || !packs.length) ? (
+            <p className="sx-mono" role="status">
+              {contentType === 'packs' ? 'No Reel Packs use this tag yet.' : 'No reels match this view.'}
+            </p>
           ) : null}
         </>
       )}
