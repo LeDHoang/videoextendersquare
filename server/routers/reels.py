@@ -1949,9 +1949,14 @@ def list_reel_locations(q: str = "", limit: int = 8):
     }
 
 
-EARTH_TEXTURE_FILE = (
-    Path(__file__).resolve().parent.parent.parent
-    / "web" / "public" / "assets" / "earth-natural-1024x512.jpg"
+_EARTH_ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "public" / "assets"
+# Prefer the 4K base; the 1024x512 original stays as the fallback.
+EARTH_TEXTURE_FILE = next(
+    (f for f in (
+        _EARTH_ASSET_DIR / "earth-natural-4096x2048.jpg",
+        _EARTH_ASSET_DIR / "earth-natural-1024x512.jpg",
+    ) if f.is_file()),
+    _EARTH_ASSET_DIR / "earth-natural-1024x512.jpg",
 )
 
 

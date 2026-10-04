@@ -1480,17 +1480,27 @@
         ctx.fillRect(hx, hy + hh * 0.5, hw, hh * 0.5);
       }
       ctx.restore();
-      // Play medallion
-      const cx = hx + hw / 2, cy = hy + hh / 2 - 14;
-      ctx.fillStyle = 'rgba(4,14,28,0.55)';
-      ctx.beginPath(); ctx.arc(cx, cy, 36, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(190,245,255,0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.fillStyle = '#EFFCFF';
-      ctx.beginPath();
-      ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
-      ctx.closePath(); ctx.fill();
+      if (!videoLive) {
+        // Play medallion: only while the card is a still (poster/loading);
+        // once the clip is decoding it gets out of the way.
+        const cx = hx + hw / 2, cy = hy + hh / 2 - 14;
+        ctx.fillStyle = 'rgba(4,14,28,0.55)';
+        ctx.beginPath(); ctx.arc(cx, cy, 36, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(190,245,255,0.9)';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.fillStyle = '#EFFCFF';
+        ctx.beginPath();
+        ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
+        ctx.closePath(); ctx.fill();
+      } else if (Number(previewVideo.duration) > 0) {
+        // Thin progress line along the bottom of the live clip.
+        const frac = Math.max(0, Math.min(1, (Number(previewVideo.currentTime) || 0) / Number(previewVideo.duration)));
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        ctx.fillRect(hx + 20, hy + hh - 10, hw - 40, 3);
+        ctx.fillStyle = '#55E7FF';
+        ctx.fillRect(hx + 20, hy + hh - 10, Math.max(3, (hw - 40) * frac), 3);
+      }
       // Item caption + counter
       const cur = items[active] || {};
       ctx.fillStyle = '#FFFFFF';

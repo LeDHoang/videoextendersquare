@@ -147,6 +147,10 @@ function loadRenderer(options = {}) {
     addEventListener() {},
     removeEventListener() {},
     createElement(kind) {
+      if (options.createElement) {
+        const custom = options.createElement(kind);
+        if (custom) return custom;
+      }
       if (kind === 'canvas') {
         const c = makePreviewCanvas(options.gl || null);
         c.ownerDocument = mockDocument;
@@ -4245,4 +4249,216 @@ test('Preview billboard texture matches the 1:1.4 plane so text is never stretch
   assert.match(rendererSource, /new THREE\.PlaneGeometry\(0\.5, 0\.7\)/);
   const ui = loadUICanvasStandalone();
   closeTo(ui.EARTH_PREVIEW_W / ui.EARTH_PREVIEW_H, 0.5 / 0.7, 0.002);
+});
+
+// ─── Panels stay in view; hover autoplays the reel preview ───────────────
+
+test('gaze clamp keeps panels inside the view cone, preserves side and distance, and leaves visible ones alone', () => {
+  const { renderer, api } = topdownHarness();
+  const head = { x: 0, y: 1.6, z: 0 };
+  const fwd = { x: 0, y: 0, z: -1 };
+  const fov = { h: 0.9, v: 0.7 };
+  const inside = api.earthGazeClamp({ x: 0.1, y: 1.65, z: -1 }, head, fwd, 0.43, 0.075, fov);
+  assert.equal(inside.clamped, false);
+  closeTo(inside.x, 0.1);
+  for (const [px, side] of [[3, 1], [-3, -1]]) {
+    const out = api.earthGazeClamp({ x: px, y: 1.6, z: -1 }, head, fwd, 0.43, 0.075, fov);
+    assert.equal(out.clamped, true);
+    assert.equal(Math.sign(out.x), side, 'stays on the side it was on');
+    const yaw = Math.abs(Math.atan2(out.x - head.x, -(out.z - head.z)));
+    const halfPanel = Math.atan(0.43 / Math.hypot(px, 1));
+    assert.ok(yaw + halfPanel <= fov.h * 0.8 + 1e-6, `whole panel inside the comfort cone, yaw ${yaw}`);
+    closeTo(Math.hypot(out.x - head.x, out.y - head.y, out.z - head.z), Math.hypot(px, 0, 1), 1e-6);
+  }
+  const high = api.earthGazeClamp({ x: 0, y: 4, z: -1 }, head, fwd, 0.25, 0.35, fov);
+  assert.ok(high.clamped && high.y < 4, 'tall panel above the view is pulled down');
+  const behind = api.earthGazeClamp({ x: 0.3, y: 1.6, z: 2 }, head, fwd, 0.43, 0.075, fov);
+  assert.ok(behind.clamped && behind.z < head.z, 'a panel behind the viewer is swung to the front');
+  // Rotated gaze: looking toward +X, a panel on -Z (to the left) is clamped around that gaze.
+  const right = api.earthGazeClamp({ x: 0.2, y: 1.6, z: -3 }, head, { x: 1, y: 0, z: 0 }, 0.43, 0.075, fov);
+  assert.ok(right.clamped && right.x > 0.5, 'clamp follows the head direction');
+  renderer.stopPreview();
+});
+
+function previewAutoplayHarness(extra = {}) {
+  let clock = 0;
+  const videos = [];
+  const items = [
+    { title: 'A', url: '/media/a-preview.mp4', poster_url: '/p/a.jpg', media_type: 'video' },
+    { title: 'B', url: '/media/b-preview.mp4', poster_url: '/p/b.jpg', media_type: 'video' },
+  ];
+  const gl = makeMockGl({ deleted: 0 });
+  const row = { slug: 'da-nang', name: 'Da Nang', lat: 16.07, lon: 108.22, heat: 0.9, active_reel_count: 3 };
+  const renderer = loadRenderer({
+    gl,
+    now: () => clock,
+    // Frames refresh activity from the network: serve the same zone back.
+    fetch: async () => ({ ok: true, json: async () => ({ locations: [row] }) }),
+    createElement(kind) {
+      if (kind !== 'video') return null;
+      const v = {
+        muted: false, loop: false, paused: true, readyState: 4, currentTime: 0, duration: 8,
+        attrs: {}, listeners: {}, src: '',
+        setAttribute(k, val) { this.attrs[k] = val; },
+        removeAttribute(k) { delete this.attrs[k]; if (k === 'src') this.src = ''; },
+        addEventListener(type, fn) { this.listeners[type] = fn; },
+        play() { this.paused = false; this.played = true; return Promise.resolve(); },
+        pause() { this.paused = true; },
+        load() {},
+      };
+      videos.push(v);
+      return v;
+    },
+  });
+  renderer.init(null, { onPreviewLocation: () => Promise.resolve(items), ...extra });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([row]);
+  return { renderer, api, videos, setClock: (v) => { clock = v; } };
+}
+
+test('hovering a heat zone autoplays the first reel muted once the hover settles, and stops when it ends', async () => {
+  const { renderer, api, videos, setClock } = previewAutoplayHarness();
+  setClock(0);
+  api.setEarthHoveredIndex(0);
+  await new Promise((r) => setTimeout(r, 10)); // preview items resolve
+  setClock(100);
+  renderer.__runScheduledFrame(1000);
+  assert.equal(videos.length, 0, 'a sweeping laser never spins up a decoder (350 ms settle)');
+  setClock(500);
+  renderer.__runScheduledFrame(2000);
+  assert.equal(videos.length, 1, 'settled hover starts exactly one video');
+  const v = videos[0];
+  assert.equal(v.muted, true);
+  assert.equal(v.src, '/media/a-preview.mp4');
+  assert.equal(v.played, true);
+  assert.equal(v.attrs.playsinline, '', 'inline playback attribute set for Quest Browser');
+  assert.equal(v.loop, false, 'with several reels the clip end advances the card');
+  // Clip ends → next reel plays.
+  v.listeners.ended();
+  setClock(900);
+  renderer.__runScheduledFrame(3000);
+  assert.equal(videos.length, 2);
+  assert.equal(videos[1].src, '/media/b-preview.mp4');
+  assert.equal(videos[0].paused, true, 'previous decoder released');
+  // Leaving the zone tears the playback down immediately.
+  api.setEarthHoveredIndex(-1);
+  assert.equal(videos[1].paused, true);
+  assert.equal(videos[1].src, '');
+  renderer.stopPreview();
+});
+
+test('autoplay respects reduced motion and falls back to the poster when a clip fails', async () => {
+  const calm = previewAutoplayHarness();
+  calm.renderer.setReducedMotion(true);
+  calm.setClock(0);
+  calm.api.setEarthHoveredIndex(0);
+  await new Promise((r) => setTimeout(r, 10));
+  calm.setClock(900);
+  calm.renderer.__runScheduledFrame(2000);
+  assert.equal(calm.videos.length, 0, 'reduced motion: poster only');
+  calm.renderer.stopPreview();
+
+  const flaky = previewAutoplayHarness();
+  flaky.setClock(0);
+  flaky.api.setEarthHoveredIndex(0);
+  await new Promise((r) => setTimeout(r, 10));
+  flaky.setClock(900);
+  flaky.renderer.__runScheduledFrame(2000);
+  assert.equal(flaky.videos.length, 1);
+  flaky.videos[0].listeners.error(); // CORS / codec / network failure
+  flaky.setClock(1000);
+  flaky.renderer.__runScheduledFrame(3000);
+  assert.equal(flaky.videos[0].paused, true);
+  assert.ok(flaky.videos.length <= 2, 'no retry storm');
+  flaky.renderer.stopPreview();
+});
+
+test('panel separation lifts the preview off the breadcrumb and keeps it in view', () => {
+  const { renderer, api } = topdownHarness();
+  const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
+  const fov = { h: 1.4, v: 1.1 }; // roomy view so the lift itself fits
+  const mk = (x, y, z, s = 1) => ({ position: { x, y, z, set(a, b, c) { this.x = a; this.y = b; this.z = c; } }, scale: { x: s } });
+  const label = mk(0, 1.5, -1), card = mk(0.1, 1.55, -1);
+  assert.equal(api.earthSeparatePanel(card, 0.25, 0.35, label, 0.43, 0.075, fwd, head, fov, 'up'), true);
+  const overlapX = (0.25 + 0.43) - Math.abs(card.position.x - label.position.x);
+  const overlapY = (0.35 + 0.075) - Math.abs(card.position.y - label.position.y);
+  assert.ok(overlapX <= 1e-9 || overlapY <= 1e-9, 'rectangles no longer intersect (lifted, or slid aside when lifting would leave the view)');
+  const apart = mk(1.2, 1.9, -1);
+  assert.equal(api.earthSeparatePanel(apart, 0.25, 0.35, label, 0.43, 0.075, fwd, head, fov, 'up'), false, 'distant panels are untouched');
+  renderer.stopPreview();
+});
+
+// ─── Mode-exit cleanup and keep-out zones ───────────────────────────────
+
+test('leaving Earth mode hides the bezel ring and compass dial (they are scene-rooted)', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  renderer.__runScheduledFrame(64);
+  assert.equal(api.earthBezelState().visible, true, 'precondition: street zoom shows them');
+  const scene = api.getScene();
+  const compass = scene.children.find((c) => c && c.userData && c.userData.compassBadge);
+  assert.equal(compass.visible, true);
+  renderer.setSceneMode('reels'); // e.g. after opening a location's reels
+  assert.equal(api.earthBezelState().visible, false);
+  assert.equal(compass.visible, false, 'compass hidden in reels');
+  // A reels frame must not resurrect them.
+  renderer.__runScheduledFrame(96);
+  assert.equal(compass.visible, false);
+  assert.equal(api.earthBezelState().visible, false);
+  // Re-entering Earth starts clean at the globe (no bezel at orbit scale).
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(128);
+  assert.equal(api.earthBezelState().visible, false);
+  renderer.stopPreview();
+});
+
+test('keep-out zones push a panel off the focused pin: up first, sideways if the view refuses', () => {
+  const { renderer, api } = topdownHarness();
+  const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
+  const fov = { h: 1.2, v: 0.95 };
+  const mk = (x, y, z) => ({ position: { x, y, z, set(a, b, c) { this.x = a; this.y = b; this.z = c; } }, scale: { x: 1 } });
+  const pin = { x: 0, y: 1.5, z: -1, r: 0.12 };
+  const overlaps = (m) => {
+    const a = api.earthViewAngles(m.position, head, fwd), k = api.earthViewAngles(pin, head, fwd);
+    const hwA = Math.atan(0.43 / a.d), hhA = Math.atan(0.075 / a.d), kr = Math.atan(pin.r / k.d);
+    return (hwA + kr - Math.abs(a.yaw - k.yaw)) > 0 && (hhA + kr - Math.abs(a.pitch - k.pitch)) > 0;
+  };
+  const sitting = mk(0, 1.5, -1); // dead on the pin
+  assert.equal(overlaps(sitting), true);
+  assert.equal(api.earthAvoidKeepOuts(sitting, 0.43, 0.075, [pin], fwd, head, fov, 'up'), true);
+  assert.equal(overlaps(sitting), false, 'breadcrumb no longer covers the pin');
+  assert.ok(sitting.position.y > pin.y, 'it moved UP, above what you are looking at');
+  // Squeezed view (no headroom): it slides sideways rather than dropping onto the pin.
+  const tight = mk(0, 1.5, -1);
+  const tightFov = { h: 1.2, v: 0.2 };
+  api.earthAvoidKeepOuts(tight, 0.43, 0.075, [pin], fwd, head, tightFov, 'up');
+  assert.ok(Math.abs(tight.position.x) > 0.3, 'moved sideways when up is clamped');
+  // Untouched when already clear.
+  const clear = mk(0, 2.0, -1);
+  assert.equal(api.earthAvoidKeepOuts(clear, 0.43, 0.075, [pin], fwd, head, fov, 'up'), false);
+  renderer.stopPreview();
+});
+
+test('the live breadcrumb never covers the zoom anchor or the hovered pin', () => {
+  const { renderer, api } = topdownHarness();
+  api.setLocationActivity([{ slug: 'berlin', name: 'Berlin, Germany', lat: 52.52, lon: 13.4, heat: 0.9, active_reel_count: 3 }]);
+  api.setEarthZoom(24, { lat: 52.52, lon: 13.4 });
+  api.setEarthHoveredIndex(0);
+  for (let t = 32; t <= 400; t += 32) renderer.__runScheduledFrame(t);
+  const keeps = api.earthHudKeepOuts();
+  assert.ok(keeps.length >= 1, 'anchor / pin keep-outs exist');
+  const scene = api.getScene();
+  const label = scene.children.find((c) => c && c.renderOrder === 100 && !(c.userData && c.userData.compassBadge));
+  const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
+  for (const k of keeps) {
+    const a = api.earthViewAngles(label.position, head, fwd), b = api.earthViewAngles(k, head, fwd);
+    const ls = label.scale.x || 1;
+    const hwA = Math.atan(0.43 * ls / a.d), hhA = Math.atan(0.075 * ls / a.d), kr = Math.atan(k.r / b.d);
+    const overlap = (hwA + kr - Math.abs(a.yaw - b.yaw)) > 0.01 && (hhA + kr - Math.abs(a.pitch - b.pitch)) > 0.01;
+    assert.equal(overlap, false, `label covers a keep-out at (${k.x.toFixed(2)}, ${k.y.toFixed(2)})`);
+  }
+  renderer.stopPreview();
 });

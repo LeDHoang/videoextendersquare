@@ -566,3 +566,94 @@ ramp/state-ring contract. Test sandbox gained an optional `now` clock override.
 **Not verified:** XR trigger-grab and the new stick curve on a real headset (no hardware;
 covered by code review only), and fling/drift feel — constants (`EARTH_FLING_TAU_MS`,
 `EARTH_SPIN_IDLE_MS`, stick gains 1.7/1.2 rad/s) are first-pass values to tune on a Quest.
+
+---
+
+## 12. Phase 11 — Quest mapping, in-view panels, hover autoplay (2026-10-04)
+
+### 12.1 Quest controller map (Earth mode)
+
+| Input | Action |
+|---|---|
+| **Trigger** on globe (hold + sweep) | Grab-rotate (orbit scale) / grab-pan (zoomed); release while moving = fling |
+| **Trigger** quick press-release | Tap: zoom into zone / point, or open feed at city band |
+| **Trigger** on dock / compass | Dock button / NORTH UP (unchanged click path) |
+| **Thumbstick** | Rotate (both axes, eased, dt-based, slower when zoomed) |
+| **Grip + stick Y** | Zoom (about the laser point) |
+| **A / X** | Hovering a zone → open its feed now; otherwise zoom out one step |
+| **B** | Dock toggle (unchanged) |
+| Hover a zone | Light haptic tick (0.18 for 35 ms) |
+| Bare hands (no gamepad) | Pinch = trigger: grab-rotate, tap, dock all work; stick/grip shortcuts n/a (use dock ZOOM OUT / GLOBE RESET) |
+
+### 12.2 Panels stay in view
+
+Label, reel card and compass are still placed from world anchors, then clamped so the
+**whole panel** (its angular half-size included) sits inside the central 80% of the
+viewer's field of view (preview camera: from `camera.fov`/`aspect`; XR: conservative
+Quest-class half-FOV 0.78 rad × 0.70 rad). Correction is smoothed (τ ≈ 0.12 s) and
+preserves each panel's side and distance, so panels glide to the edge of the comfort zone
+instead of snapping. Overlaps are resolved in the viewer's right/up plane: the reel card
+lifts off the breadcrumb; if the top of the view refuses, the slim breadcrumb yields
+downward. The compass picks the first free slot (left, right, above-left, below-left) that is in
+view and clear of the card. Pure functions: `earthGazeClamp`, `earthSeparatePanel`,
+`earthRectOverlapsPanel`.
+
+### 12.3 Hover autoplay
+
+Hover a heat zone → items load → once the hover has **settled for 350 ms** the first
+reel plays in the card (muted, `playsinline`, one `<video>` at a time; the card repaints at
+~30 Hz while decoding, 6–7 Hz otherwise). Clip end advances to the next reel (a single reel
+loops; any clip is capped at 9 s on the card); the hero keeps the poster until the first
+frame; a thin progress line replaces the play medallion. Leaving the zone, leaving Earth
+mode, reduced motion, cleanup, or any load/CORS/codec error releases the decoder
+immediately and falls back to the poster card (no retry storm). Uses the lightweight
+`preview_url` already preferred by `loadLocationHoverPreview`.
+
+### 12.4 Verification and limits
+
+New tests: gaze clamp (side/distance preserved, rotated gaze, behind-viewer), panel
+separation, autoplay settle/advance/teardown, reduced motion, failure fallback. Headless captures at
+extreme head turns (±45°+) keep label, card and compass fully visible and non-overlapping.
+**Not verified:** actual video decode in the card (headless virtual time can't advance
+playback; covered by stubbed-`<video>` tests), Quest haptic strength, the A/X shortcut, and
+trigger-grab on hardware. The media server must send CORS headers for the clip origin, or
+the texture upload is blocked and the card stays on the poster.
+
+### 12.5 Fixes after on-device review (2026-10-04)
+
+1. **Bezel ring + compass leaked into reels mode.** They are scene-rooted and only the Earth
+   dressing pass updated their visibility, so after opening a location's reels they stayed on
+   screen. `applySceneVisibility` now hides both (and clears the HUD glide state) whenever the
+   mode is not Earth; a reels frame cannot resurrect them. Test: *leaving Earth mode hides the
+   bezel ring and compass dial*.
+2. **Breadcrumb landed on top of the pin.** The overlap resolver could push the breadcrumb
+   *down* to make room for the reel card, onto the focused point. Placement now has an explicit
+   priority order: keep-out zones (zoom anchor + hovered/selected pin, circles in world space,
+   tested in the viewer's angular space) > not overlapping the card > staying anchored. The
+   breadcrumb resolves keep-outs upward first, then sideways; it yields to the card sideways,
+   never downward. The compass rejects slots that touch a keep-out. All adjustments are applied
+   as one eased offset (τ ≈ 0.12 s) from the anchored position, so panels glide instead of
+   popping. Tests: keep-out unit test and a live-scene test that the breadcrumb never covers
+   the anchor or hovered pin.
+
+### 12.6 Full-Earth base map resolution (2026-10-04)
+
+The S=1 globe was a 1024×512 Natural Earth photo stretched onto a 2048×1024 canvas and
+thresholded per source pixel, so coastlines were stair-stepped and the texture softened as soon as
+the globe filled the view. Changes:
+
+- **4096×2048 map canvas** (`EARTH_MAP_W/H`), with `EARTH_MAP_SCALE` keeping the graticule,
+  halo and ring weights identical on the globe. The texture now uses mipmaps + anisotropy
+  (`applyEarthTileSampling`) so it no longer shimmers at grazing angles.
+- **Distance-field coastline.** `buildHolographicEarthBase` keeps the classifier as a continuous
+  signed field, derives a pixel distance to the coast, and draws an anti-aliased ~3 px outline
+  plus a shelf glow at output resolution. It works in 64-row bands via `setTimeout` so a headset
+  never stalls the main thread. It accepts any source size; a better photo needs no code change.
+- **Persistent base canvas** (`earthBaseCanvas`): the visible canvas is recomposed from it on every
+  heat repaint, so rings can no longer accumulate. Zoom-drift repaints are throttled to one per
+  180 ms (each re-uploads the 4K canvas); hover/select/activity changes repaint immediately.
+- **4K source photo.** `web/public/assets/earth-natural-4096x2048.jpg` (1.3 MB, Natural Earth II
+  with shaded relief, 50m, resized from 10800×5400; public domain, see its `.LICENSE.md`) is now the
+  first entry in `EARTH_TEXTURE_URLS`, and `/api/reels/earth-texture` serves it when present. The
+  1024×512 file stays as the fallback. Coast detail (Balearics, Canaries, Black Sea inlets) and subtle
+  terrain relief now show on the globe.

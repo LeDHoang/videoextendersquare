@@ -13,8 +13,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ─── Constants & Configuration ──────────────────────────────────────
   const VR_TEX_CAP = 2048;
   const EARTH_RADIUS = 0.676;
-  const EARTH_MAP_W = 2048;
-  const EARTH_MAP_H = 1024;
+  const EARTH_MAP_W = 4096;
+  const EARTH_MAP_H = 2048;
+  // Canvas-space constants below were tuned at 2048 px wide; scale them so the
+  // 4K map keeps the same on-globe line weights and halo sizes.
+  const EARTH_MAP_SCALE = EARTH_MAP_W / 2048;
   const EARTH_PIN_CAP = 64;
   // Earth zoom map (docs/earth-zoom-map-plan.md Z1): globe scale 1 = full
   // globe … EARTH_ZOOM_MAX ≈ street band. Taps below the city band zoom
@@ -31,6 +34,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Base photo tried in order: Vite-served public asset (dev) then the
   // backend route (production/Quest). Procedural fallback covers failure.
   const EARTH_TEXTURE_URLS = [
+    '/assets/earth-natural-4096x2048.jpg',
     '/assets/earth-natural-1024x512.jpg',
     '/api/reels/earth-texture',
   ];
@@ -249,6 +253,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthPreviewItems = [];
   let earthPreviewIndex = 0;
   let earthPreviewVideo = null;
+  let activeRayInputSource = null; // XRInputSource driving the laser (haptics)
   let earthPreviewTimer = null;
   let earthPreviewGeneration = 0;
   let earthSelectedIndex = -1;
@@ -565,6 +570,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       refreshEarthCompassCanvas(rel);
       const lbl = earthLabelMesh && earthLabelMesh.visible ? earthLabelMesh : null;
       const ls = lbl ? (lbl.scale.x || 1) : 1;
+      const gazeFwd = earthHeadForward(), fovHalf = earthViewHalfFov();
       if (lbl) {
         let fx = head.x - lbl.position.x, fy = head.y - lbl.position.y, fz = head.z - lbl.position.z;
         const fl = Math.hypot(fx, fy, fz) || 1;
@@ -573,11 +579,44 @@ window.WebXRVR = window.WebXRVR || (function () {
         const rl = Math.hypot(rx, rz) || 1;
         rx /= rl; rz /= rl;
         const off = 0.43 * ls + 0.14 * ls;
-        earthCompassMesh.position.set(lbl.position.x - rx * off, lbl.position.y, lbl.position.z - rz * off);
+        // Candidate slots beside the breadcrumb, in preference order: left,
+        // right, above-left, below-left. Take the first that is fully in view
+        // and clear of the reel card; else fall back to the least-bad (left).
+        const upx = 0, upy = 1;
+        const slots = [
+          { x: -rx * off, y: 0, z: -rz * off },
+          { x: rx * off, y: 0, z: rz * off },
+          { x: -rx * 0.33 * ls, y: upy * (0.075 + 0.13) * ls, z: -rz * 0.33 * ls },
+          { x: -rx * 0.33 * ls, y: -upy * (0.075 + 0.13) * ls, z: -rz * 0.33 * ls },
+        ];
+        let chosen = null;
+        for (const sl of slots) {
+          const cand = { x: lbl.position.x + sl.x, y: lbl.position.y + sl.y, z: lbl.position.z + sl.z };
+          const cc = earthGazeClamp(cand, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
+          if (cc.clamped) continue;
+          if (earthPreviewMesh && earthRectOverlapsPanel(cand, 0.1 * ls, 0.1 * ls, earthPreviewMesh, 0.25, 0.35, gazeFwd, 0.02)) continue;
+          let blocked = false;
+          for (const k of earthHudKeeps) {
+            const ca = earthViewAngles(cand, head, gazeFwd), ka = earthViewAngles(k, head, gazeFwd);
+            const rA = Math.atan(0.1 * ls / ca.d) + Math.atan(k.r / ka.d);
+            if (Math.abs(ca.yaw - ka.yaw) < rA && Math.abs(ca.pitch - ka.pitch) < rA) { blocked = true; break; }
+          }
+          if (blocked) continue;
+          chosen = cand;
+          break;
+        }
+        if (!chosen) chosen = { x: lbl.position.x + slots[0].x, y: lbl.position.y, z: lbl.position.z + slots[0].z };
+        earthCompassMesh.position.set(chosen.x, chosen.y, chosen.z);
       } else {
         earthCompassMesh.position.set(anchor.x, anchor.y + 0.16, anchor.z - radius - 0.1);
       }
       earthCompassMesh.scale.setScalar(ls);
+      {
+        const cw = earthGazeClamp(earthCompassMesh.position, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
+        if (cw.clamped) earthCompassMesh.position.set(cw.x, cw.y, cw.z);
+        // Never sit on the breadcrumb: slide down-left out of it if they meet.
+        if (lbl) earthSeparatePanel(earthCompassMesh, 0.1, 0.1, lbl, 0.43, 0.075, gazeFwd, head, fovHalf, 'left');
+      }
       earthCompassMesh.lookAt(head.x, head.y, head.z);
       earthCompassMesh.userData.worldRadius = 0.14 * ls;
     } catch (e) {}
@@ -746,6 +785,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthMapCtx = null;
   let earthMapTexture = null;
   let earthMapDirty = true;
+  let earthBaseCanvas = null;
+  let earthBaseCtx = null;
+  let earthBaseBuildToken = 0;
+  let earthHeatPaintedAt = -1e9;
   let earthBaseSource = 'fallback';
   let earthBaseTried = false;
   let earthBaseStale = true;
@@ -1561,15 +1604,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.fillRect(0, 0, EARTH_MAP_W, EARTH_MAP_H);
   }
 
-  // Graticule overlay (upstream drawHolographicGrid verbatim).
+  // Graticule overlay (upstream drawHolographicGrid, line weights scaled to
+  // the 4K map).
   function paintEarthGrid(ctx) {
     if (!ctx) return;
+    const sc = EARTH_MAP_SCALE;
     try { ctx.save(); } catch (e) {}
     for (let lon = -180; lon <= 180; lon += 10) {
       const x = ((lon + 180) / 360) * EARTH_MAP_W;
       const major = lon % 30 === 0;
       ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
-      ctx.lineWidth = major ? 2 : 1;
+      ctx.lineWidth = (major ? 2 : 1) * sc;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, EARTH_MAP_H);
@@ -1579,90 +1624,178 @@ window.WebXRVR = window.WebXRVR || (function () {
       const y = ((90 - lat) / 180) * EARTH_MAP_H;
       const major = lat % 30 === 0;
       ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
-      ctx.lineWidth = major ? 2 : 1;
+      ctx.lineWidth = (major ? 2 : 1) * sc;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(EARTH_MAP_W, y);
       ctx.stroke();
     }
     ctx.fillStyle = 'rgba(91, 221, 255, 0.028)';
-    for (let y = 1; y < EARTH_MAP_H; y += 6) ctx.fillRect(0, y, EARTH_MAP_W, 1);
+    for (let y = sc; y < EARTH_MAP_H; y += 6 * sc) ctx.fillRect(0, y, EARTH_MAP_W, sc);
     try { ctx.restore(); } catch (e) {}
   }
 
-  // Holographic re-style of the Natural Earth photo (upstream
-  // buildHolographicEarthBase, painted onto the live map canvas instead of
-  // a separate base canvas — identical output).
+  // Persistent base layer (re-styled photo + graticule). The visible map canvas
+  // is recomposed from it on every heat repaint, so heat/hover rings never
+  // accumulate and the (expensive) re-style runs once per photo load.
+  function ensureEarthBaseCanvas() {
+    if (earthBaseCanvas || typeof document === 'undefined') return earthBaseCtx;
+    try {
+      earthBaseCanvas = document.createElement('canvas');
+      earthBaseCanvas.width = EARTH_MAP_W;
+      earthBaseCanvas.height = EARTH_MAP_H;
+      earthBaseCtx = earthBaseCanvas.getContext('2d');
+      if (!earthBaseCtx) earthBaseCanvas = null;
+    } catch (e) {
+      earthBaseCanvas = null;
+      earthBaseCtx = null;
+    }
+    return earthBaseCtx;
+  }
+
+  function earthSmoothstep(a, b, x) {
+    const t = x <= a ? 0 : (x >= b ? 1 : (x - a) / (b - a));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Soft glow either side of the coastline, tabulated over the signed
+  // distance range [-EARTH_COAST_RANGE, +EARTH_COAST_RANGE] px.
+  const EARTH_COAST_RANGE = 28;
+  const EARTH_COAST_LUT_STEP = 0.25;
+  let earthCoastLut = null;
+  function earthCoastGlowLut() {
+    if (earthCoastLut) return earthCoastLut;
+    const n = Math.round((EARTH_COAST_RANGE * 2) / EARTH_COAST_LUT_STEP) + 1;
+    const lut = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const d = -EARTH_COAST_RANGE + i * EARTH_COAST_LUT_STEP;
+      lut[i] = d >= 0 ? 0.34 * Math.exp(-d / 10) : 0.12 * Math.exp(d / 16);
+    }
+    earthCoastLut = lut;
+    return lut;
+  }
+
+  // Holographic re-style of the Natural Earth photo. Evolved from the upstream
+  // per-pixel classifier: instead of a binary land mask on the source pixels
+  // (stair-stepped coast at any upscale), it keeps the classifier as a
+  // continuous signed field, converts it to a pixel distance to the coast and
+  // anti-aliases the outline at the 4K output resolution. Works in row bands
+  // (a few ms each) so a headset never takes a long main-thread stall.
   function buildHolographicEarthBase(image) {
-    if (!earthMapCtx) return false;
-    paintEarthBase(earthMapCtx);
-    if (image) {
+    const dst = ensureEarthBaseCanvas() ? earthBaseCtx : earthMapCtx;
+    if (!dst) return false;
+    const token = ++earthBaseBuildToken;
+    paintEarthBase(dst);
+    const finish = (source) => {
+      if (token !== earthBaseBuildToken) return;
+      paintEarthGrid(dst);
+      earthBaseSource = source;
+      // Photo base is now live: prevent refreshEarthTexture() from
+      // repainting the fallback gradient over it.
+      earthBaseStale = false;
+      earthMapDirty = true;
+      refreshEarthTexture();
+    };
+    if (!image || typeof document === 'undefined') {
+      finish('fallback');
+      return true;
+    }
+    const W = EARTH_MAP_W;
+    const H = EARTH_MAP_H;
+    const srcW = Math.max(2, image.naturalWidth || image.width || 1024);
+    const srcH = Math.max(2, image.naturalHeight || image.height || 512);
+    const bandRows = 64;
+    let band = null;
+    let bctx = null;
+    try {
+      band = document.createElement('canvas');
+      band.width = W;
+      band.height = bandRows + 2;
+      bctx = band.getContext('2d', { willReadFrequently: true });
+    } catch (e) {
+      bctx = null;
+    }
+    if (!bctx) {
+      finish('fallback');
+      return true;
+    }
+    const lut = earthCoastGlowLut();
+    const lutN = lut.length;
+    const field = new Float32Array(W * (bandRows + 2));
+    let y0 = 0;
+    const step = () => {
+      if (token !== earthBaseBuildToken) return;
       try {
-        const sourceCanvas = document.createElement('canvas');
-        const sourceW = Math.max(2, Math.min(EARTH_MAP_W, image.naturalWidth || image.width || 1024));
-        const sourceH = Math.max(2, Math.min(EARTH_MAP_H, image.naturalHeight || image.height || 512));
-        sourceCanvas.width = sourceW;
-        sourceCanvas.height = sourceH;
-        const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
-        sourceCtx.drawImage(image, 0, 0, sourceW, sourceH);
-        const sourceImage = sourceCtx.getImageData(0, 0, sourceW, sourceH);
-        const outputImage = sourceCtx.createImageData(sourceW, sourceH);
-        const src = sourceImage.data;
-        const out = outputImage.data;
-        const land = new Uint8Array(sourceW * sourceH);
-        for (let pixel = 0; pixel < land.length; pixel++) {
-          const offset = pixel * 4;
-          land[pixel] = classifyEarthPixel(src[offset], src[offset + 1], src[offset + 2]);
+        const y1 = Math.min(H, y0 + bandRows);
+        const m0 = y0 > 0 ? 1 : 0;
+        const m1 = y1 < H ? 1 : 0;
+        const rows = (y1 - y0) + m0 + m1;
+        const outRows = y1 - y0;
+        if (band.height !== rows) band.height = rows;
+        bctx.imageSmoothingEnabled = true;
+        bctx.imageSmoothingQuality = 'high';
+        bctx.drawImage(image, 0, ((y0 - m0) * srcH) / H, srcW, (rows * srcH) / H, 0, 0, W, rows);
+        const src = bctx.getImageData(0, 0, W, rows).data;
+        // Continuous land field: >0 land, <0 ocean. The two terms are the
+        // upstream classifier's two tests ((r+g)/2-b > -10, r+g+b > 720).
+        for (let i = 0, n = W * rows; i < n; i++) {
+          const o = i * 4;
+          const fa = (src[o] + src[o + 1]) * 0.5 - src[o + 2] + 10;
+          const fb = src[o] + src[o + 1] + src[o + 2] - 720;
+          field[i] = fa > fb ? fa : fb;
         }
-        for (let y = 0; y < sourceH; y++) {
-          const yUp = Math.max(0, y - 1);
-          const yDown = Math.min(sourceH - 1, y + 1);
-          for (let x = 0; x < sourceW; x++) {
-            const pixel = y * sourceW + x;
-            const offset = pixel * 4;
-            const xLeft = x > 0 ? x - 1 : sourceW - 1;
-            const xRight = x + 1 < sourceW ? x + 1 : 0;
-            const isLand = land[pixel] === 1;
-            const edge = isLand !== (land[y * sourceW + xLeft] === 1) ||
-              isLand !== (land[y * sourceW + xRight] === 1) ||
-              isLand !== (land[yUp * sourceW + x] === 1) ||
-              isLand !== (land[yDown * sourceW + x] === 1);
-            const luminance = (src[offset] * 0.25 + src[offset + 1] * 0.55 + src[offset + 2] * 0.20) / 255;
-            if (edge) {
-              out[offset] = 42;
-              out[offset + 1] = 222;
-              out[offset + 2] = 255;
-            } else if (isLand) {
-              out[offset] = Math.round(5 + luminance * 16);
-              out[offset + 1] = Math.round(50 + luminance * 72);
-              out[offset + 2] = Math.round(82 + luminance * 105);
-            } else {
-              out[offset] = Math.round(1 + luminance * 4);
-              out[offset + 1] = Math.round(8 + luminance * 13);
-              out[offset + 2] = Math.round(23 + luminance * 25);
-            }
-            out[offset + 3] = 255;
+        const out = dst.createImageData(W, outRows);
+        const px = out.data;
+        for (let j = 0; j < outRows; j++) {
+          const r = j + m0;
+          const up = (r > 0 ? r - 1 : r) * W;
+          const dn = (r < rows - 1 ? r + 1 : r) * W;
+          const row = r * W;
+          const vSpan = (r > 0 ? 1 : 0) + (r < rows - 1 ? 1 : 0) || 1;
+          for (let x = 0; x < W; x++) {
+            const f = field[row + x];
+            const gx = (field[row + (x + 1 < W ? x + 1 : 0)] - field[row + (x > 0 ? x - 1 : W - 1)]) * 0.5;
+            const gy = (field[dn + x] - field[up + x]) / vSpan;
+            const mag = Math.sqrt(gx * gx + gy * gy);
+            let d = f / (mag > 0.35 ? mag : 0.35);
+            if (d > EARTH_COAST_RANGE) d = EARTH_COAST_RANGE;
+            else if (d < -EARTH_COAST_RANGE) d = -EARTH_COAST_RANGE;
+            const o = (row + x) * 4;
+            const lum = (src[o] * 0.25 + src[o + 1] * 0.55 + src[o + 2] * 0.20) / 255;
+            const cover = earthSmoothstep(-1.1, 1.1, d);
+            // Ocean → land body colour (upstream palette), anti-aliased.
+            let rr = (1 + lum * 4) + ((5 + lum * 16) - (1 + lum * 4)) * cover;
+            let gg = (8 + lum * 13) + ((50 + lum * 72) - (8 + lum * 13)) * cover;
+            let bb = (23 + lum * 25) + ((82 + lum * 105) - (23 + lum * 25)) * cover;
+            // Shelf glow hugging the coast on both sides.
+            const glow = lut[Math.round((d + EARTH_COAST_RANGE) / EARTH_COAST_LUT_STEP)];
+            rr += (24 - rr) * glow;
+            gg += (150 - gg) * glow;
+            bb += (214 - bb) * glow;
+            // Crisp cyan coastline, ~3 px wide, anti-aliased.
+            const ad = d < 0 ? -d : d;
+            const line = 1 - earthSmoothstep(0.9, 2.1, ad);
+            rr += (42 - rr) * line;
+            gg += (222 - gg) * line;
+            bb += (255 - bb) * line;
+            px[(j * W + x) * 4] = rr;
+            px[(j * W + x) * 4 + 1] = gg;
+            px[(j * W + x) * 4 + 2] = bb;
+            px[(j * W + x) * 4 + 3] = 255;
           }
         }
-        sourceCtx.putImageData(outputImage, 0, 0);
-        earthMapCtx.imageSmoothingEnabled = true;
-        earthMapCtx.imageSmoothingQuality = 'high';
-        earthMapCtx.drawImage(sourceCanvas, 0, 0, EARTH_MAP_W, EARTH_MAP_H);
-        earthBaseSource = 'photo';
-        // Photo base is now live: prevent refreshEarthTexture() from
-        // repainting the fallback gradient over it.
-        earthBaseStale = false;
+        dst.putImageData(out, 0, y0);
+        y0 = y1;
       } catch (error) {
         console.warn('[WebXRVR] Holographic Earth conversion failed; using grid fallback:', error);
-        paintEarthBase(earthMapCtx);
-        earthBaseSource = 'fallback';
+        paintEarthBase(dst);
+        finish('fallback');
+        return;
       }
-    } else {
-      earthBaseSource = 'fallback';
-    }
-    paintEarthGrid(earthMapCtx);
-    earthMapDirty = true;
-    refreshEarthTexture();
+      if (y0 < H) setTimeout(step, 0);
+      else finish('photo');
+    };
+    step();
     return true;
   }
 
@@ -1702,7 +1835,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // at its geographic size at every zoom. Hit-testing is unaffected (it
     // matches in unwarped geographic space).
     const rad = earthZoneAngularRadius(location) / Math.max(1, earthEffectiveK(earthZoom));
-    const rY = Math.max(24, (rad / Math.PI) * EARTH_MAP_H);
+    const rY = Math.max(24 * EARTH_MAP_SCALE, (rad / Math.PI) * EARTH_MAP_H);
     const latRad = Math.abs(Number(location && location.lat) || 0) * (Math.PI / 180);
     const rX = Math.min(rY * 3.2, rY / Math.max(0.32, Math.cos(latRad)));
     return { x: rX, y: rY };
@@ -1713,26 +1846,35 @@ window.WebXRVR = window.WebXRVR || (function () {
   // is painted only when stale — repainting it here used to obliterate an
   // asynchronously arrived photo base. Heat fill is upstream
   // drawEarthHeatZone verbatim (4-stop gradient + state rings).
+  // Minimum gap between zoom-drift heat repaints: each repaint re-uploads the
+  // whole 4K canvas, so gesture-rate redraws would burn GPU bandwidth. State
+  // changes (hover/select/activity) still repaint immediately.
+  const EARTH_HEAT_DRIFT_MIN_MS = 180;
+
   function refreshEarthTexture() {
     // Warp-compensated heat radii depend on zoom: repaint (heat only, never
     // the base) when the effective magnification drifts >3% so halos track
-    // gestures without a per-frame 2K canvas repaint.
+    // gestures without a per-frame 4K canvas repaint.
     if (earthMapCtx) {
       const kq = Math.round(Math.max(1, earthEffectiveK(earthZoom)) * 32) / 32;
-      if (kq !== refreshEarthTexture._kq) {
+      if (kq !== refreshEarthTexture._kq && earthNowMs() - earthHeatPaintedAt >= EARTH_HEAT_DRIFT_MIN_MS) {
         refreshEarthTexture._kq = kq;
         earthMapDirty = true;
       }
     }
     if (!earthMapDirty || !earthMapCtx) return;
     earthMapDirty = false;
+    earthHeatPaintedAt = earthNowMs();
     const ctx = earthMapCtx;
     try {
+      const baseCtx = ensureEarthBaseCanvas() ? earthBaseCtx : ctx;
       if (earthBaseStale) {
-        paintEarthBase(ctx);
-        paintEarthGrid(ctx);
+        paintEarthBase(baseCtx);
+        paintEarthGrid(baseCtx);
         earthBaseStale = false;
       }
+      // Recompose from the persistent base so previous rings are erased.
+      if (baseCtx !== ctx) ctx.drawImage(earthBaseCanvas, 0, 0);
       paintHeatZones(ctx);
     } catch (e) {}
     if (earthMapTexture) {
@@ -1777,13 +1919,13 @@ window.WebXRVR = window.WebXRVR || (function () {
           // State rings on top of the bloom (normal blending reads crisper).
           ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = style.ringColor;
-          ctx.lineWidth = state ? 3.5 : 1.6;
+          ctx.lineWidth = (state ? 3.5 : 1.6) * EARTH_MAP_SCALE;
           ctx.beginPath();
           ctx.arc(0, 0, r.y * 0.5, 0, Math.PI * 2);
           ctx.stroke();
           if (style.ringCount > 1) {
             if (style.ringDash && ctx.setLineDash) ctx.setLineDash([r.y * 0.09, r.y * 0.07]);
-            ctx.lineWidth = state === 2 ? 4.5 : 2.5;
+            ctx.lineWidth = (state === 2 ? 4.5 : 2.5) * EARTH_MAP_SCALE;
             ctx.beginPath();
             ctx.arc(0, 0, r.y * 0.74, 0, Math.PI * 2);
             ctx.stroke();
@@ -1792,7 +1934,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           // Pin-point core: marks the exact centroid under the bloom.
           ctx.fillStyle = 'rgba(255,255,255,' + style.coreAlpha.toFixed(3) + ')';
           ctx.beginPath();
-          ctx.arc(0, 0, Math.max(3, r.y * 0.05), 0, Math.PI * 2);
+          ctx.arc(0, 0, Math.max(3 * EARTH_MAP_SCALE, r.y * 0.05), 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
@@ -2273,30 +2415,102 @@ window.WebXRVR = window.WebXRVR || (function () {
     return out;
   }
 
+  // ─── Hover autoplay ─────────────────────────────────────────────────────
+  // Hovering a heat zone starts the first previewed reel playing (muted, looped
+  // per item, advancing through up to three) once the hover has settled for
+  // EARTH_PREVIEW_AUTOPLAY_DELAY_MS — so sweeping the laser across the globe
+  // never spins up a decoder. One <video> at a time; it is torn down the moment
+  // the hover ends, the mode changes, or motion is reduced. The poster stays
+  // underneath until the first decoded frame, and any failure (CORS, codec,
+  // network) silently falls back to the poster card.
+  const EARTH_PREVIEW_AUTOPLAY_DELAY_MS = 350;
+  const EARTH_PREVIEW_MAX_ITEM_MS = 9000;
+  let earthPreviewVideoUrl = '';
+  let earthPreviewVideoFailed = '';
+  let earthPreviewHoverSince = -1;
+  let earthPreviewVideoStartedAt = -1;
+
+  function disposeEarthPreviewVideo() {
+    const v = earthPreviewVideo;
+    earthPreviewVideo = null;
+    earthPreviewVideoUrl = '';
+    earthPreviewVideoStartedAt = -1;
+    if (!v) return;
+    try { v.pause && v.pause(); } catch (e) {}
+    try { v.removeAttribute && v.removeAttribute('src'); v.src = ''; v.load && v.load(); } catch (e) {}
+  }
+
+  function earthPreviewAdvance() {
+    if (earthPreviewItems.length > 1) {
+      earthPreviewIndex = (earthPreviewIndex + 1) % earthPreviewItems.length;
+      earthPreviewCycleAt = -1; // re-armed on the next billboard update
+    }
+  }
+
+  function syncEarthPreviewVideo() {
+    const item = earthPreviewItems[earthPreviewIndex];
+    const url = item && item.url ? String(item.url) : '';
+    const settled = earthPreviewHoverSince >= 0 && (earthNowMs() - earthPreviewHoverSince) >= EARTH_PREVIEW_AUTOPLAY_DELAY_MS;
+    const want = (sceneMode === 'earth' && !reducedMotion && settled && earthPreviewLocationIndex >= 0 &&
+      url && url !== earthPreviewVideoFailed) ? url : '';
+    if (want === earthPreviewVideoUrl) return;
+    disposeEarthPreviewVideo();
+    if (!want || typeof document === 'undefined' || !document.createElement) return;
+    try {
+      const v = document.createElement('video');
+      if (!v || typeof v.play !== 'function') return;
+      v.muted = true;
+      v.defaultMuted = true;
+      v.loop = earthPreviewItems.length <= 1;
+      v.preload = 'auto';
+      try { v.crossOrigin = 'anonymous'; } catch (e) {}
+      try { v.playsInline = true; v.setAttribute && v.setAttribute('playsinline', ''); v.setAttribute && v.setAttribute('muted', ''); } catch (e) {}
+      v.addEventListener && v.addEventListener('ended', () => { if (earthPreviewVideo === v) earthPreviewAdvance(); });
+      v.addEventListener && v.addEventListener('error', () => {
+        if (earthPreviewVideo === v) { earthPreviewVideoFailed = want; disposeEarthPreviewVideo(); earthPreviewAdvance(); }
+      });
+      v.src = want;
+      earthPreviewVideo = v;
+      earthPreviewVideoUrl = want;
+      earthPreviewVideoStartedAt = earthNowMs();
+      const started = v.play();
+      if (started && typeof started.catch === 'function') {
+        started.catch(() => { if (earthPreviewVideo === v) { earthPreviewVideoFailed = want; disposeEarthPreviewVideo(); } });
+      }
+    } catch (e) { disposeEarthPreviewVideo(); }
+  }
+
   function updateEarthPreviewBillboard(time) {
     if (!earthPreviewMesh) return;
     if (sceneMode !== 'earth') {
       earthPreviewMesh.visible = false;
+      if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
     }
-    if (time - lastEarthPreviewUpdate < 150) return;
+    // A decoding video repaints the card at ~30 Hz; otherwise 6–7 Hz is plenty.
+    const playing = !!(earthPreviewVideo && earthPreviewVideo.readyState >= 2 && !earthPreviewVideo.paused);
+    if (time - lastEarthPreviewUpdate < (playing ? 33 : 150)) return;
     lastEarthPreviewUpdate = time;
     const loc = (earthPreviewLocationIndex >= 0 && earthPreviewLocationIndex < earthLocations.length)
       ? earthLocations[earthPreviewLocationIndex]
       : null;
     if (!loc || !earthPreviewItems.length) {
       earthPreviewMesh.visible = false;
+      if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
     }
-    // Auto-cycle the hero through the (≤3) previewed reels; frozen under
-    // reduced motion so nothing moves unprompted.
+    // Cycle the hero through the (≤3) previewed reels. With a live video the
+    // clip's own end advances it (capped so one long reel can't hog the card);
+    // otherwise a short poster rotation. Frozen under reduced motion.
     if (!reducedMotion && earthPreviewItems.length > 1) {
       if (earthPreviewCycleAt < 0) earthPreviewCycleAt = time;
-      if (time - earthPreviewCycleAt > EARTH_PREVIEW_CYCLE_MS) {
+      const limit = earthPreviewVideo ? EARTH_PREVIEW_MAX_ITEM_MS : EARTH_PREVIEW_CYCLE_MS;
+      if (time - earthPreviewCycleAt > limit) {
         earthPreviewCycleAt = time;
         earthPreviewIndex = (earthPreviewIndex + 1) % earthPreviewItems.length;
       }
     }
+    syncEarthPreviewVideo();
     const ui = getUICanvas();
     if (ui && earthPreviewCtx) {
       try {
@@ -2315,6 +2529,277 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     earthPreviewMesh.visible = true;
   }
+
+  // ─── Gaze-safe HUD placement ────────────────────────────────────────────
+  // Label / preview / compass are positioned from world anchors (so they sit
+  // naturally by the globe) but must never leave the viewer's field of view
+  // when they move around. After the anchored placement, each panel's centre is
+  // clamped — in head-relative yaw/pitch, at its own distance — so the WHOLE
+  // panel (its angular half-size included) stays inside the central ~80% of the
+  // view. The correction is smoothed (τ≈0.12 s), so panels glide to the edge of
+  // the comfort zone instead of snapping, and sit exactly on their anchors
+  // whenever the anchors are already comfortably visible.
+  function earthHeadForward() {
+    try {
+      if (camera && typeof camera.getWorldDirection === 'function' && THREE) {
+        if (!earthGazeVec) earthGazeVec = new THREE.Vector3();
+        camera.getWorldDirection(earthGazeVec);
+        const l = Math.hypot(earthGazeVec.x, earthGazeVec.y, earthGazeVec.z);
+        if (l > 1e-6 && Number.isFinite(l)) return { x: earthGazeVec.x / l, y: earthGazeVec.y / l, z: earthGazeVec.z / l };
+      }
+    } catch (e) {}
+    return { x: 0, y: 0, z: -1 };
+  }
+  function earthViewHalfFov() {
+    // Half-FOV in radians (horizontal, vertical). Preview cameras report it;
+    // in XR use conservative Quest-class values (wider than the usable core).
+    let v = 0.70, h = 0.78;
+    try {
+      if (!xrSession && camera && Number(camera.fov) > 10) {
+        v = (camera.fov * Math.PI / 180) / 2;
+        const aspect = Number(camera.aspect) > 0.3 ? Number(camera.aspect) : 16 / 9;
+        h = Math.atan(Math.tan(v) * aspect);
+      }
+    } catch (e) {}
+    return { h, v };
+  }
+  // Pure: clamp a panel centre into the comfort cone. Returns the new position
+  // (or the same coordinates when already inside).
+  function earthGazeClamp(pos, head, fwd, halfW, halfH, fov, comfort) {
+    const k = comfort === undefined ? 0.8 : comfort;
+    const vx = pos.x - head.x, vy = pos.y - head.y, vz = pos.z - head.z;
+    const d = Math.hypot(vx, vy, vz);
+    if (!(d > 0.05)) return { x: pos.x, y: pos.y, z: pos.z, clamped: false };
+    // Head basis: f forward, r = f × up, u = r × f (level-roll assumption).
+    let rx = -fwd.z, rz = fwd.x; // right = forward × up
+    let rl = Math.hypot(rx, rz);
+    if (rl < 1e-4) { rx = 1; rz = 0; rl = 1; }
+    rx /= rl; rz /= rl;
+    const ux = -rz * fwd.y, uy = rz * fwd.x - rx * fwd.z, uz = rx * fwd.y;
+    const x = vx * rx + vz * rz;
+    const y = vx * ux + vy * uy + vz * uz;
+    const z = vx * fwd.x + vy * fwd.y + vz * fwd.z;
+    const yaw = Math.atan2(x, z);
+    const pitch = Math.atan2(y, Math.hypot(x, z));
+    const halfYaw = Math.atan(halfW / d), halfPitch = Math.atan(halfH / d);
+    const yawLim = Math.max(0.04, fov.h * k - halfYaw);
+    const pitchLim = Math.max(0.04, fov.v * k - halfPitch);
+    const cy = Math.max(-yawLim, Math.min(yawLim, yaw));
+    const cp = Math.max(-pitchLim, Math.min(pitchLim, pitch));
+    if (Math.abs(cy - yaw) < 1e-6 && Math.abs(cp - pitch) < 1e-6) return { x: pos.x, y: pos.y, z: pos.z, clamped: false, yaw, pitch, halfYaw, halfPitch, yawLim };
+    const cyaw = Math.cos(cy), syaw = Math.sin(cy), cpit = Math.cos(cp), spit = Math.sin(cp);
+    // direction = cp·(sin(cy)·r + cos(cy)·f) + sin(cp)·u
+    const dx = cpit * (syaw * rx + cyaw * fwd.x) + spit * ux;
+    const dy = cpit * (cyaw * fwd.y) + spit * uy;
+    const dz = cpit * (syaw * rz + cyaw * fwd.z) + spit * uz;
+    return { x: head.x + dx * d, y: head.y + dy * d, z: head.z + dz * d, clamped: true, yaw: cy, pitch: cp, halfYaw, halfPitch, yawLim };
+  }
+  // Non-mutating overlap test between a candidate rectangle (centre p, half
+  // extents in world metres) and a panel mesh, in the viewer's right/up plane.
+  function earthRectOverlapsPanel(p, hw, hh, mesh, mhw, mhh, fwd, gap) {
+    if (!mesh || !mesh.position || mesh.visible === false) return false;
+    let rx = -fwd.z, rz = fwd.x;
+    const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+    const ux = -rz * fwd.y, uy = rz * fwd.x - rx * fwd.z, uz = rx * fwd.y;
+    const ms = (mesh.scale && mesh.scale.x) || 1;
+    const dx3 = p.x - mesh.position.x, dy3 = p.y - mesh.position.y, dz3 = p.z - mesh.position.z;
+    const dx = dx3 * rx + dz3 * rz, dy = dx3 * ux + dy3 * uy + dz3 * uz;
+    return (hw + mhw * ms + (gap || 0.02) - Math.abs(dx)) > 0 && (hh + mhh * ms + (gap || 0.02) - Math.abs(dy)) > 0;
+  }
+
+  // Push `mover` out of `fixed` along the axis of least penetration, measured
+  // in the viewer's right/up plane, then re-clamp into the comfort cone.
+  // `prefer`: 'up' resolves vertical overlaps upward, 'left'/'right' sideways.
+  function earthSeparatePanel(mover, mhw, mhh, fixed, fhw, fhh, fwd, head, fov, prefer) {
+    if (!mover || !fixed || !mover.position || !fixed.position) return false;
+    let rx = -fwd.z, rz = fwd.x;
+    const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+    const ux = -rz * fwd.y, uy = rz * fwd.x - rx * fwd.z, uz = rx * fwd.y;
+    const ms = (mover.scale && mover.scale.x) || 1, fs = (fixed.scale && fixed.scale.x) || 1;
+    const dx3 = mover.position.x - fixed.position.x, dy3 = mover.position.y - fixed.position.y, dz3 = mover.position.z - fixed.position.z;
+    const dx = dx3 * rx + dz3 * rz;
+    const dy = dx3 * ux + dy3 * uy + dz3 * uz;
+    const gap = 0.025;
+    const ox = (mhw * ms + fhw * fs + gap) - Math.abs(dx);
+    const oy = (mhh * ms + fhh * fs + gap) - Math.abs(dy);
+    if (!(ox > 0 && oy > 0)) return false;
+    let mx = 0, my = 0;
+    if (prefer === 'up' || prefer === 'down' || oy <= ox) {
+      my = prefer === 'up' ? oy : (prefer === 'down' ? -oy : oy * (dy >= 0 ? 1 : -1));
+    } else {
+      mx = ox * ((prefer === 'left') ? -1 : (prefer === 'right' ? 1 : (dx >= 0 ? 1 : -1)));
+    }
+    const np = { x: mover.position.x + rx * mx + ux * my, y: mover.position.y + uy * my, z: mover.position.z + rz * mx + uz * my };
+    const c = earthGazeClamp(np, head, fwd, mhw * ms, mhh * ms, fov);
+    // If lifting leaves the view, slide sideways instead (away from the label).
+    if (c.clamped && prefer === 'up') {
+      const sx = ox * (dx >= 0 ? 1 : -1);
+      const alt = { x: mover.position.x + rx * sx, y: mover.position.y, z: mover.position.z + rz * sx };
+      const c2 = earthGazeClamp(alt, head, fwd, mhw * ms, mhh * ms, fov);
+      mover.position.set(c2.x, c2.y, c2.z);
+      return true;
+    }
+    mover.position.set(c.x, c.y, c.z);
+    return true;
+  }
+
+  // ─── Keep-out zones ──────────────────────────────────────────────────────
+  // Panels must never sit on the thing the user is looking AT: the focused map
+  // point (zoom anchor) and the hovered / selected zone's pin. Zones are
+  // circles in world space; overlap is tested in the viewer's angular space
+  // (perspective-correct) and resolved by sliding the panel up first, then
+  // sideways, staying inside the comfort cone.
+  function earthPinWorld(loc) {
+    try {
+      const center = earthLiveCenter();
+      const dir = qRotate(earthQuat, earthRenderedDirection(loc.lat, loc.lon));
+      const R = earthVisibleRadius(earthZoom);
+      const head = getHeadPosition();
+      // Back-side pins are hidden by the planet: no keep-out needed.
+      const facing = dir.x * (head.x - center.x) + dir.y * (head.y - center.y) + dir.z * (head.z - center.z);
+      if (facing <= 0) return null;
+      const lift = 0.05; // pins stand ~7 cm off the surface
+      return { x: center.x + dir.x * (R + lift), y: center.y + dir.y * (R + lift), z: center.z + dir.z * (R + lift) };
+    } catch (e) { return null; }
+  }
+  function earthHudKeepOuts() {
+    const out = [];
+    try {
+      if (earthZoomAnchor && earthZoom > 1.02) out.push({ x: earthZoomAnchor.x, y: earthZoomAnchor.y + 0.03, z: earthZoomAnchor.z, r: 0.11 });
+      const idxs = [earthHoveredIndex, earthSelectedIndex];
+      for (const idx of idxs) {
+        if (idx >= 0 && idx < earthLocations.length) {
+          const w = earthPinWorld(earthLocations[idx]);
+          if (w) out.push({ x: w.x, y: w.y, z: w.z, r: 0.12 });
+        }
+      }
+    } catch (e) {}
+    return out;
+  }
+  function earthViewAngles(p, head, fwd) {
+    const vx = p.x - head.x, vy = p.y - head.y, vz = p.z - head.z;
+    const d = Math.hypot(vx, vy, vz) || 1e-6;
+    let rx = -fwd.z, rz = fwd.x;
+    const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+    const ux = -rz * fwd.y, uy = rz * fwd.x - rx * fwd.z, uz = rx * fwd.y;
+    const x = vx * rx + vz * rz;
+    const y = vx * ux + vy * uy + vz * uz;
+    const z = vx * fwd.x + vy * fwd.y + vz * fwd.z;
+    return { yaw: Math.atan2(x, z), pitch: Math.atan2(y, Math.hypot(x, z)), d, r: { x: rx, z: rz }, u: { x: ux, y: uy, z: uz } };
+  }
+  function earthAnglesToPos(yaw, pitch, d, head, fwd) {
+    let rx = -fwd.z, rz = fwd.x;
+    const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+    const ux = -rz * fwd.y, uy = rz * fwd.x - rx * fwd.z, uz = rx * fwd.y;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const dx = cp * (sy * rx + cy * fwd.x) + sp * ux;
+    const dy = cp * (cy * fwd.y) + sp * uy;
+    const dz = cp * (sy * rz + cy * fwd.z) + sp * uz;
+    return { x: head.x + dx * d, y: head.y + dy * d, z: head.z + dz * d };
+  }
+  // Move `mesh` off every keep-out circle. Returns true if it moved.
+  // `prefer`: 'up' (breadcrumb: sits above what you look at) or 'side'.
+  function earthAvoidKeepOuts(mesh, hw, hh, keeps, fwd, head, fov, prefer) {
+    if (!mesh || !mesh.position || !keeps || !keeps.length) return false;
+    let moved = false;
+    for (let pass = 0; pass < 2; pass++) {
+      let again = false;
+      for (const k of keeps) {
+        const sc = (mesh.scale && mesh.scale.x) || 1;
+        const a = earthViewAngles(mesh.position, head, fwd);
+        const b = earthViewAngles(k, head, fwd);
+        const hwA = Math.atan((hw * sc) / a.d), hhA = Math.atan((hh * sc) / a.d), kr = Math.atan(k.r / b.d);
+        const gap = 0.012;
+        const ox = hwA + kr + gap - Math.abs(a.yaw - b.yaw);
+        const oy = hhA + kr + gap - Math.abs(a.pitch - b.pitch);
+        if (!(ox > 0 && oy > 0)) continue;
+        const sideSign = (a.yaw - b.yaw) >= 0 ? 1 : -1;
+        const cands = [];
+        const upC = { yaw: a.yaw, pitch: b.pitch + kr + hhA + gap };
+        const sideC = { yaw: b.yaw + sideSign * (kr + hwA + gap), pitch: a.pitch };
+        const sideO = { yaw: b.yaw - sideSign * (kr + hwA + gap), pitch: a.pitch };
+        if (prefer === 'up') cands.push(upC, sideC, sideO); else cands.push(sideC, upC, sideO);
+        let placed = null;
+        for (const c of cands) {
+          const pos = earthAnglesToPos(c.yaw, c.pitch, a.d, head, fwd);
+          const cl = earthGazeClamp(pos, head, fwd, hw * sc, hh * sc, fov);
+          if (!cl.clamped) { placed = pos; break; }
+        }
+        if (!placed) {
+          // Nothing fits cleanly: take the preferred one, clamped into view.
+          const c = cands[0];
+          const pos = earthAnglesToPos(c.yaw, c.pitch, a.d, head, fwd);
+          const cl = earthGazeClamp(pos, head, fwd, hw * sc, hh * sc, fov);
+          placed = { x: cl.x, y: cl.y, z: cl.z };
+        }
+        mesh.position.set(placed.x, placed.y, placed.z);
+        moved = true; again = true;
+      }
+      if (!again) break;
+    }
+    return moved;
+  }
+
+  const earthHudSlide = { label: null, preview: null };
+  function earthHudApply(mesh, key, halfW, halfH, fwd, head, fov) {
+    if (!mesh || !mesh.position) return;
+    const sc = (mesh.scale && mesh.scale.x) || 1;
+    const want = earthGazeClamp(mesh.position, head, fwd, halfW * sc, halfH * sc, fov);
+    if (want.clamped) mesh.position.set(want.x, want.y, want.z);
+  }
+  // Glide: everything the placement pass changed (clamp + keep-out + separation)
+  // is applied as a smoothed offset from the anchored position, so panels ease
+  // aside instead of popping when a pin, card or head turn forces a move.
+  function earthHudGlide(mesh, key, d0, dtSec) {
+    if (!mesh || !mesh.position || !d0) return;
+    let st = earthHudSlide[key];
+    if (!st) st = earthHudSlide[key] = { x: 0, y: 0, z: 0 };
+    const a = 1 - Math.exp(-Math.max(0.001, dtSec) / 0.12);
+    st.x += ((mesh.position.x - d0.x) - st.x) * a;
+    st.y += ((mesh.position.y - d0.y) - st.y) * a;
+    st.z += ((mesh.position.z - d0.z) - st.z) * a;
+    mesh.position.set(d0.x + st.x, d0.y + st.y, d0.z + st.z);
+  }
+  let earthGazeVec = null;
+  let earthHudLastT = -1;
+  function earthHudGazeSafe(time) {
+    try {
+      const dt = earthHudLastT < 0 ? 0.016 : Math.max(0.001, Math.min(0.1, (time - earthHudLastT) / 1000));
+      earthHudLastT = time;
+      const head = getHeadPosition();
+      const fwd = earthHeadForward();
+      const fov = earthViewHalfFov();
+      const keeps = earthHudKeepOuts();
+      const cardUp = !!(earthPreviewMesh && earthPreviewMesh.visible);
+      const d0Label = earthLabelMesh ? { x: earthLabelMesh.position.x, y: earthLabelMesh.position.y, z: earthLabelMesh.position.z } : null;
+      const d0Card = cardUp ? { x: earthPreviewMesh.position.x, y: earthPreviewMesh.position.y, z: earthPreviewMesh.position.z } : null;
+      // 1) Clamp each panel into the comfort cone.
+      earthHudApply(earthLabelMesh, 'label', 0.43, 0.075, fwd, head, fov);
+      if (cardUp) earthHudApply(earthPreviewMesh, 'preview', 0.25, 0.35, fwd, head, fov);
+      // 2) The focused point / hovered pin always wins: nothing covers it.
+      if (earthLabelMesh) earthAvoidKeepOuts(earthLabelMesh, 0.43, 0.075, keeps, fwd, head, fov, 'up');
+      if (cardUp) earthAvoidKeepOuts(earthPreviewMesh, 0.25, 0.35, keeps, fwd, head, fov, 'side');
+      // 3) Panels must not stack. Lift the card off the breadcrumb; if the top
+      //    of the view refuses, slide the breadcrumb SIDEWAYS (never down onto
+      //    the pin), then re-check the keep-out once more.
+      if (cardUp && earthLabelMesh) {
+        earthSeparatePanel(earthPreviewMesh, 0.25, 0.35, earthLabelMesh, 0.43, 0.075, fwd, head, fov, 'up');
+        earthAvoidKeepOuts(earthPreviewMesh, 0.25, 0.35, keeps, fwd, head, fov, 'side');
+        const ls = earthLabelMesh.scale.x || 1;
+        if (earthRectOverlapsPanel(earthLabelMesh.position, 0.43 * ls, 0.075 * ls, earthPreviewMesh, 0.25, 0.35, fwd, 0.02)) {
+          earthSeparatePanel(earthLabelMesh, 0.43, 0.075, earthPreviewMesh, 0.25, 0.35, fwd, head, fov, 'left');
+          earthAvoidKeepOuts(earthLabelMesh, 0.43, 0.075, keeps, fwd, head, fov, 'side');
+        }
+      }
+      earthHudKeeps = keeps;
+      // 4) Ease into the resolved layout.
+      earthHudGlide(earthLabelMesh, 'label', d0Label, dt);
+      if (cardUp) earthHudGlide(earthPreviewMesh, 'preview', d0Card, dt);
+      if (earthLabelMesh) earthLabelMesh.lookAt(head.x, head.y, head.z);
+      if (cardUp) earthPreviewMesh.lookAt(head.x, head.y, head.z);
+    } catch (e) {}
+  }
+  let earthHudKeeps = [];
 
   // Per-frame earth dressing for both loops: billboards face the head,
   // pins pulse (unless reduced motion), textures refresh when dirty.
@@ -2422,6 +2907,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         earthPreviewMesh.lookAt(head.x, head.y, head.z);
       }
+      earthHudGazeSafe(time);
     } catch (e) {}
     if (earthPinsGroup) {
       try {
@@ -4756,7 +5242,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     if (!earthMapTexture && earthMapCanvas && THREE) {
-      earthMapTexture = applyLinearSampling(new THREE.CanvasTexture(earthMapCanvas));
+      earthMapTexture = applyEarthTileSampling(new THREE.CanvasTexture(earthMapCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) earthMapTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       try {
         // Compensate the SphereGeometry UV seam (see earthZoneUV): shift
@@ -5862,6 +6348,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         let sources = [];
         try { sources = Array.from(session.inputSources || []); } catch (e) {}
         const preferred = pickPointerSource(sources);
+        activeRayInputSource = preferred || null;
         if (preferred) {
           const pose = sourceTargetPose(preferred, frame);
           if (pose && pose.dir) {
@@ -6039,12 +6526,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // Haptic click on XR interactions (upstream pulseInput).
-  function pulseInput(source) {
+  function pulseInput(source, strength, ms) {
     const actuator = source && source.gamepad && source.gamepad.hapticActuators &&
       source.gamepad.hapticActuators[0];
     if (!actuator || typeof actuator.pulse !== 'function') return;
     try {
-      const r = actuator.pulse(0.45, 120);
+      const r = actuator.pulse(strength === undefined ? 0.45 : strength, ms === undefined ? 120 : ms);
       if (r && typeof r.catch === 'function') r.catch(() => {});
     } catch (e) {}
   }
@@ -6540,6 +7027,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Label/preview are scene-rooted (Z1 zoom), so they gate explicitly.
     if (earthLabelMesh) earthLabelMesh.visible = isEarth;
     if (earthPreviewMesh && !isEarth) earthPreviewMesh.visible = false;
+    // The street bezel ring and compass dial are scene-rooted too: only the
+    // Earth dressing pass re-shows them, so every other mode must hide them.
+    if (!isEarth) {
+      if (earthBezelMesh) earthBezelMesh.visible = false;
+      if (earthCompassMesh) earthCompassMesh.visible = false;
+      earthHudSlide.label = null;
+      earthHudSlide.preview = null;
+      earthHudLastT = -1;
+    }
     if (screenMesh) screenMesh.visible = !isEarth;
     if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
     if (overlayMesh) {
@@ -6743,6 +7239,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     const changed = index !== earthHoveredIndex;
     earthHoveredIndex = index;
     earthPreviewLocationIndex = index;
+    if (changed) {
+      earthPreviewHoverSince = index >= 0 ? earthNowMs() : -1;
+      earthPreviewVideoFailed = '';
+      if (earthPreviewVideo) disposeEarthPreviewVideo();
+      // Light haptic tick as the laser lands on a zone (XR only).
+      if (index >= 0 && sceneMode === 'earth' && xrSession) pulseInput(activeRayInputSource, 0.18, 35);
+    }
     if (index < 0) {
       if (earthPreviewAbortController) {
         try { earthPreviewAbortController.abort(); } catch (e) {}
@@ -7220,6 +7723,24 @@ window.WebXRVR = window.WebXRVR || (function () {
           earthStickLast = -1;
         }
       }
+      // A / X (face button 1): the Quest "confirm". On a hovered zone it opens
+      // that location's feed straight away (no need to zoom to the city band
+      // first); on empty space it steps the map back out one level.
+      let faceDown = false, faceSource = null;
+      for (const source of sources) {
+        const gp = source && source.gamepad;
+        if (gp && gp.buttons && gp.buttons.length > 4 && gp.buttons[4].pressed) { faceDown = true; faceSource = source; }
+      }
+      if (faceDown && !prevBtnState.rightA) {
+        earthTouchInput();
+        if (earthHoveredIndex >= 0 && earthHoveredIndex < earthLocations.length) {
+          selectEarthLocation(earthHoveredIndex);
+        } else {
+          adjustEarthZoom(1 / EARTH_ZOOM_STEP);
+        }
+        pulseInput(faceSource);
+      }
+      prevBtnState.rightA = faceDown;
     } else {
       // ── Grip: 6DOF Natural Grab & Reposition (DeoVR / Skybox style) ──
       for (const source of sources) {
@@ -8054,6 +8575,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthMesh = null;
     earthPinsGroup = null;
     earthPreviewMesh = null;
+    disposeEarthPreviewVideo();
+    earthPreviewVideoFailed = '';
+    earthPreviewHoverSince = -1;
     reticleMesh = null;
     laserLine = null;
     controlsCanvas = null;
@@ -8075,6 +8599,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthMapTexture = null;
     earthMapCanvas = null;
     earthMapCtx = null;
+    earthBaseCanvas = null;
+    earthBaseCtx = null;
+    earthBaseBuildToken++;
+    earthHeatPaintedAt = -1e9;
     earthMapDirty = true;
     earthBaseSource = 'fallback';
     earthBaseTried = false;
@@ -9053,6 +9581,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       earthTierIndex,
       earthMapBearing,
+      setPreviewLook(yaw, pitch) { previewYaw = Number(yaw) || 0; previewPitch = Number(pitch) || 0; applyPreviewCamera(); },
+      earthPreviewVideoState() { return { url: earthPreviewVideoUrl, failed: earthPreviewVideoFailed, hoverSince: earthPreviewHoverSince, now: earthNowMs(), index: earthPreviewIndex, hasMesh: !!earthPreviewMesh, lastUpdate: lastEarthPreviewUpdate }; },
+      earthGazeClamp,
+      earthSeparatePanel,
+      earthAvoidKeepOuts,
+      earthHudKeepOuts,
+      earthViewAngles,
+      earthRectOverlapsPanel,
+      earthViewHalfFov,
       earthSpinHoldReason,
       earthTouchInput,
       earthFlingState() { return { yaw: earthFling.yaw, pitch: earthFling.pitch, spinRate: earthSpinRate }; },
