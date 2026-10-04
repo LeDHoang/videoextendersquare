@@ -3877,3 +3877,163 @@ test('full-globe drag rotates earth when passed full target.hit object (earthZoo
   renderer.stopPreview();
 });
 
+test('Step 6.1: tile image cache serves the second request without a new fetch', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.earthTileCacheClear();
+  let requests = 0;
+  api.setEarthTileImageLoader((url, onLoad) => { requests += 1; onLoad({ width: 256, height: 256, __url: url }); });
+  const url = api.earthTileLayerUrl('base', 12, 1200, 1500);
+  let first = null;
+  let second = null;
+  api.__loadTileImageForTest(url, (img) => { first = img; }, () => { throw new Error('first load failed'); });
+  api.__loadTileImageForTest(url, (img) => { second = img; }, () => { throw new Error('second load failed'); });
+  assert.ok(first, 'first load resolves');
+  assert.equal(second, first, 'second load adopts the cached image');
+  assert.equal(requests, 1, 'one network fetch serves both loads');
+  const stats = api.earthTileCacheStats();
+  assert.equal(stats.misses, 1);
+  assert.equal(stats.memoryHits, 1);
+  assert.ok(stats.size >= 1);
+  renderer.stopPreview();
+});
+
+test('Step 6.1: tile image cache evicts LRU entries past the cap', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.earthTileCacheClear();
+  api.setEarthTileImageLoader((url, onLoad) => onLoad({ width: 256, height: 256, __url: url }));
+  const firstUrl = api.earthTileLayerUrl('base', 12, 0, 0);
+  api.__loadTileImageForTest(firstUrl, () => {}, () => {});
+  for (let i = 1; i <= 230; i += 1) {
+    api.__loadTileImageForTest(api.earthTileLayerUrl('base', 12, i, 0), () => {}, () => {});
+  }
+  const stats = api.earthTileCacheStats();
+  assert.equal(stats.size, 220, 'cache holds at most 220 decoded images');
+  let refetched = 0;
+  api.setEarthTileImageLoader((url, onLoad) => { refetched += 1; onLoad({ width: 256, height: 256 }); });
+  api.__loadTileImageForTest(firstUrl, () => {}, () => { throw new Error('evicted load failed'); });
+  assert.equal(refetched, 1, 'evicted LRU entry refetches');
+  renderer.stopPreview();
+});
+
+test('Step 6.2: preview accompaniment spring clamps to ±15° and damps to rest', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.resetEarthPreviewYaw(0);
+  // A 45° head turn must not exceed the 15° surface-anchored clamp.
+  let offset = 0;
+  for (let t = 0; t <= 600; t += 16) {
+    offset = api.stepEarthPreviewYaw(Math.PI / 4, t);
+  }
+  assert.ok(Math.abs(offset) <= Math.PI / 12 + 1e-9, `clamped to ±15°, got ${offset}`);
+  assert.ok(Math.abs(offset) > 0.01, 'spring moves toward the head turn');
+  // Returning the head to center settles the panel back (no jitter latch).
+  for (let t = 700; t <= 2000; t += 16) {
+    offset = api.stepEarthPreviewYaw(0, t);
+  }
+  assert.ok(Math.abs(offset) < 0.03, `spring settles, got ${offset}`);
+  const state = api.earthPreviewYawState();
+  assert.ok(Math.abs(state.velocity) < 0.5, `velocity damps, got ${state.velocity}`);
+  renderer.stopPreview();
+});
+
+test('Step 6.2: preview accompaniment freezes under reduced motion', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, { reducedMotion: true });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.resetEarthPreviewYaw(null);
+  const offset = api.stepEarthPreviewYaw(Math.PI / 4, 1000);
+  assert.equal(offset, 0, 'reduced motion never orbits the panel');
+  renderer.stopPreview();
+});
+
+test('Step 6.3: street bezel + compass appear at street zoom and hide at globe', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  renderer.__runScheduledFrame(64);
+  let bezel = api.earthBezelState();
+  assert.equal(bezel.visible, true, 'bezel + compass show at street zoom');
+  assert.ok(bezel.radius > 0.3 && bezel.radius < 3, `bezel radius sane, got ${bezel.radius}`);
+  api.setEarthZoom(1);
+  renderer.__runScheduledFrame(96);
+  bezel = api.earthBezelState();
+  assert.equal(bezel.visible, false, 'bezel hides back at globe scale');
+  renderer.stopPreview();
+});
+
+test('Step 6.3: compass laser hover reports the badge without moving the globe', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  const scene = api.getScene();
+  const badge = scene.children.find((child) => child && child.userData && child.userData.compassBadge);
+  assert.ok(badge, 'compass badge exists in the scene');
+  badge.visible = true;
+  badge.position.set(0, 1.3, -1.15);
+  badge.userData.worldRadius = 0.5;
+  const hovered = api.updateEarthHoverFromRay({ x: 0, y: 1.3, z: 0 }, { x: 0, y: 0, z: -1 });
+  assert.equal(hovered, 'compass', 'laser over the badge reports compass');
+  renderer.stopPreview();
+});
+
+test('Heat/cone coincidence survives a street→globe zoom-out', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([
+    { slug: 'miami-us', name: 'Miami, US', lat: 25.76, lon: -80.19, heat: 0.9 },
+  ]);
+  // Street scale: pins/heat build in warped rendered coordinates.
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  const pinAtStreet = api.getSceneInfo().earthMap.pinCount;
+  assert.equal(pinAtStreet, 1);
+  // Zoom back out to the globe through the production frames: cones must
+  // rebuild geographic so they agree with the canvas halos again.
+  api.resetEarthZoom();
+  for (let t = 100; t <= 2000; t += 100) {
+    renderer.__runScheduledFrame(t);
+    api.__advanceEarthZoomForTest(t);
+  }
+  const info = api.getSceneInfo();
+  assert.equal(info.earthMap.pinCount, 1);
+  const pinPos = api.earthPinPosition(0);
+  const geo = api.locationToUnit(25.76, -80.19);
+  const R = 0.676;
+  // Pin sits on the geographic unit vector (globe scale, no warp): the cone
+  // and the canvas halo coincide again.
+  assert.ok(Math.abs(Math.hypot(pinPos.x, pinPos.y, pinPos.z) - (R + 0.035)) < 0.02,
+    `pin on surface, got r=${Math.hypot(pinPos.x, pinPos.y, pinPos.z)}`);
+  const n = Math.hypot(geo.x, geo.y, geo.z);
+  const dot = (pinPos.x * geo.x + pinPos.y * geo.y + pinPos.z * geo.z) /
+    (Math.hypot(pinPos.x, pinPos.y, pinPos.z) * n);
+  assert.ok(dot > 0.999, `pin geographic, got dot=${dot}`);
+  renderer.stopPreview();
+});
+

@@ -169,6 +169,64 @@ window.WebXRVR = window.WebXRVR || (function () {
   // and for the globe-scale legacy drag path.
   let earthQuat = { x: 0, y: 0, z: 0, w: 1 };
   let earthNorthUp = false;
+  // Step 6.2 gaze accompaniment: soft-spring yaw the street preview panel
+  // follows when the head turns, so the reel preview stays in the binocular
+  // field without rigid HUD head-locking (critically-damped spring, ±15°).
+  let earthPreviewYawOffset = 0;
+  let earthPreviewYawVelocity = 0;
+  let earthPreviewYawAnchor = null;
+  let earthPreviewYawLastTime = -1;
+  // Head forward azimuth for the preview accompaniment spring. Desktop
+  // preview cameras expose getWorldDirection; the mocked camera in node
+  // tests may not — fall back to facing -Z (yaw 0) so math stays testable.
+  function headYawAngle() {
+    try {
+      if (camera && camera.getWorldDirection) {
+        const dir = camera.getWorldDirection(new THREE.Vector3());
+        if (dir && Number.isFinite(dir.x) && Number.isFinite(dir.z)) {
+          return Math.atan2(dir.x, -dir.z);
+        }
+      }
+    } catch (e) {}
+    return 0;
+  }
+  // One critically-damped spring step (stiffness 90, damping 2*sqrt(90)).
+  // Pure function of (headYaw, time) + module spring state; clamped to
+  // ±15° (Math.PI/12) so the panel stays surface-anchored. Returns the new
+  // offset. reducedMotion freezes the panel (offset 0, velocity 0).
+  function stepEarthPreviewYaw(headYaw, time) {
+    try {
+      const now = Number(time);
+      const last = Number(earthPreviewYawLastTime);
+      const dt = (Number.isFinite(now) && Number.isFinite(last) && last >= 0)
+        ? Math.max(1 / 240, Math.min(0.1, (now - last) / 1000))
+        : 1 / 60;
+      earthPreviewYawLastTime = Number.isFinite(now) ? now : last;
+      const yaw = Number(headYaw);
+      if (!Number.isFinite(yaw)) return earthPreviewYawOffset;
+      if (earthPreviewYawAnchor === null || !Number.isFinite(earthPreviewYawAnchor)) {
+        earthPreviewYawAnchor = yaw;
+      }
+      let err = yaw - earthPreviewYawAnchor - earthPreviewYawOffset;
+      err = ((err + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      if (reducedMotion) {
+        earthPreviewYawOffset = 0;
+        earthPreviewYawVelocity = 0;
+        return 0;
+      }
+      const stiffness = 90, damping = 2 * Math.sqrt(90);
+      earthPreviewYawVelocity += ((stiffness * err) - damping * earthPreviewYawVelocity) * dt;
+      earthPreviewYawOffset = Math.max(-Math.PI / 12, Math.min(Math.PI / 12,
+        earthPreviewYawOffset + earthPreviewYawVelocity * dt));
+      return earthPreviewYawOffset;
+    } catch (e) { return earthPreviewYawOffset; }
+  }
+  function resetEarthPreviewYaw(anchor) {
+    earthPreviewYawOffset = 0;
+    earthPreviewYawVelocity = 0;
+    earthPreviewYawLastTime = -1;
+    earthPreviewYawAnchor = (anchor !== undefined) ? anchor : null;
+  }
   let earthDragging = false;
   // Hold-to-engage drag machine (upstream parity): single-axis lock, tap
   // chord, flick chord. Pitch factor is upstream-verbatim; yaw is reduced
@@ -208,6 +266,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthZoomAnim = null;
   let earthZoomApplied = -1;
   let earthZoomFrameTime = null;
+  let _earthWarpReleased = true; // zoom-out warp-frame release latch (per crossing)
   let earthTileGeometryKey = '';
   let earthLabelDetail = '';
   let earthLabelTitle = '';
@@ -268,6 +327,108 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthTileGeneration = 0;
   let earthAtmosphereMesh = null;
   let earthTileLodLevels = [];
+
+  // Step 6.3: street-table horizon bezel + interactive north compass badge.
+  // A lightweight ring around the active tile ring gives the tangent table a
+  // finished model edge; clicking/lasering the compass badge swings the map
+  // back to true north via the existing resetEarthNorthUp pose (≤0.5°).
+  let earthBezelMesh = null;
+  let earthCompassMesh = null;
+  let earthCompassCanvas = null;
+  let earthCompassCtx = null;
+  let earthCompassTexture = null;
+  function earthBezelRadius() {
+    try {
+      const S = Math.max(1, earthZoom);
+      if (!(S > 1.02) || !earthFocus) return 0;
+      return earthVisibleRadius(S) * 0.24;
+    } catch (e) { return 0; }
+  }
+  function earthBezelVisible() {
+    return !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && earthBezelMesh);
+  }
+  function ensureEarthBezel() {
+    if (!THREE || !scene || !earthGroup) return;
+    try {
+      if (!earthBezelMesh) {
+        const geo = new THREE.RingGeometry(0.96, 1.0, 96);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x39d7ff, transparent: true, opacity: 0.55,
+          side: THREE.DoubleSide, depthWrite: false,
+        });
+        earthBezelMesh = new THREE.Mesh(geo, mat);
+        earthBezelMesh.renderOrder = 5;
+        earthBezelMesh.frustumCulled = false;
+        earthBezelMesh.visible = false;
+        scene.add(earthBezelMesh);
+      }
+      if (!earthCompassCanvas && typeof document !== 'undefined') {
+        earthCompassCanvas = document.createElement('canvas');
+        earthCompassCanvas.width = 128;
+        earthCompassCanvas.height = 64;
+        earthCompassCtx = earthCompassCanvas.getContext('2d');
+      }
+      if (!earthCompassTexture && earthCompassCanvas && THREE) {
+        earthCompassTexture = new THREE.CanvasTexture(earthCompassCanvas);
+        try { if (THREE.SRGBColorSpace !== undefined) earthCompassTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+      }
+      if (!earthCompassMesh && earthCompassTexture) {
+        const mat = new THREE.MeshBasicMaterial({
+          map: earthCompassTexture, transparent: true,
+          depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+        });
+        earthCompassMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.11), mat);
+        earthCompassMesh.renderOrder = 101;
+        earthCompassMesh.frustumCulled = false;
+        earthCompassMesh.visible = false;
+        earthCompassMesh.userData.compassBadge = true;
+        scene.add(earthCompassMesh);
+      }
+    } catch (e) {}
+  }
+  function refreshEarthCompassCanvas() {
+    if (!earthCompassCtx || !earthCompassCanvas) return;
+    try {
+      const ctx = earthCompassCtx;
+      ctx.clearRect(0, 0, 128, 64);
+      ctx.fillStyle = 'rgba(7,12,24,0.92)';
+      ctx.fillRect(0, 0, 128, 64);
+      ctx.strokeStyle = earthNorthUp ? '#39d7ff' : '#3A506B';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, 124, 60);
+      ctx.fillStyle = '#F7FAFC';
+      ctx.font = '700 34px Archivo, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('N ▲', 64, 34);
+      if (earthCompassTexture) earthCompassTexture.needsUpdate = true;
+    } catch (e) {}
+  }
+  function updateEarthBezel() {
+    if (!earthBezelMesh || !earthCompassMesh) return;
+    try {
+      const head = getHeadPosition();
+      const center = earthLiveCenter();
+      const radius = earthBezelRadius();
+      const show = !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && radius > 0);
+      earthBezelMesh.visible = show;
+      earthCompassMesh.visible = show;
+      if (!show) return;
+      // Bezel: flat ring on the table plane around the focus anchor, facing up.
+      const anchor = earthZoomAnchor || { x: center.x, y: center.y, z: center.z };
+      earthBezelMesh.position.set(anchor.x, anchor.y, anchor.z);
+      earthBezelMesh.scale.setScalar(Math.max(0.05, radius));
+      earthBezelMesh.lookAt(anchor.x, anchor.y + 1, anchor.z);
+      if (earthBezelMesh.material) {
+        earthBezelMesh.material.opacity = reducedMotion ? 0.55 : 0.45 + 0.1 * Math.sin(Date.now() * 0.002);
+      }
+      // Compass badge: floats just above the bezel rim, faces the head.
+      refreshEarthCompassCanvas();
+      earthCompassMesh.position.set(anchor.x, anchor.y + 0.14, anchor.z - radius - 0.1);
+      earthCompassMesh.lookAt(head.x, head.y, head.z);
+      earthCompassMesh.userData.worldRadius = 0.16;
+    } catch (e) {}
+  }
 
   // Notification State
   let notificationText = '';
@@ -1429,6 +1590,10 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // 3D pulsing pins at exact location vectors (same convention as
   // hitTestEarth, so hover and visuals can never disagree).
+  // Each mesh stashes its location row in userData so the per-frame pass can
+  // re-seat it in the LIVE warp frame every frame (cheap vector math, no
+  // rebuild) — cones track the zoom continuously instead of lagging until
+  // the next rebuild gate.
   function rebuildEarthPins() {
     if (!earthPinsGroup || !THREE) return;
     try {
@@ -1455,6 +1620,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         mesh.quaternion.setFromUnitVectors(up, dir.clone().normalize());
         mesh.userData.pulsePhase = i * 0.7;
         mesh.userData.baseScale = 0.8 + heat * 0.9;
+        mesh.userData.location = loc;
         mesh.scale.setScalar(mesh.userData.baseScale);
         earthPinsGroup.add(mesh);
       });
@@ -1558,6 +1724,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     // constant geographic footprint. Without this, zooming balloons heat into
     // globe-sized halos.
     const kComp = Math.max(1, earthEffectiveK(earthZoom));
+    // Live surface radius (same contract as rebuildEarthHeatSprites): the
+    // lift above the sphere shrinks as the group scale grows, so offsets stay
+    // constant in world space through the zoom.
+    const liveRadius = EARTH_RADIUS + EARTH_TILE_RADIUS_EPS * 2 / Math.max(1, earthVisibleRadius(earthZoom) / EARTH_RADIUS);
+    const zAxis = (typeof THREE !== 'undefined' && THREE) ? new THREE.Vector3(0, 0, 1) : null;
+    const tmpDir = (typeof THREE !== 'undefined' && THREE) ? new THREE.Vector3() : null;
     for (let i = 0; i < earthHeatSprites.length; i++) {
       const sprite = earthHeatSprites[i];
       let boost = 1;
@@ -1565,6 +1737,25 @@ window.WebXRVR = window.WebXRVR || (function () {
         const idx = earthLocations.indexOf(sprite.location);
         if (idx >= 0 && idx === selected) boost = 1.35;
         else if (idx >= 0 && idx === hovered) boost = 1.18;
+      } catch (e) {}
+      // Re-seat in the LIVE warp frame every frame (same earthRenderedDirection
+      // the pins use): heat quads ride the zoom continuously instead of lagging
+      // until the next rebuild. Cheap vector math, no rebuild/dispose churn.
+      try {
+        const loc = sprite.location;
+        if (loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lon)) &&
+            sprite.mesh && zAxis && tmpDir) {
+          const dir = earthRenderedDirection(loc.lat, loc.lon);
+          sprite.mesh.position.set(dir.x * liveRadius, dir.y * liveRadius, dir.z * liveRadius);
+          tmpDir.set(dir.x, dir.y, dir.z).normalize();
+          sprite.mesh.quaternion.setFromUnitVectors(zAxis, tmpDir);
+          // Live footprint for street-zoom attenuation (earthZoneAngularRadius
+          // shrinks past S>256): recompute so scale tracks the zoom instantly
+          // instead of holding the build-time radius.
+          const angular = earthZoneAngularRadius(loc);
+          const halfExtent = EARTH_RADIUS * Math.sin(angular);
+          if (Number.isFinite(halfExtent) && halfExtent > 0) sprite.baseScale = halfExtent;
+        }
       } catch (e) {}
       sprite.material.opacity = Math.min(1, fade * 0.85) * (boost > 1 ? 1.15 : 1);
       sprite.mesh.scale.setScalar(sprite.baseScale * boost / kComp);
@@ -1785,6 +1976,22 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       if (earthLabelMesh) earthLabelMesh.lookAt(head.x, head.y, head.z);
       if (earthPreviewMesh && earthPreviewMesh.visible) {
+        // Step 6.2: soft-spring yaw keeps the street preview inside the
+        // binocular field on sideways glances (±15° orbit, never head-locked).
+        // The panel orbits the surface anchor (sx,sy,sz); at globe scale there
+        // is no anchor, so only the spring state tracks (no positional shift).
+        const prevYaw = earthPreviewYawOffset;
+        earthPreviewYawOffset = stepEarthPreviewYaw(headYawAngle(), time);
+        const yawDelta = earthPreviewYawOffset - prevYaw;
+        if (yawDelta !== 0 && Number.isFinite(sx) && Number.isFinite(sz)) {
+          try {
+            const ox = earthPreviewMesh.position.x - sx;
+            const oz = earthPreviewMesh.position.z - sz;
+            const c = Math.cos(yawDelta), s = Math.sin(yawDelta);
+            earthPreviewMesh.position.x = sx + ox * c - oz * s;
+            earthPreviewMesh.position.z = sz + ox * s + oz * c;
+          } catch (e) {}
+        }
         earthPreviewMesh.lookAt(head.x, head.y, head.z);
       }
     } catch (e) {}
@@ -1793,12 +2000,24 @@ window.WebXRVR = window.WebXRVR || (function () {
         const invZoom = EARTH_RADIUS / Math.max(EARTH_RADIUS, earthVisibleRadius(earthZoom));
         const surfaceRadius = EARTH_RADIUS + 0.035 / Math.max(1, earthVisibleRadius(earthZoom) / EARTH_RADIUS);
         const kids = earthPinsGroup.children;
+        const pinUp = new THREE.Vector3(0, 1, 0);
         for (let i = 0; i < kids.length; i++) {
           const p = kids[i];
           const base = p.userData.baseScale || 1;
           const pulse = reducedMotion
             ? 1
             : (1 + 0.22 * Math.sin(time * 0.003 + (p.userData.pulsePhase || 0)));
+          // Re-seat in the LIVE warp frame every frame: cones ride the zoom
+          // continuously (no rebuild lag). Same earthRenderedDirection the
+          // rebuild uses, so settled frames are bit-identical.
+          const row = p.userData.location;
+          if (row && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lon))) {
+            try {
+              const u = earthRenderedDirection(row.lat, row.lon);
+              p.position.set(u.x * surfaceRadius, u.y * surfaceRadius, u.z * surfaceRadius);
+              p.quaternion.setFromUnitVectors(pinUp, new THREE.Vector3(u.x, u.y, u.z).normalize());
+            } catch (e2) {}
+          }
           // Counter the group scale: constant world size at every zoom.
           p.scale.setScalar(Math.max(0.05, base * pulse) * invZoom);
           // Constant world surface offset (0.035 m) instead of S× growth.
@@ -1815,6 +2034,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     refreshEarthTexture();
     refreshEarthLabel();
     updateEarthTiles(time);
+    ensureEarthBezel();
+    updateEarthBezel();
     updateEarthPreviewBillboard(time);
   }
 
@@ -2506,6 +2727,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       fromPitch: earthPitch || 0, toPitch: earthPitch || 0,
     };
     earthZoomTarget = 1;
+    // Focus is gone, so the warp frame is geographic again: rebuild pins +
+    // heat immediately so the globe view never shows stale street-warped
+    // cones against geographic canvas halos (also covered per-frame in
+    // advanceEarthZoom for focus-kept zoom-outs).
+    try { rebuildEarthPins(); } catch (e) {}
+    try { rebuildEarthHeatSprites(); } catch (e) {}
+    earthMapDirty = true;
     if (reducedMotion) advanceEarthZoom(t0);
   }
 
@@ -2519,6 +2747,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthZoomAnim = null;
     earthNorthUp = false;
     applyEarthZoom();
+    try { rebuildEarthPins(); } catch (e) {}
+    try { rebuildEarthHeatSprites(); } catch (e) {}
+    earthMapDirty = true;
   }
 
 // Per-frame zoom advance for both loops: run the focus animation, else
@@ -2555,6 +2786,18 @@ window.WebXRVR = window.WebXRVR || (function () {
         applyEarthRotation();
       }
       applyEarthZoom();
+      // Tap-animation zoom-out landing back at globe scale: the pins + heat
+      // sprites were built in street-warped rendered coordinates — rebuild
+      // them geographic so cones agree with the canvas halos. (Continuous
+      // zoom-out crosses the same gate below.)
+      if (!earthZoomAnim && earthZoom <= 1.0001 && !_earthWarpReleased) {
+        _earthWarpReleased = true;
+        try { rebuildEarthPins(); } catch (e2) {}
+        try { rebuildEarthHeatSprites(); } catch (e2) {}
+        earthMapDirty = true;
+      } else if (earthEffectiveK(earthZoom) > 1) {
+        _earthWarpReleased = false;
+      }
       return true;
     }
     if (earthZoom !== earthZoomTarget) {
@@ -2564,6 +2807,21 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthZoom = Math.abs(Math.log(Math.max(1, next)) - Math.log(Math.max(1, earthZoomTarget))) < 0.004
         ? earthZoomTarget : next;
       applyEarthZoom();
+      // Zoom-out crossing back to globe scale releases the warp frame: pins
+      // and heat sprites were built in rendered (warped) coordinates, so
+      // rebuild them in geographic coordinates once the effective
+      // magnification returns to 1. Without this, the canvas halos (always
+      // geographic) and the 3D cones (stale warped) disagree after a
+      // street→globe zoom-out. Guarded to run once per crossing (the rebuild
+      // itself leaves k_eff at 1, so re-check the pre-step value).
+      if (earthFocus && earthEffectiveK(earthZoom) <= 1 && !_earthWarpReleased) {
+        _earthWarpReleased = true;
+        try { rebuildEarthPins(); } catch (e) {}
+        try { rebuildEarthHeatSprites(); } catch (e) {}
+        earthMapDirty = true;
+      } else if (earthEffectiveK(earthZoom) > 1) {
+        _earthWarpReleased = false;
+      }
     }
     // Top-down tracking: while active (and no animation or drag owns the
     // pose), ease yaw/pitch toward exact normal alignment so residual tilt
@@ -2850,7 +3108,105 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // Injectable image seam (tests stub this; production uses Image()).
   let earthTileImageLoader = null;
-  function loadEarthTileImage(url, onLoad, onError) {
+  // Step 6.1 client-side tile cache: decoded tile layer images keyed by URL.
+  // In-memory Map is authoritative (synchronous adoption, works in XR where
+  // CacheStorage may be unavailable); CacheStorage 'sx-map-tiles-v1' is a
+  // best-effort persistent backstop for repeat visits across sessions.
+  const EARTH_TILE_IMAGE_CACHE_MAX = 220;
+  const earthTileImageCache = new Map(); // url -> HTMLImageElement (LRU, MRU at end)
+  let earthTileCacheStorage = null; // 'pending' | object | false
+  let earthTileCacheStats = { memoryHits: 0, storageHits: 0, misses: 0, stores: 0 };
+  function earthTileCacheTouch(url, img) {
+    try {
+      if (earthTileImageCache.has(url)) earthTileImageCache.delete(url);
+      earthTileImageCache.set(url, img);
+      while (earthTileImageCache.size > EARTH_TILE_IMAGE_CACHE_MAX) {
+        const oldest = earthTileImageCache.keys().next();
+        if (oldest.done) break;
+        earthTileImageCache.delete(oldest.value);
+      }
+    } catch (e) {}
+  }
+  function earthTileCacheGet(url) {
+    try {
+      if (earthTileImageCache.has(url)) {
+        const img = earthTileImageCache.get(url);
+        earthTileImageCache.delete(url);
+        earthTileImageCache.set(url, img);
+        earthTileCacheStats.memoryHits += 1;
+        return img;
+      }
+    } catch (e) {}
+    return null;
+  }
+  function earthTileCacheStore() { return (typeof caches !== 'undefined' && caches) || null; }
+  function earthTileCacheStorageGet() {
+    if (earthTileCacheStorage) return earthTileCacheStorage === false ? null : earthTileCacheStorage;
+    const store = earthTileCacheStore();
+    if (!store) { earthTileCacheStorage = false; return null; }
+    try {
+      const pending = store.open('sx-map-tiles-v1');
+      earthTileCacheStorage = 'pending';
+      Promise.resolve(pending).then(
+        (cache) => { earthTileCacheStorage = cache || false; },
+        () => { earthTileCacheStorage = false; });
+    } catch (e) { earthTileCacheStorage = false; return null; }
+    return null;
+  }
+  function earthTileCacheReadStorage(url, onHit) {
+    const store = earthTileCacheStore();
+    if (!store || typeof fetch === 'undefined') return false;
+    const cache = earthTileCacheStorageGet();
+    if (!cache || typeof cache.match !== 'function') return false;
+    try {
+      Promise.resolve(cache.match(url)).then((res) => {
+        if (!res || typeof res.blob !== 'function') return;
+        Promise.resolve(res.blob()).then((blob) => {
+          if (!blob) return;
+          const objUrl = (typeof URL !== 'undefined' && URL.createObjectURL)
+            ? URL.createObjectURL(blob) : null;
+          const finish = (img) => {
+            try { if (objUrl && URL.revokeObjectURL) URL.revokeObjectURL(objUrl); } catch (e) {}
+            if (img) {
+              earthTileCacheTouch(url, img);
+              earthTileCacheStats.storageHits += 1;
+              onHit(img);
+            }
+          };
+          if (typeof createImageBitmap === 'function' && !objUrl) {
+            Promise.resolve(createImageBitmap(blob)).then((bmp) => finish(bmp), () => {});
+            return;
+          }
+          loadEarthTileImageDirect(objUrl || url, finish, () => {
+            try { if (objUrl && URL.revokeObjectURL) URL.revokeObjectURL(objUrl); } catch (e) {}
+          });
+        }, () => {});
+      }, () => {});
+      return true;
+    } catch (e) { return false; }
+  }
+  function earthTileCacheWriteStorage(url) {
+    const store = earthTileCacheStore();
+    if (!store || typeof fetch === 'undefined') return;
+    const cache = earthTileCacheStorage && earthTileCacheStorage !== 'pending' ? earthTileCacheStorage : null;
+    const put = (store_) => {
+      try {
+        Promise.resolve(fetch(url, { credentials: 'include' })).then((res) => {
+          if (!res || !res.ok) return;
+          Promise.resolve(store_.put(url, res)).then(
+            () => { earthTileCacheStats.stores += 1; }, () => {});
+        }, () => {});
+      } catch (e) {}
+    };
+    if (cache && typeof cache.put === 'function') { put(cache); return; }
+    try {
+      Promise.resolve(store.open('sx-map-tiles-v1')).then((opened) => {
+        earthTileCacheStorage = opened || false;
+        if (opened) put(opened);
+      }, () => { earthTileCacheStorage = false; });
+    } catch (e) {}
+  }
+  function loadEarthTileImageDirect(url, onLoad, onError) {
     if (earthTileImageLoader) {
       try { earthTileImageLoader(url, onLoad, onError); } catch (e) { onError(e); }
       return;
@@ -2861,6 +3217,33 @@ window.WebXRVR = window.WebXRVR || (function () {
       img.onerror = () => onError(new Error('tile image failed: ' + url));
       img.src = url;
     } catch (e) { onError(e); }
+  }
+  function loadEarthTileImage(url, onLoad, onError) {
+    const cached = earthTileCacheGet(url);
+    if (cached) { try { onLoad(cached); } catch (e) {} return; }
+    earthTileCacheStats.misses += 1;
+    let settled = false;
+    const ok = (img) => {
+      if (settled) return;
+      settled = true;
+      earthTileCacheTouch(url, img);
+      earthTileCacheWriteStorage(url);
+      try { onLoad(img); } catch (e) {}
+    };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { onError(err); } catch (e) {}
+    };
+    if (earthTileCacheReadStorage(url, ok)) {
+      // Storage lookup is async; fall through to network so a cold storage
+      // never blocks the visible set. The network win calls ok() first and
+      // the late storage hit is dropped by the settled guard (LRU keeps it
+      // only if it arrived first).
+      loadEarthTileImageDirect(url, ok, fail);
+      return;
+    }
+    loadEarthTileImageDirect(url, ok, fail);
   }
 
   function earthTileLayerUrl(layer, z, x, y) {
@@ -4735,10 +5118,23 @@ window.WebXRVR = window.WebXRVR || (function () {
           }
         }
         if (hovering < 0 && earthMesh && earthGroup && earthGroup.visible !== false) {
-          const hit = hitTestEarth(origin, direction);
-          if (hit.hit) {
-            dist = hit.dist;
-            hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
+          let compassed = false;
+          if (earthCompassMesh && earthCompassMesh.visible) {
+            try {
+              const hits = raycaster.intersectObject(earthCompassMesh, false);
+              if (hits.length > 0) {
+                dist = hits[0].distance;
+                hovering = -3; // compass badge hover (own highlight channel)
+                compassed = true;
+              }
+            } catch (e) {}
+          }
+          if (!compassed) {
+            const hit = hitTestEarth(origin, direction);
+            if (hit.hit) {
+              dist = hit.dist;
+              hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
+            }
           }
         }
       } else {
@@ -4793,7 +5189,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         } catch (e) {}
       }
     } catch (e) {}
-    const isHover = hovering >= 0 || overScreen || hovering === -2;
+    const isHover = hovering >= 0 || overScreen || hovering === -2 || hovering === -3;
     dist = Math.max(0.2, Math.min(30, dist));
     try {
       laserPositions[0] = origin.x;
@@ -5724,8 +6120,24 @@ window.WebXRVR = window.WebXRVR || (function () {
   // cheap). Returns the zone index or -1. Previously only the desktop
   // path resolved zones — the XR laser collapsed everything to "globe",
   // so hover highlight + previews never fired on Quest.
+  // Step 6.3: the compass badge is hoverable too — a laser over the badge
+  // reports 'compass' so the preview button highlight path can surface it.
   function updateEarthHoverFromRay(origin, direction) {
     if (sceneMode !== 'earth' || !origin || !direction) return -1;
+    if (earthCompassMesh && earthCompassMesh.visible) {
+      try {
+        const c = earthCompassMesh.position;
+        const r = Number(earthCompassMesh.userData.worldRadius) || 0.16;
+        const ox = origin.x - c.x, oy = origin.y - c.y, oz = origin.z - c.z;
+        const dx = direction.x, dy = direction.y, dz = direction.z;
+        const a = dx * dx + dy * dy + dz * dz;
+        if (a > 1e-12) {
+          const t = Math.max(0, -(ox * dx + oy * dy + oz * dz) / a);
+          const px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
+          if (Math.sqrt(px * px + py * py + pz * pz) <= r && t < 10) return 'compass';
+        }
+      } catch (e) {}
+    }
     let hit = null;
     try {
       hit = hitTestEarth(origin, direction);
@@ -5749,6 +6161,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       earthPreviewStatus = 'idle';
       earthPreviewItems = [];
+      resetEarthPreviewYaw(null);
     } else if (changed && sceneMode === 'earth') {
       // Hovering a new zone fetches its reels for the 3D billboard
       // (upstream scheduleEarthPreview; change-guarded, no per-move spam).
@@ -6387,14 +6800,31 @@ window.WebXRVR = window.WebXRVR || (function () {
       raycaster.set(rayOrigin, rayDir);
 
       if (sceneMode === 'earth' && earthMesh) {
-        const hit = hitTestEarth(rayOrigin, rayDir);
-        if (hit.hit) {
-          // Z1 tap dispatch: zone taps zoom below the city band and select
-          // at/above it; clean taps on open globe zoom one step.
-          const tapAction = handleEarthTap(hit.zoneIndex, hit);
-          if (tapAction !== 'none') {
-            pulseInput(ev.data);
-            handled = true;
+        // Step 6.3: compass badge click → true-north pose (400 ms slerp is
+        // inside resetEarthNorthUp's instant pose; the eased feel comes from
+        // the zoom-frame smoothing, not a second animation machine).
+        if (earthCompassMesh && earthCompassMesh.visible) {
+          try {
+            const hits = raycaster.intersectObject(earthCompassMesh, false);
+            if (hits.length > 0) {
+              if (resetEarthNorthUp()) {
+                showNotification('NORTH UP');
+                pulseInput(ev.data);
+                handled = true;
+              }
+            }
+          } catch (e) {}
+        }
+        if (!handled) {
+          const hit = hitTestEarth(rayOrigin, rayDir);
+          if (hit.hit) {
+            // Z1 tap dispatch: zone taps zoom below the city band and select
+            // at/above it; clean taps on open globe zoom one step.
+            const tapAction = handleEarthTap(hit.zoneIndex, hit);
+            if (tapAction !== 'none') {
+              pulseInput(ev.data);
+              handled = true;
+            }
           }
         }
       } else {
@@ -6972,6 +7402,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastEarthLabelKey = '';
     lastEarthPreviewUpdate = -1;
     pinSharedGeo = null;
+    earthBezelMesh = null;
+    earthCompassMesh = null;
+    earthCompassCanvas = null;
+    earthCompassCtx = null;
+    earthCompassTexture = null;
     laserPositions = null;
     reticleTexture = null;
     previewHoverRay = null;
@@ -7010,6 +7445,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthGrabGeo = earthGrabAnchor = earthPointerZoom = null;
     earthZoomAnim = null;
     earthZoomApplied = -1;
+    resetEarthPreviewYaw(null);
     // Z2 tile teardown: dispose every patch + texture; the layer rebuilds
     // from scratch on the next earth entry.
     try { retireEarthTiles(() => true); } catch (e) {}
@@ -7908,6 +8344,34 @@ window.WebXRVR = window.WebXRVR || (function () {
       applyEarthTileSampling,
       earthTileLayerUrl,
       earthTileStyleMode,
+      setEarthTileImageLoader(fn) { earthTileImageLoader = typeof fn === 'function' ? fn : null; },
+      earthTileCacheStats() { return { ...earthTileCacheStats, size: earthTileImageCache.size }; },
+      earthTileCacheClear() {
+        earthTileImageCache.clear();
+        earthTileCacheStats = { memoryHits: 0, storageHits: 0, misses: 0, stores: 0 };
+      },
+      stepEarthPreviewYaw,
+      resetEarthPreviewYaw,
+      earthPreviewYawState() {
+        return { offset: earthPreviewYawOffset, velocity: earthPreviewYawVelocity, anchor: earthPreviewYawAnchor };
+      },
+      __loadTileImageForTest(url, onLoad, onError) { loadEarthTileImage(url, onLoad, onError); },
+      __advanceEarthZoomForTest(time) { return advanceEarthZoom(time); },
+      earthPinPosition(index) {
+        try {
+          const kids = (earthPinsGroup && earthPinsGroup.children) || [];
+          const p = kids[Number(index) || 0];
+          if (!p || !p.position) return null;
+          return { x: p.position.x, y: p.position.y, z: p.position.z };
+        } catch (e) { return null; }
+      },
+      earthBezelState() {
+        return {
+          visible: !!(earthBezelMesh && earthBezelMesh.visible && earthCompassMesh && earthCompassMesh.visible),
+          radius: earthBezelRadius(),
+          northUp: !!earthNorthUp,
+        };
+      },
       earthTilePrefetchStats() {
         let ready = 0;
         try {
