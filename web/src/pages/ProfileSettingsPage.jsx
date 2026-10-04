@@ -1,3 +1,5 @@
+import RichText from '../components/ui/RichText.jsx';
+import { tokenizeRichText } from '../utils/richText.js';
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -14,6 +16,7 @@ export default function ProfileSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [profileStatus, setProfileStatus] = useState(null);
   const [blocked, setBlocked] = useState(null);
   const [deleteForm, setDeleteForm] = useState({ current_password: '', confirmation: '' });
   const avatarInputRef = useRef(null);
@@ -36,12 +39,15 @@ export default function ProfileSettingsPage() {
     setBusy(true);
     setError('');
     setMessage('');
+    setProfileStatus(null);
     try {
       const result = await api.patch('/api/users/me', form);
       setUser(result.user);
-      setMessage('PROFILE UPDATED');
+      setProfileStatus({ ok: true, text: 'PROFILE UPDATED' });
     } catch (requestError) {
-      setError(requestError.message || 'Could not update profile.');
+      // Shown beside the SAVE button: a rejected save changes nothing, so the
+      // reason (e.g. an invalid website) must be visible where the user is.
+      setProfileStatus({ ok: false, text: requestError.message || 'Could not update profile.' });
     } finally {
       setBusy(false);
     }
@@ -170,11 +176,22 @@ export default function ProfileSettingsPage() {
             </Field>
             <Field label={'BIO (' + form.bio.length + '/150)'}>
               <textarea className="sx-textarea" maxLength={150} value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} />
+              {tokenizeRichText(form.bio).some((part) => part.type !== 'text') ? (
+                <div className="sx-pf-bio-preview" aria-label="Bio preview">
+                  <span>PREVIEW</span>
+                  <p className="sx-pf-bio"><RichText text={form.bio} /></p>
+                </div>
+              ) : null}
             </Field>
             <Field label="WEBSITE">
-              <input className="sx-input" type="url" placeholder="https://example.com" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
+              <input className="sx-input" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="example.com or https://example.com" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
             </Field>
             <Button primary loading={busy} disabled={busy} onClick={saveProfile}>SAVE PROFILE</Button>
+            {profileStatus ? (
+              profileStatus.ok
+                ? <div className="sx-mono" role="status">✓ {profileStatus.text}</div>
+                : <div className="sx-error-box" role="alert">{profileStatus.text}</div>
+            ) : null}
           </div>
         </div>
       </Section>

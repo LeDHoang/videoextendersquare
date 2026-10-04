@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -51,7 +51,9 @@ from server.social.models import (
     Post,
     PostLike,
     PostSave,
+    PostTag,
     ReelPackView,
+    Tag,
     User,
     UserBlock,
     ViewDedup,
@@ -496,6 +498,35 @@ def change_password(
     return {"ok": True}
 
 
+PROFILE_TOP_TAGS = 6
+PROFILE_POST_SORTS = {"newest", "views", "likes"}
+
+
+def profile_stats(db: Session, owner_id: str) -> dict:
+    """Public aggregates for a profile header: total likes received and the
+    creator's most-used tags. Counts only published, non-deleted posts."""
+    published = and_(
+        Post.owner_id == owner_id,
+        Post.status == "published",
+        Post.deleted_at.is_(None),
+    )
+    like_total = db.query(func.coalesce(func.sum(Post.like_count), 0)).filter(published).scalar()
+    tag_rows = (
+        db.query(Tag.name, Tag.slug, func.count(PostTag.post_id).label("uses"))
+        .join(PostTag, PostTag.tag_id == Tag.id)
+        .join(Post, Post.id == PostTag.post_id)
+        .filter(published)
+        .group_by(Tag.id, Tag.name, Tag.slug)
+        .order_by(func.count(PostTag.post_id).desc(), Tag.name.asc())
+        .limit(PROFILE_TOP_TAGS)
+        .all()
+    )
+    return {
+        "like_count": int(like_total or 0),
+        "top_tags": [{"name": name, "slug": slug, "count": int(uses)} for name, slug, uses in tag_rows],
+    }
+
+
 @router.get("/api/users/{username}")
 def get_profile(
     username: str,
@@ -518,7 +549,41 @@ def get_profile(
             UserBlock.blocked_id == user.id,
         ).first()
     )
+    payload.update(profile_stats(db, user.id))
     return {"user": payload}
+
+
+def normalize_website(value: str) -> str:
+    """Accept "test.com", "www.test.com/me" or a full http(s) URL; always store
+    an https:// (or the given http://) URL. Other schemes, hostless values and
+    malformed ports are rejected so the profile link can never be javascript:/data:."""
+    website = str(value or "").strip()
+    if not website:
+        return ""
+    has_scheme = "://" in website
+    candidate = website if has_scheme else "https://" + website
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname or ""
+        parsed.port  # raises ValueError on a malformed port
+    except ValueError:
+        hostname, parsed = "", None
+    valid = (
+        parsed is not None
+        and parsed.scheme in {"http", "https"}
+        and "." in hostname
+        and not hostname.startswith(".")
+        and not hostname.endswith(".")
+        and not any(ch.isspace() for ch in candidate)
+    )
+    if not valid:
+        error(
+            422,
+            "INVALID_WEBSITE",
+            "Enter a valid website such as example.com or https://example.com.",
+            "website",
+        )
+    return candidate[:300]
 
 
 @router.patch("/api/users/me")
@@ -536,12 +601,7 @@ def update_profile(
     if req.bio is not None:
         user.bio = req.bio.strip()[:150]
     if req.website is not None:
-        website = req.website.strip()
-        if website:
-            parsed = urlsplit(website)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                error(422, "INVALID_WEBSITE", "Website must be a complete http(s) URL.", "website")
-        user.website = website[:300]
+        user.website = normalize_website(req.website)
     db.commit()
     db.refresh(user)
     return {"user": private_user(user)}
@@ -608,6 +668,7 @@ def delete_avatar(
 def get_profile_posts(
     username: str,
     media: str = "all",
+    sort: str = "newest",
     cursor: str | None = None,
     limit: int = 24,
     db: Session = Depends(get_db),
@@ -618,16 +679,30 @@ def get_profile_posts(
     if users_blocked(db, viewer_id, user.id):
         error(404, "USER_NOT_FOUND", "Profile not found.")
     limit = max(1, min(int(limit), 50))
+    sort = sort if sort in PROFILE_POST_SORTS else "newest"
     query = post_query(db).filter(Post.owner_id == user.id)
     if media in {"video", "image"}:
         query = query.filter(Post.media_type == media)
-    query = apply_cursor(query, cursor).order_by(Post.created_at.desc(), Post.id.desc())
-    rows = query.limit(limit + 1).all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    if sort == "newest":
+        query = apply_cursor(query, cursor).order_by(Post.created_at.desc(), Post.id.desc())
+        rows = query.limit(limit + 1).all()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = encode_cursor(rows[-1]) if has_more and rows else None
+    else:
+        # Count-ranked orders have no stable keyset, so page by offset ("o:<n>").
+        offset = 0
+        if cursor and cursor.startswith("o:") and cursor[2:].isdigit():
+            offset = int(cursor[2:])
+        metric = Post.view_count if sort == "views" else Post.like_count
+        query = query.order_by(metric.desc(), Post.created_at.desc(), Post.id.desc())
+        rows = query.offset(offset).limit(limit + 1).all()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = f"o:{offset + limit}" if has_more else None
     return {
         "items": [media_card(post, db, viewer_id) for post in rows],
-        "next_cursor": encode_cursor(rows[-1]) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 

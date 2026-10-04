@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from server.routers import account_safety, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import Follow, Post, Report, User
+from server.social.models import Follow, Post, PostTag, Report, Tag, User
 
 
 PASSWORD = "correct-horse-battery"
@@ -302,3 +302,126 @@ def test_password_reset_then_account_deletion(app, monkeypatch):
             assert deleted_user.status == "deleted"
             assert deleted_user.email is None
             assert deleted_user.password_hash is None
+
+
+def test_saved_posts_are_private_to_their_owner(app):
+    with (
+        TestClient(app) as owner_client,
+        TestClient(app) as viewer_client,
+        TestClient(app) as anon_client,
+    ):
+        owner = register(owner_client, "saved_owner", "saved-owner@example.com")
+        register(viewer_client, "saved_viewer", "saved-viewer@example.com")
+        post_id = create_post(app, owner["id"])
+        assert mutate(viewer_client, "PUT", f"/api/posts/{post_id}/save").status_code == 200
+
+        # The saver sees their own bookmark.
+        mine = viewer_client.get("/api/users/me/saved").json()["items"]
+        assert [item["id"] for item in mine] == [post_id]
+
+        # Anonymous visitors cannot read any saved list.
+        assert anon_client.get("/api/users/me/saved").status_code == 401
+
+        # Another account only ever receives its own (empty) saved list.
+        assert owner_client.get("/api/users/me/saved").json()["items"] == []
+
+        # There is no per-username saved route, so a saver's list cannot be
+        # requested by naming them.
+        for client in (owner_client, anon_client):
+            assert client.get("/api/users/saved_viewer/saved").status_code in {404, 405}
+            assert client.get("/api/users/saved_viewer/saved-packs").status_code in {404, 405}
+
+        # Profile and posts payloads never leak what a user saved.
+        profile = anon_client.get("/api/users/saved_viewer").json()["user"]
+        assert "saved" not in profile and "saved_count" not in profile
+        posts = anon_client.get("/api/users/saved_viewer/posts").json()["items"]
+        assert posts == []
+        owner_posts = anon_client.get("/api/users/saved_owner/posts").json()["items"]
+        assert owner_posts[0]["viewer_state"]["saved"] is False
+        assert owner_posts[0]["saved_by_me"] is False
+
+
+def test_profile_stats_top_tags_and_post_sorting(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "stats_owner", "stats-owner@example.com")
+        register(viewer_client, "stats_viewer", "stats-viewer@example.com")
+        low = create_post(app, owner["id"], "tests/stats-low.webp")
+        high = create_post(app, owner["id"], "tests/stats-high.webp")
+        with app.state.testing_session() as db:
+            db.get(Post, low).like_count = 2
+            db.get(Post, low).view_count = 90
+            db.get(Post, high).like_count = 7
+            db.get(Post, high).view_count = 10
+            neon, retro = Tag(name="neon", slug="neon"), Tag(name="retro", slug="retro")
+            db.add_all([neon, retro])
+            db.flush()
+            db.add_all([
+                PostTag(post_id=low, tag_id=neon.id),
+                PostTag(post_id=high, tag_id=neon.id),
+                PostTag(post_id=high, tag_id=retro.id),
+            ])
+            db.commit()
+
+        profile = viewer_client.get("/api/users/stats_owner").json()["user"]
+        assert profile["like_count"] == 9
+        assert [(t["slug"], t["count"]) for t in profile["top_tags"]] == [("neon", 2), ("retro", 1)]
+
+        def ids(sort, **extra):
+            body = viewer_client.get("/api/users/stats_owner/posts", params={"sort": sort, **extra}).json()
+            return [item["id"] for item in body["items"]], body["next_cursor"]
+
+        assert ids("likes")[0] == [high, low]
+        assert ids("views")[0] == [low, high]
+        assert set(ids("bogus-sort")[0]) == {low, high}
+
+        first_page, cursor = ids("likes", limit=1)
+        assert first_page == [high] and cursor == "o:1"
+        second_page, cursor = ids("likes", limit=1, cursor=cursor)
+        assert second_page == [low] and cursor is None
+
+
+def test_profile_website_accepts_bare_domains_and_rejects_unsafe_values(app):
+    with TestClient(app) as client:
+        register(client, "site_user", "site@example.com")
+
+        def patch(website, bio="#tagged bio"):
+            return mutate(client, "PATCH", "/api/users/me", {"bio": bio, "website": website})
+
+        ok = patch("test.com")
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["user"]["website"] == "https://test.com"
+        assert ok.json()["user"]["bio"] == "#tagged bio"
+        assert patch("www.test.com/me?x=1").json()["user"]["website"] == "https://www.test.com/me?x=1"
+        assert patch("http://plain.example.org").json()["user"]["website"] == "http://plain.example.org"
+        assert patch("  https://padded.dev  ").json()["user"]["website"] == "https://padded.dev"
+        assert patch("").json()["user"]["website"] == ""
+
+        for bad in ["javascript:alert(1)", "ftp://files.example.com", "data:text/html,x", "localhost", "has space.com", "test.com:99999", "https://"]:
+            rejected = patch(bad, bio="should not be saved")
+            assert rejected.status_code == 422, bad
+            assert rejected.json()["detail"]["code"] == "INVALID_WEBSITE"
+        # A rejected request must not partially apply.
+        assert client.get("/api/users/site_user").json()["user"]["bio"] == "#tagged bio"
+
+
+def test_editing_bio_hashtags_persists_across_saves_and_reads(app):
+    with TestClient(app) as client, TestClient(app) as anon:
+        register(client, "bio_editor", "bio-editor@example.com")
+
+        def save(bio, website="https://keep.example.com"):
+            response = mutate(client, "PATCH", "/api/users/me", {"bio": bio, "website": website})
+            assert response.status_code == 200, response.text
+            return response.json()["user"]
+
+        assert save("intro\n#test\n#test")["bio"] == "intro\n#test\n#test"
+        # Editing a hashtag in place must replace it, not be ignored.
+        assert save("intro\n#test2\n#test")["bio"] == "intro\n#test2\n#test"
+        assert save("intro\n#test2\n#test3")["website"] == "https://keep.example.com"
+
+        for reader in (client, anon):
+            assert reader.get("/api/users/bio_editor").json()["user"]["bio"] == "intro\n#test2\n#test3"
+        assert client.get("/api/auth/me").json()["user"]["bio"] == "intro\n#test2\n#test3"
+
+        # Clearing the bio (and the website) also persists.
+        cleared = save("", website="")
+        assert cleared["bio"] == "" and cleared["website"] == ""

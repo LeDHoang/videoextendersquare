@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import ExploreTile from '../components/explore/ExploreTile.jsx';
-import PackTile from '../components/packs/PackTile.jsx';
+import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
+import { DensityToggle, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
+import PackTile, { packCoverMembers } from '../components/packs/PackTile.jsx';
 import { Button, Field } from '../components/ui/controls.jsx';
+import RichText from '../components/ui/RichText.jsx';
 import { profilePostUrl } from '../utils/profileLinks.js';
-import { EmptyState } from '../components/ui/primitives.jsx';
+import { EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
+import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
@@ -17,6 +20,26 @@ const TABS = [
   ['image', 'PHOTOS'],
   ['packs', 'PACKS'],
 ];
+const PUBLIC_TABS = TABS.map(([value]) => value);
+const SORTS = [
+  { label: 'NEWEST FIRST', value: 'newest' },
+  { label: 'MOST VIEWED', value: 'views' },
+  { label: 'MOST LIKED', value: 'likes' },
+];
+const HIGHLIGHT_LIMIT = 12;
+const NO_POSTS = [];
+
+function joinedLabel(iso) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return 'JOINED ' + date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase();
+}
+
+function highlightCover(pack) {
+  const post = packCoverMembers(pack)[0];
+  if (!post) return pack?.cover_url || '';
+  return post.poster_url || post.preview_url || (post.media_type === 'image' ? post.url : '') || pack?.cover_url || '';
+}
 
 function Avatar({ user, large = false }) {
   const label = (user?.display_name || user?.username || '?').trim();
@@ -96,8 +119,10 @@ export default function ProfilePage() {
   const packDiscoveryEnabled = config?.features?.reel_packs?.discovery !== false;
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
-  const [tab, setTab] = useState(['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all');
+  const [highlights, setHighlights] = useState([]);
   const [savedKind, setSavedKind] = useState('reels');
+  const [sort, setSort] = useState('newest');
+  const [density, setDensity] = useGridDensity();
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -105,22 +130,34 @@ export default function ProfilePage() {
   const [dialog, setDialog] = useState('');
   const [followBusy, setFollowBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
+  const [shareLabel, setShareLabel] = useState('');
   const [editing, setEditing] = useState(null);
   const [editForm, setEditForm] = useState({ title: '', caption: '', tags: '' });
+
+  // The active tab is derived from the URL. SAVED is private: it resolves to
+  // a real tab only when the viewer is looking at their own profile, so a
+  // crafted ?tab=saved on someone else's profile falls back to ALL POSTS and
+  // never issues a saved-content request.
+  const isOwner = !!profile?.is_me;
+  const tab = requestedTab === 'saved'
+    ? (isOwner ? 'saved' : 'all')
+    : PUBLIC_TABS.includes(requestedTab) ? requestedTab : 'all';
+  const savedPacks = tab === 'saved' && savedKind === 'packs';
+  const packGrid = tab === 'packs' || savedPacks;
+
+  // Same gallery pipeline as the Explore page: tiles paint instantly from
+  // posters while missing previews/posters are generated in the background.
+  const { items: galleryItems, previewMessage } = useExplorePreviews(packGrid ? NO_POSTS : items);
 
   const loadProfile = useCallback(async () => {
     setError('');
     try {
       const result = await api.get('/api/users/' + encodeURIComponent(username));
       setProfile(result.user);
-      const nextTab = requestedTab === 'saved' && result.user.is_me
-        ? 'saved'
-        : ['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all';
-      setTab(nextTab);
     } catch (requestError) {
       setError(requestError.message || 'Profile not found.');
     }
-  }, [username, requestedTab]);
+  }, [username]);
 
   const loadPosts = useCallback(async (nextCursor = null, append = false) => {
     if (append) setLoadingMore(true);
@@ -128,15 +165,16 @@ export default function ProfilePage() {
     try {
       const result = tab === 'packs'
         ? await api.get('/api/users/' + encodeURIComponent(username) + '/packs')
-        : tab === 'saved' && savedKind === 'packs'
+        : savedPacks
           ? await api.get('/api/users/me/saved-packs', { offset: nextCursor || 0, limit: 24 })
           : tab === 'saved'
             ? await api.get('/api/users/me/saved', { cursor: nextCursor, limit: 24 })
             : await api.get('/api/users/' + encodeURIComponent(username) + '/posts', {
-            media: tab,
-            cursor: nextCursor,
-            limit: 24,
-          });
+              media: tab,
+              sort,
+              cursor: nextCursor,
+              limit: 24,
+            });
       setItems((current) => append ? current.concat(result.items || []) : result.items || []);
       setCursor(result.next_cursor ?? result.next_offset ?? null);
     } catch (requestError) {
@@ -146,26 +184,45 @@ export default function ProfilePage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [username, tab, savedKind]);
+  }, [username, tab, savedPacks, sort]);
 
+  // Reload the profile when the route user or the signed-in account changes
+  // (login/logout flips is_me and therefore what the viewer may see).
   useEffect(() => {
     setProfile(null);
     setItems([]);
-    setTab(['all', 'video', 'image', 'packs'].includes(requestedTab) ? requestedTab : 'all');
+    setHighlights([]);
     setCursor(null);
     setLoading(true);
+    setSavedKind('reels');
+    setSort('newest');
     loadProfile();
-  }, [username, loadProfile]);
+  }, [username, viewer?.id, loadProfile]);
 
   useEffect(() => {
-    if (profile) loadPosts();
-  }, [profile?.id, tab, loadPosts]);
-
-  const selectTab = (value) => {
-    setTab(value);
+    if (!profile) return;
     setItems([]);
     setCursor(null);
     setError('');
+    loadPosts();
+  }, [profile?.id, tab, savedPacks, sort, loadPosts]);
+
+  // Reel Packs double as the profile "highlights" strip.
+  useEffect(() => {
+    if (!profile?.id || !(packDiscoveryEnabled || profile.is_me)) {
+      setHighlights([]);
+      return undefined;
+    }
+    let alive = true;
+    api.get('/api/users/' + encodeURIComponent(profile.username) + '/packs')
+      .then((result) => {
+        if (alive) setHighlights((result.items || []).filter((pack) => pack.status === 'published'));
+      })
+      .catch(() => { if (alive) setHighlights([]); });
+    return () => { alive = false; };
+  }, [profile?.id, profile?.username, profile?.is_me, packDiscoveryEnabled]);
+
+  const selectTab = (value) => {
     const next = new URLSearchParams(searchParams);
     if (value === 'all') next.delete('tab');
     else next.set('tab', value);
@@ -175,9 +232,21 @@ export default function ProfilePage() {
   const selectSavedKind = (value) => {
     if (value === savedKind) return;
     setSavedKind(value);
-    setItems([]);
-    setCursor(null);
-    setError('');
+  };
+
+  const shareProfile = async () => {
+    const url = window.location.origin + '/profile/' + encodeURIComponent(profile.username);
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: '@' + profile.username + ' on ECHO', url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShareLabel('LINK COPIED');
+    } catch {
+      setShareLabel(window.prompt('Copy profile link', url) === null ? '' : 'LINK COPIED');
+    }
+    setTimeout(() => setShareLabel(''), 2000);
   };
 
   const toggleFollow = async () => {
@@ -308,45 +377,136 @@ export default function ProfilePage() {
     <div>
       {profile ? (
         <>
-          <section className="sx-profile-head">
-            <Avatar user={profile} large />
-            <div className="sx-profile-copy">
-              <div className="sx-profile-title-row">
-                <div>
-                  <h2>{profile.display_name}</h2>
-                  <span>@{profile.username}</span>
+          <section className="sx-pf-hero" aria-label="Creator profile">
+            <div className="sx-pf-hero-main">
+              <Avatar user={profile} large />
+              <div className="sx-pf-identity">
+                <div className="sx-pf-namerow">
+                  <h1 className="sx-pf-name">{profile.display_name || profile.username}</h1>
+                  {profile.account_type !== 'real' ? <span className="sx-profile-demo">DEMO PROFILE</span> : null}
                 </div>
-                {profile.is_me ? (
-                  <Button onClick={() => navigate('/settings/profile')}>EDIT PROFILE</Button>
-                ) : (
-                  <div className="sx-profile-actions">
-                    <Button onClick={() => navigate('/messages?user=' + encodeURIComponent(profile.username))}>MESSAGE</Button>
-                    <Button primary={profile.is_following} loading={followBusy} disabled={followBusy} onClick={toggleFollow}>
-                      {profile.is_following ? 'FOLLOWING' : 'FOLLOW'}
-                    </Button>
-                    <Button onClick={reportProfile}>REPORT</Button>
-                    <Button onClick={blockProfile}>BLOCK</Button>
+                <p className="sx-pf-handle">
+                  @{profile.username}
+                  {joinedLabel(profile.created_at) ? <span> · {joinedLabel(profile.created_at)}</span> : null}
+                </p>
+                {profile.bio ? <p className="sx-pf-bio"><RichText text={profile.bio} /></p> : null}
+                {profile.website ? (
+                  <a className="sx-pf-link" href={profile.website} target="_blank" rel="noreferrer noopener">
+                    {profile.website.replace(/^https?:\/\//, '')} ↗
+                  </a>
+                ) : null}
+                {profile.top_tags?.length ? (
+                  <div className="sx-pf-tags" aria-label="Most used tags">
+                    {profile.top_tags.map((tag) => (
+                      <Link key={tag.slug} to={'/explore/tag/' + encodeURIComponent(tag.slug)} className="sx-pf-tag" title={tag.count + ' post' + (tag.count === 1 ? '' : 's')}>
+                        <span aria-hidden="true">#</span>{tag.name}
+                      </Link>
+                    ))}
                   </div>
-                )}
+                ) : null}
               </div>
-              <div className="sx-profile-counts">
-                <span><strong>{profile.post_count}</strong> POSTS</span>
-                <button type="button" onClick={() => setDialog('followers')}><strong>{profile.follower_count}</strong> FOLLOWERS</button>
-                <button type="button" onClick={() => setDialog('following')}><strong>{profile.following_count}</strong> FOLLOWING</button>
+            </div>
+            <div className="sx-pf-actions">
+              {profile.is_me ? (
+                <>
+                  <button type="button" className="sx-xh-btn sx-xh-btn--primary" onClick={() => navigate('/settings/profile')}>EDIT PROFILE</button>
+                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>{shareLabel || 'SHARE'}</button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={'sx-xh-btn' + (profile.is_following ? '' : ' sx-xh-btn--primary')}
+                    disabled={followBusy}
+                    aria-pressed={profile.is_following}
+                    onClick={toggleFollow}
+                  >
+                    {followBusy ? '…' : profile.is_following ? 'FOLLOWING' : 'FOLLOW +'}
+                  </button>
+                  <button type="button" className="sx-xh-btn" onClick={() => navigate('/messages?user=' + encodeURIComponent(profile.username))}>MESSAGE</button>
+                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>{shareLabel || 'SHARE'}</button>
+                  <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={reportProfile}>REPORT</button>
+                  <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={blockProfile}>BLOCK</button>
+                </>
+              )}
+            </div>
+            <div className="sx-pf-stats" role="group" aria-label="Profile statistics">
+              <button type="button" className="sx-pf-stat sx-pf-stat--link sx-pf-stat--lead" onClick={() => setDialog('followers')}>
+                <span className="sx-pf-stat-value">{formatCompactCount(profile.follower_count)}</span>
+                <span className="sx-pf-stat-label">FOLLOWERS</span>
+              </button>
+              <button type="button" className="sx-pf-stat sx-pf-stat--link" onClick={() => setDialog('following')}>
+                <span className="sx-pf-stat-value">{formatCompactCount(profile.following_count)}</span>
+                <span className="sx-pf-stat-label">FOLLOWING</span>
+              </button>
+              <div className="sx-pf-stat">
+                <span className="sx-pf-stat-value sx-pf-stat-value--accent">{formatCompactCount(profile.like_count)}</span>
+                <span className="sx-pf-stat-label">LIKES</span>
               </div>
-              {profile.bio ? <p>{profile.bio}</p> : null}
-              {profile.website ? <a href={profile.website} target="_blank" rel="noreferrer">{profile.website}</a> : null}
-              {profile.account_type !== 'real' ? <span className="sx-profile-demo">DEMO PROFILE</span> : null}
+              <div className="sx-pf-stat">
+                <span className="sx-pf-stat-value">{formatCompactCount(profile.post_count)}</span>
+                <span className="sx-pf-stat-label">POSTS</span>
+              </div>
             </div>
           </section>
 
-          <div className="sx-profile-tabs" role="tablist" aria-label="Profile posts">
-            {TABS.filter(([value]) => value !== 'packs' || packDiscoveryEnabled || profile.is_me).concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => (
-              <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'sx-active' : ''} onClick={() => selectTab(value)}>
-                {label}
-              </button>
-            ))}
+          {(highlights.length || (profile.is_me && packCreationEnabled)) ? (
+            <section className="sx-pf-highlights" aria-label="Highlighted Reel Packs">
+              <div className="sx-pf-section-head">
+                <h2><span aria-hidden="true" />HIGHLIGHTED REEL PACKS</h2>
+                {highlights.length ? (
+                  <button type="button" onClick={() => selectTab('packs')}>VIEW ALL ({highlights.length}) →</button>
+                ) : null}
+              </div>
+              <div className="sx-pf-highlight-row">
+                {highlights.slice(0, HIGHLIGHT_LIMIT).map((pack) => {
+                  const cover = highlightCover(pack);
+                  return (
+                    <button key={pack.id} type="button" className="sx-pf-highlight" onClick={() => navigate('/packs/' + encodeURIComponent(pack.id))} title={pack.title}>
+                      <span className="sx-pf-highlight-cover">
+                        {cover ? <img src={cover} alt="" loading="lazy" /> : <b>{(pack.title || 'PACK').slice(0, 4).toUpperCase()}</b>}
+                        {pack.reel_count ? <small>{pack.reel_count}</small> : null}
+                      </span>
+                      <span className="sx-pf-highlight-title">{pack.title}</span>
+                    </button>
+                  );
+                })}
+                {profile.is_me && packCreationEnabled ? (
+                  <button type="button" className="sx-pf-highlight sx-pf-highlight--new" onClick={() => navigate('/packs/new')}>
+                    <span className="sx-pf-highlight-cover"><b aria-hidden="true">+</b></span>
+                    <span className="sx-pf-highlight-title">NEW PACK</span>
+                  </button>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="sx-pf-controls">
+            <div className="sx-pf-tabs" role="tablist" aria-label="Profile content">
+              {TABS.filter(([value]) => value !== 'packs' || packDiscoveryEnabled || profile.is_me).concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => (
+                <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'sx-active' : ''} onClick={() => selectTab(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {!packGrid && tab !== 'saved' ? (
+              <div className="sx-pf-tools">
+                <label className="sx-xh-ctl">
+                  <span className="sx-xh-ctl-label">SORT:</span>
+                  <select className="sx-pf-select" value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort posts">
+                    {SORTS.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}
+                  </select>
+                </label>
+                <DensityToggle value={density} onChange={setDensity} />
+              </div>
+            ) : null}
           </div>
+
+          {tab === 'saved' ? (
+            <div className="sx-pf-private" role="note">
+              <span>PRIVATE · ONLY YOU CAN SEE WHAT YOU SAVE</span>
+            </div>
+          ) : null}
 
           {tab === 'saved' ? (
             <div className="sx-profile-saved-tabs" role="tablist" aria-label="Saved content type">
@@ -361,14 +521,15 @@ export default function ProfilePage() {
             </div>
           ) : null}
 
+          {previewMessage && !packGrid ? <Mono>{previewMessage}</Mono> : null}
           {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
           {loading ? (
-            <ExploreGridSkeleton label={tab === 'packs' || (tab === 'saved' && savedKind === 'packs') ? 'Loading Reel Packs' : 'Loading profile posts'} />
+            <ExploreGridSkeleton label={packGrid ? 'Loading Reel Packs' : 'Loading profile posts'} />
           ) : items.length ? (
             <>
-              <div className={(tab === 'packs' || (tab === 'saved' && savedKind === 'packs')) ? 'sx-pack-grid' : 'sx-explore-grid sx-profile-grid'}>
-                {items.map((item) => (
-                  (tab === 'packs' || (tab === 'saved' && savedKind === 'packs')) ? (
+              <div className={packGrid ? 'sx-pack-grid' : gridClassName(density) + ' sx-profile-grid'}>
+                {(packGrid ? items : galleryItems).map((item) => (
+                  packGrid ? (
                     <PackTile
                       key={item.id}
                       pack={item}
@@ -391,16 +552,20 @@ export default function ProfilePage() {
                 ))}
               </div>
               {cursor ? (
-                <div className="sx-profile-load-more">
-                  <Button loading={loadingMore} disabled={loadingMore} onClick={() => loadPosts(cursor, true)}>LOAD MORE</Button>
+                <div className="sx-pf-more">
+                  <button type="button" className="sx-pf-more-btn" disabled={loadingMore} onClick={() => loadPosts(cursor, true)}>
+                    {loadingMore ? 'LOADING…' : '[ LOAD MORE ]'}
+                  </button>
                 </div>
               ) : null}
+              <div className="sx-pf-end">{'END OF LIST · ' + items.length + ' SHOWN' + (cursor ? ' · MORE AVAILABLE' : '')}</div>
             </>
           ) : (
             <EmptyState
               title={tab === 'saved' ? `NO SAVED ${savedKind.toUpperCase()}` : tab === 'packs' ? 'NO REEL PACKS YET' : 'NO POSTS YET'}
-              text={tab === 'saved' && savedKind === 'packs'
+              text={savedPacks
                 ? 'Packs you save will appear here. Saving a pack never saves its individual reels.'
+                : tab === 'saved' ? 'Reels and photos you save will appear here. Only you can see them.'
                 : profile.is_me ? 'Published images, reels, and Reel Packs will appear here.' : 'This creator has not published anything in this category.'}
             />
           )}

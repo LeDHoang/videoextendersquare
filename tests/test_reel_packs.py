@@ -818,3 +818,27 @@ def test_collection_viewer_blocked_member_renders_tombstone(app):
         assert f"tests/pack-{member['id'][:5]}-0.mp4" not in scripts
         assert f"tests/pack-{owner['id'][:5]}-0.mp4" in scripts
         assert '"available": false' in scripts or '"available":false' in scripts
+
+
+def test_saved_packs_are_private_to_their_owner(app):
+    with (
+        TestClient(app) as owner_client,
+        TestClient(app) as viewer_client,
+        TestClient(app) as anon_client,
+    ):
+        owner = register(owner_client, "sp_owner", "sp-owner@example.com")
+        register(viewer_client, "sp_viewer", "sp-viewer@example.com")
+        pack = create_pack(owner_client, create_posts(app, owner["id"]))
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+        assert mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/save").status_code == 200
+
+        assert [row["id"] for row in viewer_client.get("/api/users/me/saved-packs").json()["items"]] == [pack["id"]]
+        assert anon_client.get("/api/users/me/saved-packs").status_code == 401
+        assert owner_client.get("/api/users/me/saved-packs").json()["items"] == []
+        assert anon_client.get("/api/users/sp_viewer/saved-packs").status_code in {404, 405}
