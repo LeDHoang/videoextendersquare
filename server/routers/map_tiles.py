@@ -5,9 +5,10 @@ basemap geography on the sphere past the holographic crossfade band. Two layers
 (Earth Zoom v2): ``base`` (geography) and ``labels`` (text-only, transparent)
 so the client can tint geography toward the holographic palette without
 touching glyphs. Upstream defaults to keyless OSM standard raster (labels baked
-in; labels layer disabled by default → client renders base-only); CARTO dark
-@2x split layers are opt-in via SX_MAP_TILES_URL / SX_MAP_LABELS_URL with a
-keyed template (anonymous CARTO returns key-wall placeholders). Every tile is
+in; labels layer disabled by default → client renders base-only); Esri World
+Street Map and keyed CARTO dark @2x split layers are opt-in via
+SX_MAP_TILES_URL / SX_MAP_LABELS_URL (anonymous CARTO returns key-wall
+placeholders). Every tile is
 fetched upstream at most once (disk cache keyed per layer and per upstream
 template), then served immutable — Cloudflare edge caching (topology in
 docs/to-beta.md) absorbs repeat traffic.
@@ -38,12 +39,16 @@ from fastapi.responses import FileResponse
 router = APIRouter(prefix="/api/reels/map-tiles", tags=["reels"])
 
 MAX_ZOOM = 17
-# Keyless default that works TODAY: OSM standard raster (labels baked in, light
-# theme — the client GPU-tints it toward holo cyan). CARTO's anonymous
-# basemaps now return "API KEY REQUIRED" placeholders for every tile (verified
-# 2026-10-03), so CARTO is opt-in via SX_MAP_TILES_URL / SX_MAP_LABELS_URL with
-# a keyed template, not the default. An empty labels template disables the
-# labels layer (404 fast-path; the client renders base-only, non-fatal).
+# Keyless default: OSM standard raster (labels baked in, light theme — the
+# client GPU-tints it toward holo cyan). OSM may block a proxy it considers
+# out of policy (seen 2026-10-04: TLS resets plus an "Access blocked"
+# placeholder flagged by X-Blocked, which _fetch_upstream rejects so it is never
+# cached). Esri World Street Map
+# (https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x})
+# works keyless but needs an ArcGIS plan for commercial use; CARTO's anonymous
+# basemaps return "API KEY REQUIRED" placeholders (2026-10-03). An empty labels
+# template disables the labels layer (404 fast-path; the client renders
+# base-only, non-fatal).
 DEFAULT_UPSTREAM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 DEFAULT_LABELS_UPSTREAM = ""
 UPSTREAM_SUBDOMAINS = ("a", "b", "c", "d")
@@ -54,6 +59,8 @@ FETCH_TIMEOUT_S = 10.0
 MAX_TILE_BYTES = 1 << 20  # 1 MB — a legit 256px raster tile is ~10-60 KB
 OSM_ATTRIBUTION_BASE = "© OpenStreetMap contributors"
 OSM_ATTRIBUTION_URL = "https://www.openstreetmap.org/copyright"
+ESRI_ATTRIBUTION = "Powered by Esri — Sources: Esri, HERE, Garmin, USGS, NGA, © OpenStreetMap contributors, GIS User Community"
+ESRI_ATTRIBUTION_URL = "https://www.esri.com/en-us/legal/terms/full-master-agreement"
 
 _pool: urllib3.PoolManager | None = None
 _pool_lock = threading.Lock()
@@ -73,21 +80,48 @@ def _get_http_pool() -> urllib3.PoolManager:
     return _pool
 
 
-def _attribution_text() -> str:
-    """Credit data actually served: OSM always (base default), plus CARTO only
-    when a CARTO template is configured (keyed opt-in)."""
-    text = OSM_ATTRIBUTION_BASE
+def _configured_templates() -> tuple[str, ...]:
     try:
-        configured = (_upstream_template("base"), _upstream_template("labels"))
+        return (_upstream_template("base"), _upstream_template("labels"))
     except Exception:
-        configured = ()
-    if any("carto" in (t or "").lower() for t in configured):
+        return ()
+
+
+def _uses_esri() -> bool:
+    return "arcgisonline" in (_upstream_template("base") or "").lower()
+
+
+def _attribution_text() -> str:
+    """Credit data actually served: Esri's required credit for the Esri
+    default, else OSM (plus CARTO only when a CARTO template is configured)."""
+    if _uses_esri():
+        return ESRI_ATTRIBUTION
+    text = OSM_ATTRIBUTION_BASE
+    if any("carto" in (t or "").lower() for t in _configured_templates()):
         text += " © CARTO"
     return text
 
 
+def _tile_theme() -> str:
+    """Raster palette hint for the client tint: dark CARTO styles are already
+    night-coloured, every other default (Esri, OSM) is a light street map."""
+    base = (_upstream_template("base") or "").lower()
+    return "dark" if ("carto" in base and "dark" in base) else "light"
+
+
+def _sniff_image_type(head: bytes) -> str:
+    """Media type from magic bytes: providers mix PNG and JPEG (Esri) while
+    the cache layout keeps one ``.png`` file name per tile."""
+    if head.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
+
+
 def _attribution_header() -> str:
-    return _attribution_text().replace("©", "(C)")
+    text = _attribution_text().replace("©", "(C)").replace("—", "-")
+    return text.encode("ascii", "ignore").decode("ascii")
 CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
 # Header-safe copy of the attribution: HTTP headers are latin-1/ASCII tooling
 # territory, so the © glyph stays in the JSON route (UTF-8) and headers use (C).
@@ -143,6 +177,10 @@ def _fetch_upstream(url: str) -> tuple[bytes, str]:
         status = getattr(resp, "status", 200) or 200
         if status != 200:
             raise UpstreamTileError(f"upstream status {status}")
+        # OSM answers blocked clients with a 200 "Access blocked" placeholder
+        # image flagged only by this header — never cache it as geography.
+        if resp.headers.get("X-Blocked"):
+            raise UpstreamTileError(f"upstream blocked: {resp.headers.get('X-Blocked')}")
         content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         data = resp.data
     except UpstreamTileError:
@@ -217,7 +255,8 @@ def map_tile_attribution():
     """Attribution metadata for the VR globe UI (license requirement)."""
     return {
         "attribution": _attribution_text(),
-        "url": OSM_ATTRIBUTION_URL,
+        "url": ESRI_ATTRIBUTION_URL if _uses_esri() else OSM_ATTRIBUTION_URL,
+        "theme": _tile_theme(),
         "enabled": _tiles_enabled(),
         "max_zoom": MAX_ZOOM,
         "layers": list(LAYERS),
@@ -259,7 +298,12 @@ def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
 
     cache_file = _tile_cache_path(z, x, y, layer)
     if cache_file.is_file():
-        return FileResponse(str(cache_file), media_type="image/png", headers=_tile_headers())
+        try:
+            with cache_file.open("rb") as fh:
+                media_type = _sniff_image_type(fh.read(12))
+        except OSError:
+            media_type = "image/png"
+        return FileResponse(str(cache_file), media_type=media_type, headers=_tile_headers())
 
     identity = request.client.host if request.client else "unknown"
     if not _check_fetch_rate(identity):
@@ -281,5 +325,5 @@ def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
         ) from exc
 
     _store_tile(cache_file, data)
-    return Response(content=data, media_type="image/png", headers=_tile_headers())
+    return Response(content=data, media_type=_sniff_image_type(data[:12]), headers=_tile_headers())
 

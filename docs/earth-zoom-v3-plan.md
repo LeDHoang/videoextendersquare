@@ -657,3 +657,93 @@ the globe filled the view. Changes:
   first entry in `EARTH_TEXTURE_URLS`, and `/api/reels/earth-texture` serves it when present. The
   1024×512 file stays as the fallback. Coast detail (Balearics, Canaries, Black Sea inlets) and subtle
   terrain relief now show on the globe.
+
+### 12.7 Zoomed view: head-on facing, world-turning drag, quieter HUD (2026-10-04)
+
+1. **Zoom faces the hovered point head-on.** The zoomed map was rendered with a "table tilt"
+   (up to 55° at S≥16) *in addition to* the solved facing, so the focus was never perpendicular.
+   The former `?topdown=1` experiment is now the default: no tilt, and from the first step past
+   the full globe (`EARTH_TOPDOWN_MIN_ZOOM = 1.001`, was S=8) the focus normal is held on the
+   anchor→head line. Pointer/stick/dock zoom pins the hovered point to its ray while the per-frame
+   tracker eases the pose (12 %/frame) to exact facing; tap-zoom animates there directly.
+   `?topdown=0` restores the legacy tilted table.
+2. **Compass dial + bezel ring removed** from the zoomed view. They sit behind
+   `debugFlags.horizonhud` (default off, `?horizonhud=1` brings them back); when off the meshes
+   are never created. NORTH UP stays on the dock.
+3. **Drag turns the world instead of sliding it.** A zoomed drag used to translate the sphere so
+   the grabbed point followed the hand. It now behaves like the full globe: the comfort anchor and
+   globe centre stay fixed, and the focus moves so the point grabbed at engage stays under the ray
+   (`updateEarthTopdownPan`, closed loop on the absolute grab reference, both axes free, no axis
+   lock; pose is re-solved to face the viewer after every step). Engagement is instant once the
+   ray moves >3 cm (or a magnification-scaled chord when there is no surface point). The stick
+   uses the same model via `earthTopdownNudge` (screen right/up mapped onto the focus's east/north
+   tangents, ~0.9 m/s of surface at full deflection at any zoom).
+4. **Reels preview card = one main window.** The three-thumbnail strip is gone; the hero grew from
+   388 to 508 px and plays through the location's reels back to back (the existing muted autoplay
+   advance). Story-style segment bars along the top show one segment per reel (finished full, active
+   filling with playback). Counter chip and caption unchanged.
+
+Tests: facing at S=2…4096 (real quaternion), legacy tilt only with `?topdown=0`, pointer zoom keeps
+the hovered point on its ray every frame and ends head-on, closed-loop grab convergence with no
+oscillation, stick direction on screen, bezel/compass off by default, preview card draws exactly one
+poster/video with the CTA under the larger hero (`web/tests/vr-ui-canvas-earth-preview.test.js`).
+**Not verified on hardware:** stick speed, comfort of the faster globe re-orient on the first
+zoom step, and the 3 cm engage threshold with real controller jitter.
+
+### 12.8 Polar views and map reliability (2026-10-04)
+
+Reported: heavy warping at both poles; the zoomed map flipping from real tiles to "MAP OFFLINE";
+some regions never showing street detail.
+
+- **Tile outage (root cause of OFFLINE / missing regions).** `tile.openstreetmap.org` resets the TLS
+  handshake from this machine and `tile.osm.org` serves an "Access blocked" 403 placeholder, so only
+  tiles cached before the block loaded. (Esri World Street Map was tried as the default and reverted
+  per owner decision — see §12.9.) `/attribution` reports the served provider's credit plus a `theme`
+  hint (light → night-chart grade),
+  JPEG tiles are served with their sniffed media type, and an upstream `X-Blocked` header is a
+  failure (never cached). Client: a failed slot retries on its own 1→16 s back-off; 8 straight
+  failures with tiles already on screen only *pause* fetching for 5 s (tiles, warp and credit stay);
+  the full hologram degrade is kept for "nothing ever loaded".
+- **Base globe under tiles stays opaque.** It used to fade to 0, so everything Web Mercator does not
+  cover (|lat| > 85.05°) and every streaming hole was empty space.
+- **Tile band follows latitude.** `earthTileZoomAt(lat)` = log2(S)+3.3+log2(cos lat): a Mercator tile
+  spans cos(lat) of the ground, so at 80° the fixed 7×7 ring covered ~1/6 of the view.
+- **Ice sheets.** The colour classifier sat at zero on Greenland/Antarctic ice (false coastlines =
+  the stair-stepped stripes). A third term claims bright near-neutral pixels as land.
+  The coast distance is measured on the sphere (x slope × 1/cos lat, capped at 78°), and rows past
+  ~60° get a circular box filter 1/cos(lat) texels wide so the pole is not a fan of spokes. Minor
+  meridians stop at ±80°.
+- **Per-fragment equirect lookup** in the globe shader (`textureGrad`, seam-safe gradients) replaces
+  per-vertex UV interpolation, which swirled the map in every triangle near a pole.
+- **Quaternion top-down pose.** Drag, stick and head-tracking turn `earthQuat` by minimal rotations
+  (`earthTopdownTurn`), moving the focus by the inverse turn so the anchor stays put. No ±85° clamp,
+  no yaw/pitch solve, so the map no longer spins as the focus nears a pole and can cross it.
+  Handing back to yaw/pitch (zoom out, tap-zoom) decomposes the pose; the leftover roll eases to 0.
+
+Verified: web suite 228/228, backend 192/192, headless shots `logs/design-p1-*`, `logs/design-p2-*`
+(Greenland solid, clean polar cap at z12/z64, Esri street tiles at Da Nang). **Not verified on
+hardware:** feel of crossing a pole, and the visible seam where Mercator tiles stop at 85°.
+
+### 12.9 OSM stays the default; location card RESET ROTATION (2026-10-04)
+
+- **Tiles:** owner decision — Esri looked worse and needs a commercial plan, so the proxy default is
+  back to OSM standard. The hardening stays (X-Blocked placeholder never cached, sniffed media types,
+  provider-aware credit/theme, client retry + pause-not-wipe). While OSM keeps blocking this machine,
+  only previously cached areas load; everything else shows the hologram globe and retries.
+- **RESET ROTATION lives on the WORLD › location panel** (owner correction: not on the reel card).
+  The panel grew to 640×148 logical (0.86 × 0.199 m; `EARTH_LABEL_HALF_H` replaces the hard-coded
+  0.075 in the HUD layout) with an action row: trigger hint left, `⟲ RESET ROTATION` right. Both
+  floating panels (panel + reel card) are now hit-tested for mouse and XR (`earthHudPanelHit`) and
+  take the pointer before the globe; pointing at either keeps its location hovered, and a sweep that
+  crossed bare globe on the way restores the zone left < 1.2 s ago. The reel card keeps one
+  `TRIGGER ▸ OPEN LOCATION FEED` button, now clickable.
+- **Target** (`earthResetTarget`): the location the panel shows (hovered, else selected); with none
+  featured but zoomed, the current focus (re-uprights the view); bare globe → button disabled.
+- **RESET ROTATION** (`faceEarthLocation`): zoomed, the pose slerps to `earthUprightQuat` (the NORTH UP
+  basis for the target) while the focus follows whatever sits on the interpolated view normal, so the
+  spot glides to the centre over 650 ms and ends perpendicular, north-up, zoom unchanged (NORTH UP flag
+  set). At globe scale it is a yaw/pitch turn facing the location (pitch clamp ±1.2 as for globe
+  drags). Any drag/zoom/tap cancels it.
+
+Verified: web suite 233/233 (`RESET ROTATION …`, `WORLD › location panel …` tests), backend
+`tests/test_map_tiles.py`, headless shot `logs/design-p4-preview.png`. **Not verified on hardware.**

@@ -115,7 +115,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     lock: true, overlay: true, guide: true, glow: true,
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
-    topdown: false,
+    topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
+    horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -138,6 +139,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('earthmap', '0')) debugFlags.earthmap = false;
       if (has('earthstyle', 'raw')) debugFlags.earthstyle = 'raw';
       if (has('topdown', '1')) debugFlags.topdown = true;
+      if (has('topdown', '0')) debugFlags.topdown = false;
+      if (has('horizonhud', '1')) debugFlags.horizonhud = true;
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -173,6 +176,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   // and for the globe-scale legacy drag path.
   let earthQuat = { x: 0, y: 0, z: 0, w: 1 };
   let earthNorthUp = false;
+  // Zoomed top-down pose is owned by earthQuat itself (drag, stick, tracking
+  // all turn it by minimal rotations). Yaw/pitch cannot express it: facing a
+  // high-latitude focus with yaw+pitch alone forces north-up, which spins the
+  // whole map around the pole as the focus passes near it. earthRoll carries
+  // the leftover twist when the pose is handed back to yaw/pitch (zoom out,
+  // tap-zoom) and eases to zero there.
+  let earthPoseQuat = false;
+  let earthRoll = 0;
   // Step 6.2 gaze accompaniment: soft-spring yaw the street preview panel
   // follows when the head turns, so the reel preview stays in the binocular
   // field without rigid HUD head-locking (critically-damped spring, ±15°).
@@ -249,6 +260,18 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthLocations = [];
   let earthHoveredIndex = -1;
   let earthPreviewLocationIndex = -1;
+  let earthPreviewHoverRegion = ''; // location-card button under the pointer
+  let earthLabelHoverRegion = '';   // WORLD › location panel button under the pointer
+  let earthRecentHover = { index: -1, at: -1e9 }; // last zone the ray was on (panel reach grace)
+  // WORLD › location panel: 640×148 logical (2× canvas), 0.86 m wide. The
+  // bottom row holds the RESET ROTATION button.
+  const EARTH_LABEL_LOGICAL_W = 640;
+  const EARTH_LABEL_LOGICAL_H = 148;
+  const EARTH_LABEL_HALF_W = 0.43;
+  const EARTH_LABEL_HALF_H = 0.86 * EARTH_LABEL_LOGICAL_H / EARTH_LABEL_LOGICAL_W / 2;
+  const EARTH_LABEL_RESET_RECT = { x: 444, y: 112, w: 176, h: 28 };
+  const EARTH_PANEL_HOVER_GRACE_MS = 1200;
+  let earthFaceAnim = null;         // RESET ROTATION slerp { t0, dur, fromQ, toQ, fromN, toN, lat, lon }
   let earthPreviewStatus = 'idle';
   let earthPreviewItems = [];
   let earthPreviewIndex = 0;
@@ -275,15 +298,17 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthTileGeometryKey = '';
   let earthLabelDetail = '';
   let earthLabelTitle = '';
-  // Top-down street experiment (?topdown=1): at city zoom and deeper the
-  // globe stops tilting — drag pans the focus across the surface (grab
-  // feel) while the solver keeps the focus normal aligned to the view
-  // (zero obliquity, Google-Maps-style). Bearing (north-up) is NOT
-  // corrected: yaw+pitch facing leaves 0–50° of map rotation depending on
-  // the target, and true north-up needs a roll DOF the globe has never had.
-  const EARTH_TOPDOWN_MIN_ZOOM = 8; // city band and deeper
+  // Zoomed Earth view (default; ?topdown=0 restores the legacy tilted table).
+  // The instant the map is zoomed past the globe, the focused point's normal is
+  // held on the line to the viewer's head (zero obliquity, Google-Maps style)
+  // and a drag turns the WORLD under that fixed viewing spot — the same
+  // grab-the-planet feel as the full-globe view — instead of sliding the
+  // sphere around the room. The globe centre stays put; only the pose changes.
+  // Bearing (north-up) is NOT corrected here: yaw+pitch facing leaves some map
+  // rotation; the dock NORTH UP button supplies the roll DOF.
+  const EARTH_TOPDOWN_MIN_ZOOM = 1.001; // any zoom past the full globe
   const EARTH_TOPDOWN_MAX_PITCH = 2.9; // relaxed clamp so polar foci still face exactly
-  let earthTopdownPanPrev = null; // fixed-frame local of the last pan update (grab reference)
+  let earthTopdownGrab = null; // { geo, point } the pressed spot while a zoomed drag turns the world
   let earthGrabGeo = null;
   let earthGrabAnchor = null;
   let earthPointerZoom = null;
@@ -327,6 +352,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthTileBaseFade = -1;  // last opacity pushed to the base globe material
   let earthTileClock = -1;     // high-water frame time (probe scheduling)
   let earthTileProbeAt = -1;   // degraded-mode re-arm deadline (frame clock)
+  let earthTilePausedUntil = -1; // partial-outage fetch pause deadline (frame clock)
   let earthTileLoadRatio = 1;  // ready / (ready + pending); 1 = nothing waited on
   let earthTilePrefetch = new Map(); // 'z/x/y' → { z, x, y, state: 'loading'|'ready', img } next-band warm cache
   let earthTileGeneration = 0;
@@ -428,7 +454,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
   function ensureEarthBezel() {
-    if (!THREE || !scene || !earthGroup) return;
+    if (!THREE || !scene || !earthGroup || !debugFlags.horizonhud) return;
     try {
       if (!earthBezelMesh && typeof document !== 'undefined') {
         const bezelCanvas = document.createElement('canvas');
@@ -542,7 +568,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const head = getHeadPosition();
       const center = earthLiveCenter();
       const radius = earthBezelRadius();
-      const show = !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && radius > 0);
+      const show = !!(debugFlags.horizonhud && sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && radius > 0);
       earthBezelMesh.visible = show;
       earthCompassMesh.visible = show;
       if (!show) return;
@@ -578,7 +604,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         let rx = fz, rz = -fx;
         const rl = Math.hypot(rx, rz) || 1;
         rx /= rl; rz /= rl;
-        const off = 0.43 * ls + 0.14 * ls;
+        const off = EARTH_LABEL_HALF_W * ls + 0.14 * ls;
         // Candidate slots beside the breadcrumb, in preference order: left,
         // right, above-left, below-left. Take the first that is fully in view
         // and clear of the reel card; else fall back to the least-bad (left).
@@ -586,8 +612,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         const slots = [
           { x: -rx * off, y: 0, z: -rz * off },
           { x: rx * off, y: 0, z: rz * off },
-          { x: -rx * 0.33 * ls, y: upy * (0.075 + 0.13) * ls, z: -rz * 0.33 * ls },
-          { x: -rx * 0.33 * ls, y: -upy * (0.075 + 0.13) * ls, z: -rz * 0.33 * ls },
+          { x: -rx * 0.33 * ls, y: upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
+          { x: -rx * 0.33 * ls, y: -upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
         ];
         let chosen = null;
         for (const sl of slots) {
@@ -615,7 +641,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const cw = earthGazeClamp(earthCompassMesh.position, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
         if (cw.clamped) earthCompassMesh.position.set(cw.x, cw.y, cw.z);
         // Never sit on the breadcrumb: slide down-left out of it if they meet.
-        if (lbl) earthSeparatePanel(earthCompassMesh, 0.1, 0.1, lbl, 0.43, 0.075, gazeFwd, head, fovHalf, 'left');
+        if (lbl) earthSeparatePanel(earthCompassMesh, 0.1, 0.1, lbl, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, gazeFwd, head, fovHalf, 'left');
       }
       earthCompassMesh.lookAt(head.x, head.y, head.z);
       earthCompassMesh.userData.worldRadius = 0.14 * ls;
@@ -1410,7 +1436,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Pure pixel classifier for the holographic re-style (upstream
   // buildHolographicEarthBase verbatim). Returns 1 for land, 0 for ocean.
   function classifyEarthPixel(r, g, b) {
-    return (((r + g) * 0.5 - b) > -10 || (r + g + b) > 720) ? 1 : 0;
+    const mn = Math.min(r, g, b), mx = Math.max(r, g, b);
+    return (((r + g) * 0.5 - b) > -10 || (r + g + b) > 720 ||
+      (mn - 185) - 0.8 * ((mx - mn) - 25) > 0) ? 1 : 0;
   }
 
   // Thermal-bloom heat style. One continuous ramp drives everything that shows
@@ -1610,14 +1638,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!ctx) return;
     const sc = EARTH_MAP_SCALE;
     try { ctx.save(); } catch (e) {}
+    // Minor meridians stop at ±80° (like a printed graticule) so the pole
+    // isn't a 36-spoke starburst; the 30° majors still meet there.
+    const capY = ((90 - 80) / 180) * EARTH_MAP_H;
     for (let lon = -180; lon <= 180; lon += 10) {
       const x = ((lon + 180) / 360) * EARTH_MAP_W;
       const major = lon % 30 === 0;
       ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
       ctx.lineWidth = (major ? 2 : 1) * sc;
       ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, EARTH_MAP_H);
+      ctx.moveTo(x, major ? 0 : capY);
+      ctx.lineTo(x, major ? EARTH_MAP_H : EARTH_MAP_H - capY);
       ctx.stroke();
     }
     for (let lat = -80; lat <= 80; lat += 10) {
@@ -1675,6 +1706,34 @@ window.WebXRVR = window.WebXRVR || (function () {
     return lut;
   }
 
+  // Polar pre-filter for one output row (RGBA, in place). An equirect row at
+  // latitude φ is oversampled by 1/cos φ along longitude, and on the sphere
+  // all of it converges into a small ring — near the poles every column's
+  // detail became a radial spoke once zoomed. A circular box filter
+  // 1/cos φ texels wide resamples the row to its true ground resolution
+  // (no-op below ~60°, the whole ring averaged at the pole itself).
+  function earthPolarRowFilter(px, j, W, cosLat, sums) {
+    const r = Math.min(W >> 1, Math.floor(0.5 / Math.max(1e-4, cosLat) - 0.5));
+    if (r < 1) return;
+    const base = j * W * 4;
+    const n = W + 2 * r + 1; // circular window prefix sums, per channel
+    for (let c = 0; c < 3; c++) {
+      const off = c * (W * 2 + 2);
+      sums[off] = 0;
+      for (let i = 0; i < n - 1; i++) {
+        const x = ((i - r) % W + W) % W;
+        sums[off + i + 1] = sums[off + i] + px[base + x * 4 + c];
+      }
+    }
+    const inv = 1 / (2 * r + 1);
+    for (let x = 0; x < W; x++) {
+      for (let c = 0; c < 3; c++) {
+        const off = c * (W * 2 + 2);
+        px[base + x * 4 + c] = (sums[off + x + 2 * r + 1] - sums[off + x]) * inv;
+      }
+    }
+  }
+
   // Holographic re-style of the Natural Earth photo. Evolved from the upstream
   // per-pixel classifier: instead of a binary land mask on the source pixels
   // (stair-stepped coast at any upscale), it keeps the classifier as a
@@ -1722,6 +1781,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const lut = earthCoastGlowLut();
     const lutN = lut.length;
     const field = new Float32Array(W * (bandRows + 2));
+    const rowSums = new Float64Array((W * 2 + 2) * 3);
     let y0 = 0;
     const step = () => {
       if (token !== earthBaseBuildToken) return;
@@ -1736,13 +1796,22 @@ window.WebXRVR = window.WebXRVR || (function () {
         bctx.imageSmoothingQuality = 'high';
         bctx.drawImage(image, 0, ((y0 - m0) * srcH) / H, srcW, (rows * srcH) / H, 0, 0, W, rows);
         const src = bctx.getImageData(0, 0, W, rows).data;
-        // Continuous land field: >0 land, <0 ocean. The two terms are the
-        // upstream classifier's two tests ((r+g)/2-b > -10, r+g+b > 720).
+        // Continuous land field: >0 land, <0 ocean. The first two terms are
+        // the upstream classifier's tests ((r+g)/2-b > -10, r+g+b > 720).
+        // Both sit right at zero on the bluish-white ice sheets (Greenland,
+        // Antarctica, Ellesmere), which traced false coastlines all over
+        // them — the stair-stepped stripes. The third term claims bright,
+        // near-neutral pixels as land: ice scores +40…+65, while every sea
+        // (deep, shelf, coastal turquoise) stays well below zero.
         for (let i = 0, n = W * rows; i < n; i++) {
           const o = i * 4;
-          const fa = (src[o] + src[o + 1]) * 0.5 - src[o + 2] + 10;
-          const fb = src[o] + src[o + 1] + src[o + 2] - 720;
-          field[i] = fa > fb ? fa : fb;
+          const r = src[o], g = src[o + 1], b = src[o + 2];
+          const fa = (r + g) * 0.5 - b + 10;
+          const fb = r + g + b - 720;
+          const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+          const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+          const fc = (mn - 185) - 0.8 * ((mx - mn) - 25);
+          field[i] = fa > fb ? (fa > fc ? fa : fc) : (fb > fc ? fb : fc);
         }
         const out = dst.createImageData(W, outRows);
         const px = out.data;
@@ -1752,9 +1821,17 @@ window.WebXRVR = window.WebXRVR || (function () {
           const dn = (r < rows - 1 ? r + 1 : r) * W;
           const row = r * W;
           const vSpan = (r > 0 ? 1 : 0) + (r < rows - 1 ? 1 : 0) || 1;
+          // Distances are measured on the sphere, not in texels: an
+          // equirect column spans cos(lat) of a row's ground, so the x slope
+          // is rescaled per row. Without it the coast line and shelf glow
+          // thinned to nothing east-west near the poles and smeared north-south.
+          // Capped at 78°: closer to the pole the stretch would turn JPEG
+          // noise on open sea into speckled false coastline.
+          const lat = (0.5 - (y0 + j + 0.5) / H) * Math.PI;
+          const invCos = 1 / Math.max(0.2, Math.cos(lat));
           for (let x = 0; x < W; x++) {
             const f = field[row + x];
-            const gx = (field[row + (x + 1 < W ? x + 1 : 0)] - field[row + (x > 0 ? x - 1 : W - 1)]) * 0.5;
+            const gx = (field[row + (x + 1 < W ? x + 1 : 0)] - field[row + (x > 0 ? x - 1 : W - 1)]) * 0.5 * invCos;
             const gy = (field[dn + x] - field[up + x]) / vSpan;
             const mag = Math.sqrt(gx * gx + gy * gy);
             let d = f / (mag > 0.35 ? mag : 0.35);
@@ -1783,6 +1860,7 @@ window.WebXRVR = window.WebXRVR || (function () {
             px[(j * W + x) * 4 + 2] = bb;
             px[(j * W + x) * 4 + 3] = 255;
           }
+          earthPolarRowFilter(px, j, W, Math.cos(lat), rowSums);
         }
         dst.putImageData(out, 0, y0);
         y0 = y1;
@@ -2175,17 +2253,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     else ctx.rect(x, y, w, h);
   }
   function drawEarthLabelPanel(ctx, o) {
-    // Logical space is 640×112; the canvas is 2× for crisp text in-headset.
+    // Logical space is 640×148; the canvas is 2× for crisp text in-headset.
     if (ctx.setTransform) { const k = (earthLabelCanvas && earthLabelCanvas.width / 640) || 1; ctx.setTransform(k, 0, 0, k, 0, 0); }
-    ctx.clearRect(0, 0, 640, 112);
+    ctx.clearRect(0, 0, EARTH_LABEL_LOGICAL_W, EARTH_LABEL_LOGICAL_H);
     const tierIdx = earthTierIndex(o.scale);
     const tier = o.offline ? { name: 'OFFLINE', color: '#FF7A59' } : EARTH_TIERS[tierIdx];
     const accent = o.featured ? '#FFB11F' : tier.color;
     const hasGrad = !!ctx.createLinearGradient;
     // Glass body
-    earthRoundRect(ctx, 2, 2, 636, 108, 20);
+    earthRoundRect(ctx, 2, 2, 636, EARTH_LABEL_LOGICAL_H - 4, 20);
     if (hasGrad) {
-      const g = ctx.createLinearGradient(0, 2, 0, 110);
+      const g = ctx.createLinearGradient(0, 2, 0, EARTH_LABEL_LOGICAL_H - 2);
       g.addColorStop(0, 'rgba(18,34,58,0.95)');
       g.addColorStop(1, 'rgba(5,10,22,0.97)');
       ctx.fillStyle = g;
@@ -2275,11 +2353,28 @@ window.WebXRVR = window.WebXRVR || (function () {
       ctx.textAlign = 'left';
       ctx.fillText(o.hint, 20, 94);
     }
+    // Action row: trigger hint (zoomed) left, RESET ROTATION button right.
+    ctx.fillStyle = 'rgba(140,175,210,0.16)';
+    ctx.fillRect(20, 106, 600, 1);
     if (o.zoomed && o.hint) {
       ctx.fillStyle = accent;
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(o.hint, 620, 62);
+      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.hint, 20, 127);
+    }
+    {
+      const b = EARTH_LABEL_RESET_RECT;
+      const on = !!o.resetEnabled, hot = on && !!o.resetHot;
+      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 14);
+      ctx.fillStyle = on ? (hot ? 'rgba(85,231,255,0.34)' : 'rgba(85,231,255,0.12)') : 'rgba(110,140,170,0.08)';
+      ctx.fill();
+      ctx.strokeStyle = on ? (hot ? '#BFF5FF' : 'rgba(85,231,255,0.85)') : 'rgba(110,140,170,0.35)';
+      ctx.lineWidth = hot ? 2.5 : 1.5;
+      ctx.stroke();
+      ctx.fillStyle = on ? (hot ? '#F2FDFF' : '#A9F0FF') : '#5F7891';
+      ctx.font = '800 12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
     }
     // Realm ladder: four segments, filled through the current realm
     const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
@@ -2295,9 +2390,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Tile streaming progress hairline along the bottom edge
     if (o.streaming >= 0) {
       ctx.fillStyle = 'rgba(160,190,220,0.16)';
-      ctx.fillRect(22, 104, 596, 2);
+      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, 596, 2);
       ctx.fillStyle = tier.color;
-      ctx.fillRect(22, 104, Math.max(4, 596 * o.streaming), 2);
+      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, Math.max(4, 596 * o.streaming), 2);
     }
   }
 
@@ -2312,8 +2407,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     const featured = hovered || selected;
     // Z2 attribution suffix (license requirement whenever tiles are visible)
     // or the offline notice when the layer degraded while zoomed.
-    const tileOffline = (!earthTileAvailable || earthTileFailures >= EARTH_TILE_FAIL_LIMIT) &&
-      (earthZoom > 1.02 || earthZoomTarget > 1.02);
+    // A paused partial outage keeps its tiles on screen, so it keeps the
+    // license credit instead of the offline notice.
+    const tileOffline = !earthTileAvailable && (earthZoom > 1.02 || earthZoomTarget > 1.02);
     const tileSuffix = tileOffline
       ? '|offline'
       : (earthTileFade() > 0.02 ? '|osm' : '');
@@ -2324,8 +2420,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     const zoomPct = earthZoomPercent();
     const streamQ = (zoomed && earthTileFade() > 0.02 && earthTileLoadRatio < 0.995)
       ? Math.round(earthTileLoadRatio * 20) : -1;
+    const resetEnabled = !!earthResetTarget();
+    const resetHot = resetEnabled && earthLabelHoverRegion === 'face';
     const key = earthLocations.length + '|' + (featured ? featured.slug : '') + tileSuffix +
-      '|' + (zoomed ? zoomPct + ':' + earthZoom.toFixed(4) : 'g') + '|' + streamQ;
+      '|' + (zoomed ? zoomPct + ':' + earthZoom.toFixed(4) : 'g') + '|' + streamQ +
+      '|' + (resetEnabled ? 1 : 0) + (resetHot ? 'h' : '');
     if (key === lastEarthLabelKey) return;
     lastEarthLabelKey = key;
     try {
@@ -2358,7 +2457,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (tileSuffix === '|osm') {
         const suffix = ' · ' + earthAttributionText;
         detail = String(detail).slice(0, Math.max(0, 44 - suffix.length)) + suffix;
-        refreshEarthAttribution(); // upgrade to the CARTO credit if configured
+        refreshEarthAttribution(); // upgrade to the served provider's credit
       }
       let titleStr = String(title);
       if (titleStr.length > 30 && zoomed) {
@@ -2381,6 +2480,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         scale: Math.max(1, earthZoom),
         streaming: streamQ >= 0 ? streamQ / 20 : -1,
         hint: earthLabelHint(featured, zoomed),
+        resetEnabled,
+        resetHot,
       });
       earthLabelTitle = titleStr.slice(0, 30);
       earthLabelDetail = String(detail).slice(0, 44);
@@ -2521,6 +2622,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           earthPreviewItems,
           earthPreviewIndex,
           earthPreviewPosters: earthPreviewPosterImages(),
+          earthPreviewHover: earthPreviewHoverRegion,
           reducedMotion,
           time,
         });
@@ -2774,21 +2876,21 @@ window.WebXRVR = window.WebXRVR || (function () {
       const d0Label = earthLabelMesh ? { x: earthLabelMesh.position.x, y: earthLabelMesh.position.y, z: earthLabelMesh.position.z } : null;
       const d0Card = cardUp ? { x: earthPreviewMesh.position.x, y: earthPreviewMesh.position.y, z: earthPreviewMesh.position.z } : null;
       // 1) Clamp each panel into the comfort cone.
-      earthHudApply(earthLabelMesh, 'label', 0.43, 0.075, fwd, head, fov);
+      earthHudApply(earthLabelMesh, 'label', EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, fwd, head, fov);
       if (cardUp) earthHudApply(earthPreviewMesh, 'preview', 0.25, 0.35, fwd, head, fov);
       // 2) The focused point / hovered pin always wins: nothing covers it.
-      if (earthLabelMesh) earthAvoidKeepOuts(earthLabelMesh, 0.43, 0.075, keeps, fwd, head, fov, 'up');
+      if (earthLabelMesh) earthAvoidKeepOuts(earthLabelMesh, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, keeps, fwd, head, fov, 'up');
       if (cardUp) earthAvoidKeepOuts(earthPreviewMesh, 0.25, 0.35, keeps, fwd, head, fov, 'side');
       // 3) Panels must not stack. Lift the card off the breadcrumb; if the top
       //    of the view refuses, slide the breadcrumb SIDEWAYS (never down onto
       //    the pin), then re-check the keep-out once more.
       if (cardUp && earthLabelMesh) {
-        earthSeparatePanel(earthPreviewMesh, 0.25, 0.35, earthLabelMesh, 0.43, 0.075, fwd, head, fov, 'up');
+        earthSeparatePanel(earthPreviewMesh, 0.25, 0.35, earthLabelMesh, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, fwd, head, fov, 'up');
         earthAvoidKeepOuts(earthPreviewMesh, 0.25, 0.35, keeps, fwd, head, fov, 'side');
         const ls = earthLabelMesh.scale.x || 1;
-        if (earthRectOverlapsPanel(earthLabelMesh.position, 0.43 * ls, 0.075 * ls, earthPreviewMesh, 0.25, 0.35, fwd, 0.02)) {
-          earthSeparatePanel(earthLabelMesh, 0.43, 0.075, earthPreviewMesh, 0.25, 0.35, fwd, head, fov, 'left');
-          earthAvoidKeepOuts(earthLabelMesh, 0.43, 0.075, keeps, fwd, head, fov, 'side');
+        if (earthRectOverlapsPanel(earthLabelMesh.position, EARTH_LABEL_HALF_W * ls, EARTH_LABEL_HALF_H * ls, earthPreviewMesh, 0.25, 0.35, fwd, 0.02)) {
+          earthSeparatePanel(earthLabelMesh, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, earthPreviewMesh, 0.25, 0.35, fwd, head, fov, 'left');
+          earthAvoidKeepOuts(earthLabelMesh, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, keeps, fwd, head, fov, 'side');
         }
       }
       earthHudKeeps = keeps;
@@ -3088,6 +3190,36 @@ window.WebXRVR = window.WebXRVR || (function () {
     const s = Math.sqrt(1+m22-m00-m11)*2;
     return qNormalize({ x:(m02+m20)/s, y:(m12+m21)/s, z:0.25*s, w:(m10-m01)/s });
   }
+  function qSlerp(a, b, t) {
+    let bx = b.x, by = b.y, bz = b.z, bw = b.w;
+    let d = a.x * bx + a.y * by + a.z * bz + a.w * bw;
+    if (d < 0) { d = -d; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+    if (d > 0.9995) {
+      return qNormalize({ x: a.x + (bx - a.x) * t, y: a.y + (by - a.y) * t, z: a.z + (bz - a.z) * t, w: a.w + (bw - a.w) * t });
+    }
+    const th = Math.acos(d), sn = Math.sin(th);
+    const wa = Math.sin((1 - t) * th) / sn, wb = Math.sin(t * th) / sn;
+    return qNormalize({ x: a.x * wa + bx * wb, y: a.y * wa + by * wb, z: a.z * wa + bz * wb, w: a.w * wa + bw * wb });
+  }
+  // Same rotation axis, angle scaled by t (t ∈ [0, 1] eases toward q).
+  function qScaleAngle(q, t) {
+    const w = Math.max(-1, Math.min(1, q.w));
+    const sign = w < 0 ? -1 : 1;
+    const half = Math.acos(w * sign);
+    const s = Math.sin(half);
+    if (s < 1e-9) return { x: 0, y: 0, z: 0, w: 1 };
+    return qFromAxisAngle({ x: q.x * sign / s, y: q.y * sign / s, z: q.z * sign / s }, 2 * half * t);
+  }
+  // Inverse of R = Ry(yaw)·Rx(pitch)·Rz(roll) (three.js 'YXZ' Euler order).
+  function earthEulerYXZ(q) {
+    const x = q.x, y = q.y, z = q.z, w = q.w;
+    const m11 = 1 - 2 * (y * y + z * z), m13 = 2 * (x * z + w * y);
+    const m21 = 2 * (x * y + w * z), m22 = 1 - 2 * (x * x + z * z), m23 = 2 * (y * z - w * x);
+    const m31 = 2 * (x * z - w * y), m33 = 1 - 2 * (x * x + y * y);
+    const pitch = Math.asin(-Math.max(-1, Math.min(1, m23)));
+    if (Math.abs(m23) < 0.9999999) return { yaw: Math.atan2(m13, m33), pitch, roll: Math.atan2(m21, m22) };
+    return { yaw: Math.atan2(-m31, m11), pitch, roll: 0 };
+  }
   function vDot(a,b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
   function vCross(a,b) { return { x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x }; }
   function vLen(v) { return Math.hypot(v.x, v.y, v.z); }
@@ -3205,9 +3337,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       shader.uniforms.uEarthAdaptive = uniforms.uEarthAdaptive;
       shader.uniforms.uEarthCapStart = uniforms.uEarthCapStart;
       shader.uniforms.uEarthCapEnd = uniforms.uEarthCapEnd;
-      shader.vertexShader = 'uniform vec3 uEarthFocus; uniform float uEarthK; uniform float uEarthWarpEnabled; uniform float uEarthAdaptive; attribute vec3 earthRendered; varying vec3 vEarthRendered;\n' +
+      shader.vertexShader = 'uniform vec3 uEarthFocus; uniform float uEarthK; uniform float uEarthWarpEnabled; uniform float uEarthAdaptive; attribute vec3 earthRendered; varying vec3 vEarthRendered; varying vec3 vEarthGeo;\n' +
         shader.vertexShader.replace('#include <begin_vertex>', `
           vec3 earthGeo = normalize(position);
+          vEarthGeo = position;
           float earthDot = clamp(dot(uEarthFocus, earthGeo), -1.0, 1.0);
           vec3 earthTangent = earthGeo - uEarthFocus * earthDot;
           float earthTangentLen = length(earthTangent);
@@ -3223,8 +3356,31 @@ window.WebXRVR = window.WebXRVR || (function () {
           vec3 transformed = uEarthAdaptive > 0.5 ? earthRendered : earthWarpedDir * length(position);
           vEarthRendered = normalize(transformed);
         `);
-      shader.fragmentShader = 'uniform vec3 uEarthFocus; uniform float uEarthWarpEnabled; uniform float uEarthCapStart; uniform float uEarthCapEnd; varying vec3 vEarthRendered;\n' +
-        shader.fragmentShader.replace('#include <opaque_fragment>', `
+      // Equirect lookup per fragment from the interpolated geographic
+      // direction. Per-vertex UVs interpolate linearly across each triangle,
+      // which smears and swirls the map wherever longitude turns fast — every
+      // triangle near a pole. u = lon/2π + 0.5 folds in both the vertex UV
+      // (+0.25) and the texture offset (+0.25). Gradients come from whichever
+      // of two u parameterisations is continuous here, so the dateline seam
+      // never drops to the smallest mip.
+      shader.fragmentShader = 'uniform vec3 uEarthFocus; uniform float uEarthWarpEnabled; uniform float uEarthCapStart; uniform float uEarthCapEnd; varying vec3 vEarthRendered; varying vec3 vEarthGeo;\n' +
+        shader.fragmentShader.replace('#include <map_fragment>', `
+          #ifdef USE_MAP
+            vec3 earthTexDir = normalize(vEarthGeo);
+            float earthU = length(earthTexDir.xz) > 1e-7
+              ? atan(earthTexDir.x, earthTexDir.z) * 0.15915494309 + 0.5 : 0.5;
+            float earthV = asin(clamp(earthTexDir.y, -1.0, 1.0)) * 0.31830988618 + 0.5;
+            float earthUAlt = fract(earthU + 0.5) - 0.5;
+            vec2 earthDx = vec2(dFdx(earthU), dFdx(earthV));
+            vec2 earthDy = vec2(dFdy(earthU), dFdy(earthV));
+            vec2 earthDxAlt = vec2(dFdx(earthUAlt), earthDx.y);
+            vec2 earthDyAlt = vec2(dFdy(earthUAlt), earthDy.y);
+            bool earthUseAlt = max(abs(earthDxAlt.x), abs(earthDyAlt.x)) < max(abs(earthDx.x), abs(earthDy.x));
+            vec4 sampledDiffuseColor = textureGrad(map, vec2(earthU, earthV),
+              earthUseAlt ? earthDxAlt : earthDx, earthUseAlt ? earthDyAlt : earthDy);
+            diffuseColor *= sampledDiffuseColor;
+          #endif
+        `).replace('#include <opaque_fragment>', `
           float earthCapAngle = acos(clamp(dot(normalize(vEarthRendered), uEarthFocus), -1.0, 1.0));
           float earthCapFade = uEarthWarpEnabled > 0.5 ? 1.0 - smoothstep(uEarthCapStart, uEarthCapEnd, earthCapAngle) : 1.0;
           if (earthCapFade <= 0.001) discard;
@@ -3232,7 +3388,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           #include <opaque_fragment>
         `);
     };
-    material.customProgramCacheKey = () => 'earth-half-angle-adaptive-v4';
+    material.customProgramCacheKey = () => 'earth-half-angle-adaptive-v5';
   }
 
   function updateEarthBaseGeometry() {
@@ -3316,24 +3472,28 @@ window.WebXRVR = window.WebXRVR || (function () {
   function applyEarthRotation() {
     if (!earthMesh) return;
     try {
-      if (earthNorthUp && earthFocus) {
-        // North Up owns the full pose, including roll. Zoom easing and frame
-        // updates must not rebuild it from yaw/pitch telemetry.
+      if ((earthNorthUp || earthPoseQuat) && earthFocus) {
+        // North Up / the top-down quaternion pose own the full pose,
+        // including roll. Zoom easing and frame updates must not rebuild it
+        // from yaw/pitch telemetry.
       } else if (earthZoom > 1.0001 && earthFocus) {
-        // Keep the focused normal exact during zoom/anchor solves. The table
+        // Keep the focused normal exact during zoom/anchor solves. In the
+        // default (top-down) mode there is no tilt at all; the legacy table
         // tilt is represented by the map's curved warped surface and by the
         // north-up basis used for pan; changing this normal would move the
         // comfort anchor and make the world swim.
         const qYaw = qFromAxisAngle({x:0,y:1,z:0}, earthYaw || 0);
         const qPitch = qFromAxisAngle({x:1,y:0,z:0}, earthPitch || 0);
-        const base = qMultiply(qYaw, qPitch);
+        let base = qMultiply(qYaw, qPitch);
+        if (earthRoll) base = qMultiply(base, qFromAxisAngle({x:0,y:0,z:1}, earthRoll));
         const normal = qRotate(base, locationToUnit(earthFocus.lat, earthFocus.lon));
         const east = vNorm(vCross({x:0,y:1,z:0}, normal));
-        earthQuat = qMultiply(qFromAxisAngle(east, tableTilt(earthZoom)), base);
+        earthQuat = debugFlags.topdown ? base : qMultiply(qFromAxisAngle(east, tableTilt(earthZoom)), base);
       } else {
         const qYaw = qFromAxisAngle({x:0,y:1,z:0}, earthYaw || 0);
         const qPitch = qFromAxisAngle({x:1,y:0,z:0}, earthPitch || 0);
         earthQuat = qMultiply(qYaw, qPitch);
+        if (earthRoll) earthQuat = qMultiply(earthQuat, qFromAxisAngle({x:0,y:0,z:1}, earthRoll));
       }
       earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
     } catch (e) {}
@@ -3363,6 +3523,15 @@ window.WebXRVR = window.WebXRVR || (function () {
   // (city), S=512→z12 (streets), S=16384→z17 (max raster detail).
   function earthTileZoom() {
     return Math.max(0, Math.min(17, Math.round(Math.log2(Math.max(1, earthZoom)) + 3.3)));
+  }
+  // Band actually streamed around a latitude. A Web Mercator tile spans
+  // cos(lat) of an equatorial tile's ground, so at 80° the fixed 7×7 ring
+  // covered ~1/6 of the view and the rest fell back to the blurry base globe.
+  // Dropping the band by log2(1/cos lat) keeps tiles the same on-screen size
+  // (and the ring the same coverage) at every latitude.
+  function earthTileZoomAt(lat) {
+    const phi = Math.max(-85.05112878, Math.min(85.05112878, Number(lat) || 0)) * Math.PI / 180;
+    return Math.max(0, Math.min(17, Math.round(Math.log2(Math.max(1, earthZoom)) + 3.3 + Math.log2(Math.cos(phi)))));
   }
 
   // Z4: breadcrumb zoom readout — log-scale share of the S=1→MAX range
@@ -3410,6 +3579,18 @@ window.WebXRVR = window.WebXRVR || (function () {
       return { x: earthGroup.position.x, y: earthGroup.position.y, z: earthGroup.position.z };
     }
     return earthCenter;
+  }
+
+  // Hand a quaternion-owned pose (top-down drag/tracking, North Up) back to
+  // yaw/pitch without a jump: decompose it, keep the twist in earthRoll and
+  // let advanceEarthZoom ease that to zero.
+  function releaseEarthPose() {
+    if (!earthPoseQuat && !earthNorthUp) return;
+    const e = earthEulerYXZ(earthQuat);
+    earthYaw = e.yaw;
+    earthPitch = e.pitch;
+    earthRoll = e.roll;
+    earthPoseQuat = false;
   }
 
   // Solve yaw/pitch so the rotated focus unit vector faces targetDir (unit,
@@ -3520,6 +3701,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // focus rotation together so the target lands centered on the view axis.
   function zoomEarthTo(lat, lon, targetZoom) {
     const toZoom = clampEarthZoom(targetZoom);
+    earthFaceAnim = null;
+    releaseEarthPose();
     const viewAxis = lockEarthZoomAnchor();
     earthFocus = { lat: Number(lat) || 0, lon: Number(lon) || 0 };
     earthNorthUp = false;
@@ -3564,6 +3747,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the focus so the globe returns to free spin at the docked position.
   function adjustEarthZoom(factor, pointerRay) {
     earthTouchInput();
+    earthFaceAnim = null;
     earthFling = { yaw: 0, pitch: 0 };
     const prev = earthZoomTarget;
     const next = clampEarthZoom(prev * (Number(factor) || 1));
@@ -3577,12 +3761,15 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (earthMesh) earthMesh.quaternion.set(earthQuat.x,earthQuat.y,earthQuat.z,earthQuat.w);
         earthPointerZoom = { geo: { ...hit.local }, distance: vLen(vSub(hit.point, pointerRay.origin)), ray: { origin: { ...pointerRay.origin }, direction: { ...pointerRay.direction } } };
         earthZoomAnchor = { ...hit.point };
+        // The turn above is a pure quaternion edit: keep it authoritative.
+        if (earthTopdownWillBeActive(next)) earthPoseQuat = true;
       }
     }
     if (next > 1 && !earthFocus) { earthFocus = earthFacingLatLon(); lockEarthZoomAnchor(); }
     earthZoomTarget = next;
     earthZoomAnim = null; // continuous input supersedes any tap animation
     if (next <= 1) {
+      releaseEarthPose();
       earthFocus = null;
       earthZoomAnchor = null;
       earthPointerZoom = null;
@@ -3607,10 +3794,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     return { east, north: vNorm(vCross(normal, east)), normal };
   }
 
-  function resetEarthNorthUp() {
-    if (!earthFocus || !earthZoomAnchor) return false;
-    const targetView = earthTopdownViewDir() || { x: 0, y: 0, z: -1 };
-    let targetNormal = earthSafeUnit(targetView, { x:0, y:0, z:1 });
+  // Pose that puts (lat, lon) on the view normal with its north tangent
+  // pointing up on screen (legacy ?topdown=0 adds the table tilt).
+  function earthUprightQuat(lat, lon, view) {
+    let targetNormal = earthSafeUnit(view, { x:0, y:0, z:1 });
     const worldUp = { x:0, y:1, z:0 };
     let targetNorth = vSub(worldUp, vScale(targetNormal, vDot(worldUp, targetNormal)));
     if (vLen(targetNorth) < 1e-8) targetNorth = { x:0, y:0, z:1 };
@@ -3620,12 +3807,19 @@ window.WebXRVR = window.WebXRVR || (function () {
     const tiltQ = qFromAxisAngle(targetEast, tilt);
     targetNormal = qRotate(tiltQ, targetNormal);
     targetNorth = qRotate(tiltQ, targetNorth);
-    const source = earthGeographicBasis(earthFocus.lat, earthFocus.lon);
+    const source = earthGeographicBasis(lat, lon);
     const sourceQ = qFromBasis(source.east, source.north, source.normal);
     const targetQ = qFromBasis(targetEast, targetNorth, targetNormal);
     // Map the complete geographic basis, not the canonical basis. This keeps
     // the focused location on targetNormal and its north tangent north-up.
-    earthQuat = qMultiply(targetQ, qConjugate(sourceQ));
+    return qMultiply(targetQ, qConjugate(sourceQ));
+  }
+
+  function resetEarthNorthUp() {
+    if (!earthFocus || !earthZoomAnchor) return false;
+    earthFaceAnim = null;
+    earthQuat = earthUprightQuat(earthFocus.lat, earthFocus.lon,
+      earthTopdownViewDir() || { x: 0, y: 0, z: -1 });
     earthNorthUp = true;
     earthZoomAnim = null;
     if (earthMesh) earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
@@ -3634,7 +3828,78 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
 
+  // Location card RESET ROTATION: turn the globe so (lat, lon) ends centred on
+  // the view, perpendicular and north-up. Zoomed, the pose and the focus
+  // travel together (slerp of the pose, focus = whatever sits on the
+  // interpolated view normal), so the spot glides to the centre instead of
+  // snapping; the zoom level is untouched. At globe scale it is a yaw/pitch
+  // turn (north up by construction).
+  const EARTH_FACE_ANIM_MS = 650;
+  function faceEarthLocation(lat, lon) {
+    const la = Number(lat), lo = Number(lon);
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) return false;
+    earthTouchInput();
+    earthFling = { yaw: 0, pitch: 0 };
+    earthPointerZoom = null;
+    earthGrabGeo = null;
+    earthGrabAnchor = null;
+    const t0 = earthNowMs();
+    if (earthFocus && earthZoomTarget > 1.0001 && earthZoomAnchor) {
+      const view = earthTopdownViewDir() || { x: 0, y: 0, z: 1 };
+      const toQ = earthUprightQuat(la, lo, view);
+      earthZoomAnim = null;
+      earthPoseQuat = true;
+      earthNorthUp = false;
+      earthFaceAnim = {
+        t0, dur: EARTH_FACE_ANIM_MS, lat: la, lon: lo,
+        fromQ: { ...earthQuat }, toQ,
+        fromN: vNorm(qRotate(earthQuat, locationToUnit(earthFocus.lat, earthFocus.lon))),
+        toN: vNorm(qRotate(toQ, locationToUnit(la, lo))),
+      };
+      if (reducedMotion) advanceEarthFace(t0 + EARTH_FACE_ANIM_MS);
+      return true;
+    }
+    earthFaceAnim = null;
+    const head = getHeadPosition();
+    const c = earthLiveCenter();
+    const dir = earthSafeUnit({ x: head.x - c.x, y: head.y - c.y, z: head.z - c.z }, { x: 0, y: 0, z: 1 });
+    const solved = solveEarthFocusRotation(la, lo, dir, 1.2);
+    let dYaw = solved.yaw - (earthYaw || 0);
+    dYaw = ((dYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    earthZoomAnim = {
+      t0, dur: EARTH_FACE_ANIM_MS,
+      fromZoom: earthZoom, toZoom: earthZoomTarget,
+      fromYaw: earthYaw || 0, toYaw: (earthYaw || 0) + dYaw,
+      fromPitch: earthPitch || 0, toPitch: solved.pitch,
+    };
+    if (reducedMotion) advanceEarthZoom(t0 + EARTH_FACE_ANIM_MS);
+    return true;
+  }
+  function advanceEarthFace(time) {
+    const a = earthFaceAnim;
+    if (!a) return false;
+    const k = reducedMotion ? 1 : Math.max(0, Math.min(1, ((Number(time) || 0) - a.t0) / Math.max(1, a.dur)));
+    const e = 1 - Math.pow(1 - k, 3); // cubic-out, like the zoom animation
+    earthQuat = qSlerp(a.fromQ, a.toQ, e);
+    const n = qRotate(qScaleAngle(qFromUnitVectors(a.fromN, a.toN), e), a.fromN);
+    const f = k >= 1 ? { lat: a.lat, lon: a.lon } : unitToLatLon(qRotate(qConjugate(earthQuat), n));
+    if (!earthFocus) earthFocus = { lat: f.lat, lon: f.lon };
+    earthFocus.lat = f.lat;
+    earthFocus.lon = f.lon;
+    if (k >= 1) {
+      earthQuat = { ...a.toQ };
+      earthFaceAnim = null;
+      earthNorthUp = true; // the result is exactly the NORTH UP pose
+    }
+    if (earthMesh) earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
+    applyEarthRotation(); // quaternion kept; re-pins the anchor
+    lastEarthLabelKey = '';
+    return true;
+  }
+
   function resetEarthZoom() {
+    earthFaceAnim = null;
+    releaseEarthPose();
     earthFocus = null;
     earthZoomAnchor = null;
     earthNorthUp = false;
@@ -3667,7 +3932,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthFocus = null;
     earthZoomAnchor = null;
     earthZoomAnim = null;
+    earthFaceAnim = null;
     earthNorthUp = false;
+    earthPoseQuat = false;
+    earthRoll = 0;
     applyEarthZoom();
     try { rebuildEarthPins(); } catch (e) {}
     try { rebuildEarthHeatSprites(); } catch (e) {}
@@ -3691,6 +3959,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     const rawDt = earthZoomFrameTime === null ? 0 : Math.max(0, now - earthZoomFrameTime);
     const dt = Math.min(rawDt, 100);
     earthZoomFrameTime = now;
+    if (earthFaceAnim) advanceEarthFace(now);
+    // Settle a released pose: the twist eases out, and back at globe scale
+    // the pitch eases into the ±1.2 drag clamp (a polar view can leave it
+    // past that).
+    if (!earthPoseQuat && !earthNorthUp && !earthDragging) {
+      const keep = reducedMotion ? 0 : Math.pow(0.85, dt / (1000 / 60));
+      let settled = false;
+      if (earthRoll) {
+        earthRoll *= keep;
+        if (Math.abs(earthRoll) < 1e-4) earthRoll = 0;
+        settled = true;
+      }
+      if (!earthFocus && Math.abs(earthPitch || 0) > 1.2) {
+        const lim = Math.sign(earthPitch) * 1.2;
+        earthPitch = lim + (earthPitch - lim) * keep;
+        if (Math.abs(earthPitch - lim) < 1e-4) earthPitch = lim;
+        settled = true;
+      }
+      if (settled && !earthZoomAnim) applyEarthRotation();
+    }
     if (earthZoomAnim) {
       const anim = earthZoomAnim;
       const k = reducedMotion ? 1 : Math.max(0, Math.min(1, ((Number(time) || 0) - anim.t0) / Math.max(1, anim.dur)));
@@ -3746,18 +4034,21 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     // Top-down tracking: while active (and no animation or drag owns the
-    // pose), ease yaw/pitch toward exact normal alignment so residual tilt
-    // — from drags, head motion, or clamp limits — converges back to a
-    // perpendicular street view. Object motion only; the head never moves.
-    if (earthTopdownActive() && !earthZoomAnim && !earthDragging) {
+    // pose), turn the globe a fraction of the minimal rotation that puts the
+    // focus normal on the head line, so residual tilt — from head motion or
+    // pointer zoom — converges back to a perpendicular street view. Minimal
+    // rotations keep the map bearing, so this stays calm at the poles where
+    // a yaw/pitch solve would spin the map. Object motion only.
+    if (earthTopdownActive() && !earthZoomAnim && !earthDragging && !earthFaceAnim) {
       const viewDir = earthTopdownViewDir();
       if (viewDir && earthFocus) {
-        const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon,
-          viewDir, EARTH_TOPDOWN_MAX_PITCH);
-        let dYaw = solved.yaw - (earthYaw || 0);
-        dYaw = ((dYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-        earthYaw = (earthYaw || 0) + dYaw * 0.12;
-        earthPitch = (earthPitch || 0) + (solved.pitch - (earthPitch || 0)) * 0.12;
+        if (!earthNorthUp) earthPoseQuat = true;
+        const cur = qRotate(earthQuat, locationToUnit(earthFocus.lat, earthFocus.lon));
+        const full = qFromUnitVectors(cur, viewDir);
+        if (Math.abs(full.w) < 1 - 1e-12) {
+          earthQuat = qMultiply(qScaleAngle(full, reducedMotion ? 1 : 0.12), earthQuat);
+          if (earthMesh) earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
+        }
         applyEarthRotation(); // also re-pins the focus to the anchor
       }
     }
@@ -3827,14 +4118,21 @@ window.WebXRVR = window.WebXRVR || (function () {
   const EARTH_TILE_CROSSFADE_HI = 8;
   const EARTH_TILE_FAIL_LIMIT = 8;      // consecutive failures → offline mode
   const EARTH_TILE_PROBE_MS = 5000;     // degraded-mode re-arm cadence
+  // A failed slot retries on its own back-off (1 s doubling to 16 s) instead
+  // of staying blank until the view moves to another tile.
+  const EARTH_TILE_RETRY_MS = 1000;
+  const EARTH_TILE_RETRY_MAX_MS = 16000;
   let earthTileLastGeometryUpdate = -1;
   const OSM_ATTRIBUTION_TEXT = '© OPENSTREETMAP © CARTO';
   const OSM_ATTRIBUTION_TEXT_OSM_ONLY = '© OPENSTREETMAP';
+  const ESRI_ATTRIBUTION_TEXT = '© ESRI · © OPENSTREETMAP';
   const OSM_ATTRIBUTION_OFFLINE = 'MAP OFFLINE — CITY VIEW';
-  // Dynamic credit: OSM-only until /attribution reports a CARTO template in
-  // play (keyed opt-in). Fetched once per earth session; short HUD forms.
+  // Dynamic credit: OSM-only until /attribution names the provider actually
+  // proxied (Esri default, keyed CARTO opt-in). Fetched once per earth
+  // session; short HUD forms. The server's theme hint picks the tile grade.
   let earthAttributionText = OSM_ATTRIBUTION_TEXT_OSM_ONLY;
   let earthAttributionFetched = false;
+  let earthTileTheme = 'light';
   function refreshEarthAttribution() {
     if (earthAttributionFetched || typeof fetch === 'undefined') return;
     earthAttributionFetched = true;
@@ -3843,10 +4141,12 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (!r || !r.ok) return null;
         return r.json();
       }).then((p) => {
-        if (p && typeof p.attribution === 'string' && /carto/i.test(p.attribution)) {
-          earthAttributionText = OSM_ATTRIBUTION_TEXT;
-          lastEarthLabelKey = ''; // repaint with the CARTO credit
-        }
+        if (!p || typeof p.attribution !== 'string') return;
+        if (/esri/i.test(p.attribution)) earthAttributionText = ESRI_ATTRIBUTION_TEXT;
+        else if (/carto/i.test(p.attribution)) earthAttributionText = OSM_ATTRIBUTION_TEXT;
+        if (p.theme === 'dark' || p.theme === 'light') earthTileTheme = p.theme;
+        else earthTileTheme = /carto/i.test(p.attribution) ? 'dark' : 'light';
+        lastEarthLabelKey = ''; // repaint with the provider's credit
       }).catch(() => {});
     } catch (e) {}
   }
@@ -4278,7 +4578,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // engages the night-chart grade for light rasters (keyless OSM); keyed dark
   // CARTO sources keep the original tint chain.
   function earthTileSourceIsLight() {
-    return earthAttributionText === OSM_ATTRIBUTION_TEXT_OSM_ONLY;
+    return earthTileTheme !== 'dark';
   }
   function makeEarthTileUniforms(labelsTexture, holo) {
     return {
@@ -4429,8 +4729,22 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  function earthTileHasReady() {
+    for (const entry of earthTiles.values()) {
+      if (entry && entry.state === 'ready') return true;
+    }
+    return false;
+  }
+  function earthTileRetryDue() {
+    for (const entry of earthTiles.values()) {
+      if (entry && entry.state === 'error' && !(entry.retryAt > earthTileClock)) return true;
+    }
+    return false;
+  }
+
   function pumpEarthTileQueue() {
     if (!earthTileGroup) return;
+    if (earthTilePausedUntil >= 0 && earthTileClock < earthTilePausedUntil) return;
     while (earthTileInFlight < EARTH_TILE_FETCH_CONCURRENCY && earthTileQueue.length > 0) {
       const job = earthTileQueue.shift();
       const entry = earthTiles.get(job.key);
@@ -4457,6 +4771,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         current.img = img;
         if (materializeEarthTile(current, job, 0)) {
           earthTileFailures = 0; // a success re-arms the online verdict
+          current.failCount = 0;
           earthTileAvailable = true;
           refreshEarthTileFallbacks();
         }
@@ -4466,11 +4781,22 @@ window.WebXRVR = window.WebXRVR || (function () {
         const current = earthTiles.get(job.key);
         if (current !== entry || generation !== earthTileGeneration || entry.state === 'retired') { pumpEarthTileQueue(); return; }
         current.state = 'error';
+        current.failCount = (current.failCount || 0) + 1;
+        current.retryAt = earthTileClock + Math.min(EARTH_TILE_RETRY_MAX_MS,
+          EARTH_TILE_RETRY_MS * Math.pow(2, current.failCount - 1));
         refreshEarthTileFallbacks();
         earthTileFailures += 1;
-        if (earthTileFailures >= EARTH_TILE_FAIL_LIMIT) {
-          // Offline / rate-limited / flag-off: degrade to the hologram (§7.4),
-          // then re-probe on a slow cadence instead of latching forever.
+        if (earthTileFailures >= EARTH_TILE_FAIL_LIMIT && earthTileHasReady()) {
+          // Partial outage (rate limit, flaky upstream): the map already on
+          // screen stays — tiles, warp and credit — and fetching pauses for
+          // one probe interval before the holes retry. Tearing everything
+          // down here is what made a working map flip to MAP OFFLINE.
+          earthTilePausedUntil = earthTileClock + EARTH_TILE_PROBE_MS;
+          earthTileQueue = [];
+        } else if (earthTileFailures >= EARTH_TILE_FAIL_LIMIT) {
+          // Nothing loaded at all (offline / flag-off): degrade to the
+          // hologram (§7.4), then re-probe on a slow cadence instead of
+          // latching forever.
           earthTileAvailable = false;
           earthTileQueue = [];
           earthTilePrefetch.clear();
@@ -4515,6 +4841,12 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     earthTileClock = Math.max(earthTileClock, now);
+    if (earthTilePausedUntil >= 0 && earthTileClock >= earthTilePausedUntil) {
+      // Pause over: retry the holes; two more misses re-pause.
+      earthTilePausedUntil = -1;
+      earthTileFailures = Math.min(earthTileFailures, EARTH_TILE_FAIL_LIMIT - 2);
+      earthTileCenterKey = '';
+    }
     refreshEarthTileLoadRatio();
     // Z3: follow the zoom band with the activity fetch (debounced inside).
     scheduleEarthActivityRefetch();
@@ -4535,8 +4867,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     updateEarthHeatSprites(fade);
     if (earthMesh.material && Math.abs(fade - earthTileBaseFade) > 0.004) {
       try {
+        // The base hologram stays opaque under the tiles: Web Mercator stops
+        // at ±85.05°, so the polar caps (and slots still streaming or
+        // retrying) show the hologram instead of empty space. Tiles blend
+        // over it with their own fade opacity.
         earthMesh.material.transparent = fade > 0.001;
-        earthMesh.material.opacity = 1 - fade;
+        earthMesh.material.opacity = 1;
         earthMesh.material.needsUpdate = true;
         earthTileBaseFade = fade;
       } catch (e) {}
@@ -4561,14 +4897,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Re-plan at most ~7 Hz.
     if (earthTileLastMaintain >= 0 && time - earthTileLastMaintain < 150) return;
     earthTileLastMaintain = time;
-    const z = earthTileZoom();
     const anchor = earthFocus || earthFacingLatLon();
+    const z = earthTileZoomAt(anchor.lat);
     const center = earthTileXY(anchor.lat, anchor.lon, z);
     const n = 1 << z;
     const centerKey = earthTileKey(z,
       Math.max(0, Math.min(n - 1, Math.floor(center.x))),
       Math.max(0, Math.min(n - 1, Math.floor(center.y))));
-    if (z === earthTileZ && centerKey === earthTileCenterKey && earthTiles.size > 0) {
+    if (z === earthTileZ && centerKey === earthTileCenterKey && earthTiles.size > 0 && !earthTileRetryDue()) {
       maintainEarthTilePrefetch(z, center);
       return;
     }
@@ -4623,6 +4959,11 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
       entry.z = tile.z; entry.x = tile.x; entry.y = tile.y;
+      if (entry.state === 'error' && !(entry.retryAt > earthTileClock)) {
+        // Back-off elapsed: re-queue (an ancestor fallback mesh, if any,
+        // keeps covering the slot while it refetches).
+        entry.state = entry.mesh ? 'fallback' : 'queued';
+      }
       if (entry.state === 'ready') {
         entry.lodLevel = tile.lodLevel || 0;
         earthTilePrefetch.delete(tile.key); // prefetch/normal race leftover
@@ -5343,8 +5684,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (!earthLabelCanvas && typeof document !== 'undefined') {
         try {
           earthLabelCanvas = document.createElement('canvas');
-          earthLabelCanvas.width = 1280; // 2× the 640×112 logical layout (crisp in-headset)
-          earthLabelCanvas.height = 224;
+          earthLabelCanvas.width = EARTH_LABEL_LOGICAL_W * 2; // 2× the logical layout (crisp in-headset)
+          earthLabelCanvas.height = EARTH_LABEL_LOGICAL_H * 2;
           earthLabelCtx = earthLabelCanvas.getContext('2d');
         } catch (e) {
           earthLabelCanvas = null;
@@ -5363,7 +5704,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           depthTest: false,
           side: THREE.DoubleSide,
         });
-        earthLabelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.15), labelMat);
+        earthLabelMesh = new THREE.Mesh(new THREE.PlaneGeometry(EARTH_LABEL_HALF_W * 2, EARTH_LABEL_HALF_H * 2), labelMat);
         earthLabelMesh.renderOrder = 100;
         // Scene-rooted (Z1): the zoomed globe group scales/moves, while the
         // label must stay a fixed world-size billboard. updateEarthDressing
@@ -6130,6 +6471,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {}
     }
     if (sceneMode === 'earth' && controlIndex < 0) {
+      const earthPanel = earthHudPanelHit(ray.origin, ray.direction);
+      if (earthPanel) {
+        updateEarthHoverFromRay(ray.origin, ray.direction); // keeps the location + button highlight
+        return { ray, hit: null, controlIndex, panelDesc, earthPanel };
+      }
       const hit = hitTestEarth(ray.origin, ray.direction);
       updateEarthHoverFromRay(ray.origin, ray.direction);
       return { ray, hit, controlIndex, panelDesc };
@@ -6186,7 +6532,17 @@ window.WebXRVR = window.WebXRVR || (function () {
             hovering = hits[0].uv ? controlIndexFromUV(hits[0].uv) : -1;
           }
         }
-        if (hovering < 0 && earthMesh && earthGroup && earthGroup.visible !== false) {
+        let carded = false;
+        if (hovering < 0) {
+          const card = earthHudPanelHit(origin, direction);
+          if (card) {
+            dist = card.distance;
+            hovering = -2; // card hover (lit laser; button highlight is drawn on the card)
+            carded = true;
+          }
+          raycaster.set(origin, direction);
+        }
+        if (hovering < 0 && !carded && earthMesh && earthGroup && earthGroup.visible !== false) {
           let compassed = false;
           if (earthCompassMesh && earthCompassMesh.visible) {
             try {
@@ -6554,6 +6910,13 @@ window.WebXRVR = window.WebXRVR || (function () {
         previewPointer.control = true;
         return;
       }
+      // Location card: buttons click on press; the card body swallows the
+      // press so it never grabs the globe behind it.
+      if (sceneMode === 'earth' && target && target.earthPanel) {
+        previewPointer.control = true;
+        if (target.earthPanel.region) executeEarthPanelAction(target.earthPanel.region);
+        return;
+      }
       // Press on the comments panel: list/scrollbar begins a drag-scroll,
       // every other region clicks on release.
       if (sceneMode !== 'earth' && target && target.panelDesc) {
@@ -6882,6 +7245,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewOrbitDistance = 4.8;
     earthYaw = 0;
     earthPitch = 0;
+    earthRoll = 0;
+    earthPoseQuat = false;
     earthLastFrameTime = -1;
     earthSpinRate = 0;
     earthFling = { yaw: 0, pitch: 0 };
@@ -7099,9 +7464,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     const anchor = earthFocus || earthFacingLatLon();
     const lat = Math.max(-90, Math.min(90, Number(anchor && anchor.lat) || 0));
     const lon = Number(anchor && anchor.lon) || 0;
-    const visible = earthTileVisibleSet(zoomParam, lat, lon, EARTH_TILE_RING);
+    const bandZ = earthTileZoomAt(lat);
+    const visible = earthTileVisibleSet(bandZ, lat, lon, EARTH_TILE_RING);
     if (!visible.length) return null;
-    const n = 1 << zoomParam;
+    const n = 1 << bandZ;
     let minX = n, maxX = -1, minY = n, maxY = -1;
     for (const t of visible) {
       if (t.x < minX) minX = t.x;
@@ -7207,8 +7573,108 @@ window.WebXRVR = window.WebXRVR || (function () {
   // so hover highlight + previews never fired on Quest.
   // Step 6.3: the compass badge is hoverable too — a laser over the badge
   // reports 'compass' so the preview button highlight path can surface it.
+  // Ray → floating earth panels (reel card, WORLD › location panel):
+  // { panel: 'card'|'label', region, distance } for the nearest one hit
+  // (region '' off the buttons), else null. Panels sit in front of the
+  // globe, so they take the pointer first.
+  function earthHudPanelHit(origin, direction) {
+    if (!raycaster || !origin || !direction) return null;
+    let best = null;
+    try {
+      raycaster.set(origin, direction);
+      if (earthPreviewMesh && earthPreviewMesh.visible) {
+        const hits = raycaster.intersectObject(earthPreviewMesh, false);
+        if (hits.length) {
+          const ui = getUICanvas();
+          const uv = hits[0].uv;
+          let region = '';
+          if (uv && ui && typeof ui.resolveEarthPreviewHit === 'function') {
+            region = ui.resolveEarthPreviewHit(uv.x * ui.EARTH_PREVIEW_W, (1 - uv.y) * ui.EARTH_PREVIEW_H) || '';
+          }
+          best = { panel: 'card', region, distance: hits[0].distance };
+        }
+      }
+      if (earthLabelMesh && earthLabelMesh.visible !== false) {
+        const hits = raycaster.intersectObject(earthLabelMesh, false);
+        if (hits.length && (!best || hits[0].distance < best.distance)) {
+          const uv = hits[0].uv;
+          let region = '';
+          if (uv) {
+            const x = uv.x * EARTH_LABEL_LOGICAL_W, y = (1 - uv.y) * EARTH_LABEL_LOGICAL_H;
+            const b = EARTH_LABEL_RESET_RECT;
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) region = 'face';
+          }
+          best = { panel: 'label', region, distance: hits[0].distance };
+        }
+      }
+    } catch (e) { return null; }
+    return best;
+  }
+  function setEarthPreviewHoverRegion(region) {
+    const next = region || '';
+    if (next === earthPreviewHoverRegion) return;
+    earthPreviewHoverRegion = next;
+    lastEarthPreviewUpdate = -1e9; // repaint the hover highlight now
+  }
+  function setEarthLabelHoverRegion(region) {
+    const next = region || '';
+    if (next === earthLabelHoverRegion) return;
+    earthLabelHoverRegion = next;
+    lastEarthLabelKey = ''; // repaint the hover highlight now
+  }
+  function setEarthPanelHover(panelHit) {
+    setEarthPreviewHoverRegion(panelHit && panelHit.panel === 'card' ? panelHit.region : '');
+    setEarthLabelHoverRegion(panelHit && panelHit.panel === 'label' ? panelHit.region : '');
+  }
+  // What RESET ROTATION turns to: the location the panel is showing
+  // (hovered, else selected), else the current zoomed focus. Null on the
+  // bare globe with nothing featured.
+  function earthResetTarget() {
+    const idx = earthHoveredIndex >= 0 ? earthHoveredIndex : earthSelectedIndex;
+    const row = (idx >= 0 && idx < earthLocations.length) ? earthLocations[idx] : null;
+    if (row && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lon))) {
+      return { lat: Number(row.lat), lon: Number(row.lon), name: row.name || '' };
+    }
+    if (earthFocus && earthZoomTarget > 1.0001) return { lat: earthFocus.lat, lon: earthFocus.lon, name: '' };
+    return null;
+  }
+  // Panel buttons: 'face' (location panel) → RESET ROTATION; 'feed' (reel
+  // card) → OPEN FEED, same routing as the dock (clusters drill in first).
+  function executeEarthPanelAction(action) {
+    if (sceneMode !== 'earth') return false;
+    if (action === 'face') {
+      const target = earthResetTarget();
+      if (!target || !faceEarthLocation(target.lat, target.lon)) return false;
+      showNotification('RESET ROTATION');
+      return true;
+    }
+    if (action === 'feed') {
+      const idx = earthPreviewLocationIndex;
+      const row = (idx >= 0 && idx < earthLocations.length) ? earthLocations[idx] : null;
+      if (!row) return false;
+      if (row.kind === 'cluster' && Number(row.location_count) > 1) handleEarthTap(idx, null);
+      else selectEarthLocation(idx);
+      return true;
+    }
+    return false;
+  }
+
   function updateEarthHoverFromRay(origin, direction) {
     if (sceneMode !== 'earth' || !origin || !direction) return -1;
+    // Pointing at a panel keeps its location: the ray leaving the zone to
+    // reach a button must not close the card or blank the WORLD › title. A
+    // sweep that crossed bare globe on the way restores the zone it just
+    // left (short grace).
+    const panelHit = earthHudPanelHit(origin, direction);
+    setEarthPanelHover(panelHit);
+    if (panelHit) {
+      if (earthHoveredIndex < 0 && earthRecentHover.index >= 0 &&
+          earthRecentHover.index < earthLocations.length &&
+          earthNowMs() - earthRecentHover.at < EARTH_PANEL_HOVER_GRACE_MS) {
+        setEarthHoveredIndex(earthRecentHover.index);
+      }
+      return panelHit.panel === 'card' ? 'preview' : 'label';
+    }
     if (earthCompassMesh && earthCompassMesh.visible) {
       try {
         const c = earthCompassMesh.position;
@@ -7236,6 +7702,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function setEarthHoveredIndex(index) {
     index = Number(index);
+    if (index >= 0) earthRecentHover = { index, at: earthNowMs() };
     const changed = index !== earthHoveredIndex;
     earthHoveredIndex = index;
     earthPreviewLocationIndex = index;
@@ -7340,6 +7807,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const hitObj = hit.hit ? hit : (hit.x !== undefined ? { hit: true, local: hit } : null);
     if (!hitObj || !hitObj.hit) return false;
     earthDragging = true;
+    earthFaceAnim = null; // a grab takes the globe from the RESET ROTATION turn
     earthDragSource = source || 'pointer';
     earthFling = { yaw: 0, pitch: 0 }; // a new grab catches a coasting globe
     earthDragTrail = [];
@@ -7358,7 +7826,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthPressTime = 0;
     }
     earthPressZone = (hitObj && hitObj.zoneIndex >= 0) ? hitObj.zoneIndex : -1;
-    if (hitObj.local) {
+    earthTopdownGrab = null;
+    if (hitObj.local && earthTopdownActive() && earthZoom > 1.0001) {
+      // Zoomed top-down: the world turns under the fixed viewing spot, so the
+      // grab is tracked as a geographic reference only (no group translation).
+      earthTopdownGrab = { geo: { ...hitObj.local }, point: hitObj.point ? { ...hitObj.point } : null };
+      earthPointerZoom = null;
+      earthGrabGeo = null;
+      earthGrabAnchor = null;
+    } else if (hitObj.local) {
       earthGrabGeo = { ...hitObj.local };
       earthPointerZoom = null;
       earthGrabAnchor = hitObj.point ? { ...hitObj.point } : null;
@@ -7366,40 +7842,68 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
 
-  // Top-down pan step: move the focus opposite the cursor's geographic
-  // motion (grab feel — content follows the cursor), then re-face exactly
-  // so the street view stays perpendicular. Only runs past the engage
-  // thresholds, so tap safety is unchanged. Returns true when consumed.
-  function updateEarthTopdownPan(local) {
+  // Turn the world so geographic point `grab` shows where `cursor` shows now:
+  // earthQuat ← earthQuat·R with R = rot(grab→cursor), and the focus (the
+  // point at the anchor) moves by R⁻¹, so its world direction — and the
+  // comfort anchor — stay exactly put. One minimal rotation per step: no
+  // lat/lon bookkeeping, so the pole is just another point (no clamp, no
+  // spin) and the map bearing carries through.
+  function earthTopdownTurn(grab, cursor) {
     if (!earthFocus) return false;
-    if (!earthTopdownPanPrev) {
-      earthTopdownPanPrev = { ...local };
-      return true; // grab point established; no motion yet
-    }
-    const prev = earthTopdownPanPrev;
-    earthTopdownPanPrev = { ...local };
-    const a = unitToLatLon(prev);
-    const b = unitToLatLon(local);
-    let dLon = b.lon - a.lon;
-    dLon = ((dLon + 540) % 360) - 180; // shortest arc across the dateline
-    const dLat = b.lat - a.lat;
-    if (earthDragAxis === 'pitch') {
-      earthFocus.lat = Math.max(-85, Math.min(85, earthFocus.lat - dLat));
-    } else {
-      // Yaw axis (or undecided): longitude only, mirroring legacy rotate.
-      earthFocus.lon = ((earthFocus.lon - dLon + 540) % 360) - 180;
-    }
-    earthZoomAnim = null; // the drag owns the pose now (cancels any tap anim)
+    earthFaceAnim = null;
+    const R = qFromUnitVectors(grab, cursor);
+    const focus = qRotate(qConjugate(R), locationToUnit(earthFocus.lat, earthFocus.lon));
+    const ll = unitToLatLon(focus);
+    earthFocus.lat = ll.lat;
+    earthFocus.lon = ll.lon;
+    earthQuat = qMultiply(earthQuat, R);
+    earthPoseQuat = true;
     earthNorthUp = false;
-    const viewDir = earthTopdownViewDir();
-    if (viewDir) {
-      const solved = solveEarthFocusRotation(earthFocus.lat, earthFocus.lon,
-        viewDir, EARTH_TOPDOWN_MAX_PITCH);
-      earthYaw = solved.yaw;
-      earthPitch = solved.pitch;
-      applyEarthRotation(); // re-pins the moved focus to the anchor
-    }
+    earthZoomAnim = null; // the gesture owns the pose now (cancels any tap anim)
+    if (earthMesh) earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
+    applyEarthRotation(); // re-pins the anchor
     return true;
+  }
+
+  // Grab step (closed loop, exactly like the full-globe grab): whatever
+  // geographic point is now under the ray, the world turns so the pressed
+  // point shows there instead. Both axes are free — no axis lock — so the
+  // world turns the way the hand drags it. Returns true when consumed.
+  function updateEarthTopdownPan(local) {
+    if (!earthFocus || !earthTopdownGrab) return false;
+    const grab = earthSafeUnit(earthTopdownGrab.geo);
+    const cursor = earthSafeUnit(local);
+    if (vDot(grab, cursor) > 1 - 1e-15) return true;
+    return earthTopdownTurn(grab, cursor) || true;
+  }
+
+  // Stick / programmatic nudge: move the content by (cx, cy) screen units of
+  // `arc` radians of the local rendered surface. The viewer-facing right/up
+  // axes are mapped onto the focus's east/north tangents, so "right" is right
+  // on screen whatever the map bearing is.
+  function earthTopdownNudge(cx, cy, arc) {
+    if (!earthFocus || !earthZoomAnchor) return false;
+    const head = getHeadPosition();
+    const f = vNorm({ x: earthZoomAnchor.x - head.x, y: earthZoomAnchor.y - head.y, z: earthZoomAnchor.z - head.z });
+    let right = vCross(f, { x: 0, y: 1, z: 0 });
+    if (vLen(right) < 1e-6) right = { x: 1, y: 0, z: 0 };
+    right = vNorm(right);
+    const up = vNorm(vCross(right, f));
+    const m = { x: right.x * cx + up.x * cy, y: right.y * cx + up.y * cy, z: right.z * cx + up.z * cy };
+    // Content moves along m: the point `ang` behind the focus (against m,
+    // on the surface) is brought to the anchor.
+    const F = locationToUnit(earthFocus.lat, earthFocus.lon);
+    const mLocal = qRotate(qConjugate(earthQuat), m);
+    const t = vSub(mLocal, vScale(F, vDot(mLocal, F)));
+    const ang = Math.hypot(cx, cy) * arc;
+    if (!(ang > 0) || vLen(t) < 1e-12) return false;
+    const tn = vNorm(t);
+    const behind = earthSafeUnit({
+      x: F.x * Math.cos(ang) - tn.x * Math.sin(ang),
+      y: F.y * Math.cos(ang) - tn.y * Math.sin(ang),
+      z: F.z * Math.cos(ang) - tn.z * Math.sin(ang),
+    });
+    return earthTopdownTurn(behind, F);
   }
 
   function updateEarthDrag(direction, source) {
@@ -7407,6 +7911,32 @@ window.WebXRVR = window.WebXRVR || (function () {
     // R3: ignore hand-switch mid-drag. A second controller's move/release
     // must not hijack the active grab (source recorded in beginEarthDrag).
     if (source && earthDragSource && source !== earthDragSource) return;
+    if (earthTopdownGrab && earthFocus && earthZoom > 1.0001) {
+      const tl = (direction.local && direction.local.x !== undefined) ? direction.local
+        : (direction.x !== undefined ? direction : null);
+      if (!tl) return;
+      const n = vNorm(tl);
+      if (!earthDragEngaged) {
+        // Engage as soon as the pointer leaves the tap tolerance: measured in
+        // world metres when the hit carries a surface point, else as a chord
+        // scaled by the local magnification (the same hand motion spans far
+        // less ground the deeper you are zoomed).
+        const g = earthTopdownGrab;
+        const away = (direction.point && g.point)
+          ? vLen(vSub(direction.point, g.point)) > 0.03
+          : vLen(vSub(n, vNorm(g.geo))) * Math.max(1, earthEffectiveK(earthZoom)) > EARTH_TAP_CHORD;
+        if (away) {
+          earthDragMoved = earthDragEngaged = true;
+          earthTopdownGrab.geo = n; // re-anchor here: engaging never jumps the world
+          earthZoomAnim = null;
+          earthTouchInput();
+        }
+        return;
+      }
+      earthTouchInput();
+      updateEarthTopdownPan(n);
+      return;
+    }
     if (direction.hit && direction.point && earthFocus && earthZoom > 1.0001 && earthGrabGeo) {
       const hit = direction;
       if (vLen(vSub(hit.point, earthGrabAnchor)) > 0.002) {
@@ -7479,9 +8009,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         // v2 grab-pan: keep the pressed geographic point under the current
         // ray at every zoomed level. The quaternion delta is derived from
         // rendered surface directions, so warp and roll are both respected.
-        if (earthFocus && earthZoom > 1.0001 && earthGrabGeo && earthZoom >= EARTH_TOPDOWN_MIN_ZOOM && updateEarthTopdownPan(normalized)) {
-          // Geographic grab-pan keeps the anchored location under the ray.
-        } else if (earthFocus && earthZoom > 1.0001 && earthGrabGeo) {
+        if (earthFocus && earthZoom > 1.0001 && earthGrabGeo) {
           const focusLocal = locationToUnit(earthFocus.lat, earthFocus.lon);
           const oldRendered = earthWarpLocal(earthGrabGeo, earthZoom, focusLocal);
           const cursorRendered = earthWarpLocal(normalized, earthZoom, focusLocal);
@@ -7498,8 +8026,6 @@ window.WebXRVR = window.WebXRVR || (function () {
           earthNorthUp = false;
           if (earthMesh) earthMesh.quaternion.set(earthQuat.x, earthQuat.y, earthQuat.z, earthQuat.w);
           applyEarthZoom();
-        } else if (earthFocus && earthZoom >= EARTH_TOPDOWN_MIN_ZOOM && updateEarthTopdownPan(normalized)) {
-          // compatibility fallback for a top-down-only missed grab
         } else if (globeGrab && earthGrabGeo) {
           // TRUE GRAB at orbit scale: solve yaw/pitch so the geographic point
           // that was grabbed sits exactly under the pointer ray's hit. North
@@ -7571,7 +8097,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthDragCumY = 0;
     earthDragAxis = null;
     earthPressZone = -1;
-    earthTopdownPanPrev = null; // next drag re-grabs
+    earthTopdownGrab = null; // next drag re-grabs
     if (earthGrabGeo && earthGrabAnchor && earthFocus) {
       const center = earthLiveCenter();
       const dir = qRotate(earthQuat, locationToUnit(earthFocus.lat,earthFocus.lon));
@@ -7718,7 +8244,15 @@ window.WebXRVR = window.WebXRVR || (function () {
           const slow = 1 / Math.max(1, Math.sqrt(Math.max(1, earthZoom)));
           earthTouchInput();
           earthFling = { yaw: 0, pitch: 0 };
-          rotateEarth(shape(thumbX) * 1.7 * sdt * slow, -shape(thumbY) * 1.2 * sdt * slow);
+          if (earthFocus && earthZoom > 1.0001 && earthTopdownActive()) {
+            // Zoomed: turn the world under the fixed viewing spot. Speed is a
+            // constant ~0.9 m/s of surface at full deflection whatever the zoom
+            // (arc = distance / (magnification × visible radius)).
+            const arc = 0.9 * sdt / (Math.max(1, earthEffectiveK(earthZoom)) * earthVisibleRadius(earthZoom));
+            earthTopdownNudge(shape(thumbX), shape(thumbY), arc);
+          } else {
+            rotateEarth(shape(thumbX) * 1.7 * sdt * slow, -shape(thumbY) * 1.2 * sdt * slow);
+          }
         } else {
           earthStickLast = -1;
         }
@@ -7944,7 +8478,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function onVRSelectStart(ev) {
     if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
-        !earthCompassUnderRay(activeRayOrigin, activeRayDir)) {
+        !earthCompassUnderRay(activeRayOrigin, activeRayDir) &&
+        !earthHudPanelHit(activeRayOrigin, activeRayDir)) {
       const hit = hitTestEarth(activeRayOrigin, activeRayDir);
       if (hit.hit) {
         const hand = (ev && ev.data && ev.data.handedness) || activeRayHandedness || 'xr';
@@ -8005,10 +8540,18 @@ window.WebXRVR = window.WebXRVR || (function () {
         // already dispatched — never double-fire zoom/select.
         handled = true;
       } else if (sceneMode === 'earth' && earthMesh) {
+        // Floating panels first (reel card, location panel): they sit in
+        // front of the globe.
+        const card = earthHudPanelHit(rayOrigin, rayDir);
+        if (card) {
+          if (card.region && executeEarthPanelAction(card.region)) pulseInput(ev.data);
+          handled = true;
+        }
+        raycaster.set(rayOrigin, rayDir);
         // Step 6.3: compass badge click → true-north pose (400 ms slerp is
         // inside resetEarthNorthUp's instant pose; the eased feel comes from
         // the zoom-frame smoothing, not a second animation machine).
-        if (earthCompassMesh && earthCompassMesh.visible) {
+        if (!handled && earthCompassMesh && earthCompassMesh.visible) {
           try {
             const hits = raycaster.intersectObject(earthCompassMesh, false);
             if (hits.length > 0) {
@@ -8654,7 +9197,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthZoomTarget = 1;
     earthFocus = null;
     earthZoomAnchor = null;
-    earthTopdownPanPrev = null;
+    earthTopdownGrab = null;
+    earthPoseQuat = false;
+    earthRoll = 0;
+    earthFaceAnim = null;
+    earthPreviewHoverRegion = '';
+    earthLabelHoverRegion = '';
+    earthRecentHover = { index: -1, at: -1e9 };
     earthGrabGeo = earthGrabAnchor = earthPointerZoom = null;
     earthZoomAnim = null;
     earthZoomApplied = -1;
@@ -8672,12 +9221,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthTileBaseFade = -1;
     earthTileClock = -1;
     earthTileProbeAt = -1;
+    earthTilePausedUntil = -1;
     earthTileLoadRatio = 1;
     earthTileFailures = 0;
     earthTileAvailable = true;
     earthTileLabelsAvailable = true;
     earthAttributionText = OSM_ATTRIBUTION_TEXT_OSM_ONLY;
     earthAttributionFetched = false;
+    earthTileTheme = 'light';
     // Z3 teardown: heat overlay + band-tracked activity fetch.
     disposeEarthHeatSprites();
     earthHeatGroup = null;
@@ -9089,7 +9640,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -9453,6 +10004,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Earth zoom map seams (Z1).
       clampEarthZoom,
       earthTileZoom,
+      earthTileZoomAt,
       unitToLatLon,
       rotateEarthDir,
       earthGeographicBasis,
@@ -9464,6 +10016,19 @@ window.WebXRVR = window.WebXRVR || (function () {
       adjustEarthZoom,
       resetEarthZoom,
       resetEarthNorthUp,
+      earthTopdownNudge,
+      earthEulerYXZ,
+      faceEarthLocation,
+      executeEarthPanelAction,
+      earthHudPanelHit,
+      earthResetTarget,
+      earthLabelHoverRegion() { return earthLabelHoverRegion; },
+      earthLabelMeshForTest() { return earthLabelMesh; },
+      earthPreviewHoverRegion() { return earthPreviewHoverRegion; },
+      earthFaceAnimating() { return !!earthFaceAnim; },
+      earthNowMs,
+      earthPreviewMeshForTest() { return earthPreviewMesh; },
+      earthPolarRowFilter,
       resetEarthZoomImmediate,
       handleEarthTap,
       // Earth tile layer seams (Z2).
@@ -9523,6 +10088,8 @@ window.WebXRVR = window.WebXRVR || (function () {
           failures: earthTileFailures,
           ready: Array.from(earthTiles.values()).filter((e) => e.state === 'ready').length,
           probeAt: earthTileProbeAt,
+          pausedUntil: earthTilePausedUntil,
+          errored: Array.from(earthTiles.values()).filter((e) => e.state === 'error').length,
           loadRatio: earthTileLoadRatio,
         };
       },
@@ -9630,6 +10197,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthZoomAnim = null;
         earthZoomFrameTime = null;
         earthNorthUp = false;
+        earthPoseQuat = false;
+        earthRoll = 0;
+        earthFaceAnim = null;
         earthFocus = focus ? { lat: Number(focus.lat) || 0, lon: Number(focus.lon) || 0 } : null;
         if (!earthFocus) earthZoomAnchor = null;
         else if (!earthZoomAnchor) earthZoomAnchor = { x: 0, y: 1.3, z: -1.15 };
@@ -9644,6 +10214,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         return loadEarthPreviewForIndex(index, earthPreviewGeneration);
       },
       setEarthPose(yaw, pitch, center) {
+        earthPoseQuat = false;
+        earthRoll = 0;
         earthYaw = Number(yaw) || 0;
         earthPitch = Math.max(-1.2, Math.min(1.2, Number(pitch) || 0));
         if (center) earthCenter = { x: center.x, y: center.y, z: center.z };

@@ -101,7 +101,7 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 | `SX_LIBX264` | `0` disables libx264 proxies (forces HEVC masters) | `1` |
 | `SX_DEBUG` | Streamlit sidebar debug output | off |
 | `SX_MAP_TILES_ENABLED` | `0` disables the tile proxy (VR globe falls back to the holographic look, label shows `MAP OFFLINE — CITY VIEW`) | `1` |
-| `SX_MAP_TILES_URL` | Upstream **base** tile template swapped without code change (default keyless OSM standard raster, labels baked in; CARTO dark is opt-in with a keyed template — anonymous CARTO returns key-wall placeholders) | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` |
+| `SX_MAP_TILES_URL` | Upstream **base** tile template swapped without code change (default keyless OSM standard raster, labels baked in. OSM can block a proxy it deems out of policy — check for TLS resets / an `X-Blocked` header; Esri World Street Map `…/MapServer/tile/{z}/{y}/{x}` works keyless but needs an ArcGIS plan commercially; CARTO dark is opt-in with a keyed template — anonymous CARTO returns key-wall placeholders) | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` |
 | `SX_MAP_LABELS_URL` | Upstream **labels** tile template, empty = disabled (client renders base-only; set to a keyed CARTO `dark_only_labels` template to restore split untinted labels) | _(empty)_ |
 | `SX_MAP_TILES_CACHE_DIR` | Disk cache for proxied tiles, keyed per layer + upstream-template hash (immutable, `Cache-Control: public, max-age=604800`) — persist this alongside `output/` or repeat zooms refetch upstream | `data/map_tiles/` |
 | `SX_MAP_MIN_CELL_REELS` | K-anonymity floor: sub-city heat cells (geohash ≥ 6) are suppressed below this many active reels (city-level rows are unaffected — already the published privacy unit) | `3` |

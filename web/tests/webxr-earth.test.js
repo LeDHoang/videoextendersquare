@@ -3123,16 +3123,16 @@ function topdownHarness(options = {}) {
   return { renderer, api: renderer.__test };
 }
 
-test('topdown engages only with the flag at city zoom and deeper', () => {
+test('top-down facing is the default for any zoom past the globe; ?topdown=0 restores the legacy table', () => {
   const { renderer, api } = topdownHarness();
+  api.setEarthZoom(1);
+  assert.equal(api.earthTopdownActive(), false); // full globe: free spin, no focus
+  api.setEarthZoom(2, { lat: 35.67, lon: 139.65 });
+  assert.equal(api.earthTopdownActive(), true);  // no city-band threshold any more
   api.setEarthZoom(64, { lat: 35.67, lon: 139.65 });
-  assert.equal(api.earthTopdownActive(), false); // flag off: legacy rotate everywhere
-  api.setDebugFlags({ topdown: true });
   assert.equal(api.earthTopdownActive(), true);
-  api.setEarthZoom(4, { lat: 0, lon: 0 });
-  assert.equal(api.earthTopdownActive(), false); // below the city band: tilted globe intact
-  api.setEarthZoom(8, { lat: 0, lon: 0 });
-  assert.equal(api.earthTopdownActive(), true); // city band is the threshold
+  api.setDebugFlags({ topdown: false });
+  assert.equal(api.earthTopdownActive(), false);
   api.cleanup();
   renderer.stopPreview();
 });
@@ -3178,29 +3178,43 @@ test('topdown zoom lands perpendicular even near the pole', () => {
   renderer.stopPreview();
 });
 
-test('topdown drag pans the focus and stays perpendicular', () => {
+test('topdown drag turns the world: free 2-axis grab, perpendicular throughout, centre stays put', () => {
   const { renderer, api } = topdownHarness();
-  api.setDebugFlags({ topdown: true });
-  api.setEarthZoom(64, { lat: 35.67, lon: 139.65 });
-  const press = { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } };
+  api.zoomEarthTo(35.67, 139.65, 8);
+  api.advanceEarthZoom(100000);
+  const centre0 = { ...api.getEarthState().liveCenter };
+  const press = { hit: true, zoneIndex: -1, local: api.locationToUnit(35.67, 139.65) };
   api.beginEarthDrag('mouse', press);
-  // First engaged update only establishes the grab point (no motion).
-  api.updateEarthDrag({ x: 0.2, y: 0.1, z: 0.97 });
+  // Inside the tap tolerance nothing moves.
+  api.updateEarthDrag({ local: api.locationToUnit(35.671, 139.651) });
   assert.equal(api.getEarthState().focus.lon, 139.65);
-  // Second update pans: cursor moved east, so the focus moves west (grab).
-  api.updateEarthDrag({ x: 0.3, y: 0.15, z: 0.94 });
+  // Past the tolerance the first update only re-anchors (engaging never jumps)...
+  api.updateEarthDrag({ local: api.locationToUnit(38.0, 142.0) });
+  assert.equal(api.getEarthState().focus.lon, 139.65);
+  assert.equal(api.getEarthState().focus.lat, 35.67);
+  // ...then the cursor drifting north-east pulls the focus south-west: both axes move.
+  const T = renderer.getThree();
+  const worldOf = (st, lat, lon) => {
+    const u = api.locationToUnit(lat, lon);
+    const q = new T.Quaternion(st.quaternion.x, st.quaternion.y, st.quaternion.z, st.quaternion.w);
+    return new T.Vector3(u.x, u.y, u.z).applyQuaternion(q);
+  };
+  const cursorBefore = worldOf(api.getEarthState(), 38.1, 142.2);
+  api.updateEarthDrag({ local: api.locationToUnit(38.1, 142.2) });
   const focus = api.getEarthState().focus;
-  assert.ok(focus.lon < 139.65, `focus panned west: ${focus.lon}`);
-  closeTo(focus.lon, 133.6, 0.15);
-  assert.equal(focus.lat, 35.67); // yaw axis lock: longitude only
-  // Perpendicular through the pan: solved normal matches the live view dir.
-  const A = api.getEarthState().anchor;
-  const l = Math.hypot(A.x - 0, A.y - 1.6, A.z - 0) || 1;
-  const vd = { x: (0 - A.x) / l, y: (1.6 - A.y) / l, z: (0 - A.z) / l };
-  const dir = api.rotateEarthDir(api.locationToUnit(focus.lat, focus.lon), api.getEarthState().yaw, api.getEarthState().pitch);
-  closeTo(dir.x * vd.x + dir.y * vd.y + dir.z * vd.z, 1, 1e-6);
-  // Release after a real move: drag release, never a tap.
-  assert.equal(api.endEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0.3, y: 0.15, z: 0.94 } }), false);
+  assert.ok(focus.lon < 139.65 && focus.lat < 35.67, `focus moved opposite the cursor: ${focus.lat}, ${focus.lon}`);
+  // A great-circle turn, so roughly (not exactly) the lat/lon difference.
+  closeTo(focus.lon, 139.65 - 0.2, 0.02);
+  closeTo(focus.lat, 35.67 - 0.1, 0.02);
+  // Exact contract: the grabbed point now sits where the cursor point was.
+  const grabAfter = worldOf(api.getEarthState(), 38.0, 142.0);
+  assert.ok(grabAfter.distanceTo(cursorBefore) < 1e-9, `grab lands on cursor (${grabAfter.distanceTo(cursorBefore)})`);
+  // Perpendicular through the pan, and the globe centre never translated.
+  const facing = focusFacing(renderer, api);
+  closeTo(facing, 1, 1e-9);
+  const centre1 = api.getEarthState().liveCenter;
+  assert.ok(Math.hypot(centre1.x - centre0.x, centre1.y - centre0.y, centre1.z - centre0.z) < 1e-9, 'sphere rotated in place');
+  assert.equal(api.endEarthDrag('mouse', null), false); // a real drag, never a tap
   renderer.stopPreview();
 });
 
@@ -3548,7 +3562,11 @@ test('Earth shaders use valid r186 chunks and preserve rim alpha before output',
   assert.match(rendererSource, /earthWarped = 2\.0 \* atan\(uEarthK \* tan\(earthAngle \* 0\.5\)\)/);
   assert.match(rendererSource, /uEarthCapStart/);
   assert.match(rendererSource, /smoothstep\(uEarthCapStart, uEarthCapEnd, earthCapAngle\)/);
-  assert.match(rendererSource, /earth-half-angle-adaptive-v4/);
+  assert.match(rendererSource, /earth-half-angle-adaptive-v5/);
+  // Per-fragment equirect lookup replaces r186's map chunk (no polar swirl).
+  assert.match(threeR186BuildSource, /var map_fragment = "#ifdef USE_MAP/);
+  assert.match(rendererSource, /replace\('#include <map_fragment>'/);
+  assert.match(rendererSource, /textureGrad\(map, vec2\(earthU, earthV\)/);
   assert.match(rendererSource, /earthScaleDistanceKm/);
   const { renderer, api } = topdownHarness();
   const geo = api.buildEarthTileGeometry(17, 65536, 65536, 0.681);
@@ -3772,8 +3790,9 @@ test('arbitrary-focus cap hits inverse geography exactly on the actual surface',
   renderer.stopPreview();
 });
 
-test('off-focus grabbed geography stays at its surface anchor and release does not jump', () => {
+test('legacy (?topdown=0): off-focus grabbed geography stays at its surface anchor and release does not jump', () => {
   const { renderer, api }=topdownHarness();
+  api.setDebugFlags({ topdown: false });
   api.setEarthZoom(64,{lat:35,lon:179});
   const press=earthWorldSample(renderer,api,35.01,179.03);
   const hit=api.hitTestEarth(press.ray.origin,press.ray.direction);
@@ -3806,35 +3825,20 @@ test('R3: table tilt ramps 0°→55° over S=2→16 without moving below S=2', (
   renderer.stopPreview();
 });
 
-test('R3: zoomed drag-pan is the default; ?topdown=1 stays a compatible alias', () => {
-  // Decision: ?topdown=1 is a compatible alias — identical gesture must give
-  // identical results with the flag off or on (world-translate path keeps
-  // focus and moves the anchor; local-only path pans focus lat/lon).
-  const run = (topdown) => {
-    const { renderer, api } = topdownHarness();
-    api.setDebugFlags({ topdown });
-    api.setEarthZoom(64, { lat: 35, lon: 139 });
-    const press = earthWorldSample(renderer, api, 35.01, 139.03);
-    const hit = api.hitTestEarth(press.ray.origin, press.ray.direction);
-    api.beginEarthDrag('pointer', hit);
-    const move = earthWorldSample(renderer, api, 35.04, 139.06);
-    const moveHit = api.hitTestEarth(move.ray.origin, move.ray.direction);
-    api.updateEarthDrag(moveHit, 'pointer');
-    const st = api.getEarthState();
-    const end = earthWorldSample(renderer, api, 35.01, 139.03);
-    api.endEarthDrag('pointer', null);
-    const out = { focus: st.focus, anchor: st.anchor, grabbed: { ...end.point } };
-    renderer.stopPreview();
-    return out;
-  };
-  const off = run(false);
-  const on = run(true);
-  // Grabbed surface follows the pointer in both modes (world-translate path).
-  assert.ok(Math.hypot(off.grabbed.x - on.grabbed.x, off.grabbed.y - on.grabbed.y, off.grabbed.z - on.grabbed.z) < 1e-9,
-    'flag off/on gestures agree');
-  // Cross-realm objects: compare fields, not prototypes.
-  assert.equal(off.focus.lat, on.focus.lat);
-  assert.equal(off.focus.lon, on.focus.lon);
+test('legacy (?topdown=0): zoomed drag slides the surface so the grabbed point follows the pointer', () => {
+  const { renderer, api } = topdownHarness();
+  api.setDebugFlags({ topdown: false });
+  api.setEarthZoom(64, { lat: 35, lon: 139 });
+  const press = earthWorldSample(renderer, api, 35.01, 139.03);
+  const hit = api.hitTestEarth(press.ray.origin, press.ray.direction);
+  api.beginEarthDrag('pointer', hit);
+  const move = earthWorldSample(renderer, api, 35.04, 139.06);
+  const moveHit = api.hitTestEarth(move.ray.origin, move.ray.direction);
+  api.updateEarthDrag(moveHit, 'pointer');
+  const end = earthWorldSample(renderer, api, 35.01, 139.03);
+  api.endEarthDrag('pointer', null);
+  assert.ok(end.point.distanceTo(move.point) < 1e-9, 'grabbed surface follows the pointer');
+  renderer.stopPreview();
 });
 
 test('R3: drag ignores hand-switch mid-gesture and rejects antipodal jumps', () => {
@@ -3855,8 +3859,9 @@ test('R3: drag ignores hand-switch mid-gesture and rejects antipodal jumps', () 
   renderer.stopPreview();
 });
 
-test('off-center pointer refocus and zoom keep geographic anchor on stored ray every frame', () => {
+test('legacy (?topdown=0): off-center pointer refocus and zoom keep geographic anchor on stored ray every frame', () => {
   const {renderer,api}=topdownHarness();
+  api.setDebugFlags({ topdown: false });
   api.setEarthZoom(64,{lat:20,lon:180});
   const sample=earthWorldSample(renderer,api,20.02,179.97);
   api.advanceEarthZoom(0);
@@ -4093,6 +4098,7 @@ test('Step 6.3: street bezel + compass appear at street zoom and hide at globe',
   renderer.startPreview(makePreviewCanvas(gl));
   const api = renderer.__test;
   renderer.setSceneMode('earth');
+  api.setDebugFlags({ horizonhud: true });
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
   renderer.__runScheduledFrame(32);
   renderer.__runScheduledFrame(64);
@@ -4113,6 +4119,7 @@ test('Step 6.3: compass laser hover reports the badge without moving the globe',
   renderer.startPreview(makePreviewCanvas(gl));
   const api = renderer.__test;
   renderer.setSceneMode('earth');
+  api.setDebugFlags({ horizonhud: true });
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
   renderer.__runScheduledFrame(32);
   const scene = api.getScene();
@@ -4394,6 +4401,7 @@ test('panel separation lifts the preview off the breadcrumb and keeps it in view
 
 test('leaving Earth mode hides the bezel ring and compass dial (they are scene-rooted)', () => {
   const { renderer, api } = topdownHarness();
+  api.setDebugFlags({ horizonhud: true });
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
   renderer.__runScheduledFrame(32);
   renderer.__runScheduledFrame(64);
@@ -4461,4 +4469,442 @@ test('the live breadcrumb never covers the zoom anchor or the hovered pin', () =
     assert.equal(overlap, false, `label covers a keep-out at (${k.x.toFixed(2)}, ${k.y.toFixed(2)})`);
   }
   renderer.stopPreview();
+});
+
+// ─── Zoomed view: head-on facing, world-turning drag, no compass/halo ───
+
+// Dot product of the focused point's REAL world normal (final quaternion, so
+// any tilt shows up) with the unit vector from the anchor to the head.
+function focusFacing(renderer, api) {
+  const T = renderer.getThree(), st = api.getEarthState();
+  const q = new T.Quaternion(st.quaternion.x, st.quaternion.y, st.quaternion.z, st.quaternion.w);
+  const u = api.locationToUnit(st.focus.lat, st.focus.lon);
+  const n = new T.Vector3(u.x, u.y, u.z).applyQuaternion(q).normalize();
+  const view = new T.Vector3(0 - st.anchor.x, 1.6 - st.anchor.y, 0 - st.anchor.z).normalize();
+  return n.dot(view);
+}
+
+test('zoomed view is exactly perpendicular to the focused point at every zoom (no table tilt)', () => {
+  const { renderer, api } = topdownHarness();
+  for (const [lat, lon, S] of [[25.76, -80.19, 2], [16.07, 108.22, 8], [48.85, 2.35, 64], [-33.9, 151.2, 512], [64, -21, 4096]]) {
+    api.zoomEarthTo(lat, lon, S);
+    api.advanceEarthZoom(100000);
+    closeTo(api.getEarthState().zoom, S, 1e-6);
+    closeTo(focusFacing(renderer, api), 1, 1e-9);
+  }
+  renderer.stopPreview();
+});
+
+test('legacy table tilt is gone by default and still available with ?topdown=0', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(40, -100, 64);
+  api.advanceEarthZoom(100000);
+  assert.ok(focusFacing(renderer, api) > 0.999999);
+  api.setDebugFlags({ topdown: false });
+  api.zoomEarthTo(40, -100, 64);
+  api.advanceEarthZoom(200000);
+  assert.ok(focusFacing(renderer, api) < 0.7, 'legacy mode keeps the 55° table tilt');
+  renderer.stopPreview();
+});
+
+test('pointer zoom turns the hovered point to face the viewer while it stays under the pointer ray', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(1);
+  api.advanceEarthZoom(0);
+  // Hover a point well off the view axis on the globe.
+  const T = renderer.getThree();
+  const st0 = api.getEarthState();
+  const ray = { origin: new T.Vector3(0.45, 1.5, 0), direction: new T.Vector3(st0.liveCenter.x - 0.45, st0.liveCenter.y - 1.5, st0.liveCenter.z).normalize() };
+  const hit = api.hitTestEarth(ray.origin, ray.direction);
+  assert.equal(hit.hit, true);
+  const geo = api.unitToLatLon(hit.local);
+  api.adjustEarthZoom(12, ray);
+  let t = 0;
+  for (let i = 0; i < 160; i++) {
+    t += 16;
+    api.advanceEarthZoom(t);
+    // The hovered geography never leaves the stored ray (tolerance 2 mm).
+    const p = earthWorldSample(renderer, api, geo.lat, geo.lon).point;
+    const rel = p.clone().sub(ray.origin);
+    const off = rel.clone().sub(ray.direction.clone().multiplyScalar(rel.dot(ray.direction))).length();
+    assert.ok(off < 2e-3, `hovered point left the ray at frame ${i}: ${off}`);
+  }
+  assert.ok(api.getEarthState().zoom > 8, 'zoomed in');
+  assert.ok(focusFacing(renderer, api) > 0.9999, `ends head-on, got ${focusFacing(renderer, api)}`);
+  renderer.stopPreview();
+});
+
+test('zoomed grab is a closed loop: the point grabbed at engage returns under the ray without overshoot', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(35, 139, 256);
+  api.advanceEarthZoom(100000);
+  const press = earthWorldSample(renderer, api, 35.003, 139.004);
+  const hit = api.hitTestEarth(press.ray.origin, press.ray.direction);
+  api.beginEarthDrag('pointer', hit);
+  // The pointer leaves the tap tolerance: the grab re-anchors at the point now under it.
+  const engage = earthWorldSample(renderer, api, 35.3, 139.4);
+  assert.ok(engage.point.distanceTo(press.point) > 0.03, 'the sweep clears the tap tolerance');
+  const engageHit = api.hitTestEarth(engage.ray.origin, engage.ray.direction);
+  api.updateEarthDrag(engageHit, 'pointer');
+  const grabbed = api.unitToLatLon(engageHit.local);
+  // It keeps sweeping to a ray that was aimed at (35.45, 139.7) when the drag began.
+  const target = earthWorldSample(renderer, api, 35.45, 139.7);
+  const errs = [];
+  const before = api.unitToLatLon(api.hitTestEarth(target.ray.origin, target.ray.direction).local);
+  const startErr = Math.hypot(before.lat - grabbed.lat, (before.lon - grabbed.lon) * Math.cos(35 * Math.PI / 180));
+  assert.ok(startErr > 0.1, 'the world starts out of register with the ray');
+  for (let i = 0; i < 8; i++) {
+    api.updateEarthDrag(api.hitTestEarth(target.ray.origin, target.ray.direction), 'pointer');
+    const under = api.unitToLatLon(api.hitTestEarth(target.ray.origin, target.ray.direction).local);
+    errs.push(Math.hypot(under.lat - grabbed.lat, (under.lon - grabbed.lon) * Math.cos(35 * Math.PI / 180)));
+  }
+  assert.ok(errs[errs.length - 1] < 1e-4, `grabbed point is back under the ray: ${errs.map((e) => e.toFixed(5))}`);
+  for (let i = 1; i < errs.length; i++) assert.ok(errs[i] <= errs[i - 1] + 1e-6, 'residual never grows (no oscillation)');
+  assert.ok(errs[0] < startErr * 0.2, `first correction closes most of the gap: ${startErr} -> ${errs[0]}`);
+  closeTo(focusFacing(renderer, api), 1, 1e-9);
+  api.endEarthDrag('pointer', null);
+  renderer.stopPreview();
+});
+
+test('zoomed stick nudge moves the content the way the stick points, on screen', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(35, 139, 64);
+  api.advanceEarthZoom(100000);
+  const T = renderer.getThree();
+  const A = api.getEarthState().anchor;
+  const f = new T.Vector3(A.x - 0, A.y - 1.6, A.z - 0).normalize();
+  const right = new T.Vector3().crossVectors(f, new T.Vector3(0, 1, 0)).normalize();
+  const up = new T.Vector3().crossVectors(right, f).normalize();
+  const screenOf = (lat, lon) => { const p = earthWorldSample(renderer, api, lat, lon).point.clone().sub(new T.Vector3(A.x, A.y, A.z)); return { x: p.dot(right), y: p.dot(up) }; };
+  for (const [cx, cy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    api.setEarthZoom(64, { lat: 35, lon: 139 });
+    api.advanceEarthZoom(100000);
+    const before = screenOf(35, 139);
+    api.earthTopdownNudge(cx, cy, 0.00002);
+    const after = screenOf(35, 139);
+    const dx = after.x - before.x, dy = after.y - before.y;
+    assert.ok(dx * cx + dy * cy > 0, `content moved toward (${cx},${cy}): ${dx.toFixed(5)}, ${dy.toFixed(5)}`);
+    assert.ok(Math.abs(dx * cy - dy * cx) < 0.15 * Math.hypot(dx, dy), 'moves along the stick direction');
+  }
+  renderer.stopPreview();
+});
+
+test('the street bezel ring and compass dial are off by default (?horizonhud=1 restores them)', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  renderer.__runScheduledFrame(64);
+  assert.equal(api.earthBezelState().visible, false);
+  const scene = api.getScene();
+  assert.equal(scene.children.some((c) => c && c.userData && c.userData.compassBadge), false, 'no compass mesh is even created');
+  renderer.stopPreview();
+});
+
+test('zoomed drag crosses the north pole without spinning the map or clamping', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(84, -40, 64);
+  api.advanceEarthZoom(100000);
+  const T = renderer.getThree();
+  // Screen "north" of the map, as a world vector at the anchor.
+  const bearing = () => {
+    const st = api.getEarthState();
+    const q = new T.Quaternion(st.quaternion.x, st.quaternion.y, st.quaternion.z, st.quaternion.w);
+    const f = api.locationToUnit(st.focus.lat, st.focus.lon);
+    const g = api.locationToUnit(89.99, 0); // pole marker direction
+    const fv = new T.Vector3(f.x, f.y, f.z).applyQuaternion(q);
+    const gv = new T.Vector3(g.x, g.y, g.z).applyQuaternion(q);
+    return gv.sub(fv.multiplyScalar(gv.dot(fv))).normalize();
+  };
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(84, -40) });
+  api.updateEarthDrag({ local: api.locationToUnit(87, -40) }); // engage + re-anchor
+  const lats = [];
+  let prevQ = null, maxStep = 0;
+  // Pull the map 0.5° per step toward the pole and past it (12°).
+  for (let i = 1; i <= 24; i++) {
+    const cursor = api.locationToUnit(87 - 0.5, -40); // grab point drifts south ⇒ focus goes north
+    api.updateEarthDrag({ local: cursor });
+    const q = api.getEarthState().quaternion;
+    if (prevQ) {
+      const dot = Math.abs(q.x * prevQ.x + q.y * prevQ.y + q.z * prevQ.z + q.w * prevQ.w);
+      maxStep = Math.max(maxStep, 2 * Math.acos(Math.min(1, dot)));
+    }
+    prevQ = q;
+    lats.push(api.getEarthState().focus.lat);
+  }
+  // Each frame is one small turn (≈0.5°), never a lurch, and the focus is
+  // free to reach and pass the pole (no ±85° clamp).
+  assert.ok(maxStep < 0.02, `per-step turn stays small (${maxStep} rad)`);
+  assert.ok(Math.max(...lats) > 89, `focus reached the pole (${Math.max(...lats)})`);
+  closeTo(focusFacing(renderer, api), 1, 1e-9);
+  assert.ok(bearing().length() > 0.5);
+  api.endEarthDrag('mouse', null);
+  renderer.stopPreview();
+});
+
+test('stick nudge near the pole is a small steady turn (no lat/lon spin)', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(88.5, 120, 64);
+  api.advanceEarthZoom(100000);
+  let prev = api.getEarthState().quaternion, maxStep = 0;
+  for (let i = 0; i < 40; i++) {
+    api.earthTopdownNudge(0, 1, 0.002);
+    const q = api.getEarthState().quaternion;
+    const dot = Math.abs(q.x * prev.x + q.y * prev.y + q.z * prev.z + q.w * prev.w);
+    maxStep = Math.max(maxStep, 2 * Math.acos(Math.min(1, dot)));
+    prev = q;
+  }
+  assert.ok(maxStep < 0.0025, `each nudge turns ≈ arc only (${maxStep})`);
+  closeTo(focusFacing(renderer, api), 1, 1e-9);
+  renderer.stopPreview();
+});
+
+test('zooming back out from a twisted polar pose settles upright without a jump', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(84, -40, 64);
+  api.advanceEarthZoom(100000);
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(84, -40) });
+  api.updateEarthDrag({ local: api.locationToUnit(86, -10) });
+  for (let i = 0; i < 10; i++) api.updateEarthDrag({ local: api.locationToUnit(85, 20 + i * 4) });
+  api.endEarthDrag('mouse', null);
+  const before = api.getEarthState().quaternion;
+  api.resetEarthZoom();
+  const after = api.getEarthState().quaternion;
+  const dot = Math.abs(before.x * after.x + before.y * after.y + before.z * after.z + before.w * after.w);
+  assert.ok(dot > 1 - 1e-9, 'hand-off to yaw/pitch is seamless');
+  for (let t = 1000; t < 4000; t += 16) api.advanceEarthZoom(t);
+  const e = api.earthEulerYXZ(api.getEarthState().quaternion);
+  assert.ok(Math.abs(e.roll) < 1e-3, `roll settled (${e.roll})`);
+  assert.ok(Math.abs(e.pitch) <= 1.2 + 1e-3, `pitch back inside the drag clamp (${e.pitch})`);
+  renderer.stopPreview();
+});
+
+test('tile band drops with latitude so the ring keeps covering polar views', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(512, { lat: 0, lon: 0 });
+  assert.equal(api.earthTileZoomAt(0), api.earthTileZoom());
+  assert.equal(api.earthTileZoomAt(60), api.earthTileZoom() - 1);
+  assert.equal(api.earthTileZoomAt(80), api.earthTileZoom() - 2); // 12.3 + log2(cos 80°) = 9.77 → 10
+  assert.equal(api.earthTileZoomAt(-80), api.earthTileZoomAt(80));
+  assert.ok(api.earthTileZoomAt(89.9) >= 0);
+  renderer.stopPreview();
+});
+
+test('a partial tile outage keeps the loaded map, pauses, and retries the holes', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  // The first dozen tiles load, then the upstream starts failing.
+  let served = 0, mode = 'mixed';
+  api.setEarthTileImageLoader((url, onLoad, onError) => {
+    if (url.includes('/labels/')) { onError(new Error('no labels')); return; }
+    if (mode === 'ok' || served < 12) { served += 1; onLoad({ width: 256, height: 256 }); return; }
+    onError(new Error('502'));
+  });
+  api.setEarthZoom(8, { lat: 21.02, lon: 105.85 });
+  for (let t = 200; t < 1400; t += 200) renderer.__runScheduledFrame(t);
+  let stats = api.earthTileStats();
+  assert.equal(stats.available, true, 'layer stays up');
+  assert.ok(stats.ready >= 12, `loaded tiles kept (${stats.ready})`);
+  assert.ok(stats.pausedUntil > 0, 'fetching paused instead of tearing down');
+  assert.ok(api.earthTileFade() > 0, 'map still drawn');
+  assert.ok(!/OFFLINE/.test(api.getEarthLabelDetail()), `no offline notice: ${api.getEarthLabelDetail()}`);
+  // Upstream heals: after the pause the failed slots retry and fill in.
+  mode = 'ok';
+  for (let t = 1400; t < 30000; t += 400) renderer.__runScheduledFrame(t);
+  stats = api.earthTileStats();
+  assert.equal(stats.errored, 0, 'every hole retried');
+  assert.equal(stats.ready, stats.tracked);
+  renderer.stopPreview();
+});
+
+test('ice sheets classify as land (no false coastlines across Greenland/Antarctica)', () => {
+  const api = loadRenderer().__test;
+  // Natural Earth II samples: ice interior, ice edge, shelf water, deep sea.
+  assert.equal(api.classifyEarthPixel(222, 228, 240), 1, 'Greenland interior');
+  assert.equal(api.classifyEarthPixel(228, 232, 243), 1, 'East Antarctica');
+  assert.equal(api.classifyEarthPixel(113, 171, 211), 0, 'Bahamas shelf');
+  assert.equal(api.classifyEarthPixel(97, 150, 190), 0, 'Arctic Ocean');
+  assert.equal(api.classifyEarthPixel(188, 238, 255), 0, 'bright coastal water');
+});
+
+test('polar rows are resampled to their ground width (no radial spokes at the poles)', () => {
+  const api = loadRenderer().__test;
+  const W = 64;
+  const row = () => {
+    const px = new Uint8ClampedArray(W * 4);
+    for (let x = 0; x < W; x++) { px[x * 4] = x % 2 ? 200 : 0; px[x * 4 + 1] = 50; px[x * 4 + 2] = 90; px[x * 4 + 3] = 255; }
+    return px;
+  };
+  const sums = new Float64Array((W * 2 + 2) * 3);
+  // Mid latitude (cos 0.9): untouched.
+  const mid = row(); api.earthPolarRowFilter(mid, 0, W, 0.9, sums);
+  assert.equal(mid[0], 0); assert.equal(mid[4], 200);
+  // Near the pole the alternating columns average out; the mean is kept.
+  const polar = row(); api.earthPolarRowFilter(polar, 0, W, 0.01, sums);
+  for (let x = 0; x < W; x++) {
+    assert.ok(Math.abs(polar[x * 4] - 100) <= 4, `col ${x} = ${polar[x * 4]}`);
+    assert.equal(polar[x * 4 + 1], 50);
+    assert.equal(polar[x * 4 + 3], 255);
+  }
+});
+
+// ─── Location card RESET ROTATION ───
+
+function screenNorthAlignment(renderer, api) {
+  // 1 when the focus's geographic north points straight up on screen.
+  const T = renderer.getThree(), st = api.getEarthState();
+  const q = new T.Quaternion(st.quaternion.x, st.quaternion.y, st.quaternion.z, st.quaternion.w);
+  const f = api.locationToUnit(st.focus.lat, st.focus.lon);
+  const g = api.locationToUnit(st.focus.lat + 0.01, st.focus.lon);
+  const north = new T.Vector3(g.x - f.x, g.y - f.y, g.z - f.z).applyQuaternion(q);
+  const view = new T.Vector3(0 - st.anchor.x, 1.6 - st.anchor.y, 0 - st.anchor.z).normalize();
+  const up = new T.Vector3(0, 1, 0);
+  up.sub(view.clone().multiplyScalar(up.dot(view))).normalize();
+  north.sub(view.clone().multiplyScalar(north.dot(view))).normalize();
+  return north.dot(up);
+}
+
+test('RESET ROTATION (zoomed) glides the location to the centre, perpendicular and north-up, zoom kept', () => {
+  const { renderer, api } = topdownHarness();
+  api.zoomEarthTo(35.67, 139.65, 64);
+  api.advanceEarthZoom(100000);
+  // Twist the pose with a drag so it is neither on the target nor upright.
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(35.67, 139.65) });
+  api.updateEarthDrag({ local: api.locationToUnit(35.9, 139.9) });
+  for (let i = 0; i < 8; i++) api.updateEarthDrag({ local: api.locationToUnit(36 + i * 0.05, 140 + i * 0.09) });
+  api.endEarthDrag('mouse', null);
+  const zoom0 = api.getEarthState().zoomTarget;
+  assert.ok(screenNorthAlignment(renderer, api) < 0.99999, 'drag left the map twisted');
+  const target = { lat: 35.62, lon: 139.78 };
+  const start = { ...api.getEarthState().focus };
+  assert.ok(api.faceEarthLocation(target.lat, target.lon));
+  assert.equal(api.earthFaceAnimating(), true);
+  // The focus glides (no snap) toward the target over the animation.
+  const t0 = api.earthNowMs();
+  let prev = { ...api.getEarthState().focus }, maxStep = 0;
+  for (let t = t0 + 16; t <= t0 + 800; t += 16) {
+    api.advanceEarthZoom(t);
+    const f = api.getEarthState().focus;
+    maxStep = Math.max(maxStep, Math.hypot(f.lat - prev.lat, f.lon - prev.lon));
+    prev = { ...f };
+  }
+  assert.equal(api.earthFaceAnimating(), false);
+  const total = Math.hypot(target.lat - start.lat, target.lon - start.lon);
+  assert.ok(maxStep < total * 0.5, `glides in steps (${maxStep} of ${total})`);
+  const st = api.getEarthState();
+  closeTo(st.focus.lat, target.lat, 1e-9);
+  closeTo(st.focus.lon, target.lon, 1e-9);
+  closeTo(focusFacing(renderer, api), 1, 1e-6);
+  closeTo(screenNorthAlignment(renderer, api), 1, 1e-6);
+  assert.equal(st.zoomTarget, zoom0, 'zoom level untouched');
+  assert.equal(st.northUp, true);
+  // Head-tracking afterwards keeps it put (already aligned).
+  for (let t = t0 + 816; t < t0 + 1600; t += 16) api.advanceEarthZoom(t);
+  closeTo(screenNorthAlignment(renderer, api), 1, 1e-6);
+  renderer.stopPreview();
+});
+
+test('RESET ROTATION at globe scale turns the location to face the viewer, north up', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(1);
+  api.setEarthPose(2.0, -0.6);
+  assert.ok(api.faceEarthLocation(20, -100));
+  const t0 = api.earthNowMs();
+  for (let t = t0 + 16; t <= t0 + 900; t += 16) api.advanceEarthZoom(t);
+  const T = renderer.getThree(), st = api.getEarthState();
+  const q = new T.Quaternion(st.quaternion.x, st.quaternion.y, st.quaternion.z, st.quaternion.w);
+  const u = api.locationToUnit(20, -100);
+  const n = new T.Vector3(u.x, u.y, u.z).applyQuaternion(q);
+  const c = st.liveCenter;
+  const toHead = new T.Vector3(0 - c.x, 1.6 - c.y, 0 - c.z).normalize();
+  assert.ok(n.dot(toHead) > 0.9999, `faces the viewer (${n.dot(toHead)})`);
+  const e = api.earthEulerYXZ(st.quaternion);
+  assert.ok(Math.abs(e.roll) < 1e-6, 'upright (no roll)');
+  assert.equal(st.zoomTarget, 1);
+  renderer.stopPreview();
+});
+
+test('WORLD › location panel: RESET ROTATION button keeps the location and turns to it', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    onPreviewLocation: async () => [{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }],
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  const api = renderer.__test;
+  await new Promise((resolve) => setImmediate(resolve));
+  api.setLocationActivity([{ slug: 'mumbai-india', name: 'Mumbai, India', lat: 19.07, lon: 72.88, heat: 0.9 }]);
+  api.setEarthZoom(64, { lat: 19.0, lon: 72.7 });
+  api.setEarthHoveredIndex(0);
+  await api.loadEarthPreviewNow(0);
+  for (let t = 1000; t < 1600; t += 200) renderer.__runScheduledFrame(t);
+  const label = api.earthLabelMeshForTest();
+  assert.ok(label && label.visible !== false, 'location panel is up');
+  assert.ok(/Mumbai/.test(api.getEarthLabelTitle()), `title: ${api.getEarthLabelTitle()}`);
+  const T = renderer.getThree();
+  label.updateMatrixWorld(true);
+  const H = 148, W = 640, halfH = 0.86 * H / W / 2;
+  const rayTo = (px, py) => {
+    const local = new T.Vector3((px / W - 0.5) * 0.86, (0.5 - py / H) * halfH * 2, 0);
+    const world = label.localToWorld(local);
+    const origin = new T.Vector3(0, 1.6, 0);
+    return { origin, direction: world.sub(origin).normalize() };
+  };
+  const button = rayTo(532, 126);
+  const hit = api.earthHudPanelHit(button.origin, button.direction);
+  assert.equal(hit.panel, 'label');
+  assert.equal(hit.region, 'face');
+  const body = rayTo(200, 40);
+  assert.equal(api.earthHudPanelHit(body.origin, body.direction).region, '');
+  // The ray leaving the zone (even across bare globe) for the panel keeps Mumbai.
+  api.setEarthHoveredIndex(-1);
+  assert.equal(api.updateEarthHoverFromRay(button.origin, button.direction), 'label');
+  assert.equal(api.getEarthState().previewLocationIndex, 0, 'grace restored the zone just left');
+  assert.equal(api.earthLabelHoverRegion(), 'face');
+  assert.deepEqual({ lat: api.earthResetTarget().lat, lon: api.earthResetTarget().lon }, { lat: 19.07, lon: 72.88 });
+  assert.equal(api.executeEarthPanelAction('face'), true);
+  assert.equal(api.earthFaceAnimating(), true);
+  const t0 = api.earthNowMs();
+  for (let t = t0 + 16; t <= t0 + 900; t += 16) api.advanceEarthZoom(t);
+  const st = api.getEarthState();
+  closeTo(st.focus.lat, 19.07, 1e-9);
+  closeTo(st.focus.lon, 72.88, 1e-9);
+  closeTo(focusFacing(renderer, api), 1, 1e-6);
+  closeTo(screenNorthAlignment(renderer, api), 1, 1e-6);
+  renderer.stopPreview();
+});
+
+test('RESET ROTATION with nothing featured re-uprights the current zoomed view; bare globe has no target', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(1);
+  assert.equal(api.earthResetTarget(), null);
+  assert.equal(api.executeEarthPanelAction('face'), false);
+  api.zoomEarthTo(48.85, 2.35, 64);
+  api.advanceEarthZoom(100000);
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(48.85, 2.35) });
+  api.updateEarthDrag({ local: api.locationToUnit(49.1, 2.7) });
+  for (let i = 0; i < 6; i++) api.updateEarthDrag({ local: api.locationToUnit(49.2 + i * 0.04, 2.8 + i * 0.07) });
+  api.endEarthDrag('mouse', null);
+  const focus = { ...api.getEarthState().focus };
+  assert.equal(api.executeEarthPanelAction('face'), true);
+  const t0 = api.earthNowMs();
+  for (let t = t0 + 16; t <= t0 + 900; t += 16) api.advanceEarthZoom(t);
+  closeTo(api.getEarthState().focus.lat, focus.lat, 1e-9);
+  closeTo(screenNorthAlignment(renderer, api), 1, 1e-6);
+  renderer.stopPreview();
+});
+
+test('reel card keeps a single OPEN LOCATION FEED button (reset lives on the location panel)', () => {
+  const window = {};
+  vm.runInNewContext(readFileSync(new URL('../../ui/assets/vr_ui_canvas.js', import.meta.url), 'utf8'), { window });
+  const ui = window.VRUICanvas;
+  assert.equal(ui.EARTH_PREVIEW_BUTTONS.length, 1);
+  assert.equal(ui.resolveEarthPreviewHit(256, 690), 'feed');
+  assert.equal(ui.resolveEarthPreviewHit(256, 300), '');
+  const b = ui.EARTH_PREVIEW_BUTTONS[0];
+  assert.ok(b.x >= 0 && b.x + b.w <= ui.EARTH_PREVIEW_W && b.y + b.h <= ui.EARTH_PREVIEW_H);
 });

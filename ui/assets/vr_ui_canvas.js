@@ -22,6 +22,11 @@
   const EARTH_PREVIEW_W = 512;
   // 512×716 matches the 0.5 m × 0.7 m billboard (1:1.4) so text is never stretched.
   const EARTH_PREVIEW_H = 716;
+  // Reel card button (canvas px): opens the location feed. (RESET ROTATION
+  // lives on the WORLD › location panel, drawn in webxr_vr.js.)
+  const EARTH_PREVIEW_BUTTONS = [
+    { action: 'feed', label: 'TRIGGER  ▸  OPEN LOCATION FEED', x: 28, y: 670, w: 456, h: 40 },
+  ];
 
   // Panel layout metrics
   const CP_HEADER_H = 48;
@@ -1294,9 +1299,10 @@
   }
 
   // ─── Render Earth Preview ───────────────────────────────────────────
-  // Holo Atlas card: LIVE header, heat meter, hero poster (or live video when a
-  // decoder frame exists), 3-up thumbnail strip with the active item lit, and
-  // an explicit call-to-action. Every state (loading / idle / error) is drawn
+  // Holo Atlas card: LIVE header, heat meter, one large hero window (poster, or
+  // live video when a decoder frame exists) that plays through the location's
+  // reels back to back with story-style segment progress, and an explicit
+  // call-to-action. Every state (loading / idle / error) is drawn
   // deliberately; nothing ever shows as an empty frame.
   // Real canvases return a gradient object; stub contexts (tests, exotic
   // runtimes) may not — every gradient fill degrades to a flat colour.
@@ -1383,6 +1389,7 @@
       earthPreviewItems = [],
       earthPreviewIndex = 0,
       earthPreviewPosters = [],
+      earthPreviewHover = '',
       reducedMotion = false,
       time = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0,
     } = options;
@@ -1457,7 +1464,7 @@
     }
 
     // Hero media
-    const hx = 28, hy = 144, hw = W - 56, hh = 388;
+    const hx = 28, hy = 144, hw = W - 56, hh = 508;
     const videoLive = previewVideo && previewVideo.readyState >= 2;
     const poster = posterReady(earthPreviewPosters[active]) ? earthPreviewPosters[active] : null;
     if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, 22);
@@ -1493,13 +1500,24 @@
         ctx.beginPath();
         ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
         ctx.closePath(); ctx.fill();
-      } else if (Number(previewVideo.duration) > 0) {
-        // Thin progress line along the bottom of the live clip.
-        const frac = Math.max(0, Math.min(1, (Number(previewVideo.currentTime) || 0) / Number(previewVideo.duration)));
-        ctx.fillStyle = 'rgba(255,255,255,0.22)';
-        ctx.fillRect(hx + 20, hy + hh - 10, hw - 40, 3);
-        ctx.fillStyle = '#55E7FF';
-        ctx.fillRect(hx + 20, hy + hh - 10, Math.max(3, (hw - 40) * frac), 3);
+      }
+      // Story-style progress: one segment per reel; finished reels are full,
+      // the active one fills with the clip's playback, upcoming ones are empty.
+      const segGap = 6, segH = 4, segY = hy + 14;
+      const segW = (hw - 40 - segGap * (items.length - 1)) / items.length;
+      const liveFrac = (videoLive && Number(previewVideo.duration) > 0)
+        ? Math.max(0, Math.min(1, (Number(previewVideo.currentTime) || 0) / Number(previewVideo.duration))) : 0;
+      for (let i = 0; i < items.length; i++) {
+        const sx = hx + 20 + i * (segW + segGap);
+        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        previewRoundRect(ctx, sx, segY, segW, segH, 2);
+        ctx.fill();
+        const frac = i < active ? 1 : (i === active ? liveFrac : 0);
+        if (frac > 0) {
+          ctx.fillStyle = '#55E7FF';
+          previewRoundRect(ctx, sx, segY, Math.max(segH, segW * frac), segH, 2);
+          ctx.fill();
+        }
       }
       // Item caption + counter
       const cur = items[active] || {};
@@ -1507,45 +1525,39 @@
       ctx.font = '800 22px Archivo, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(truncatePreviewText(cur.title || cur.filename || 'Untitled reel', 30), hx + 20, hy + hh - 32);
-      previewRoundRect(ctx, hx + hw - 78, hy + 16, 62, 28, 14);
+      previewRoundRect(ctx, hx + hw - 78, hy + 28, 62, 28, 14);
       ctx.fillStyle = 'rgba(4,14,28,0.72)';
       ctx.fill();
       ctx.fillStyle = '#BFF5FF';
       ctx.font = '800 14px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 31);
+      ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 43);
     }
 
-    // Thumbnail strip: three slots, active one lit
-    const tw = Math.floor((hw - 24) / 3), th = 104, ty = hy + hh + 16;
-    for (let i = 0; i < 3; i++) {
-      const tx = hx + i * (tw + 12);
-      const img = posterReady(earthPreviewPosters[i]) ? earthPreviewPosters[i] : null;
-      if (i < items.length && img) drawCoverRounded(ctx, img, tx, ty, tw, th, 16);
-      else drawPreviewPlaceholder(ctx, tx, ty, tw, th, 16, -1, '');
-      if (i < items.length && i !== active) {
-        previewRoundRect(ctx, tx, ty, tw, th, 16);
-        ctx.fillStyle = 'rgba(3,9,20,0.55)';
-        ctx.fill();
-      }
-      previewRoundRect(ctx, tx, ty, tw, th, 16);
-      ctx.strokeStyle = (i === active && items.length) ? '#55E7FF' : 'rgba(110,140,170,0.35)';
-      ctx.lineWidth = (i === active && items.length) ? 3.5 : 1.5;
+    // Button: open the feed (amber, live only with reels). Hover brightens it.
+    for (const b of EARTH_PREVIEW_BUTTONS) {
+      const hot = earthPreviewHover === b.action;
+      const live = b.action !== 'feed' || items.length > 0;
+      const rgb = b.action === 'feed' ? '255,177,31' : '85,231,255';
+      previewRoundRect(ctx, b.x, b.y, b.w, b.h, 20);
+      ctx.fillStyle = live ? 'rgba(' + rgb + ',' + (hot ? 0.34 : 0.14) + ')' : 'rgba(110,140,170,0.10)';
+      ctx.fill();
+      ctx.strokeStyle = live ? 'rgba(' + rgb + ',' + (hot ? 1 : 0.85) + ')' : 'rgba(110,140,170,0.4)';
+      ctx.lineWidth = hot ? 2.5 : 1.5;
       ctx.stroke();
+      ctx.fillStyle = !live ? '#6F8BA6' : (b.action === 'feed' ? (hot ? '#FFF1D6' : '#FFD58A') : (hot ? '#F2FDFF' : '#A9F0FF'));
+      ctx.font = '800 14px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label, b.x + b.w / 2, b.y + 21);
     }
+  }
 
-    // Call to action
-    const cyy = ty + th + 18;
-    previewRoundRect(ctx, hx, cyy, hw, 40, 20);
-    ctx.fillStyle = items.length ? 'rgba(255,177,31,0.14)' : 'rgba(110,140,170,0.10)';
-    ctx.fill();
-    ctx.strokeStyle = items.length ? 'rgba(255,177,31,0.85)' : 'rgba(110,140,170,0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = items.length ? '#FFD58A' : '#6F8BA6';
-    ctx.font = '800 14px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('TRIGGER  ▸  OPEN LOCATION FEED', W / 2, cyy + 21);
+  // Canvas px → location-card button action ('' when between buttons).
+  function resolveEarthPreviewHit(x, y) {
+    for (const b of EARTH_PREVIEW_BUTTONS) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.action;
+    }
+    return '';
   }
 
   // ─── Public Module API ──────────────────────────────────────────────
@@ -1581,5 +1593,7 @@
     isGuideArtworkDirty,
     clearGuideArtworkDirty,
     renderEarthPreviewCanvas,
+    resolveEarthPreviewHit,
+    EARTH_PREVIEW_BUTTONS,
   };
 });

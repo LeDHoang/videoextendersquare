@@ -195,9 +195,44 @@ def test_attribution_credits_carto_only_when_configured_and_lists_layers(client,
     payload = client.get("/api/reels/map-tiles/attribution").json()
     assert payload["attribution"] == "© OpenStreetMap contributors"
     assert "CARTO" not in payload["attribution"]
+    assert payload["theme"] == "light"
     assert payload["layers"] == ["base", "labels"]
     assert map_tiles._attribution_header().isascii()
+    # Esri opt-in carries Esri's required credit (ASCII-safe header).
+    monkeypatch.setenv("SX_MAP_TILES_URL", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}")
+    payload = client.get("/api/reels/map-tiles/attribution").json()
+    assert payload["attribution"].startswith("Powered by Esri")
+    assert map_tiles._attribution_header().isascii()
+    monkeypatch.delenv("SX_MAP_TILES_URL")
     # Keyed CARTO opt-in restores the CARTO credit.
     monkeypatch.setenv("SX_MAP_TILES_URL", "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png?api_key=K")
     payload = client.get("/api/reels/map-tiles/attribution").json()
     assert "OpenStreetMap" in payload["attribution"] and "CARTO" in payload["attribution"]
+    assert payload["theme"] == "dark"
+
+
+def test_jpeg_tiles_served_with_their_real_media_type(client, monkeypatch):
+    jpeg = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 4
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client, data=jpeg, content_type="image/jpeg"))
+    fresh = client.get("/api/reels/map-tiles/base/2/1/1.png")
+    assert fresh.status_code == 200
+    assert fresh.headers["content-type"] == "image/jpeg"
+    cached = client.get("/api/reels/map-tiles/base/2/1/1.png")
+    assert cached.headers["content-type"] == "image/jpeg"
+    assert cached.content == jpeg
+    assert len(client.fetch_calls) == 1
+
+
+def test_osm_blocked_placeholder_is_an_upstream_failure(monkeypatch):
+    class FakeResp:
+        status = 200
+        headers = {"Content-Type": "image/png", "X-Blocked": "Access denied."}
+        data = FAKE_TILE_PNG
+
+    class FakePool:
+        def request(self, *args, **kwargs):
+            return FakeResp()
+
+    monkeypatch.setattr(map_tiles, "_get_http_pool", lambda: FakePool())
+    with pytest.raises(map_tiles.UpstreamTileError, match="blocked"):
+        map_tiles._fetch_upstream("https://tile.openstreetmap.org/1/0/0.png")
