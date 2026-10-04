@@ -492,3 +492,77 @@ toward the viewer). Covered by `Compass bearing is exact…` in `webxr-earth.tes
 - **Not verified:** on-device Quest comfort, text size at real viewing distance, and
   frame cost of the extra HUD canvases (all small, drawn only when their key changes,
   except the preview card at ≤6 Hz while visible). Step 6.4 stays open.
+
+---
+
+## 11. Phase 10 — Heat zones and globe controls (2026-10-04)
+
+### 11.1 Thermal-bloom heat zones
+
+One ramp now drives every heat visual (canvas bloom, tile-layer sprite, pins):
+**mint → amber → coral**, white-hot core on the hottest zones (`earthHeatRamp`). Mint
+replaced the old cyan low end because cyan vanished on the cyan Natural-Earth land.
+
+| | Before | After |
+|---|---|---|
+| Falloff | 5 stops, red core fading through yellow to cyan; additive blend washed to white on bright land | 5-stop soft gaussian-like bloom, **normal** blend so colour survives on any background; strong at every heat (the bloom is the data) |
+| Rings | 1–3 concentric "radar" rings encoding *intensity* | Rings encode **state**: hairline contour at rest; dashed halo on hover; solid white lock on select. Plus a centroid dot |
+| Sprite (over tiles) | flat tint, 3 colour buckets | same bloom texture + contour, per-heat ramp colour, slow colour "breath" (opacity/scale contracts untouched) |
+| Radii / hit-testing | unchanged | unchanged (`earthZoneAngularRadius`) |
+
+### 11.2 Control review — findings
+
+1. **Drag was not a grab.** Rotation = pointer delta × fixed gain, with a 280 ms hold (or
+   flick) before it engaged and a single-axis lock — diagonal drags were impossible and the
+   point under the pointer slid away from it.
+2. **No momentum.** Release stopped the globe dead.
+3. **The globe never stood still.** Idle drift (3°/s) ran whenever zoomed out and not
+   dragging — including while a zone was hovered, its preview card was loading/playing, or
+   a tap had just landed — so the target slipped away from the laser.
+4. **XR had no grab at all.** Trigger = tap only; rotation was thumbstick-only.
+5. **Thumbstick was frame-rate dependent** (fixed rad/frame ⇒ ~2.5 rad/s at 72 Hz, faster at
+   120 Hz), single-axis, with no easing, and equally fast at street zoom.
+
+### 11.3 New behaviour
+
+- **Grab-rotate (orbit scale).** `updateEarthDrag` solves yaw/pitch so the geographic point
+  that was grabbed stays exactly under the pointer ray (north stays up, pitch clamped ±1.2).
+  A drag begins the moment the pointer leaves tap tolerance (`EARTH_TAP_CHORD`) and the grab
+  point is **re-anchored at that instant**, so engaging never jumps. Diagonal drags work.
+  Zoomed grab-pan (quaternion / top-down) is unchanged.
+- **Fling.** Pose samples over the last ~120 ms give a release velocity (cap 4.5 rad/s) that
+  decays with τ = 550 ms. A deliberate pause before release (>60 ms) does not fling; a new
+  press catches the globe instantly. Orbit scale only.
+- **XR trigger = grab.** `selectstart` on the globe begins the same drag machine as the
+  mouse; the laser updates it per frame; a clean press-release is still a tap (zoom/select).
+  Dock buttons and the compass keep their own click path. (WebXR order is
+  `selectstart → select → selectend`; `select` is swallowed while a grab owns the gesture.)
+- **Stick.** Dead-zone remapped, power-curved, both axes at once, **dt-based**, and scaled by
+  `1/√zoom`. Wheel-X yaw is zoom-scaled too.
+
+### 11.4 When the Earth stands still
+
+`earthSpinHoldReason()` returns the first applicable reason (empty string = free to drift):
+
+| Reason | Condition |
+|---|---|
+| `reduced-motion` | accessibility flag |
+| `dragging` | any grab in progress |
+| `zoom-animating` / `zoomed` | zoom animation, or scale > 1.02 |
+| `coasting` | fling momentum remains |
+| `hovering-zone` | laser/mouse is over a zone |
+| `zone-selected` | a zone is selected |
+| `preview-open` | a preview card is loading or showing |
+| `recent-input` | < 4.5 s since drag / stick / wheel / tap / zoom |
+
+Drift eases in over 2 s and out with a 250 ms time constant — never a jolt.
+
+### 11.5 Verification
+
+`node --test web/tests/*.js` green. New tests cover: drift ease-in and 3°/s cap, every
+stand-still reason, grab keeps the point under a diagonal sweep (< 0.02 rad), engage without
+jump, pitch clamp, fling → coast → decay → catch, no fling after a deliberate stop, new heat
+ramp/state-ring contract. Test sandbox gained an optional `now` clock override.
+**Not verified:** XR trigger-grab and the new stick curve on a real headset (no hardware;
+covered by code review only), and fling/drift feel — constants (`EARTH_FLING_TAU_MS`,
+`EARTH_SPIN_IDLE_MS`, stick gains 1.7/1.2 rad/s) are first-pass values to tune on a Quest.

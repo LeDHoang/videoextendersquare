@@ -161,7 +161,7 @@ function loadRenderer(options = {}) {
     document: mockDocument,
     navigator: { userAgent: 'NodeTest' },
     console: { log() {}, warn() {}, error() {} },
-    performance: { now: () => 0 },
+    performance: { now: options.now || (() => 0) },
     fetch: options.fetch || (async () => ({ ok: true, json: async () => ({ locations: [] }) })),
     AbortController,
     CustomEvent: TestCustomEvent,
@@ -289,11 +289,50 @@ test('reduced motion disables idle spin and Earth stays dormant by default', () 
   api.advanceEarthSpin(1000);
   assert.equal(api.advanceEarthSpin(2000), 0);
   closeTo(api.getEarthState().yaw, 0);
+  assert.equal(api.earthSpinHoldReason(), 'reduced-motion');
+});
 
+test('idle drift eases in from rest, never jolts, and caps at 3°/s', () => {
+  const renderer = loadRenderer();
+  const api = renderer.__test;
   api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
   renderer.setReducedMotion(false);
-  api.advanceEarthSpin(1000);
-  closeTo(api.advanceEarthSpin(1100), Math.PI / 600);
+  api.advanceEarthSpin(1000); // arms the clock
+  const first = api.advanceEarthSpin(1100);
+  assert.ok(first > 0 && first < Math.PI / 600 * 0.2, `first frame is a gentle nudge, got ${first}`);
+  let last = first;
+  for (let t = 1200; t <= 6000; t += 100) {
+    const d = api.advanceEarthSpin(t);
+    assert.ok(d >= last - 1e-12, 'drift accelerates monotonically while the ramp runs');
+    last = d;
+  }
+  closeTo(last, Math.PI / 600, 1e-9); // 3°/s × 0.1 s at full speed
+});
+
+test('the globe stands still while there is something to read or touch', () => {
+  const { renderer, api } = topdownHarness();
+  api.setLocationActivity([{ slug: 'miami-us', name: 'Miami, US', lat: 25.76, lon: -80.19, heat: 0.9 }]);
+  api.setEarthZoom(1);
+  // Warm up to full drift: no input, nothing hovered, long idle.
+  for (let t = 0; t <= 9000; t += 100) api.advanceEarthSpin(t);
+  assert.equal(api.earthSpinHoldReason(), '');
+  assert.ok(api.earthFlingState().spinRate > 0.04);
+  // Hovering a zone parks the globe (and the rate bleeds off smoothly).
+  api.setEarthHoveredIndex(0);
+  assert.equal(api.earthSpinHoldReason(), 'hovering-zone');
+  const before = api.getEarthState().yaw;
+  for (let t = 9100; t <= 11000; t += 100) api.advanceEarthSpin(t);
+  const drift = Math.abs(api.getEarthState().yaw - before);
+  assert.ok(drift < 0.02, `target must not slip away under the laser, drifted ${drift}`);
+  assert.ok(api.earthFlingState().spinRate < 0.001, 'rate has decayed to rest');
+  // Leaving the zone still waits out the post-input cooldown before drifting again.
+  api.setEarthHoveredIndex(-1);
+  api.earthTouchInput();
+  assert.equal(api.earthSpinHoldReason(), 'recent-input');
+  // Zoomed = never drifts.
+  api.setEarthZoom(64, { lat: 25.76, lon: -80.19 });
+  assert.equal(api.earthSpinHoldReason(), 'zoomed');
+  renderer.stopPreview();
 });
 
 test('desktop preview starts without navigator.xr and cleans up GPU resources', () => {
@@ -1209,48 +1248,130 @@ test('holographic classifier and heat style match upstream constants', () => {  
   assert.equal(api.classifyEarthPixel(10, 30, 80), 0);
   assert.equal(api.classifyEarthPixel(250, 250, 250), 1);
   // Heat style: 4-stop fill + ring counts by threshold.
+  // Thermal-bloom: rings encode STATE (not intensity); the bloom carries heat.
   const cold = api.earthHeatStyle(0.1, 0);
-  assert.equal(cold.ringCount, 1);
+  assert.equal(cold.ringCount, 1, 'rest = one hairline contour');
   assert.equal(cold.stops.length, 5);
   const mid = api.earthHeatStyle(0.5, 1);
   assert.equal(mid.ringCount, 2);
+  assert.equal(mid.ringDash, true, 'hover = dashed halo');
   assert.equal(mid.ringColor, '#9CF4FF');
   const hot = api.earthHeatStyle(0.9, 2);
-  assert.equal(hot.ringCount, 3);
+  assert.equal(hot.ringCount, 2);
+  assert.equal(hot.ringDash, false, 'selected = solid lock');
   assert.equal(hot.ringColor, '#FFFFFF');
+  // One ramp: cool blue → amber → coral, white-hot core on the hottest.
+  assert.equal(api.earthHeatRamp(0).hex, 0x40e6aa);
+  assert.equal(api.earthHeatRamp(0.5).hex, 0xffc857);
+  assert.equal(api.earthHeatRamp(1).hex, 0xff4d6d);
+  const core = api.earthHeatRamp(1).core;
+  assert.ok(core[0] > 250 && core[1] > 150 && core[2] > 150, 'hot core pushes toward white');
+  assert.match(api.earthHeatStyle(1, 0).stops[1][1], /,0\.940\)$/, 'hot bloom is near-opaque at the core');
+  const faint = Number(/,([\d.]+)\)$/.exec(api.earthHeatStyle(0, 0).stops[1][1])[1]);
+  assert.ok(faint > 0.75, 'even the coolest zone stays clearly visible');
 });
 
-test('vertical drag pitches the globe, horizontal drag yaws with reduced gain', () => {
-  const renderer = loadRenderer();
-  const api = renderer.__test;
-  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+// Pointer pinned in WORLD space: after each pose change the hit's local
+// direction is the inverse rotation of that fixed world direction — exactly
+// what the live raycast reports.
+function pointerLocal(api, world) {
+  const { yaw, pitch } = api.getEarthState();
+  return api.rotateEarthDir(api.rotateEarthDir(world, -yaw, 0), 0, -pitch);
+}
+function worldOf(api, local) {
+  const { yaw, pitch } = api.getEarthState();
+  return api.rotateEarthDir(local, yaw, pitch);
+}
+const unit = (v) => { const l = Math.hypot(v.x, v.y, v.z); return { x: v.x / l, y: v.y / l, z: v.z / l }; };
 
-  // Mostly-vertical flick: pitch engages, yaw stays locked near zero.
-  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
-  api.updateEarthDrag({ x: 0.02, y: 0.3, z: 0.95 });
-  api.endEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0.02, y: 0.3, z: 0.95 } });
-  let state = api.getEarthState();
-  assert.ok(state.pitch > 0.2);
-  assert.ok(Math.abs(state.yaw) < 0.05);
-
-  // Mostly-horizontal flick: yaw engages with reduced gain (1.7 vs 2.8).
-  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
-  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
-  api.updateEarthDrag({ x: 0.3, y: 0.02, z: 0.95 });
-  api.endEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0.3, y: 0.02, z: 0.95 } });
-  state = api.getEarthState();
-  assert.ok(state.yaw > 0.2 && state.yaw < 0.9);
-  assert.ok(Math.abs(state.pitch) < 0.05);
-
-  // Pitch clamps at +/-1.2 no matter how far the drag travels.
+test('grab-rotate keeps the grabbed point under the pointer (true globe drag, no hold, no axis lock)', () => {
+  const { renderer, api } = topdownHarness();
   api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
   api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
-  for (let i = 1; i <= 10; i++) {
-    api.updateEarthDrag({ x: 0, y: i * 0.09, z: 1 - i * 0.04 });
+  // Diagonal sweep: both axes move at once (the old axis lock forbade this).
+  const stops = [{ x: 0.12, y: 0.06, z: 1 }, { x: 0.3, y: 0.16, z: 0.95 }, { x: 0.46, y: 0.24, z: 0.85 }, { x: 0.55, y: 0.3, z: 0.78 }]
+    .map(unit);
+  let grabbed = null;
+  stops.forEach((world, i) => {
+    const local = pointerLocal(api, world);
+    if (i === 0) grabbed = local; // the point re-anchored on engage
+    api.updateEarthDrag({ hit: true, local });
+  });
+  // The grabbed geographic point must now sit in the last pointer direction.
+  const where = unit(worldOf(api, grabbed));
+  const want = stops[stops.length - 1];
+  const err = Math.acos(Math.max(-1, Math.min(1, where.x * want.x + where.y * want.y + where.z * want.z)));
+  assert.ok(err < 0.02, `grab point drifted ${err} rad from the pointer`);
+  const state = api.getEarthState();
+  assert.ok(Math.abs(state.yaw) > 0.1 && Math.abs(state.pitch) > 0.05, 'diagonal drag moved both axes');
+  assert.ok(Math.abs(state.pitch) <= 1.2);
+});
+
+test('a drag engages the moment the pointer leaves tap tolerance, without jumping', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  api.updateEarthDrag({ hit: true, local: unit({ x: 0.02, y: 0.01, z: 1 }) }); // inside tolerance
+  assert.equal(api.getEarthState().yaw, 0);
+  api.updateEarthDrag({ hit: true, local: unit({ x: 0.2, y: 0.05, z: 1 }) }); // leaves tolerance: re-anchor, no jump
+  closeTo(api.getEarthState().yaw, 0, 1e-6);
+  closeTo(api.getEarthState().pitch, 0, 1e-6);
+  api.updateEarthDrag({ hit: true, local: pointerLocal(api, unit({ x: 0.35, y: 0.05, z: 1 })) });
+  assert.ok(Math.abs(api.getEarthState().yaw) > 0.05, 'now it follows');
+});
+
+test('pitch clamps at ±1.2 no matter how far a drag travels', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  for (let i = 1; i <= 12; i++) {
+    const world = unit({ x: 0, y: Math.sin(i * 0.13), z: Math.cos(i * 0.13) });
+    api.updateEarthDrag({ hit: true, local: pointerLocal(api, world) });
   }
   api.endEarthDrag('mouse', { hit: false, zoneIndex: -1, local: null });
-  state = api.getEarthState();
-  assert.ok(state.pitch <= 1.2);
+  assert.ok(Math.abs(api.getEarthState().pitch) <= 1.2 + 1e-9);
+});
+
+test('releasing mid-sweep flings the globe; it coasts, decays to rest, and a new grab catches it', () => {
+  let clock = 0;
+  const { renderer, api } = topdownHarness({ now: () => clock });
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  renderer.setReducedMotion(false);
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  for (let i = 1; i <= 6; i++) {
+    clock += 16; // ~60 Hz pointer events
+    api.updateEarthDrag({ hit: true, local: pointerLocal(api, unit({ x: i * 0.09, y: 0, z: 1 })) });
+  }
+  clock += 8; // released while still moving
+  api.endEarthDrag('mouse', { hit: false, zoneIndex: -1, local: null });
+  const fling = api.earthFlingState();
+  assert.ok(Math.abs(fling.yaw) > 0.05, `fling velocity captured, got ${fling.yaw}`);
+  assert.equal(api.earthSpinHoldReason(), 'coasting');
+  const yaw0 = api.getEarthState().yaw;
+  api.advanceEarthSpin(1000);
+  api.advanceEarthSpin(1100);
+  const yaw1 = api.getEarthState().yaw;
+  assert.ok(Math.abs(yaw1 - yaw0) > 1e-4, 'it keeps turning after release');
+  for (let t = 1200; t <= 6000; t += 100) api.advanceEarthSpin(t);
+  assert.equal(api.earthFlingState().yaw, 0, 'momentum decays fully');
+  // Catch: a fresh press zeroes any remaining motion immediately.
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  assert.equal(api.earthFlingState().yaw, 0);
+  assert.equal(api.earthSpinHoldReason(), 'dragging');
+});
+
+test('a deliberate stop before release does not fling', () => {
+  let clock = 0;
+  const { renderer, api } = topdownHarness({ now: () => clock });
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  for (let i = 1; i <= 4; i++) {
+    clock += 16;
+    api.updateEarthDrag({ hit: true, local: pointerLocal(api, unit({ x: i * 0.09, y: 0, z: 1 })) });
+  }
+  clock += 140; // hold still past the 60 ms release window
+  api.endEarthDrag('mouse', { hit: false, zoneIndex: -1, local: null });
+  assert.equal(api.earthFlingState().yaw, 0);
 });
 
 test('earth entry pauses playback and return resumes via handshake', () => {
@@ -2989,9 +3110,9 @@ test('a failed labels layer still materializes the tile; failed base does not', 
 
 // ─── Top-down street experiment (?topdown=1) ───
 
-function topdownHarness() {
+function topdownHarness(options = {}) {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, ...options });
   renderer.init(null, {});
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.setSceneMode('earth');
@@ -3871,7 +3992,9 @@ test('full-globe drag rotates earth when passed full target.hit object (earthZoo
     renderedLocal: { x: 0.22, y: 0, z: 0.97 },
     zoneIndex: -1,
   };
-  api.updateEarthDrag(movedHit, 'pointer');
+  api.updateEarthDrag(movedHit, 'pointer'); // leaves tap tolerance → re-anchors
+  const furtherHit = { ...movedHit, local: { x: 0.36, y: 0, z: 0.93 }, renderedLocal: { x: 0.36, y: 0, z: 0.93 } };
+  api.updateEarthDrag(furtherHit, 'pointer');
   const yawAfter = api.getEarthState().yaw;
   assert.notEqual(yawAfter, yawBefore, 'yaw must rotate when dragging with target.hit object');
   renderer.stopPreview();

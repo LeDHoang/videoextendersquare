@@ -1370,19 +1370,47 @@ window.WebXRVR = window.WebXRVR || (function () {
     return (((r + g) * 0.5 - b) > -10 || (r + g + b) > 720) ? 1 : 0;
   }
 
-  // Pure heat-style lookup (upstream drawEarthHeatZone verbatim).
+  // Thermal-bloom heat style. One continuous ramp drives everything that shows
+  // heat (canvas bloom, sprite tint, pins): cool mint → amber → hot
+  // coral, with a white-hot core on the hottest zones. A soft gaussian-like
+  // falloff replaces the old concentric "radar" rings; rings now carry state
+  // only (one hairline contour at rest, a dashed halo on hover, a solid white
+  // lock on selection).
+  const EARTH_HEAT_LO = [64, 230, 170]; // mint: reads on both the cyan globe and navy tiles
+  const EARTH_HEAT_MID = [255, 200, 87];
+  const EARTH_HEAT_HI = [255, 77, 109];
+  function heatMix(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+  function earthHeatRamp(heat) {
+    const h = Math.max(0, Math.min(1, Number(heat) || 0));
+    const base = h < 0.5 ? heatMix(EARTH_HEAT_LO, EARTH_HEAT_MID, h / 0.5) : heatMix(EARTH_HEAT_MID, EARTH_HEAT_HI, (h - 0.5) / 0.5);
+    return {
+      base,
+      core: heatMix(base, [255, 255, 255], 0.2 + 0.6 * h * h),
+      edge: heatMix(EARTH_HEAT_LO, base, 0.35),
+      hex: ((Math.round(base[0]) << 16) | (Math.round(base[1]) << 8) | Math.round(base[2])),
+    };
+  }
   function earthHeatStyle(heat, state) {
     const h = Math.max(0, Math.min(1, Number(heat) || 0));
+    const r = earthHeatRamp(h);
+    const rgba = (c, a) => 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + a.toFixed(3) + ')';
+    const k = 0.85 + 0.15 * h; // strong at every heat: the bloom IS the data
     return {
       stops: [
-        [0, 'rgba(255,52,24,' + (0.66 + h * 0.28).toFixed(3) + ')'],
-        [0.22, 'rgba(255,119,20,' + (0.60 + h * 0.22).toFixed(3) + ')'],
-        [0.52, 'rgba(255,222,45,' + (0.28 + h * 0.20).toFixed(3) + ')'],
-        [0.78, 'rgba(34,221,255,0.18)'],
-        [1, 'rgba(16,177,255,0)'],
+        [0, rgba(r.core, 1.0 * k)],
+        [0.18, rgba(r.base, 0.94 * k)],
+        [0.45, rgba(r.base, 0.55 * k)],
+        [0.74, rgba(r.edge, 0.20 * k)],
+        [1, rgba(r.edge, 0)],
       ],
-      ringCount: h > 0.72 ? 3 : (h > 0.36 ? 2 : 1),
-      ringColor: state === 2 ? '#FFFFFF' : (state === 1 ? '#9CF4FF' : 'rgba(255,221,84,0.58)'),
+      // Rings encode STATE, not intensity: hairline contour at rest, plus a
+      // second (dashed on hover, solid on select) halo when engaged.
+      ringCount: state ? 2 : 1,
+      ringDash: state === 1,
+      ringColor: state === 2 ? '#FFFFFF' : (state === 1 ? '#9CF4FF' : 'rgba(255,240,205,0.34)'),
+      coreAlpha: 0.55 + 0.4 * h,
     };
   }
 
@@ -1725,7 +1753,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (sa !== sb) return sa - sb;
         return earthHeatOf(a) - earthHeatOf(b);
       });
-      ctx.globalCompositeOperation = 'lighter';
+      // Normal blending (not additive): the Natural-Earth land is already bright
+      // cyan, and 'lighter' washed amber/coral into near-white there.
+      ctx.globalCompositeOperation = 'source-over';
       for (const loc of sorted) {
         const u = earthZoneUV(loc.lat, loc.lon, EARTH_MAP_W, EARTH_MAP_H);
         const r = earthZonePixelRadius(loc);
@@ -1744,14 +1774,26 @@ window.WebXRVR = window.WebXRVR || (function () {
           ctx.beginPath();
           ctx.arc(0, 0, r.y, 0, Math.PI * 2);
           ctx.fill();
-          // State rings (upstream counts/widths/colors).
+          // State rings on top of the bloom (normal blending reads crisper).
+          ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = style.ringColor;
-          ctx.lineWidth = state ? 4 : 2;
-          for (let ring = 0; ring < style.ringCount; ring++) {
+          ctx.lineWidth = state ? 3.5 : 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r.y * 0.5, 0, Math.PI * 2);
+          ctx.stroke();
+          if (style.ringCount > 1) {
+            if (style.ringDash && ctx.setLineDash) ctx.setLineDash([r.y * 0.09, r.y * 0.07]);
+            ctx.lineWidth = state === 2 ? 4.5 : 2.5;
             ctx.beginPath();
-            ctx.arc(0, 0, r.y * (0.48 + ring * 0.18), 0, Math.PI * 2);
+            ctx.arc(0, 0, r.y * 0.74, 0, Math.PI * 2);
             ctx.stroke();
+            if (style.ringDash && ctx.setLineDash) ctx.setLineDash([]);
           }
+          // Pin-point core: marks the exact centroid under the bloom.
+          ctx.fillStyle = 'rgba(255,255,255,' + style.coreAlpha.toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.max(3, r.y * 0.05), 0, Math.PI * 2);
+          ctx.fill();
           ctx.restore();
         }
       }
@@ -1803,7 +1845,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       ranked.forEach((loc, i) => {
         const u = earthRenderedDirection(loc.lat, loc.lon);
         const heat = earthHeatOf(loc);
-        const color = heat > 0.66 ? 0xff5a3c : (heat > 0.33 ? 0xffb43c : 0x55e7ff);
+        const color = earthHeatRamp(heat).hex;
         const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(
           pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color }));
         mesh.frustumCulled = false;
@@ -1832,15 +1874,23 @@ window.WebXRVR = window.WebXRVR || (function () {
       canvas.width = 128;
       canvas.height = 128;
       const ctx = canvas.getContext('2d');
-      const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+      // Matches the canvas bloom: hot core, smooth gaussian-ish falloff, a
+      // hairline contour at 0.5r and a tiny centroid dot (tinted per sprite).
+      const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
       g.addColorStop(0, 'rgba(255,255,255,1)');
-      g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
-      g.addColorStop(0.72, 'rgba(255,255,255,0.16)');
+      g.addColorStop(0.16, 'rgba(255,255,255,0.80)');
+      g.addColorStop(0.40, 'rgba(255,255,255,0.36)');
+      g.addColorStop(0.70, 'rgba(255,255,255,0.10)');
       g.addColorStop(1, 'rgba(255,255,255,0)');
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(64, 64, 62, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(64, 64, 31, 0, Math.PI * 2);
+      ctx.stroke();
       earthHeatTexture = applyLinearSampling(new THREE.CanvasTexture(canvas));
       try { if (THREE.SRGBColorSpace !== undefined) earthHeatTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     } catch (e) {
@@ -1875,7 +1925,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const angular = earthZoneAngularRadius(loc);
         const halfExtent = EARTH_RADIUS * Math.sin(angular);
         const dir = earthRenderedDirection(loc.lat, loc.lon);
-        const color = heat > 0.66 ? 0xff5a3c : (heat > 0.33 ? 0xffb43c : 0x55e7ff);
+        const color = earthHeatRamp(heat).hex;
         const material = new THREE.MeshBasicMaterial({
           map: texture,
           color,
@@ -1893,14 +1943,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         mesh.scale.setScalar(halfExtent);
         mesh.renderOrder = 3;
         earthHeatGroup.add(mesh);
-        earthHeatSprites.push({ mesh, material, location: loc, baseScale: halfExtent });
+        earthHeatSprites.push({ mesh, material, location: loc, baseScale: halfExtent, hex: color });
       });
     } catch (e) {}
   }
 
     // Per-frame fade/state for the heat overlay (visible only over tiles).
+  let earthHeatClock = 0;
   function updateEarthHeatSprites(fade) {
     if (!earthHeatGroup) return;
+    earthHeatClock = (typeof performance !== 'undefined' && performance.now) ? performance.now() : earthHeatClock + 16;
     const visible = fade > 0.02 && earthHeatSprites.length > 0;
     earthHeatGroup.visible = visible;
     if (!visible) return;
@@ -1944,6 +1996,14 @@ window.WebXRVR = window.WebXRVR || (function () {
           if (Number.isFinite(halfExtent) && halfExtent > 0) sprite.baseScale = halfExtent;
         }
       } catch (e) {}
+      // Living bloom: a slow breath on colour intensity (not opacity/scale, which
+      // are asserted contracts); hotter zones breathe a touch faster/deeper.
+      if (sprite.material.color && sprite.material.color.setHex) {
+        const heatK = earthHeatOf(sprite.location);
+        const breath = reducedMotion ? 1 : 0.9 + 0.1 * Math.sin(earthHeatClock * (0.0016 + heatK * 0.0014) + i * 1.7);
+        sprite.material.color.setHex(sprite.hex || 0xffffff);
+        if (sprite.material.color.multiplyScalar) sprite.material.color.multiplyScalar(breath * (boost > 1 ? 1.2 : 1));
+      }
       sprite.material.opacity = Math.min(1, fade * 0.85) * (boost > 1 ? 1.15 : 1);
       sprite.mesh.scale.setScalar(sprite.baseScale * boost / kComp);
     }
@@ -3017,6 +3077,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // facing point when no focus is set yet. Zooming back out to 1 releases
   // the focus so the globe returns to free spin at the docked position.
   function adjustEarthZoom(factor, pointerRay) {
+    earthTouchInput();
+    earthFling = { yaw: 0, pitch: 0 };
     const prev = earthZoomTarget;
     const next = clampEarthZoom(prev * (Number(factor) || 1));
     if (next === prev) return earthZoomTarget;
@@ -3221,6 +3283,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // preview → accept → location feed. A clean tap on open globe zooms one
   // step toward the tapped point. Drag releases never reach here.
   function handleEarthTap(zoneIndex, hit) {
+    earthTouchInput();
     const idx = Number(zoneIndex);
     if (idx >= 0 && idx < earthLocations.length) {
       const loc = earthLocations[idx];
@@ -4216,18 +4279,93 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // ─── Globe motion policy ────────────────────────────────────────────────
+  // The globe is a *showpiece when idle, a stable instrument when used*:
+  //   • It drifts (3°/s) only at orbit scale with nothing to read or touch.
+  //   • It STANDS STILL while: dragging, coasting from a fling, hovering or
+  //     selecting a zone (the target must not slip from under the laser while
+  //     its preview loads/plays), a preview is open, a zoom is animating or
+  //     zoomed in, or for EARTH_SPIN_IDLE_MS after any input (drag, stick,
+  //     wheel, tap, zoom) so the user's last pose is respected.
+  //   • Drift eases in over EARTH_SPIN_RAMP_MS and out over ~0.25 s — it never
+  //     starts or stops with a jolt.
+  //   • A release while moving flings the globe: velocity (sampled over the
+  //     last ~120 ms) decays with a 0.55 s time constant.
+  const EARTH_SPIN_RATE = Math.PI / 60;   // rad/s, idle drift
+  const EARTH_SPIN_IDLE_MS = 4500;
+  const EARTH_SPIN_RAMP_MS = 2000;
+  const EARTH_FLING_TAU_MS = 550;
+  const EARTH_FLING_MIN = 0.03;           // rad/s below which a fling is dropped
+  const EARTH_FLING_MAX = 4.5;            // rad/s cap
+  let earthSpinRate = 0;                  // eased drift rate (rad/s)
+  let earthFrameClock = 0;                // last frame timestamp (ms)
+  let earthLastInputAt = -1e9;            // frame-clock stamp of the last input
+  let earthFling = { yaw: 0, pitch: 0 };  // coasting velocity (rad/s)
+  let earthDragTrail = [];                // [{t, yaw, pitch}] recent drag poses
+  let earthStickLast = -1;                // last stick-rotate timestamp (ms)
+
+  function earthTouchInput() {
+    earthLastInputAt = earthFrameClock;
+    // The last input also cancels any stale fling from a previous gesture.
+  }
+  function earthNowMs() {
+    try { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : earthFrameClock; }
+    catch (e) { return earthFrameClock; }
+  }
+  // Why the globe is (not) allowed to drift right now. Exposed for tests/HUD.
+  function earthSpinHoldReason() {
+    if (reducedMotion) return 'reduced-motion';
+    if (earthDragging) return 'dragging';
+    if (earthZoomAnim) return 'zoom-animating';
+    if (earthZoomTarget > 1.02 || earthZoom > 1.02) return 'zoomed';
+    if (Math.abs(earthFling.yaw) > EARTH_FLING_MIN || Math.abs(earthFling.pitch) > EARTH_FLING_MIN) return 'coasting';
+    if (earthHoveredIndex >= 0) return 'hovering-zone';
+    if (earthSelectedIndex >= 0) return 'zone-selected';
+    if (earthPreviewLocationIndex >= 0 || earthPreviewItems.length > 0) return 'preview-open';
+    if (earthFrameClock - earthLastInputAt < EARTH_SPIN_IDLE_MS) return 'recent-input';
+    return '';
+  }
+
   function advanceEarthSpin(time) {
-    // Idle spin only at globe scale with no gesture running: spinning a
-    // zoomed-in map would rip the viewed region away from the user.
-    if (reducedMotion || earthDragging || earthZoomAnim || earthZoomTarget > 1.02) return 0;
+    if (reducedMotion) { earthSpinRate = 0; earthFling = { yaw: 0, pitch: 0 }; return 0; }
+    earthFrameClock = Number.isFinite(Number(time)) ? Number(time) : earthFrameClock;
     if (earthLastFrameTime < 0) {
       earthLastFrameTime = time;
       return 0;
     }
     const dt = Math.max(0, Math.min(100, time - earthLastFrameTime));
     earthLastFrameTime = time;
-    const delta = (Math.PI / 60) * (dt / 1000);
-    rotateEarth(delta, 0);
+    const sec = dt / 1000;
+    // 1) Fling coast (orbit scale only — a zoomed map must never slide away).
+    let delta = 0;
+    const flinging = !earthDragging && (earthFling.yaw !== 0 || earthFling.pitch !== 0);
+    if (flinging) {
+      if (earthZoomTarget > 1.02 || earthZoomAnim) {
+        earthFling = { yaw: 0, pitch: 0 };
+      } else {
+        const decay = Math.exp(-dt / EARTH_FLING_TAU_MS);
+        earthFling = { yaw: earthFling.yaw * decay, pitch: earthFling.pitch * decay };
+        if (Math.abs(earthFling.yaw) < EARTH_FLING_MIN && Math.abs(earthFling.pitch) < EARTH_FLING_MIN) {
+          earthFling = { yaw: 0, pitch: 0 };
+        } else {
+          rotateEarth(earthFling.yaw * sec, earthFling.pitch * sec);
+          delta += earthFling.yaw * sec;
+        }
+      }
+    }
+    // 2) Idle drift with eased start/stop.
+    const hold = earthSpinHoldReason();
+    if (hold) {
+      earthSpinRate *= Math.exp(-dt / 250);
+      if (earthSpinRate < 1e-5) earthSpinRate = 0;
+    } else {
+      earthSpinRate = Math.min(EARTH_SPIN_RATE, earthSpinRate + EARTH_SPIN_RATE * (dt / EARTH_SPIN_RAMP_MS));
+    }
+    if (earthSpinRate > 0 && !earthDragging) {
+      const d = earthSpinRate * sec;
+      rotateEarth(d, 0);
+      delta += d;
+    }
     return delta;
   }
 
@@ -5758,6 +5896,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       // (the laser helper only reports globe-vs-dock for its visuals).
       // Change-guarded inside: holding still never refetches.
       updateEarthHoverFromRay(activeRayOrigin, activeRayDir);
+      if (earthDragging && earthXrGrabActive && sceneMode === 'earth') {
+        const grabHit = hitTestEarth(activeRayOrigin, activeRayDir);
+        if (grabHit.hit && grabHit.local) updateEarthDrag(grabHit, earthDragSource);
+      }
     } catch (e) {}
   }
 
@@ -6066,7 +6208,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           const ray = previewRayAt(event.clientX, event.clientY);
           adjustEarthZoom(Math.exp(-(event.deltaY || 0) * 0.0016), ray);
         }
-        if (event.deltaX) rotateEarth((event.deltaX || 0) * 0.0025, 0);
+        if (event.deltaX) { earthTouchInput(); earthFling = { yaw: 0, pitch: 0 }; rotateEarth((event.deltaX || 0) * 0.0025 / Math.max(1, Math.sqrt(earthZoom)), 0); }
         return;
       }
       // Wheel over the comments panel scrolls the list (upstream parity).
@@ -6254,6 +6396,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthYaw = 0;
     earthPitch = 0;
     earthLastFrameTime = -1;
+    earthSpinRate = 0;
+    earthFling = { yaw: 0, pitch: 0 };
     applyEarthRotation();
     if (orbitControls && typeof orbitControls.reset === 'function') {
       try { orbitControls.reset(); } catch (e) {}
@@ -6694,6 +6838,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!hitObj || !hitObj.hit) return false;
     earthDragging = true;
     earthDragSource = source || 'pointer';
+    earthFling = { yaw: 0, pitch: 0 }; // a new grab catches a coasting globe
+    earthDragTrail = [];
+    earthTouchInput();
     const initialVec = hitObj.local || (hitObj.x !== undefined ? hitObj : (hitObj.point || null));
     earthDragLastDir = initialVec ? { ...initialVec } : null;
     earthDragStartDir = initialVec ? { ...initialVec } : null;
@@ -6795,16 +6942,29 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       // Rotation engages on hold (>=280 ms) or deliberate flick; until
       // then the globe stays frozen so clicks can't fight zone selection.
+      const globeGrab = !(earthFocus && earthZoom > 1.0001);
       if (!earthDragEngaged) {
-        let heldLong = false;
-        try {
-          heldLong = (typeof performance !== 'undefined' && performance.now)
-            ? (performance.now() - earthPressTime) >= EARTH_DRAG_HOLD_MS
-            : false;
-        } catch (e) {}
-        if (heldLong || chord > EARTH_DRAG_CHORD) earthDragEngaged = true;
+        if (globeGrab) {
+          // Orbit scale: a drag begins the instant the pointer leaves the tap
+          // tolerance (no 280 ms hold). The grab point is re-anchored HERE, so
+          // engaging never jumps the globe by the dead-zone distance.
+          if (chord > EARTH_TAP_CHORD) {
+            earthDragEngaged = true;
+            earthGrabGeo = { ...normalized };
+            earthDragTrail = [];
+          }
+        } else {
+          let heldLong = false;
+          try {
+            heldLong = (typeof performance !== 'undefined' && performance.now)
+              ? (performance.now() - earthPressTime) >= EARTH_DRAG_HOLD_MS
+              : false;
+          } catch (e) {}
+          if (heldLong || chord > EARTH_DRAG_CHORD) earthDragEngaged = true;
+        }
       }
       if (earthDragEngaged) {
+        earthTouchInput();
         // Single-axis lock decided once per drag from cumulative travel.
         if (!earthDragAxis) {
           const ax = Math.abs(earthDragCumX);
@@ -6837,6 +6997,20 @@ window.WebXRVR = window.WebXRVR || (function () {
           applyEarthZoom();
         } else if (earthFocus && earthZoom >= EARTH_TOPDOWN_MIN_ZOOM && updateEarthTopdownPan(normalized)) {
           // compatibility fallback for a top-down-only missed grab
+        } else if (globeGrab && earthGrabGeo) {
+          // TRUE GRAB at orbit scale: solve yaw/pitch so the geographic point
+          // that was grabbed sits exactly under the pointer ray's hit. North
+          // stays up (no roll); pitch is clamped at ±1.2 like the sticks.
+          const ll = unitToLatLon(earthGrabGeo);
+          const cursorWorld = vNorm(qRotate(earthQuat, normalized));
+          const solved = solveEarthFocusRotation(ll.lat, ll.lon, cursorWorld, 1.2);
+          if (solved && Number.isFinite(solved.yaw) && Number.isFinite(solved.pitch)) {
+            earthYaw = solved.yaw;
+            earthPitch = solved.pitch;
+            applyEarthRotation();
+            earthDragTrail.push({ t: earthNowMs(), yaw: earthYaw, pitch: earthPitch });
+            if (earthDragTrail.length > 12) earthDragTrail.shift();
+          }
         } else if (earthDragAxis === 'pitch') {
           rotateEarth(0, dy * EARTH_PITCH_SENSITIVITY);
         } else if (earthDragAxis === 'yaw') {
@@ -6866,6 +7040,25 @@ window.WebXRVR = window.WebXRVR || (function () {
       else if (earthPressZone >= 0) selected = earthPressZone;
       else if (earthHoveredIndex >= 0) selected = earthHoveredIndex;
     }
+    // Fling: velocity over the last ~120 ms of pose samples, only if the
+    // pointer was still moving at release (a deliberate stop does not coast).
+    earthFling = { yaw: 0, pitch: 0 };
+    try {
+      const now = earthNowMs();
+      const recent = earthDragTrail.filter((p) => now - p.t <= 120);
+      if (earthDragMoved && earthDragEngaged && recent.length >= 2 && now - recent[recent.length - 1].t <= 60 &&
+          !(earthFocus && earthZoom > 1.0001)) {
+        const a = recent[0], b = recent[recent.length - 1];
+        const span = Math.max(16, b.t - a.t) / 1000;
+        let dYaw = b.yaw - a.yaw;
+        dYaw = ((dYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        const clampV = (v) => Math.max(-EARTH_FLING_MAX, Math.min(EARTH_FLING_MAX, v));
+        const vy = clampV(dYaw / span), vp = clampV((b.pitch - a.pitch) / span);
+        if (Math.hypot(vy, vp) > EARTH_FLING_MIN * 4) earthFling = { yaw: vy, pitch: vp };
+      }
+    } catch (e) { earthFling = { yaw: 0, pitch: 0 }; }
+    earthDragTrail = [];
+    earthTouchInput();
     earthDragging = false;
     earthDragSource = null;
     earthDragLastDir = null;
@@ -7010,11 +7203,21 @@ window.WebXRVR = window.WebXRVR || (function () {
           continue;
         }
         if (Math.abs(thumbX) > 0.12 || Math.abs(thumbY) > 0.12) {
-          // Single-axis like drags: follow the dominant stick direction.
-          const yawMag = Math.abs(thumbX) > 0.12 ? Math.abs(thumbX) : -1;
-          const pitchMag = Math.abs(thumbY) > 0.12 ? Math.abs(thumbY) : -1;
-          if (yawMag >= pitchMag) rotateEarth(thumbX * 0.035, 0);
-          else rotateEarth(0, -thumbY * 0.024);
+          // Frame-rate independent, dead-zone-remapped, eased stick rotation:
+          // both axes at once, gentle near centre, slower the deeper you zoom.
+          const shape = (v) => {
+            const m = (Math.abs(v) - 0.12) / 0.88;
+            return m <= 0 ? 0 : Math.sign(v) * Math.pow(Math.min(1, m), 1.6);
+          };
+          const nowT = earthNowMs();
+          const sdt = earthStickLast > 0 ? Math.max(0.004, Math.min(0.1, (nowT - earthStickLast) / 1000)) : 1 / 72;
+          earthStickLast = nowT;
+          const slow = 1 / Math.max(1, Math.sqrt(Math.max(1, earthZoom)));
+          earthTouchInput();
+          earthFling = { yaw: 0, pitch: 0 };
+          rotateEarth(shape(thumbX) * 1.7 * sdt * slow, -shape(thumbY) * 1.2 * sdt * slow);
+        } else {
+          earthStickLast = -1;
         }
       }
     } else {
@@ -7206,7 +7409,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
-  function onVRSelectStart() {
+  // XR trigger on the globe = GRAB (same drag machine as the mouse): hold the
+  // trigger and sweep the controller to turn the planet under the laser; a
+  // clean press-release is still a tap (zoom / select), dispatched by
+  // endEarthDrag. Dock buttons and the compass keep their own click path.
+  let earthXrGrabActive = false; // WebXR order: selectstart → select → selectend
+  function earthCompassUnderRay(origin, direction) {
+    try {
+      if (!earthCompassMesh || !earthCompassMesh.visible || !raycaster) return false;
+      raycaster.set(origin, direction);
+      return raycaster.intersectObject(earthCompassMesh, false).length > 0;
+    } catch (e) { return false; }
+  }
+  function onVRSelectStart(ev) {
+    if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
+        !earthCompassUnderRay(activeRayOrigin, activeRayDir)) {
+      const hit = hitTestEarth(activeRayOrigin, activeRayDir);
+      if (hit.hit) {
+        const hand = (ev && ev.data && ev.data.handedness) || activeRayHandedness || 'xr';
+        if (beginEarthDrag(hand, hit)) earthXrGrabActive = true;
+      }
+    }
     pressedButton = hoveredButton;
     // Begin a trigger-drag scroll when pressing on the panel list/scrollbar.
     if (commentsPanelVisible && cPanelHover &&
@@ -7217,7 +7440,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     emitPreviewState();
   }
 
-  function onVRSelectEnd() {
+  function onVRSelectEnd(ev) {
+    if (earthXrGrabActive) {
+      earthXrGrabActive = false;
+      let hit = null;
+      try { if (activeRayOrigin && activeRayDir) hit = hitTestEarth(activeRayOrigin, activeRayDir); } catch (e) {}
+      const hand = (ev && ev.data && ev.data.handedness) || activeRayHandedness || 'xr';
+      if (earthDragging) {
+        const acted = endEarthDrag(hand, hit && hit.hit ? hit : null);
+        if (acted) pulseInput(ev && ev.data);
+      }
+    }
     pressedButton = -1;
     cPanelDrag = false;
     cPanelDragMoved = false;
@@ -7246,7 +7479,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (raycaster && scene && rayOrigin && rayDir) {
       raycaster.set(rayOrigin, rayDir);
 
-      if (sceneMode === 'earth' && earthMesh) {
+      if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
+        // The trigger gesture was owned by the grab machine (tap or drag) and
+        // already dispatched — never double-fire zoom/select.
+        handled = true;
+      } else if (sceneMode === 'earth' && earthMesh) {
         // Step 6.3: compass badge click → true-north pose (400 ms slerp is
         // inside resetEarthNorthUp's instant pose; the eased feel comes from
         // the zoom-frame smoothing, not a second animation machine).
@@ -8281,6 +8518,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthZoneUV,
       classifyEarthPixel,
       earthHeatStyle,
+      earthHeatRamp,
       computeDockPose,
       controlIndexFromUV,
       // v8.3 lock/scale/distance/panel seams.
@@ -8815,6 +9053,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       earthTierIndex,
       earthMapBearing,
+      earthSpinHoldReason,
+      earthTouchInput,
+      earthFlingState() { return { yaw: earthFling.yaw, pitch: earthFling.pitch, spinRate: earthSpinRate }; },
       earthViewBasis,
       earthDockStatus,
       earthPreviewPosterImages,
@@ -8870,6 +9111,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthPitch = Math.max(-1.2, Math.min(1.2, Number(pitch) || 0));
         if (center) earthCenter = { x: center.x, y: center.y, z: center.z };
         earthLastFrameTime = -1;
+        earthSpinRate = 0;
+        earthFling = { yaw: 0, pitch: 0 };
+        earthLastInputAt = -1e9;
         applyEarthRotation();
       },
       getEarthState,
