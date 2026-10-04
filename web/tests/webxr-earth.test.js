@@ -4878,11 +4878,8 @@ test('WORLD › location panel: RESET ROTATION button keeps the location and tur
   renderer.stopPreview();
 });
 
-test('RESET ROTATION with nothing featured re-uprights the current zoomed view; bare globe has no target', () => {
+test('RESET ROTATION with nothing featured re-uprights the current zoomed view', () => {
   const { renderer, api } = topdownHarness();
-  api.setEarthZoom(1);
-  assert.equal(api.earthResetTarget(), null);
-  assert.equal(api.executeEarthPanelAction('face'), false);
   api.zoomEarthTo(48.85, 2.35, 64);
   api.advanceEarthZoom(100000);
   api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(48.85, 2.35) });
@@ -4907,4 +4904,34 @@ test('reel card keeps a single OPEN LOCATION FEED button (reset lives on the loc
   assert.equal(ui.resolveEarthPreviewHit(256, 300), '');
   const b = ui.EARTH_PREVIEW_BUTTONS[0];
   assert.ok(b.x >= 0 && b.x + b.w <= ui.EARTH_PREVIEW_W && b.y + b.h <= ui.EARTH_PREVIEW_H);
+});
+
+test('RESET ROTATION on the EARTH ACTIVITY globe stands it upright, keeping the facing side', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(1);
+  api.setEarthPose(1.1, 0.9);
+  assert.equal(api.earthResetTarget().kind, 'globe');
+  assert.equal(api.executeEarthPanelAction('face'), true);
+  const t0 = api.earthNowMs();
+  for (let t = t0 + 16; t <= t0 + 900; t += 16) api.advanceEarthZoom(t);
+  const e = api.earthEulerYXZ(api.getEarthState().quaternion);
+  closeTo(e.pitch, 0, 1e-6);
+  closeTo(e.roll, 0, 1e-6);
+  closeTo(e.yaw, 1.1, 1e-6);
+  assert.equal(api.getEarthState().zoomTarget, 1);
+  // A twisted pose handed back from a polar zoom also loses its roll.
+  api.zoomEarthTo(84, -40, 64);
+  api.advanceEarthZoom(100000);
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: api.locationToUnit(84, -40) });
+  api.updateEarthDrag({ local: api.locationToUnit(86, -10) });
+  for (let i = 0; i < 8; i++) api.updateEarthDrag({ local: api.locationToUnit(85, 20 + i * 4) });
+  api.endEarthDrag('mouse', null);
+  api.resetEarthZoom();
+  api.advanceEarthZoom(api.earthNowMs() + 100000);
+  assert.equal(api.executeEarthPanelAction('face'), true);
+  const t1 = api.earthNowMs();
+  for (let t = t1 + 16; t <= t1 + 1500; t += 16) api.advanceEarthZoom(t);
+  const e2 = api.earthEulerYXZ(api.getEarthState().quaternion);
+  assert.ok(Math.abs(e2.pitch) < 1e-6 && Math.abs(e2.roll) < 1e-4, `upright (${e2.pitch}, ${e2.roll})`);
+  renderer.stopPreview();
 });

@@ -7627,16 +7627,33 @@ window.WebXRVR = window.WebXRVR || (function () {
     setEarthLabelHoverRegion(panelHit && panelHit.panel === 'label' ? panelHit.region : '');
   }
   // What RESET ROTATION turns to: the location the panel is showing
-  // (hovered, else selected), else the current zoomed focus. Null on the
-  // bare globe with nothing featured.
+  // (hovered, else selected), else the current zoomed focus, else — the
+  // EARTH ACTIVITY globe — the whole globe stood upright.
   function earthResetTarget() {
     const idx = earthHoveredIndex >= 0 ? earthHoveredIndex : earthSelectedIndex;
     const row = (idx >= 0 && idx < earthLocations.length) ? earthLocations[idx] : null;
     if (row && Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lon))) {
-      return { lat: Number(row.lat), lon: Number(row.lon), name: row.name || '' };
+      return { kind: 'location', lat: Number(row.lat), lon: Number(row.lon), name: row.name || '' };
     }
-    if (earthFocus && earthZoomTarget > 1.0001) return { lat: earthFocus.lat, lon: earthFocus.lon, name: '' };
-    return null;
+    if (earthFocus && earthZoomTarget > 1.0001) return { kind: 'focus', lat: earthFocus.lat, lon: earthFocus.lon, name: '' };
+    return { kind: 'globe' };
+  }
+  // EARTH ACTIVITY reset: north up, equator level, no twist. Yaw is kept so
+  // the side of the planet facing the viewer stays the same.
+  function resetEarthGlobeUpright() {
+    earthFaceAnim = null;
+    releaseEarthPose();
+    earthTouchInput();
+    earthFling = { yaw: 0, pitch: 0 };
+    const t0 = earthNowMs();
+    earthZoomAnim = {
+      t0, dur: EARTH_FACE_ANIM_MS,
+      fromZoom: earthZoom, toZoom: earthZoomTarget,
+      fromYaw: earthYaw || 0, toYaw: earthYaw || 0,
+      fromPitch: earthPitch || 0, toPitch: 0,
+    };
+    if (reducedMotion) advanceEarthZoom(t0 + EARTH_FACE_ANIM_MS);
+    return true;
   }
   // Panel buttons: 'face' (location panel) → RESET ROTATION; 'feed' (reel
   // card) → OPEN FEED, same routing as the dock (clusters drill in first).
@@ -7644,7 +7661,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (sceneMode !== 'earth') return false;
     if (action === 'face') {
       const target = earthResetTarget();
-      if (!target || !faceEarthLocation(target.lat, target.lon)) return false;
+      if (!target) return false;
+      if (target.kind === 'globe') resetEarthGlobeUpright();
+      else if (!faceEarthLocation(target.lat, target.lon)) return false;
       showNotification('RESET ROTATION');
       return true;
     }

@@ -738,7 +738,9 @@ hardware:** feel of crossing a pole, and the visible seam where Mercator tiles s
   crossed bare globe on the way restores the zone left < 1.2 s ago. The reel card keeps one
   `TRIGGER ▸ OPEN LOCATION FEED` button, now clickable.
 - **Target** (`earthResetTarget`): the location the panel shows (hovered, else selected); with none
-  featured but zoomed, the current focus (re-uprights the view); bare globe → button disabled.
+  featured but zoomed, the current focus (re-uprights the view); on the EARTH ACTIVITY globe
+  (nothing featured, not zoomed) it stands the globe upright — pitch and roll to 0, yaw kept so the
+  facing side stays (`resetEarthGlobeUpright`).
 - **RESET ROTATION** (`faceEarthLocation`): zoomed, the pose slerps to `earthUprightQuat` (the NORTH UP
   basis for the target) while the focus follows whatever sits on the interpolated view normal, so the
   spot glides to the centre over 650 ms and ends perpendicular, north-up, zoom unchanged (NORTH UP flag
