@@ -20,7 +20,8 @@
   const OVERLAY_W = 1024;
   const OVERLAY_H = 1024;
   const EARTH_PREVIEW_W = 512;
-  const EARTH_PREVIEW_H = 512;
+  // 512×716 matches the 0.5 m × 0.7 m billboard (1:1.4) so text is never stretched.
+  const EARTH_PREVIEW_H = 716;
 
   // Panel layout metrics
   const CP_HEADER_H = 48;
@@ -172,6 +173,164 @@
     ctx.drawImage(video, sx, sy, sw, sh, x, y, width, height);
   }
 
+  // ─── Earth Atlas dock ──────────────────────────────────────────────
+  // In Earth mode the reels transport (inert behind the globe) is replaced by a
+  // purpose-built panel: realm / scale / map-status readouts, a zoom meter and
+  // the four map actions, all in the holo-cyan language of the globe itself.
+  // Hit rectangles are unchanged (CTRL_BUTTONS); only the drawing differs.
+  const EARTH_ICON = {
+    earth_open_feed(ctx, cx, cy, c) {
+      ctx.strokeStyle = c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = c; ctx.beginPath();
+      ctx.moveTo(cx - 3, cy - 4); ctx.lineTo(cx + 5, cy); ctx.lineTo(cx - 3, cy + 4); ctx.closePath(); ctx.fill();
+    },
+    earth_zoom_out(ctx, cx, cy, c) {
+      ctx.strokeStyle = c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx - 1, cy - 1, 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - 4, cy - 1); ctx.lineTo(cx + 2, cy - 1);
+      ctx.moveTo(cx + 4, cy + 4); ctx.lineTo(cx + 9, cy + 9); ctx.stroke();
+    },
+    earth_reset(ctx, cx, cy, c) {
+      ctx.strokeStyle = c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(cx, cy, 3.5, 8, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.stroke();
+    },
+    earth_north_up(ctx, cx, cy, c) {
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx + 6, cy + 7); ctx.lineTo(cx, cy + 3); ctx.lineTo(cx - 6, cy + 7); ctx.closePath(); ctx.fill();
+    },
+  };
+
+  function renderEarthDock(ctx, options) {
+    const {
+      hoveredButton = -1,
+      pressedButton = -1,
+      earth = {},
+    } = options;
+    const hasGrad = canGradient(ctx);
+    const accent = earth.tierColor || '#39D7FF';
+    previewRoundRect(ctx, 0, 0, CONTROLS_W, CONTROLS_H, 10);
+    if (hasGrad) {
+      const g = ctx.createLinearGradient(0, 0, 0, CONTROLS_H);
+      g.addColorStop(0, 'rgba(10,24,42,0.97)');
+      g.addColorStop(1, 'rgba(4,9,20,0.98)');
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = 'rgba(8,16,30,0.97)';
+    ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Header
+    ctx.fillStyle = accent;
+    ctx.fillRect(24, 14, 4, 20);
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('EARTH ATLAS', 36, 24);
+    ctx.fillStyle = '#9FB6CE';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 168, 24);
+
+    // Mode toggle (active) + exit
+    const eIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
+    const eb = CTRL_BUTTONS[eIdx];
+    previewRoundRect(ctx, eb.x, eb.y, eb.w, eb.h, 8);
+    ctx.fillStyle = hoveredButton === eIdx ? '#0E5A80' : '#093D5B';
+    ctx.fill();
+    ctx.strokeStyle = '#55E7FF';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('EARTH MAP', eb.x + eb.w / 2, eb.y + eb.h / 2);
+    const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
+    previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, 6);
+    ctx.fillStyle = '#101214';
+    ctx.fill();
+    ctx.strokeStyle = '#FF3B1F';
+    ctx.stroke();
+    ctx.fillStyle = '#FF3B1F';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('✕', xb.x + xb.w / 2, xb.y + xb.h / 2);
+
+    // Readout tiles
+    const tiles = [
+      { k: 'REALM', v: earth.tier || 'ORBIT', c: accent },
+      { k: 'SCALE', v: earth.scaleCaption || '—', c: '#E8F6FF' },
+      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? '#FF7A59' : '#7CF0C9' },
+    ];
+    const tw = 236, th = 96, ty = 70;
+    for (let i = 0; i < tiles.length; i++) {
+      const tx = 24 + i * (tw + 22);
+      previewRoundRect(ctx, tx, ty, tw, th, 14);
+      ctx.fillStyle = 'rgba(57,215,255,0.07)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(110,160,200,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#7F93AD';
+      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(tiles[i].k, tx + 20, ty + 24);
+      ctx.fillStyle = tiles[i].c;
+      ctx.font = '800 30px Archivo, sans-serif';
+      ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 20, ty + 62);
+    }
+    // Zoom meter
+    const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
+    ctx.fillStyle = '#7F93AD';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('ZOOM', 24, 190);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#E8F6FF';
+    ctx.fillText(Math.round(zp * 100) + '%', 776, 190);
+    previewRoundRect(ctx, 80, 184, 640, 12, 6);
+    ctx.fillStyle = 'rgba(160,190,220,0.16)';
+    ctx.fill();
+    if (zp > 0.005) {
+      previewRoundRect(ctx, 80, 184, Math.max(12, 640 * zp), 12, 6);
+      if (hasGrad) {
+        const zg = ctx.createLinearGradient(80, 0, 720, 0);
+        zg.addColorStop(0, '#39D7FF');
+        zg.addColorStop(0.4, '#4FE3C1');
+        zg.addColorStop(0.7, '#FFC857');
+        zg.addColorStop(1, '#FF8A5B');
+        ctx.fillStyle = zg;
+      } else ctx.fillStyle = accent;
+      ctx.fill();
+    }
+
+    // Action row
+    for (let i = 0; i < CTRL_BUTTONS.length; i++) {
+      const btn = CTRL_BUTTONS[i];
+      if (!isEarthAction(btn.action)) continue;
+      const hover = hoveredButton === i, pressed = pressedButton === i;
+      const feed = btn.action === 'earth_open_feed';
+      const live = feed ? !!earth.canOpenFeed : true;
+      const tone = feed ? '#FFB11F' : '#55E7FF';
+      const lit = btn.action === 'earth_north_up' && earth.northUp;
+      previewRoundRect(ctx, btn.x, btn.y, btn.w, btn.h, 10);
+      ctx.fillStyle = pressed ? 'rgba(4,10,20,0.95)' : (hover || lit ? 'rgba(57,215,255,0.20)' : 'rgba(57,215,255,0.07)');
+      if (feed && live) ctx.fillStyle = hover ? 'rgba(255,177,31,0.30)' : 'rgba(255,177,31,0.14)';
+      ctx.fill();
+      ctx.strokeStyle = live ? tone : 'rgba(110,140,170,0.4)';
+      ctx.lineWidth = hover || lit ? 2.5 : 1.5;
+      ctx.stroke();
+      const ink = live ? (hover ? '#FFFFFF' : tone) : '#6F8BA6';
+      EARTH_ICON[btn.action](ctx, btn.x + 26, btn.y + btn.h / 2, ink);
+      ctx.fillStyle = ink;
+      ctx.font = 'bold 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+    }
+  }
+
   // ─── Render Controls Dock ──────────────────────────────────────────
   function renderControlsCanvas(ctx, options = {}) {
     if (!ctx) return;
@@ -203,6 +362,11 @@
     const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
 
     ctx.clearRect(0, 0, CONTROLS_W, CONTROLS_H);
+
+    if (sceneMode === 'earth') {
+      renderEarthDock(ctx, options);
+      return;
+    }
 
     // 1. Dark Glass Container Background
     ctx.fillStyle = 'rgba(12, 14, 17, 0.96)';
@@ -1130,6 +1294,86 @@
   }
 
   // ─── Render Earth Preview ───────────────────────────────────────────
+  // Holo Atlas card: LIVE header, heat meter, hero poster (or live video when a
+  // decoder frame exists), 3-up thumbnail strip with the active item lit, and
+  // an explicit call-to-action. Every state (loading / idle / error) is drawn
+  // deliberately; nothing ever shows as an empty frame.
+  // Real canvases return a gradient object; stub contexts (tests, exotic
+  // runtimes) may not — every gradient fill degrades to a flat colour.
+  function canGradient(ctx) {
+    try {
+      const g = ctx.createLinearGradient && ctx.createLinearGradient(0, 0, 1, 1);
+      return !!(g && typeof g.addColorStop === 'function');
+    } catch (e) { return false; }
+  }
+
+  function previewRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+
+  function posterReady(img) {
+    return !!(img && img.complete !== false && (Number(img.naturalWidth) || Number(img.width)) > 0);
+  }
+
+  function drawCoverRounded(ctx, source, x, y, w, h, r) {
+    ctx.save();
+    previewRoundRect(ctx, x, y, w, h, r);
+    ctx.clip();
+    try {
+      if (source && source.videoWidth !== undefined) {
+        drawVideoCover(ctx, source, x, y, w, h);
+      } else {
+        const sw0 = Number(source.naturalWidth) || Number(source.width) || w;
+        const sh0 = Number(source.naturalHeight) || Number(source.height) || h;
+        const ratio = sw0 / Math.max(1, sh0), target = w / Math.max(1, h);
+        let sx = 0, sy = 0, sw = sw0, sh = sh0;
+        if (ratio > target) { sw = sh0 * target; sx = (sw0 - sw) / 2; }
+        else { sh = sw0 / target; sy = (sh0 - sh) / 2; }
+        ctx.drawImage(source, sx, sy, sw, sh, x, y, w, h);
+      }
+    } catch (e) {}
+    ctx.restore();
+  }
+
+  function drawPreviewPlaceholder(ctx, x, y, w, h, r, phase, label) {
+    ctx.save();
+    previewRoundRect(ctx, x, y, w, h, r);
+    ctx.clip();
+    if (canGradient(ctx)) {
+      const g = ctx.createLinearGradient(x, y, x + w, y + h);
+      g.addColorStop(0, '#0B1A2E');
+      g.addColorStop(1, '#050B16');
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = '#071221';
+    ctx.fillRect(x, y, w, h);
+    if (phase >= 0 && canGradient(ctx)) {
+      // Loading shimmer: a soft diagonal band sweeping across the slot.
+      const bx = x - w * 0.4 + ((phase % 1400) / 1400) * w * 1.8;
+      const sg = ctx.createLinearGradient(bx, y, bx + w * 0.35, y + h * 0.2);
+      sg.addColorStop(0, 'rgba(85,231,255,0)');
+      sg.addColorStop(0.5, 'rgba(85,231,255,0.16)');
+      sg.addColorStop(1, 'rgba(85,231,255,0)');
+      ctx.fillStyle = sg;
+      ctx.fillRect(x, y, w, h);
+    } else {
+      ctx.strokeStyle = 'rgba(85,231,255,0.10)';
+      ctx.lineWidth = 1;
+      for (let yy = y + 8; yy < y + h; yy += 14) {
+        ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke();
+      }
+    }
+    ctx.restore();
+    if (label) {
+      ctx.fillStyle = '#6F8BA6';
+      ctx.font = '700 15px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + w / 2, y + h / 2);
+    }
+  }
+
   function renderEarthPreviewCanvas(ctx, options = {}) {
     if (!ctx) return;
     const {
@@ -1138,54 +1382,160 @@
       earthPreviewStatus = 'idle',
       earthPreviewItems = [],
       earthPreviewIndex = 0,
+      earthPreviewPosters = [],
       reducedMotion = false,
+      time = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0,
     } = options;
     if (!location) return;
+    const W = EARTH_PREVIEW_W, H = EARTH_PREVIEW_H;
+    const hasGrad = canGradient(ctx);
+    const items = Array.isArray(earthPreviewItems) ? earthPreviewItems.slice(0, 3) : [];
+    const active = items.length ? Math.max(0, Math.min(items.length - 1, Number(earthPreviewIndex) || 0)) : 0;
+    const heat = Math.max(0, Math.min(1, Number(location.heat) || 0));
 
-    ctx.clearRect(0, 0, EARTH_PREVIEW_W, EARTH_PREVIEW_H);
-    ctx.fillStyle = 'rgba(8, 30, 48, 0.98)';
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(2, 2, EARTH_PREVIEW_W - 4, EARTH_PREVIEW_H - 4, 24);
-    else ctx.rect(2, 2, EARTH_PREVIEW_W - 4, EARTH_PREVIEW_H - 4);
+    ctx.clearRect(0, 0, W, H);
+    // Glass body
+    previewRoundRect(ctx, 4, 4, W - 8, H - 8, 30);
+    if (hasGrad) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, 'rgba(14,32,54,0.97)');
+      g.addColorStop(1, 'rgba(4,10,22,0.98)');
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = 'rgba(8,30,48,0.98)';
     ctx.fill();
-    ctx.strokeStyle = '#55E7FF';
-    ctx.lineWidth = 4;
+    if (hasGrad) {
+      const rg = ctx.createLinearGradient(0, 0, W, H);
+      rg.addColorStop(0, '#55E7FF');
+      rg.addColorStop(0.5, 'rgba(70,110,150,0.8)');
+      rg.addColorStop(1, '#FFB11F');
+      ctx.strokeStyle = rg;
+    } else ctx.strokeStyle = '#55E7FF';
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    ctx.fillStyle = '#BFF5FF';
-    ctx.font = '800 17px "JetBrains Mono", monospace';
+    // Header: LIVE chip + window label
+    const pulse = reducedMotion ? 1 : 0.55 + 0.45 * Math.sin(time * 0.006);
+    previewRoundRect(ctx, 28, 26, 78, 28, 14);
+    ctx.fillStyle = 'rgba(255,70,50,0.16)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,110,90,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,90,70,' + pulse.toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(46, 40, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#FFD9D2';
+    ctx.font = '800 14px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('LIVE LOCATION PREVIEW', 26, 26);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 28px sans-serif';
-    ctx.fillText(truncatePreviewText(location.name || location.slug, 29), 26, 57);
-    ctx.fillStyle = '#8EDCEC';
-    ctx.font = '800 13px "JetBrains Mono", monospace';
-    ctx.fillText(
-      Math.round((Number(location.heat) || 0) * 100) + '% HEAT · ' +
-        (Number(location.active_reel_count) || 0) + ' ACTIVE',
-      26,
-      82
-    );
+    ctx.fillText('LIVE', 58, 41);
+    ctx.fillStyle = '#7FA2BA';
+    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('TRENDING · 7 DAYS', W - 30, 41);
 
-    const mediaX = 24, mediaY = 104, mediaW = EARTH_PREVIEW_W - 48, mediaH = 380;
-    ctx.fillStyle = '#020713';
-    ctx.fillRect(mediaX, mediaY, mediaW, mediaH);
-    if (previewVideo && previewVideo.readyState >= 2) {
-      try {
-        drawVideoCover(ctx, previewVideo, mediaX, mediaY, mediaW, mediaH);
-      } catch (e) {}
-    } else {
-      ctx.strokeStyle = 'rgba(85, 231, 255, 0.18)';
-      ctx.lineWidth = 2;
-      for (let y = mediaY + 12; y < mediaY + mediaH; y += 24) {
-        ctx.beginPath();
-        ctx.moveTo(mediaX, y);
-        ctx.lineTo(mediaX + mediaW, y);
-        ctx.stroke();
-      }
+    // Location name + heat meter
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '800 34px Archivo, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(truncatePreviewText(location.name || location.slug, 22), 28, 84);
+    ctx.fillStyle = '#9FD8E6';
+    ctx.font = '700 14px "JetBrains Mono", monospace';
+    ctx.fillText(Math.round(heat * 100) + '% HEAT  ·  ' + (Number(location.active_reel_count) || 0) + ' ACTIVE', 28, 118);
+    previewRoundRect(ctx, 300, 112, 184, 10, 5);
+    ctx.fillStyle = 'rgba(160,190,220,0.16)';
+    ctx.fill();
+    if (heat > 0.01) {
+      previewRoundRect(ctx, 300, 112, Math.max(10, 184 * heat), 10, 5);
+      if (hasGrad) {
+        const hg = ctx.createLinearGradient(300, 0, 484, 0);
+        hg.addColorStop(0, '#39D7FF');
+        hg.addColorStop(0.55, '#FFC857');
+        hg.addColorStop(1, '#FF5A3C');
+        ctx.fillStyle = hg;
+      } else ctx.fillStyle = '#FFC857';
+      ctx.fill();
     }
+
+    // Hero media
+    const hx = 28, hy = 144, hw = W - 56, hh = 388;
+    const videoLive = previewVideo && previewVideo.readyState >= 2;
+    const poster = posterReady(earthPreviewPosters[active]) ? earthPreviewPosters[active] : null;
+    if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, 22);
+    else if (poster) drawCoverRounded(ctx, poster, hx, hy, hw, hh, 22);
+    else {
+      const loading = earthPreviewStatus === 'loading' || (items.length > 0 && earthPreviewStatus === 'ready');
+      drawPreviewPlaceholder(ctx, hx, hy, hw, hh, 22, loading && !reducedMotion ? time : -1,
+        earthPreviewStatus === 'error' ? 'PREVIEW UNAVAILABLE'
+          : (earthPreviewStatus === 'idle' && !items.length ? 'NO RECENT REELS YET' : ''));
+    }
+    if (items.length) {
+      ctx.save();
+      previewRoundRect(ctx, hx, hy, hw, hh, 22);
+      ctx.clip();
+      if (hasGrad) {
+        const vg = ctx.createLinearGradient(0, hy + hh * 0.5, 0, hy + hh);
+        vg.addColorStop(0, 'rgba(2,6,14,0)');
+        vg.addColorStop(1, 'rgba(2,6,14,0.88)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(hx, hy + hh * 0.5, hw, hh * 0.5);
+      }
+      ctx.restore();
+      // Play medallion
+      const cx = hx + hw / 2, cy = hy + hh / 2 - 14;
+      ctx.fillStyle = 'rgba(4,14,28,0.55)';
+      ctx.beginPath(); ctx.arc(cx, cy, 36, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(190,245,255,0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = '#EFFCFF';
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
+      ctx.closePath(); ctx.fill();
+      // Item caption + counter
+      const cur = items[active] || {};
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '800 22px Archivo, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(truncatePreviewText(cur.title || cur.filename || 'Untitled reel', 30), hx + 20, hy + hh - 32);
+      previewRoundRect(ctx, hx + hw - 78, hy + 16, 62, 28, 14);
+      ctx.fillStyle = 'rgba(4,14,28,0.72)';
+      ctx.fill();
+      ctx.fillStyle = '#BFF5FF';
+      ctx.font = '800 14px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 31);
+    }
+
+    // Thumbnail strip: three slots, active one lit
+    const tw = Math.floor((hw - 24) / 3), th = 104, ty = hy + hh + 16;
+    for (let i = 0; i < 3; i++) {
+      const tx = hx + i * (tw + 12);
+      const img = posterReady(earthPreviewPosters[i]) ? earthPreviewPosters[i] : null;
+      if (i < items.length && img) drawCoverRounded(ctx, img, tx, ty, tw, th, 16);
+      else drawPreviewPlaceholder(ctx, tx, ty, tw, th, 16, -1, '');
+      if (i < items.length && i !== active) {
+        previewRoundRect(ctx, tx, ty, tw, th, 16);
+        ctx.fillStyle = 'rgba(3,9,20,0.55)';
+        ctx.fill();
+      }
+      previewRoundRect(ctx, tx, ty, tw, th, 16);
+      ctx.strokeStyle = (i === active && items.length) ? '#55E7FF' : 'rgba(110,140,170,0.35)';
+      ctx.lineWidth = (i === active && items.length) ? 3.5 : 1.5;
+      ctx.stroke();
+    }
+
+    // Call to action
+    const cyy = ty + th + 18;
+    previewRoundRect(ctx, hx, cyy, hw, 40, 20);
+    ctx.fillStyle = items.length ? 'rgba(255,177,31,0.14)' : 'rgba(110,140,170,0.10)';
+    ctx.fill();
+    ctx.strokeStyle = items.length ? 'rgba(255,177,31,0.85)' : 'rgba(110,140,170,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = items.length ? '#FFD58A' : '#6F8BA6';
+    ctx.font = '800 14px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('TRIGGER  ▸  OPEN LOCATION FEED', W / 2, cyy + 21);
   }
 
   // ─── Public Module API ──────────────────────────────────────────────

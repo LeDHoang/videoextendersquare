@@ -341,19 +341,105 @@ window.WebXRVR = window.WebXRVR || (function () {
     try {
       const S = Math.max(1, earthZoom);
       if (!(S > 1.02) || !earthFocus) return 0;
-      return earthVisibleRadius(S) * 0.24;
+      // Frames the comfortable tabletop patch (≈0.8 m), not the multi-metre planet.
+      return Math.min(0.8, earthVisibleRadius(S) * 0.24);
     } catch (e) { return 0; }
   }
   function earthBezelVisible() {
     return !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && earthBezelMesh);
   }
+  // Map bearing as the viewer sees it: the clockwise angle (rad) from screen-up
+  // to geographic north, measured in the plane perpendicular to the line of
+  // sight (head → focus anchor). 0 means the map is north-up on screen — which is
+  // exactly what NORTH UP restores, whatever the table tilt does to the world-
+  // space north vector. North at the focus is unchanged by the radial warp, so
+  // the focus tangent rotated by the live pose is exact.
+  function earthViewBasis() {
+    const head = getHeadPosition();
+    const anchor = earthZoomAnchor || earthLiveCenter();
+    let fx = anchor.x - head.x, fy = anchor.y - head.y, fz = anchor.z - head.z;
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    let rx = -fz, rz = fx;
+    const rl = Math.hypot(rx, rz);
+    if (rl < 1e-6) { rx = 1; rz = 0; } else { rx /= rl; rz /= rl; }
+    // up = right × forward
+    const ux = 0 * fz - rz * fy, uy = rz * fx - rx * fz, uz = rx * fy - 0 * fx;
+    return { f: { x: fx, y: fy, z: fz }, r: { x: rx, y: 0, z: rz }, u: { x: ux, y: uy, z: uz } };
+  }
+  function earthMapBearing() {
+    try {
+      if (!earthFocus) return 0;
+      const b = earthGeographicBasis(earthFocus.lat, earthFocus.lon);
+      const n = qRotate(earthQuat, b.north);
+      const v = earthViewBasis();
+      const nr = n.x * v.r.x + n.y * v.r.y + n.z * v.r.z;
+      const nu = n.x * v.u.x + n.y * v.u.y + n.z * v.u.z;
+      if (Math.hypot(nr, nu) < 1e-6) return 0;
+      return Math.atan2(nr, nu);
+    } catch (e) { return 0; }
+  }
+  const EARTH_BEZEL_INNER = 0.86, EARTH_BEZEL_OUTER = 1.08;
+  // Surveyor's bezel: static 1024² texture (ticks every 5°, majors every 15°,
+  // N/E/S/W lettering, soft inner glow). Drawn once; orientation is applied by
+  // rotating the mesh to true north each frame.
+  function drawEarthBezelTexture(canvas) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+    const C = 512, rOuter = 512, rIn = rOuter * EARTH_BEZEL_INNER / EARTH_BEZEL_OUTER;
+    ctx.clearRect(0, 0, 1024, 1024);
+    if (ctx.createRadialGradient) {
+      const g = ctx.createRadialGradient(C, C, rIn - 6, C, C, rOuter);
+      g.addColorStop(0, 'rgba(57,215,255,0.00)');
+      g.addColorStop(0.18, 'rgba(57,215,255,0.20)');
+      g.addColorStop(1, 'rgba(10,40,70,0.0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(C, C, rOuter, 0, Math.PI * 2); ctx.arc(C, C, rIn - 6, 0, Math.PI * 2, true); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(120,235,255,0.95)';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(C, C, rIn, 0, Math.PI * 2); ctx.stroke();
+    for (let deg = 0; deg < 360; deg += 5) {
+      const major = deg % 15 === 0, card = deg % 90 === 0;
+      const len = card ? 56 : (major ? 34 : 18);
+      const a = (deg - 90) * Math.PI / 180;
+      ctx.strokeStyle = card ? '#FFC857' : (major ? 'rgba(190,245,255,0.95)' : 'rgba(120,205,235,0.65)');
+      ctx.lineWidth = card ? 7 : (major ? 4 : 2.5);
+      ctx.beginPath();
+      ctx.moveTo(C + Math.cos(a) * (rIn + 6), C + Math.sin(a) * (rIn + 6));
+      ctx.lineTo(C + Math.cos(a) * (rIn + 6 + len), C + Math.sin(a) * (rIn + 6 + len));
+      ctx.stroke();
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const letters = [['N', 0, '#FFC857', 54], ['E', 90, '#DFF8FF', 40], ['S', 180, '#DFF8FF', 40], ['W', 270, '#DFF8FF', 40]];
+    for (const [ch, deg, color, size] of letters) {
+      const a = (deg - 90) * Math.PI / 180;
+      const r = rIn + 102;
+      ctx.fillStyle = color;
+      ctx.font = '800 ' + size + 'px Archivo, sans-serif';
+      ctx.fillText(ch, C + Math.cos(a) * r, C + Math.sin(a) * r);
+    }
+    return true;
+  }
   function ensureEarthBezel() {
     if (!THREE || !scene || !earthGroup) return;
     try {
-      if (!earthBezelMesh) {
-        const geo = new THREE.RingGeometry(0.96, 1.0, 96);
+      if (!earthBezelMesh && typeof document !== 'undefined') {
+        const bezelCanvas = document.createElement('canvas');
+        bezelCanvas.width = 1024;
+        bezelCanvas.height = 1024;
+        let bezelTexture = null;
+        try {
+          if (drawEarthBezelTexture(bezelCanvas)) {
+            bezelTexture = new THREE.CanvasTexture(bezelCanvas);
+            try { if (THREE.SRGBColorSpace !== undefined) bezelTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+            applyLinearSampling(bezelTexture);
+          }
+        } catch (e) { bezelTexture = null; }
+        const geo = new THREE.RingGeometry(EARTH_BEZEL_INNER, EARTH_BEZEL_OUTER, 128);
         const mat = new THREE.MeshBasicMaterial({
-          color: 0x39d7ff, transparent: true, opacity: 0.55,
+          color: bezelTexture ? 0xffffff : 0x39d7ff, map: bezelTexture, transparent: true, opacity: 0.9,
           side: THREE.DoubleSide, depthWrite: false,
         });
         earthBezelMesh = new THREE.Mesh(geo, mat);
@@ -364,8 +450,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       if (!earthCompassCanvas && typeof document !== 'undefined') {
         earthCompassCanvas = document.createElement('canvas');
-        earthCompassCanvas.width = 128;
-        earthCompassCanvas.height = 64;
+        earthCompassCanvas.width = 256;
+        earthCompassCanvas.height = 256;
         earthCompassCtx = earthCompassCanvas.getContext('2d');
       }
       if (!earthCompassTexture && earthCompassCanvas && THREE) {
@@ -377,7 +463,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           map: earthCompassTexture, transparent: true,
           depthWrite: false, depthTest: false, side: THREE.DoubleSide,
         });
-        earthCompassMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.11), mat);
+        earthCompassMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), mat);
         earthCompassMesh.renderOrder = 101;
         earthCompassMesh.frustumCulled = false;
         earthCompassMesh.visible = false;
@@ -386,21 +472,62 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     } catch (e) {}
   }
-  function refreshEarthCompassCanvas() {
+  // Live compass dial: the card rotates so N always points at true north
+  // relative to the viewer; ring glows cyan while the map is locked north-up.
+  let earthCompassKey = '';
+  function refreshEarthCompassCanvas(relBearing) {
     if (!earthCompassCtx || !earthCompassCanvas) return;
     try {
+      const rel = Number.isFinite(relBearing) ? relBearing : 0;
+      const deg = Math.round(rel * 180 / Math.PI);
+      const aligned = Math.abs(((deg % 360) + 540) % 360 - 180) < 3;
+      const key = deg + '|' + (earthNorthUp ? 1 : 0) + '|' + (aligned ? 1 : 0);
+      if (key === earthCompassKey) return;
+      earthCompassKey = key;
       const ctx = earthCompassCtx;
-      ctx.clearRect(0, 0, 128, 64);
-      ctx.fillStyle = 'rgba(7,12,24,0.92)';
-      ctx.fillRect(0, 0, 128, 64);
-      ctx.strokeStyle = earthNorthUp ? '#39d7ff' : '#3A506B';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(2, 2, 124, 60);
+      ctx.setTransform && ctx.setTransform(2, 0, 0, 2, 0, 0);
+      ctx.clearRect(0, 0, 128, 128);
+      const accent = (earthNorthUp || aligned) ? '#39D7FF' : '#FFB11F';
+      if (ctx.createRadialGradient) {
+        const g = ctx.createRadialGradient(64, 56, 6, 64, 64, 62);
+        g.addColorStop(0, 'rgba(22,44,72,0.96)');
+        g.addColorStop(1, 'rgba(5,10,22,0.97)');
+        ctx.fillStyle = g;
+      } else ctx.fillStyle = 'rgba(7,12,24,0.95)';
+      ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(64, 64);
+      ctx.rotate(rel);
+      for (let d = 0; d < 360; d += 15) {
+        const a = d * Math.PI / 180;
+        const long = d % 90 === 0;
+        ctx.strokeStyle = long ? '#DFF8FF' : 'rgba(140,190,220,0.6)';
+        ctx.lineWidth = long ? 2 : 1;
+        ctx.beginPath();
+        ctx.moveTo(Math.sin(a) * 52, -Math.cos(a) * 52);
+        ctx.lineTo(Math.sin(a) * (long ? 44 : 47), -Math.cos(a) * (long ? 44 : 47));
+        ctx.stroke();
+      }
+      // North needle (amber) + south tail
+      ctx.fillStyle = '#FFB11F';
+      ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(8, 0); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(190,215,235,0.55)';
+      ctx.beginPath(); ctx.moveTo(0, 36); ctx.lineTo(7, 0); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#F7FAFC';
-      ctx.font = '700 34px Archivo, sans-serif';
+      ctx.font = '800 15px Archivo, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('N ▲', 64, 34);
+      ctx.fillText('N', 0, -30 + 0);
+      ctx.restore();
+      ctx.fillStyle = '#0B1626';
+      ctx.beginPath(); ctx.arc(64, 64, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
+      // Fixed lubber marker (view-up) at the top edge
+      ctx.fillStyle = accent;
+      ctx.beginPath(); ctx.moveTo(64, 2); ctx.lineTo(71, 12); ctx.lineTo(57, 12); ctx.closePath(); ctx.fill();
       if (earthCompassTexture) earthCompassTexture.needsUpdate = true;
     } catch (e) {}
   }
@@ -414,19 +541,45 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthBezelMesh.visible = show;
       earthCompassMesh.visible = show;
       if (!show) return;
-      // Bezel: flat ring on the table plane around the focus anchor, facing up.
+      const rel = earthMapBearing();
+      // Bezel lies IN the map's tangent plane at the focus (a convex planet falls
+      // away beneath it, so it reads as a floating surveyor's plate): local
+      // +X = east, +Y = true north (texture top), +Z = outward normal.
       const anchor = earthZoomAnchor || { x: center.x, y: center.y, z: center.z };
-      earthBezelMesh.position.set(anchor.x, anchor.y, anchor.z);
+      const basis = earthGeographicBasis(earthFocus.lat, earthFocus.lon);
+      const nW = qRotate(earthQuat, basis.normal);
+      const northW = qRotate(earthQuat, basis.north);
+      const eastW = vNorm(vCross(northW, nW));
+      const lift = 0.012;
+      earthBezelMesh.position.set(anchor.x + nW.x * lift, anchor.y + nW.y * lift, anchor.z + nW.z * lift);
       earthBezelMesh.scale.setScalar(Math.max(0.05, radius));
-      earthBezelMesh.lookAt(anchor.x, anchor.y + 1, anchor.z);
+      try {
+        const bq = qFromBasis(eastW, northW, nW);
+        earthBezelMesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+      } catch (e2) { earthBezelMesh.lookAt(anchor.x + nW.x, anchor.y + nW.y, anchor.z + nW.z); }
       if (earthBezelMesh.material) {
-        earthBezelMesh.material.opacity = reducedMotion ? 0.55 : 0.45 + 0.1 * Math.sin(Date.now() * 0.002);
+        earthBezelMesh.material.opacity = reducedMotion ? 0.9 : 0.8 + 0.1 * Math.sin(Date.now() * 0.002);
       }
-      // Compass badge: floats just above the bezel rim, faces the head.
-      refreshEarthCompassCanvas();
-      earthCompassMesh.position.set(anchor.x, anchor.y + 0.14, anchor.z - radius - 0.1);
+      // Compass dial rides beside the breadcrumb (camera-plane left of it), so
+      // it is always on-screen, never overlaps the label, and stays pointable.
+      refreshEarthCompassCanvas(rel);
+      const lbl = earthLabelMesh && earthLabelMesh.visible ? earthLabelMesh : null;
+      const ls = lbl ? (lbl.scale.x || 1) : 1;
+      if (lbl) {
+        let fx = head.x - lbl.position.x, fy = head.y - lbl.position.y, fz = head.z - lbl.position.z;
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        fx /= fl; fz /= fl;
+        let rx = fz, rz = -fx;
+        const rl = Math.hypot(rx, rz) || 1;
+        rx /= rl; rz /= rl;
+        const off = 0.43 * ls + 0.14 * ls;
+        earthCompassMesh.position.set(lbl.position.x - rx * off, lbl.position.y, lbl.position.z - rz * off);
+      } else {
+        earthCompassMesh.position.set(anchor.x, anchor.y + 0.16, anchor.z - radius - 0.1);
+      }
+      earthCompassMesh.scale.setScalar(ls);
       earthCompassMesh.lookAt(head.x, head.y, head.z);
-      earthCompassMesh.userData.worldRadius = 0.16;
+      earthCompassMesh.userData.worldRadius = 0.14 * ls;
     } catch (e) {}
   }
 
@@ -1311,12 +1464,33 @@ window.WebXRVR = window.WebXRVR || (function () {
       shader.uniforms.uTileTintStrength = uniforms.uTileTintStrength;
       shader.uniforms.uTileHasLabels = uniforms.uTileHasLabels;
       shader.uniforms.uTileLabelsAlpha = uniforms.uTileLabelsAlpha;
-      shader.fragmentShader = ('uniform sampler2D labelsMap; uniform vec3 uTileTintLift; uniform vec3 uTileTintHue; uniform float uTileTintDepth; uniform float uTileTintStrength; uniform float uTileHasLabels; uniform float uTileLabelsAlpha;\n' +
+      shader.uniforms.uTileNight = uniforms.uTileNight || { value: 0 };
+      shader.fragmentShader = ('uniform sampler2D labelsMap; uniform vec3 uTileTintLift; uniform vec3 uTileTintHue; uniform float uTileTintDepth; uniform float uTileTintStrength; uniform float uTileHasLabels; uniform float uTileLabelsAlpha; uniform float uTileNight;\n' +
         shader.fragmentShader.replace('#include <map_fragment>', `
           #include <map_fragment>
           {
             vec3 tileLifted = 1.0 - (1.0 - diffuseColor.rgb) * (1.0 - uTileTintLift);
             vec3 tileTinted = tileLifted * uTileTintHue * uTileTintDepth;
+            if (uTileNight > 0.5) {
+              // Night chart grade for LIGHT rasters (keyless OSM): classify the
+              // paper-white source into land / sea / park, then re-light only the
+              // ink (labels, casings, coast) and warm road fills as holo-cyan
+              // line work. Result: deep navy chart with glowing, legible detail
+              // instead of a muddy multiplied wash. Palette is sRGB -> linear.
+              vec3 nSrc = diffuseColor.rgb;
+              float nLum = dot(nSrc, vec3(0.2126, 0.7152, 0.0722));
+              float nWater = smoothstep(0.015, 0.09, nSrc.b - nSrc.r);
+              float nGreen = smoothstep(0.012, 0.06, nSrc.g - max(nSrc.r, nSrc.b)) * (1.0 - nWater);
+              float nWarm = smoothstep(0.05, 0.26, nSrc.r - nSrc.b) * (1.0 - nGreen);
+              float nSat = max(nSrc.r, max(nSrc.g, nSrc.b)) - min(nSrc.r, min(nSrc.g, nSrc.b));
+              float nInk = clamp((0.80 - nLum) * 2.6, 0.0, 1.0) * (1.0 - nWater * 0.85) * (1.0 - nGreen) * (1.0 - smoothstep(0.07, 0.24, nSat));
+              vec3 nLand = pow(vec3(0.070, 0.150, 0.235), vec3(2.2));
+              vec3 nSea = pow(vec3(0.016, 0.052, 0.110), vec3(2.2));
+              vec3 nPark = pow(vec3(0.050, 0.190, 0.205), vec3(2.2));
+              vec3 nBase = mix(mix(nLand, nSea, nWater), nPark, nGreen);
+              vec3 nGlow = mix(pow(vec3(0.20, 0.56, 0.78), vec3(2.2)), pow(vec3(0.84, 0.97, 1.0), vec3(2.2)), smoothstep(0.5, 1.0, nInk));
+              tileTinted = mix(nBase, nGlow, clamp(max(nInk, nWarm * 0.75), 0.0, 1.0) * 0.92);
+            }
             vec3 tileRgb = mix(diffuseColor.rgb, tileTinted, uTileTintStrength);
             if (uTileHasLabels > 0.5) {
               vec4 tileLabels = texture2D(labelsMap, vMapUv);
@@ -1604,7 +1778,24 @@ window.WebXRVR = window.WebXRVR || (function () {
           try { child.material.dispose(); } catch (e) {}
         }
       }
-      if (!pinSharedGeo) pinSharedGeo = new THREE.ConeGeometry(0.022, 0.07, 10);
+      if (!pinSharedGeo) {
+        // Map-marker teardrop: tip touches the surface, round head faces out.
+        // Falls back to the legacy cone where LatheGeometry is unavailable.
+        try {
+          const prof = [[0, -0.035], [0.0035, -0.029], [0.010, -0.013], [0.0165, 0.006], [0.0195, 0.021],
+            [0.0160, 0.032], [0.0085, 0.0375], [0, 0.0385]].map((p) => new THREE.Vector2(p[0], p[1]));
+          pinSharedGeo = new THREE.LatheGeometry(prof, 16);
+          const pos = pinSharedGeo.attributes.position;
+          const col = new Float32Array(pos.count * 3);
+          for (let i = 0; i < pos.count; i++) {
+            const t = Math.max(0, Math.min(1, (pos.getY(i) + 0.035) / 0.0735));
+            const v = 0.55 + 0.75 * t * t; // darker tip → blown-out highlight on the head
+            col[i * 3] = v; col[i * 3 + 1] = v; col[i * 3 + 2] = v;
+          }
+          pinSharedGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+          pinSharedGeo.userData = { vertexColored: true };
+        } catch (e) { pinSharedGeo = new THREE.ConeGeometry(0.022, 0.07, 10); }
+      }
       const up = new THREE.Vector3(0, 1, 0);
       const ranked = earthLocations.slice()
         .sort((a, b) => earthHeatOf(b) - earthHeatOf(a))
@@ -1613,13 +1804,14 @@ window.WebXRVR = window.WebXRVR || (function () {
         const u = earthRenderedDirection(loc.lat, loc.lon);
         const heat = earthHeatOf(loc);
         const color = heat > 0.66 ? 0xff5a3c : (heat > 0.33 ? 0xffb43c : 0x55e7ff);
-        const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial({ color }));
+        const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(
+          pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color }));
         mesh.frustumCulled = false;
         const dir = new THREE.Vector3(u.x, u.y, u.z);
         mesh.position.copy(dir).multiplyScalar(EARTH_RADIUS + 0.035);
         mesh.quaternion.setFromUnitVectors(up, dir.clone().normalize());
         mesh.userData.pulsePhase = i * 0.7;
-        mesh.userData.baseScale = 0.8 + heat * 0.9;
+        mesh.userData.baseScale = 0.62 + heat * 0.62;
         mesh.userData.location = loc;
         mesh.scale.setScalar(mesh.userData.baseScale);
         earthPinsGroup.add(mesh);
@@ -1706,11 +1898,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
-  if (earthAtmosphereMesh && earthAtmosphereMesh.material) {
-      try {
-        earthAtmosphereMesh.material.opacity = sceneMode === 'earth' ? 0.12 + tableTilt(earthZoom) * 0.08 : 0;
-      } catch (e) {}
-    }
     // Per-frame fade/state for the heat overlay (visible only over tiles).
   function updateEarthHeatSprites(fade) {
     if (!earthHeatGroup) return;
@@ -1762,6 +1949,156 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // ─── Holo Atlas label HUD ───────────────────────────────────────────
+  // Zoom realms (v3 plan §2): tier name + accent colour follow the heat ramp
+  // (cyan → teal → amber → coral) so the breadcrumb reads as depth at a glance.
+  const EARTH_TIERS = [
+    { name: 'ORBIT', max: 3, color: '#39D7FF' },
+    { name: 'REGION', max: 24, color: '#4FE3C1' },
+    { name: 'CITY', max: 200, color: '#FFC857' },
+    { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+  ];
+  function earthTierIndex(scale) {
+    const s = Math.max(1, Number(scale) || 1);
+    for (let i = 0; i < EARTH_TIERS.length; i++) if (s < EARTH_TIERS[i].max) return i;
+    return EARTH_TIERS.length - 1;
+  }
+  function earthLabelHint(featured, zoomed) {
+    if (featured) return earthZoom >= EARTH_ZOOM_CITY ? 'TRIGGER  ▸  OPEN FEED' : 'TRIGGER  ▸  ZOOM IN';
+    return zoomed ? '' : 'DRAG TO ROTATE  ·  TRIGGER TO ZOOM';
+  }
+  function earthRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+  function drawEarthLabelPanel(ctx, o) {
+    // Logical space is 640×112; the canvas is 2× for crisp text in-headset.
+    if (ctx.setTransform) { const k = (earthLabelCanvas && earthLabelCanvas.width / 640) || 1; ctx.setTransform(k, 0, 0, k, 0, 0); }
+    ctx.clearRect(0, 0, 640, 112);
+    const tierIdx = earthTierIndex(o.scale);
+    const tier = o.offline ? { name: 'OFFLINE', color: '#FF7A59' } : EARTH_TIERS[tierIdx];
+    const accent = o.featured ? '#FFB11F' : tier.color;
+    const hasGrad = !!ctx.createLinearGradient;
+    // Glass body
+    earthRoundRect(ctx, 2, 2, 636, 108, 20);
+    if (hasGrad) {
+      const g = ctx.createLinearGradient(0, 2, 0, 110);
+      g.addColorStop(0, 'rgba(18,34,58,0.95)');
+      g.addColorStop(1, 'rgba(5,10,22,0.97)');
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = 'rgba(8,16,30,0.96)';
+    ctx.fill();
+    // Rim: accent on the left fading to slate on the right
+    if (hasGrad) {
+      const rg = ctx.createLinearGradient(0, 0, 640, 0);
+      rg.addColorStop(0, accent);
+      rg.addColorStop(0.55, 'rgba(70,100,134,0.75)');
+      rg.addColorStop(1, 'rgba(58,80,107,0.55)');
+      ctx.strokeStyle = rg;
+    } else ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // Top specular line
+    if (hasGrad) {
+      const sg = ctx.createLinearGradient(20, 0, 620, 0);
+      sg.addColorStop(0, 'rgba(255,255,255,0)');
+      sg.addColorStop(0.5, 'rgba(190,235,255,0.35)');
+      sg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.strokeStyle = sg;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(24, 4.5); ctx.lineTo(616, 4.5); ctx.stroke();
+    }
+    ctx.textBaseline = 'middle';
+    // Tier chip
+    ctx.font = '700 12px "JetBrains Mono", monospace';
+    const chipText = tier.name;
+    const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
+    earthRoundRect(ctx, 18, 14, chipW, 26, 13);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fill();
+    ctx.strokeStyle = tier.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = tier.color;
+    ctx.beginPath(); ctx.arc(32, 27, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.textAlign = 'left';
+    ctx.fillText(chipText, 44, 28);
+    // Title (the zoom share is carried by the gauge, not repeated in text)
+    const titleText = o.zoomed ? String(o.title).replace(/\s·\s\d+%$/, '') : String(o.title);
+    const titleX = 18 + chipW + 14;
+    const titleMax = 540 - titleX;
+    let fs = 25;
+    ctx.fillStyle = '#F7FAFC';
+    ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+    while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
+      fs -= 1;
+      ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+    }
+    ctx.fillText(titleText, titleX, 28);
+    // Zoom gauge (right)
+    const gx = 592, gy = 34, gr = 20;
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(160,190,220,0.18)';
+    ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
+    const frac = Math.max(0, Math.min(1, (Number(o.zoomPct) || 0) / 100));
+    if (frac > 0.005) {
+      ctx.strokeStyle = tier.color;
+      ctx.beginPath(); ctx.arc(gx, gy, gr, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.fillStyle = '#F7FAFC';
+    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
+    // Detail line
+    ctx.textAlign = 'left';
+    ctx.fillStyle = o.offline ? '#FFB199' : '#B8C6D9';
+    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.fillText(o.detail, 20, 61);
+    // Divider
+    ctx.fillStyle = 'rgba(140,175,210,0.16)';
+    ctx.fillRect(20, 76, 600, 1);
+    // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
+    if (o.zoomed) {
+      ctx.fillStyle = '#7F93AD';
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('SCALE', 20, 94);
+      drawEarthScaleBar(ctx, o.scaleBar);
+    } else if (o.hint) {
+      ctx.fillStyle = '#7F93AD';
+      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.hint, 20, 94);
+    }
+    if (o.zoomed && o.hint) {
+      ctx.fillStyle = accent;
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(o.hint, 620, 62);
+    }
+    // Realm ladder: four segments, filled through the current realm
+    const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
+    for (let i = 0; i < EARTH_TIERS.length; i++) {
+      const sx = ladderX + i * (segW + segGap);
+      ctx.fillStyle = 'rgba(160,190,220,0.16)';
+      earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
+      if (i <= tierIdx) {
+        ctx.fillStyle = EARTH_TIERS[i].color;
+        earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
+      }
+    }
+    // Tile streaming progress hairline along the bottom edge
+    if (o.streaming >= 0) {
+      ctx.fillStyle = 'rgba(160,190,220,0.16)';
+      ctx.fillRect(22, 104, 596, 2);
+      ctx.fillStyle = tier.color;
+      ctx.fillRect(22, 104, Math.max(4, 596 * o.streaming), 2);
+    }
+  }
+
   function refreshEarthLabel() {
     if (!earthLabelCtx || !earthLabelTexture) return;
     const hovered = (earthHoveredIndex >= 0 && earthHoveredIndex < earthLocations.length)
@@ -1783,8 +2120,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     // suffix) is untouched.
     const zoomed = earthZoom > 1.02 || earthZoomTarget > 1.02;
     const zoomPct = earthZoomPercent();
+    const streamQ = (zoomed && earthTileFade() > 0.02 && earthTileLoadRatio < 0.995)
+      ? Math.round(earthTileLoadRatio * 20) : -1;
     const key = earthLocations.length + '|' + (featured ? featured.slug : '') + tileSuffix +
-      '|' + (zoomed ? zoomPct + ':' + earthZoom.toFixed(4) : 'g');
+      '|' + (zoomed ? zoomPct + ':' + earthZoom.toFixed(4) : 'g') + '|' + streamQ;
     if (key === lastEarthLabelKey) return;
     lastEarthLabelKey = key;
     try {
@@ -1829,31 +2168,49 @@ window.WebXRVR = window.WebXRVR || (function () {
       } else {
         titleStr = titleStr.slice(0, 30);
       }
-      ctx.clearRect(0, 0, 640, 112);
-      ctx.fillStyle = 'rgba(7,12,24,0.94)';
-      ctx.fillRect(0, 0, 640, 112);
-      ctx.strokeStyle = featured ? '#FFB11F' : '#3A506B';
-      ctx.lineWidth = 3;
-      if (ctx.roundRect) {
-        ctx.beginPath();
-        ctx.roundRect(2, 2, 636, 108, 14);
-        ctx.stroke();
-      } else {
-        ctx.strokeRect(2, 2, 636, 108);
-      }
-      ctx.fillStyle = '#F7FAFC';
-      ctx.font = '700 28px Archivo, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(titleStr, 320, zoomed ? 26 : 43);
-      ctx.fillStyle = '#B8C6D9';
-      ctx.font = '700 15px "JetBrains Mono", monospace';
-      ctx.fillText(String(detail).slice(0, 44), 320, zoomed ? 57 : 84);
-      if (zoomed) drawEarthScaleBar(ctx, scaleBar);
+      drawEarthLabelPanel(ctx, {
+        title: titleStr,
+        detail: String(detail).slice(0, 44),
+        zoomed,
+        zoomPct,
+        featured: !!featured,
+        offline: tileOffline,
+        scaleBar,
+        scale: Math.max(1, earthZoom),
+        streaming: streamQ >= 0 ? streamQ / 20 : -1,
+        hint: earthLabelHint(featured, zoomed),
+      });
       earthLabelTitle = titleStr.slice(0, 30);
       earthLabelDetail = String(detail).slice(0, 44);
       earthLabelTexture.needsUpdate = true;
     } catch (e) {}
+  }
+
+  // Poster thumbnails for the preview card: same-origin images only
+  // (crossOrigin=anonymous keeps the canvas texture upload legal; a failed
+  // load simply leaves the placeholder slot).
+  const EARTH_PREVIEW_CYCLE_MS = 3200;
+  let earthPreviewCycleAt = -1;
+  const earthPreviewPosterCache = new Map();
+  function earthPreviewPosterImages() {
+    const out = [];
+    for (let i = 0; i < earthPreviewItems.length && i < 3; i++) {
+      const url = earthPreviewItems[i] && (earthPreviewItems[i].poster_url || earthPreviewItems[i].thumbnail_url);
+      if (!url || typeof Image === 'undefined') { out.push(null); continue; }
+      let img = earthPreviewPosterCache.get(url);
+      if (!img) {
+        try {
+          img = new Image();
+          try { img.crossOrigin = 'anonymous'; } catch (e) {}
+          img.onerror = () => { img.failed = true; };
+          img.src = url;
+          earthPreviewPosterCache.set(url, img);
+          if (earthPreviewPosterCache.size > 24) earthPreviewPosterCache.delete(earthPreviewPosterCache.keys().next().value);
+        } catch (e) { img = null; }
+      }
+      out.push(img && !img.failed ? img : null);
+    }
+    return out;
   }
 
   function updateEarthPreviewBillboard(time) {
@@ -1871,6 +2228,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthPreviewMesh.visible = false;
       return;
     }
+    // Auto-cycle the hero through the (≤3) previewed reels; frozen under
+    // reduced motion so nothing moves unprompted.
+    if (!reducedMotion && earthPreviewItems.length > 1) {
+      if (earthPreviewCycleAt < 0) earthPreviewCycleAt = time;
+      if (time - earthPreviewCycleAt > EARTH_PREVIEW_CYCLE_MS) {
+        earthPreviewCycleAt = time;
+        earthPreviewIndex = (earthPreviewIndex + 1) % earthPreviewItems.length;
+      }
+    }
     const ui = getUICanvas();
     if (ui && earthPreviewCtx) {
       try {
@@ -1880,7 +2246,9 @@ window.WebXRVR = window.WebXRVR || (function () {
           earthPreviewStatus,
           earthPreviewItems,
           earthPreviewIndex,
+          earthPreviewPosters: earthPreviewPosterImages(),
           reducedMotion,
+          time,
         });
         if (earthPreviewTexture) earthPreviewTexture.needsUpdate = true;
       } catch (e) {}
@@ -2029,6 +2397,12 @@ window.WebXRVR = window.WebXRVR || (function () {
             p.position.set(p.position.x * k, p.position.y * k, p.position.z * k);
           }
         }
+      } catch (e) {}
+    }
+    // Limb glow breathes with table tilt (stronger once the map lies "flat").
+    if (earthAtmosphereMesh && earthAtmosphereMesh.material) {
+      try {
+        earthAtmosphereMesh.material.opacity = sceneMode === 'earth' ? 0.30 + tableTilt(earthZoom) * 0.10 : 0;
       } catch (e) {}
     }
     refreshEarthTexture();
@@ -3010,14 +3384,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // callers, tests, and future miss branches.
     if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
     const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
-    ctx.strokeStyle = '#F7FAFC';
+    ctx.strokeStyle = '#E8F6FF';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(left, 94); ctx.lineTo(right, 94);
     ctx.moveTo(left, 89); ctx.lineTo(left, 99);
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
-    ctx.fillStyle = '#F7FAFC';
+    ctx.fillStyle = '#E8F6FF';
     ctx.font = '700 15px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
@@ -3351,6 +3725,25 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
+  // Shared per-tile uniform block (fallback + network tiles). uTileNight
+  // engages the night-chart grade for light rasters (keyless OSM); keyed dark
+  // CARTO sources keep the original tint chain.
+  function earthTileSourceIsLight() {
+    return earthAttributionText === OSM_ATTRIBUTION_TEXT_OSM_ONLY;
+  }
+  function makeEarthTileUniforms(labelsTexture, holo) {
+    return {
+      labelsMap: { value: labelsTexture || null },
+      uTileTintLift: { value: EARTH_TILE_TINT_LIFT_VEC },
+      uTileTintHue: { value: EARTH_TILE_TINT_HUE_VEC },
+      uTileTintDepth: { value: EARTH_TILE_TINT_DEPTH },
+      uTileTintStrength: { value: holo ? 1 : 0 },
+      uTileHasLabels: { value: labelsTexture ? 1 : 0 },
+      uTileLabelsAlpha: { value: holo ? EARTH_TILE_LABEL_ALPHA : 1 },
+      uTileNight: { value: (holo && earthTileSourceIsLight()) ? 1 : 0 },
+    };
+  }
+
   function earthReadyAncestor(tile) {
     let best = null;
     for (const candidate of earthTiles.values()) {
@@ -3377,15 +3770,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       entry.textureBytes = 0; // shared with the ancestor (counted once)
       ancestor.textureRefs = (ancestor.textureRefs || 1) + 1;
       const holo = earthTileStyleMode() === 'holo';
-      const uniforms = {
-        labelsMap: { value: entry.labelsTexture },
-        uTileTintLift: { value: EARTH_TILE_TINT_LIFT_VEC },
-        uTileTintHue: { value: EARTH_TILE_TINT_HUE_VEC },
-        uTileTintDepth: { value: EARTH_TILE_TINT_DEPTH },
-        uTileTintStrength: { value: holo ? 1 : 0 },
-        uTileHasLabels: { value: entry.labelsTexture ? 1 : 0 },
-        uTileLabelsAlpha: { value: holo ? EARTH_TILE_LABEL_ALPHA : 1 },
-      };
+      const uniforms = makeEarthTileUniforms(entry.labelsTexture, holo);
       entry.material = new THREE.MeshBasicMaterial({ map: entry.texture, transparent: true, opacity: earthTileFade(), depthWrite: false, side: THREE.FrontSide });
       installEarthTileShader(entry.material, uniforms);
       entry.mesh = new THREE.Mesh(entry.geometry, entry.material);
@@ -3460,15 +3845,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       earthTileTextureBytes += entry.textureBytes;
       const holoTile = earthTileStyleMode() === 'holo';
-      const tileUniforms = {
-        labelsMap: { value: entry.labelsTexture },
-        uTileTintLift: { value: EARTH_TILE_TINT_LIFT_VEC },
-        uTileTintHue: { value: EARTH_TILE_TINT_HUE_VEC },
-        uTileTintDepth: { value: EARTH_TILE_TINT_DEPTH },
-        uTileTintStrength: { value: holoTile ? 1 : 0 },
-        uTileHasLabels: { value: entry.labelsTexture ? 1 : 0 },
-        uTileLabelsAlpha: { value: holoTile ? EARTH_TILE_LABEL_ALPHA : 1 },
-      };
+      const tileUniforms = makeEarthTileUniforms(entry.labelsTexture, holoTile);
       entry.material = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
@@ -4191,7 +4568,37 @@ window.WebXRVR = window.WebXRVR || (function () {
         starPositions[i * 3 + 2] = r * Math.cos(ph);
       }
       starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-      const starMat = new THREE.PointsMaterial({ color: 0x99ccff, size: 0.08, transparent: true, opacity: 0.8 });
+      // Soft round stars (radial sprite) with per-star tint, instead of square
+      // pixels: reads as a night sky rather than dead pixels.
+      const starColors = new Float32Array(starCount * 3);
+      for (let i = 0; i < starCount; i++) {
+        const t = Math.random();
+        const warm = t > 0.88, bright = 0.55 + Math.random() * 0.45;
+        starColors[i * 3] = (warm ? 1.0 : 0.62 + t * 0.2) * bright;
+        starColors[i * 3 + 1] = (warm ? 0.86 : 0.80 + t * 0.15) * bright;
+        starColors[i * 3 + 2] = 1.0 * bright;
+      }
+      starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+      let starSprite = null;
+      try {
+        if (typeof document !== 'undefined') {
+          const sc = document.createElement('canvas');
+          sc.width = 64; sc.height = 64;
+          const sx = sc.getContext('2d');
+          const sg = sx.createRadialGradient(32, 32, 0, 32, 32, 32);
+          sg.addColorStop(0, 'rgba(255,255,255,1)');
+          sg.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+          sg.addColorStop(1, 'rgba(255,255,255,0)');
+          sx.fillStyle = sg;
+          sx.fillRect(0, 0, 64, 64);
+          starSprite = new THREE.CanvasTexture(sc);
+        }
+      } catch (e) { starSprite = null; }
+      const starMat = new THREE.PointsMaterial({
+        color: 0xffffff, size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
+        vertexColors: true, depthWrite: false,
+      });
+      if (starSprite) starMat.map = starSprite;
       starfieldPoints = new THREE.Points(starGeo, starMat);
       scene.add(starfieldPoints);
     }
@@ -4268,6 +4675,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           shader.fragmentShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
             shader.fragmentShader.replace('#include <opaque_fragment>', `
               float earthRim = pow(1.0 - abs(dot(normalize(vEarthRimNormal), normalize(vEarthRimViewPosition))), 3.0);
+              diffuseColor.rgb = mix(vec3(0.04, 0.30, 0.85), vec3(0.50, 0.96, 1.0), earthRim);
               diffuseColor.a *= earthRim;
               #include <opaque_fragment>
             `);
@@ -4286,7 +4694,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Z2 tile layer: child of the mesh so patches inherit the geographic
       // frame (same convention as pins/hit-test) plus the group's zoom scale.
       earthTileGroup = new THREE.Group();
-      earthTileGroup.renderOrder = 1;
+      // NOTE: do NOT set renderOrder on this THREE.Group. Group.renderOrder is a
+      // *group sort order* that outranks every child's own renderOrder, so a value
+      // here drew the whole tile layer AFTER the scene-rooted HUD (label, preview
+      // card, bezel, compass) and buried them under the map at any zoom with tiles.
+      // Tile meshes carry their own renderOrder (1 coarse / 2 fine).
       earthTileGroup.frustumCulled = false;
       earthMesh.add(earthTileGroup);
       earthTileZ = -1;
@@ -4307,8 +4719,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (!earthLabelCanvas && typeof document !== 'undefined') {
         try {
           earthLabelCanvas = document.createElement('canvas');
-          earthLabelCanvas.width = 640;
-          earthLabelCanvas.height = 112;
+          earthLabelCanvas.width = 1280; // 2× the 640×112 logical layout (crisp in-headset)
+          earthLabelCanvas.height = 224;
           earthLabelCtx = earthLabelCanvas.getContext('2d');
         } catch (e) {
           earthLabelCanvas = null;
@@ -4340,8 +4752,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (!earthPreviewCanvas && typeof document !== 'undefined') {
         try {
           earthPreviewCanvas = document.createElement('canvas');
+          // 512×716 keeps the 0.5 × 0.7 m billboard texel-square (no stretch).
           earthPreviewCanvas.width = 512;
-          earthPreviewCanvas.height = 512;
+          earthPreviewCanvas.height = 716;
           earthPreviewCtx = earthPreviewCanvas.getContext('2d');
         } catch (e) {
           earthPreviewCanvas = null;
@@ -4744,6 +5157,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     return overlayHasPopups;
   }
 
+  // Readout block for the Earth Atlas dock (drawn by vr_ui_canvas).
+  function earthDockStatus() {
+    try {
+      const zoomed = earthZoom > 1.02 || earthZoomTarget > 1.02;
+      const tier = EARTH_TIERS[earthTierIndex(earthZoom)];
+      const tileOffline = (!earthTileAvailable || earthTileFailures >= EARTH_TILE_FAIL_LIMIT) && zoomed;
+      const streaming = zoomed && earthTileFade() > 0.02 && earthTileLoadRatio < 0.995;
+      let mapStatus = 'ORBITAL';
+      if (tileOffline) mapStatus = 'OFFLINE';
+      else if (streaming) mapStatus = 'STREAMING ' + Math.round(earthTileLoadRatio * 100) + '%';
+      else if (earthTileFade() > 0.02) mapStatus = 'LIVE TILES';
+      const featured = earthLocations[earthHoveredIndex] || earthLocations[earthSelectedIndex] || null;
+      let scaleCaption = '—';
+      if (zoomed) {
+        const bar = earthScaleBar(earthZoom, earthFocus || earthFacingLatLon());
+        if (bar && bar.caption) scaleCaption = bar.caption;
+      }
+      return {
+        tier: tier.name,
+        tierColor: tier.color,
+        zoomPct: earthZoomPercent(),
+        scaleCaption,
+        mapStatus,
+        mapOffline: !!tileOffline,
+        location: featured ? (featured.name || featured.slug) : (zoomed ? 'WORLD' : 'EARTH ACTIVITY'),
+        northUp: !!earthNorthUp,
+        canOpenFeed: !!featured,
+      };
+    } catch (e) { return {}; }
+  }
+
   function updateUiTextures() {
     const ui = getUICanvas();
     if (!ui) return;
@@ -4771,6 +5215,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer,
         autoNext: getAutoNext(),
         sceneMode,
+        earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
         callbacks,
@@ -6184,6 +6629,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         .then((items) => {
           if (earthPreviewGeneration === generation && (!signal || !signal.aborted)) {
             earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
+            earthPreviewIndex = 0;
+            earthPreviewCycleAt = -1;
             earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
           }
           return earthPreviewItems;
@@ -7407,6 +7854,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthCompassCanvas = null;
     earthCompassCtx = null;
     earthCompassTexture = null;
+    earthCompassKey = '';
     laserPositions = null;
     reticleTexture = null;
     previewHoverRay = null;
@@ -8365,6 +8813,13 @@ window.WebXRVR = window.WebXRVR || (function () {
           return { x: p.position.x, y: p.position.y, z: p.position.z };
         } catch (e) { return null; }
       },
+      earthTierIndex,
+      earthMapBearing,
+      earthViewBasis,
+      earthDockStatus,
+      earthPreviewPosterImages,
+      earthTileSourceIsLight,
+      EARTH_TIERS,
       earthBezelState() {
         return {
           visible: !!(earthBezelMesh && earthBezelMesh.visible && earthCompassMesh && earthCompassMesh.visible),

@@ -11,6 +11,10 @@
 #   headless Chrome: --headless=new --use-angle=swiftshader
 #     --enable-unsafe-swiftshader --virtual-time-budget=25000
 #     --screenshot=../logs/earth-r7-<mode>.png "<url>?mode=street&cam=orbit"
+# Holo Atlas design harness (2026-10-04, same gitignored reports/ zone):
+#   reports/earth-design-server.py 8472 — real OSM tiles + globe texture + sample zones
+#   reports/earth-design-harness.html   — ?s=globe|hover|region|city|street|preview&cam=head|orbit
+#   reports/earth-shot.sh <scenario> <cam> <tag> → logs/design-<tag>-<scenario>-<cam>.png
 # Captures: ../logs/earth-r7-globe.png, earth-r7-street(-orbit,-raw).png.
 # Headset (Quest HTTPS) gate remains blocked — no device on adb.
 #

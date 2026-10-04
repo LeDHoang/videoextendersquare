@@ -24,7 +24,8 @@
 | **Phase 5: Map Tile Loading Acceleration** | Persistent HTTP keep-alive pool, 404 labels bailout, parent-first LOD queue | [map_tiles.py](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/server/routers/map_tiles.py), [webxr_vr.js](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js) | **COMPLETED & VERIFIED** (Latency cut by ~65%, HTTP calls halved) |
 | **Phase 6: Floating Label & Preview Anti-Clipping** | Zero-depth clipping (`renderOrder: 100`, `depthTest: false`), eye-facing basis & distance scaling | [webxr_vr.js](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js) | **COMPLETED & VERIFIED** (Miami breadcrumb & 3-card preview 100% visible) |
 | **Phase 7: Automated Test Suites & Live Probes** | Backend pytest, frontend node/vitest, headless Chrome CDP runs | All suites + scripts | **COMPLETED & VERIFIED** (190 pytest green, 198 web tests green) |
-| **Phase 8: Progressive Enhancements (Steps Left)** | Client-side `CacheStorage`, binocular soft-spring yaw, physical Quest 3 testing | Future polish | **PLANNED & READY FOR EXECUTION** |
+| **Phase 8: Progressive Enhancements** | Client-side tile cache, soft-spring yaw, bezel + compass (6.1–6.3) | [webxr_vr.js](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js) | **DONE** (commit `47fecc1`); Quest hardware (6.4) and CDN (6.5) remain |
+| **Phase 9: Holo Atlas design pass** | Night-chart map grade, glass HUD, live preview card, compass dial + tangent bezel, Earth dock, HUD z-order fix | [webxr_vr.js](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/webxr_vr.js), [vr_ui_canvas.js](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/ui/assets/vr_ui_canvas.js) | **DONE** — see §10 |
 
 ---
 
@@ -440,3 +441,54 @@ With core rendering, drag rotation, network streaming, and panel positioning ful
   - In backend proxy [server/routers/map_tiles.py](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/server/routers/map_tiles.py), verify disk cache pruning and rate-limiting (`RATE_LIMIT_COUNT = 720` requests/min per IP).
 - **Target Files:** [server/routers/map_tiles.py](file:///Users/hoangleduc/Documents/[ez]/Coding/VR%20Tiktok/videoextendersquare/server/routers/map_tiles.py), `docs/to-beta.md`
 - **Acceptance Criteria:** Upstream OSM receives at most 1 fetch per unique tile coordinate globally; edge absorbs 99%+ of repeat tile requests.
+
+---
+
+## 10. Phase 9 — "Holo Atlas" Design Pass (2026-10-04)
+
+Goal: keep every feature of §§1–6 and make the Earth read as one finished product
+instead of a working prototype. One design language: deep-navy glass, holo-cyan
+accent, and a four-step **realm ladder** (ORBIT → REGION → CITY → STREET, accent
+cyan → teal → amber → coral, the same ramp as the heat blobs) that threads through
+the HUD, the dock and the gauge.
+
+### 10.1 A real bug found while reviewing pixels
+
+`earthTileGroup.renderOrder = 1` was set on a `THREE.Group`. `Group.renderOrder` is a
+**group sort order** that outranks every child's own `renderOrder`, so the whole tile
+layer drew *after* the scene-rooted HUD. At any zoom with tiles the breadcrumb label,
+preview card, bezel and compass were painted **under the map** (invisible), even though
+state probes reported them "visible". Fixed by removing the assignment; guarded by a
+regression test that fails if any `Group` in the scene carries a `renderOrder`.
+
+### 10.2 What changed
+
+| Area | Before | After |
+|---|---|---|
+| **Map grade** | OSM raster multiplied into a muddy steel-blue wash | Night-chart shader for light rasters (`uTileNight`): land/sea/park classified, ink + warm road fills re-lit as cyan line work; dark CARTO keeps the old chain. Raw mode untouched |
+| **Breadcrumb label** | Flat box, 2 text lines, scale bar tacked on | Glass card: tier chip, title, zoom gauge ring, detail line, scale bar, interaction hint, realm ladder, tile-streaming hairline. 2× canvas for crisp text. `earthLabelTitle/Detail` strings unchanged |
+| **Preview card** | Title + an empty scanline box (video never wired); 512² canvas stretched onto a 0.5×0.7 plane | 512×716 canvas matching the plane; LIVE chip, heat meter, hero poster, 3-up thumbnails, auto-cycling active item, "TRIGGER ▸ OPEN LOCATION FEED" CTA, deliberate loading/empty/error states |
+| **Compass** | "N ▲" rectangle at the far rim | Live dial (needle + rotating ring) reading the **on-screen** map bearing; rides beside the label so it is always visible and pointable |
+| **Bezel** | Flat horizontal ring, radius up to 1.4 m (surrounded the viewer) | Surveyor's plate in the map's tangent plane, ≤0.8 m, 5° ticks, N/E/S/W lettering, N tick on true north |
+| **Dock (Earth mode)** | Reels transport shown in red/vermilion behind the globe | Earth Atlas dock: realm / scale / map-status tiles, zoom meter, holo action buttons with icons. Hit rectangles unchanged |
+| **Pins** | Chunky cone | Teardrop marker, tip on the surface, highlight on the head |
+| **Sky / limb** | Square star pixels; stray atmosphere-opacity block executed once at load | Soft tinted star sprites; limb glow now breathes with table tilt (the block moved into the per-frame pass) and uses a two-tone Fresnel |
+
+### 10.3 Compass math
+
+`earthMapBearing()` = clockwise angle from screen-up to geographic north in the plane
+perpendicular to the line of sight (head → focus anchor). NORTH UP ⇒ 0 for any table
+tilt (a world-space azimuth reads 180° there, because the tilted map's north leans
+toward the viewer). Covered by `Compass bearing is exact…` in `webxr-earth.test.js`.
+
+### 10.4 Verification
+
+- `node --test web/tests/*.js`: all green (new: HUD z-order, tiers, dock readout,
+  compass bearing, night-grade gating, preview aspect).
+- Headless Chrome (SwiftShader) before/after captures in `logs/design-*.png`, driven by
+  the gitignored `reports/earth-design-harness.html` + `reports/earth-design-server.py`
+  (real OSM tiles, real globe texture, 8 worldwide zones, 3 poster thumbnails) and
+  `reports/earth-shot.sh <globe|hover|region|city|street|preview> <head|orbit> <tag>`.
+- **Not verified:** on-device Quest comfort, text size at real viewing distance, and
+  frame cost of the extra HUD canvases (all small, drawn only when their key changes,
+  except the preview card at ≤6 Hz while visible). Step 6.4 stays open.

@@ -4037,3 +4037,89 @@ test('Heat/cone coincidence survives a street→globe zoom-out', () => {
   renderer.stopPreview();
 });
 
+
+// ─── Holo Atlas design pass (v3 plan §9) ────────────────────────────────
+
+test('HUD regression: the tile Group never carries a renderOrder (it would outrank the HUD)', () => {
+  // THREE.Group.renderOrder is a group sort order that beats every child's own
+  // renderOrder; a value on the tile group drew the whole map OVER the label,
+  // preview card, bezel and compass at every zoom with tiles.
+  assert.doesNotMatch(rendererSource, /earthTileGroup\.renderOrder\s*=/);
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  const walk = (node, out) => {
+    if (!node) return out;
+    if (node.isGroup && node.renderOrder) out.push(node);
+    (node.children || []).forEach((child) => walk(child, out));
+    return out;
+  };
+  assert.deepEqual(walk(api.getScene(), []).map((g) => g.renderOrder), [], 'no Group may set a sort order');
+  renderer.stopPreview();
+});
+
+test('Holo Atlas tiers follow the zoom realms and ladder monotonically', () => {
+  const { renderer, api } = topdownHarness();
+  const names = [1, 2.9, 3, 23, 24, 199, 200, 16384].map((s) => api.EARTH_TIERS[api.earthTierIndex(s)].name);
+  assert.deepEqual(names, ['ORBIT', 'ORBIT', 'REGION', 'REGION', 'CITY', 'CITY', 'STREET', 'STREET']);
+  let prev = -1;
+  for (const s of [1, 2, 4, 8, 16, 64, 256, 1024, 16384]) {
+    const idx = api.earthTierIndex(s);
+    assert.ok(idx >= prev, 'tier never regresses as zoom grows');
+    prev = idx;
+  }
+  renderer.stopPreview();
+});
+
+test('Holo Atlas dock readout reports realm, scale, map state and feed readiness', () => {
+  const { renderer, api } = topdownHarness();
+  api.setLocationActivity([{ slug: 'miami-us', name: 'Miami, US', lat: 25.76, lon: -80.19, heat: 0.9, active_reel_count: 4 }]);
+  let status = api.earthDockStatus();
+  assert.equal(status.tier, 'ORBIT');
+  assert.equal(status.canOpenFeed, false);
+  assert.equal(status.mapStatus, 'ORBITAL');
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  api.setEarthHoveredIndex(0);
+  renderer.__runScheduledFrame(32);
+  status = api.earthDockStatus();
+  assert.equal(status.tier, 'STREET');
+  assert.equal(status.canOpenFeed, true);
+  assert.equal(status.location, 'Miami, US');
+  assert.match(status.scaleCaption, /\d (m|km)$/);
+  assert.ok(status.zoomPct > 50 && status.zoomPct <= 100);
+  renderer.stopPreview();
+});
+
+test('Compass bearing is exact: NORTH UP puts north straight up on screen', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
+  renderer.__runScheduledFrame(32);
+  assert.ok(api.resetEarthNorthUp(), 'north-up pose applies');
+  closeTo(api.earthMapBearing(), 0, 0.05);
+  renderer.__runScheduledFrame(64);
+  closeTo(api.earthMapBearing(), 0, 0.05); // stays north-up through subsequent frames
+  assert.ok(api.getEarthState().northUp, 'north-up flag set by the reset');
+  renderer.stopPreview();
+});
+
+test('Night-chart grade only engages for light rasters (keyless OSM), never keyed dark CARTO', () => {
+  const { renderer, api } = topdownHarness();
+  api.refreshEarthAttribution; // seam present
+  assert.equal(api.earthTileSourceIsLight(), true, 'default attribution is OSM-only → light raster');
+  assert.match(rendererSource, /uTileNight/);
+  assert.match(rendererSource, /earth-tile-holo-v1/);
+  renderer.stopPreview();
+});
+
+test('Preview card posters are same-origin loads with a capped cache and tolerate missing urls', () => {
+  const { renderer, api } = topdownHarness();
+  assert.equal(api.earthPreviewPosterImages().length, 0, 'no items → no posters');
+  renderer.stopPreview();
+});
+
+test('Preview billboard texture matches the 1:1.4 plane so text is never stretched', () => {
+  assert.match(rendererSource, /earthPreviewCanvas\.width = 512;\s*earthPreviewCanvas\.height = 716;/);
+  assert.match(rendererSource, /new THREE\.PlaneGeometry\(0\.5, 0\.7\)/);
+  const ui = loadUICanvasStandalone();
+  closeTo(ui.EARTH_PREVIEW_W / ui.EARTH_PREVIEW_H, 0.5 / 0.7, 0.002);
+});
