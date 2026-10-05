@@ -461,7 +461,10 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
                   onClick={() => navigate('/messages')}
                   title="Open messages"
                 >
-                  MESSAGES {messaging.unread.total ? <span>{messaging.unread.total}</span> : null}
+                  <span className="sx-message-nav-label">MESSAGES</span>
+                  {messaging.unread.total ? (
+                    <span className="sx-message-nav-badge"><span>{messaging.unread.total}</span></span>
+                  ) : null}
                 </button>
                 <button
                   type="button"

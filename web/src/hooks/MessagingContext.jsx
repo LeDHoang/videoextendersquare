@@ -22,6 +22,16 @@ function readStored(key, fallback) {
   }
 }
 
+// A refresh returns only the newest page. Keep rows the user already paged in
+// beyond it (older than the page's last row) so live events never collapse the list.
+export function mergeFirstPage(previous, fresh, extended) {
+  if (!extended || !fresh.length) return fresh;
+  const seen = new Set(fresh.map((row) => row.id));
+  const floor = fresh[fresh.length - 1].updated_at || '';
+  const tail = previous.filter((row) => !seen.has(row.id) && (row.updated_at || '') < floor);
+  return [...fresh, ...tail];
+}
+
 function clientId(prefix = 'message') {
   const random = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
@@ -37,6 +47,8 @@ export function MessagingProvider({ children }) {
   const [inbox, setInbox] = useState([]);
   const [requests, setRequests] = useState([]);
   const [unread, setUnread] = useState({ inbox: 0, requests: 0, total: 0 });
+  const [boxCursors, setBoxCursors] = useState({ inbox: null, requests: null });
+  const [boxLoadingMore, setBoxLoadingMore] = useState({ inbox: false, requests: false });
   const [messages, setMessages] = useState({});
   const [historyCursors, setHistoryCursors] = useState({});
   const [selectedId, setSelectedId] = useState(null);
@@ -48,6 +60,10 @@ export function MessagingProvider({ children }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const eventCursor = useRef(0);
+  const boxRows = useRef({ inbox: [], requests: [] });
+  const boxExtended = useRef({ inbox: false, requests: false });
+  const boxCursorRef = useRef({ inbox: null, requests: null });
+  const boxMoreInFlight = useRef({ inbox: false, requests: false });
   const refreshTimer = useRef(null);
   const conversationVisible = location.pathname.startsWith('/messages')
     || (dockOpen && !dockMinimized);
@@ -60,15 +76,47 @@ export function MessagingProvider({ children }) {
     }
   }, []);
 
+  const applyBox = useCallback((box, rows, cursor) => {
+    boxRows.current[box] = rows;
+    boxCursorRef.current[box] = cursor;
+    if (box === 'requests') setRequests(rows);
+    else setInbox(rows);
+    setBoxCursors((current) => ({ ...current, [box]: cursor }));
+  }, []);
+
   const loadBox = useCallback(async (box) => {
     if (!user) return null;
     const result = await api.get('/api/messages/bootstrap', { box, limit: 50 });
-    if (box === 'requests') setRequests(result.conversations || []);
-    else setInbox(result.conversations || []);
+    const fresh = result.conversations || [];
+    const extended = boxExtended.current[box];
+    const rows = mergeFirstPage(boxRows.current[box], fresh, extended);
+    // Once extended, the stored cursor still points past the loaded tail.
+    applyBox(box, rows, extended && fresh.length ? boxCursorRef.current[box] : result.next_cursor || null);
+    if (!result.next_cursor) boxExtended.current[box] = false;
     setUnread(result.unread || { inbox: 0, requests: 0, total: 0 });
     eventCursor.current = Math.max(eventCursor.current, Number(result.event_cursor) || 0);
     return result;
-  }, [user]);
+  }, [applyBox, user]);
+
+  // Older conversations, appended after the ones already loaded.
+  const loadMoreBox = useCallback(async (box) => {
+    const cursor = boxCursorRef.current[box];
+    if (!user || !cursor || boxMoreInFlight.current[box]) return null;
+    boxMoreInFlight.current[box] = true;
+    setBoxLoadingMore((current) => ({ ...current, [box]: true }));
+    try {
+      const result = await api.get('/api/messages/bootstrap', { box, limit: 50, cursor });
+      const seen = new Set(boxRows.current[box].map((row) => row.id));
+      const added = (result.conversations || []).filter((row) => !seen.has(row.id));
+      boxExtended.current[box] = true;
+      applyBox(box, [...boxRows.current[box], ...added], result.next_cursor || null);
+      if (!result.next_cursor) boxExtended.current[box] = false;
+      return result;
+    } finally {
+      boxMoreInFlight.current[box] = false;
+      setBoxLoadingMore((current) => ({ ...current, [box]: false }));
+    }
+  }, [applyBox, user]);
 
   const refreshAll = useCallback(async () => {
     if (!user) return;
@@ -108,6 +156,10 @@ export function MessagingProvider({ children }) {
     if (!user) {
       setInbox([]);
       setRequests([]);
+      boxRows.current = { inbox: [], requests: [] };
+      boxExtended.current = { inbox: false, requests: false };
+      boxCursorRef.current = { inbox: null, requests: null };
+      setBoxCursors({ inbox: null, requests: null });
       setUnread({ inbox: 0, requests: 0, total: 0 });
       setMessages({});
       setSelectedId(null);
@@ -294,6 +346,9 @@ export function MessagingProvider({ children }) {
     inbox,
     requests,
     unread,
+    boxCursors,
+    boxLoadingMore,
+    loadMoreBox,
     messages,
     historyCursors,
     selectedId,
@@ -319,7 +374,7 @@ export function MessagingProvider({ children }) {
     decideRequest,
     deleteMessage,
   }), [
-    capabilities, inbox, requests, unread, messages, historyCursors, selectedId,
+    capabilities, inbox, requests, unread, boxCursors, boxLoadingMore, loadMoreBox, messages, historyCursors, selectedId,
     composeUsername, draft, setDraft, dockOpen, dockMinimized, shareTarget, busy,
     error, refreshAll, loadBox, loadConversation, selectConversation, composeTo,
     send, decideRequest, deleteMessage,

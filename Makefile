@@ -8,7 +8,7 @@ UVICORN := .venv/bin/uvicorn
 ## dev: concurrently runs FastAPI (8000) + Vite dev (5173)
 dev:
 	@trap 'kill 0' INT TERM EXIT; \
-	$(UVICORN) server.app:app --reload --port 8000 & \
+	$(UVICORN) server.app:app --reload --reload-dir server --reload-dir pipeline --reload-dir core --timeout-graceful-shutdown 2 --port 8000 & \
 	cd web && npm run dev & \
 	wait
 

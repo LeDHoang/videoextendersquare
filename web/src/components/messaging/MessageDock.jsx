@@ -9,6 +9,7 @@ export default function MessageDock() {
   const { user } = useAuth();
   const messaging = useMessaging();
   if (!user) return null;
+  const unread = messaging.unread.total;
   if (!messaging.dockOpen) {
     return (
       <button
@@ -18,18 +19,25 @@ export default function MessageDock() {
           messaging.setDockOpen(true);
           if (messaging.selectedId) messaging.loadConversation(messaging.selectedId).catch(() => {});
         }}
-        aria-label="Open compact messages"
+        aria-label={unread ? `Open compact messages, ${unread} unread` : 'Open compact messages'}
       >
         <IndustrialMessageIcon className="sx-message-launcher-icon" />
-        MESSAGE{messaging.unread.total ? <span>{messaging.unread.total}</span> : null}
+        MESSAGE{unread ? <span>{unread > 99 ? '99+' : unread}</span> : null}
       </button>
     );
   }
   return (
     <section className={`sx-message-dock ${messaging.dockMinimized ? 'sx-minimized' : ''}`} aria-label="Compact messages">
       <header>
-        <button type="button" className="sx-message-dock-title" onClick={() => navigate(messaging.selectedId ? `/messages/${messaging.selectedId}` : '/messages')}><IndustrialMessageIcon className="sx-message-dock-icon" />MESSAGES</button>
-        <span>{messaging.unread.total ? `${messaging.unread.total} UNREAD` : 'LIVE'}</span>
+        <button
+          type="button"
+          className="sx-message-dock-title"
+          title="Open the full messages page"
+          onClick={() => navigate(messaging.selectedId ? `/messages/${encodeURIComponent(messaging.selectedId)}` : '/messages')}
+        >
+          <IndustrialMessageIcon className="sx-message-dock-icon" />MESSAGES
+        </button>
+        {unread ? <span className="sx-message-dock-status sx-hot">{unread} UNREAD</span> : null}
         <button
           type="button"
           onClick={() => {
