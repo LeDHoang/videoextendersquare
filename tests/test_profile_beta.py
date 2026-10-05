@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from server.routers import account_safety, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import Follow, Post, PostTag, Report, Tag, User
+from server.social.models import Follow, Post, PostTag, Report, Tag, User, UserBlock
 
 
 PASSWORD = "correct-horse-battery"
@@ -425,3 +425,167 @@ def test_editing_bio_hashtags_persists_across_saves_and_reads(app):
         # Clearing the bio (and the website) also persists.
         cleared = save("", website="")
         assert cleared["bio"] == "" and cleared["website"] == ""
+
+
+def test_profile_editor_endpoints_require_the_signed_in_owner(app):
+    with TestClient(app) as anon:
+        # No session: every settings endpoint is closed (CSRF cookie absent too).
+        for method, path, body in [
+            ("PATCH", "/api/users/me", {"bio": "hijack"}),
+            ("DELETE", "/api/users/me/avatar", None),
+            ("PATCH", "/api/auth/password", {"current_password": "x", "new_password": "y" * 12}),
+            ("DELETE", "/api/users/me", {"current_password": "x", "confirmation": "DELETE"}),
+            ("PUT", "/api/users/anyone/block", None),
+        ]:
+            response = anon.request(method, path, json=body)
+            assert response.status_code in {401, 403}, (method, path, response.status_code)
+        assert anon.get("/api/users/me/blocked").status_code == 401
+        assert anon.get("/api/users/me/blocked").json()["detail"]["code"] == "AUTH_REQUIRED"
+
+    with TestClient(app) as alice, TestClient(app) as bob:
+        register(alice, "alice_owner", "alice-owner@example.com")
+        register(bob, "bob_other", "bob-other@example.com")
+
+        # A write always lands on the caller's own account; there is no way to name another.
+        assert mutate(bob, "PATCH", "/api/users/me", {"bio": "bob was here"}).status_code == 200
+        assert alice.get("/api/users/alice_owner").json()["user"]["bio"] == ""
+        assert alice.get("/api/users/bob_other").json()["user"]["bio"] == "bob was here"
+        assert bob.patch("/api/users/alice_owner", json={"bio": "x"}).status_code in {404, 405}
+
+        # A CSRF-less write from a signed-in session is refused too.
+        assert alice.patch("/api/users/me", json={"bio": "no csrf"}).status_code == 403
+
+
+def test_restricting_a_handle_from_settings(app):
+    with TestClient(app) as client:
+        register(client, "blocker_one", "blocker-one@example.com")
+        with TestClient(app) as other:
+            register(other, "target_two", "target-two@example.com")
+
+        assert mutate(client, "PUT", "/api/users/blocker_one/block").status_code == 422
+        assert mutate(client, "PUT", "/api/users/nobody_here/block").status_code == 404
+
+        assert mutate(client, "PUT", "/api/users/target_two/block").json()["blocked"] is True
+        # Restricting twice is harmless and the list holds exactly one entry.
+        assert mutate(client, "PUT", "/api/users/target_two/block").status_code == 200
+        listed = client.get("/api/users/me/blocked").json()["users"]
+        assert [entry["username"] for entry in listed] == ["target_two"]
+
+        assert mutate(client, "DELETE", "/api/users/target_two/block").json()["blocked"] is False
+        assert client.get("/api/users/me/blocked").json()["users"] == []
+
+
+def test_blocking_from_settings_cuts_every_tie_both_ways(app):
+    with TestClient(app) as alice, TestClient(app) as bob, TestClient(app) as carol:
+        alice_user = register(alice, "block_alice", "block-alice@example.com")
+        bob_user = register(bob, "block_bob", "block-bob@example.com")
+        register(carol, "block_carol", "block-carol@example.com")
+        bob_post = create_post(app, bob_user["id"], "tests/block-bob.webp")
+        alice_post = create_post(app, alice_user["id"], "tests/block-alice.webp")
+
+        # Follow each other, then alice restricts bob.
+        assert mutate(alice, "PUT", "/api/users/block_bob/follow").status_code == 200
+        assert mutate(bob, "PUT", "/api/users/block_alice/follow").status_code == 200
+        assert alice.get("/api/users/block_bob").json()["user"]["is_following"] is True
+
+        assert mutate(alice, "PUT", "/api/users/block_bob/block").status_code == 200
+
+        # Follows are removed in both directions and the counters follow.
+        with app.state.testing_session() as db:
+            assert db.query(Follow).count() == 0
+            assert db.get(User, alice_user["id"]).follower_count == 0
+            assert db.get(User, alice_user["id"]).following_count == 0
+            assert db.get(User, bob_user["id"]).follower_count == 0
+            assert db.get(User, bob_user["id"]).following_count == 0
+
+        # Neither side can open the other's profile, posts or re-follow.
+        for client, other_name, other_post in ((alice, "block_bob", bob_post), (bob, "block_alice", alice_post)):
+            assert client.get(f"/api/users/{other_name}").status_code == 404
+            assert client.get(f"/api/users/{other_name}/posts").status_code == 404
+            assert client.get(f"/api/posts/{other_post}").status_code == 404
+            assert mutate(client, "PUT", f"/api/users/{other_name}/follow").status_code == 403
+
+        # A third party is unaffected.
+        assert carol.get("/api/users/block_bob").status_code == 200
+        assert carol.get(f"/api/posts/{bob_post}").status_code == 200
+
+        # Only the blocker sees the entry; the blocked user has nothing listed.
+        assert [u["username"] for u in alice.get("/api/users/me/blocked").json()["users"]] == ["block_bob"]
+        assert bob.get("/api/users/me/blocked").json()["users"] == []
+        # The blocked user cannot undo the block (their DELETE is on their own, empty row).
+        assert mutate(bob, "DELETE", "/api/users/block_alice/block").status_code == 200
+        assert alice.get("/api/users/block_bob").status_code == 404
+
+        # Unblocking restores visibility but not the old follows.
+        assert mutate(alice, "DELETE", "/api/users/block_bob/block").status_code == 200
+        assert alice.get("/api/users/block_bob").json()["user"]["is_following"] is False
+        assert bob.get("/api/users/block_alice").status_code == 200
+        assert alice.get(f"/api/posts/{bob_post}").status_code == 200
+
+
+def test_account_deletion_from_settings_is_guarded_and_thorough(app):
+    with TestClient(app) as victim, TestClient(app) as friend, TestClient(app) as fan, TestClient(app) as anon:
+        user = register(victim, "doomed_user", "doomed@example.com")
+        register(friend, "friend_user", "friend@example.com")
+        register(fan, "fan_user", "fan@example.com")
+        friend_id = friend.get("/api/auth/me").json()["user"]["id"]
+        fan_id = fan.get("/api/auth/me").json()["user"]["id"]
+        post_id = create_post(app, user["id"])
+        friend_post = create_post(app, friend_id, "tests/friend.webp")
+        assert mutate(fan, "PUT", "/api/users/doomed_user/follow").status_code == 200
+        assert mutate(victim, "PUT", "/api/users/fan_user/follow").status_code == 200
+        assert mutate(fan, "PUT", f"/api/posts/{post_id}/like").status_code == 200
+        assert mutate(victim, "PUT", "/api/users/friend_user/block").status_code == 200
+        with app.state.testing_session() as db:
+            assert db.get(User, fan_id).follower_count == 1 and db.get(User, fan_id).following_count == 1
+        mutate(victim, "PATCH", "/api/users/me", {"bio": "bye"})
+
+        # Every guard refuses without touching the account.
+        wrong_password = mutate(victim, "DELETE", "/api/users/me", {"current_password": "not-it-at-all", "confirmation": "DELETE"})
+        assert wrong_password.status_code == 400
+        assert wrong_password.json()["detail"]["code"] == "INVALID_PASSWORD"
+        wrong_token = mutate(victim, "DELETE", "/api/users/me", {"current_password": PASSWORD, "confirmation": "delete"})
+        assert wrong_token.status_code == 422
+        no_token = mutate(victim, "DELETE", "/api/users/me", {"current_password": PASSWORD})
+        assert no_token.status_code == 422
+        assert victim.request("DELETE", "/api/users/me", json={"current_password": PASSWORD, "confirmation": "DELETE"}).status_code == 403
+        assert fan.get("/api/users/doomed_user").status_code == 200  # still alive after all refusals
+
+        # Another signed-in user can only ever delete themselves.
+        assert mutate(fan, "DELETE", "/api/users/me", {"current_password": PASSWORD + "x", "confirmation": "DELETE"}).status_code == 400
+        assert fan.get("/api/users/doomed_user").status_code == 200
+
+        stale_cookies = dict(victim.cookies)
+        done = mutate(victim, "DELETE", "/api/users/me", {"current_password": PASSWORD, "confirmation": "DELETE"})
+        assert done.status_code == 200 and done.json() == {"ok": True}
+
+        # Session is gone, cookies cleared, and the old cookie no longer works.
+        assert victim.get("/api/auth/me").json()["user"] is None
+        anon.cookies.update(stale_cookies)
+        assert anon.get("/api/auth/me").json()["user"] is None
+        assert anon.patch("/api/users/me", json={"bio": "zombie"}, headers={"x-csrf-token": stale_cookies.get("echo_csrf", "")}).status_code in {401, 403}
+
+        # Can't sign back in with either identifier.
+        for identifier in ("doomed_user", "doomed@example.com"):
+            assert anon.post("/api/auth/login", json={"identifier": identifier, "password": PASSWORD}).status_code == 401
+
+        # Public footprint is gone: profile, posts, follow ties, block rows, counters.
+        assert fan.get("/api/users/doomed_user").status_code == 404
+        assert fan.get(f"/api/posts/{post_id}").status_code == 404
+        assert fan.get(f"/api/posts/{friend_post}").status_code == 200
+        # The unrelated account the victim had blocked can see the world normally again.
+        assert friend.get("/api/users/fan_user").status_code == 200
+        with app.state.testing_session() as db:
+            gone = db.get(User, user["id"])
+            assert gone.status == "deleted" and gone.email is None and gone.password_hash is None
+            assert gone.username.startswith("deleted_") and gone.bio == "" and gone.display_name == "Deleted user"
+            assert db.query(Follow).count() == 0
+            assert db.query(UserBlock).count() == 0
+            assert db.get(User, fan_id).follower_count == 0
+            assert db.get(User, fan_id).following_count == 0
+            assert db.get(Post, post_id).status == "deleted"
+
+        # The handle and email can be claimed again by a fresh account.
+        with TestClient(app) as reborn:
+            fresh = register(reborn, "doomed_user", "doomed@example.com")
+            assert fresh["id"] != user["id"]
