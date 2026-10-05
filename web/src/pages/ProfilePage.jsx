@@ -410,6 +410,8 @@ export default function ProfilePage() {
               {profile.is_me ? (
                 <>
                   <button type="button" className="sx-xh-btn sx-xh-btn--primary" onClick={() => navigate('/settings/profile')}>EDIT PROFILE</button>
+                  {/* Credits are private to the account owner: this button only renders on your own profile. */}
+                  <button type="button" className="sx-xh-btn" onClick={() => navigate('/wallet')}>CREDITS</button>
                   <button type="button" className="sx-xh-btn" onClick={shareProfile}>{shareLabel || 'SHARE'}</button>
                 </>
               ) : (

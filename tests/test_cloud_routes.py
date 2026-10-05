@@ -335,3 +335,72 @@ def test_fal_key_api_is_encrypted_redacted_and_user_owned(app, monkeypatch):
         assert deleted.status_code == 200
         assert deleted.json() == {"configured": False, "hint": ""}
         assert alice_client.get("/api/account/fal-key").json() == {"configured": False, "hint": ""}
+
+
+def test_wallet_ledger_and_checkout_are_private_to_the_account_owner(app, monkeypatch):
+    monkeypatch.setenv("SX_STRIPE_ENABLED", "1")
+    monkeypatch.setenv("SX_PUBLIC_BASE_URL", "https://echo.example.com")
+    monkeypatch.setenv("SX_STRIPE_PRICE_500", "price_500")
+
+    with TestClient(app) as alice_client, TestClient(app) as bob_client, TestClient(app) as anonymous:
+        # Signed-out visitors can read the public pack catalog but nothing account-scoped.
+        assert anonymous.get("/api/billing/catalog").status_code == 200
+        assert anonymous.get("/api/billing/wallet").status_code == 401
+        assert anonymous.get("/api/billing/transactions").status_code == 401
+        assert anonymous.post("/api/billing/checkout-session", json={"pack_id": "starter"}).status_code in {401, 403}
+        assert anonymous.post("/api/billing/quote", json={"kind": "image", "stage_id": "x"}).status_code in {401, 403}
+
+        alice = register(alice_client, "wallet_alice")
+        bob = register(bob_client, "wallet_bob")
+        with app.state.testing_session() as db:
+            grant_credits(db, alice["id"], 250, source="earned", idempotency_key="owner-test-alice")
+            db.commit()
+
+        alice_wallet = alice_client.get("/api/billing/wallet").json()
+        assert alice_wallet["available_credits"] == 250
+        # Bob never sees Alice's balance, and naming her in the query changes nothing.
+        for params in ({}, {"user_id": alice["id"]}, {"username": "wallet_alice"}):
+            assert bob_client.get("/api/billing/wallet", params=params).json()["available_credits"] == 0
+            assert bob_client.get("/api/billing/transactions", params=params).json() == {"transactions": []}
+
+        alice_rows = alice_client.get("/api/billing/transactions").json()["transactions"]
+        assert [row["delta_available"] for row in alice_rows] == [250]
+
+        # A ledger cursor belonging to Alice is refused for Bob.
+        stolen = bob_client.get("/api/billing/transactions", params={"before": alice_rows[0]["id"]})
+        assert stolen.status_code == 400
+
+        # Writes need the owner's CSRF token: a cookie session alone cannot buy credits.
+        assert alice_client.post("/api/billing/checkout-session", json={"pack_id": "starter"}).status_code == 403
+
+        # A checkout is created for the caller and binds the Stripe session to them alone.
+        captured = {}
+
+        class FakeSession:
+            id = "cs_owner"
+            url = "https://checkout.stripe.com/c/pay/cs_owner"
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            return FakeSession()
+
+        from server.billing import stripe_service
+
+        class FakeStripe:
+            class checkout:
+                class Session:
+                    create = staticmethod(fake_create)
+
+        monkeypatch.setattr(stripe_service, "_stripe", lambda: FakeStripe)
+        response = bob_client.post(
+            "/api/billing/checkout-session",
+            json={"pack_id": "starter"},
+            headers=csrf_headers(bob_client),
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["checkout_url"].startswith("https://checkout.stripe.com/")
+        assert captured["client_reference_id"] == bob["id"]
+        assert captured["metadata"]["echo_user_id"] == bob["id"]
+        assert alice["id"] not in str(captured)
+        # Nothing is credited until the signed webhook arrives.
+        assert bob_client.get("/api/billing/wallet").json()["available_credits"] == 0
