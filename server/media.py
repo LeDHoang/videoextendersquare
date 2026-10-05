@@ -4,6 +4,7 @@ Plain equivalents of the ui/media utilities with NO Streamlit dependency —
 the FastAPI layer must stay usable without the Streamlit fallback installed.
 """
 
+import json
 import os
 import subprocess
 import tempfile
@@ -120,6 +121,56 @@ def get_video_codec(src: str) -> str:
     if key is not None:
         _codec_cache[key] = codec
     return codec
+
+
+def probe_media_info(src: str) -> dict | None:
+    """Read duration and pixel size of a media file with one ffprobe call.
+
+    Returns {"duration_ms", "width", "height"} (each None when unknown), or
+    None when the file cannot be probed at all (missing file, no ffprobe,
+    unreadable media). Duration is only meaningful for video; the caller
+    decides whether to keep it.
+    """
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,duration:format=duration",
+        "-of", "json", src,
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                           creationflags=_NO_WINDOW)
+        if p.returncode != 0:
+            return None
+        data = json.loads(p.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+    streams = data.get("streams") or []
+    stream = streams[0] if streams else {}
+
+    def positive_int(value) -> int | None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    duration_ms = None
+    for raw in (stream.get("duration"), (data.get("format") or {}).get("duration")):
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if seconds > 0:
+            duration_ms = int(round(seconds * 1000))
+            break
+    if not streams and duration_ms is None:
+        return None
+    return {
+        "duration_ms": duration_ms,
+        "width": positive_int(stream.get("width")),
+        "height": positive_int(stream.get("height")),
+    }
 
 
 def has_web_preview(src: str) -> bool:

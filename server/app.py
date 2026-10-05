@@ -45,8 +45,20 @@ async def _cleanup_loop():
             await asyncio.to_thread(messages.cleanup_message_events)
             await asyncio.to_thread(reconcile_pending_requests)
             await asyncio.to_thread(reap_stale_reservations)
+            await asyncio.to_thread(_backfill_media_info)
         except Exception:
             pass  # best-effort housekeeping must never crash the loop
+
+
+def _backfill_media_info() -> None:
+    """Fill reel duration/size for posts that predate the probe (see services.backfill_media_info)."""
+    if os.environ.get("SX_MEDIA_BACKFILL", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+    from server.social.services import backfill_media_info
+
+    count = backfill_media_info()
+    if count:
+        logging.getLogger("server.app").info("Backfilled duration/size for %d posts", count)
 
 
 @asynccontextmanager
@@ -82,10 +94,13 @@ async def lifespan(app: FastAPI):
         pass  # health checks / job errors surface this properly later
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
+    # Off the startup path: probing a large library can take a while.
+    backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))
     try:
         yield
     finally:
         cleanup_task.cancel()
+        backfill_task.cancel()
 
 
 def create_app() -> FastAPI:

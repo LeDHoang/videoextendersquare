@@ -301,6 +301,79 @@ def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
     }
 
 
+def apply_media_info(post: Post) -> None:
+    """Fill duration/size from the media file, keeping old values if the probe fails."""
+    from server import media as media_service
+
+    path = Path("output") / post.media_path
+    try:
+        if not path.is_file():
+            return
+    except OSError:
+        return
+    info = media_service.probe_media_info(str(path))
+    if not info:
+        return
+    post.width = info["width"]
+    post.height = info["height"]
+    # Stills have no meaningful runtime (ffprobe reports a 40ms placeholder for some).
+    post.duration_ms = info["duration_ms"] if post.media_type == "video" else None
+
+
+# Files that could not be probed in this process, keyed by (post id, mtime, size),
+# so a corrupt file is not re-probed on every housekeeping pass. A replaced file
+# gets a new key and is tried again.
+_media_probe_failed: set[tuple[str, int, int]] = set()
+
+
+def backfill_media_info(session_factory=None, limit: int | None = 500) -> int:
+    """Retroactively fill duration/size for posts whose media is now on disk.
+
+    Looks for posts missing their size (or, for video, their runtime) whose file
+    exists under ./output, probes them, and stores the result. Files that are
+    not there are skipped without being remembered, so media that shows up later
+    (a restored volume, a synced folder) is picked up on the next pass. Returns
+    how many posts were updated. Safe to run repeatedly and from several workers.
+    """
+    if session_factory is None:
+        from .database import SessionLocal as session_factory
+
+    updated = 0
+    with session_factory() as db:
+        candidates = (
+            db.query(Post.id, Post.media_path)
+            .filter(or_(Post.width.is_(None), and_(Post.media_type == "video", Post.duration_ms.is_(None))))
+            .order_by(Post.created_at.desc())
+            .all()
+        )
+        pending = 0
+        for post_id, media_path in candidates:
+            if limit is not None and updated >= limit:
+                break
+            path = Path("output") / media_path
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            key = (post_id, stat.st_mtime_ns, stat.st_size)
+            if key in _media_probe_failed:
+                continue
+            post = db.get(Post, post_id)
+            if post is None:
+                continue
+            apply_media_info(post)
+            if post.width is None and post.duration_ms is None:
+                _media_probe_failed.add(key)
+                continue
+            updated += 1
+            pending += 1
+            if pending >= 25:
+                db.commit()
+                pending = 0
+        db.commit()
+    return updated
+
+
 def create_or_update_post(
     db: Session,
     *,
@@ -342,6 +415,7 @@ def create_or_update_post(
     post.source = str(source or "upload")[:32]
     post.status = "published"
     post.deleted_at = None
+    apply_media_info(post)
     post.legacy_like_count = max(0, int(legacy_likes or 0))
     post.legacy_view_count = max(0, int(legacy_views or 0))
     real_likes = db.query(PostLike).filter(PostLike.post_id == post.id).count() if post.id else 0
@@ -407,6 +481,9 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         "views": post.view_count,
         "comments_count": post.comment_count,
         "saves": post.save_count,
+        "duration_ms": post.duration_ms,
+        "width": post.width,
+        "height": post.height,
         "author_name": post.owner.username,
         "creator": creator,
         "liked_by_me": liked,

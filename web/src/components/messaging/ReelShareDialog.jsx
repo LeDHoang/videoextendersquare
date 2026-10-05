@@ -11,6 +11,7 @@ export default function ReelShareDialog() {
   const navigate = useNavigate();
   const location = useLocation();
   const closeRef = useRef(null);
+  const linkRef = useRef(null);
   const target = messaging.shareTarget;
   // Require an explicit pack kind — reel payloads in pack playback context may
   // carry a pack_id without being a pack share.
@@ -83,7 +84,10 @@ export default function ReelShareDialog() {
       await navigator.clipboard.writeText(metadata.canonical_url);
       setStatus('Link copied.');
     } catch {
-      window.prompt(`Copy this ${kind === 'pack' ? 'Reel Pack' : 'reel'} link:`, metadata.canonical_url);
+      // Clipboard blocked (insecure origin, permissions): select the visible link so Ctrl/⌘+C finishes the job.
+      linkRef.current?.focus();
+      linkRef.current?.select();
+      setStatus('Could not copy automatically — the link is selected, press Ctrl+C or ⌘C.');
     }
   };
 
@@ -158,16 +162,16 @@ export default function ReelShareDialog() {
         {kind === 'pack' && metadata ? (
           <div className="sx-share-pack-preview" role="status" aria-label={`Reel Pack preview: ${metadata.title}`}>
             <span aria-hidden="true">▦</span>
-            <span>REEL PACK · {metadata.playable_count ?? metadata.reel_count ?? 0} AVAILABLE{(metadata.playable_count ?? metadata.reel_count ?? 0) === 1 ? '' : 'S'}</span>
+            <span>REEL PACK · {metadata.playable_count ?? metadata.reel_count ?? 0} AVAILABLE</span>
             {metadata.creator?.username ? <span>@{metadata.creator.username}</span> : null}
             {metadata.needs_repair ? <span>HIDDEN FROM DISCOVERY UNTIL REPAIRED</span> : null}
           </div>
         ) : null}
 
         <div className="sx-share-link-row">
-          <input readOnly value={metadata?.canonical_url || ''} aria-label={`Canonical ${kind === 'pack' ? 'Reel Pack' : 'reel'} link`} placeholder={metadata ? undefined : 'Preparing link…'} />
-          <button type="button" onClick={copyLink} disabled={!metadata}>COPY</button>
-          <button type="button" onClick={nativeShare} disabled={!metadata}>{navigator.share ? 'SHARE' : 'COPY'}</button>
+          <input ref={linkRef} readOnly value={metadata?.canonical_url || ''} aria-label={`Canonical ${kind === 'pack' ? 'Reel Pack' : 'reel'} link`} placeholder={metadata ? undefined : 'Preparing link…'} onFocus={(event) => event.target.select()} />
+          <button type="button" onClick={copyLink} disabled={!metadata}>COPY LINK</button>
+          {navigator.share ? <button type="button" onClick={nativeShare} disabled={!metadata}>SHARE</button> : null}
         </div>
 
         <div className="sx-share-grid">

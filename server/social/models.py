@@ -114,6 +114,11 @@ class Post(Base):
     comment_count = Column(Integer, nullable=False, default=0)
     save_count = Column(Integer, nullable=False, default=0)
     view_count = Column(Integer, nullable=False, default=0)
+    # Probed from the media file when the post is created; NULL when unknown
+    # (file missing/unreadable, or a row that predates the probe).
+    duration_ms = Column(Integer, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
+import { formatClock, formatDuration } from '../../utils/mediaFormat.js';
 
 export function formatCompactCount(value) {
   const count = Number(value) || 0;
@@ -17,7 +18,8 @@ export function locationKey(city, country) {
   return citySlug + (countrySlug ? '--' + countrySlug : '');
 }
 
-export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare }) {
+/* orderLabel (e.g. "01") adds a top-right badge with the reel's runtime, which counts down while it autoplays. */
+export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare, orderLabel = '' }) {
   const navigate = useNavigate();
   const isImage = video.media_type === 'image';
   const wrapRef = useRef(null);
@@ -26,6 +28,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const [preload, setPreload] = useState('metadata');
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
+  const [remaining, setRemaining] = useState(null);
 
   useEffect(() => {
     if (isImage) return undefined;
@@ -72,12 +75,21 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     };
   }, [isImage, video.preview_url, video.url]);
 
+  // Whole seconds left in the playing preview; the state only changes when the shown second does.
+  const syncRemaining = (event) => {
+    const el = event.currentTarget;
+    if (Number.isFinite(el.duration) && el.duration > 0) {
+      setRemaining(Math.max(0, Math.round(el.duration - el.currentTime)));
+    }
+  };
+
   const commentCount = video.comments_count ?? video.comments?.length ?? 0;
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
   const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename;
   const badge = contextTag ? '#' + contextTag : isImage ? 'IMAGE' : '';
+  const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
 
   return (
     <article
@@ -134,6 +146,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               preload={preload}
               disablePictureInPicture
               onLoadedData={() => setReady(true)}
+              onLoadedMetadata={syncRemaining}
+              onTimeUpdate={syncRemaining}
               onError={() => {
                 if (src !== video.url) setSrc(video.url);
                 else {
@@ -208,6 +222,11 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
         </span>
       ) : null}
       {badge ? <span className="sx-explore-kind">{badge}</span> : null}
+      {orderLabel ? (
+        <span className="sx-explore-order" aria-hidden="true">
+          {orderLabel}{runtime ? ' · ' + runtime : ''}
+        </span>
+      ) : null}
       {place ? (
         placeKey ? (
           <button

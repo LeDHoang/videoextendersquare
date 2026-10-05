@@ -842,3 +842,62 @@ def test_saved_packs_are_private_to_their_owner(app):
         assert anon_client.get("/api/users/me/saved-packs").status_code == 401
         assert owner_client.get("/api/users/me/saved-packs").json()["items"] == []
         assert anon_client.get("/api/users/sp_viewer/saved-packs").status_code in {404, 405}
+
+
+def test_pack_owner_controls_are_private_to_the_owner(app):
+    with TestClient(app) as owner_client, TestClient(app) as other_client, TestClient(app) as anon_client:
+        owner = register(owner_client, "pack_ctl_owner", "pack-ctl-owner@example.com")
+        register(other_client, "pack_ctl_other", "pack-ctl-other@example.com")
+        post_ids = create_posts(app, owner["id"], 4)
+        pack = create_pack(owner_client, post_ids, "Owner controls pack")
+        pack_id, revision = pack["id"], pack["revision"]
+        assert pack["viewer_state"]["can_edit"] is True
+
+        # A draft is invisible to everyone but its owner, including likes and reports.
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 404
+        assert mutate(other_client, "PUT", f"/api/packs/{pack_id}/like").status_code == 404
+        assert mutate(other_client, "PUT", f"/api/packs/{pack_id}/save").status_code == 404
+
+        publish = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
+        assert publish.status_code == 200, publish.text
+        published = publish.json()["pack"]
+        assert published["status"] == "published"
+
+        # Once visible, a non-owner sees it read-only and every owner mutation is refused.
+        seen = other_client.get(f"/api/packs/{pack_id}").json()["pack"]
+        assert seen["viewer_state"]["can_edit"] is False
+        for method, path, body in (
+            ("PATCH", f"/api/packs/{pack_id}", {"expected_revision": published["revision"], "visibility": "unlisted"}),
+            ("POST", f"/api/packs/{pack_id}/publish", {"expected_revision": published["revision"]}),
+            ("POST", f"/api/packs/{pack_id}/unpublish", {"expected_revision": published["revision"]}),
+            ("DELETE", f"/api/packs/{pack_id}?expected_revision={published['revision']}", None),
+        ):
+            refused = mutate(other_client, method, path, body)
+            assert refused.status_code == 403, (method, path, refused.text)
+            assert refused.json()["detail"]["code"] == "PACK_FORBIDDEN"
+        assert other_client.get(f"/api/packs/{pack_id}").json()["pack"]["status"] == "published"
+
+        # Likes and saves need an account.
+        assert anon_client.put(f"/api/packs/{pack_id}/like").status_code in {401, 403}
+
+        # Owner can change visibility of a published pack, then move it back to draft.
+        unlisted = mutate(
+            owner_client,
+            "PATCH",
+            f"/api/packs/{pack_id}",
+            {"expected_revision": published["revision"], "visibility": "unlisted"},
+        )
+        assert unlisted.status_code == 200, unlisted.text
+        assert unlisted.json()["pack"]["visibility"] == "unlisted"
+        assert other_client.get("/api/packs").json()["items"] == []
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 200  # link still works
+
+        revision = unlisted.json()["pack"]["revision"]
+        draft = mutate(owner_client, "POST", f"/api/packs/{pack_id}/unpublish", {"expected_revision": revision})
+        assert draft.status_code == 200, draft.text
+        assert draft.json()["pack"]["status"] == "draft"
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 404
+
+        # A stale revision is rejected instead of silently overwriting.
+        stale = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
+        assert stale.status_code == 409, stale.text

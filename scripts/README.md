@@ -29,6 +29,9 @@
 #                        fal playground, GPU keepalive). Each bootstraps
 #                        sys.path to the repo root, so run from anywhere:
 #                          .venv/bin/python scripts/batch_upscale.py
+#                          .venv/bin/python scripts/batch_backfill_media_info.py
+#                            (fills reel duration/size for posts whose media is on disk;
+#                             the server also does this at startup and every 15 min)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
 #   dev/               — one-off paid-API / hardware experiment scripts, NOT
