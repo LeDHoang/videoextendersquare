@@ -118,6 +118,37 @@ describe('ProfileSettingsPage', () => {
     expect(terminate).toBeEnabled();
   });
 
+  it('lets each password field be revealed independently, and hides them by default', () => {
+    renderPage();
+    const current = screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-current-password' });
+    const fresh = screen.getByLabelText('NEW PASSWORD');
+    expect(current).toHaveAttribute('type', 'password');
+    expect(fresh).toHaveAttribute('type', 'password');
+    fireEvent.click(screen.getByRole('button', { name: 'Show new password' }));
+    expect(fresh).toHaveAttribute('type', 'text');
+    expect(current).toHaveAttribute('type', 'password');
+    expect(screen.getByRole('button', { name: 'Hide new password' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Show current password' }));
+    expect(current).toHaveAttribute('type', 'text');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide new password' }));
+    expect(fresh).toHaveAttribute('type', 'password');
+    // the account-deletion password stays masked
+    expect(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-delete-password' })).toHaveAttribute('type', 'password');
+  });
+
+  it('shows a live strength meter for the new password, using the server minimum', () => {
+    renderPage();
+    const meter = () => screen.getByRole('img', { name: /Password strength/ });
+    expect(meter()).toHaveAccessibleName('Password strength: not started');
+    const fresh = screen.getByLabelText('NEW PASSWORD');
+    fireEvent.change(fresh, { target: { value: 'short' } });
+    expect(meter()).toHaveAccessibleName('Password strength: TOO SHORT');
+    fireEvent.change(fresh, { target: { value: 'abcdefghij' } });
+    expect(meter()).toHaveAccessibleName('Password strength: MINIMUM MET');
+    fireEvent.change(fresh, { target: { value: 'abcdefghijklm1!' } });
+    expect(meter()).toHaveAccessibleName('Password strength: STRONG');
+  });
+
   it('shows friendly errors for self-block and unknown handles and leaves the list alone', async () => {
     renderPage();
     await screen.findByText('@spambot');

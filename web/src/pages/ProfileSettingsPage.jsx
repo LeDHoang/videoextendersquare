@@ -1,16 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { PasswordMeter } from '../components/auth/AuthKit.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
+import { PASSWORD_MAX, PASSWORD_MIN } from '../utils/authForm.js';
 import { hardRedirect } from '../utils/hardRedirect.js';
 import { tokenizeRichText } from '../utils/richText.js';
 
 const BIO_MAX = 150;
-const PASSWORD_MIN = 10;
-const PASSWORD_MAX = 128;
 
 const AVATAR_ERRORS = {
   AVATAR_TOO_LARGE: 'That image is over 5 MB. Export or compress it under 5 MB and retry.',
@@ -45,6 +45,25 @@ function FieldRow({ label, meta, htmlFor, children }) {
         {meta ? <span className="sx-ps-meta">{meta}</span> : null}
       </div>
       {children}
+    </div>
+  );
+}
+
+// Password input with a SHOW/HIDE toggle; `name` makes the toggle's label specific ("Show new password").
+function PasswordInput({ name, ...inputProps }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="sx-ps-inline">
+      <input className="sx-ps-input" type={shown ? 'text' : 'password'} {...inputProps} />
+      <button
+        type="button"
+        className="sx-ps-btn sx-ps-btn--small sx-ps-btn--quiet"
+        aria-pressed={shown}
+        aria-label={(shown ? 'Hide ' : 'Show ') + name}
+        onClick={() => setShown((value) => !value)}
+      >
+        {shown ? 'HIDE' : 'SHOW'}
+      </button>
     </div>
   );
 }
@@ -397,11 +416,12 @@ export default function ProfileSettingsPage() {
           <Panel title="PASSWORD MANAGEMENT" note={'MIN ' + PASSWORD_MIN + ' CHARACTERS'}>
             <form className="sx-ps-form" onSubmit={changePassword}>
               <FieldRow label="CURRENT PASSWORD" htmlFor="ps-current-password">
-                <input id="ps-current-password" className="sx-ps-input" type="password" autoComplete="current-password" placeholder="••••••••••••" value={passwords.current_password} onChange={(event) => setPasswords({ ...passwords, current_password: event.target.value })} />
+                <PasswordInput name="current password" id="ps-current-password" autoComplete="current-password" placeholder="••••••••••••" value={passwords.current_password} onChange={(event) => setPasswords({ ...passwords, current_password: event.target.value })} />
               </FieldRow>
               <FieldRow label="NEW PASSWORD" htmlFor="ps-new-password">
-                <input id="ps-new-password" className="sx-ps-input" type="password" autoComplete="new-password" maxLength={PASSWORD_MAX} placeholder="••••••••••••" value={newPassword} onChange={(event) => setPasswords({ ...passwords, new_password: event.target.value })} />
+                <PasswordInput name="new password" id="ps-new-password" autoComplete="new-password" maxLength={PASSWORD_MAX} placeholder="••••••••••••" value={newPassword} onChange={(event) => setPasswords({ ...passwords, new_password: event.target.value })} />
               </FieldRow>
+              <PasswordMeter password={newPassword} />
               <ul className="sx-ps-checks" aria-label="Password requirements">
                 <Check pass={passwordRules.length}>{PASSWORD_MIN}–{PASSWORD_MAX} CHARACTERS</Check>
                 <Check pass={passwordRules.different}>DIFFERENT FROM CURRENT</Check>
