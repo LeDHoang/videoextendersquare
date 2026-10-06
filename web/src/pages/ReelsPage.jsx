@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
+import { Hero, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
@@ -178,11 +178,6 @@ export default function ReelsPage() {
     ...(deepPostId ? { post: deepPostId } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
-  const videoOpts = videos.map((v) => ({
-    value: v.path,
-    label: v.title || v.filename,
-    tag: `${v.size} · ${v.codec} · ${v.media_type === 'image' ? 'IMAGE' : v.is_proxy ? 'PROXY' : 'MASTER'}`,
-  }));
 
   const generateProxy = async () => {
     setProxyBusy(true);
@@ -247,7 +242,7 @@ export default function ReelsPage() {
   const needsProxy = videos.filter((v) => v.media_type !== 'image' && codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
 
   return (
-    <div>
+    <div className="sx-reels-page">
       <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
           <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
@@ -435,29 +430,12 @@ export default function ReelsPage() {
           {deepIndex >= 0 ? (
             <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
           ) : null}
-          <ReelsPlayer params={playerParams} initialIndex={initialIndex} />
+          <ReelsPlayer params={playerParams} initialIndex={initialIndex} revealOnLoad />
           {videos.some((v) => v.tunnel_url) ? (
             <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
           ) : null}
         </div>
       )}
-
-      {videos.length > 0 ? (
-        <Section num={2} title="Video Playlist" active>
-          <Dropdown
-            label={`MATCHING PLAYLIST (${videos.length} VIDEOS)`}
-            value={videoOpts[0]?.value ?? ''}
-            options={videoOpts}
-            onChange={() => {}}
-            placeholder={`${videos.length} video(s) in playlist — inspect files`}
-          />
-          <p className="sx-body" style={{ marginTop: 'var(--sx-2)', fontSize: '0.85rem' }}>
-            {needsProxy
-              ? `⚠ ${needsProxy} video(s) in this list require an H.264 proxy for inline browser playback.`
-              : '✓ All files are compatible with standard HTML5 browser & VR playback.'}
-          </p>
-        </Section>
-      ) : null}
     </div>
   );
 }

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+
 from argon2 import PasswordHasher
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -591,6 +594,34 @@ def test_pack_player_uses_db_fallback_when_scan_misses(app):
         assert f'"pack_id": "{pack["id"]}"' in scripts or f'"pack_id":"{pack["id"]}"' in scripts
         assert '"available": true' in scripts or '"available":true' in scripts
         assert body["feed"]["pack"]["playable_count"] == 5
+
+
+def test_pack_player_items_carry_probed_duration_and_resolution(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_media_owner", "pack-media-owner@example.com")
+        register(viewer_client, "pack_media_viewer", "pack-media-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        with app.state.testing_session() as db:
+            first = db.get(Post, post_ids[0])
+            first.duration_ms, first.width, first.height = 14000, 1920, 1080
+            db.commit()
+        pack = create_pack(owner_client, post_ids, "Media facts pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        body = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()
+        # Inspect the player's own item list (videoData), not the pack metadata that
+        # is also embedded in the scripts, so this proves the playback items carry the facts.
+        match = re.search(r"let videoData = (.*?);\n\s*const initialFeedState =", body["scripts"][-1], re.S)
+        items = {item["post_id"]: item for item in json.loads(match.group(1))}
+        first = items[post_ids[0]]
+        assert (first["duration_ms"], first["width"], first["height"]) == (14000, 1920, 1080)
+        # Reels the probe has not seen stay null so the details column can omit the chip.
+        second = items[post_ids[1]]
+        assert second["duration_ms"] is None and second["width"] is None and second["height"] is None
 
 
 def test_pack_draft_share_blocked_and_progress_rejects_unavailable(app):

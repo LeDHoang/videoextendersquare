@@ -36,6 +36,9 @@
     border: 1px solid #24282D;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 59, 31, 0.35);
     overflow: hidden;
+    /* clip never makes a scroll container so focus or hit-testing cannot shift the
+       picture inside the frame (the ambient glow overflows it by 20px) */
+    overflow: clip;
     display: flex;
     flex-direction: column;
     margin: auto;
@@ -244,6 +247,62 @@
     visibility: hidden;
   }
 
+  /* Precision reticle: four vermilion corner brackets over the picture.
+     Decorative only so they never take pointer events. */
+  .reels-reticle {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    z-index: 5;
+    pointer-events: none;
+    border: 0 solid #FF3B1F;
+  }
+  .reels-reticle.tl { top: 14px; left: 14px; border-top-width: 2px; border-left-width: 2px; }
+  .reels-reticle.tr { top: 14px; right: 14px; border-top-width: 2px; border-right-width: 2px; }
+  .reels-reticle.bl { bottom: 34px; left: 14px; border-bottom-width: 2px; border-left-width: 2px; }
+  .reels-reticle.br { bottom: 34px; right: 14px; border-bottom-width: 2px; border-right-width: 2px; }
+  .reels-phone-frame.sx-fs-active .reels-reticle,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-reticle {
+    display: none;
+  }
+
+  /* Keyboard focus rings for the controls that had none. */
+  .edge-chevron:focus-visible,
+  .drawer-tab:focus-visible,
+  .drawer-close-btn:focus-visible,
+  .comment-name:focus-visible,
+  .comment-time-btn:focus-visible,
+  .comment-like-btn:focus-visible,
+  .comment-delete-btn:focus-visible,
+  .follow-pill:focus-visible,
+  .meta-creator:focus-visible,
+  .twitch-comment-pill:focus-visible,
+  .sync-time-toggle:focus-visible,
+  .account-btn:focus-visible,
+  .comment-submit-btn:focus-visible {
+    outline: 2px solid #FFFFFF;
+    outline-offset: 2px;
+  }
+
+  /* Motion preferences: no slide or pulse and no transitions on the chrome. */
+  @media (prefers-reduced-motion: reduce) {
+    .reels-comments-drawer,
+    .action-btn,
+    .edge-chevron,
+    .reels-progress-bar,
+    .reels-progress-fill,
+    .reels-progress-fill::after,
+    .twitch-comment-pill,
+    .reels-twitch-ticker,
+    .reels-ambient-glow {
+      transition: none !important;
+      animation: none !important;
+    }
+    .comment-item.comment-highlight {
+      animation: none !important;
+    }
+  }
+
   /* Top Bar */
   .reels-top-bar {
     position: absolute;
@@ -303,12 +362,16 @@
     display: none;
   }
   .reels-cluster {
-    background: #08090A;
-    border: 1px solid #24282D;
-    padding: 3px;
+    background: rgba(13, 14, 16, 0.9);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid #24282E;
+    border-radius: 12px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 6px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   }
   /* The `hidden` attribute must win over the flex display above, otherwise
      the overflow group stacks below the primary group instead of replacing it. */
@@ -318,15 +381,15 @@
   .reels-cluster-divider {
     width: 100%;
     height: 1px;
-    background: #24282D;
-    margin: 2px 0;
+    background: #24282E;
+    margin: 0;
   }
   .action-btn {
     width: 40px;
     height: 40px;
-    border-radius: 0px;
+    border-radius: 8px;
     background: #16191C;
-    border: 1px solid #24282D;
+    border: 1px solid #24282E;
     color: #A4ABB3;
     display: flex;
     flex-direction: column;
@@ -339,9 +402,13 @@
     text-decoration: none;
   }
   .action-btn:hover {
-    background: #1D2126;
+    background: rgba(255, 59, 31, 0.14);
     color: #FF3B1F;
     border-color: #FF3B1F;
+  }
+  .action-btn:focus-visible {
+    outline: 2px solid #FFFFFF;
+    outline-offset: 2px;
   }
   .action-btn:active, .action-btn.flash-click {
     background: #FF3B1F !important;
@@ -380,8 +447,36 @@
     line-height: 1;
     white-space: nowrap;
   }
+  /* Toggled-on state (sound on or comments open): vermilion text and ring.
+     The old rule painted the label dark on a dark button. */
+  .action-btn.active {
+    background: rgba(255, 59, 31, 0.14);
+    color: #FF3B1F;
+    border-color: #FF3B1F;
+    box-shadow: 0 0 12px rgba(255, 59, 31, 0.25);
+  }
   .action-btn.active .action-btn-label {
+    color: #FF3B1F;
+  }
+  /* Auto-advance on reads as a solid vermilion key like the mockup. */
+  #modeBtn.active {
+    background: #FF3B1F;
+    border-color: #FF3B1F;
     color: #0A0A0A;
+    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45);
+  }
+  #modeBtn.active .action-btn-label {
+    color: #0A0A0A;
+  }
+  /* Amber accents: comment count and the cache button. */
+  #commentBadge,
+  #preloadBtn {
+    color: #F59E0B;
+  }
+  #preloadBtn:hover {
+    background: rgba(245, 158, 11, 0.14);
+    border-color: #F59E0B;
+    color: #F59E0B;
   }
   /* Liked state for the reel LIKE button — red glow + red-filled heart. */
   #likeBtn.active {
@@ -603,7 +698,9 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: 20px;
+    height: 26px;
+    padding-bottom: 6px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -611,24 +708,49 @@
   }
   .reels-progress-bar {
     width: 100%;
-    height: 4px;
-    background: #24282D;
+    height: 6px;
+    background: #24282E;
     cursor: pointer;
     position: relative;
     transition: height 0.15s;
   }
-  .reels-progress-wrap:hover .reels-progress-bar {
-    height: 6px;
+  .reels-progress-wrap:hover .reels-progress-bar,
+  .reels-progress-bar:focus-visible {
+    height: 8px;
+  }
+  .reels-progress-bar:focus-visible {
+    outline: 2px solid #FFFFFF;
+    outline-offset: 1px;
   }
   .reels-progress-fill {
+    position: relative;
     height: 100%;
     width: 0%;
     background: #FF3B1F;
+    box-shadow: 0 0 12px rgba(255, 59, 31, 0.7);
     transition: width 0.1s linear;
+  }
+  /* Round scrub handle riding the end of the fill. */
+  .reels-progress-fill::after {
+    content: '';
+    position: absolute;
+    right: -7px;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin-top: -7px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    border: 2px solid #FF3B1F;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    transition: transform 0.15s ease;
+  }
+  .reels-progress-wrap:hover .reels-progress-fill::after {
+    transform: scale(1.2);
   }
   .reels-time-display {
     position: absolute;
-    bottom: 6px;
+    bottom: 16px;
     right: 14px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
@@ -649,11 +771,11 @@
     position: absolute;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 6px;
-    height: 6px;
-    border-radius: 0px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
     background: #FF3B1F;
-    border: 1px solid #FFF;
+    border: 1px solid #08090A;
     pointer-events: auto;
     cursor: pointer;
     transition: transform 0.15s ease, background 0.15s ease;
@@ -1254,11 +1376,14 @@
 
   /* VR Button */
   #vrBtn {
-    border-color: rgba(168, 85, 247, 0.4);
+    background: rgba(168, 85, 247, 0.16);
+    border-color: rgba(168, 85, 247, 0.55);
+    color: #A855F7;
   }
   #vrBtn:hover {
-    background: #1D2126;
+    background: rgba(168, 85, 247, 0.3);
     border-color: #A855F7;
+    color: #FFFFFF;
     box-shadow: 0 0 16px rgba(168, 85, 247, 0.35);
   }
   .vr-active .reels-badge {
@@ -1471,6 +1596,345 @@
     .reels-pack-card-inner { padding:20px 14px; }
     .reels-pack-queue-item { min-height:52px; }
   }
+
+  /* Docked details column (desktop SPA embed only).
+     The host becomes a three column grid: square player then a gutter holding
+     PREV and NEXT then the details column. Below the dock breakpoint the markup
+     is moved back into the frame so nothing here applies. */
+  .reels-gutter[hidden],
+  .reels-side[hidden] {
+    display: none !important;
+  }
+  #sxReelsHost.sx-reels-docked {
+    display: grid;
+    grid-template-columns: minmax(0, min(84dvh, 1100px)) 64px clamp(320px, 30vw, 600px);
+    justify-content: center;
+    align-items: stretch;
+    width: 100%;
+  }
+  #sxReelsHost.sx-reels-docked .reels-phone-frame {
+    width: 100%;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    align-self: start;
+  }
+  .reels-gutter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #sxReelsHost.sx-reels-docked .reels-edge-nav {
+    position: static;
+    transform: none;
+    top: auto;
+    right: auto;
+    z-index: auto;
+  }
+  #sxReelsHost.sx-reels-docked .reels-meta {
+    display: none;
+  }
+  .reels-side {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    background: #0D0E10;
+    border: 1px solid #24282E;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  }
+  .reels-side-inner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .side-head {
+    flex: 0 0 auto;
+    display: grid;
+    gap: 10px;
+    max-height: 46%;
+    overflow-y: auto;
+    padding: 14px;
+    background: rgba(8, 9, 10, 0.8);
+    border-bottom: 1px solid #24282E;
+    user-select: auto;
+  }
+  .side-creator-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .side-avatar {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: #121417;
+    border: 1px solid #FF3B1F;
+    box-shadow: 0 0 8px rgba(255, 59, 31, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font: 800 13px/1 'JetBrains Mono', monospace;
+    color: #FF3B1F;
+  }
+  .side-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .side-creator-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .side-creator {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #FF3B1F;
+    font: 700 12px/1.2 'JetBrains Mono', monospace;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .side-creator:hover {
+    color: #FFFFFF;
+    text-decoration: underline;
+  }
+  .side-creator:focus-visible,
+  .side-more:focus-visible,
+  .side-chip:focus-visible {
+    outline: 2px solid #FFFFFF;
+    outline-offset: 2px;
+  }
+  .side-age {
+    font: 600 10px/1.2 'JetBrains Mono', monospace;
+    color: #7E8794;
+    letter-spacing: 0.08em;
+  }
+  .side-title,
+  .side-caption {
+    user-select: text;
+  }
+  .side-title {
+    margin: 0;
+    font: 800 14px/1.3 Archivo, sans-serif;
+    color: #F2F3F5;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .side-caption {
+    margin: 0;
+    font: 400 12px/1.5 Archivo, sans-serif;
+    color: #A4ABB3;
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .side-caption.expanded {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-height: 168px;
+    overflow-y: auto;
+  }
+  .side-caption[hidden],
+  .side-more[hidden],
+  .side-creator[hidden] {
+    display: none;
+  }
+  .side-more {
+    justify-self: start;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: #FF3B1F;
+    font: 700 10px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+  }
+  .side-tags,
+  .side-specs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .side-tags:empty,
+  .side-specs:empty {
+    display: none;
+  }
+  .side-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #121417;
+    border: 1px solid #24282E;
+    color: #A4ABB3;
+    font: 600 10px/1.3 'JetBrains Mono', monospace;
+    text-decoration: none;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+  .side-chip:hover {
+    color: #FFFFFF;
+    border-color: #FF3B1F;
+  }
+  .side-chip.tag {
+    color: #FF3B1F;
+    border-color: rgba(255, 59, 31, 0.3);
+  }
+  .side-chip.spec {
+    color: #F2F3F5;
+    cursor: default;
+  }
+  .side-chip.spec:hover {
+    border-color: #24282E;
+  }
+  .side-chip.spec b {
+    color: #7E8794;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .side-stats {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border: 1px solid #24282E;
+    border-radius: 6px;
+    background: #121417;
+  }
+  .side-stats > div {
+    padding: 7px 4px;
+    text-align: center;
+    min-width: 0;
+  }
+  .side-stats > div + div {
+    border-left: 1px solid #24282E;
+  }
+  .side-stats dt {
+    font: 600 9px/1 'JetBrains Mono', monospace;
+    color: #7E8794;
+    letter-spacing: 0.1em;
+  }
+  .side-stats dd {
+    margin: 4px 0 0;
+    font: 800 13px/1 Archivo, sans-serif;
+    color: #FFFFFF;
+  }
+  .side-comments {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #sxReelsHost.sx-reels-docked #commentsDrawer {
+    position: static;
+    inset: auto;
+    transform: none;
+    transition: none;
+    height: 100%;
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    border-top: 0;
+    box-shadow: none;
+    background: #0D0E10;
+  }
+  #sxReelsHost.sx-reels-docked .drawer-close-btn,
+  #sxReelsHost.sx-reels-docked .drawer-telemetry {
+    display: none;
+  }
+  /* Fullscreen with room for the column (see FS_DOCK_QUERY).
+     The host is the fullscreen element so it keeps its black stage and the frame stops being a
+     full-bleed fixed layer: it becomes a screen-high square beside the gutter and the column.
+     These rules carry two ids so they beat the full-bleed fullscreen rules above and in the
+     page stylesheet. Phones and small tablets never get the class and keep the old layout. */
+  #sxReelsHost.sx-fs-docked {
+    display: grid !important;
+    grid-template-columns: minmax(0, min(100dvh, calc(100vw - 64px - clamp(320px, 30vw, 600px)))) 64px clamp(320px, 30vw, 600px);
+    justify-content: center;
+    align-content: center;
+    align-items: stretch;
+  }
+  #sxReelsHost.sx-fs-docked .reels-phone-frame {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: 1 / 1 !important;
+    margin: 0 !important;
+    align-self: start;
+    border: 1px solid #24282D !important;
+    overflow: hidden !important;
+    overflow: clip !important;
+  }
+  /* The square already fits the frame so there is nothing to pan. */
+  #sxReelsHost.sx-fs-docked #reelsVideo,
+  #sxReelsHost.sx-fs-docked #reelsImage {
+    cursor: auto;
+  }
+  #sxReelsHost.sx-fs-docked .reels-actions {
+    right: 14px !important;
+    max-height: calc(100% - 60px) !important;
+  }
+  #sxReelsHost.sx-fs-docked .reels-progress-wrap {
+    padding: 0 0 6px !important;
+  }
+  #sxReelsHost.sx-fs-docked .reels-reticle {
+    display: block;
+  }
+  /* In the gutter the PREV and NEXT keys follow the same rounded look as the action bar. */
+  .edge-chevron {
+    border-radius: 8px;
+    border-color: #24282E;
+  }
+  .edge-chevron:hover {
+    background: rgba(255, 59, 31, 0.14);
+  }
+  /* On phones the right edge belongs to the action bar. The page-edge PREV and NEXT
+     keys used to sit behind it so they now move to the left edge. */
+  @media (max-width: 700px) {
+    .reels-edge-nav {
+      right: auto;
+      left: max(10px, env(safe-area-inset-left));
+    }
+    /* The square frame is small on a phone: let the comments sheet use all of it so the
+       list has room and drop the decorative footer lines. The input must be 16px or
+       iOS Safari zooms the page when it takes focus. */
+    .reels-comments-drawer {
+      height: 100%;
+      max-height: none;
+    }
+    .drawer-telemetry {
+      display: none;
+    }
+    .comment-input {
+      font-size: 16px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -1488,6 +1952,7 @@
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
+    <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
     <canvas id="packVisualCanvas" width="1024" height="1024" hidden></canvas>
@@ -1556,55 +2021,55 @@
   <!-- Floating Command Grid (Right Side).
        Primary group is always visible; the "..." button swaps in the
        overflow group. Tapping the video dismisses the overflow. -->
-  <div class="reels-actions" id="reelsActions">
+  <div class="reels-actions" id="reelsActions" role="toolbar" aria-orientation="vertical" aria-label="Reel actions">
     <!-- PRIMARY Cluster -->
     <div class="reels-cluster" id="railPrimary">
-      <button class="action-btn" id="soundBtn" title="Toggle Sound (M)">
+      <button class="action-btn" id="soundBtn" type="button" title="Toggle Sound (M)" aria-label="Sound" aria-pressed="false" aria-keyshortcuts="M">
         <span class="btn-icon">
           __ICON_SOUND_MUTE__
         </span>
         <span class="action-btn-label">MUTE</span>
       </button>
-      <button class="action-btn" id="modeBtn" title="Auto-Next / Loop">
+      <button class="action-btn active" id="modeBtn" type="button" title="Auto-Next / Loop" aria-label="Auto-advance to the next reel" aria-pressed="true">
         <span class="btn-icon sx-flip-x">
           __ICON_BACK__
         </span>
         <span class="action-btn-label" id="modeLabel">AUTO</span>
       </button>
       <div class="reels-cluster-divider"></div>
-      <button class="action-btn" id="likeBtn" title="Like / Unlike (F)">
+      <button class="action-btn" id="likeBtn" type="button" title="Like / Unlike (F)" aria-label="Like reel" aria-pressed="false" aria-keyshortcuts="F">
         <span class="btn-icon">
           __ICON_LIKE__
         </span>
         <span class="action-btn-label" id="likeCount">0</span>
       </button>
-      <button class="action-btn" id="commentBtn" title="Comments & Time-Sync Notes (C)" style="position: relative;">
+      <button class="action-btn" id="commentBtn" type="button" title="Comments & Time-Sync Notes (C)" aria-label="Comments" aria-expanded="false" aria-controls="commentsDrawer" aria-keyshortcuts="C" style="position: relative;">
         <span class="btn-icon">
           __ICON_COMMENT__
         </span>
         <span class="action-btn-label" id="commentBadge">0</span>
       </button>
-      <button class="action-btn" id="shareBtn" title="Share reel">
+      <button class="action-btn" id="shareBtn" type="button" title="Share reel" aria-label="Share reel">
         <span class="btn-icon">
           __ICON_SHARE__
         </span>
         <span class="action-btn-label">SHARE</span>
       </button>
-      <button class="action-btn" id="fullBtn" title="Fullscreen">
+      <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
         <span class="btn-icon">
           __ICON_FULLSCREEN__
         </span>
         <span class="action-btn-label">FULL</span>
       </button>
       <div id="vrBtnWrap" style="display:none;">
-        <button class="action-btn" id="vrBtn" title="Enter VR Mode — requires WebXR device or Chrome emulator extension">
+        <button class="action-btn" id="vrBtn" type="button" title="Enter VR Mode — requires WebXR device or Chrome emulator extension" aria-label="Enter VR mode">
           <span class="btn-icon">
             __ICON_VR__
           </span>
           <span class="action-btn-label" style="color: #A855F7;">VR</span>
         </button>
       </div>
-      <button class="action-btn" id="moreBtn" title="More actions">
+      <button class="action-btn" id="moreBtn" type="button" title="More actions" aria-label="More actions" aria-expanded="false" aria-controls="railMore">
         <span class="btn-icon">
           __ICON_MORE__
         </span>
@@ -1614,34 +2079,34 @@
 
     <!-- OVERFLOW Cluster (replaces the primary cluster in place) -->
     <div class="reels-cluster" id="railMore" hidden>
-      <button class="action-btn" id="railBackBtn" title="Back to main actions">
+      <button class="action-btn" id="railBackBtn" type="button" title="Back to main actions" aria-label="Back to main actions">
         <span class="btn-icon">
           __ICON_BACK__
         </span>
         <span class="action-btn-label">BACK</span>
       </button>
       <div class="reels-cluster-divider"></div>
-      <button class="action-btn" id="saveBtn" title="Save / Unsave">
+      <button class="action-btn" id="saveBtn" type="button" title="Save / Unsave" aria-label="Save reel" aria-pressed="false">
         <span class="btn-icon">
           __ICON_SAVE__
         </span>
         <span class="action-btn-label">SAVE</span>
       </button>
-      <button class="action-btn" id="reportBtn" title="Report post">
+      <button class="action-btn" id="reportBtn" type="button" title="Report post" aria-label="Report this reel">
         <span class="btn-icon">
           __ICON_REPORT__
         </span>
         <span class="action-btn-label">REPORT</span>
       </button>
-      <button class="action-btn" id="notInterestedBtn" title="Show fewer reels like this">
+      <button class="action-btn" id="notInterestedBtn" type="button" title="Show fewer reels like this" aria-label="Show fewer reels like this">
         <span class="btn-icon material-symbols-outlined">thumb_down</span>
         <span class="action-btn-label">LESS</span>
       </button>
-      <button class="action-btn" id="hideCreatorBtn" title="Hide this creator">
+      <button class="action-btn" id="hideCreatorBtn" type="button" title="Hide this creator" aria-label="Hide this creator">
         <span class="btn-icon material-symbols-outlined">person_off</span>
         <span class="action-btn-label">HIDE</span>
       </button>
-      <button class="action-btn" id="preloadBtn" title="Preload All Filtered Reels (L)">
+      <button class="action-btn" id="preloadBtn" type="button" title="Preload All Filtered Reels (L)" aria-label="Preload the next reels" aria-keyshortcuts="L">
         <span class="btn-icon">
           __ICON_PRELOAD__
         </span>
@@ -1652,12 +2117,12 @@
 
   <!-- Page-edge prev/next chevrons: fixed to the viewport right edge,
        vertically centered on the player window by positionEdgeNav(). -->
-  <div class="reels-edge-nav" id="edgeNav" hidden>
-    <button class="edge-chevron" id="edgePrevBtn" title="Previous reel (W / Up)">
+  <div class="reels-edge-nav" id="edgeNav" role="group" aria-label="Reel navigation" hidden>
+    <button class="edge-chevron" id="edgePrevBtn" type="button" title="Previous reel (W / Up)" aria-label="Previous reel">
       <span class="btn-icon">__ICON_PREV__</span>
       <span class="action-btn-label">PREV</span>
     </button>
-    <button class="edge-chevron" id="edgeNextBtn" title="Next reel (S / Down)">
+    <button class="edge-chevron" id="edgeNextBtn" type="button" title="Next reel (S / Down)" aria-label="Next reel">
       <span class="btn-icon">__ICON_NEXT__</span>
       <span class="action-btn-label">NEXT</span>
     </button>
@@ -1681,26 +2146,26 @@
 
   <div class="reels-progress-wrap" id="progressWrap">
     <div class="reels-time-display" id="timeDisplay">0:00 / 0:00</div>
-    <div class="reels-progress-bar" id="progressBar">
+    <div class="reels-progress-bar" id="progressBar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00 of 0:00">
       <div class="reels-comment-markers" id="commentMarkers"></div>
       <div class="reels-progress-fill" id="progressFill"></div>
     </div>
   </div>
 
   <!-- ECHO Industrial Comments Drawer — 2D Viewport Aesthetic -->
-  <div class="reels-comments-drawer" id="commentsDrawer" tabindex="-1">
+  <div class="reels-comments-drawer" id="commentsDrawer" role="dialog" aria-modal="false" aria-label="Comments" tabindex="-1">
     <div class="drawer-header">
       <div class="drawer-header-left">
         <span class="drawer-header-icon" aria-hidden="true">__ICON_COMMENT__</span>
         <h2 class="drawer-title" id="drawerTitle">COMMENTS <span class="drawer-title-count">(0)</span></h2>
       </div>
       <div class="drawer-header-right">
-        <div class="drawer-tabs">
-          <button type="button" class="drawer-tab active" data-tab="all" id="tabAll">ALL</button>
-          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync">__ICON_TIMESYNC__ TIME-SYNC</button>
-          <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral"><span class="material-symbols-outlined">forum</span> GENERAL</button>
+        <div class="drawer-tabs" role="tablist" aria-label="Comment filter">
+          <button type="button" class="drawer-tab active" data-tab="all" id="tabAll" role="tab" aria-selected="true">ALL</button>
+          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync" role="tab" aria-selected="false">__ICON_TIMESYNC__ TIME-SYNC</button>
+          <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral" role="tab" aria-selected="false"><span class="material-symbols-outlined">forum</span> GENERAL</button>
         </div>
-        <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)"><span class="material-symbols-outlined">close</span></button>
+        <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)" aria-label="Close comments"><span class="material-symbols-outlined">close</span></button>
       </div>
     </div>
     <div class="drawer-body" id="commentsList">
@@ -1732,6 +2197,35 @@
     </div>
   </div>
 </div>
+
+<!-- Docked details column (desktop SPA embed). Hidden until applyDock() runs. The comments
+     drawer and the PREV/NEXT group are moved in here at wide widths and back out below. -->
+<div class="reels-gutter" id="reelsGutter" hidden></div>
+<aside class="reels-side" id="reelsSide" aria-label="Reel details and comments" hidden>
+  <div class="reels-side-inner">
+    <header class="side-head">
+      <div class="side-creator-row">
+        <span class="side-avatar" id="sideAvatar" aria-hidden="true"></span>
+        <div class="side-creator-text">
+          <button type="button" class="side-creator" id="sideCreator" hidden></button>
+          <span class="side-age" id="sideAge"></span>
+        </div>
+        <button type="button" class="follow-pill" id="sideFollow" hidden aria-pressed="false"><span class="follow-pill-icon" aria-hidden="true">__ICON_FOLLOW__</span><span id="sideFollowLabel">FOLLOW</span></button>
+      </div>
+      <h2 class="side-title" id="sideTitle">Loading video…</h2>
+      <p class="side-caption" id="sideCaption" hidden></p>
+      <button type="button" class="side-more" id="sideCaptionToggle" hidden aria-expanded="false" aria-controls="sideCaption">MORE</button>
+      <div class="side-tags" id="sideTags"></div>
+      <div class="side-specs" id="sideSpecs"></div>
+      <dl class="side-stats">
+        <div><dt>LIKES</dt><dd id="sideLikes">0</dd></div>
+        <div><dt>COMMENTS</dt><dd id="sideComms">0</dd></div>
+        <div><dt>VIEWS</dt><dd id="sideViews">0</dd></div>
+      </dl>
+    </header>
+    <div class="side-comments" id="sideCommentsSlot"></div>
+  </div>
+</aside>
 
 <script>__QUEST_CONTROLLER_IMG_JS__</script>
 <script>__REELS_FEED_STATE_JS__</script>
@@ -1780,6 +2274,10 @@
     let isMuted = true;
     let activeTab = 'all';
     let isSyncTimeActive = true;
+    // Docked details column (desktop SPA embed): true while the comments drawer
+    // and PREV/NEXT group live in the side column instead of the player frame.
+    let isDocked = false;
+    let sideCaptionOpen = false;
 
     let currentUser = null;
     let pendingReplayAttempted = false;
@@ -1850,6 +2348,22 @@
     const railMore = document.getElementById('railMore');
     const railBackBtn = document.getElementById('railBackBtn');
     const edgeNav = document.getElementById('edgeNav');
+    const sideEl = document.getElementById('reelsSide');
+    const gutterEl = document.getElementById('reelsGutter');
+    const sideSlot = document.getElementById('sideCommentsSlot');
+    const sideAvatar = document.getElementById('sideAvatar');
+    const sideCreator = document.getElementById('sideCreator');
+    const sideAge = document.getElementById('sideAge');
+    const sideFollow = document.getElementById('sideFollow');
+    const sideFollowLabel = document.getElementById('sideFollowLabel');
+    const sideTitle = document.getElementById('sideTitle');
+    const sideCaption = document.getElementById('sideCaption');
+    const sideCaptionToggle = document.getElementById('sideCaptionToggle');
+    const sideTags = document.getElementById('sideTags');
+    const sideSpecs = document.getElementById('sideSpecs');
+    const sideLikes = document.getElementById('sideLikes');
+    const sideComms = document.getElementById('sideComms');
+    const sideViews = document.getElementById('sideViews');
     const edgePrevBtn = document.getElementById('edgePrevBtn');
     const edgeNextBtn = document.getElementById('edgeNextBtn');
 
@@ -3200,9 +3714,14 @@
         item._following = !!(item.viewer_state && item.viewer_state.following_creator);
       }
 
-      if (likeBtn) likeBtn.classList.toggle('active', item._liked);
+      if (likeBtn) {
+        likeBtn.classList.toggle('active', item._liked);
+        likeBtn.setAttribute('aria-pressed', item._liked ? 'true' : 'false');
+        likeBtn.setAttribute('aria-label', (item._liked ? 'Unlike reel' : 'Like reel') + ', ' + (Number(item.likes) || 0) + ' likes');
+      }
       if (saveBtn) {
         saveBtn.classList.toggle('active', item._saved);
+        saveBtn.setAttribute('aria-pressed', item._saved ? 'true' : 'false');
         saveBtn.title = item._saved ? 'Remove from saved posts' : 'Save post';
       }
 
@@ -3229,6 +3748,7 @@
       if (followPill) {
         followPill.hidden = !creator || !creator.username || isOwnPost;
         followPill.classList.toggle('active', !!item._following);
+        followPill.setAttribute('aria-pressed', item._following ? 'true' : 'false');
         followPill.title = item._following ? 'Unfollow creator' : 'Follow creator';
         const pillLabel = document.getElementById('followPillLabel');
         if (pillLabel) pillLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
@@ -3238,6 +3758,7 @@
       if (hideCreatorBtn) hideCreatorBtn.hidden = isPackMode || !creator || isOwnPost;
       if (followLabel) followLabel.textContent = item._following ? 'FOLLOWING' : 'FOLLOW';
       if (isPackMode) syncPackChrome();
+      updateSideLive();
     }
 
     async function likeCurrentReel() {
@@ -3769,11 +4290,15 @@
     }
     function updateTwitchTicker() {
       if (!twitchCommentTicker) return;
-      if (commentsDrawer && commentsDrawer.classList.contains('open')) {
+      if (drawerBlocksPlayer()) {
         hideTicker();
         return;
       }
 
+      if (isImageItem(videoData[idx])) {
+        hideTicker();
+        return;
+      }
       const curTime = video.currentTime || 0;
       const active = getCurrentComments().filter((comment) => {
         if (comment.timestamp === null || comment.timestamp === undefined) return false;
@@ -3798,6 +4323,16 @@
         pill.className = 'twitch-comment-pill';
         pill.dataset.cid = comment.id;
         pill.title = 'Open comment in panel';
+        pill.setAttribute('role', 'button');
+        pill.tabIndex = 0;
+        pill.setAttribute('aria-label', 'Comment from ' + (comment.author_name || 'Anonymous') + ' at ' + formatTime(comment.timestamp) + ': ' + (comment.text || '') + '. Open in comments');
+        pill.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            openDrawerToComment(comment.id);
+          }
+        });
 
         const avatar = document.createElement('div');
         avatar.className = 'twitch-avatar';
@@ -3829,7 +4364,8 @@
       if (!commentId) return;
       toggleDrawer(true);
       setActiveTab('all');
-      // Wait for the drawer slide-up (0.34s) so scroll offsets are correct
+      // Wait for the drawer slide-up (0.34s) so scroll offsets are correct.
+      // The docked column does not slide so it can scroll straight away.
       setTimeout(() => {
         if (!commentsList) return;
         const target = commentsList.querySelector('#comment-' + commentId);
@@ -3841,15 +4377,22 @@
           target.classList.add('comment-highlight');
           setTimeout(() => target.classList.remove('comment-highlight'), 2400);
         }
-      }, 380);
+      }, isDocked ? 0 : 380);
     }
 
     // ── Active tab control helpers ──
     function setActiveTab(key) {
       const map = { all: tabAll, sync: tabSync, general: tabGeneral };
       const activeEl = map[key] || tabAll;
-      [tabAll, tabSync, tabGeneral].forEach((t) => t && t.classList.remove('active'));
-      if (activeEl) activeEl.classList.add('active');
+      [tabAll, tabSync, tabGeneral].forEach((t) => {
+        if (!t) return;
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      if (activeEl) {
+        activeEl.classList.add('active');
+        activeEl.setAttribute('aria-selected', 'true');
+      }
       activeTab = (activeEl && activeEl.getAttribute('data-tab')) || 'all';
       renderDrawerComments();
     }
@@ -3869,6 +4412,8 @@
       if (countEl) countEl.textContent = `(${comments.length})`;
       else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${comments.length})`;
       if (commentBadge) commentBadge.textContent = String(comments.length);
+      if (commentBtn) commentBtn.setAttribute('aria-label', 'Comments, ' + comments.length);
+      if (sideComms) sideComms.textContent = fmtCount(comments.length);
 
       let filtered = comments;
       if (activeTab === 'sync') {
@@ -3988,15 +4533,31 @@
 
     function toggleDrawer(open) {
       if (!commentsDrawer) return;
+      if (isDocked) {
+        // The column is always visible: "open" just brings it into view and
+        // focuses the composer; closing is a no-op.
+        if (open !== false && sideEl) {
+          try {
+            sideEl.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+          } catch (scrollError) {}
+          setTimeout(() => {
+            try { if (commentInput) commentInput.focus({ preventScroll: true }); } catch (focusError) {}
+          }, 0);
+        }
+        updateTwitchTicker();
+        return;
+      }
       const willOpen = (typeof open === 'boolean') ? open : !commentsDrawer.classList.contains('open');
       if (willOpen) {
         commentsDrawer.classList.add('open');
         commentBtn.classList.add('active');
+        commentBtn.setAttribute('aria-expanded', 'true');
         renderDrawerComments();
         setTimeout(() => commentInput && commentInput.focus(), 150);
       } else {
         commentsDrawer.classList.remove('open');
         commentBtn.classList.remove('active');
+        commentBtn.setAttribute('aria-expanded', 'false');
       }
       updateTwitchTicker();
     }
@@ -4206,6 +4767,7 @@
           metaFolder.textContent = '▦ REEL PACK';
           metaTitle.textContent = 'Reel unavailable';
           metaSize.textContent = '';
+          renderSidePanel();
           showPackStage('unavailable');
           persistPackProgress(true);
           if (packUnavailableTimer) clearTimeout(packUnavailableTimer);
@@ -4222,6 +4784,7 @@
       } catch (e) {}
       metaSize.textContent = item.size || '';
       refreshEngagementUI();
+      renderSidePanel();
       startViewTracking(item);
       maybeFetchMore();
       if (isPackMode) recordPackEvent('pack_item_view', { index: idx });
@@ -4316,6 +4879,8 @@
 
     function updateSoundBtnUI(muted) {
       if (!soundBtn) return;
+      soundBtn.classList.toggle('active', !muted);
+      soundBtn.setAttribute('aria-pressed', muted ? 'false' : 'true');
       if (muted) {
         soundBtn.innerHTML = `
           <span class="btn-icon">
@@ -4335,6 +4900,8 @@
 
     function updateModeBtnUI(auto) {
       if (!modeBtn) return;
+      modeBtn.classList.toggle('active', !!auto);
+      modeBtn.setAttribute('aria-pressed', auto ? 'true' : 'false');
       if (auto) {
         modeBtn.innerHTML = `
           <span class="btn-icon sx-flip-x">
@@ -4711,6 +5278,13 @@
     function setRailOverflow(open) {
       if (railPrimary) railPrimary.hidden = open;
       if (railMore) railMore.hidden = !open;
+      if (moreBtn) moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      // Keep keyboard focus inside the group that is now showing.
+      try {
+        const next = open ? railBackBtn : moreBtn;
+        if (next && document.activeElement && frame.contains(document.activeElement) &&
+            document.activeElement.closest('.reels-actions')) next.focus({ preventScroll: true });
+      } catch (focusError) {}
     }
     function isRailOverflowOpen() {
       return !!(railMore && !railMore.hidden);
@@ -4847,7 +5421,7 @@
     if (vWrap) {
       vWrap.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+        if (drawerBlocksPlayer()) return;
         if (!isCurrentFullscreen() || getMaxPan() <= 0) return;
         isPanning = true;
         panStartX = e.clientX;
@@ -4915,7 +5489,7 @@
       if (e.target.tagName === 'VIDEO' || e.target.tagName === 'IMG' || e.target.id === 'videoWrap') {
         if (isRailOverflowOpen()) {
           setRailOverflow(false);
-        } else if (commentsDrawer && commentsDrawer.classList.contains('open')) {
+        } else if (drawerBlocksPlayer()) {
           toggleDrawer(false);
         } else {
           togglePlay();
@@ -4930,6 +5504,12 @@
     let edgeNavInView = true;
     function positionEdgeNav() {
       if (!edgeNav || !frame) return;
+      if (isDocked) {
+        // Static inside the gutter: always shown and centred by the grid.
+        edgeNav.hidden = false;
+        edgeNav.style.top = '';
+        return;
+      }
       const rect = frame.getBoundingClientRect();
       const onScreen = rect.bottom > 0 && rect.top < window.innerHeight && rect.height > 0;
       const show = onScreen && edgeNavInView;
@@ -4958,6 +5538,7 @@
     // ReelsPlayer.jsx re-injects this script on param change and calls this
     // hook on teardown — release the window-level listeners + observer.
     window.__sxReelsCleanup = function () {
+      window.removeEventListener('keydown', onKeydown);
       window.removeEventListener('scroll', positionEdgeNav, { capture: true });
       window.removeEventListener('resize', positionEdgeNav);
       document.removeEventListener('fullscreenchange', positionEdgeNav);
@@ -4988,12 +5569,29 @@
         const pct = (video.currentTime / video.duration) * 100;
         progressFill.style.width = pct + '%';
         timeDisplay.textContent = formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
+        progressBar.setAttribute('aria-valuenow', String(Math.round(pct)));
+        progressBar.setAttribute('aria-valuetext', formatTime(video.currentTime) + ' of ' + formatTime(video.duration));
         if (syncTimeDisplay) syncTimeDisplay.textContent = formatTime(video.currentTime);
         if (isSyncTimeActive && commentInput && !commentInput.value) {
           commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime)}...`;
         }
       }
       updateTwitchTicker();
+    });
+
+    // Keyboard seeking on the scrubber: arrows step 5s and Home/End jump.
+    progressBar.addEventListener('keydown', (e) => {
+      if (!video.duration) return;
+      let handled = true;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') seekRelative(-5);
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') seekRelative(5);
+      else if (e.key === 'Home') video.currentTime = 0;
+      else if (e.key === 'End') video.currentTime = Math.max(0, video.duration - 0.1);
+      else handled = false;
+      if (handled) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     });
 
     // Seek on progress bar click
@@ -5008,7 +5606,7 @@
     // Mouse Wheel Scroll: Horizontal Pan in Fullscreen or Vertical Reel Switch
     let scrollTimeout;
     frame.addEventListener('wheel', (e) => {
-      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (drawerBlocksPlayer()) return;
       if (isCurrentFullscreen() && Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 5) {
         e.preventDefault();
         applyPan(panX - e.deltaX, false);
@@ -5032,7 +5630,7 @@
     let touchPanned = false;
 
     frame.addEventListener('touchstart', (e) => {
-      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (drawerBlocksPlayer()) return;
       if (e.touches.length === 1) {
         touchStartX = e.touches[0].clientX;
         touchStartY = e.touches[0].clientY;
@@ -5044,7 +5642,7 @@
     }, { passive: true });
 
     frame.addEventListener('touchmove', (e) => {
-      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (drawerBlocksPlayer()) return;
       if (e.touches.length === 1) {
         const curX = e.touches[0].clientX;
         const curY = e.touches[0].clientY;
@@ -5074,7 +5672,7 @@
 
     frame.addEventListener('touchend', (e) => {
       frame.classList.remove('panning');
-      if (commentsDrawer && commentsDrawer.classList.contains('open')) return;
+      if (drawerBlocksPlayer()) return;
       if (touchMode === 'pan') {
         if (touchPanned) {
           wasPanning = true;
@@ -5095,16 +5693,329 @@
       touchMode = null;
     }, { passive: true });
 
+    // ── Docked details column (desktop SPA embed) ──
+    const DOCK_QUERY = '(min-width:1100px) and (min-height:560px)';
+    // Fullscreen fills the screen, so it needs less room than the in-page player to be worth a column.
+    // Anything narrower (phones, small tablets) keeps the full-bleed fullscreen with the slide-up sheet.
+    const FS_DOCK_QUERY = '(min-width:1000px) and (min-height:520px)';
+    const dockMQ = (typeof window.matchMedia === 'function') ? window.matchMedia(DOCK_QUERY) : null;
+    const fsDockMQ = (typeof window.matchMedia === 'function') ? window.matchMedia(FS_DOCK_QUERY) : null;
+    // Only the SPA embed has these hosts; the standalone player page never docks.
+    const dockHost = document.getElementById('sxReelsHost');
+    const dockRoot = document.getElementById('sxReelsRoot');
+    let dockObserver = null;
+
+    function prefersReducedMotion() {
+      return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    // VR is detected through the WebXR session itself. The sx-vr-active class cannot be used for that:
+    // the app also sets it in plain fullscreen to hide the site header.
+    function vrPresenting() {
+      try { return !!(typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
+    }
+    // '' (not docked), 'inline' (in the page) or 'fullscreen' (column beside a screen-high square).
+    function dockMode() {
+      if (!dockHost || !sideEl || !gutterEl || !dockMQ) return '';
+      // The hidden player behind the desktop VR preview is not a 2D surface; leave it alone.
+      if (dockRoot && dockRoot.classList.contains('sx-immersive-preview-source')) return '';
+      if (vrPresenting()) return '';
+      if (isCurrentFullscreen()) return (fsDockMQ && fsDockMQ.matches) ? 'fullscreen' : '';
+      return dockMQ.matches ? 'inline' : '';
+    }
+    function wantsDock() {
+      return dockMode() !== '';
+    }
+    // True while the comments sheet is covering the player (never when docked).
+    function drawerBlocksPlayer() {
+      return !isDocked && !!commentsDrawer && commentsDrawer.classList.contains('open');
+    }
+    function applyDock() {
+      if (!dockHost) return;
+      const mode = dockMode();
+      const next = mode !== '';
+      // Entering or leaving fullscreen while docked only changes the layout class, nothing moves.
+      dockHost.classList.toggle('sx-fs-docked', mode === 'fullscreen');
+      if (dockRoot) dockRoot.classList.toggle('sx-fs-docked', mode === 'fullscreen');
+      if (next === isDocked) return;
+      const focused = document.activeElement;
+      const inDrawer = !!(focused && commentsDrawer && commentsDrawer.contains(focused));
+      let selStart = null;
+      let selEnd = null;
+      if (inDrawer && focused === commentInput) {
+        selStart = commentInput.selectionStart;
+        selEnd = commentInput.selectionEnd;
+      }
+      isDocked = next;
+      if (next) {
+        // Docked: the sheet becomes a plain column and PREV/NEXT sit in the gutter.
+        commentsDrawer.classList.remove('open');
+        sideSlot.appendChild(commentsDrawer);
+        if (edgeNav) {
+          gutterEl.appendChild(edgeNav);
+          edgeNav.hidden = false;
+          edgeNav.style.top = '';
+        }
+        commentsDrawer.setAttribute('role', 'region');
+        commentsDrawer.removeAttribute('aria-modal');
+        if (commentBtn) {
+          commentBtn.classList.remove('active');
+          commentBtn.removeAttribute('aria-expanded');
+          commentBtn.setAttribute('aria-controls', 'reelsSide');
+        }
+      } else {
+        frame.appendChild(commentsDrawer);
+        if (edgeNav) frame.appendChild(edgeNav);
+        commentsDrawer.setAttribute('role', 'dialog');
+        commentsDrawer.setAttribute('aria-modal', 'false');
+        if (commentBtn) {
+          commentBtn.setAttribute('aria-expanded', 'false');
+          commentBtn.setAttribute('aria-controls', 'commentsDrawer');
+        }
+      }
+      sideEl.hidden = !next;
+      gutterEl.hidden = !next;
+      dockHost.classList.toggle('sx-reels-docked', next);
+      if (dockRoot) dockRoot.classList.toggle('sx-reels-docked', next);
+      if (next) renderSidePanel();
+      if (inDrawer && focused && document.contains(focused)) {
+        try {
+          focused.focus({ preventScroll: true });
+          if (selStart !== null && commentInput) commentInput.setSelectionRange(selStart, selEnd);
+        } catch (focusError) {}
+      }
+      positionEdgeNav();
+      updateTwitchTicker();
+    }
+    function teardownDock() {
+      if (dockObserver) { dockObserver.disconnect(); dockObserver = null; }
+      if (dockMQ) {
+        if (dockMQ.removeEventListener) dockMQ.removeEventListener('change', applyDock);
+        else if (dockMQ.removeListener) dockMQ.removeListener(applyDock);
+      }
+      document.removeEventListener('fullscreenchange', applyDock);
+      document.removeEventListener('webkitfullscreenchange', applyDock);
+      if (fsDockMQ) {
+        if (fsDockMQ.removeEventListener) fsDockMQ.removeEventListener('change', applyDock);
+        else if (fsDockMQ.removeListener) fsDockMQ.removeListener(applyDock);
+      }
+      if (dockRoot) dockRoot.classList.remove('sx-reels-docked', 'sx-fs-docked');
+    }
+    [dockMQ, fsDockMQ].forEach((mq) => {
+      if (!mq) return;
+      if (mq.addEventListener) mq.addEventListener('change', applyDock);
+      else if (mq.addListener) mq.addListener(applyDock);
+    });
+    document.addEventListener('fullscreenchange', applyDock);
+    document.addEventListener('webkitfullscreenchange', applyDock);
+    // Fullscreen and VR toggle classes on <html>, the host and the frame.
+    if (typeof MutationObserver === 'function') {
+      dockObserver = new MutationObserver(() => applyDock());
+      [document.documentElement, dockHost, frame].forEach((node) => {
+        if (node) dockObserver.observe(node, { attributes: true, attributeFilter: ['class'] });
+      });
+    }
+
+    function relativeAge(iso) {
+      const t = Date.parse(iso);
+      if (!isFinite(t)) return '';
+      const seconds = Math.max(0, (Date.now() - t) / 1000);
+      if (seconds < 60) return 'JUST NOW';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'M AGO';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'H AGO';
+      if (seconds < 86400 * 30) return Math.floor(seconds / 86400) + 'D AGO';
+      if (seconds < 86400 * 365) return Math.floor(seconds / (86400 * 30)) + 'MO AGO';
+      return Math.floor(seconds / (86400 * 365)) + 'Y AGO';
+    }
+    // Mirrors locationKey() in web/src/components/explore/ExploreTile.jsx.
+    function placeSlug(value) {
+      return String(value || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+    }
+    function placeKeyFor(location) {
+      const city = placeSlug(location && location.city);
+      if (!city) return '';
+      const country = placeSlug(location && location.country);
+      return city + (country ? '--' + country : '');
+    }
+    function sideLink(className, text, path, title) {
+      const link = document.createElement('a');
+      link.className = className;
+      link.href = path;
+      link.textContent = text;
+      if (title) link.title = title;
+      link.addEventListener('click', (event) => {
+        // Let the browser handle new-tab clicks; navigate in-app otherwise.
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        dispatchNavigation(path);
+      });
+      return link;
+    }
+    function specChip(label, value) {
+      const chip = document.createElement('span');
+      chip.className = 'side-chip spec';
+      const key = document.createElement('b');
+      key.textContent = label;
+      chip.append(key, document.createTextNode(' ' + value));
+      return chip;
+    }
+    function renderSideSpecs(item) {
+      if (!sideSpecs) return;
+      sideSpecs.replaceChildren();
+      if (!item || item.available === false) return;
+      const total = videoData.length;
+      sideSpecs.appendChild(specChip(isPackMode ? 'PACK' : 'QUEUE', (idx + 1) + ' / ' + total + (feedHasMore ? '+' : '')));
+      const width = Number(item.width);
+      const height = Number(item.height);
+      const durationMs = Number(item.duration_ms);
+      if (item.size) sideSpecs.appendChild(specChip('SIZE', item.size));
+      if (width > 0 && height > 0) sideSpecs.appendChild(specChip('RES', width + '×' + height));
+      if (durationMs > 0 && !isImageItem(item)) sideSpecs.appendChild(specChip('DUR', formatTime(durationMs / 1000)));
+    }
+    // Everything in the column that depends on WHICH reel is playing.
+    function renderSidePanel() {
+      if (!sideEl) return;
+      const item = videoData[idx];
+      const unavailable = !item || item.available === false;
+      const creator = unavailable ? null : (item.creator || null);
+
+      sideAvatar.replaceChildren();
+      if (creator) {
+        const avatarUrl = creator.avatar_url || item.author_avatar_url;
+        if (avatarUrl) {
+          const image = document.createElement('img');
+          image.src = avatarUrl;
+          image.alt = '';
+          sideAvatar.appendChild(image);
+        } else {
+          sideAvatar.textContent = String(creator.display_name || creator.username || '?').slice(0, 1).toUpperCase();
+        }
+      }
+      if (sideCreator) {
+        if (creator && creator.username) {
+          sideCreator.hidden = false;
+          sideCreator.textContent = creator.display_name || creator.username;
+          sideCreator.title = 'Open @' + creator.username + ' profile';
+          sideCreator.onclick = () => openProfile(creator.username);
+        } else {
+          sideCreator.hidden = true;
+          sideCreator.textContent = '';
+          sideCreator.onclick = null;
+        }
+      }
+      if (sideAge) {
+        const age = unavailable ? '' : relativeAge(item.created_at);
+        const handle = creator && creator.username ? '@' + creator.username : '';
+        sideAge.textContent = [handle, age].filter(Boolean).join(' · ');
+      }
+      sideTitle.textContent = unavailable ? 'Reel unavailable' : (item.title || item.filename || '');
+      // The title is clamped to 3 lines so give the full text on hover.
+      sideTitle.title = sideTitle.textContent;
+
+      const caption = unavailable ? '' : String(item.caption || '').trim();
+      sideCaptionOpen = false;
+      sideCaption.hidden = !caption;
+      sideCaption.textContent = caption;
+      sideCaption.classList.remove('expanded');
+      sideCaptionToggle.hidden = true;
+      sideCaptionToggle.textContent = 'MORE';
+      sideCaptionToggle.setAttribute('aria-expanded', 'false');
+      if (caption) {
+        // Only offer MORE when the 3-line clamp actually hides something.
+        requestAnimationFrame(() => {
+          if (sideCaption.scrollHeight > sideCaption.clientHeight + 1) sideCaptionToggle.hidden = false;
+        });
+      }
+
+      sideTags.replaceChildren();
+      if (!unavailable) {
+        (item.tags || []).forEach((tag) => {
+          const slug = placeSlug(String(tag).replace(/^#/, ''));
+          if (!slug) return;
+          sideTags.appendChild(sideLink('side-chip tag', '#' + String(tag).replace(/^#/, ''), '/explore/tag/' + encodeURIComponent(slug), 'Explore #' + slug));
+        });
+        const location = item.location || {};
+        const place = [location.city, location.country].filter(Boolean).join(', ') || location.display_name || '';
+        if (place) {
+          const key = placeKeyFor(location);
+          if (key) {
+            sideTags.appendChild(sideLink('side-chip', place, '/explore/location/' + encodeURIComponent(key), 'Explore reels from ' + place));
+          } else {
+            const chip = document.createElement('span');
+            chip.className = 'side-chip';
+            chip.textContent = place;
+            sideTags.appendChild(chip);
+          }
+        }
+      }
+      renderSideSpecs(item);
+      updateSideLive();
+    }
+    // Counts and follow state: cheap enough to refresh on every engagement change.
+    function updateSideLive() {
+      if (!sideEl) return;
+      const item = videoData[idx];
+      const unavailable = !item || item.available === false;
+      sideLikes.textContent = unavailable ? '0' : fmtCount(item.likes);
+      sideViews.textContent = unavailable ? '0' : fmtCount(item.views);
+      sideComms.textContent = unavailable ? '0' : fmtCount(getCurrentComments().length);
+      if (sideFollow && followPill) {
+        const following = followPill.classList.contains('active');
+        sideFollow.hidden = followPill.hidden || unavailable;
+        sideFollow.classList.toggle('active', following);
+        sideFollow.setAttribute('aria-pressed', following ? 'true' : 'false');
+        sideFollow.title = following ? 'Unfollow creator' : 'Follow creator';
+        if (sideFollowLabel) sideFollowLabel.textContent = following ? 'FOLLOWING' : 'FOLLOW';
+      }
+      renderSideSpecs(item);
+    }
+    if (sideFollow) sideFollow.addEventListener('click', () => followCurrentCreator());
+    if (sideCaptionToggle) {
+      sideCaptionToggle.addEventListener('click', () => {
+        sideCaptionOpen = !sideCaptionOpen;
+        sideCaption.classList.toggle('expanded', sideCaptionOpen);
+        sideCaptionToggle.textContent = sideCaptionOpen ? 'LESS' : 'MORE';
+        sideCaptionToggle.setAttribute('aria-expanded', sideCaptionOpen ? 'true' : 'false');
+      });
+    }
+
     // Keyboard controls
-    window.addEventListener('keydown', (e) => {
-      // Don't capture shortcuts when typing in comment input
-      if (e.target && e.target.tagName === 'INPUT') {
-        if (e.key === 'Escape') {
+    // <reels-key-filter> (extracted verbatim by web/tests/reels-keyboard.test.js)
+    // Decides what a keydown means for the player: 'skip' = not ours, 'field' =
+    // typing context (only Esc matters), 'handle' = run the shortcut map.
+    function reelsKeyFilter(e, foreignModalOpen) {
+      if (!e || e.defaultPrevented) return 'skip';
+      if (e.ctrlKey || e.metaKey || e.altKey) return 'skip';
+      const t = e.target;
+      const tag = t && t.tagName ? String(t.tagName).toUpperCase() : '';
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        !!(t && t.isContentEditable) ||
+        !!(t && t.getAttribute && t.getAttribute('role') === 'textbox');
+      if (typing) return 'field';
+      if (foreignModalOpen) return 'skip';
+      // Space/Enter on a focused control activates that control, not play/pause.
+      if ((e.key === ' ' || e.key === 'Enter') && t && t.closest &&
+          t.closest('button, a, [role="tab"], [role="slider"]')) return 'skip';
+      return 'handle';
+    }
+    // </reels-key-filter>
+    function onKeydown(e) {
+      const keyHost = frame.parentElement || frame;
+      const foreignModalOpen = Array.prototype.some.call(
+        document.querySelectorAll('[role="dialog"][aria-modal="true"]'),
+        (dialog) => !dialog.hidden && !keyHost.contains(dialog)
+      );
+      const mode = reelsKeyFilter(e, foreignModalOpen);
+      if (mode === 'skip') return;
+      if (mode === 'field') {
+        // Only Esc, and only for fields that belong to the player (comment box,
+        // collection name) -- never the site search or the message dock.
+        if (e.key === 'Escape' && keyHost.contains(e.target)) {
           if (collectOpen) {
             hideCollectNewRow();
             return;
           }
           toggleDrawer(false);
+          if (isDocked && e.target && typeof e.target.blur === 'function') e.target.blur();
         }
         return;
       }
@@ -5153,10 +6064,13 @@
         e.preventDefault();
         likeCurrentReel();
       }
-    });
+    }
+    // Exposed so the SPA wrapper in reels.py can detach it on teardown.
+    window.__sxReelsKeydown = onKeydown;
+    window.addEventListener('keydown', onKeydown);
 
     // Focus frame on click for direct keyboard capture
-    frame.focus();
+    try { frame.focus({ preventScroll: true }); } catch (focusError) { frame.focus(); }
 
     // ── WebXR VR Integration ──
     const vrBtnWrap = document.getElementById('vrBtnWrap');
@@ -5205,18 +6119,11 @@
         },
         onUnmute: function() {
           isMuted = false;
-          if (soundBtn) {
-            soundBtn.textContent = '🔊';
-            soundBtn.classList.add('active');
-          }
+          updateSoundBtnUI(false);
         },
         onMuteChange: function(muted) {
           isMuted = muted;
-          if (soundBtn) {
-            soundBtn.textContent = isMuted ? '🔇' : '🔊';
-            if (isMuted) soundBtn.classList.remove('active');
-            else soundBtn.classList.add('active');
-          }
+          updateSoundBtnUI(isMuted);
           showFlash(isMuted ? '🔇' : '🔊');
         },
         getPlaylist: function() { return videoData; },
@@ -5416,9 +6323,11 @@
       } catch (e) {}
       document.removeEventListener('fullscreenchange', notifyFsChange);
       document.removeEventListener('webkitfullscreenchange', notifyFsChange);
+      teardownDock();
     };
 
     // Initial Load
+    applyDock();
     if (isPackMode) {
       syncPackChrome();
       recordPackEvent('pack_open');

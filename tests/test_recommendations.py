@@ -36,6 +36,8 @@ from server.social.models import (
 
 
 PASSWORD = "correct-horse-battery"
+# The `app` fixture swaps in a stub payload builder; keep the real one for wire-format tests.
+_REAL_BUILD_PAYLOAD = reels._build_payload
 
 
 @pytest.fixture
@@ -744,3 +746,96 @@ def test_expired_sessions_and_dismissals_are_purged(app):
             .count()
         )
         assert remaining == 0
+
+
+# --- player-inline wire format: CSS scoping and keyboard wiring ---------------------------------
+
+
+def test_scope_css_passes_keyframes_through_and_scopes_the_rest():
+    css = """
+    html, body { margin:0 }
+    .a, .b { color:red; }
+    @keyframes slideUpTicker { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+    @media (max-width:480px) { .a { color:blue; } }
+    @keyframes commentPulse { from { box-shadow: 0 0 0 1px #f00; } to { box-shadow: 0 0 9px #f00; } }
+    """
+    out = reels._scope_css(css)
+    assert "#sxReelsRoot .a, #sxReelsRoot .b { color:red; }" in out
+    assert "@media (max-width:480px) { #sxReelsRoot .a { color:blue; } }" in out
+    # keyframes survive verbatim and their from/to steps are never treated as selectors
+    assert "@keyframes slideUpTicker { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }" in out
+    assert "@keyframes commentPulse" in out
+    assert not re.search(r"#sxReelsRoot (from|to)\b", out)
+    assert "margin:0" not in out  # html/body rules are still dropped
+
+
+def test_player_css_keeps_the_ticker_and_comment_animations():
+    html = (reels.ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
+    scoped = reels._scope_css(re.search(r"<style>(.*?)</style>", html, re.S).group(1))
+    for name in ("slideUpTicker", "commentPulse"):
+        assert f"@keyframes {name}" in scoped
+        assert f"animation: {name}" in scoped
+    assert not re.search(r"#sxReelsRoot (from|to)\b", scoped)
+
+
+def test_inline_player_attaches_the_keyboard_handler_instead_of_orphaning_it(app):
+    seed_catalog(app, creators=2, posts_per_creator=2)
+    with TestClient(app) as client:
+        body = client.get("/api/reels/player-inline", params={"folder": "ALL FOLDERS"}).json()
+    init_script = body["scripts"][-1]
+    # regression: the listener used to be rewritten into a bare assignment that nothing attached
+    assert "window.__sxReelsKeydown = (e) => {" not in init_script
+    assert "window.addEventListener('keydown', onKeydown);" in init_script
+    assert "window.__sxReelsKeydown = onKeydown;" in init_script
+    # and SPA teardown still detaches it
+    assert "window.removeEventListener('keydown', window.__sxReelsKeydown);" in init_script
+
+
+def test_inline_player_items_carry_probed_duration_and_resolution(app, monkeypatch):
+    posts = seed_catalog(app, creators=2, posts_per_creator=2)
+    with app.state.testing_session() as db:
+        probed = db.get(Post, posts[0].id)
+        probed.duration_ms, probed.width, probed.height = 14000, 1920, 1080
+        db.commit()
+    # Run the real payload builder (and reel_records) against the test database.
+    monkeypatch.setattr(reels, "_build_payload", _REAL_BUILD_PAYLOAD)
+    monkeypatch.setattr("server.social.database.SessionLocal", app.state.testing_session)
+    with TestClient(app) as client:
+        body = client.get("/api/reels/player-inline", params={"folder": "ALL FOLDERS"}).json()
+    match = re.search(r"let videoData = (.*?);\n\s*const initialFeedState =", body["scripts"][-1], re.S)
+    items = {item["post_id"]: item for item in json.loads(match.group(1))}
+    probed_item = items[posts[0].id]
+    assert (probed_item["duration_ms"], probed_item["width"], probed_item["height"]) == (14000, 1920, 1080)
+    # an unprobed reel reports null rather than a made-up number
+    other = items[posts[1].id]
+    assert other["duration_ms"] is None and other["width"] is None and other["height"] is None
+    # sanity: this really is the real builder (it carries the caption/tags the stub omits)
+    assert "caption" in probed_item and "tags" in probed_item
+
+
+def test_every_player_selector_is_scoped_to_the_embed_root():
+    """The SPA embed must never restyle the host app: each selector from reels.html has to come out
+    prefixed with #sxReelsRoot (the naive scoper silently mis-handles some constructs)."""
+    html = (reels.ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
+    scoped = reels._scope_css(re.search(r"<style>(.*?)</style>", html, re.S).group(1))
+    rules, depth, current = [], 0, ""
+    for char in scoped:
+        current += char
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                rules.append(current.strip())
+                current = ""
+    assert len(rules) > 200
+    leaks = []
+    for rule in rules:
+        selector = rule.split("{", 1)[0].strip()
+        if selector.startswith("@"):
+            continue
+        leaks += [part.strip() for part in selector.split(",") if not part.strip().startswith("#sxReelsRoot")]
+    assert leaks == []
+    # the docked-column rules in particular must have survived scoping
+    assert "#sxReelsRoot #sxReelsHost.sx-reels-docked #commentsDrawer" in scoped
+    assert "#sxReelsRoot .reels-side-inner" in scoped

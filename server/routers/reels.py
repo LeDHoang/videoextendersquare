@@ -1356,6 +1356,11 @@ def _build_payload(
             "likes": meta.get("likes", 0),
             "views": meta.get("views", 0),
             "saves": meta.get("saves", 0),
+            # Probed media facts (null when unknown); the details column only
+            # renders the chips it has real values for.
+            "duration_ms": meta.get("duration_ms"),
+            "width": meta.get("width"),
+            "height": meta.get("height"),
             "liked_by_me": bool(meta.get("liked_by_me", False)),
             "saved_by_me": bool(meta.get("saved_by_me", False)),
             "filename": item["filename"],
@@ -1488,8 +1493,12 @@ def _pack_feed_data(
             "likes": card.get("likes", 0),
             "views": card.get("views", 0),
             "saves": card.get("saves", 0),
+            "duration_ms": card.get("duration_ms"),
+            "width": card.get("width"),
+            "height": card.get("height"),
             "comments": [],
             "author_name": card.get("author_name", ""),
+            "author_avatar_url": (card.get("creator") or {}).get("avatar_url"),
             "creator": card.get("creator"),
             "viewer_state": card.get("viewer_state", {
                 "liked": False,
@@ -2577,16 +2586,17 @@ def _scope_rules(css: str, root: str = "#sxReelsRoot") -> list[str]:
     return out
 
 
-def _extract_media_blocks(css: str) -> tuple[str, list[tuple[str, str]]]:
-    """Split out `@media cond { ... }` blocks (balanced braces).
+def _extract_at_blocks(css: str, at_rule: str) -> tuple[str, list[tuple[str, str]]]:
+    """Split out `@<at_rule> header { ... }` blocks (balanced braces).
 
-    Returns (remaining_css, [(condition, inner_css), ...]).
+    Returns (remaining_css, [(header, inner_css), ...]) where header includes
+    the at-rule name and its prelude, e.g. "@media (max-width:480px)".
     """
     blocks = []
     rest: list[str] = []
     i = 0
     while True:
-        m = re.search(r"@media[^{]*\{", css[i:])
+        m = re.search(rf"@{at_rule}\b[^{{]*\{{", css[i:])
         if not m:
             rest.append(css[i:])
             break
@@ -2609,6 +2619,10 @@ def _extract_media_blocks(css: str) -> tuple[str, list[tuple[str, str]]]:
     return "".join(rest), blocks
 
 
+def _extract_media_blocks(css: str) -> tuple[str, list[tuple[str, str]]]:
+    return _extract_at_blocks(css, "media")
+
+
 def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
     """Scope the player's page-level CSS to the mount root so it can be
     embedded directly in the SPA without clobbering the app's own styles."""
@@ -2617,14 +2631,20 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
     imports = re.findall(r"@import\s+url\([^)]+\)\s*;", css)
     # Remove imports before block parsing so they don't get split on '}'
     css_no_imports = re.sub(r"@import\s+url\([^)]+\)\s*;", "", css)
+    # @keyframes names are global and their `from`/`to` steps are not selectors,
+    # so pass them through verbatim (they used to be dropped, leaving the ticker
+    # slide-up and the comment highlight pulse without animation in the SPA).
+    css_no_frames, keyframe_blocks = _extract_at_blocks(css_no_imports, "keyframes")
     # Keep @media blocks (responsive rail/overlay rules) with scoped inners;
-    # other @-rules (e.g. @keyframes) are still dropped as before.
-    css_no_media, media_blocks = _extract_media_blocks(css_no_imports)
+    # any other @-rule is still dropped.
+    css_no_media, media_blocks = _extract_media_blocks(css_no_frames)
     out = _scope_rules(css_no_media, root)
     for header, inner in media_blocks:
         scoped_inner = _scope_rules(inner, root)
         if scoped_inner:
             out.append(f"{header} {{ {' '.join(scoped_inner)} }}")
+    for header, inner in keyframe_blocks:
+        out.append(f"{header} {{ {' '.join(inner.split())} }}")
     # Keep imports at top so font loads before scoped rules
     if imports:
         return "\n".join(imports) + "\n" + "\n".join(out)
@@ -2782,14 +2802,6 @@ def reels_player_inline(
 
     if scripts:
         init = scripts[-1]
-        init = init.replace(
-            "window.addEventListener('keydown', (e) => {",
-            "window.__sxReelsKeydown = (e) => {",
-        )
-        init = init.replace(
-            "});\n\n    // Focus frame on click for direct keyboard capture",
-            "};\n\n    // Focus frame on click for direct keyboard capture",
-        )
         # Deep-link start index (Explore → Reels): replace the hard-coded
         # initial loadVideo(0) with the clamped start offset.
         init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")

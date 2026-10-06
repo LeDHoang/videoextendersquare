@@ -86,17 +86,21 @@ export function ReelsPlayerSkeleton({ label = 'Loading player' }) {
       aria-label={label}
     >
       <SrOnly text={`${label}…`} />
-      <div className="sx-skel-player-frame sx-skel" aria-hidden="true" />
-      <div className="sx-skel-player-rail" aria-hidden="true">
-        <div className="sx-skel" style={{ width: 44, height: 44 }} />
-        <div className="sx-skel" style={{ width: 44, height: 120 }} />
-        <div className="sx-skel" style={{ width: 44, height: 44 }} />
+      <div className="sx-skel-player-stage" aria-hidden="true">
+        <div className="sx-skel-player-frame sx-skel" />
+        <div className="sx-skel-player-rail">
+          <div className="sx-skel" style={{ width: 44, height: 44 }} />
+          <div className="sx-skel" style={{ width: 44, height: 120 }} />
+          <div className="sx-skel" style={{ width: 44, height: 44 }} />
+        </div>
+        <div className="sx-skel-player-meta">
+          <div className="sx-skel" style={{ width: 120, height: 14 }} />
+          <div className="sx-skel" style={{ width: 'min(46vw, 320px)', height: 14 }} />
+          <div className="sx-skel" style={{ width: 180, height: 12 }} />
+        </div>
       </div>
-      <div className="sx-skel-player-meta" aria-hidden="true">
-        <div className="sx-skel" style={{ width: 120, height: 14 }} />
-        <div className="sx-skel" style={{ width: 'min(46vw, 320px)', height: 14 }} />
-        <div className="sx-skel" style={{ width: 180, height: 12 }} />
-      </div>
+      <div className="sx-skel-player-gutter" aria-hidden="true" />
+      <div className="sx-skel-player-side sx-skel" aria-hidden="true" />
     </div>
   );
 }

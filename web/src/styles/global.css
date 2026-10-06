@@ -1529,6 +1529,12 @@ button:hover .sx-sidebar-hero-logo,
   outline: none;
 }
 
+/* The Reels page uses the whole screen: the player and its details column grow with it
+   instead of sitting in a 1440px strip. Other pages keep the readable cap. */
+.sx-main:has(> .sx-reels-page) {
+  max-width: min(100%, 2560px);
+}
+
 /* Navigation tabs */
 .sx-nav {
   display: flex;
@@ -2758,6 +2764,19 @@ code {
   position: relative;
   overflow: visible;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 59, 31, 0.3);
+}
+
+/* Wide screens: the player docks a details column beside the square (see applyDock()
+   in ui/assets/reels.html). The media query MUST match DOCK_QUERY there (a test pins it).
+   The mount widens up front so there is no jump when the script docks; the frame and the
+   column draw their own borders so the mount's frame and backdrop go away. */
+@media (min-width: 1100px) and (min-height: 560px) {
+  .sx-reels-mount {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 /* Reels fullscreen host: the browser forces the :fullscreen element's
@@ -4184,9 +4203,47 @@ body.sx-vr-active .sx-reels-mount,
   margin: 0 auto;
 }
 
+/* The square stage (frame + rail + meta). It fills the skeleton by default and becomes
+   the first grid column when the details column is shown. */
+.sx-skel-player-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.sx-skel-player-side,
+.sx-skel-player-gutter {
+  display: none;
+}
+
 .sx-skel-player-frame {
   position: absolute;
   inset: 0;
+}
+
+/* Same breakpoint as the live docked layout (keep in sync with .sx-reels-mount above). */
+@media (min-width: 1100px) and (min-height: 560px) {
+  .sx-skel-player {
+    display: grid;
+    grid-template-columns: minmax(0, min(84dvh, 1100px)) 64px clamp(320px, 30vw, 600px);
+    justify-content: center;
+    width: 100%;
+    height: auto;
+  }
+
+  .sx-skel-player-stage {
+    position: relative;
+    inset: auto;
+    aspect-ratio: 1 / 1;
+  }
+
+  .sx-skel-player-gutter {
+    display: block;
+  }
+
+  .sx-skel-player-side {
+    display: block;
+    border-radius: 8px;
+  }
 }
 
 .sx-skel-player-rail {

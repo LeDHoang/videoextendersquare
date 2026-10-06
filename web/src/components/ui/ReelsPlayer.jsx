@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { ReelsPlayerSkeleton } from './Skeleton.jsx';
+import { revealScrollTarget } from '../../utils/revealPlayer.js';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
@@ -14,6 +15,7 @@ export default function ReelsPlayer({
   previewMode = false,
   previewOptions = {},
   onPreviewReady,
+  revealOnLoad = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -23,6 +25,9 @@ export default function ReelsPlayer({
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
   const previewCanvasRef = useRef(null);
+  // Scroll the square into view once per page visit, and never after the reader has scrolled themselves.
+  const revealedRef = useRef(false);
+  const userScrolledRef = useRef(false);
   const start = Math.max(0, initialIndex | 0);
   const sig = JSON.stringify({ ...params, start, viewer: user?.id || null });
   const previewSig = JSON.stringify(previewOptions || {});
@@ -67,6 +72,14 @@ export default function ReelsPlayer({
   }, [navigate, location.pathname, location.search, messaging, setUser]);
 
   useEffect(() => {
+    if (!revealOnLoad) return undefined;
+    const mark = () => { userScrolledRef.current = true; };
+    const events = ['wheel', 'touchmove', 'keydown', 'mousedown'];
+    events.forEach((name) => window.addEventListener(name, mark, { passive: true }));
+    return () => events.forEach((name) => window.removeEventListener(name, mark));
+  }, [revealOnLoad]);
+
+  useEffect(() => {
     let alive = true;
     setData(null);
     setErr('');
@@ -107,6 +120,35 @@ export default function ReelsPlayer({
       s.textContent = code;
       mount.appendChild(s);
     }
+    let revealTimer = 0;
+    let revealAttempts = 0;
+    if (revealOnLoad && !previewMode && !revealedRef.current) {
+      const tryReveal = () => {
+        const frame = document.getElementById('reelsFrame');
+        const rect = frame ? frame.getBoundingClientRect() : null;
+        // Layout can still be settling for a moment (fonts, the skeleton swap). A timer (not rAF) so a tab
+        // that loads in the background still ends up scrolled.
+        if (!rect || rect.height < 100) {
+          if (revealAttempts < 60) {
+            revealAttempts += 1;
+            revealTimer = window.setTimeout(tryReveal, 50);
+          }
+          return;
+        }
+        revealedRef.current = true;
+                if (userScrolledRef.current) return;
+        const header = document.querySelector('.sx-top-bar');
+        const target = revealScrollTarget({
+          top: rect.top,
+          bottom: rect.bottom,
+          viewportHeight: window.innerHeight,
+          headerBottom: header ? Math.max(0, header.getBoundingClientRect().bottom) : 0,
+          scrollY: window.scrollY,
+        });
+        if (target !== null) window.scrollTo({ top: target, behavior: 'auto' });
+      };
+      revealTimer = window.setTimeout(tryReveal, 0);
+    }
     let previewFrame = 0;
     let previewAttempts = 0;
     if (previewMode) {
@@ -135,6 +177,7 @@ export default function ReelsPlayer({
     }
     // Tear down player timers/handlers (e.g. the image-reel dwell timer).
     return () => {
+      if (revealTimer) window.clearTimeout(revealTimer);
       if (previewFrame) window.cancelAnimationFrame(previewFrame);
       if (previewMode && window.WebXRVR?.stopPreview) {
         try {
