@@ -1529,9 +1529,10 @@ button:hover .sx-sidebar-hero-logo,
   outline: none;
 }
 
-/* The Reels page uses the whole screen: the player and its details column grow with it
-   instead of sitting in a 1440px strip. Other pages keep the readable cap. */
-.sx-main:has(> .sx-reels-page) {
+/* Browsing pages (Reels, Explore, tag and location feeds, Compare, profiles, packs) use the whole
+   screen: grids add columns and the player grows instead of sitting in a 1440px strip.
+   Pages marked sx-wide-page opt in. Forms and settings keep the readable cap. */
+.sx-main:has(> .sx-wide-page) {
   max-width: min(100%, 2560px);
 }
 
@@ -3284,6 +3285,7 @@ code {
   position: relative;
   width: 100%;
   max-width: 900px;
+  max-width: min(100%, 1100px, 90dvh);
   aspect-ratio: 1 / 1;
   margin: 0 auto var(--sx-6) auto;
   border: 1px solid var(--sx-rule-strong);
@@ -8212,7 +8214,7 @@ a.sx-xh-btn { text-decoration: none; }
 /* ─── Reel Pack detail page (sx-pk-*) ──────────────────────────────────── */
 .sx-pk {
   width: 100%;
-  max-width: 1560px;
+  max-width: none;
   margin: 0 auto;
 }
 
@@ -8231,6 +8233,14 @@ a.sx-xh-btn { text-decoration: none; }
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: var(--sx-6);
   align-items: start;
+}
+
+/* On very wide screens the cover stops growing (a 1000px collage pushes the title off screen)
+   and the track list takes the rest. */
+@media (min-width: 1700px) {
+  .sx-pk-grid {
+    grid-template-columns: minmax(0, 760px) minmax(0, 1fr);
+  }
 }
 
 .sx-pk-side,

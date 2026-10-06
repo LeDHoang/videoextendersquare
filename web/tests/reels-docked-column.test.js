@@ -198,8 +198,8 @@ test('the player still ends with the literal the server rewrites for deep links 
 test('the Reels page has no Video Playlist section and lifts the 1440px content cap', () => {
   const page = read('web/src/pages/ReelsPage.jsx');
   assert.doesNotMatch(page, /Video Playlist|MATCHING PLAYLIST/);
-  assert.match(page, /<div className="sx-reels-page">/);
-  assert.match(globalCss, /\.sx-main:has\(> \.sx-reels-page\) \{\s*max-width: min\(100%, 2560px\);/);
+    assert.match(globalCss, /\.sx-main:has\(> \.sx-wide-page\) \{\s*max-width: min\(100%, 2560px\);/);
+  assert.match(page, /<div className="sx-reels-page sx-wide-page">/);
   // the player grid (page script, skeleton) grows with the screen instead of stopping at 860px and 400px
   assert.equal((html.match(/min\(84dvh, 1100px\)\) 64px clamp\(320px, 30vw, 600px\)/g) || []).length, 1);
   assert.match(globalCss, /min\(84dvh, 1100px\)\) 64px clamp\(320px, 30vw, 600px\)/);
@@ -221,4 +221,23 @@ test('the Reels page scrolls the square into view once on load, and other pages 
     try { source = read('web/src/pages/' + other); } catch { continue; }
     assert.doesNotMatch(source, /revealOnLoad/, other + ' must not auto-scroll');
   }
+});
+
+test('browsing pages opt into the full-width layout, forms and settings keep the readable cap', () => {
+  const marked = {
+    'ExplorePage.jsx': /<div className="sx-wide-page">/,
+    'TagExplorePage.jsx': /<div className="sx-tag-page sx-wide-page">/,
+    'LocationExplorePage.jsx': /<div className="sx-tag-page sx-wide-page">/,
+    'ComparePage.jsx': /<div className="sx-wide-page"/,
+    'ProfilePage.jsx': /<div className="sx-wide-page">/,
+    'PackPage.jsx': /<div className="sx-pk sx-wide-page">/,
+  };
+  for (const [file, pattern] of Object.entries(marked)) assert.match(read('web/src/pages/' + file), pattern, file);
+  for (const file of ['ProfileSettingsPage.jsx', 'WalletPage.jsx', 'MessagesPage.jsx', 'AuthPage.jsx', 'UploadPage.jsx', 'ImagePage.jsx', 'VideoPage.jsx']) {
+    assert.doesNotMatch(read('web/src/pages/' + file), /sx-wide-page/, file + ' stays at the readable width');
+  }
+  // the old per-page strips that defeated the wider shell are gone
+  assert.doesNotMatch(read('web/src/pages/ComparePage.jsx'), /maxWidth: 1400/);
+  assert.doesNotMatch(globalCss, /\.sx-pk \{\s*width: 100%;\s*max-width: 1560px;/);
+  assert.match(globalCss, /@media \(min-width: 1700px\) \{\s*\.sx-pk-grid \{\s*grid-template-columns: minmax\(0, 760px\) minmax\(0, 1fr\);/);
 });

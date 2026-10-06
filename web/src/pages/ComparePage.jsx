@@ -78,7 +78,7 @@ export default function ComparePage() {
   const iframeSrc = pair ? `/api/compare/player?pair=${encodeURIComponent(pair.name)}` : null;
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', minWidth: 0 }}>
+    <div className="sx-wide-page" style={{ minWidth: 0 }}>
       {/* ─── Header ────────────────────────────────────────── */}
       <Hero
         title="FAST VS STUDIO"

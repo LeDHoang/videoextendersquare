@@ -242,7 +242,7 @@ export default function ReelsPage() {
   const needsProxy = videos.filter((v) => v.media_type !== 'image' && codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
 
   return (
-    <div className="sx-reels-page">
+    <div className="sx-reels-page sx-wide-page">
       <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
           <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>

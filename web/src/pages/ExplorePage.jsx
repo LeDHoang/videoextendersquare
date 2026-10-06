@@ -246,7 +246,7 @@ export default function ExplorePage() {
   const empty = (!reelsVisible || !order.length) && (!packsVisible || !packs.length);
 
   return (
-    <div>
+    <div className="sx-wide-page">
       <ExploreHeader
         title="EXPLORE"
         kicker={packDiscoveryEnabled ? 'ECHO · REELS AND AUTHORED REEL PACKS' : 'ECHO · REELS'}

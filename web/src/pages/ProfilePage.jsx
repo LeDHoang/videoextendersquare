@@ -374,7 +374,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div>
+    <div className="sx-wide-page">
       {profile ? (
         <>
           <section className="sx-pf-hero" aria-label="Creator profile">

@@ -166,7 +166,7 @@ export default function LocationExplorePage() {
   ];
 
   return (
-    <div className="sx-tag-page">
+    <div className="sx-tag-page sx-wide-page">
       <nav className="sx-tag-breadcrumb" aria-label="Explore breadcrumb">
         <Link to="/explore">EXPLORE</Link>
         <span aria-hidden="true">/</span>

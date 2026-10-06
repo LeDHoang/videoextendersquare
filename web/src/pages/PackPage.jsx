@@ -403,7 +403,7 @@ export default function PackPage() {
   ];
 
   return (
-    <div className="sx-pk">
+    <div className="sx-pk sx-wide-page">
       {error ? (
         <div className="sx-error-box" role="alert">
           <span>{error}</span>
