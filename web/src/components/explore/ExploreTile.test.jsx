@@ -101,3 +101,70 @@ describe('ExploreTile order and runtime badge', () => {
     expect(badge(container)).toHaveTextContent(/^04$/);
   });
 });
+
+describe('ExploreTile autoplay', () => {
+  let observers;
+  let play;
+  let pause;
+  let started;
+
+  beforeEach(() => {
+    observers = [];
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(cb) { this.cb = cb; observers.push(this); }
+      observe() {}
+      disconnect() {}
+    });
+    started = 0;
+    // Like a browser: a <video> with no source rejects play() instead of starting.
+    play = vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(function () {
+      if (!this.getAttribute('src')) return Promise.reject(new DOMException('no source', 'NotSupportedError'));
+      started += 1;
+      Object.defineProperty(this, 'paused', { value: false, configurable: true });
+      return Promise.resolve();
+    });
+    pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    play.mockRestore();
+    pause.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  const show = () => act(() => { observers.forEach((o) => o.cb([{ isIntersecting: true }])); });
+
+  it('plays a tile that is already visible when it mounts, once its source is attached', () => {
+    const { container } = renderTile();
+    show();
+    expect(container.querySelector('video')).toHaveAttribute('src', '/media/a-explore.mp4');
+    expect(started).toBe(1);
+  });
+
+  it('retries when the browser reports the media ready after an earlier attempt could not play', () => {
+    const { container } = renderTile();
+    show();
+    const el = container.querySelector('video');
+    Object.defineProperty(el, 'paused', { value: true, configurable: true });
+    act(() => { fireEvent.canPlay(el); });
+    expect(started).toBe(2);
+  });
+
+  it('plays again from the original file when the preview fails to load', () => {
+    const { container } = renderTile();
+    show();
+    const el = container.querySelector('video');
+    Object.defineProperty(el, 'paused', { value: true, configurable: true });
+    act(() => { fireEvent.error(el); });
+    expect(el).toHaveAttribute('src', '/media/a.mp4');
+    expect(started).toBe(2);
+  });
+
+  it('does not play a tile that has not scrolled into view', () => {
+    const { container } = renderTile();
+    act(() => { observers.forEach((o) => o.cb([{ isIntersecting: false }])); });
+    act(() => { fireEvent.canPlay(container.querySelector('video')); });
+    expect(play).not.toHaveBeenCalled();
+  });
+});

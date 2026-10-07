@@ -1607,7 +1607,9 @@
   }
   #sxReelsHost.sx-reels-docked {
     display: grid;
-    grid-template-columns: minmax(0, min(84dvh, 1100px)) 64px clamp(320px, 30vw, 600px);
+    /* The square takes all the height left under the 64px page header (12px breathing room above and below);
+       web/src/styles/global.css (.sx-reels-mount, .sx-skel-player) must use the same size. */
+    grid-template-columns: minmax(0, min(calc(100dvh - 88px), 1100px)) 64px clamp(320px, 30vw, 600px);
     justify-content: center;
     align-items: stretch;
     width: 100%;

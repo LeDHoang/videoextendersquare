@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import HeaderBar from './HeaderBar.jsx';
 import Sidebar from './Sidebar.jsx';
+import Footer from './Footer.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { HealthProvider, useHealthContext } from '../../hooks/HealthContext.jsx';
 import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx';
@@ -57,6 +58,9 @@ function Shell() {
 
   const isPlayerRoute = location.pathname === '/reels' || /^\/packs\/[^/]+$/.test(location.pathname);
   const immersive = isPlayerRoute && (isVrActive || isFsActive);
+  // Left off the messages console and the immersive/fullscreen player (their own full-height layouts) and the
+  // sign-in / recovery screens (single-screen flows that the footer would push past the fold).
+  const showFooter = !immersive && !/^\/(messages|login|signup|forgot-password|reset-password)(\/|$)/.test(location.pathname);
 
   // Keep html/body class in sync so pure-CSS fallback also hides chrome
   useEffect(() => {
@@ -117,6 +121,8 @@ function Shell() {
             <Outlet />
           </ErrorBoundary>
         </main>
+
+        {showFooter ? <Footer /> : null}
       </div>
       {!immersive && !location.pathname.startsWith('/messages') ? <MessageDock /> : null}
       {!immersive ? <ReelShareDialog /> : null}

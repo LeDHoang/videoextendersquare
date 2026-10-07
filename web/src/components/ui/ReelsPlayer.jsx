@@ -16,6 +16,7 @@ export default function ReelsPlayer({
   previewOptions = {},
   onPreviewReady,
   revealOnLoad = false,
+  revealAlign = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -144,6 +145,7 @@ export default function ReelsPlayer({
           viewportHeight: window.innerHeight,
           headerBottom: header ? Math.max(0, header.getBoundingClientRect().bottom) : 0,
           scrollY: window.scrollY,
+          align: revealAlign,
         });
         if (target !== null) window.scrollTo({ top: target, behavior: 'auto' });
       };

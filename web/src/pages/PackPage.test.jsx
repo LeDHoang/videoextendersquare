@@ -342,6 +342,12 @@ describe('PackPage', () => {
       expect(await screen.findByTestId('player')).toHaveTextContent('PLAYER 1');
     });
 
+    it('lays the player out on the same full-width page as the main Reels player', async () => {
+      renderPage('/packs/pack-1?play=1&item=0');
+      const player = await screen.findByTestId('player');
+      expect(player.closest('.sx-pack-player-page')).toHaveClass('sx-wide-page');
+    });
+
     it('clamps an out-of-range item in the URL', async () => {
       renderPage('/packs/pack-1?play=1&item=99');
       expect(await screen.findByTestId('player')).toHaveTextContent('PLAYER 2');

@@ -28,6 +28,16 @@ describe('revealScrollTarget', () => {
     expect(revealScrollTarget({ ...base, viewportHeight: 600, top: 300, bottom: 1100 })).toBe(300 - 76);
   });
 
+  it('with align, also lines up a square that is already fully visible (pack page with its toolbar above)', () => {
+    expect(revealScrollTarget({ ...base, top: 138, bottom: 958, align: true })).toBe(138 - 76);
+    expect(revealScrollTarget({ ...base, top: 80, bottom: 905, align: true })).toBe(4);
+  });
+
+  it('with align, still never scrolls up and leaves a square already at the header alone', () => {
+    expect(revealScrollTarget({ ...base, top: 76, bottom: 900, align: true })).toBeNull();
+    expect(revealScrollTarget({ ...base, scrollY: 600, top: 40, bottom: 860, align: true })).toBeNull();
+  });
+
   it('works without a header and ignores bad numbers', () => {
     expect(revealScrollTarget({ viewportHeight: 800, top: 300, bottom: 1100, scrollY: 0 })).toBe(288);
     expect(revealScrollTarget({ ...base, top: NaN, bottom: 1199 })).toBeNull();

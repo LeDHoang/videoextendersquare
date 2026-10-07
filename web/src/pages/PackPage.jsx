@@ -366,7 +366,7 @@ export default function PackPage() {
     const playableTotal = Math.max(0, Number(pack.playable_count ?? items.filter((item) => item.available).length ?? 0));
     const clampedIndex = items.length ? Math.min(requestedItem, items.length - 1) : 0;
     return (
-      <div className="sx-pack-player-page">
+      <div className="sx-pack-player-page sx-wide-page">
         <div className="sx-pack-player-toolbar">
           <Button onClick={closePlayer}>← PACK DETAILS</Button>
           <strong>▦ {pack.title}</strong>
@@ -375,6 +375,8 @@ export default function PackPage() {
         <ReelsPlayer
           params={{ pack_id: pack.id, restart }}
           initialIndex={clampedIndex}
+          revealOnLoad
+          revealAlign
         />
       </div>
     );

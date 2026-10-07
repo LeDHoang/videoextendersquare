@@ -348,13 +348,69 @@
 }
 
 .sx-pack-player-toolbar {
-  display: flex;
+  /* back button | pack name | availability. The name takes the spare width and is cut with an ellipsis, so the
+     bar never wraps into several lines; on phones it moves to its own row (see the media query below). */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px clamp(8px, 2vw, 16px);
   margin-bottom: var(--sx-3);
   color: var(--sx-ink-2);
-  font: 700 11px/1.3 var(--sx-mono);
+  /* Size properties, not the `font` shorthand: it used var(--sx-mono), which is not defined, so the whole
+     declaration was dropped and the bar silently fell back to the inherited size. */
+  font-size: clamp(11px, 0.6rem + 0.4vw, 14px);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.sx-pack-player-toolbar > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sx-ink);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-pack-player-toolbar > span {
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .sx-pack-player-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'back count'
+      'name name';
+  }
+
+  .sx-pack-player-toolbar > .sx-btn {
+    grid-area: back;
+    justify-self: start;
+  }
+
+  .sx-pack-player-toolbar > span {
+    grid-area: count;
+  }
+
+  /* the name gets the full row and may use two lines before it is cut */
+  .sx-pack-player-toolbar > strong {
+    display: -webkit-box;
+    grid-area: name;
+    text-align: left;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+}
+
+.sx-pack-player-toolbar .sx-btn {
+  border-color: var(--sx-accent);
+}
+
+.sx-pack-player-toolbar .sx-btn:hover:not(:disabled) {
+  background: var(--sx-accent-dim);
 }
 
 .sx-pack-editor-layout {
@@ -689,6 +745,9 @@ button {
   width: 100%;
   position: relative;
   box-sizing: border-box;
+  /* Column, so the footer sits at the bottom of the window when a page is shorter than the screen. */
+  display: flex;
+  flex-direction: column;
   transition: padding-left 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1529,6 +1588,84 @@ button:hover .sx-sidebar-hero-logo,
   outline: none;
 }
 
+/* Site footer: the last thing in the shell, so short pages end on it instead of on empty space.
+   Same width rule as .sx-main (wide pages opt in through their .sx-wide-page child). */
+/* The player pages already size the square to the window, so the page's usual bottom padding would only
+   leave a dead band between the player and the footer: keep just the same 12px that sits above the square. */
+.sx-main:has(> .sx-reels-page),
+.sx-main:has(> .sx-pack-player-page) {
+  padding-bottom: var(--sx-3);
+  /* and the footer follows the player directly instead of dropping to the bottom of a tall window */
+  flex: 0 0 auto;
+}
+
+.sx-footer {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--sx-6);
+  box-sizing: border-box;
+}
+
+.sx-shell:has(> .sx-main > .sx-wide-page) > .sx-footer {
+  max-width: min(100%, 2560px);
+}
+
+.sx-footer-inner {
+  /* brand on the left, the company line truly centred (equal side columns), nothing on the right: the
+     floating MESSAGE button lives there */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--sx-3) var(--sx-5);
+  padding: var(--sx-4) 0 var(--sx-5);
+  border-top: 1px solid var(--sx-rule);
+  position: relative;
+}
+
+.sx-footer-inner::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 56px;
+  border-top: 2px solid var(--sx-accent);
+}
+
+.sx-footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-2);
+  color: var(--sx-accent);
+  font: 400 1.2rem/1 'Archivo Black', Archivo, sans-serif;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.sx-footer-logo {
+  width: 22px;
+  height: 22px;
+}
+
+.sx-footer-brand {
+  justify-self: start;
+}
+
+.sx-footer-brand:focus-visible {
+  outline: var(--sx-focus-ring);
+  outline-offset: var(--sx-focus-offset);
+}
+
+.sx-footer-legal {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+  color: var(--sx-ink-3);
+  font: 600 0.6875rem/1.4 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+}
+
+
 /* Browsing pages (Reels, Explore, tag and location feeds, Compare, profiles, packs) use the whole
    screen: grids add columns and the player grows instead of sitting in a 1440px strip.
    Pages marked sx-wide-page opt in. Forms and settings keep the readable cap. */
@@ -1633,6 +1770,25 @@ button:hover .sx-sidebar-hero-logo,
 
   .sx-main {
     padding: var(--sx-4) var(--sx-3) var(--sx-8);
+  }
+
+  .sx-footer {
+    padding: 0 var(--sx-3);
+  }
+
+  .sx-footer-inner {
+    /* one centred column on phones; the MESSAGE button sits over the page's bottom edge, so lift the content above it */
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding-bottom: 72px;
+  }
+
+  .sx-footer-brand {
+    justify-self: center;
+  }
+
+  .sx-footer-legal {
+    grid-column: 1;
   }
 }
 
@@ -2756,8 +2912,9 @@ code {
 .sx-reels-mount {
   width: min(calc(100vh - 160px), 900px, 100%);
   width: min(calc(100dvh - 160px), 900px, 100%);
-  min-height: min(calc(100vh - 160px), 900px);
-  min-height: min(calc(100dvh - 160px), 900px);
+  /* No reserved height: the mount is exactly as tall as the square it holds (the loading skeleton keeps the
+     place while it loads). A height-based min-height left a blank band under the square that grew as the window
+     got narrower, because the square is then limited by width, not height. */
   aspect-ratio: auto;
   margin: 0 auto;
   border: 1px solid var(--sx-rule-strong);
@@ -2769,8 +2926,8 @@ code {
 
 /* Wide screens: the player docks a details column beside the square (see applyDock()
    in ui/assets/reels.html). The media query MUST match DOCK_QUERY there (a test pins it).
-   The mount widens up front so there is no jump when the script docks; the frame and the
-   column draw their own borders so the mount's frame and backdrop go away. */
+   The mount widens up front; the frame and the column draw their own borders so the mount's
+   frame and backdrop go away. */
 @media (min-width: 1100px) and (min-height: 560px) {
   .sx-reels-mount {
     width: 100%;
@@ -4226,7 +4383,7 @@ body.sx-vr-active .sx-reels-mount,
 @media (min-width: 1100px) and (min-height: 560px) {
   .sx-skel-player {
     display: grid;
-    grid-template-columns: minmax(0, min(84dvh, 1100px)) 64px clamp(320px, 30vw, 600px);
+    grid-template-columns: minmax(0, min(calc(100dvh - 88px), 1100px)) 64px clamp(320px, 30vw, 600px);
     justify-content: center;
     width: 100%;
     height: auto;
@@ -8213,6 +8370,12 @@ a.sx-xh-btn { text-decoration: none; }
 
 /* ─── Reel Pack detail page (sx-pk-*) ──────────────────────────────────── */
 .sx-pk {
+  /* Warm neutrals with faint red hairlines; solid red is kept for active/hover states and a few rules. */
+  --pk-red-wash: rgba(255, 59, 31, 0.03);
+  --pk-red-line: rgba(255, 59, 31, 0.12);
+  --pk-red-line-strong: rgba(255, 59, 31, 0.3);
+  --pk-panel: #0b0a0a;
+  --pk-panel-2: #111010;
   width: 100%;
   max-width: none;
   margin: 0 auto;
@@ -8221,9 +8384,10 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-notice {
   margin-bottom: var(--sx-4);
   padding: var(--sx-3) var(--sx-4);
-  border: 1px solid var(--sx-success-border);
-  background: var(--sx-success-dim);
-  color: var(--sx-success-hi);
+  border: 1px solid var(--sx-rule);
+  border-left: 3px solid var(--sx-accent);
+  background: var(--pk-panel-2);
+  color: var(--sx-ink);
   font: 700 0.75rem/1.4 'JetBrains Mono', monospace;
   letter-spacing: 0.04em;
 }
@@ -8261,11 +8425,11 @@ a.sx-xh-btn { text-decoration: none; }
   display: block;
   width: 100%;
   padding: 4px;
-  border: 1px solid var(--sx-rule);
-  background: #050607;
+  border: 1px solid var(--pk-red-line);
+  background: var(--pk-panel);
   color: inherit;
   cursor: pointer;
-}
+  }
 
 .sx-pk-cover::before,
 .sx-pk-cover::after {
@@ -8322,7 +8486,7 @@ a.sx-xh-btn { text-decoration: none; }
   transform: translate(-50%, -50%);
   padding: 10px 18px;
   border: 2px solid var(--sx-accent);
-  background: rgba(0, 0, 0, 0.88);
+  background: rgba(10, 4, 3, 0.9);
   color: #fff;
   font: 800 0.75rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
@@ -8335,7 +8499,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-cover:not(:disabled):hover .sx-pk-play,
 .sx-pk-cover:focus-visible .sx-pk-play {
   background: var(--sx-accent);
-  color: #000;
+  color: var(--sx-on-accent);
 }
 
 /* Meta */
@@ -8358,22 +8522,23 @@ a.sx-xh-btn { text-decoration: none; }
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border: 1px solid var(--sx-rule);
-  background: var(--sx-surface-2);
-  color: var(--sx-ink);
+  border: 1px solid var(--sx-accent);
+  background: transparent;
+  color: var(--sx-accent-hi);
   font: 800 0.6875rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
 }
 
 .sx-pk-status {
+  border-color: var(--pk-red-line);
   background: transparent;
   color: var(--sx-ink-2);
 }
 
 .sx-pk-status--draft {
-  border-color: var(--sx-warn-border);
-  background: var(--sx-warn-dim);
-  color: var(--sx-warn-hi);
+  border-color: var(--pk-red-line-strong);
+  background: transparent;
+  color: var(--sx-ink);
 }
 
 .sx-pk-meta h1 {
@@ -8381,6 +8546,8 @@ a.sx-xh-btn { text-decoration: none; }
   max-width: 100%;
   overflow-wrap: anywhere;
   color: var(--sx-ink);
+  padding-left: var(--sx-3);
+  border-left: 3px solid var(--sx-accent);
   font: 400 clamp(1.5rem, 3vw, 2.25rem)/1.05 'Archivo Black', sans-serif;
   letter-spacing: -0.02em;
   text-transform: uppercase;
@@ -8420,14 +8587,17 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-tags a {
   padding: 5px 8px;
   border: 1px solid var(--sx-rule);
+  background: transparent;
   color: var(--sx-ink-2);
   font: 700 0.625rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.04em;
+  transition: background var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out), border-color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
 .sx-pk-tags a:hover {
   border-color: var(--sx-accent);
-  color: var(--sx-accent);
+  background: var(--sx-accent-dim);
+  color: var(--sx-accent-hi);
 }
 
 /* Telemetry grid */
@@ -8437,6 +8607,7 @@ a.sx-xh-btn { text-decoration: none; }
   gap: 1px;
   margin: 0;
   padding: 1px;
+  border-top: 2px solid var(--sx-accent);
   background: var(--sx-rule);
 }
 
@@ -8447,7 +8618,7 @@ a.sx-xh-btn { text-decoration: none; }
   justify-content: center;
   gap: 4px;
   padding: 12px 6px;
-  background: var(--sx-bg);
+  background: var(--pk-panel);
 }
 
 .sx-pk-stats dd {
@@ -8476,7 +8647,7 @@ a.sx-xh-btn { text-decoration: none; }
   gap: 8px;
   padding: 12px 10px;
   border: 1px solid var(--sx-rule);
-  background: var(--sx-surface-3);
+  background: var(--pk-panel-2);
   color: var(--sx-ink);
   font: 700 0.6875rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.08em;
@@ -8491,8 +8662,9 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 .sx-pk-act:hover:not(:disabled) {
-  background: var(--sx-surface-hover);
-  border-color: var(--sx-rule-strong);
+  background: var(--pk-panel-2);
+  border-color: var(--sx-accent);
+  color: var(--sx-ink);
 }
 
 .sx-pk-act:focus-visible {
@@ -8507,7 +8679,13 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-pk-act--on {
   border-color: var(--sx-accent);
-  color: var(--sx-accent);
+  background: var(--sx-accent-dim);
+  color: var(--sx-accent-hi);
+}
+
+.sx-pk-act--on:hover:not(:disabled) {
+  background: var(--sx-accent-dim);
+  color: var(--sx-accent-hi);
 }
 
 .sx-pk-act--quiet {
@@ -8515,8 +8693,8 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 .sx-pk-act--quiet:hover:not(:disabled) {
-  color: var(--sx-danger-hi);
-  border-color: var(--sx-danger-border);
+  color: var(--sx-accent-hi);
+  border-color: var(--sx-accent);
 }
 
 /* Owner controls */
@@ -8526,7 +8704,8 @@ a.sx-xh-btn { text-decoration: none; }
   gap: var(--sx-3);
   padding: var(--sx-4);
   border: 1px solid var(--sx-rule);
-  background: var(--sx-surface);
+  border-top: 2px solid var(--sx-accent);
+  background: var(--pk-panel);
 }
 
 .sx-pk-owner > header {
@@ -8611,24 +8790,29 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 /* List rows */
+/* The list is a size container: rows adapt to the width they are given (the page's own breakpoints
+   don't track the column width). Type and thumbnail grow from their old size up to +10% as the list widens. */
 .sx-pk-list {
+  container: pk-list / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--sx-2);
   margin: 0;
   padding: 0;
   list-style: none;
+  --pk-thumb: clamp(64px, 40px + 4cqi, 88px);
+  --pk-gap: clamp(10px, 0.5rem + 0.8cqi, 18px);
 }
 
 .sx-pk-row {
   display: grid;
-  grid-template-columns: 2rem 80px minmax(0, 1fr) auto auto;
+  grid-template-columns: clamp(1.75rem, 1rem + 3cqi, 2.5rem) var(--pk-thumb) minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: var(--sx-4);
+  gap: var(--pk-gap);
   width: 100%;
-  padding: var(--sx-3);
+  padding: clamp(8px, 0.4rem + 0.8cqi, 14px);
   border: 1px solid var(--sx-rule);
-  background: #050607;
+  background: var(--pk-panel);
   color: var(--sx-ink);
   text-align: left;
   cursor: pointer;
@@ -8637,7 +8821,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-pk-row:not(:disabled):hover,
 .sx-pk-row:not(:disabled):focus-visible {
-  background: var(--sx-surface-2);
+  background: var(--pk-panel-2);
   border-color: var(--sx-accent);
 }
 
@@ -8653,7 +8837,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-pk-row-num {
   color: var(--sx-ink-muted);
-  font: 700 1.25rem/1 'Orbitron', 'JetBrains Mono', sans-serif;
+  font: 700 clamp(1.25rem, 1.1667rem + 0.37cqi, 1.375rem)/1 'Orbitron', 'JetBrains Mono', sans-serif;
   transition: color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
@@ -8664,12 +8848,12 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-thumb {
   position: relative;
   display: grid;
-  width: 80px;
-  height: 80px;
+  width: var(--pk-thumb);
+  height: var(--pk-thumb);
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--sx-rule);
-  background: var(--sx-surface-3);
+  background: var(--pk-panel-2);
 }
 
 .sx-pk-thumb img {
@@ -8688,8 +8872,8 @@ a.sx-xh-btn { text-decoration: none; }
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.4);
-  color: var(--sx-accent);
+  background: rgba(20, 4, 2, 0.55);
+  color: var(--sx-accent-hi);
   font-size: 0.875rem;
   opacity: 0;
   transition: opacity var(--sx-duration-fast) var(--sx-ease-out);
@@ -8709,7 +8893,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-pk-row-copy strong {
   overflow: hidden;
-  font: 700 0.9375rem/1.25 'Archivo', sans-serif;
+  font: 700 clamp(0.9375rem, 0.875rem + 0.28cqi, 1.03125rem)/1.25 'Archivo', sans-serif;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8724,22 +8908,22 @@ a.sx-xh-btn { text-decoration: none; }
   align-items: center;
   gap: 6px 8px;
   color: var(--sx-ink-2);
-  font: 600 0.6875rem/1 'JetBrains Mono', monospace;
+  font: 600 clamp(0.6875rem, 0.6417rem + 0.204cqi, 0.75625rem)/1 'JetBrains Mono', monospace;
 }
 
 .sx-pk-chip {
   padding: 3px 6px;
   border: 1px solid var(--sx-rule);
-  background: var(--sx-surface-3);
-  font-size: 0.625rem;
+  background: var(--pk-panel-2);
+  font-size: clamp(0.625rem, 0.5833rem + 0.185cqi, 0.6875rem);
 }
 
 .sx-pk-row-stats {
   display: flex;
   align-items: center;
-  gap: var(--sx-3);
+  gap: clamp(8px, 0.4rem + 0.7cqi, 16px);
   color: var(--sx-ink);
-  font: 700 0.75rem/1 'JetBrains Mono', monospace;
+  font: 700 clamp(0.75rem, 0.7rem + 0.222cqi, 0.825rem)/1 'JetBrains Mono', monospace;
 }
 
 .sx-pk-row-stats span {
@@ -8755,11 +8939,11 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 .sx-pk-row-go {
-  padding: 9px 16px;
+  padding: 9px clamp(10px, 0.5rem + 0.9cqi, 18px);
   border: 1px solid var(--sx-rule);
-  background: var(--sx-surface-3);
+  background: transparent;
   color: var(--sx-ink-2);
-  font: 800 0.6875rem/1 'JetBrains Mono', monospace;
+  font: 800 clamp(0.6875rem, 0.6417rem + 0.204cqi, 0.75625rem)/1 'JetBrains Mono', monospace;
   letter-spacing: 0.1em;
   white-space: nowrap;
   transition: background var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out), border-color var(--sx-duration-fast) var(--sx-ease-out);
@@ -8769,10 +8953,11 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-row:focus-visible .sx-pk-row-go {
   border-color: var(--sx-accent);
   background: var(--sx-accent);
-  color: #000;
+  color: var(--sx-on-accent);
 }
 
 .sx-pk-row--gone .sx-pk-row-go {
+  border-color: var(--sx-rule);
   background: transparent;
   color: var(--sx-ink-muted);
 }
@@ -8781,11 +8966,11 @@ a.sx-xh-btn { text-decoration: none; }
 /* Same grid + tile as Explore, sized for the narrower right-hand column. */
 .sx-explore-grid.sx-pk-gallery {
   margin-top: 0;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 312px), 1fr));
 }
 
 .sx-explore-grid.sx-explore-grid--stack.sx-pk-gallery {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 468px), 1fr));
 }
 
 .sx-pk-gone {
@@ -8795,7 +8980,7 @@ a.sx-xh-btn { text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: var(--sx-2);
-  background: var(--sx-surface-2);
+  background: var(--pk-panel-2);
   color: var(--sx-ink-muted);
   font-size: 2.5rem;
 }
@@ -8821,7 +9006,7 @@ a.sx-xh-btn { text-decoration: none; }
   gap: var(--sx-2) var(--sx-4);
   padding: var(--sx-3) var(--sx-4);
   border: 1px solid var(--sx-rule);
-  background: #050607;
+  background: var(--pk-panel);
   color: var(--sx-ink-3);
   font: 700 0.6875rem/1.4 'JetBrains Mono', monospace;
   letter-spacing: 0.06em;
@@ -8842,7 +9027,8 @@ a.sx-xh-btn { text-decoration: none; }
   width: min(100%, 440px);
   padding: var(--sx-5);
   border: 1px solid var(--sx-rule-strong);
-  background: var(--sx-surface);
+  border-top: 2px solid var(--sx-accent);
+  background: var(--pk-panel);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
 }
 
@@ -8964,26 +9150,30 @@ a.sx-xh-btn { text-decoration: none; }
   }
 }
 
-@media (max-width: 640px) {
+/* Row layers by the width of the list itself. */
+@container pk-list (max-width: 720px) {
+  /* The whole row is the button and the thumbnail shows its own play cue, so the PLAY pill goes first. */
   .sx-pk-row {
-    grid-template-columns: 1.75rem 64px minmax(0, 1fr);
-    gap: var(--sx-3);
-  }
-
-  .sx-pk-thumb {
-    width: 64px;
-    height: 64px;
-  }
-
-  .sx-pk-row-stats {
-    grid-column: 3;
-    gap: var(--sx-3);
+    grid-template-columns: clamp(1.75rem, 1rem + 3cqi, 2.25rem) var(--pk-thumb) minmax(0, 1fr) auto;
   }
 
   .sx-pk-row-go {
     display: none;
   }
+}
 
+@container pk-list (max-width: 520px) {
+  /* Stats drop under the title block so the title keeps its width. */
+  .sx-pk-row {
+    grid-template-columns: clamp(1.5rem, 0.5rem + 4cqi, 1.75rem) var(--pk-thumb) minmax(0, 1fr);
+  }
+
+  .sx-pk-row-stats {
+    grid-column: 3;
+  }
+}
+
+@media (max-width: 640px) {
   .sx-pk-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

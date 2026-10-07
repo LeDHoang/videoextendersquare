@@ -201,8 +201,15 @@ test('the Reels page has no Video Playlist section and lifts the 1440px content 
     assert.match(globalCss, /\.sx-main:has\(> \.sx-wide-page\) \{\s*max-width: min\(100%, 2560px\);/);
   assert.match(page, /<div className="sx-reels-page sx-wide-page">/);
   // the player grid (page script, skeleton) grows with the screen instead of stopping at 860px and 400px
-  assert.equal((html.match(/min\(84dvh, 1100px\)\) 64px clamp\(320px, 30vw, 600px\)/g) || []).length, 1);
-  assert.match(globalCss, /min\(84dvh, 1100px\)\) 64px clamp\(320px, 30vw, 600px\)/);
+  const dockedColumns = /min\(calc\(100dvh - 88px\), 1100px\)\) 64px clamp\(320px, 30vw, 600px\)/;
+  assert.equal((html.match(new RegExp(dockedColumns.source, 'g')) || []).length, 1);
+  assert.match(globalCss, dockedColumns);
+  // the mount is as tall as its square: a height-based min-height left a blank band under it that grew as the
+  // window narrowed (the square is limited by width there)
+  const mountRule = globalCss.slice(globalCss.indexOf('.sx-reels-mount {'), globalCss.indexOf('/* Wide screens: the player docks'));
+  assert.doesNotMatch(mountRule, /^\s*min-height:/m);
+  const dockedMount = globalCss.slice(globalCss.indexOf('@media (min-width: 1100px) and (min-height: 560px) {\n  .sx-reels-mount'));
+  assert.doesNotMatch(dockedMount.slice(0, dockedMount.indexOf('}\n}')), /^\s*min-height:/m);
 });
 
 test('the Reels page scrolls the square into view once on load, and other pages are not affected', () => {
@@ -216,11 +223,16 @@ test('the Reels page scrolls the square into view once on load, and other pages 
   // a hidden or background tab never fires requestAnimationFrame, so the wait must be a timer
   const wait = player.slice(player.indexOf('const tryReveal'), player.indexOf('let previewFrame'));
   assert.doesNotMatch(wait, /requestAnimationFrame/);
-  for (const other of ['PackPage.jsx', 'ImmersivePreviewPage.jsx']) {
-    let source = '';
-    try { source = read('web/src/pages/' + other); } catch { continue; }
-    assert.doesNotMatch(source, /revealOnLoad/, other + ' must not auto-scroll');
-  }
+  // The pack's player view lines its square up exactly like the Reels page (same spot under the header, despite the
+  // toolbar above it); the pack details page and the immersive preview never auto-scroll.
+  const pack = read('web/src/pages/PackPage.jsx');
+  assert.match(pack, /initialIndex=\{clampedIndex\}\s+revealOnLoad\s+revealAlign\s+\/>/);
+  assert.equal((pack.match(/revealOnLoad/g) || []).length, 1, 'only the player view auto-scrolls');
+  assert.match(player, /revealAlign = false/);
+  assert.match(player, /align: revealAlign/);
+  let preview = '';
+  try { preview = read('web/src/pages/ImmersivePreviewPage.jsx'); } catch { /* page not present */ }
+  assert.doesNotMatch(preview, /revealOnLoad/, 'ImmersivePreviewPage.jsx must not auto-scroll');
 });
 
 test('browsing pages opt into the full-width layout, forms and settings keep the readable cap', () => {

@@ -29,6 +29,18 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const [remaining, setRemaining] = useState(null);
+  const visibleRef = useRef(false);
+
+  // Play only while the tile is on screen and the <video> actually has a source. The visibility callback can
+  // fire before React has put `src` on the element (play() then rejects and nothing retries), and a
+  // preview -> original fallback reloads the element, so this is also called once media is ready.
+  const tryPlay = () => {
+    const vid = videoRef.current;
+    if (!vid || !visibleRef.current || !vid.paused || !vid.getAttribute('src')) return;
+    vid.play().catch(() => {
+      /* Still throttled by the browser: the next canplay / visibility event retries. */
+    });
+  };
 
   useEffect(() => {
     if (isImage) return undefined;
@@ -51,14 +63,11 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     const visIO = new IntersectionObserver(
       (entries) => {
         const visible = entries[0]?.isIntersecting;
+        visibleRef.current = !!visible;
         if (visible) {
           setSrc((current) => current || video.preview_url || video.url);
           setPreload('auto');
-          if (vid.paused) {
-            vid.play().catch(() => {
-              /* Browser autoplay throttling retries on the next visibility event. */
-            });
-          }
+          tryPlay();
         } else if (!vid.paused) {
           vid.pause();
         }
@@ -69,11 +78,17 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     nearIO.observe(el);
     visIO.observe(el);
     return () => {
+      visibleRef.current = false;
       nearIO.disconnect();
       visIO.disconnect();
       if (!vid.paused) vid.pause();
     };
   }, [isImage, video.preview_url, video.url]);
+
+  // A new source (first assignment or the fallback to the original file) needs a fresh play() once it renders.
+  useEffect(() => {
+    tryPlay();
+  }, [src]);
 
   // Whole seconds left in the playing preview; the state only changes when the shown second does.
   const syncRemaining = (event) => {
@@ -146,6 +161,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               preload={preload}
               disablePictureInPicture
               onLoadedData={() => setReady(true)}
+              onCanPlay={tryPlay}
               onLoadedMetadata={syncRemaining}
               onTimeUpdate={syncRemaining}
               onError={() => {
