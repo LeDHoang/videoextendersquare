@@ -21,8 +21,8 @@ const VISIBILITY_OPTIONS = [
 
 const VIEW_KEY = 'sx.pack.view';
 const VIEW_OPTIONS = [
-  { label: 'LIST', value: 'list' },
   { label: 'GALLERY', value: 'gallery' },
+  { label: 'LIST', value: 'list' },
 ];
 const DETAILS_LIMIT = 500;
 const MIN_PUBLISH = 3;
@@ -30,9 +30,9 @@ const MIN_PUBLISH = 3;
 export function usePackView() {
   const [view, setViewState] = useState(() => {
     try {
-      return localStorage.getItem(VIEW_KEY) === 'gallery' ? 'gallery' : 'list';
+      return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'gallery';
     } catch {
-      return 'list';
+      return 'gallery';
     }
   });
   const setView = useCallback((next) => {

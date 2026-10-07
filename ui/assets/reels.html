@@ -71,6 +71,9 @@
     box-shadow: none !important;
     overflow: hidden !important;
   }
+  .reels-phone-frame.sx-pseudo-fullscreen {
+    height: calc(100dvh - var(--sx-bottom-nav, 0px)) !important;
+  }
 
   /* Standalone player mode: the frame's parent is the document body. */
   body:fullscreen,
@@ -135,40 +138,22 @@
     z-index: 25 !important;
   }
 
+  /* Fullscreen action bar: a vertical stack pinned to the bottom-right corner (TikTok / Reels style).
+     Meta and the comment ticker reserve the same right gutter so nothing runs underneath it. */
   .reels-phone-frame:fullscreen .reels-actions,
   .reels-phone-frame:-webkit-full-screen .reels-actions,
-  .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
-    position: absolute !important;
-    /* Clear the fixed page-edge prev/next chevrons (40px + 10px edge + gap). */
-    right: max(64px, calc(env(safe-area-inset-right) + 54px)) !important;
-    top: 50% !important;
-    bottom: auto !important;
-    left: auto !important;
-    transform: translateY(-50%) !important;
-    z-index: 25 !important;
-    max-height: calc(100% - 60px) !important;
-    overflow-y: auto !important;
-  }
-
-  @media (max-width: 480px) {
-    .reels-phone-frame:fullscreen .reels-actions,
-    .reels-phone-frame:-webkit-full-screen .reels-actions,
-    .reels-phone-frame.sx-pseudo-fullscreen .reels-actions {
-      right: max(58px, calc(env(safe-area-inset-right) + 48px)) !important;
-    }
-  }
-
-  /* Fullscreen-active marker (JS toggles .sx-fs-active on the frame for ALL
-     fullscreen modes). Real fullscreen targets the frame's PARENT, so the
-     :fullscreen selectors above never match it — this class is the selector
-     that actually applies. It clears the fixed page-edge chevrons. */
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-actions,
   .reels-phone-frame.sx-fs-active .reels-actions {
-    right: max(64px, calc(env(safe-area-inset-right) + 54px)) !important;
-  }
-  @media (max-width: 480px) {
-    .reels-phone-frame.sx-fs-active .reels-actions {
-      right: max(58px, calc(env(safe-area-inset-right) + 48px)) !important;
-    }
+    position: absolute !important;
+    right: max(10px, env(safe-area-inset-right)) !important;
+    bottom: max(36px, calc(28px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom)))) !important;
+    top: auto !important;
+    left: auto !important;
+    transform: scale(1.2) !important;
+    transform-origin: 100% 100% !important;
+    z-index: 27 !important;
+    max-height: calc((100% - 120px) / 1.2) !important;
+    overflow-y: auto !important;
   }
 
   .reels-phone-frame:fullscreen .reels-meta,
@@ -176,8 +161,8 @@
   .reels-phone-frame.sx-pseudo-fullscreen .reels-meta {
     position: absolute !important;
     left: max(16px, env(safe-area-inset-left)) !important;
-    bottom: max(24px, calc(16px + env(safe-area-inset-bottom))) !important;
-    right: max(80px, calc(72px + env(safe-area-inset-right))) !important;
+    bottom: max(24px, calc(16px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom)))) !important;
+    right: max(90px, calc(82px + env(safe-area-inset-right))) !important;
     z-index: 25 !important;
   }
 
@@ -190,9 +175,7 @@
     right: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
-    padding-bottom: env(safe-area-inset-bottom) !important;
-    padding-left: max(12px, env(safe-area-inset-left)) !important;
-    padding-right: max(12px, env(safe-area-inset-right)) !important;
+    padding: 0 0 var(--sx-fs-safe-bottom, env(safe-area-inset-bottom)) !important;
     z-index: 26 !important;
   }
 
@@ -200,9 +183,9 @@
   .reels-phone-frame:-webkit-full-screen .reels-twitch-ticker,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-twitch-ticker {
     position: absolute !important;
-    bottom: max(24px, calc(16px + env(safe-area-inset-bottom))) !important;
+    bottom: max(24px, calc(16px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom)))) !important;
     left: max(16px, env(safe-area-inset-left)) !important;
-    right: max(80px, calc(72px + env(safe-area-inset-right))) !important;
+    right: max(90px, calc(82px + env(safe-area-inset-right))) !important;
     z-index: 26 !important;
   }
 
@@ -1544,33 +1527,67 @@
       font-size: 13px;
     }
   }
-  .reels-pack-bar { position:absolute; top:14px; left:14px; right:88px; z-index:16; display:flex; align-items:center; gap:8px; pointer-events:none; }
+  .reels-pack-bar { position:absolute; top:14px; left:14px; right:88px; z-index:16; display:flex; align-items:stretch; gap:6px; pointer-events:none; }
   .reels-pack-bar[hidden], .reels-pack-card[hidden], .reels-pack-queue[hidden] { display:none !important; }
-  .reels-pack-pill { min-height:40px; padding:8px 12px; border:1px solid rgba(255,85,58,.82); border-radius:4px; background:rgba(9,11,14,.92); color:#fff; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.05em; cursor:pointer; pointer-events:auto; }
-  .reels-pack-pill:hover, .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; background:#241512; }
-  .reels-pack-pill.primary { background:#ff553a; color:#090b0e; }
-  .reels-pack-title-pill { min-width:0; max-width:48%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .reels-pack-card { position:absolute; inset:0; z-index:12; display:grid; place-items:center; padding:28px; background:linear-gradient(135deg,rgba(255,85,58,.12),transparent 42%),radial-gradient(circle at 50% 34%,rgba(96,165,250,.18),transparent 38%),rgba(5,8,14,.97); color:#fff; }
-  .reels-pack-card-inner { width:min(560px,92%); border:1px solid rgba(255,85,58,.82); border-radius:8px; padding:28px; background:rgba(12,14,17,.96); box-shadow:0 20px 70px rgba(0,0,0,.55); text-align:center; }
-  .reels-pack-card-label { color:#ff765f; font:900 12px/1 "JetBrains Mono",monospace; letter-spacing:.16em; }
-  .reels-pack-card h2 { margin:14px 0 8px; font:900 clamp(24px,5vw,42px)/1.05 "Archivo",sans-serif; }
-  .reels-pack-card p { margin:0 auto 20px; max-width:44ch; color:#c7ccd4; line-height:1.5; }
-  .reels-pack-card-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
-  .reels-pack-card-actions button, .reels-pack-queue-actions button, .reels-pack-queue-close { min-height:44px; padding:10px 14px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
-  .reels-pack-card-actions button:first-child, .reels-pack-queue-actions button:first-child { border-color:#ff553a; background:#ff553a; color:#090b0e; }
-  .reels-pack-queue { position:absolute; inset:54px 54px 34px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid #ff553a; border-radius:8px; background:rgba(9,11,14,.98); color:#fff; box-shadow:0 24px 90px rgba(0,0,0,.72); }
-  .reels-pack-queue-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid #30363d; }
+  .reels-pack-pill { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:40px; padding:8px 12px; border:1px solid #2F353C; border-radius:4px; background:rgba(13,14,16,.9); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; white-space:nowrap; cursor:pointer; pointer-events:auto; box-shadow:0 8px 24px rgba(0,0,0,.5); transition:background .15s ease,border-color .15s ease,color .15s ease; }
+  .reels-pack-pill svg, .reels-pack-btn svg { width:16px; height:16px; flex:none; display:block; }
+  .reels-pack-pill:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
+  .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-pack-pill.primary { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; box-shadow:0 0 18px rgba(255,59,31,.35); }
+  .reels-pack-pill.primary:hover { background:#ff5a42; color:#0A0A0A; }
+  .reels-pack-pill.is-saved { border-color:#FF3B1F; color:#FF3B1F; }
+  .reels-pack-pill.is-saved svg path { fill:currentColor; }
+  .reels-pack-title-pill { min-width:0; max-width:48%; }
+  .reels-pack-pill-k { opacity:.72; margin-right:6px; }
+  .reels-pack-card { position:absolute; inset:0; z-index:12; display:flex; padding:clamp(14px,4%,34px) 76px; overflow:auto; color:#F2F3F5; background:radial-gradient(ellipse at 10% 105%,rgba(255,59,31,.22),transparent 55%),linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,rgba(8,9,10,.93); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+  .reels-pack-card-inner { position:relative; margin:var(--pk-m,auto); width:min(600px,100%); padding:clamp(18px,4vmin,32px); border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.96); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px rgba(255,59,31,.10); text-align:left; animation:sx-pack-rise .32s cubic-bezier(.2,.8,.2,1) both; }
+  .reels-pack-card-inner::before, .reels-pack-card-inner::after { content:""; position:absolute; bottom:-1px; width:18px; height:18px; pointer-events:none; border:0 solid #FF3B1F; }
+  .reels-pack-card-inner::before { left:-1px; border-bottom-width:2px; border-left-width:2px; }
+  .reels-pack-card-inner::after { right:-1px; border-bottom-width:2px; border-right-width:2px; }
+  .reels-pack-card-head { display:flex; align-items:center; gap:10px; }
+  .reels-pack-card-dot { width:8px; height:8px; flex:none; background:#FF3B1F; box-shadow:0 0 10px rgba(255,59,31,.8); animation:sx-pack-blink 1.6s steps(2,jump-none) infinite; }
+  .reels-pack-card-label { flex:1; min-width:0; color:#FF3B1F; font:800 11px/1.2 "JetBrains Mono",monospace; letter-spacing:.18em; text-transform:uppercase; }
+  .reels-pack-card-count { padding:4px 8px; border:1px solid #2F353C; background:#16191C; color:#A4ABB3; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
+  .reels-pack-card h2 { margin:16px 0 10px; font:400 clamp(26px,6vmin,46px)/1.02 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; overflow-wrap:anywhere; color:#F2F3F5; }
+  .reels-pack-card p { margin:0; max-width:46ch; color:#A4ABB3; font:400 14px/1.55 "Archivo",sans-serif; }
+  .reels-pack-card-status { margin:0 !important; padding-top:12px; border-top:1px dashed #2F353C; color:#8A919A !important; font:700 10px/1.5 "JetBrains Mono",monospace !important; letter-spacing:.1em; text-transform:uppercase; }
+  .reels-pack-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
+  .reels-pack-btn { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:44px; padding:10px 16px; border:1px solid #2F353C; border-radius:4px; background:#16191C; color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease; }
+  .reels-pack-btn[hidden] { display:none !important; }
+  .reels-pack-btn:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
+  .reels-pack-btn.primary { grid-column:1 / -1; min-height:48px; border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; font-size:12px; box-shadow:0 0 22px rgba(255,59,31,.35); }
+  .reels-pack-btn.primary:hover { background:#ff5a42; color:#0A0A0A; }
+  .reels-pack-btn:focus-visible, .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-pack-card.is-unavailable .reels-pack-card-inner { border-top-color:#FFB224; box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px rgba(255,178,36,.08); }
+  .reels-pack-card.is-unavailable .reels-pack-card-inner::before, .reels-pack-card.is-unavailable .reels-pack-card-inner::after { border-color:#FFB224; }
+  .reels-pack-card.is-unavailable .reels-pack-card-dot { background:#FFB224; box-shadow:0 0 10px rgba(255,178,36,.8); }
+  .reels-pack-card.is-unavailable .reels-pack-card-label { color:#FFB224; }
+  .reels-pack-card.is-unavailable .reels-pack-btn.primary { border-color:#FFB224; background:#FFB224; box-shadow:0 0 22px rgba(255,178,36,.3); }
+  .reels-pack-queue { position:absolute; inset:54px 76px auto 54px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.98); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); color:#F2F3F5; box-shadow:0 24px 90px rgba(0,0,0,.75),0 0 60px rgba(255,59,31,.08); animation:sx-pack-rise .24s cubic-bezier(.2,.8,.2,1) both; }
+  .reels-pack-queue-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid #24282E; }
   .reels-pack-queue-head div { min-width:0; flex:1; }
   .reels-pack-queue-head strong, .reels-pack-queue-head small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .reels-pack-queue-head small { margin-top:4px; color:#aab1bb; }
-  .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; }
-  .reels-pack-queue-item { width:100%; min-height:52px; display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:10px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:#fff; text-align:left; cursor:pointer; }
-  .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible, .reels-pack-queue-item.current { border-color:#ff553a; background:#1b1515; outline:none; }
-  .reels-pack-queue-item:disabled { color:#767d86; cursor:not-allowed; }
-  .reels-pack-queue-empty { margin:0; padding:18px 14px; color:#aab1bb; font:700 13px/1.4 "JetBrains Mono",monospace; }
+  .reels-pack-queue-head strong { font:400 clamp(16px,3.4vmin,22px)/1.1 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; }
+  .reels-pack-queue-head small { margin-top:6px; color:#8A919A; font:700 10px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; }
+  .reels-pack-queue-eyebrow { display:block; margin-bottom:6px; color:#FF3B1F; font:800 9px/1 "JetBrains Mono",monospace; letter-spacing:.18em; font-style:normal; }
+  .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; scrollbar-width:thin; scrollbar-color:#2F353C transparent; }
+  .reels-pack-queue-item { position:relative; width:100%; min-height:52px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:12px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:#F2F3F5; font:700 13px/1.2 "Archivo",sans-serif; text-align:left; cursor:pointer; transition:background .12s ease,border-color .12s ease; }
+  .reels-pack-queue-item span:first-child { display:grid; place-items:center; height:30px; border:1px solid #2F353C; background:#16191C; color:#A4ABB3; font:800 11px/1 "JetBrains Mono",monospace; }
+  .reels-pack-queue-item span:last-child { padding:6px 8px; border:1px solid #2F353C; color:#A4ABB3; font:800 10px/1 "JetBrains Mono",monospace; letter-spacing:.12em; }
+  .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible { border-color:#FF3B1F; background:rgba(255,59,31,.08); outline:none; }
+  .reels-pack-queue-item:hover span:last-child, .reels-pack-queue-item:focus-visible span:last-child { border-color:#FF3B1F; color:#FF3B1F; }
+  .reels-pack-queue-item.current { border-color:#FF3B1F; background:rgba(255,59,31,.14); box-shadow:inset 3px 0 0 #FF3B1F; }
+  .reels-pack-queue-item.current span:first-child { border-color:#FF3B1F; color:#FF3B1F; }
+  .reels-pack-queue-item.current span:last-child { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; }
+  .reels-pack-queue-item:disabled { color:#6B727A; cursor:not-allowed; background:repeating-linear-gradient(135deg,rgba(255,178,36,.06) 0 4px,transparent 4px 8px); }
+  .reels-pack-queue-item:disabled span:last-child { border-style:dashed; border-color:rgba(255,178,36,.5); color:#FFB224; }
+  .reels-pack-queue-empty { margin:0; padding:18px 14px; color:#8A919A; font:700 12px/1.4 "JetBrains Mono",monospace; letter-spacing:.04em; }
   .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
-  .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid #ff553a; border-radius:8px; background:rgba(9,11,14,.98); color:#fff; box-shadow:0 24px 90px rgba(0,0,0,.72); }
+  .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.98); color:#F2F3F5; box-shadow:0 24px 90px rgba(0,0,0,.75); }
   .reels-collect-dialog[hidden], .reels-collect-backdrop[hidden] { display:none !important; }
+  .reels-phone-frame.sx-fs-active .reels-pack-bar, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-bar { top:max(14px, calc(env(safe-area-inset-top) + 8px)); left:max(14px, env(safe-area-inset-left)); right:76px; }
+  .reels-phone-frame.sx-fs-active .reels-pack-card, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-card { padding:max(62px, calc(env(safe-area-inset-top) + 56px)) var(--pk-r,76px) var(--pk-b,40px) var(--pk-l,max(14px, env(safe-area-inset-left))); }
+  .reels-phone-frame.sx-pack-stage .reels-meta, .reels-phone-frame.sx-pack-stage .reels-twitch-ticker { visibility:hidden; }
   .reels-phone-frame.sx-collect-open .reels-actions,
   .reels-phone-frame.sx-collect-open .reels-progress-wrap,
   .reels-phone-frame.sx-collect-open .reels-pack-bar,
@@ -1583,17 +1600,35 @@
   .reels-collect-newrow button:first-of-type { border-color:#ff553a; background:#ff553a; color:#090b0e; }
   .reels-collect-newrow button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
   .reels-pack-queue-item strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .reels-pack-queue-item span:last-child { font:800 10px/1 "JetBrains Mono",monospace; }
-  .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid #30363d; }
-  .reels-pack-card-actions button:focus-visible, .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid #fff; outline-offset:2px; }
-  .reels-pack-card-status { color:#ffd166 !important; font-family:"JetBrains Mono",monospace; }
+  .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid #24282E; }
+  .reels-pack-queue-actions button, .reels-pack-queue-close { min-height:44px; padding:10px 14px; border:1px solid #2F353C; border-radius:4px; background:#16191C; color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease; }
+  .reels-pack-queue-actions button:hover, .reels-pack-queue-close:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
+  .reels-pack-queue-actions button:first-child { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; }
+  .reels-pack-queue-actions button:first-child:hover { background:#ff5a42; color:#0A0A0A; }
+  .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  @keyframes sx-pack-rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+  @keyframes sx-pack-blink { from { opacity:1; } to { opacity:.25; } }
+  @media (prefers-reduced-motion: reduce) {
+    .reels-pack-card-inner, .reels-pack-queue { animation:none; }
+    .reels-pack-card-dot { animation:none; }
+  }
   @media (max-width:720px) {
     .reels-pack-bar { right:68px; gap:5px; }
     .reels-pack-pill { min-height:44px; padding:8px 10px; font-size:10px; }
+    .reels-pack-pill-label { display:none; }
     .reels-pack-title-pill { max-width:42%; }
-    .reels-pack-queue { inset:50px 16px 22px; max-height:calc(100% - 72px); }
-    .reels-pack-card { padding:14px; }
-    .reels-pack-card-inner { padding:20px 14px; }
+    .reels-pack-queue { inset:50px 64px auto 16px; max-height:calc(100% - 72px); }
+    .reels-pack-card { padding:62px 64px 14px 14px; }
+    .reels-pack-card-inner { padding:16px 14px; }
+    .reels-pack-card h2 { margin:12px 0 6px; font-size:clamp(18px,5.6vw,28px); }
+    .reels-pack-card-actions { margin-top:14px; }
+    .reels-pack-btn { padding:10px 8px; font-size:10px; letter-spacing:.06em; }
+    .reels-pack-btn.primary { min-height:44px; }
+  }
+  @media (max-width:480px) {
+    .reels-pack-card { padding-left:54px; }
+    .reels-pack-card p { font-size:12px; line-height:1.4; }
+    .reels-pack-card-status { display:none !important; }
     .reels-pack-queue-item { min-height:52px; }
   }
 
@@ -1900,6 +1935,10 @@
   }
   #sxReelsHost.sx-fs-docked .reels-actions {
     right: 14px !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    transform-origin: 50% 50% !important;
     max-height: calc(100% - 60px) !important;
   }
   #sxReelsHost.sx-fs-docked .reels-progress-wrap {
@@ -1948,9 +1987,9 @@
   </div>
 
   <div class="reels-pack-bar" id="packModeBar" hidden>
-    <button type="button" class="reels-pack-pill reels-pack-title-pill primary" id="packQueueBtn">▦ PACK <span id="packPosition">1/1</span></button>
-    <button type="button" class="reels-pack-pill" id="packSaveBtn">SAVE PACK</button>
-    <button type="button" class="reels-pack-pill" id="packShareBtn">SHARE PACK</button>
+    <button type="button" class="reels-pack-pill reels-pack-title-pill primary" id="packQueueBtn" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5"/><rect x="13.5" y="4" width="6.5" height="6.5"/><rect x="4" y="13.5" width="6.5" height="6.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5"/></svg><span><span class="reels-pack-pill-k">PACK</span><span id="packPosition">1/1</span></span></button>
+    <button type="button" class="reels-pack-pill" id="packSaveBtn" aria-pressed="false" aria-label="Save pack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="miter" aria-hidden="true"><path d="M6 3.5h12v17l-6-4.5-6 4.5z"/></svg><span class="reels-pack-pill-label" id="packSaveLabel">SAVE PACK</span></button>
+    <button type="button" class="reels-pack-pill" id="packShareBtn" aria-label="Share pack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="5.5" r="2.4"/><circle cx="18" cy="18.5" r="2.4"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/></svg><span class="reels-pack-pill-label">SHARE PACK</span></button>
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
@@ -1961,20 +2000,24 @@
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="reels-pack-card" id="packStageCard" hidden role="dialog" aria-modal="false" aria-labelledby="packStageTitle" aria-describedby="packStageText packStageStatus">
       <div class="reels-pack-card-inner">
-        <div class="reels-pack-card-label" id="packStageLabel">REEL PACK</div>
+        <div class="reels-pack-card-head">
+          <span class="reels-pack-card-dot" aria-hidden="true"></span>
+          <div class="reels-pack-card-label" id="packStageLabel">REEL PACK</div>
+          <span class="reels-pack-card-count" id="packStageCount" aria-hidden="true"></span>
+        </div>
         <h2 id="packStageTitle">Reel Pack</h2>
         <p id="packStageText">Loading pack…</p>
         <p class="reels-pack-card-status" id="packStageStatus"></p>
         <div class="reels-pack-card-actions">
-          <button type="button" id="packStagePrimary">START PACK</button>
-          <button type="button" id="packStageSecondary" hidden>RETURN TO PACK</button>
-          <button type="button" id="packStageExplore" hidden>EXPLORE PACKS</button>
+          <button type="button" class="reels-pack-btn primary" id="packStagePrimary"><span class="reels-pack-btn-ico" id="packStagePrimaryIco" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/></svg></span><span id="packStagePrimaryLabel">START PACK</span></button>
+          <button type="button" class="reels-pack-btn" id="packStageSecondary" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7"/></svg><span>RETURN TO PACK</span></button>
+          <button type="button" class="reels-pack-btn" id="packStageExplore" hidden><span>EXPLORE PACKS</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7"/></svg></button>
         </div>
       </div>
     </div>
     <section class="reels-pack-queue" id="packQueuePanel" role="dialog" aria-modal="false" aria-label="Reel Pack queue" hidden>
       <div class="reels-pack-queue-head">
-        <div><strong id="packQueueTitle">REEL PACK</strong><small id="packQueueCreator">Loading pack…</small></div>
+        <div><em class="reels-pack-queue-eyebrow">REEL PACK · QUEUE</em><strong id="packQueueTitle">REEL PACK</strong><small id="packQueueCreator">Loading pack…</small></div>
         <button type="button" class="reels-pack-queue-close" id="packQueueClose" aria-label="Close pack queue">CLOSE</button>
       </div>
       <div class="reels-pack-queue-list" id="packQueueList"></div>
@@ -2302,6 +2345,10 @@
     const packStageText = document.getElementById('packStageText');
     const packStageStatus = document.getElementById('packStageStatus');
     const packStagePrimary = document.getElementById('packStagePrimary');
+    const packStagePrimaryLabel = document.getElementById('packStagePrimaryLabel');
+    const packStagePrimaryIco = document.getElementById('packStagePrimaryIco');
+    const packStageCount = document.getElementById('packStageCount');
+    const packSaveLabel = document.getElementById('packSaveLabel');
     const packStageSecondary = document.getElementById('packStageSecondary');
     const packStageExplore = document.getElementById('packStageExplore');
     const packQueuePanel = document.getElementById('packQueuePanel');
@@ -2620,19 +2667,82 @@
       packVisualRegions.push({ action, x: x / 1024, y: y / 1024, w: w / 1024, h: h / 1024, ...(extra || {}) });
     }
 
+    let packFontKicked = false;
+
+    function setPackCanvasSpacing(ctx, px) {
+      if ('letterSpacing' in ctx) ctx.letterSpacing = px + 'px';
+    }
+
+    // Shared obsidian frame for the pack / collect canvases: grid, vermilion glow, corner brackets, status label.
+    function drawPackCanvasFrame(ctx, label, accent, chip) {
+      ctx.clearRect(0, 0, 1024, 1024);
+      ctx.fillStyle = '#0d0e10';
+      ctx.fillRect(0, 0, 1024, 1024);
+      const glow = ctx.createRadialGradient(100, 1000, 0, 100, 1000, 760);
+      glow.addColorStop(0, accent === '#ffb224' ? 'rgba(255,178,36,.20)' : 'rgba(255,59,31,.24)');
+      glow.addColorStop(1, 'rgba(255,59,31,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = 'rgba(255,255,255,.035)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let g = 32; g < 1024; g += 32) {
+        ctx.moveTo(g + 0.5, 0); ctx.lineTo(g + 0.5, 1024);
+        ctx.moveTo(0, g + 0.5); ctx.lineTo(1024, g + 0.5);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#24282e';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(34, 34, 956, 956);
+      ctx.fillStyle = accent;
+      ctx.fillRect(34, 34, 956, 6);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 5;
+      const arm = 40;
+      [[34, 990, 1, -1], [990, 990, -1, -1]].forEach(([cx, cy, dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + dy * arm); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * arm, cy);
+        ctx.stroke();
+      });
+      ctx.fillStyle = accent;
+      ctx.fillRect(92, 91, 14, 14);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = '800 22px "JetBrains Mono", monospace';
+      setPackCanvasSpacing(ctx, 4);
+      ctx.fillText(label, 124, 99);
+      if (chip) {
+        ctx.textAlign = 'right';
+        ctx.font = '800 22px "JetBrains Mono", monospace';
+        setPackCanvasSpacing(ctx, 1);
+        const chipW = ctx.measureText(chip).width + 32;
+        ctx.fillStyle = '#16191c';
+        ctx.fillRect(932 - chipW, 78, chipW, 42);
+        ctx.strokeStyle = '#2f353c';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(932 - chipW, 78, chipW, 42);
+        ctx.fillStyle = '#a4abb3';
+        ctx.fillText(chip, 916, 99);
+      }
+      setPackCanvasSpacing(ctx, 0);
+      ctx.textBaseline = 'alphabetic';
+    }
+
     function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra) {
-      ctx.fillStyle = primary ? '#ff553a' : '#171b21';
-      ctx.strokeStyle = primary ? '#ff765f' : '#69727d';
+      ctx.fillStyle = primary ? '#ff3b1f' : '#16191c';
+      ctx.strokeStyle = primary ? '#ff3b1f' : '#2f353c';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 8);
+      ctx.roundRect(x, y, w, h, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = primary ? '#080a0d' : '#ffffff';
-      ctx.font = '900 24px "JetBrains Mono", monospace';
+      ctx.fillStyle = primary ? '#0a0a0a' : '#f2f3f5';
+      ctx.font = '800 23px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      setPackCanvasSpacing(ctx, 2);
       ctx.fillText(label, x + w / 2, y + h / 2);
+      setPackCanvasSpacing(ctx, 0);
       addPackVisualRegion(action, x, y, w, h, extra);
     }
 
@@ -2643,28 +2753,28 @@
       packVisualRegions = [];
       const ctx = packVisualCanvas.getContext('2d');
       const pack = packState.pack || {};
-      ctx.clearRect(0, 0, 1024, 1024);
-      const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
-      gradient.addColorStop(0, '#1c0d0b');
-      gradient.addColorStop(0.48, '#09101c');
-      gradient.addColorStop(1, '#05080e');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 1024, 1024);
-      ctx.strokeStyle = '#ff553a';
-      ctx.lineWidth = 5;
-      ctx.strokeRect(34, 34, 956, 956);
-      ctx.fillStyle = '#ff765f';
-      ctx.font = '900 24px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(mode === 'queue' ? 'REEL PACK QUEUE' : 'REEL PACK', 512, 104);
+      const pad = (n) => String(n).padStart(2, '0');
+      // Canvas text never triggers a webfont load by itself — fetch the title face once, then redraw.
+      if (!packFontKicked && document.fonts && document.fonts.load) {
+        packFontKicked = true;
+        document.fonts.load('400 40px "Archivo Black"').then(() => { if (packVisualMode === mode) renderPackVisual(mode); }).catch(() => {});
+      }
+      const unavailable = mode === 'unavailable';
+      const accent = unavailable ? '#ffb224' : '#ff3b1f';
+      const label = mode === 'queue' ? 'REEL PACK · QUEUE' : mode === 'complete' ? 'REEL PACK COMPLETE' : unavailable ? 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length : 'REEL PACK';
+      const chip = mode === 'complete' ? pad(videoData.length) + ' / ' + pad(videoData.length) : unavailable ? pad(idx + 1) + ' / ' + pad(videoData.length) : '';
+      drawPackCanvasFrame(ctx, label, accent, chip);
+      ctx.fillStyle = accent;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
 
       if (mode === 'queue') {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 42px "Archivo", sans-serif';
-        ctx.fillText(String(pack.title || 'Untitled Pack').slice(0, 34), 512, 158);
-        ctx.fillStyle = '#aeb7c3';
-        ctx.font = '700 21px "JetBrains Mono", monospace';
-        ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 512, 196);
+        ctx.fillStyle = '#f2f3f5';
+        ctx.font = '400 44px "Archivo Black", "Archivo", sans-serif';
+        ctx.fillText(String(pack.title || 'Untitled Pack').toUpperCase().slice(0, 30), 92, 164);
+        ctx.fillStyle = '#8a919a';
+        ctx.font = '700 20px "JetBrains Mono", monospace';
+        ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 92, 198);
         const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
         // Draft owners get a publish row above the action bar; trim the
         // visible queue rows so the two never overlap.
@@ -2674,26 +2784,35 @@
           const y = rowStart + index * (rowH + rowGap);
           const current = index === idx;
           const available = item && item.available !== false;
-          ctx.fillStyle = current ? '#2a1815' : '#11161d';
-          ctx.strokeStyle = current ? '#ff553a' : '#303945';
+          ctx.fillStyle = current ? 'rgba(255,59,31,.16)' : '#12151a';
+          ctx.strokeStyle = current ? '#ff3b1f' : '#24282e';
           ctx.lineWidth = current ? 3 : 1;
           ctx.fillRect(rowX, y, rowW, rowH);
           ctx.strokeRect(rowX, y, rowW, rowH);
-          ctx.textAlign = 'left';
+          if (current) { ctx.fillStyle = '#ff3b1f'; ctx.fillRect(rowX, y, 7, rowH); }
+          ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = available ? '#ffffff' : '#777f89';
-          ctx.font = '800 19px "JetBrains Mono", monospace';
-          ctx.fillText(String(index + 1).padStart(2, '0'), rowX + 18, y + rowH / 2);
-          ctx.font = '700 20px "Archivo", sans-serif';
+          ctx.fillStyle = '#16191c';
+          ctx.fillRect(rowX + 20, y + 9, 40, 30);
+          ctx.strokeStyle = current ? '#ff3b1f' : '#2f353c';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rowX + 20, y + 9, 40, 30);
+          ctx.fillStyle = current ? '#ff3b1f' : '#a4abb3';
+          ctx.font = '800 17px "JetBrains Mono", monospace';
+          ctx.fillText(pad(index + 1), rowX + 40, y + rowH / 2 + 1);
+          ctx.textAlign = 'left';
+          ctx.fillStyle = available ? '#f2f3f5' : '#6b727a';
+          ctx.font = '700 21px "Archivo", sans-serif';
           const name = available ? (item.title || item.filename || 'Untitled reel') : 'Reel unavailable';
-          ctx.fillText(String(name).slice(0, 50), rowX + 76, y + rowH / 2);
+          ctx.fillText(String(name).slice(0, 46), rowX + 80, y + rowH / 2);
           ctx.textAlign = 'right';
-          ctx.font = '800 16px "JetBrains Mono", monospace';
+          ctx.font = '800 15px "JetBrains Mono", monospace';
+          ctx.fillStyle = !available ? '#ffb224' : (current ? '#ff3b1f' : '#a4abb3');
           ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
           if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
         });
         if (videoData.length > maxRows) {
-          ctx.fillStyle = '#aeb7c3';
+          ctx.fillStyle = '#8a919a';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'alphabetic';
           ctx.font = '700 18px "JetBrains Mono", monospace';
@@ -2704,7 +2823,7 @@
           if (queuePlayable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 796, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#767d86';
+            ctx.fillStyle = '#6b727a';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -2715,23 +2834,38 @@
         drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
         drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
       } else {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 58px "Archivo", sans-serif';
-        const title = mode === 'complete' ? 'PACK COMPLETE' : (mode === 'unavailable' ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack'));
-        wrapPackCanvasText(ctx, title, 512, 300, 820, 68, 2);
-        ctx.fillStyle = '#b8c0ca';
-        ctx.font = '600 25px "Archivo", sans-serif';
+        ctx.fillStyle = '#f2f3f5';
+        ctx.font = '400 64px "Archivo Black", "Archivo", sans-serif';
+        const title = unavailable ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack').toUpperCase();
+        wrapPackCanvasText(ctx, title, 92, 250, 840, 72, 2);
+        ctx.fillStyle = '#a4abb3';
+        ctx.font = '400 26px "Archivo", sans-serif';
         const description = mode === 'complete'
           ? 'You reached the end of this authored collection.'
-          : mode === 'unavailable'
+          : unavailable
             ? 'This item was removed or is inaccessible. It will be skipped.'
             : (pack.description || ('An ordered collection by ' + packCreatorLabel() + '.'));
-        wrapPackCanvasText(ctx, description, 512, 465, 760, 38, 4);
+        wrapPackCanvasText(ctx, description, 92, 420, 840, 38, 3);
         if (mode === 'complete') {
+          ctx.strokeStyle = '#2f353c';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath(); ctx.moveTo(92, 590); ctx.lineTo(932, 590); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#8a919a';
+          ctx.textAlign = 'left';
+          ctx.font = '700 18px "JetBrains Mono", monospace';
+          setPackCanvasSpacing(ctx, 1.5);
+          ctx.fillText(videoData.length + ' ORDERED REELS · NO AUTOMATIC FEED CONTINUATION', 92, 636);
+          setPackCanvasSpacing(ctx, 0);
           drawPackCanvasButton(ctx, 'REPLAY PACK', 92, 720, 250, 76, true, 'replay');
           drawPackCanvasButton(ctx, 'RETURN TO PACK', 387, 720, 250, 76, false, 'return');
           drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
-        } else if (mode === 'unavailable') {
+        } else if (unavailable) {
+          ctx.fillStyle = '#8a919a';
+          ctx.textAlign = 'left';
+          ctx.font = '700 18px "JetBrains Mono", monospace';
+          ctx.fillText('SKIPPING WITHOUT EXPOSING PROTECTED MEDIA.', 92, 636);
           drawPackCanvasButton(ctx, 'SKIP ITEM', 337, 720, 350, 76, true, 'skip');
         }
         const canPublishHere = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft' && mode === 'complete';
@@ -2740,7 +2874,7 @@
           if (playable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 822, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#767d86';
+            ctx.fillStyle = '#6b727a';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -2805,6 +2939,9 @@
       else if (video) video.play().catch(() => {});
     }
 
+    const PACK_ICON_REPLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/></svg>';
+    const PACK_ICON_SKIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M5 5l9 7-9 7zM19 5v14"/></svg>';
+
     function renderPackQueueDom() {
       if (!isPackMode || !packQueueList) return;
       packQueueList.replaceChildren();
@@ -2838,7 +2975,11 @@
       if (packPosition) packPosition.textContent = (videoData.length ? idx + 1 : 0) + '/' + videoData.length;
       if (packQueueBtn) packQueueBtn.title = 'Open ' + (pack.title || 'Reel Pack') + ' queue';
       const saveLabel = pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK';
-      if (packSaveBtn) packSaveBtn.textContent = saveLabel;
+      if (packSaveLabel) packSaveLabel.textContent = saveLabel;
+      if (packSaveBtn) {
+        packSaveBtn.classList.toggle('is-saved', !!pack.saved_by_me);
+        packSaveBtn.setAttribute('aria-pressed', pack.saved_by_me ? 'true' : 'false');
+      }
       if (packQueueSave) packQueueSave.textContent = saveLabel;
       if (packQueuePublish) {
         const canPublish = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft';
@@ -2861,33 +3002,76 @@
       packQueueOpen = false;
       if (packQueuePanel) packQueuePanel.hidden = true;
       packStageCard.hidden = false;
+      setPackStageFrame(true);
       const pack = packState.pack || {};
       packStageSecondary.hidden = mode !== 'complete';
       packStageExplore.hidden = mode !== 'complete';
+      packStageCard.classList.toggle('is-unavailable', mode !== 'complete');
+      const pad = (n) => String(n).padStart(2, '0');
       if (mode === 'complete') {
+        if (packStageCount) packStageCount.textContent = pad(videoData.length) + ' / ' + pad(videoData.length);
         packStageLabel.textContent = 'REEL PACK COMPLETE';
         packStageTitle.textContent = pack.title || 'Pack complete';
         packStageText.textContent = 'You reached the end of this authored collection.';
         packStageStatus.textContent = videoData.length + ' ordered reels · no automatic feed continuation';
-        packStagePrimary.textContent = 'REPLAY PACK';
+        packStagePrimaryLabel.textContent = 'REPLAY PACK';
+        if (packStagePrimaryIco) packStagePrimaryIco.innerHTML = PACK_ICON_REPLAY;
         packStagePrimary.dataset.action = 'replay';
       } else {
+        if (packStageCount) packStageCount.textContent = pad(idx + 1) + ' / ' + pad(videoData.length);
         packStageLabel.textContent = 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length;
         packStageTitle.textContent = 'Reel unavailable';
         packStageText.textContent = 'This reel was removed or is no longer accessible. Its place in the authored order is preserved.';
         packStageStatus.textContent = 'Skipping without exposing protected media.';
-        packStagePrimary.textContent = 'SKIP ITEM';
+        packStagePrimaryLabel.textContent = 'SKIP ITEM';
+        if (packStagePrimaryIco) packStagePrimaryIco.innerHTML = PACK_ICON_SKIP;
         packStagePrimary.dataset.action = 'skip';
       }
       renderPackVisual(mode);
       syncPackChrome();
+      layoutPackStage();
       try { packStagePrimary.focus({ preventScroll: true }); } catch (e) {
         try { packStagePrimary.focus(); } catch (ignored) {}
       }
     }
 
+    // The stage card owns the whole picture — the reel's own title / ticker overlays would sit on top of it.
+    function setPackStageFrame(on) {
+      const frameEl = document.getElementById('reelsFrame');
+      if (frameEl) frameEl.classList.toggle('sx-pack-stage', !!on);
+    }
+
+    // Full-bleed fullscreen: the card is centred horizontally and, when it clears the action bar, on the
+    // whole screen. Otherwise it sits right above the bar, and on frames too short for that beside it.
+    function layoutPackStage() {
+      if (!packStageCard) return;
+      const inner = packStageCard.firstElementChild;
+      const rail = document.getElementById('reelsActions');
+      ['--pk-l', '--pk-r', '--pk-b', '--pk-m'].forEach((name) => packStageCard.style.removeProperty(name));
+      if (packStageCard.hidden || !inner || !rail || isDocked || !isCurrentFullscreen()) return;
+      const set = (name, value) => packStageCard.style.setProperty(name, value);
+      const frameRect = frame.getBoundingClientRect();
+      const railRect = rail.getBoundingClientRect();
+      const topPad = parseFloat(getComputedStyle(packStageCard).paddingTop) || 62;
+      const railTop = railRect.top - frameRect.top;
+      const gap = 12;
+      set('--pk-l', '14px');
+      set('--pk-r', '14px');
+      const cardH = inner.offsetHeight;
+      if (frameRect.height / 2 + cardH / 2 <= railTop - gap && frameRect.height / 2 - cardH / 2 >= topPad) {
+        set('--pk-b', topPad + 'px');
+      } else if (cardH <= railTop - topPad - gap) {
+        set('--pk-b', Math.ceil(frameRect.height - railTop + gap) + 'px');
+        set('--pk-m', 'auto auto 0');
+      } else {
+        set('--pk-r', Math.ceil(frameRect.right - railRect.left + gap) + 'px');
+        set('--pk-b', '40px');
+      }
+    }
+
     function hidePackStage() {
       if (packStageCard) packStageCard.hidden = true;
+      setPackStageFrame(false);
       if (packQueuePanel) packQueuePanel.hidden = true;
       packQueueOpen = false;
       packVisualMode = '';
@@ -2903,6 +3087,7 @@
         pauseCurrentPlayback();
         packQueueOpen = true;
         if (packStageCard) packStageCard.hidden = true;
+        setPackStageFrame(false);
         if (packQueuePanel) packQueuePanel.hidden = false;
         renderPackQueueDom();
         renderPackVisual('queue');
@@ -3269,24 +3454,12 @@
       packVisualRegions = [];
       const ctx = packVisualCanvas.getContext('2d');
       ctx.clearRect(0, 0, 1024, 1024);
-      const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
-      gradient.addColorStop(0, '#1c0d0b');
-      gradient.addColorStop(0.48, '#09101c');
-      gradient.addColorStop(1, '#05080e');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 1024, 1024);
-      ctx.strokeStyle = '#ff553a';
-      ctx.lineWidth = 5;
-      ctx.strokeRect(34, 34, 956, 956);
-      ctx.fillStyle = '#ff765f';
-      ctx.font = '900 24px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillText('SAVE TO COLLECTION', 512, 104);
+      drawPackCanvasFrame(ctx, 'SAVE TO COLLECTION', '#ff3b1f', '');
       const item = videoData[idx];
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '900 38px "Archivo", sans-serif';
-      ctx.fillText(String((item && (item.title || item.filename)) || 'This reel').slice(0, 40), 512, 160);
+      ctx.fillStyle = '#f2f3f5';
+      ctx.font = '400 40px "Archivo Black", "Archivo", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(String((item && (item.title || item.filename)) || 'This reel').toUpperCase().slice(0, 32), 92, 168);
       const shown = collectRows.slice(0, 7);
       const rowX = 92, rowW = 840, rowH = 56, rowGap = 8, rowStart = 220;
       shown.forEach((row, index) => {
@@ -5307,6 +5480,7 @@
         frame.classList.toggle('sx-fs-active', isCurrentFullscreen());
       } catch (e) {}
       positionEdgeNav();
+      layoutPackStage();
     }
 
     function togglePseudoFullscreen(enable) {
@@ -5333,9 +5507,11 @@
     fullBtn.addEventListener('click', () => {
       const fsTarget = frame.parentElement || frame;
       if (fsTarget.classList.contains('sx-pseudo-fullscreen') || frame.classList.contains('sx-pseudo-fullscreen')) {
+        window.__sxFsOptOut = true;
         togglePseudoFullscreen(false);
         return;
       }
+      if (document.fullscreenElement) window.__sxFsOptOut = true;
       if (!document.fullscreenElement) {
         // Fullscreen the frame's PARENT (host div in the SPA, body
         // standalone): author CSS cannot size a :fullscreen element
@@ -5512,6 +5688,11 @@
         edgeNav.style.top = '';
         return;
       }
+      // Full-bleed fullscreen navigates by swipe (touch), wheel and keys, so the page-edge keys go away.
+      if (isCurrentFullscreen()) {
+        edgeNav.hidden = true;
+        return;
+      }
       const rect = frame.getBoundingClientRect();
       const onScreen = rect.bottom > 0 && rect.top < window.innerHeight && rect.height > 0;
       const show = onScreen && edgeNavInView;
@@ -5533,16 +5714,28 @@
     }
     window.addEventListener('scroll', positionEdgeNav, { passive: true, capture: true });
     window.addEventListener('resize', positionEdgeNav);
+    window.addEventListener('resize', layoutPackStage);
     document.addEventListener('fullscreenchange', positionEdgeNav);
     document.addEventListener('webkitfullscreenchange', positionEdgeNav);
     positionEdgeNav();
     syncFsActiveClass();
+    // Phones open the 2D player full-bleed. This is CSS-only fullscreen (no browser gesture needed), skipped for the
+    // desktop VR preview, inside a VR session, and once the reader has left fullscreen themselves.
+    if (!window.__sxFsOptOut && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches &&
+        !(document.getElementById('sxReelsRoot') && document.getElementById('sxReelsRoot').classList.contains('sx-immersive-preview-source')) && !vrPresenting() && !isCurrentFullscreen()) {
+      togglePseudoFullscreen(true);
+    }
     // ReelsPlayer.jsx re-injects this script on param change and calls this
     // hook on teardown — release the window-level listeners + observer.
     window.__sxReelsCleanup = function () {
       window.removeEventListener('keydown', onKeydown);
       window.removeEventListener('scroll', positionEdgeNav, { capture: true });
       window.removeEventListener('resize', positionEdgeNav);
+      window.removeEventListener('resize', layoutPackStage);
+      // Leaving the player must give the site header back (the host element is about to be discarded).
+      if (frame && frame.classList.contains('sx-pseudo-fullscreen')) {
+        try { togglePseudoFullscreen(false); } catch (e) {}
+      }
       document.removeEventListener('fullscreenchange', positionEdgeNav);
       document.removeEventListener('webkitfullscreenchange', positionEdgeNav);
       if (edgeNavObserver) {

@@ -210,6 +210,7 @@ describe('PackPage', () => {
 
   describe('list and gallery views', () => {
     it('lists every reel in order with creator, kind and counts', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       await loaded();
       const rows = screen.getAllByRole('button', { name: /^Play Reel \d, reel \d$/ });
       expect(rows).toHaveLength(3);
@@ -224,6 +225,7 @@ describe('PackPage', () => {
     });
 
     it('shows removed reels as disabled rows', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [item(1), item(2, { available: false, post: null }), item(3)], playable_count: 2 }),
       });
@@ -234,30 +236,41 @@ describe('PackPage', () => {
       expect(screen.getByText('2 OF 3 REELS AVAILABLE')).toBeInTheDocument();
     });
 
-    it('switches to the gallery of Explore tiles and remembers the choice', async () => {
-      const { unmount } = await loaded();
-      fireEvent.click(screen.getByRole('radio', { name: 'GALLERY' }));
+    it('opens on the gallery of Explore tiles by default', async () => {
+      await loaded();
       expect(screen.getAllByTestId('tile')).toHaveLength(3);
       expect(screen.queryByRole('list')).not.toBeInTheDocument();
       expect(screen.getByRole('radio', { name: 'GALLERY' })).toHaveAttribute('aria-checked', 'true');
       expect(document.querySelector('.sx-pk-gallery.sx-explore-grid')).not.toBeNull();
       expect(screen.getByRole('button', { name: 'Compact square grid' })).toHaveAttribute('aria-pressed', 'true');
-      expect(localStorage.getItem('sx.pack.view')).toBe('gallery');
+    });
+
+    it('lists Gallery before List in the view switch', async () => {
+      await loaded();
+      const labels = screen.getAllByRole('radio', { name: /^(GALLERY|LIST)$/ }).map((r) => r.textContent);
+      expect(labels).toEqual(['GALLERY', 'LIST']);
+    });
+
+    it('switches to the list and remembers the choice', async () => {
+      const { unmount } = await loaded();
+      fireEvent.click(screen.getByRole('radio', { name: 'LIST' }));
+      expect(screen.queryByTestId('tile')).not.toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'LIST' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.queryByRole('button', { name: 'Large tiles' })).not.toBeInTheDocument();
+      expect(localStorage.getItem('sx.pack.view')).toBe('list');
       unmount();
 
       renderPage();
       await screen.findByRole('heading', { name: 'Neon Collection', level: 1 });
-      expect(screen.getAllByTestId('tile')).toHaveLength(3);
-
-      fireEvent.click(screen.getByRole('radio', { name: 'LIST' }));
       expect(screen.queryByTestId('tile')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Large tiles' })).not.toBeInTheDocument();
-      expect(localStorage.getItem('sx.pack.view')).toBe('list');
+
+      fireEvent.click(screen.getByRole('radio', { name: 'GALLERY' }));
+      expect(screen.getAllByTestId('tile')).toHaveLength(3);
+      expect(localStorage.getItem('sx.pack.view')).toBe('gallery');
     });
 
     it('offers the same density control as Explore in gallery view', async () => {
       await loaded();
-      fireEvent.click(screen.getByRole('radio', { name: 'GALLERY' }));
       fireEvent.click(screen.getByRole('button', { name: 'Large tiles' }));
       expect(document.querySelector('.sx-explore-grid--stack.sx-pk-gallery')).not.toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Compact square grid' }));
@@ -276,6 +289,7 @@ describe('PackPage', () => {
     });
 
     it('shows each reel\'s resolution and runtime, and the pack total', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       await loaded();
       const rows = screen.getAllByRole('button', { name: /^Play Reel \d, reel \d$/ });
       expect(rows[0]).toHaveTextContent('3840×3840');
@@ -286,6 +300,7 @@ describe('PackPage', () => {
     });
 
     it('leaves out runtime and size when the API does not know them, and marks a partial total', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       mocks.api.get.mockResolvedValue({
         pack: makePack({
           items: [item(1), { ...item(2), post: post(2, { duration_ms: null, width: null, height: null }) }, item(3)],
@@ -299,6 +314,7 @@ describe('PackPage', () => {
     });
 
     it('omits the total entirely when no runtime is known', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [1, 2, 3].map((n) => ({ ...item(n), post: post(n, { duration_ms: null }) })) }),
       });
@@ -307,6 +323,7 @@ describe('PackPage', () => {
     });
 
     it('shows no runtime for image reels', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [{ ...item(1), post: post(1, { media_type: 'image', duration_ms: 40 }) }, item(2), item(3)] }),
       });
@@ -317,15 +334,16 @@ describe('PackPage', () => {
       expect(screen.getByText(/TOTAL RUNTIME/)).toHaveTextContent('TOTAL RUNTIME: 2:25');
     });
 
-    it('falls back to the list when stored data is garbage', async () => {
+    it('falls back to the gallery when stored data is garbage', async () => {
       localStorage.setItem('sx.pack.view', 'banana');
       await loaded();
-      expect(screen.getByRole('radio', { name: 'LIST' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name: 'GALLERY' })).toHaveAttribute('aria-checked', 'true');
     });
   });
 
   describe('playback', () => {
     it('plays from a list row at that reel and restarts the sequence', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       await loaded();
       fireEvent.click(screen.getByRole('button', { name: 'Play Reel 3, reel 3' }));
       expect(where()).toBe('/packs/pack-1?play=1&item=2&restart=1');
@@ -359,6 +377,7 @@ describe('PackPage', () => {
     });
 
     it('returns to the details without counting another open', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
       await loaded();
       fireEvent.click(screen.getByRole('button', { name: 'Play Reel 1, reel 1' }));
       await screen.findByTestId('player');

@@ -72,6 +72,9 @@ export default function ReelsPlayer({
     };
   }, [navigate, location.pathname, location.search, messaging, setUser]);
 
+  // Phones open the player full-bleed; leaving fullscreen yourself opts out only until you leave the player.
+  useEffect(() => () => { window.__sxFsOptOut = false; }, []);
+
   useEffect(() => {
     if (!revealOnLoad) return undefined;
     const mark = () => { userScrolledRef.current = true; };

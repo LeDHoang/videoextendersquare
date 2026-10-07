@@ -2965,7 +2965,7 @@ code {
 #sxReelsHost:-webkit-full-screen .reels-phone-frame,
 #sxReelsHost.sx-pseudo-fullscreen .reels-phone-frame {
   width: 100vw !important;
-  height: 100dvh !important;
+  height: calc(100dvh - var(--sx-bottom-nav, 0px)) !important;
   max-width: none !important;
   max-height: none !important;
   aspect-ratio: auto !important;
@@ -3073,9 +3073,7 @@ code {
   right: 0 !important;
   width: 100% !important;
   box-sizing: border-box !important;
-  padding-bottom: env(safe-area-inset-bottom) !important;
-  padding-left: max(12px, env(safe-area-inset-left)) !important;
-  padding-right: max(12px, env(safe-area-inset-right)) !important;
+  padding: 0 0 var(--sx-fs-safe-bottom, env(safe-area-inset-bottom)) !important;
   z-index: 26 !important;
 }
 
@@ -9697,4 +9695,122 @@ a.sx-xh-btn { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .sx-au, .sx-au-spin { animation: none; }
   .sx-au-meter i { transition: none; }
+}
+
+
+/* ─── Phone fullscreen player: bottom tab bar ─────────────────────────────── */
+.sx-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100000;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: calc(56px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
+  background: rgba(13, 14, 16, 0.96);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid #24282e;
+}
+
+.sx-bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  color: #f2f3f5;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 150ms ease;
+}
+
+.sx-bottom-nav-item:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.sx-bottom-nav-item.sx-active {
+  color: var(--sx-accent, #ff3b1f);
+}
+
+.sx-bottom-nav-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+}
+
+.sx-bottom-nav-svg {
+  width: 34px;
+  height: 34px;
+  display: block;
+}
+
+.sx-bottom-nav-item.sx-active .sx-bottom-nav-svg {
+  filter: drop-shadow(0 0 6px rgba(255, 59, 31, 0.45));
+}
+
+/* The Explore / Upload / Messages art hard-codes near-white strokes; recolour them when their tab is active. */
+.sx-bottom-nav-item.sx-active .sx-bottom-nav-svg [stroke='#f2f3f5'] {
+  stroke: var(--sx-accent, #ff3b1f);
+}
+
+.sx-bottom-nav-item.sx-active .sx-bottom-nav-svg [fill='#f2f3f5'] {
+  fill: var(--sx-accent, #ff3b1f);
+}
+
+.sx-bottom-nav-badge {
+  position: absolute;
+  top: 1px;
+  right: -1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  background: var(--sx-accent, #ff3b1f);
+  color: #0a0a0a;
+  font: 800 9px/1 'JetBrains Mono', ui-monospace, monospace;
+  border-radius: 8px;
+}
+
+.sx-bottom-nav-avatar {
+  width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font: 800 12px/1 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.sx-bottom-nav-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sx-bottom-nav-avatar--guest {
+  background: transparent;
+  color: inherit;
+  border-color: currentColor;
+}
+
+.sx-bottom-nav-avatar--guest svg {
+  width: 24px;
+  height: 24px;
+}
+
+.sx-bottom-nav-item.sx-active .sx-bottom-nav-avatar {
+  border-color: var(--sx-accent, #ff3b1f);
+  box-shadow: 0 0 8px rgba(255, 59, 31, 0.5);
 }

@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import HeaderBar from './HeaderBar.jsx';
 import Sidebar from './Sidebar.jsx';
 import Footer from './Footer.jsx';
+import MobileBottomNav from './MobileBottomNav.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { HealthProvider, useHealthContext } from '../../hooks/HealthContext.jsx';
 import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx';
@@ -18,6 +19,20 @@ function Shell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
   const [isFsActive, setIsFsActive] = useState(false);
+  // The browser's own fullscreen shows only the player element, so the tab bar is for the CSS fullscreen alone.
+  const [isRealFs, setIsRealFs] = useState(false);
+  const [isPhone, setIsPhone] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches,
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 700px)');
+    const onChange = () => setIsPhone(query.matches);
+    onChange();
+    query.addEventListener?.('change', onChange);
+    return () => query.removeEventListener?.('change', onChange);
+  }, []);
 
   // ── VR / Fullscreen immersive detection (Reels only) ──
   useEffect(() => {
@@ -37,6 +52,7 @@ function Shell() {
           (el.closest && (el.closest('#sxReelsRoot') || el.closest('#reelsFrame'))) ||
           (el.querySelector && (el.querySelector('#reelsFrame') || el.querySelector('#sxReelsRoot'))));
       setIsFsActive(isReelsFs);
+      setIsRealFs(!!el);
     };
     window.addEventListener('echo:vr-enter', onVrEnter);
     window.addEventListener('echo:vr-exit', onVrExit);
@@ -58,6 +74,7 @@ function Shell() {
 
   const isPlayerRoute = location.pathname === '/reels' || /^\/packs\/[^/]+$/.test(location.pathname);
   const immersive = isPlayerRoute && (isVrActive || isFsActive);
+  const showBottomNav = isPlayerRoute && isFsActive && isPhone && !isVrActive && !isRealFs;
   // Left off the messages console and the immersive/fullscreen player (their own full-height layouts) and the
   // sign-in / recovery screens (single-screen flows that the footer would push past the fold).
   const showFooter = !immersive && !/^\/(messages|login|signup|forgot-password|reset-password)(\/|$)/.test(location.pathname);
@@ -124,6 +141,7 @@ function Shell() {
 
         {showFooter ? <Footer /> : null}
       </div>
+      {showBottomNav ? <MobileBottomNav /> : null}
       {!immersive && !location.pathname.startsWith('/messages') ? <MessageDock /> : null}
       {!immersive ? <ReelShareDialog /> : null}
     </>
