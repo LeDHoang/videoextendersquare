@@ -57,6 +57,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 | Credits nav icon final art | P2 cosmetic | `web/src/components/icons/svg/credits.svg` marked TEMP | todolist.md near-term |
 | Captions/WebVTT | **Decision needed: declare out-of-scope for beta** | No `<track>`/VTT capability anywhere | A11y item above |
 | Alt-text field on upload | P3 | No field; avatars render `alt=""` | Deferred |
+| Reels page default folder | **P1 (pre-launch config)** | `ReelsPage.jsx` still defaults `folder` to `testpipeline` (dev HEVC test clips). That folder holds no image posts, so the default For You feed shows videos only; image/slideshow posts (added 2026-10-11) appear only under ALL FOLDERS / `uploads` or via deep links. Owner decision: keep `testpipeline` during dev, switch the default (likely `ALL FOLDERS`) when close to beta launch | `web/src/pages/ReelsPage.jsx` `useState(searchParams.get('folder') \|\| 'testpipeline')` (+ the matching fallback in its fetch `.then`) |
 
 ### VR roadmap phases — out of beta scope by design (source: `docs/todolist.md`)
 
@@ -209,7 +210,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Run `make test` in the normal project `.venv` and record the exact commit and dependency versions. (`.venv` exists again as of 2026-09-19, Python 3.14.6 — but standardize on 3.12 to match the image; see container-hygiene item.)
 - [ ] Run `make build` and deploy the generated frontend from the same tested commit.
 - [ ] Run Python compilation and frontend/inline JavaScript parse checks.
-- [ ] Run `make migrate` on a production-like database and verify the schema reaches **`20261005_0011`** (updated from the stale `20260912_0004`; source of truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py:14`).
+- [ ] Run `make migrate` on a production-like database and verify the schema reaches **`20261011_0012`** (updated from the stale `20260912_0004`; source of truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py:14`).
 - [ ] Test fresh database creation, upgrade from the oldest supported production schema, failed-migration recovery, and backup restoration.
 - [ ] Test the chosen production database rather than relying only on SQLite test runs — **priority:** re-run the billing suite and the recommendation concurrency tests (`tests/test_recommendations.py -k concurrent`, currently SQLite-fixture-only) against PostgreSQL.
 - [ ] Require CI success, migration success, a clean worktree, and an approved release checklist before deployment.
@@ -241,7 +242,7 @@ Do not use this procedure for a blank database.
 - [ ] Confirm the old social tables exist and `alembic_version` does not.
 - [ ] Back up `data/echo.db`.
 - [ ] Run `.venv/bin/python -m alembic stamp 20260910_0001`.
-- [ ] Run `make migrate` and confirm the final revision is **`20261005_0011`** (updated from stale `20260912_0004`).
+- [ ] Run `make migrate` and confirm the final revision is **`20261011_0012`** (updated from stale `20260912_0004`).
 
 ## Suggested production environment
 
@@ -346,7 +347,7 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - Recommendation concurrency regression tests: **passing** — `test_concurrent_page_materialization_replays_winner` + `test_concurrent_affinity_upsert_dedupes` (4 passed, ~1.5s, SQLite fixtures; Postgres re-run is a listed gate above). The 2026-09-12 "failed with HTTP 500s" record below is **historical** — the fix (winner-replay on `uq_recommendation_request_session_page`) landed and is dual-dialect.
 - Staged-upload/job ownership tests: **passing** (`tests/test_cloud_routes.py` — owner-private staging, owned job status/download). Publication-path ownership was open at audit time — **fixed 2026-09-20** (see verification entry above).
 - `.venv` recreated (CPython 3.14.6); the 2026-09-12 ".venv absent" note is resolved.
-- Current schema head: `20261005_0011` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
+- Current schema head: `20261011_0012` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
 - Build fixes landed 2026-09-19: `.dockerignore` rewritten (`.venv/` typo fixed; `data/` + `logs/` + model caches excluded — previously baked the dev DB into the image); `vapoursynth==78` scoped off Linux (no manylinux wheel — previously broke `docker build`).
 - WebXR engine: 43/43 node tests, vite build clean (see `docs/threejs-vr-implementation-plan.md` §7).
 

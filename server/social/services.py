@@ -23,6 +23,7 @@ from .models import (
     Post,
     PostLike,
     PostSave,
+    PostSlide,
     PostTag,
     Tag,
     User,
@@ -31,6 +32,11 @@ from .models import (
 
 
 logger = logging.getLogger(__name__)
+
+# Image posts hold this long in the player unless the post sets dwell_ms.
+IMAGE_POST_DWELL_MS = 15_000
+# A multi-image post carries at most this many images (cover included).
+MAX_POST_IMAGES = 10
 
 
 def normalize_media_path(value: str) -> str:
@@ -186,6 +192,7 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
             .options(
                 joinedload(Post.owner),
                 selectinload(Post.tags).selectinload(PostTag.tag),
+                selectinload(Post.slides),
             )
             .filter(
                 Post.media_path.in_(normalized),
@@ -264,6 +271,7 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
                 "duration_ms": post.duration_ms,
                 "width": post.width,
                 "height": post.height,
+                **post_image_fields(post),
                 "author_name": post.owner.username,
                 "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
                 "author_avatar_url": avatar_url(post.owner),
@@ -302,6 +310,87 @@ def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
         }
         for path, row in records.items()
     }
+
+
+def _image_entry(media_path: str, width: int | None, height: int | None) -> dict:
+    """One image of an image post as the player needs it."""
+    from server import media as media_service
+
+    url = f"/media/{media_path}"
+    poster_url = url
+    try:
+        source = Path("output") / media_path
+        poster = Path(media_service.explore_poster_path(str(source)))
+        if poster.is_file() and poster.stat().st_size > 0 and poster.stat().st_mtime >= source.stat().st_mtime:
+            poster_url = f"/media/{poster.resolve().relative_to(Path('output').resolve()).as_posix()}"
+    except (OSError, ValueError):
+        pass
+    return {"path": media_path, "url": url, "poster_url": poster_url, "width": width, "height": height}
+
+
+def post_image_fields(post: Post) -> dict:
+    """Slideshow fields for an image post: every image in order and the dwell.
+
+    Video posts get an empty image list so callers can branch on media_type.
+    """
+    if post.media_type != "image":
+        return {"images": [], "dwell_ms": None}
+    images = [_image_entry(post.media_path, post.width, post.height)]
+    images.extend(_image_entry(slide.media_path, slide.width, slide.height) for slide in post.slides)
+    return {"images": images, "dwell_ms": int(post.dwell_ms or IMAGE_POST_DWELL_MS)}
+
+
+def slide_media_paths(db: Session | None = None) -> set[str]:
+    """Media paths that are extra slides of some post (never their own tile)."""
+    if db is not None:
+        return {row[0] for row in db.query(PostSlide.media_path).all()}
+    from .database import SessionLocal
+
+    with SessionLocal() as session:
+        return {row[0] for row in session.query(PostSlide.media_path).all()}
+
+
+def _probe_size(media_path: str) -> tuple[int | None, int | None]:
+    from server import media as media_service
+
+    path = Path("output") / media_path
+    try:
+        if not path.is_file():
+            return None, None
+    except OSError:
+        return None, None
+    info = media_service.probe_media_info(str(path)) or {}
+    return info.get("width"), info.get("height")
+
+
+def sync_post_slides(db: Session, post: Post, slide_paths: list[str]) -> None:
+    """Replace an image post's extra slides (images after the cover), in order.
+
+    Raises ValueError for a video post with slides, too many images, a
+    duplicate, or a file that already belongs to another post.
+    """
+    normalized = [normalize_media_path(path) for path in slide_paths]
+    if normalized and post.media_type != "image":
+        raise ValueError("Only image posts can have more than one media file.")
+    if len(normalized) + 1 > MAX_POST_IMAGES:
+        raise ValueError(f"An image post holds at most {MAX_POST_IMAGES} images.")
+    if len(set(normalized)) != len(normalized) or post.media_path in normalized:
+        raise ValueError("An image post cannot repeat the same image.")
+    if normalized:
+        taken_by_post = db.query(Post.id).filter(Post.media_path.in_(normalized)).first()
+        taken_by_slide = (
+            db.query(PostSlide.post_id)
+            .filter(PostSlide.media_path.in_(normalized), PostSlide.post_id != post.id)
+            .first()
+        )
+        if taken_by_post or taken_by_slide:
+            raise ValueError("An image already belongs to another post.")
+    post.slides.clear()
+    db.flush()
+    for position, media_path in enumerate(normalized, start=1):
+        width, height = _probe_size(media_path)
+        post.slides.append(PostSlide(position=position, media_path=media_path, width=width, height=height))
+    db.flush()
 
 
 def apply_media_info(post: Post) -> None:
@@ -392,6 +481,7 @@ def create_or_update_post(
     legacy_likes: int = 0,
     legacy_views: int = 0,
     stable_legacy_id: bool = False,
+    slide_paths: list[str] | None = None,
 ) -> Post:
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
@@ -426,6 +516,8 @@ def create_or_update_post(
     post.view_count = max(post.view_count or 0, post.legacy_view_count)
     db.flush()
     sync_post_tags(db, post, list(tags or []))
+    if slide_paths is not None or post.media_type != "image":
+        sync_post_slides(db, post, list(slide_paths or []))
     db.flush()
     return post
 
@@ -487,6 +579,7 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         "duration_ms": post.duration_ms,
         "width": post.width,
         "height": post.height,
+        **post_image_fields(post),
         "author_name": post.owner.username,
         "creator": creator,
         "liked_by_me": liked,

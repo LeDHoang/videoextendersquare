@@ -230,6 +230,65 @@
     visibility: hidden;
   }
 
+  /* Image posts: one segment per image fills over the post's dwell time. */
+  .reels-slide-bar {
+    position: absolute;
+    top: 6px;
+    left: 14px;
+    right: 14px;
+    z-index: 7;
+    display: flex;
+    gap: 4px;
+    pointer-events: none;
+  }
+  .reels-slide-bar[hidden] { display: none; }
+  .reels-slide-seg {
+    position: relative;
+    flex: 1 1 0;
+    height: 3px;
+    overflow: hidden;
+    background: rgba(242, 243, 245, 0.28);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+  }
+  .reels-slide-seg i {
+    position: absolute;
+    inset: 0;
+    background: #FF3B1F;
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+  /* Prev/next slide arrows on multi-image posts; tapping the image's left or
+     right third does the same on touch screens. */
+  .reels-slide-nav {
+    position: absolute;
+    top: 50%;
+    z-index: 7;
+    display: none;
+    width: 40px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid rgba(242, 243, 245, 0.18);
+    border-radius: 4px;
+    background: rgba(13, 14, 16, 0.62);
+    color: #F2F3F5;
+    cursor: pointer;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .reels-slide-nav svg { width: 22px; height: 22px; display: block; margin: 0 auto; }
+  .reels-slide-nav.prev { left: 12px; }
+  /* Clear of the action rail (right: 14px, ~54px wide). */
+  .reels-slide-nav.next { right: 78px; }
+  .reels-video-wrap.slides-multi .reels-slide-nav { display: block; }
+  .reels-video-wrap.slides-multi:hover .reels-slide-nav,
+  .reels-slide-nav:focus-visible { opacity: 1; }
+  .reels-slide-nav:hover { border-color: #FF3B1F; color: #FF3B1F; }
+  .reels-slide-nav:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  @media (hover: none) {
+    .reels-video-wrap.slides-multi .reels-slide-nav { display: none; }
+  }
+
   /* Precision reticle: four vermilion corner brackets over the picture.
      Decorative only so they never take pointer events. */
   .reels-reticle {
@@ -1996,6 +2055,9 @@
     <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
+    <div class="reels-slide-bar" id="slideBar" role="progressbar" aria-label="Image post progress" hidden></div>
+    <button type="button" class="reels-slide-nav prev" id="slidePrevBtn" aria-label="Previous image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button type="button" class="reels-slide-nav next" id="slideNextBtn" aria-label="Next image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
     <canvas id="packVisualCanvas" width="1024" height="1024" hidden></canvas>
     <video id="preloadVideo" playsinline muted preload="auto" crossorigin="anonymous" style="display:none;"></video>
     <div class="reels-pack-card" id="packStageCard" hidden role="dialog" aria-modal="false" aria-labelledby="packStageTitle" aria-describedby="packStageText packStageStatus">
@@ -2369,9 +2431,22 @@
     const collectNewCreate = document.getElementById('collectNewCreate');
     const collectNewCancel = document.getElementById('collectNewCancel');
     const progressWrap = document.getElementById('progressWrap');
-    // Single image tiles hold for a fixed dwell, then auto-advance.
-    const IMAGE_DWELL_S = 10;
+    // <reels-image-state>
+    // Image posts hold for their dwell (15s unless the post sets dwell_ms),
+    // then auto-advance. A multi-image post splits the dwell evenly across
+    // its images. imageTimer is set only while the post is advancing.
+    const IMAGE_DWELL_DEFAULT_MS = 15000;
     let imageTimer = null;
+    let imageElapsedMs = 0;
+    let imageRunStartedAt = 0;
+    let imagePostDwellMs = IMAGE_DWELL_DEFAULT_MS;
+    let imagePostSlides = [];
+    let imageSlideIndex = 0;
+    let imageProgressFrame = 0;
+    const slideBar = document.getElementById('slideBar');
+    const slidePrevBtn = document.getElementById('slidePrevBtn');
+    const slideNextBtn = document.getElementById('slideNextBtn');
+    // </reels-image-state>
     const counter = document.getElementById('counter');
     const soundBtn = document.getElementById('soundBtn');
     const playBtn = document.getElementById('playBtn');
@@ -2467,31 +2542,206 @@
       return !!item && item.media_type === 'image';
     }
 
+    // <reels-image-slides>
+    // Every image of an image post, in order (older payloads carry only url).
+    function imageSlidesFor(item) {
+      const images = item && Array.isArray(item.images) ? item.images.filter((image) => image && image.url) : [];
+      if (images.length) return images;
+      return item && item.url ? [{ url: item.url, poster_url: item.poster_url }] : [];
+    }
+
+    function imageDwellFor(item) {
+      const ms = Number(item && item.dwell_ms);
+      return Number.isFinite(ms) && ms >= 1000 ? ms : IMAGE_DWELL_DEFAULT_MS;
+    }
+
+    function imageElapsedNow() {
+      const running = imageTimer ? performance.now() - imageRunStartedAt : 0;
+      return Math.min(imagePostDwellMs, imageElapsedMs + running);
+    }
+
+    function imageSliceMs() {
+      return imagePostDwellMs / Math.max(1, imagePostSlides.length);
+    }
+
+    function resolveSlideUrl(item, slideIndex) {
+      const slide = imagePostSlides[slideIndex];
+      if (!slide) return '';
+      // The cover may already be cached as a blob by the preloader.
+      if (slideIndex === 0 && blobUrlMap[idx]) return blobUrlMap[idx];
+      return resolveItemUrl({ url: slide.url, tunnel_url: item && item.tunnel_url });
+    }
+
+    // Show one image of the current post and warm the one after it.
+    function showImageSlide(slideIndex) {
+      const item = videoData[idx];
+      if (!reelsImage || !imagePostSlides.length) return;
+      imageSlideIndex = Math.max(0, Math.min(imagePostSlides.length - 1, slideIndex));
+      const url = resolveSlideUrl(item, imageSlideIndex);
+      if (url && reelsImage.getAttribute('src') !== url) reelsImage.src = url;
+      const label = (item && (item.title || item.filename)) || 'Image post';
+      reelsImage.alt = imagePostSlides.length > 1
+        ? label + ' — image ' + (imageSlideIndex + 1) + ' of ' + imagePostSlides.length
+        : label;
+      const upcoming = imagePostSlides[imageSlideIndex + 1];
+      if (upcoming) {
+        try {
+          const warmer = new Image();
+          warmer.src = resolveSlideUrl(item, imageSlideIndex + 1);
+        } catch (e) {}
+      }
+      renderSlideProgress();
+    }
+
+    function renderSlideProgress() {
+      if (!slideBar) return;
+      const item = videoData[idx];
+      const count = imagePostSlides.length;
+      if (!isImageItem(item) || !count) {
+        slideBar.hidden = true;
+        if (videoWrap) videoWrap.classList.remove('slides-multi');
+        return;
+      }
+      if (slideBar.childElementCount !== count) {
+        slideBar.innerHTML = '';
+        for (let i = 0; i < count; i++) {
+          const segment = document.createElement('span');
+          segment.className = 'reels-slide-seg';
+          segment.appendChild(document.createElement('i'));
+          slideBar.appendChild(segment);
+        }
+      }
+      slideBar.hidden = false;
+      if (videoWrap) videoWrap.classList.toggle('slides-multi', count > 1);
+      const slice = imageSliceMs();
+      const elapsed = imageElapsedNow();
+      for (let i = 0; i < count; i++) {
+        const fill = Math.max(0, Math.min(1, (elapsed - i * slice) / slice));
+        slideBar.children[i].firstChild.style.transform = 'scaleX(' + fill.toFixed(4) + ')';
+      }
+      slideBar.setAttribute('aria-valuetext', count > 1
+        ? 'Image ' + (imageSlideIndex + 1) + ' of ' + count
+        : formatTime(elapsed / 1000) + ' of ' + formatTime(imagePostDwellMs / 1000));
+    }
+
+    function tickSlideProgress() {
+      imageProgressFrame = 0;
+      renderSlideProgress();
+      if (imageTimer) imageProgressFrame = requestAnimationFrame(tickSlideProgress);
+    }
+
+    function stopSlideProgress() {
+      if (imageProgressFrame) cancelAnimationFrame(imageProgressFrame);
+      imageProgressFrame = 0;
+    }
+
+    // Start a new image post from its first image with a fresh dwell.
+    function resetImagePost(item) {
+      if (imageTimer) clearTimeout(imageTimer);
+      imageTimer = null;
+      window.__sxImageTimer = null;
+      stopSlideProgress();
+      imageElapsedMs = 0;
+      imagePostDwellMs = imageDwellFor(item);
+      imagePostSlides = imageSlidesFor(item);
+      imageSlideIndex = 0;
+    }
+
+    // Pause the dwell; the post keeps its place for armImageTimer to resume.
     function clearImageTimer() {
       if (imageTimer) {
+        imageElapsedMs = imageElapsedNow();
         clearTimeout(imageTimer);
         imageTimer = null;
       }
       window.__sxImageTimer = null;
+      stopSlideProgress();
+      renderSlideProgress();
     }
 
-    // Hold the still for IMAGE_DWELL_S, then auto-advance (or re-hold on LOOP).
-    function armImageTimer() {
-      clearImageTimer();
-      updatePlayBtnUI(true);
-      // timeDisplay is initialized before the first loadVideo() call below.
-      if (timeDisplay) timeDisplay.textContent = '0:00 / 0:10';
-      imageTimer = setTimeout(() => {
+    function scheduleImageBoundary() {
+      const slice = imageSliceMs();
+      const elapsed = imageElapsedNow();
+      const boundary = Math.min(imagePostDwellMs, (Math.floor(elapsed / slice) + 1) * slice);
+      imageTimer = setTimeout(onImageBoundary, Math.max(16, boundary - elapsed));
+      window.__sxImageTimer = imageTimer;
+    }
+
+    // A slide's share of the dwell ran out: show the next image, or end the post.
+    function onImageBoundary() {
+      const elapsed = imageElapsedNow();
+      if (elapsed >= imagePostDwellMs - 5) {
         imageTimer = null;
+        window.__sxImageTimer = null;
+        imageElapsedMs = imagePostDwellMs;
+        stopSlideProgress();
+        renderSlideProgress();
         finishViewTracking('complete');
         if (isAutoNext) nextVideo('autoplay');
         else {
+          // LOOP replays the post from its first image.
           startViewTracking(videoData[idx]);
+          imageElapsedMs = 0;
+          showImageSlide(0);
           armImageTimer();
         }
-      }, IMAGE_DWELL_S * 1000);
-      window.__sxImageTimer = imageTimer;
+        return;
+      }
+      const slide = Math.min(imagePostSlides.length - 1, Math.floor(elapsed / imageSliceMs()));
+      if (slide !== imageSlideIndex) showImageSlide(slide);
+      scheduleImageBoundary();
     }
+
+    // Start or resume the dwell from where the post was paused.
+    function armImageTimer() {
+      if (imageTimer) clearTimeout(imageTimer);
+      imageTimer = null;
+      if (!isImageItem(videoData[idx])) return;
+      if (imageElapsedMs >= imagePostDwellMs) {
+        imageElapsedMs = 0;
+        showImageSlide(0);
+      }
+      updatePlayBtnUI(true);
+      imageRunStartedAt = performance.now();
+      scheduleImageBoundary();
+      stopSlideProgress();
+      imageProgressFrame = requestAnimationFrame(tickSlideProgress);
+    }
+
+    // Manual prev/next image; wraps around. The dwell jumps to that image's
+    // share so the post still ends when its last image has had its time.
+    function stepImageSlide(delta) {
+      if (!isImageItem(videoData[idx]) || imagePostSlides.length < 2) return false;
+      const count = imagePostSlides.length;
+      const target = (imageSlideIndex + delta + count) % count;
+      const running = !!imageTimer;
+      if (imageTimer) clearTimeout(imageTimer);
+      imageTimer = null;
+      imageElapsedMs = target * imageSliceMs();
+      showImageSlide(target);
+      if (running) {
+        imageRunStartedAt = performance.now();
+        scheduleImageBoundary();
+      }
+      renderSlideProgress();
+      return true;
+    }
+
+    // Tap on the image: its left third goes back, its right third forward
+    // (multi-image posts only). Returns false to fall through to play/pause.
+    function handleSlideTap(clientX) {
+      if (!isImageItem(videoData[idx]) || imagePostSlides.length < 2 || !reelsImage) return false;
+      const imageRect = reelsImage.getBoundingClientRect();
+      const wrapRect = videoWrap ? videoWrap.getBoundingClientRect() : imageRect;
+      const left = Math.max(imageRect.left, wrapRect.left);
+      const right = Math.min(imageRect.right, wrapRect.right);
+      if (right - left < 1) return false;
+      const u = (clientX - left) / (right - left);
+      if (u < 1 / 3) return stepImageSlide(-1);
+      if (u > 2 / 3) return stepImageSlide(1);
+      return false;
+    }
+    // </reels-image-slides>
 
     function formatTime(seconds) {
       if (seconds === null || seconds === undefined || isNaN(seconds)) return '0:00';
@@ -2627,8 +2877,8 @@
           ready: !!(reelsImage && reelsImage.complete && reelsImage.naturalWidth),
           paused: !imageTimer,
           muted: true,
-          currentTime: 0,
-          duration: IMAGE_DWELL_S,
+          currentTime: imageElapsedNow() / 1000,
+          duration: imagePostDwellMs / 1000,
           version: String(reelsImage && reelsImage.currentSrc || ''),
         };
       }
@@ -3514,6 +3764,18 @@
       return handlePackVisualSelect(point);
     }
 
+    // VR screen tap: on an image post the left/right thirds step images;
+    // static cards keep their own hit targets. False means play/pause.
+    function handleScreenSelect(point) {
+      if (currentVisualSource().kind === 'image') {
+        if (!point || imagePostSlides.length < 2) return false;
+        if (point.u < 1 / 3) return stepImageSlide(-1);
+        if (point.u > 2 / 3) return stepImageSlide(1);
+        return false;
+      }
+      return handleCardSelect(point);
+    }
+
     function showRewardToast(message, award) {
       if (!rewardToast || !message) return;
       rewardToast.textContent = message;
@@ -4144,7 +4406,7 @@
 
     function playbackMeasurements(item, state) {
       const durationMs = isImageItem(item)
-        ? IMAGE_DWELL_S * 1000
+        ? imageDwellFor(item)
         : (video && Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null);
       let playbackQuality = {};
       try {
@@ -4815,6 +5077,17 @@
       });
     }
 
+    // Stills have no timeline, so their comments are always general: hide the
+    // time-sync toggle and drop the "at 0:00" hint while an image post shows.
+    function syncCommentComposer(item) {
+      const still = isImageItem(item);
+      if (syncTimeToggle) syncTimeToggle.style.display = still ? 'none' : '';
+      if (!commentInput) return;
+      if (still) commentInput.placeholder = 'Add a comment...';
+      else if (isSyncTimeActive) commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime || 0)}...`;
+      else commentInput.placeholder = 'Add a general comment...';
+    }
+
     if (syncTimeToggle) {
       syncTimeToggle.addEventListener('click', () => {
         isSyncTimeActive = !isSyncTimeActive;
@@ -4875,18 +5148,18 @@
       }
     }
 
-    // Render one image tile: still on screen, no timeline, 10s dwell.
+    // Render an image post: its images on screen in turn, no timeline,
+    // the post's dwell (15s default) split across the images.
     function showImage(item, options) {
       try { video.pause(); } catch (e) {}
       try {
         video.removeAttribute('src');
         video.load();
       } catch (e) {}
-      const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
       video.style.display = 'none';
-      reelsImage.src = itemUrl;
-      reelsImage.alt = item.title || item.filename || 'Image reel';
+      resetImagePost(item);
       reelsImage.onload = notifyVisualSourceChange;
+      showImageSlide(0);
       reelsImage.style.display = 'block';
       if (videoWrap) videoWrap.classList.add('image-mode');
       if (progressWrap) progressWrap.classList.add('image-hidden');
@@ -4913,7 +5186,9 @@
       const loadOptions = options || {};
       if (collectOpen) closeCollectOverlay();
       hideError();
-      clearImageTimer();
+      // Drop the previous image post's slideshow; showImage sets up the next one.
+      resetImagePost(null);
+      renderSlideProgress();
       if (typeof resetPan === 'function') resetPan();
       if (!videoData.length) {
         showError('No recommendations are currently available.');
@@ -4966,6 +5241,7 @@
 
       // Update comments display for this reel
       renderDrawerComments();
+      syncCommentComposer(item);
 
       if (isImageItem(item)) {
         showImage(item, loadOptions);
@@ -5124,8 +5400,11 @@
 
     // Seek Relative (A / D controls: -5s / +5s)
     function seekRelative(sec) {
-      // No timeline on stills — nothing to seek.
-      if (isImageItem(videoData[idx])) return;
+      // Stills have no timeline: seeking steps through a post's images.
+      if (isImageItem(videoData[idx])) {
+        stepImageSlide(sec > 0 ? 1 : -1);
+        return;
+      }
       if (video.duration) {
         const target = Math.max(0, Math.min(video.duration, video.currentTime + sec));
         video.currentTime = target;
@@ -5142,7 +5421,7 @@
     // Toggle Play/Pause
     function togglePlay() {
       flashBtn(playBtn);
-      // Stills have no media clock — play/pause gates the 10s dwell timer.
+      // Stills have no media clock — play/pause gates the dwell timer.
       if (isImageItem(videoData[idx])) {
         if (imageTimer) {
           clearImageTimer();
@@ -5669,10 +5948,17 @@
           setRailOverflow(false);
         } else if (drawerBlocksPlayer()) {
           toggleDrawer(false);
-        } else {
+        } else if (!handleSlideTap(e.clientX)) {
           togglePlay();
         }
       }
+    });
+    [[slidePrevBtn, -1], [slideNextBtn, 1]].forEach(([button, delta]) => {
+      if (!button) return;
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stepImageSlide(delta);
+      });
     });
 
     // Page-edge prev/next chevrons: fixed to the viewport's right edge,
@@ -6295,7 +6581,7 @@
           };
         },
         onTogglePackQueue: function() { return setPackQueue(); },
-        onMainScreenSelect: handleCardSelect,
+        onMainScreenSelect: handleScreenSelect,
         onSavePack: togglePackSave,
         onSharePack: shareCurrentPack,
         onCollectReel: function() { return openCollectOverlay(); },

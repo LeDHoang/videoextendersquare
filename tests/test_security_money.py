@@ -60,6 +60,10 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_MESSAGE_ENCRYPTION_KEY", "test-only-message-key-with-at-least-32-chars")
     monkeypatch.setenv("SX_SECURITY_SECRET", "test-only-security-secret-for-hmac-cookies")
     monkeypatch.setenv("SX_FAL_KEY_ENCRYPTION_KEY", "test-only-dedicated-fal-encryption-secret")
+    # Published test media lands in tmp_path, not the real output/uploads
+    # library (otherwise every run adds placeholder tiles to Explore).
+    monkeypatch.setattr(uploads, "OUTPUT_DIR", tmp_path / "output")
+    monkeypatch.setattr(uploads, "UPLOAD_DIR", tmp_path / "output" / "uploads")
     monkeypatch.setattr(
         auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1)
     )

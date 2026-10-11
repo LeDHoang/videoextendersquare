@@ -322,7 +322,7 @@ describe('PackPage', () => {
       expect(screen.queryByText(/TOTAL RUNTIME/)).not.toBeInTheDocument();
     });
 
-    it('shows no runtime for image reels', async () => {
+    it('times image posts by their 15s dwell, not the probed still', async () => {
       localStorage.setItem('sx.pack.view', 'list');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [{ ...item(1), post: post(1, { media_type: 'image', duration_ms: 40 }) }, item(2), item(3)] }),
@@ -330,8 +330,18 @@ describe('PackPage', () => {
       await loaded();
       const row = screen.getByRole('button', { name: 'Play Reel 1, reel 1' });
       expect(row).toHaveTextContent('IMAGE');
+      expect(row).toHaveTextContent('0:15');
       expect(row).not.toHaveTextContent('0:01');
-      expect(screen.getByText(/TOTAL RUNTIME/)).toHaveTextContent('TOTAL RUNTIME: 2:25');
+      expect(screen.getByText(/TOTAL RUNTIME/)).toHaveTextContent('TOTAL RUNTIME: 2:40');
+    });
+
+    it('labels multi-image posts with their image count', async () => {
+      localStorage.setItem('sx.pack.view', 'list');
+      mocks.api.get.mockResolvedValue({
+        pack: makePack({ items: [{ ...item(1), post: post(1, { media_type: 'image', images: [{ url: 'a' }, { url: 'b' }, { url: 'c' }] }) }, item(2), item(3)] }),
+      });
+      await loaded();
+      expect(screen.getByRole('button', { name: 'Play Reel 1, reel 1' })).toHaveTextContent('IMAGES · 3');
     });
 
     it('falls back to the gallery when stored data is garbage', async () => {

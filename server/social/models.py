@@ -119,16 +119,48 @@ class Post(Base):
     duration_ms = Column(Integer, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
+    # How long an image post stays on screen in the player; NULL means the
+    # default (IMAGE_POST_DWELL_MS). Unused for video posts.
+    dwell_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     owner = relationship("User")
     tags = relationship("PostTag", cascade="all, delete-orphan")
+    # Extra images of a multi-image post, after the cover (media_path).
+    slides = relationship(
+        "PostSlide",
+        cascade="all, delete-orphan",
+        order_by="PostSlide.position",
+    )
 
     __table_args__ = (
         Index("ix_posts_owner_created", "owner_id", "created_at", "id"),
         Index("ix_posts_status_created", "status", "created_at", "id"),
+    )
+
+
+class PostSlide(Base):
+    """One extra image of a multi-image post.
+
+    The cover image stays on posts.media_path (slide 0); rows here are slides
+    1..N-1 in order. Only image posts have slides; a file belongs to one post.
+    """
+
+    __tablename__ = "post_slides"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    media_path = Column(String(1000), nullable=False, unique=True, index=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "position", name="uq_post_slide_position"),
+        CheckConstraint("position >= 1", name="ck_post_slide_position_positive"),
     )
 
 

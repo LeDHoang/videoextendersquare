@@ -6,6 +6,7 @@ import { EmptyState, Hero } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
+import { imagePostLabel } from '../utils/mediaFormat.js';
 
 const VISIBILITY_OPTIONS = [
   { label: 'PUBLIC · DISCOVERABLE', value: 'public' },
@@ -79,7 +80,8 @@ export default function PackEditorPage() {
       api.get('/api/reels', { search: librarySearch, sort: 'alphabetical', codec: 'all' })
         .then((result) => {
           if (!alive) return;
-          setAvailable((result.videos || []).filter((row) => row && row.post_id));
+          // Feed rows carry post_id; the editor keys members (and post_ids) on id.
+          setAvailable((result.videos || []).filter((row) => row && row.post_id).map((row) => ({ ...row, id: row.post_id })));
         })
         .catch(() => {
           if (alive) setAvailable([]);
@@ -257,7 +259,7 @@ export default function PackEditorPage() {
                 <img src={post.poster_url || post.preview_url || post.url} alt="" />
               ) : <span className="sx-pack-track-placeholder">▶</span>}
               <strong>{post.title || post.path?.split('/').pop() || 'Untitled reel'}</strong>
-              <small className="sx-pack-editor-owner">@{post.creator?.username || post.author_name || 'creator'}</small>
+              <small className="sx-pack-editor-owner">@{post.creator?.username || post.author_name || 'creator'} · {imagePostLabel(post) || 'VIDEO'}</small>
               <label>
                 <input
                   type="radio"
@@ -296,7 +298,7 @@ export default function PackEditorPage() {
                 {image ? <img src={image} alt="" loading="lazy" /> : <span>▶</span>}
                 <strong>{post.title || post.path?.split('/').pop() || 'Untitled reel'}</strong>
                 <small>@{post.creator?.username || post.author_name || 'creator'}</small>
-                <small>{selectedAlready ? 'IN PACK' : 'ADD TO PACK'}</small>
+                <small>{imagePostLabel(post) || 'VIDEO'} · {selectedAlready ? 'IN PACK' : 'ADD TO PACK'}</small>
               </button>
             );
           })}

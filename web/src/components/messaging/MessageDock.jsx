@@ -4,6 +4,20 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { IndustrialMessageIcon } from '../icons/index.jsx';
 import MessagingPanel from './MessagingPanel.jsx';
 
+const GLYPH_PATHS = {
+  minimize: 'M5 12h14',
+  expand: 'M5 5h14v14H5z',
+  close: 'M6 6l12 12M18 6L6 18',
+};
+
+function DockGlyph({ kind }) {
+  return (
+    <svg className="sx-message-dock-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="square" aria-hidden="true">
+      <path d={GLYPH_PATHS[kind]} />
+    </svg>
+  );
+}
+
 export default function MessageDock() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -46,8 +60,12 @@ export default function MessageDock() {
             if (expanding && messaging.selectedId) messaging.loadConversation(messaging.selectedId).catch(() => {});
           }}
           aria-label={messaging.dockMinimized ? 'Expand messages' : 'Minimize messages'}
-        >{messaging.dockMinimized ? '□' : '—'}</button>
-        <button type="button" onClick={() => messaging.setDockOpen(false)} aria-label="Close messages">×</button>
+        >
+          <DockGlyph kind={messaging.dockMinimized ? 'expand' : 'minimize'} />
+        </button>
+        <button type="button" onClick={() => messaging.setDockOpen(false)} aria-label="Close messages">
+          <DockGlyph kind="close" />
+        </button>
       </header>
       {!messaging.dockMinimized ? <MessagingPanel compact /> : null}
     </section>

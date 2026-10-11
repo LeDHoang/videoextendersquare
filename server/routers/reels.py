@@ -24,7 +24,14 @@ from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
-from server.social.services import get_post_by_reference, metadata_for_paths, reel_records, scoped_media_paths
+from server.social.services import (
+    IMAGE_POST_DWELL_MS,
+    get_post_by_reference,
+    metadata_for_paths,
+    reel_records,
+    scoped_media_paths,
+    slide_media_paths,
+)
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
 
@@ -1199,7 +1206,14 @@ def _scan_cached() -> list[dict]:
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
-        _scan_cache["data"] = SM.scan_output_media(str(OUTPUT_DIR))
+        scanned = SM.scan_output_media(str(OUTPUT_DIR))
+        # Extra images of a multi-image post play inside that post, so they
+        # never surface as tiles of their own.
+        try:
+            slides = slide_media_paths()
+        except Exception:
+            slides = set()
+        _scan_cache["data"] = [item for item in scanned if item["rel_path"] not in slides]
     return _scan_cache["data"]
 
 
@@ -1379,12 +1393,22 @@ def _build_payload(
             except (OSError, ValueError):
                 continue
             poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path))
+            # Every image of the post in order (a loose file is a 1-image post).
+            images = (social_row or {}).get("images") or [{
+                "path": rel,
+                "url": f"/media/{rel}",
+                "poster_url": poster_url or f"/media/{rel}",
+                "width": meta.get("width"),
+                "height": meta.get("height"),
+            }]
             payload.append({
                 **base,
                 "media_type": "image",
                 "url": f"/media/{rel}",
                 "preview_url": f"/media/{rel}",
                 "poster_url": poster_url or f"/media/{rel}",
+                "images": images,
+                "dwell_ms": (social_row or {}).get("dwell_ms") or IMAGE_POST_DWELL_MS,
                 "codec": "IMG",
                 "is_proxy": False,
                 "stream_tag": "IMAGE",
@@ -1496,6 +1520,8 @@ def _pack_feed_data(
             "duration_ms": card.get("duration_ms"),
             "width": card.get("width"),
             "height": card.get("height"),
+            "images": card.get("images") or [],
+            "dwell_ms": card.get("dwell_ms"),
             "comments": [],
             "author_name": card.get("author_name", ""),
             "author_avatar_url": (card.get("creator") or {}).get("avatar_url"),

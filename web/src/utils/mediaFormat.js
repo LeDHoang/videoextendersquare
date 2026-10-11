@@ -22,9 +22,26 @@ export function formatResolution(width, height) {
   return w > 0 && h > 0 ? `${w}×${h}` : '';
 }
 
+// Image posts stay on screen this long in the player unless they set dwell_ms.
+export const IMAGE_POST_DWELL_MS = 15000;
+
+/** How long an image post plays in the Reels player. */
+export function imageDwellMs(post) {
+  const ms = Number(post?.dwell_ms);
+  return Number.isFinite(ms) && ms >= 1000 ? ms : IMAGE_POST_DWELL_MS;
+}
+
+/** "IMAGE" for a one-image post, "IMAGES · 3" for a slideshow, '' for video. */
+export function imagePostLabel(post) {
+  if (post?.media_type !== 'image') return '';
+  const count = post.images?.length || 1;
+  return count > 1 ? `IMAGES · ${count}` : 'IMAGE';
+}
+
 /**
- * Combined runtime of the video reels in a pack. `complete` is false when some
- * available video has no known runtime, so the total is a lower bound.
+ * Combined play time of a pack: video runtimes plus each image post's dwell.
+ * `complete` is false when some available video has no known runtime, so the
+ * total is a lower bound.
  */
 export function packRuntime(items) {
   let ms = 0;
@@ -32,7 +49,12 @@ export function packRuntime(items) {
   let unknown = 0;
   for (const item of items || []) {
     const post = item?.available ? item.post : null;
-    if (!post || post.media_type === 'image') continue;
+    if (!post) continue;
+    if (post.media_type === 'image') {
+      ms += imageDwellMs(post);
+      known += 1;
+      continue;
+    }
     const duration = Number(post.duration_ms);
     if (Number.isFinite(duration) && duration > 0) {
       ms += duration;

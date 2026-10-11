@@ -30,6 +30,8 @@ const VID_ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 const TITLE_MAX = 100;
 const CAPTION_MAX = 2200;
 const TAGS_MAX = 5;
+// One post is either a single video or 1–10 images (a slideshow), never both.
+const MAX_POST_IMAGES = 10;
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp'];
 const VIDEO_EXTS = ['mp4', 'mov', 'avi', 'webm'];
@@ -96,6 +98,10 @@ export default function UploadPage() {
   const [kind, setKind] = useState(null);
   const [staged, setStaged] = useState(null);
   const [staging, setStaging] = useState(false);
+  // Multi-image post: every staged image in post order ({ key, file, meta, url }).
+  // Empty for single-file uploads; file/staged then mirror gallery[0].
+  const [gallery, setGallery] = useState([]);
+  const isSlideshow = gallery.length > 1;
 
   // ── 02 Square gate + pipeline config ──
   const [path, setPath] = useState('skip'); // 'skip' | 'extend'
@@ -147,6 +153,9 @@ export default function UploadPage() {
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(null);
   const [error, setError] = useState('');
+  // Why the last file selection was refused (shown in step 01; a refused
+  // selection keeps whatever was staged before).
+  const [pickError, setPickError] = useState('');
 
   const previewUrl = useObjectUrl(file);
   const isSquare = !!staged && (staged.orientation === 'SQUARE' || (staged.width && staged.width === staged.height));
@@ -316,18 +325,97 @@ export default function UploadPage() {
     publishing ||
     busy;
 
+  const releaseGallery = (entries) => {
+    for (const entry of entries) URL.revokeObjectURL(entry.url);
+  };
+
+  // Keep the cover (file/staged) in step with the slideshow order.
+  const applyGallery = (next) => {
+    if (next.length > 1) {
+      setGallery(next);
+      setFile(next[0].file);
+      setStaged(next[0].meta);
+      setPath('skip');
+      return;
+    }
+    releaseGallery(next);
+    setGallery([]);
+    const only = next[0];
+    setFile(only ? only.file : null);
+    setStaged(only ? only.meta : null);
+    setKind(only ? 'image' : null);
+    if (only) {
+      const square = only.meta.orientation === 'SQUARE' || (only.meta.width && only.meta.width === only.meta.height);
+      setPath(square ? 'skip' : 'extend');
+    }
+  };
+
+  const moveGalleryItem = (index, delta) => {
+    const target = index + delta;
+    if (target < 0 || target >= gallery.length) return;
+    const next = gallery.slice();
+    [next[index], next[target]] = [next[target], next[index]];
+    applyGallery(next);
+  };
+
+  const removeGalleryItem = (index) => {
+    const removed = gallery[index];
+    if (removed) URL.revokeObjectURL(removed.url);
+    applyGallery(gallery.filter((_, position) => position !== index));
+  };
+
+  const stageGallery = async (images) => {
+    setFile(null);
+    setKind('image');
+    setStaged(null);
+    setStaging(true);
+    setPath('skip');
+    try {
+      const metas = await Promise.all(images.map((image) => api.upload('/api/image/upload', image)));
+      applyGallery(images.map((image, index) => ({
+        key: metas[index].stage_id,
+        file: image,
+        meta: metas[index],
+        url: URL.createObjectURL(image),
+      })));
+      if (!title) setTitle(images[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX));
+    } catch (e) {
+      setPickError(`Could not stage the images: ${e.message}`);
+      setKind(null);
+    } finally {
+      setStaging(false);
+    }
+  };
+
   const onFiles = async (files) => {
-    const picked = (files || [])[0];
+    const list = Array.from(files || []);
+    const picked = list[0];
     if (!picked) return;
+    setPickError('');
+    const unsupported = list.find((entry) => !kindOf(entry.name));
+    if (unsupported) {
+      setPickError(`Unsupported file type: ${unsupported.name}. Use PNG/JPG/WEBP or MP4/MOV/AVI/WEBM.`);
+      return;
+    }
+    if (list.length > 1 && list.some((entry) => kindOf(entry.name) === 'video')) {
+      setPickError('A post is either one video or up to 10 images. Images and videos cannot be mixed, and a post holds one video.');
+      return;
+    }
+    if (list.length > MAX_POST_IMAGES) {
+      setPickError(`An image post holds at most ${MAX_POST_IMAGES} images (you picked ${list.length}).`);
+      return;
+    }
     setError('');
     setPublished(null);
     setJob(null);
     setJobDone(null);
-    const k = kindOf(picked.name);
-    if (!k) {
-      setError(`Unsupported file type: ${picked.name}. Use PNG/JPG/WEBP or MP4/MOV/AVI/WEBM.`);
+    releaseGallery(gallery);
+    setGallery([]);
+    if (list.length > 1) {
+      await stageGallery(list);
       return;
     }
+    const k = kindOf(picked.name);
     setFile(picked);
     setKind(k);
     setStaged(null);
@@ -344,7 +432,7 @@ export default function UploadPage() {
       setPath(square ? 'skip' : 'extend');
       if (!title) setTitle(picked.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX));
     } catch (e) {
-      setError(`Could not stage ${picked.name}: ${e.message}`);
+      setPickError(`Could not stage ${picked.name}: ${e.message}`);
       setFile(null);
       setKind(null);
     } finally {
@@ -438,6 +526,7 @@ export default function UploadPage() {
           osm_id: location?.osm_id ?? null,
         },
         ...(path === 'skip' ? { stage_id: staged.stage_id } : { job_id: job.jobId }),
+        ...(isSlideshow ? { extra_stage_ids: gallery.slice(1).map((entry) => entry.meta.stage_id) } : {}),
       };
       const res = await api.post('/api/uploads/publish', body);
       setPublished(res);
@@ -449,6 +538,9 @@ export default function UploadPage() {
   };
 
   const reset = () => {
+    setPickError('');
+    releaseGallery(gallery);
+    setGallery([]);
     setFile(null);
     setKind(null);
     setStaged(null);
@@ -477,20 +569,49 @@ export default function UploadPage() {
         />
       ) : null}
 
-      <Section num={1} title="Select Source" active note="Single file · PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM">
+      <Section num={1} title="Select Source" active note="1 video or up to 10 images · PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM">
         <UploadZone
           accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.avi,.webm"
-          multiple={false}
+          multiple
           onFiles={onFiles}
-          caption="Drop one image or video, or click to browse"
+          caption="Drop one video, or up to 10 images for a slideshow post"
         />
+        {pickError ? (
+          <div className="sx-error-box" role="alert" style={{ marginTop: 'var(--sx-3)' }}>
+            <div className="sx-error-title">FILES NOT ADDED</div>
+            <div>{pickError}</div>
+          </div>
+        ) : null}
         {staging ? (
           <div style={{ marginTop: 'var(--sx-3)' }} role="status" aria-busy="true" aria-label="Staging upload">
             <Skeleton h={86} />
             <Mono>STAGING UPLOAD…</Mono>
           </div>
         ) : null}
-        {staged ? (
+        {staged && isSlideshow ? (
+          <div style={{ marginTop: 'var(--sx-4)' }}>
+            <SpecRow
+              cells={[
+                ['IMAGES', String(gallery.length), 'SLIDESHOW POST'],
+                ['DWELL', '15s', 'SPLIT ACROSS THE IMAGES'],
+                ['FORMAT', 'AS-IS', 'NO EXTEND · SHOWN 1:1 IN THE PLAYER'],
+              ]}
+            />
+            <ol className="sx-upload-gallery" aria-label="Images in post order">
+              {gallery.map((entry, index) => (
+                <li key={entry.key} className="sx-upload-gallery-item">
+                  <img src={entry.url} alt={entry.file.name} />
+                  <span className="sx-upload-gallery-pos">{index === 0 ? 'COVER' : index + 1}</span>
+                  <div className="sx-upload-gallery-actions">
+                    <button type="button" onClick={() => moveGalleryItem(index, -1)} disabled={index === 0} aria-label={`Move ${entry.file.name} earlier`}>←</button>
+                    <button type="button" onClick={() => moveGalleryItem(index, 1)} disabled={index === gallery.length - 1} aria-label={`Move ${entry.file.name} later`}>→</button>
+                    <button type="button" onClick={() => removeGalleryItem(index)} aria-label={`Remove ${entry.file.name}`}>×</button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : staged ? (
           <div style={{ marginTop: 'var(--sx-4)' }}>
             <SpecRow
               cells={
@@ -528,6 +649,13 @@ export default function UploadPage() {
       <Section num={2} title="Square Gate" active={!!staged} note="EXTEND TO 1:1 OR SKIP">
         {!staged ? (
           <Mono>AWAITING SOURCE FILE…</Mono>
+        ) : isSlideshow ? (
+          <div className="sx-accent-block" role="note">
+            <div className="sx-accent-block-title">MULTI-IMAGE POST — PUBLISHED AS-IS</div>
+            <div className="sx-accent-block-body">
+              <p>Slideshow posts skip the extender. Each image is shown center-cropped to 1:1 in the player. To extend an image, upload it on its own.</p>
+            </div>
+          </div>
         ) : isSquare ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div className="sx-accent-block" role="note">

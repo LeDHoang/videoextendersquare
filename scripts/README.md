@@ -38,5 +38,13 @@
 #                        collected by pytest (deliberately not named test_*):
 #                          dev/ltx_lora_debug_job.py    — real fal.ai LoRA job (~$0.01)
 #                          dev/vpy_znedi3_experiment.py — local VapourSynth/znedi3 test
+#                          dev/experiment_fetch_city_photos.py — free Wikimedia Commons
+#                            city photos → reports/city_photos/ (+ credits.json)
+#                          dev/experiment_apply_city_photos.py — hardlink those photos over
+#                            black <2 KB placeholder images in output/ (--relink-posts gives
+#                            each slideshow post distinct photos; --dry-run previews)
+#                          dev/experiment_seed_image_slideshow_posts.py — turn loose images
+#                            in output/ into DB image posts, 1–4 same-city images each
+#                            (run after `make migrate`; --dry-run previews)
 #
 # Regression tests live in ../tests/ (run with `make test`).

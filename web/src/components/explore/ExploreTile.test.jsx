@@ -96,9 +96,19 @@ describe('ExploreTile order and runtime badge', () => {
     expect(badge(container)).toHaveTextContent('01 · 0:15');
   });
 
-  it('shows only the order on an image reel', () => {
+  it('folds the image kind into the order chip instead of a second, overlapping badge', () => {
     const { container } = renderTile({ orderLabel: '04', video: video({ media_type: 'image', poster_url: '/p.jpg', duration_ms: 40 }) });
-    expect(badge(container)).toHaveTextContent(/^04$/);
+    expect(badge(container)).toHaveTextContent(/^04 · IMAGE$/);
+    expect(container.querySelector('.sx-explore-kind')).toBeNull();
+  });
+
+  it('labels a multi-image post with its image count', () => {
+    const images = [{ url: 'a' }, { url: 'b' }, { url: 'c' }];
+    const inPack = renderTile({ orderLabel: '01', video: video({ media_type: 'image', poster_url: '/p.jpg', images }) });
+    expect(badge(inPack.container)).toHaveTextContent(/^01 · IMAGES · 3$/);
+    cleanup();
+    const inExplore = renderTile({ video: video({ media_type: 'image', poster_url: '/p.jpg', images }) });
+    expect(inExplore.container.querySelector('.sx-explore-kind')).toHaveTextContent('IMAGES · 3');
   });
 });
 

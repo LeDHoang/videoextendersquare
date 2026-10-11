@@ -25,7 +25,7 @@ from server import media as SM
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
-from server.social.services import create_or_update_post, post_card
+from server.social.services import MAX_POST_IMAGES, create_or_update_post, post_card
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -56,6 +56,9 @@ class PublishRequest(BaseModel):
     # Exactly one source pointer is required.
     stage_id: str | None = None
     job_id: str | None = None
+    # More staged images for a multi-image (slideshow) post, after the cover
+    # stage_id. Image posts only, published as-is (no extend pipeline).
+    extra_stage_ids: list[str] = []
 
     @field_validator("title")
     @classmethod
@@ -92,6 +95,26 @@ class PublishRequest(BaseModel):
         if len(cleaned) > _TAGS_MAX:
             raise ValueError(f"at most {_TAGS_MAX} tags")
         return cleaned
+
+
+def _resolve_extra_images(
+    req: "PublishRequest",
+    request: Request,
+    context: AuthContext,
+) -> list[str]:
+    """Validate and resolve a slideshow's extra staged images, in order."""
+    extras = [stage_id for stage_id in req.extra_stage_ids if stage_id]
+    if not extras:
+        return []
+    if req.kind != "image":
+        raise HTTPException(status_code=400, detail="A video post holds exactly one video; images and videos cannot be mixed.")
+    if req.job_id or not req.stage_id:
+        raise HTTPException(status_code=400, detail="Multi-image posts are published as-is; extended images cannot be combined.")
+    if len(extras) + 1 > MAX_POST_IMAGES:
+        raise HTTPException(status_code=400, detail=f"An image post holds at most {MAX_POST_IMAGES} images.")
+    if len(set(extras)) != len(extras) or req.stage_id in extras:
+        raise HTTPException(status_code=400, detail="The same image was added twice.")
+    return [_resolve_source("image", stage_id, None, request, context)[0] for stage_id in extras]
 
 
 def _slugify(text: str, fallback: str = "upload") -> str:
@@ -171,15 +194,31 @@ def publish_upload(
     rate_limiter.check(db, f"publish-hour:{context.user.id}", hourly_cap, 60 * 60)
     rate_limiter.check(db, f"publish-day:{context.user.id}", daily_cap, 24 * 60 * 60)
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
+    extra_sources = _resolve_extra_images(req, request, context)
     src_ext = Path(src_path).suffix.lstrip(".").lower() or ("png" if req.kind == "image" else "mp4")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    dest = UPLOAD_DIR / f"{_slugify(req.title)}-{stamp}-{uuid.uuid4().hex[:6]}.{src_ext}"
+    base_name = f"{_slugify(req.title)}-{stamp}-{uuid.uuid4().hex[:6]}"
+    dest = UPLOAD_DIR / f"{base_name}.{src_ext}"
+    extra_dests = [
+        UPLOAD_DIR / f"{base_name}-{index}.{Path(extra).suffix.lstrip('.').lower() or 'png'}"
+        for index, extra in enumerate(extra_sources, start=2)
+    ]
+    copied: list[Path] = []
     try:
-        shutil.copy2(src_path, dest)
+        for source, target in [(src_path, dest), *zip(extra_sources, extra_dests)]:
+            shutil.copy2(source, target)
+            copied.append(target)
     except OSError as ex:
+        for target in copied:
+            target.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Could not store upload: {ex}") from ex
+    for extra_dest in extra_dests:
+        try:
+            SM.make_image_poster(str(extra_dest))
+        except Exception:
+            pass
 
     preview_url: str | None = None
     poster_url: str | None = None
@@ -243,20 +282,24 @@ def publish_upload(
                 "osm_id": str(loc.osm_id) if loc.osm_id is not None else None,
             },
             source="extended" if req.job_id else "upload",
+            slide_paths=[target.resolve().relative_to(root).as_posix() for target in extra_dests] if req.kind == "image" else None,
         )
         db.commit()
         db.refresh(post)
-    except Exception:
+    except Exception as ex:
         db.rollback()
-        for candidate in (
-            dest,
-            SM.explore_preview_path(str(dest)),
-            SM.explore_poster_path(str(dest)),
-        ):
-            try:
-                Path(candidate).unlink(missing_ok=True)
-            except OSError:
-                pass
+        for stored in (dest, *extra_dests):
+            for candidate in (
+                stored,
+                SM.explore_preview_path(str(stored)),
+                SM.explore_poster_path(str(stored)),
+            ):
+                try:
+                    Path(candidate).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        if isinstance(ex, ValueError):
+            raise HTTPException(status_code=400, detail=str(ex)) from ex
         raise
 
     reels_router.invalidate_scan_cache()

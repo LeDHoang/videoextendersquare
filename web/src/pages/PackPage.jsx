@@ -11,7 +11,7 @@ import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
-import { formatDuration, formatResolution, packRuntime } from '../utils/mediaFormat.js';
+import { formatDuration, formatResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
 import { REPORT_REASONS } from '../utils/messageFormat.js';
 
 const VISIBILITY_OPTIONS = [
@@ -111,7 +111,8 @@ function ReelRow({ item, index, pack, onPlay }) {
   const place = [post.location?.city, post.location?.country].filter(Boolean).join(', ');
   const comments = post.comments_count ?? 0;
   const resolution = formatResolution(post.width, post.height);
-  const duration = post.media_type === 'image' ? '' : formatDuration(post.duration_ms);
+  const imageLabel = imagePostLabel(post);
+  const duration = formatDuration(imageLabel ? imageDwellMs(post) : post.duration_ms);
   return (
     <li>
       <button type="button" className="sx-pk-row" onClick={() => onPlay(index)} aria-label={`Play ${post.title || 'untitled reel'}, reel ${index + 1}`}>
@@ -124,7 +125,7 @@ function ReelRow({ item, index, pack, onPlay }) {
           <strong>{post.title || post.filename || 'Untitled reel'}</strong>
           <small>
             <span>@{owner}</span>
-            {post.media_type === 'image' ? <span className="sx-pk-chip">IMAGE</span> : null}
+            {imageLabel ? <span className="sx-pk-chip">{imageLabel}</span> : null}
             {resolution ? <span className="sx-pk-chip">{resolution}</span> : null}
             {duration ? <span className="sx-pk-chip" aria-label={'Runtime ' + duration}>{duration}</span> : null}
             {place ? <span className="sx-pk-chip">{place}</span> : null}

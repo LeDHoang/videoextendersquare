@@ -2537,6 +2537,83 @@ input[type='range']::-moz-range-thumb {
   }
 }
 
+/* Multi-image post: thumbnails in post order with move/remove controls. */
+.sx-upload-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--sx-2);
+  margin: var(--sx-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sx-upload-gallery-item {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid var(--sx-rule-strong);
+  background: var(--sx-surface);
+}
+
+.sx-upload-gallery-item img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.sx-upload-gallery-pos {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 3px 6px;
+  background: rgba(10, 10, 10, 0.82);
+  color: var(--sx-ink);
+  font: 700 0.62rem/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.08em;
+}
+
+.sx-upload-gallery-item:first-child .sx-upload-gallery-pos {
+  background: var(--sx-accent);
+  color: #0a0a0a;
+}
+
+.sx-upload-gallery-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  left: 6px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.sx-upload-gallery-actions button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--sx-rule-strong);
+  background: rgba(10, 10, 10, 0.82);
+  color: var(--sx-ink);
+  font: 700 0.85rem/1 'JetBrains Mono', monospace;
+  cursor: pointer;
+}
+
+.sx-upload-gallery-actions button:hover:not(:disabled) {
+  border-color: var(--sx-accent);
+  color: var(--sx-accent-hi);
+}
+
+.sx-upload-gallery-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.sx-upload-gallery-actions button:focus-visible {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 1px;
+}
+
 .sx-upload-icon {
   font-size: 2rem;
   color: var(--sx-accent);
@@ -6272,26 +6349,27 @@ button.sx-explore-loc-link:hover {
   border-top: 2px solid var(--sx-accent);
   background: var(--sx-bg);
   box-shadow: var(--sx-shadow-popover);
+  --sx-dock-head: 48px;
 }
 
 .sx-message-dock > header {
   display: grid;
-  height: 40px;
+  height: var(--sx-dock-head);
   grid-template-columns: 1fr;
   grid-auto-flow: column;
   grid-auto-columns: auto;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: 9px;
+  padding: 0 9px;
   border-bottom: 1px solid var(--sx-rule);
   background: var(--sx-surface);
   color: var(--sx-ink-3);
-  font: 700 0.62rem/1 'JetBrains Mono', monospace;
+  font: 700 0.75rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
 }
 
 .sx-message-dock > header button {
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 0;
   background: transparent;
   color: var(--sx-ink);
@@ -6299,18 +6377,27 @@ button.sx-explore-loc-link:hover {
   cursor: pointer;
 }
 
+.sx-message-dock > header button:not(.sx-message-dock-title) {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  text-align: center;
+}
+.sx-message-dock-glyph { width: 22px; height: 22px; display: block; }
 .sx-message-dock > header button:hover { color: var(--sx-accent-hi); }
 .sx-message-dock > header button:focus-visible { outline: 2px solid var(--sx-accent); outline-offset: -2px; }
 .sx-message-dock-status.sx-hot { color: var(--sx-accent-hi); }
 
 .sx-message-dock .sx-messaging-panel {
   grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
-  height: calc(100% - 40px);
+  height: calc(100% - var(--sx-dock-head));
   margin: 0;
   border: 0;
 }
 
-.sx-message-dock.sx-minimized { width: 300px; height: 40px; }
+.sx-message-dock.sx-minimized { width: 340px; height: var(--sx-dock-head); }
 
 .sx-message-launcher {
   position: fixed;
@@ -6335,8 +6422,8 @@ button.sx-explore-loc-link:hover {
 .sx-message-launcher:focus-visible { outline: 2px solid var(--sx-accent); outline-offset: 2px; }
 .sx-message-launcher-icon { width: 18px; height: 18px; display: block; color: var(--sx-accent); }
 
-.sx-message-dock-title { display: flex !important; align-items: center; gap: 7px; }
-.sx-message-dock-icon { width: 15px; height: 15px; display: block; color: var(--sx-accent); }
+.sx-message-dock-title { display: flex !important; align-items: center; gap: 9px; font: inherit; font-size: 0.85rem; }
+.sx-message-dock-icon { width: 21px; height: 21px; display: block; color: var(--sx-accent); }
 
 .sx-message-dock .sx-message-bubble { max-width: 88%; }
 .sx-message-dock .sx-message-hint-keys { display: none; }
@@ -6514,8 +6601,8 @@ button.sx-explore-loc-link:hover {
     height: calc(100dvh - 64px);
   }
 
-  .sx-message-dock .sx-messaging-panel { margin: 0; height: calc(100% - 40px); }
-  .sx-message-dock.sx-minimized { inset: auto 0 0 auto; width: 300px; height: 40px; }
+  .sx-message-dock .sx-messaging-panel { margin: 0; height: calc(100% - var(--sx-dock-head)); }
+  .sx-message-dock.sx-minimized { inset: auto 0 0 auto; width: 340px; height: var(--sx-dock-head); }
 
   /* main uses 16px (not 24px) top padding at this width */
   .sx-messages-page { height: calc(100dvh - 64px - var(--sx-4) - var(--sx-4)); }

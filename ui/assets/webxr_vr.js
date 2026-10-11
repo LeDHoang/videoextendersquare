@@ -6165,13 +6165,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     // ?dockfreeze=1 paints the dock once per session, then freezes its
     // texture re-uploads (diagnostic: isolates dock sub-image tears).
     if (controlsCtx && !(debugFlags.dockfreeze && dockFreezePainted)) {
+      const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
+      const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
       ui.renderControlsCanvas(controlsCtx, {
         source,
         itemState,
         packMode: isPackExperience(),
         packContext: getPackContext(),
-        playlist: callbacks.getPlaylist ? callbacks.getPlaylist() : [],
-        idx: callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0,
+        playlist,
+        idx,
+        item: playlist[idx] || null,
         comments: callbacks.getComments ? callbacks.getComments() : [],
         hoveredButton,
         pressedButton,
@@ -7001,8 +7004,8 @@ window.WebXRVR = window.WebXRVR || (function () {
             if (callbacks.onTogglePlay) { try { callbacks.onTogglePlay(); } catch (e) {} }
           } else if (target.controlIndex < 0 && raycaster && screenMesh && screenMesh.visible !== false) {
             // Tap on the video screen: a pop-up comment opens the panel at
-            // it, otherwise playback toggles (static pack cards route
-            // through the pack select handler first).
+            // it, otherwise playback toggles (static pack cards and image
+            // posts' prev/next thirds route through the select handler first).
             let screenHit = null;
             try {
               const ray = previewRayAt(event.clientX, event.clientY);
@@ -7022,7 +7025,7 @@ window.WebXRVR = window.WebXRVR || (function () {
                   handled = true;
                 }
               }
-              if (!handled && source.kind === 'static-card' && callbacks.onMainScreenSelect && screenHit.uv) {
+              if (!handled && (source.kind === 'static-card' || source.kind === 'image') && callbacks.onMainScreenSelect && screenHit.uv) {
                 try {
                   handled = callbacks.onMainScreenSelect({
                     u: screenHit.uv.x,
@@ -8661,6 +8664,16 @@ window.WebXRVR = window.WebXRVR || (function () {
                   handled = true;
                 }
               } else if (visualSource.kind === 'static-card') {
+                pulseInput(ev.data);
+                showControls();
+                handled = true;
+              } else if (visualSource.kind === 'image' && callbacks.onMainScreenSelect && hits[0].uv
+                && (function () {
+                  // Left/right third of an image post steps its images.
+                  try {
+                    return !!callbacks.onMainScreenSelect({ u: hits[0].uv.x, v: 1 - hits[0].uv.y });
+                  } catch (e) { return false; }
+                })()) {
                 pulseInput(ev.data);
                 showControls();
                 handled = true;

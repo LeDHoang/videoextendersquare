@@ -337,6 +337,12 @@
   }
 
   // ─── Render Controls Dock ──────────────────────────────────────────
+  function dockItemTitle(item) {
+    if (!item) return '';
+    const path = String(item.path || item.rel_path || '');
+    return String(item.title || item.filename || path.split('/').pop() || 'UNTITLED REEL');
+  }
+
   function renderControlsCanvas(ctx, options = {}) {
     if (!ctx) return;
     const {
@@ -399,7 +405,7 @@
 
     let dispName = packMode && packContext
       ? (packContext.title || 'UNTITLED PACK')
-      : (item ? (item.title || item.filename) : 'SYS_RENDER_004.mp4');
+      : dockItemTitle(item);
     if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
     ctx.fillStyle = '#E3E2E3';
     ctx.font = '12px "JetBrains Mono", monospace';
@@ -1233,7 +1239,7 @@
     const accentColor = '#FF3B1F';
     const dimText = 'rgba(242, 243, 245, 0.85)';
     const cards = [
-      { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Left/Right → Seek ±5s' },
+      { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Reels: Left/Right → Seek ±5s|Images: Left/Right → Prev/Next' },
       { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
       { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
       { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },

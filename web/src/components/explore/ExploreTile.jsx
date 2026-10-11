@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
-import { formatClock, formatDuration } from '../../utils/mediaFormat.js';
+import { formatClock, formatDuration, imagePostLabel } from '../../utils/mediaFormat.js';
 
 export function formatCompactCount(value) {
   const count = Number(value) || 0;
@@ -102,8 +102,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
   const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
-  const label = video.title || video.filename;
-  const badge = contextTag ? '#' + contextTag : isImage ? 'IMAGE' : '';
+  const label = video.title || video.filename || video.path?.split('/').pop() || 'Untitled reel';
+  const badge = contextTag ? '#' + contextTag : imagePostLabel(video);
   const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
 
   return (
@@ -237,10 +237,11 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           {video.title}
         </span>
       ) : null}
-      {badge ? <span className="sx-explore-kind">{badge}</span> : null}
+      {/* Both chips sit top-right, so a pack tile folds the kind into its order chip. */}
+      {badge && !orderLabel ? <span className="sx-explore-kind">{badge}</span> : null}
       {orderLabel ? (
         <span className="sx-explore-order" aria-hidden="true">
-          {orderLabel}{runtime ? ' · ' + runtime : ''}
+          {[orderLabel, badge, runtime].filter(Boolean).join(' · ')}
         </span>
       ) : null}
       {place ? (
