@@ -162,3 +162,59 @@ Per-eye meshes already give true stereo.
 
   Run the CDP probes in `scripts/debug-quest*.cjs`.
 - **Detection note.** The colour-tinted test pairs, with a different tint per eye, score about 0.61–0.63, so they are not auto-detected. The manual toggle covers them. Real stereo footage scores 0.81–0.98.
+
+### Pre-Quest QA sweep (2026-10-16)
+
+A form and function pass over every surface a 3D post reaches. It ran on the same isolated stack: backend :8010 and Vite :5183, with an APFS clone of `output/` and a migrated DB copy. The seed was:
+- two users;
+- SBS and TB videos;
+- a 3-slide SBS slideshow;
+- the tinted SBS clip;
+- time-synced and general comments;
+- a mixed 3D + 2D pack;
+- a DM share;
+- `batch_stereo_mono.py` run over the 6 legacy `testpipeline-3d` posts, which built all 6 renditions.
+
+**Passed.**
+- **Explore, tag and location grids.** Square left-eye posters and previews, with "3D" and "#tag · 3D" badges. Tiles open the player at the post.
+- **2D player.**
+  - Plays `-mono` 1920². The RES chip reads `1920×1920 ×2 · 3D SIDE-BY-SIDE`.
+  - 3D slideshow cycles mono slides.
+  - Pop-up comment markers and ticker work. A new 0:05 comment shows its marker at 64.9%.
+  - Docked fullscreen and the phone (375 px) pseudo-fullscreen show the square mono.
+  - Legacy crop fullscreen shows the left eye only.
+- **Sharing.**
+  - The share link is `/reels?post=<id>` with a QR code.
+  - The DM payload and MessagingPanel card use the mono explore and poster.
+- **Packs.**
+  - Gallery labels such as `01 · 3D · 0:05`, and the list resolution `1920×1920 ×2 · 3D`.
+  - The pack player plays 3D and 2D items in 2D.
+  - Editor rows and the library use mono posters.
+  - The VR Collect overlay swaps the screen to the 2048² static card (mono) and restores the 4096×2048 SBS source on close.
+- **Earth.**
+  - The hover preview card plays the mono preview and poster.
+  - Selecting a location loads the location feed with the stereo source in split preview.
+  - The screen and its eye meshes hide in Earth mode and come back on return.
+- **VR preview (split stereo).**
+  - DOME, SQ CURVE and FLAT keep both eye meshes on the shared geometry.
+  - Pop-up comments render over the stereo screen in both eyes.
+  - Dock controls all work: comments, like, save, next/prev, earth and `share_reel`.
+- **Header search.** Post results come from `media_card` with mono assets only. A result opens the player at that post (TB → `-mono.mp4` 1920², layout mono in 2D).
+- **Profile.** Editing keeps `stereo_layout`. The highlight cover uses the mono poster.
+- **Delete.** After a soft delete the post leaves:
+  - search;
+  - the ranked feed;
+  - the `/api/reels` disk-scan feed;
+  - the profile.
+
+  Its `-mono*` files are skipped by the scanners, so they never show up as orphan tiles.
+- **Moderation.** Reports carry no media, so there is nothing to crop.
+
+**Bugs found and fixed.**
+- **B1.** `media_card` and the lazy `POST /explore-preview` built 2:1 grid assets from the original stereo file. Both now use the `-mono` rendition, with tests in `tests/test_stereo_posts.py`.
+- **B2.** With 3D on, the Upload Studio slideshow strip thumbnails were centre-cropped and straddled both eyes. They now get `sx-stereo-crop-{layout}` and show the left eye. Covered in `UploadPage.test.jsx`.
+
+**Observations, not 3D bugs.**
+- **VR Earth "all locations" restore is unwired.** The pre-Three.js engine restored all locations when Earth was pressed during a location feed (`toggleEarthMode` → `onRestoreAllLocations`). `0da05fa` dropped that call, so in VR a location feed has no way back to all locations. `reels.html` still passes `onRestoreAllLocations` and `isLocationFeedActive`. This is on `main` as well.
+- **Share links use the page origin.** In dev that is `localhost:5173`; this is pre-existing.
+- **`/api/rewards/reels` returns 503 in the QA env.** Rewards were disabled there.

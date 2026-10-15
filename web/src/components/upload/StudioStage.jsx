@@ -350,7 +350,7 @@ export default function StudioStage({
             {entries.map((entry, index) => (
               <li key={entry.key} className={`sx-upload-gallery-item ${entry.key === selected?.key ? 'sx-selected' : ''}`}>
                 <button type="button" className="sx-studio-strip-view" onClick={() => onSelect(entry.key)} aria-label={`View ${entry.name}`} aria-pressed={entry.key === selected?.key}>
-                  <img src={entry.url} alt={entry.name} />
+                  <img src={entry.url} alt={entry.name} className={stereo ? `sx-stereo-crop-${stereo}` : undefined} />
                 </button>
                 <span className="sx-upload-gallery-pos">{index === 0 ? 'COVER' : index + 1}</span>
                 <div className="sx-upload-gallery-actions">

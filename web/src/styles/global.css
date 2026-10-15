@@ -4729,7 +4729,6 @@ button.sx-explore-loc-link:hover {
   white-space: nowrap;
 }
 
-/* Media-kind badge, top-right. */
 /* Legacy 3D posts without a 2D rendition serve the raw stereo file: crop
    every cover-fit view of it to the left eye. */
 .sx-stereo-crop-sbs {
@@ -4740,6 +4739,7 @@ button.sx-explore-loc-link:hover {
   object-position: 50% 0% !important;
 }
 
+/* Media-kind badge, top-right. */
 .sx-explore-kind {
   position: absolute;
   right: 8px;

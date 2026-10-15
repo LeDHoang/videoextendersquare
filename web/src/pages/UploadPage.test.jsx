@@ -634,6 +634,11 @@ describe('UploadPage studio — 3D stereo posts', () => {
     renderPage();
     await pick(['eyes1.png', 'eyes2.png']);
     expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    // Strip thumbnails show the left eye, not the seam between both eyes.
+    expect(screen.getByAltText('eyes2.png')).toHaveClass('sx-stereo-crop-sbs');
+    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    expect(screen.getByAltText('eyes2.png')).not.toHaveClass('sx-stereo-crop-sbs');
+    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
     fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({
