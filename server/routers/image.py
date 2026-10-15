@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from pipeline.image_worker import process_image
+from pipeline.stereo_detect import detect_stereo
 from core import models as _models
 from server.billing.parameters import image_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
@@ -89,6 +90,8 @@ def upload_image(
         "height": h,
         "orientation": orientation,
         "padding": {"top": top, "bottom": bottom, "left": left, "right": right},
+        # See video.py: exact 2:1 / 1:2 stills may be SBS / top-bottom stereo.
+        "stereo": detect_stereo(dest_path, w, h, kind="image"),
     }
 
 

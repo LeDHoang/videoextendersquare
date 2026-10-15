@@ -19,6 +19,7 @@ from server.billing.parameters import video_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.video_worker import process_video
+from pipeline.stereo_detect import detect_stereo
 from server import media as SM
 from server import output
 from server.jobs import JobStatus, job_manager
@@ -166,6 +167,9 @@ def upload_video(
         "duration": round(dur, 2),
         "orientation": orientation,
         "padding": {"top": top, "bottom": bottom, "left": left, "right": right},
+        # Exact 2:1 / 1:2 frames may be full SBS / top-bottom stereo; the
+        # Upload Studio pre-selects 3D when this says detected.
+        "stereo": detect_stereo(dest_path, w, h, kind="video", duration=dur),
     }
 
 

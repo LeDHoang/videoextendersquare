@@ -45,9 +45,10 @@ API fields on every post, card and feed item:
 1. **Candidate:** `sbs` when `w == 2*h`, `tb` when `h == 2*w`.
 2. **Metadata.** ffprobe stream side data "Stereo 3D" (`side by side` / `top and bottom`, not inverted), or the MKV/WebM `stereo_mode` tag (`left_right` / `top_bottom`). A match gives `method: "metadata"`.
 3. **Content.**
-   - Split the frame into the two eye halves, grayscale, 96×96 each.
-   - Score = `1 − min_s mean|A − shift_x(B, s)| / contrast(A)` for `s ∈ [−8, 8]`. Disparity is horizontal for both layouts.
-   - Videos use the median over 3 frames; images use 1. A score of at least 0.75 means detected (`method: "content"`).
+   - Split the frame into the two eye halves, grayscale, 128×128 each, band-passed (minus a radius-4 blur, then a radius-1.2 blur so sub-pixel disparity still matches).
+   - Score = `1 − min_s mean|A − shift_x(B, s)| / (1.128·stddev)` for `s ∈ [−12, 12]`. Disparity is horizontal for both layouts.
+   - Videos use the median over 3 frames (15/50/85%); images use 1. A score of at least **0.72** means detected (`method: "content"`).
+   - Calibration: six real 7680×3840 SBS reels in `output/testpipeline-3d` scored 0.81–0.98. Ordinary 2:1 and 1:2 crops and stretches scored 0.00–0.33, and a synthetic test pattern scored 0.64.
    - Flat or black frames are inconclusive.
 
 The stage response carries `stereo: {candidate, detected, method, score}`.
@@ -101,7 +102,7 @@ Per-eye meshes already give true stereo.
 
 - [x] Branch `3dreels` from `origin/main` (local `main` was stale). Upstream unset so a bare `git push` cannot hit `main`.
 - [x] **Migration + model:** `20261015_0013_post_stereo_layout`, plus the `Post.stereo_layout` column. Bump `EXPECTED_SCHEMA_REVISION` and update `AGENTS.md` and the `docs/to-beta.md` mentions.
-- [ ] **Detection:** `pipeline/stereo_detect.py`, plus the `stereo` block in the `/api/video/upload` and `/api/image/upload` stage responses.
+- [x] **Detection:** `pipeline/stereo_detect.py`, plus the `stereo` block in the `/api/video/upload` and `/api/image/upload` stage responses.
 - [ ] **Media:** `mono_sibling_path`, `make_left_eye_rendition`, the stereo cap in `make_web_preview`, and `-mono.` added to the derived-sibling skip filters.
 - [ ] **Publish:** `PublishRequest.stereo_layout`, the geometry and as-is validation, the slideshow check, atomic rendition generation, and the layout threaded into `create_or_update_post`.
 - [ ] **Serialization:** `post_card`, `reel_records` / `metadata_for_paths`, slide entries, the `reels.py` `_build_payload` (video and image, location feed), and the pack DB fallback.
