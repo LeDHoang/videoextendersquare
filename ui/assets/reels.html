@@ -2571,7 +2571,13 @@
     }
 
     function wantsStereoSource() {
-      try { return !!(typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
+      try {
+        if (typeof WebXRVR === 'undefined') return false;
+        if (WebXRVR.isPresenting && WebXRVR.isPresenting()) return true;
+        // The desktop split-screen VR preview shows each eye like a headset.
+        const preview = WebXRVR.getPreviewState && WebXRVR.getPreviewState();
+        return !!(preview && preview.running && preview.stereo);
+      } catch (e) { return false; }
     }
 
     // What to load for a post or slide right now: {url, layout, crop}.
@@ -6702,6 +6708,7 @@
         // 3D posts switch between their 2D rendition and stereo file.
         onEnterVR: syncStereoSource,
         onExitVR: syncStereoSource,
+        onPreviewStereo: syncStereoSource,
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {
           if (!isPackMode || !packState.pack) return null;

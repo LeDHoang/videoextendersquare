@@ -2178,6 +2178,11 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
     p = (root / rel).resolve()
     if not p.is_relative_to(root) or not p.is_file():
         return rel, None, None, "not found"
+    # A 3D original's grid assets come from its left-eye 2D rendition, so
+    # tiles stay square (the rendition only exists for stereo posts).
+    mono, _stereo = SM.stereo_paths(str(p))
+    if mono is not None:
+        p = mono.resolve()
     if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
         try:
             poster = SM.make_image_poster(str(p))
@@ -2193,8 +2198,8 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
                 return None
 
         poster_url = _img_url(poster)
-        # The tile uses the full image as its own preview.
-        return rel, f"/media/{rel}", poster_url, None
+        # The tile uses the full image (or its left eye) as its own preview.
+        return rel, _img_url(str(p)), poster_url, None
     try:
         prev = SM.make_explore_preview(str(p))
     except Exception as ex:  # noqa: BLE001

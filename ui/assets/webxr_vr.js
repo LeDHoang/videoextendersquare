@@ -7628,6 +7628,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   function setPreviewStereo(enabled) {
     stereoMode = !!enabled;
     emitPreviewState();
+    // The host may swap a 3D post to its stereo file for the split preview.
+    if (callbacks.onPreviewStereo) {
+      try { callbacks.onPreviewStereo(stereoMode); } catch (e) {}
+    }
   }
 
   function setReducedMotion(enabled) {

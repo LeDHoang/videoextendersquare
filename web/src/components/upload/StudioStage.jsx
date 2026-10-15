@@ -286,11 +286,8 @@ export default function StudioStage({
           {selected && !showExtended && geometry?.square && !isSlideshow ? (
             <span className="sx-studio-flag sx-ok">ALREADY 1:1</span>
           ) : null}
-          {selected && !showExtended && stereo ? (
-            <span className="sx-studio-flag sx-ok">3D · ONE SQUARE PER EYE</span>
-          ) : null}
           {selected && !showExtended && !extendPath && layout !== 'batch' ? (
-            <span className="sx-studio-flag">PUBLISHED AS-IS</span>
+            <span className={`sx-studio-flag ${stereo ? 'sx-ok' : ''}`}>{stereo ? '3D · PUBLISHED AS-IS' : 'PUBLISHED AS-IS'}</span>
           ) : null}
           {selected && !showExtended && extendPath && upscaleOnly && geometry && !geometry.square ? (
             <span className="sx-studio-flag sx-warn">UPSCALE ONLY · STRETCHED TO 1:1</span>

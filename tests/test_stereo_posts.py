@@ -269,3 +269,44 @@ def test_oversized_h264_stereo_gets_capped_proxy(tmp_path, monkeypatch):
     assert mono_path is None and str(stereo_path) == proxy
     # Mono uploads keep the old rule: H.264 plays as-is.
     assert media.make_web_preview(str(tmp_path / "big.mp4")) == str(source)
+
+
+@needs_ffmpeg
+def test_grid_assets_of_stereo_video_come_from_the_left_eye(client, tmp_path):
+    """Profile/feed cards and the lazy grid generator never build 2:1 tiles."""
+    user = _register(client, "stereo_grid")
+    source = tmp_path / "grid-sbs.mp4"
+    _stereo_video(source, "sbs")
+    video_router.STAGED_UPLOADS["grid"] = (str(source), time.time(), f"user:{user['id']}")
+    meta = _publish(client, {"kind": "video", "title": "Grid", "stage_id": "grid", "stereo_layout": "sbs"}).json()["meta"]
+    mono = Path("output") / meta["url"].removeprefix("/media/")
+    # Drop the grid assets publish made, as if they had never been built.
+    media.explore_preview_path(str(mono)).unlink()
+    media.explore_poster_path(str(mono)).unlink()
+
+    rel, preview_url, poster_url, err = reels._gen_explore_assets(meta["path"])
+    assert err is None
+    assert preview_url.endswith("-mono-explore.mp4")
+    assert poster_url.endswith("-mono-poster.jpg")
+    info = media.probe_media_info(str(Path("output") / poster_url.removeprefix("/media/")))
+    assert info["width"] == info["height"]
+    assert not media.explore_preview_path(str(Path("output") / meta["path"])).exists()
+
+    with client.testing_session() as db:
+        card = social.media_card(db.query(Post).one(), db)
+    assert card["preview_url"] == preview_url
+    assert card["poster_url"] == poster_url
+    assert card["url"] == meta["url"]
+
+
+def test_profile_card_of_stereo_still_keeps_left_eye_poster(client, tmp_path):
+    user = _register(client, "stereo_card")
+    stage = _stage_image(tmp_path, user, "card", _stereo_still("sbs"))
+    meta = _publish(client, {"kind": "image", "title": "Card", "stage_id": stage, "stereo_layout": "sbs"}).json()["meta"]
+    with client.testing_session() as db:
+        card = social.media_card(db.query(Post).one(), db)
+    assert card["url"].endswith("-mono.png")
+    assert card["preview_url"] == card["url"]
+    assert card["poster_url"].endswith("-mono-poster.jpg")
+    rel, preview_url, poster_url, err = reels._gen_explore_assets(meta["path"])
+    assert err is None and preview_url.endswith("-mono.png") and poster_url.endswith("-mono-poster.jpg")

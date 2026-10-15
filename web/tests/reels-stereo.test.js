@@ -48,8 +48,10 @@ function fakeVideo() {
 function loadStereo(items, { presenting = false } = {}) {
   const engine = {
     presenting,
+    previewSplit: false,
     layouts: [],
     isPresenting() { return this.presenting; },
+    getPreviewState() { return { running: this.previewSplit, stereo: this.previewSplit }; },
     setSourceStereo(layout) { this.layouts.push(layout); },
   };
   const calls = { preload: 0, notify: 0, slides: [], viewTracking: 0 };
@@ -110,6 +112,14 @@ test('3D posts load the 2D rendition in 2D and the stereo file only in VR', () =
   assert.equal(playbackFor(tb, tb).layout, 'tb');
   // A stereo file that failed once falls back to the 2D view (mono-flat).
   assert.equal(playbackFor(sbsPost, { stereoFailed: true }).url, sbsPost.url);
+});
+
+test('the desktop split-screen VR preview loads the stereo file like a headset', () => {
+  const { playbackFor, engine } = loadStereo([]);
+  engine.previewSplit = true;
+  assert.equal(playbackFor(sbsPost, sbsPost).url, sbsPost.stereo_url);
+  engine.previewSplit = false;
+  assert.equal(playbackFor(sbsPost, sbsPost).url, sbsPost.url);
 });
 
 test('legacy stereo files without a rendition are cropped to the left eye in 2D', () => {

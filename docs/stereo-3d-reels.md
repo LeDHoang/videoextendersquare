@@ -1,6 +1,6 @@
 # 3D Reels — stereoscopic SBS + top-bottom posts
 
-Branch: `3dreels` (cut from `origin/main` @ `dcaa4e4`). Status: **in progress**.
+Branch: `3dreels` (cut from `origin/main` @ `dcaa4e4`). Status: **implemented; on-device Quest check pending**.
 This file is the full plan **and** the living checklist. Tick items and record deviations as work lands.
 
 ## Goal
@@ -109,11 +109,11 @@ Per-eye meshes already give true stereo.
 - [x] **Legacy:** remove the filename regex, and map the `testpipeline-3d` folder to `sbs` on the server.
 - [x] **2D player** (`reels.html`): URL choice by presenting state, blob cache keyed by URL, the swap on XR enter/exit, `setSourceStereo`, the legacy crop classes, the glow sampler, and the RES chip.
 - [x] **VR engine:** split the flags, the stereo canvas, per-eye meshes, `applyStereoVisibility`, the per-eye layers in `renderStereoPair`, glow, diagnostics, and a `VR_VERSION` bump.
-- [ ] **VR flows:** next/prev/auto-next, seek, packs, slideshows, Earth open/close, the location feed, and enter/exit mid-reel.
+- [x] **VR flows:** next/prev/auto-next, seek, packs, slideshows, Earth open/close, the location feed, and enter/exit mid-reel.
 - [x] **Upload Studio:** the 3D toggle (auto-on when detected), the skip path, the stage preview, the slideshow rule, the batch warning, the `mediaFormat` helpers, the 3D badges, and a rebuild of the prod bundle.
-- [ ] **Tests:** `tests/test_stereo_posts.py`, `tests/test_stereo_detect.py`, `web/tests/reels-stereo.test.js`, the `webxr-earth.test.js` cases, and the `UploadPage.test.jsx` cases.
-- [ ] **Docs:** this file, the partial ticks in the `docs/todolist.md` Phase 1 items, and the schema revision mentions.
-- [ ] **Verification:** `make test`; browser checks for upload, 2D, grids and the split-stereo preview; the IWER emulator flows; on-device Quest checks for depth, swap, frame pacing and the TB proxy decode.
+- [x] **Tests:** `tests/test_stereo_posts.py`, `tests/test_stereo_detect.py`, `web/tests/reels-stereo.test.js`, the `webxr-earth.test.js` cases, and the `UploadPage.test.jsx` cases.
+- [x] **Docs:** this file, the partial ticks in the `docs/todolist.md` Phase 1 items, and the schema revision mentions.
+- [~] **Verification:** `make test`; browser checks for upload, 2D, grids and the split-stereo preview; the IWER emulator flows; on-device Quest checks for depth, swap, frame pacing and the TB proxy decode.
 
 ## Notes / deviations
 
@@ -134,4 +134,31 @@ Per-eye meshes already give true stereo.
   - Slideshows offer the toggle only when every image is the same candidate.
   - Batch mode warns that 3D files render as flat 2D.
 - **Badges.** Explore/profile/pack-gallery tiles append "3D" to their kind badge. Legacy raw stereo files get the `sx-stereo-crop-*` classes on tiles and pack covers.
+- **Desktop split preview acts like a headset.** On `/reels/immersive-preview` with "SIDE-BY-SIDE STEREO" on, the player loads `stereo_url` and draws each half with the per-eye layers, exactly as XR does. The engine fires `onPreviewStereo` so the swap happens immediately. This is how stereo was verified without a Quest.
+- **Bug found in browser verification (fixed).** Profile and feed `media_card` and the lazy `POST /api/reels/explore-preview` built grid assets from the original's name. That produced 2:1 `<stem>-explore.mp4` / `<stem>-poster.jpg` straddling both eyes. Both now use the `-mono` rendition, and `tests/test_stereo_posts.py` covers it.
 - **Stereo proxy rule.** Mono uploads keep the old rule: an H.264 source plays as-is. Stereo uploads also get a `-preview.mp4` when an H.264 source is longer than 4096 px.
+
+## Verification log (2026-10-16)
+
+- **`make test`:** pytest 305, node 307, vitest 353, all green.
+- **Isolated dev servers.** A backend on :8010 and Vite on :5183, with a migrated copy of the dev DB and a scratch `output/`. The other session's :8000 / :5173 servers were left untouched. Everything was removed afterwards.
+- **Upload Studio.** A real 3840×1920 SBS clip was auto-detected ("3D SIDE-BY-SIDE DETECTED", content score). The stage showed the left eye 1920² with no extend sections, and publish produced:
+  - the original, H.264 3840×1920, with no proxy needed;
+  - `-mono.mp4` at 1920²;
+  - `-mono-explore.mp4` and `-mono-poster.jpg` at 720².
+- **2D Reels.** The player loads `-mono.mp4` (1920×1920). The RES chip reads `1920×1920 ×2` plus `3D SIDE-BY-SIDE`.
+- **Profile grid.** Square left-eye posters and previews, with a "3D" badge.
+- **Split-stereo preview.** Tinted samples were used: left eye red, right eye blue.
+  - The SBS video (4096×2048 proxy), the TB video (2048×4096 proxy) and an SBS still each showed red in the left half and blue in the right.
+  - Next and prev across TB→SBS rebuilt the proxy.
+  - Earth round-trip: the screen hides in Earth mode and stereo is restored on return.
+  - Turning split off swaps back to `-mono` at the same playhead.
+- **Legacy crop.** With the rendition removed, the 2D player plays the raw 3840×1920 file with `stereo-crop-sbs` (object-position 0% 50%), showing only the red left eye.
+- **Not yet verified on device.** These still need a Quest:
+  - stereo depth;
+  - the enter/exit swap inside a real XR session;
+  - frame pacing at 2048/eye vs `?vrstereoeye=1536`;
+  - TB 2048×4096 H.264 decode.
+
+  Run the CDP probes in `scripts/debug-quest*.cjs`.
+- **Detection note.** The colour-tinted test pairs, with a different tint per eye, score about 0.61–0.63, so they are not auto-detected. The manual toggle covers them. Real stereo footage scores 0.81–0.98.

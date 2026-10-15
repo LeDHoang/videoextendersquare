@@ -279,11 +279,18 @@ def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         card["size"] = media_service.human_bytes(source.stat().st_size)
     except (OSError, AttributeError):
         card["size"] = ""
+    stereo = (post.stereo_layout or "mono") != "mono"
     if post.media_type == "image":
         card["preview_url"] = card["url"]
-        card["poster_url"] = card["url"]
+        # A 3D still keeps its left-eye poster from post_card.
+        if not (stereo and card.get("poster_url")):
+            card["poster_url"] = card["url"]
         card["codec"] = "IMG"
         return card
+    # Grid assets of a 3D video come from its left-eye rendition.
+    grid_source = source
+    if stereo and not card.get("stereo_crop"):
+        grid_source = media_service.mono_sibling_path(str(source))
 
     def sibling_url(path: Path) -> str | None:
         try:
@@ -294,8 +301,8 @@ def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
             return None
         return None
 
-    card["preview_url"] = sibling_url(media_service.explore_preview_path(str(source)))
-    card["poster_url"] = sibling_url(media_service.explore_poster_path(str(source)))
+    card["preview_url"] = sibling_url(media_service.explore_preview_path(str(grid_source)))
+    card["poster_url"] = sibling_url(media_service.explore_poster_path(str(grid_source)))
     try:
         card["codec"] = media_service.get_video_codec(str(source)).upper()
     except Exception:
