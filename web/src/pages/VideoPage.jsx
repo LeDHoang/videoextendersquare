@@ -1,15 +1,33 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
+import CustomModelPanel from '../components/ui/CustomModelPanel.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
+import StudioLoading from '../components/ui/StudioLoading.jsx';
+import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
+import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
+import { useAuth } from '../hooks/AuthContext.jsx';
+import { useWallet } from '../hooks/WalletContext.jsx';
+import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { billingErrorMessage } from '../utils/billingErrors.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
+const CREDIT_OUTPAINT_MODELS = new Set([
+  'fal-ai/ltx-2.3-quality/outpaint',
+  'fal-ai/ltx-2.3-quality/outpaint/lora',
+  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'fal-ai/wan-vace-14b/outpainting',
+]);
+const CREDIT_UPSCALE_MODELS = new Set([
+  'fal-ai/bytedance-upscaler/upscale/video',
+  'fal-ai/seedvr/upscale/video',
+]);
 
 function fmtBytes(n) {
   if (!n) return '—';
@@ -18,14 +36,15 @@ function fmtBytes(n) {
 }
 
 export default function VideoPage() {
+  const { user } = useAuth();
+  const { wallet, catalog, falKey, refresh: refreshWallet } = useWallet();
   const health = useHealthContext();
   const cfg = useConfigContext();
   const probes = health?.probes || {};
   const blocked = ['ffmpeg', 'ffprobe', 'encoder']
     .filter((id) => probes[id] && !probes[id].ok)
     .map((id) => probes[id]);
-  const falOk = health?.fal_key?.ok ?? false;
-  const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
+  const studioOk = probes.vapoursynth?.ok && probes.ffms2?.ok && probes.znedi3?.ok;
 
   const models = cfg?.config?.models || {};
   const outpaintCatalog = models.video_outpaint_catalog || [];
@@ -38,12 +57,16 @@ export default function VideoPage() {
   const [items, setItems] = useState([]);
   const [mode, setMode] = useState(MODES[0]);
   const [outpaintOpt, setOutpaintOpt] = useState(defaultOutpaint);
-  const [prompt, setPrompt] = useState('Seamlessly extend the background environment, high details, matching texture and lighting. Keep the origin video aethestic and lighting');
+  const [prompt, setPrompt] = useState('Seamlessly extend the background environment, cool lighting, neutral color temperature, matching original white balance and color palette.');
   const [engine, setEngine] = useState('FAST');
   const [falUpscale, setFalUpscale] = useState(defaultUpscale);
   const [sharpening, setSharpening] = useState(0.5);
   const [ltxRes, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
+  const [ltxGuidance, setLtxGuidance] = useState(1.0);
+  const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
+  const [ltxNegativePrompt, setLtxNegativePrompt] = useState('yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated');
+  const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
   const [seedvrTarget, setSeedvrTarget] = useState('1080p');
   const [btdRes, setBtdRes] = useState('4k');
@@ -57,53 +80,113 @@ export default function VideoPage() {
   const [jobs, setJobs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
+  const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
+  const [paymentSource, setPaymentSource] = useState('credits');
+  const autoByokRef = useRef(false);
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
   const studioPicked = engine === 'STUDIO';
-  const needsKey = !upscaleOnly || falPicked;
-  const disabled = blocked.length > 0 || (needsKey && !falOk) || (studioPicked && !studioOk) || busy;
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
-  const totalDur = useMemo(() => items.reduce((a, b) => a + (b.duration || 0), 0), [items]);
-  const effDur = trimEnabled ? Math.min(items.length ? Math.max(...items.map((i) => i.duration)) : 15, trimDur) : totalDur;
+  // If the sidebar saved a custom endpoint, the catalog gains a CUSTOM(...)
+  // entry after /api/config loads — preselect it once so the override actually
+  // takes effect instead of silently staying on the stock default.
+  const customInit = useRef(false);
+  useEffect(() => {
+    if (customInit.current || !outpaintCatalog.length || !upscaleCatalog.length) return;
+    customInit.current = true;
+    const oc = outpaintCatalog.find((e) => e.model === models.outpaint_vid);
+    if (oc?.is_custom) setOutpaintOpt(oc.label);
+    const uc = upscaleCatalog.find((e) => e.model === models.upscale_vid);
+    if (uc?.is_custom) setFalUpscale(uc.label);
+  }, [outpaintCatalog, upscaleCatalog, models]);
 
-  const cost = useMemo(() => {
-    const out = { label: 'None (Upscale Only)', value: 0 };
-    const up = { label: `Local (${engine} Engine — $0.00)`, value: 0 };
-    const resWidth = { '480p': 480, '720p': 720, '1080p': 1080 }[ltxRes] || 720;
-    const frames = effDur > 0 ? Math.round(effDur * 24) : 121;
-    if (!upscaleOnly && outpaintEntry) {
-      if (outpaintEntry.pricing_kind === 'per_mp') {
-        out.label = `${outpaintEntry.label} (${ltxRes}) (~$${outpaintEntry.price.toFixed(4)}/MP)`;
-        out.value = ((resWidth * resWidth * frames) / 1e6) * outpaintEntry.price;
-      } else {
-        const rate = outpaintEntry.price || 0.06;
-        out.label = `${outpaintEntry.label} ($${rate.toFixed(2)}/s)`;
-        out.value = effDur * rate;
+  const totalDur = useMemo(() => items.reduce((a, b) => a + (b.duration || 0), 0), [items]);
+  const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
+  const loraList = useMemo(
+    () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
+    [loraPicked, ltxLoras],
+  );
+  const parameters = useMemo(() => videoBillingParameters({
+    prompt,
+    upscaleOnly,
+    falPicked,
+    studioPicked,
+    sharpening,
+    outpaintModel,
+    upscaleModel,
+    ltxResolution: ltxRes,
+    ltxAudio,
+    ltxGuidance,
+    ltxPromptExpansion,
+    ltxNegativePrompt,
+    ltxLoras: loraList,
+    // No WAN resolution selector in the UI yet: pin the top tier so quotes
+    // never understate the charge (backend bills 480p/580p/720p at
+    // $0.04/$0.06/$0.08 per second).
+    wanResolution: '720p',
+    seedvrFactor,
+    seedvrTarget,
+    bytedanceTargetRes: btdRes,
+    bytedanceTargetFps: btdFps,
+    bytedanceTier: btdTier,
+    bytedancePreset: btdPreset,
+    bytedanceFidelity: btdFidelity,
+    trimEnabled,
+    trimStart,
+    trimDuration: trimDur,
+    customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
+    customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
+  }), [prompt, upscaleOnly, falPicked, studioPicked, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  const quoteItems = useMemo(
+    () => items.filter((item) => stagedItemNeedsCloud(item, parameters)).map((item) => ({ stage_id: item.stage_id })),
+    [items, parameters],
+  );
+  const cloudRequired = quoteItems.length > 0;
+  const needsOutpaintCloud = items.some((item) => !upscaleOnly && Number(item.width) !== Number(item.height));
+  const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_OUTPAINT_MODELS.has(outpaintModel);
+  const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_UPSCALE_MODELS.has(upscaleModel);
+  const byokOnly = (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
+  const quoteState = useCreditQuotes({
+    kind: 'video',
+    items: quoteItems,
+    parameters,
+    enabled: cloudRequired && Boolean(user) && !byokOnly,
+  });
+  const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
+  // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
+  // button stays clickable and render() re-fetches fresh quotes first.
+  const quoteStale = cloudRequired && paymentSource === 'credits' && !byokOnly && Boolean(catalog?.credits_enabled) && (
+    quoteState.loading || Boolean(quoteState.error) || quoteState.quotes.length !== quoteItems.length
+  );
+  const fundingBlocked = cloudRequired && (
+    !user ||
+    (paymentSource === 'byok' && !falKey?.configured) ||
+    (paymentSource === 'credits' && (
+      byokOnly || !catalog?.credits_enabled || insufficientCredits
+    ))
+  );
+  const disabled = blocked.length > 0 || fundingBlocked || (studioPicked && !studioOk) || busy;
+
+  useEffect(() => {
+    if (byokOnly) {
+      if (paymentSource !== 'byok') {
+        autoByokRef.current = true;
+        setPaymentSource('byok');
       }
+    } else if (autoByokRef.current) {
+      // The switch to BYOK was automatic: restore credits now that a
+      // credit-supported model is selected again. An explicit user choice
+      // of BYOK is left untouched.
+      autoByokRef.current = false;
+      setPaymentSource('credits');
     }
-    if (falPicked && upscaleEntry) {
-      if (upscaleEntry.pricing_kind === 'per_mp') {
-        const w = { '720p': 720, '1080p': 1080, '2160p': 2160 }[seedvrTarget] || 1080;
-        up.label = `${upscaleEntry.label} (${seedvrTarget}) ($${upscaleEntry.price.toFixed(3)}/MP)`;
-        up.value = ((w * w * frames) / 1e6) * upscaleEntry.price;
-      } else if (upscaleEntry.model && upscaleEntry.model.includes('bytedance')) {
-        const base = upscaleEntry.base_rates?.[btdRes] ?? 0.0288;
-        const rate = base * (upscaleEntry.fps_multiplier?.[btdFps] ?? 1) * (upscaleEntry.tier_multiplier?.[btdTier] ?? 1);
-        up.label = `Bytedance (${btdRes}, ${btdFps}, ${btdTier}) ($${rate.toFixed(4)}/s)`;
-        up.value = effDur * rate;
-      } else {
-        const rate = upscaleEntry.price || 0.003;
-        up.label = `${upscaleEntry.label} ($${rate.toFixed(3)}/s)`;
-        up.value = effDur * rate;
-      }
-    }
-    return { out, up, total: out.value + up.value };
-  }, [upscaleOnly, outpaintEntry, effDur, ltxRes, falPicked, upscaleEntry, btdRes, btdFps, btdTier, seedvrTarget, engine]);
+  }, [byokOnly, paymentSource]);
 
   const onFiles = async (files) => {
     setError('');
@@ -121,43 +204,53 @@ export default function VideoPage() {
     setItems(staged);
   };
 
+
   const render = async () => {
     setError('');
+    if (!upscaleOnly && outpaintEntry?.is_custom && !outArgs.ok) {
+      setError(`Outpaint custom args: ${outArgs.error}`);
+      return;
+    }
+    if (falPicked && upscaleEntry?.is_custom && !upArgs.ok) {
+      setError(`Upscale custom args: ${upArgs.error}`);
+      return;
+    }
+    if (fundingBlocked) {
+      setError('Choose an available cloud payment source and wait for a valid quote.');
+      return;
+    }
     setBusy(true);
     const jobList = [];
-    for (const item of items) {
-      const fd = new FormData();
-      const kv = {
-        stage_id: item.stage_id,
-        prompt: upscaleOnly ? '' : prompt,
-        upscale_only: String(upscaleOnly),
-        upscale_engine: falPicked ? 'fal' : studioPicked ? 'studio' : 'fast',
-        sharpening: String(sharpening),
-        outpaint_model: upscaleOnly ? 'fal-ai/ltx-2.3-quality/outpaint' : outpaintModel,
-        upscale_model: upscaleModel,
-        ltx_resolution: ltxRes,
-        ltx_audio: String(ltxAudio),
-        seedvr_factor: String(seedvrFactor),
-        seedvr_target: seedvrTarget,
-        bytedance_target_res: btdRes,
-        bytedance_target_fps: btdFps,
-        bytedance_tier: btdTier,
-        bytedance_preset: btdPreset,
-        bytedance_fidelity: btdFidelity,
-        trim_enabled: String(trimEnabled),
-        trim_start: String(trimStart),
-        trim_duration: String(trimDur),
-      };
-      for (const [k, v] of Object.entries(kv)) fd.append(k, v);
-      try {
-        const res = await api.form('/api/video/process', fd);
-        jobList.push({ jobId: res.job_id, name: item.name, kind: 'video' });
-      } catch (e) {
-        setError(e.message);
+    try {
+      const freshQuotes = paymentSource === 'credits' && cloudRequired ? await quoteState.refresh() : [];
+      const quoteByStage = new Map(freshQuotes.map((quote) => [quote.stage_id, quote]));
+      for (const item of items) {
+        const itemNeedsCloud = stagedItemNeedsCloud(item, parameters);
+        const fd = new FormData();
+        fd.append('stage_id', item.stage_id);
+        appendProcessingParameters(fd, parameters);
+        if (itemNeedsCloud) {
+          fd.append('payment_source', paymentSource);
+          if (paymentSource === 'credits') {
+            const quote = quoteByStage.get(item.stage_id);
+            if (!quote?.quote_id) throw new Error(`A fresh quote is unavailable for ${item.name}.`);
+            fd.append('quote_id', quote.quote_id);
+          }
+        }
+        try {
+          const res = await api.form('/api/video/process', fd);
+          jobList.push({ jobId: res.job_id, name: item.name, kind: 'video' });
+        } catch (submissionError) {
+          setError(billingErrorMessage(submissionError));
+        }
       }
+      setJobs(jobList);
+      if (cloudRequired) await refreshWallet();
+    } catch (requestError) {
+      setError(billingErrorMessage(requestError, 'Could not prepare cloud billing.'));
+    } finally {
+      setBusy(false);
     }
-    setJobs(jobList);
-    setBusy(false);
   };
 
   const maxSourceDur = items.length ? Math.max(...items.map((i) => i.duration || 0)) : 60;
@@ -218,10 +311,7 @@ export default function VideoPage() {
 
       <Section num={2} title="Configure Parameters" active={items.length > 0}>
         {items.length === 0 ? (
-          <EmptyState
-            title="AWAITING SOURCE VIDEO"
-            text="Drop one or more videos in the upload zone above to unlock pipeline parameters."
-          />
+          <StudioLoading title="EXTENDER" subtitle="AWAITING SOURCE VIDEO INITIATION…" compact />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div>
@@ -235,6 +325,9 @@ export default function VideoPage() {
                   <Eyebrow>OUTPAINT MODEL</Eyebrow>
                   <Segmented options={outpaintOptions} value={outpaintOpt} onChange={setOutpaintOpt} ariaLabel="Outpaint Model" />
                 </div>
+                {outpaintEntry?.is_custom ? (
+                  <CustomModelPanel model={outpaintEntry.model} kind="outpaint" entry={outpaintEntry} onArgs={setOutArgs} />
+                ) : null}
                 <Field label="OUTPAINT EXTENSION PROMPT">
                   <textarea
                     className="sx-textarea"
@@ -255,9 +348,111 @@ export default function VideoPage() {
                           ))}
                         </select>
                       </Field>
+                      <Field label="GUIDANCE SCALE (CFG)">
+                        <input
+                          className="sx-input"
+                          type="number"
+                          min={1.0}
+                          max={20.0}
+                          step={0.1}
+                          value={ltxGuidance}
+                          onChange={(e) => setLtxGuidance(Number(e.target.value))}
+                        />
+                      </Field>
+                      <Field label="NEGATIVE PROMPT" style={{ gridColumn: '1 / -1' }}>
+                        <input
+                          className="sx-input"
+                          type="text"
+                          value={ltxNegativePrompt}
+                          onChange={(e) => setLtxNegativePrompt(e.target.value)}
+                          placeholder="yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
+                        />
+                      </Field>
                       <div style={{ alignSelf: 'center' }}>
                         <ToggleRow label="Preserve Audio Track" checked={ltxAudio} onChange={setLtxAudio} />
                       </div>
+                      <div style={{ alignSelf: 'center' }}>
+                        <ToggleRow label="Enable Prompt Expansion (LLM Enrich)" checked={ltxPromptExpansion} onChange={setLtxPromptExpansion} />
+                      </div>
+                    </div>
+                  </details>
+                ) : null}
+
+                {loraPicked ? (
+                  <details className="sx-expander" open>
+                    <summary>▸ CUSTOM LoRA STACK (MAX 3)</summary>
+                    <div className="sx-expander-body sx-cols sx-cols-2">
+                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-muted)', marginBottom: 'var(--sx-2)' }}>
+                        Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot. Civitai: paste the plain https://civitai.com/api/download/models/&lt;versionId&gt; link (optionally with ?fileId=&lt;id&gt;) — the server auto-appends your CIVITAI_KEY, so never include your token yourself.
+                      </div>
+                      {ltxLoras.map((lora, i) => (
+                        <div key={i} className="sx-cols sx-cols-2" style={{ gridColumn: '1 / -1', gap: 'var(--sx-3)' }}>
+                          <Field label={`LoRA #${i + 1} — SAFETENSORS URL`}>
+                            <input
+                              className="sx-input"
+                              type="url"
+                              placeholder="https://example.com/path/to/lora.safetensors"
+                              value={lora.path}
+                              onChange={(e) => {
+                                const next = [...ltxLoras];
+                                next[i] = { ...next[i], path: e.target.value };
+                                setLtxLoras(next);
+                              }}
+                            />
+                          </Field>
+                          <div className="sx-cols sx-cols-2" style={{ gap: 'var(--sx-3)' }}>
+                            <Field label="SCALE">
+                              <input
+                                className="sx-input"
+                                type="number"
+                                min={0}
+                                max={2}
+                                step={0.05}
+                                value={lora.scale}
+                                onChange={(e) => {
+                                  const next = [...ltxLoras];
+                                  next[i] = { ...next[i], scale: Number(e.target.value) };
+                                  setLtxLoras(next);
+                                }}
+                              />
+                            </Field>
+                            <Field label="TRANSFORMER">
+                              <select
+                                className="sx-select"
+                                value={lora.transformer}
+                                onChange={(e) => {
+                                  const next = [...ltxLoras];
+                                  next[i] = { ...next[i], transformer: e.target.value };
+                                  setLtxLoras(next);
+                                }}
+                              >
+                                {['both', 'high', 'low'].map((o) => (
+                                  <option key={o}>{o}</option>
+                                ))}
+                              </select>
+                            </Field>
+                          </div>
+                          {i > 0 ? (
+                            <button
+                              type="button"
+                              className="sx-link-danger"
+                              onClick={() => setLtxLoras(ltxLoras.filter((_, j) => j !== i))}
+                            >
+                              REMOVE LoRA #{i + 1}
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                      {ltxLoras.length < 3 ? (
+                        <button
+                          type="button"
+                          className="sx-link"
+                          style={{ gridColumn: '1 / -1', alignSelf: 'start' }}
+                          onClick={() => setLtxLoras([...ltxLoras, { path: '', scale: 1, transformer: 'both' }])}
+                        >
+                          + ADD LoRA
+                        </button>
+                      ) : null}
                     </div>
                   </details>
                 ) : null}
@@ -275,6 +470,9 @@ export default function VideoPage() {
                   <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
                   <Segmented options={upscaleOptions} value={falUpscale} onChange={setFalUpscale} ariaLabel="FAL Upscale Model" />
                 </div>
+                {upscaleEntry?.is_custom ? (
+                  <CustomModelPanel model={upscaleEntry.model} kind="upscale" entry={upscaleEntry} onArgs={setUpArgs} />
+                ) : null}
 
                 {falUpscale.includes('Bytedance') ? (
                   <details className="sx-expander">
@@ -352,10 +550,10 @@ export default function VideoPage() {
                 title="STUDIO ENGINE UNAVAILABLE"
                 tone="warn"
                 lines={[
-                  'This system is missing VapourSynth + the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
+                  'This system is missing VapourSynth, the ffms2 source plugin or the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
                   'FAST engine uses Lanczos4 + CAS and is fully operational.',
                 ]}
-                code={['pip install vapoursynth', '+ vsznedi3 plugin']}
+                code={['pip install vapoursynth', '+ ffms2 + vsznedi3 plugins']}
               />
             ) : null}
 
@@ -415,31 +613,22 @@ export default function VideoPage() {
               ) : null}
             </div>
 
-            {/* Cost Breakdown Panel */}
-            <div className="sx-cost-panel">
-              <div className="sx-cost-head">
-                <span className="sx-cost-title">ESTIMATED CLOUD BILLING BREAKDOWN</span>
-                <span className="sx-cost-total">EST. TOTAL: ~${cost.total.toFixed(4)} USD</span>
-              </div>
-              <div className="sx-cost-body">
-                <div>• <b>Batch Scope:</b> {items.length} video(s) ({effDur.toFixed(1)}s total processing time)</div>
-                <div>• <b>Trimming:</b> {trimEnabled ? `ENABLED (${trimDur}s max)` : 'DISABLED (Full video)'}</div>
-                <div>• <b>Outpaint Stage:</b> ~${cost.out.value.toFixed(4)} USD ({cost.out.label})</div>
-                <div>• <b>Upscale Stage:</b> ~${cost.up.value.toFixed(4)} USD ({cost.up.label})</div>
-              </div>
-            </div>
+            <CloudFundingPanel
+              required={cloudRequired}
+              paymentSource={paymentSource}
+              onChange={setPaymentSource}
+              quoteState={quoteState}
+              byokOnly={byokOnly}
+            />
 
             {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
             {!blocked.length && studioPicked && !studioOk ? (
               <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
             ) : null}
-            {!blocked.length && needsKey && !falOk ? (
-              <GatedReason>FAL API KEY REQUIRED FOR OUTPAINTING / CLOUD UPSCALE</GatedReason>
-            ) : null}
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button primary disabled={disabled} loading={busy} onClick={render}>
-                ▶ RENDER {items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE`}
               </Button>
             </div>
 
@@ -456,7 +645,7 @@ export default function VideoPage() {
       {jobs.length ? (
         <Section num={3} title="Render Output" active>
           {jobs.map((j) => (
-            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" />
+            <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={() => refreshWallet({ silent: true })} />
           ))}
           <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
           <Mono>

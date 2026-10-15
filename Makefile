@@ -3,12 +3,12 @@ PY := .venv/bin/python
 PIP := .venv/bin/pip
 UVICORN := .venv/bin/uvicorn
 
-.PHONY: dev build start install streamlit clean
+.PHONY: dev build start install install-dev migrate test streamlit clean
 
 ## dev: concurrently runs FastAPI (8000) + Vite dev (5173)
 dev:
 	@trap 'kill 0' INT TERM EXIT; \
-	$(UVICORN) server.app:app --reload --port 8000 & \
+	$(UVICORN) server.app:app --reload --reload-dir server --reload-dir pipeline --reload-dir core --timeout-graceful-shutdown 2 --port 8000 & \
 	cd web && npm run dev & \
 	wait
 
@@ -27,6 +27,19 @@ start:
 install:
 	$(PIP) install -r requirements.txt
 	cd web && npm install
+
+## install-dev: install runtime, frontend, and test dependencies
+install-dev: install
+	$(PIP) install -r requirements-dev.txt
+
+## migrate: apply database schema migrations
+migrate:
+	$(PY) -m alembic upgrade head
+
+## test: run backend integration and frontend regression tests
+test:
+	$(PY) -m pytest -q tests
+	cd web && npm test
 
 ## streamlit: legacy fallback on 8501 (app.py is untouched)
 streamlit:

@@ -1,21 +1,94 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
+import { useAuth } from '../../hooks/AuthContext.jsx';
+import { useMessaging } from '../../hooks/MessagingContext.jsx';
+import { ReelsPlayerSkeleton } from './Skeleton.jsx';
+import { revealScrollTarget } from '../../utils/revealPlayer.js';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
 // player scripts; we re-inject them in order and clean up on change.
-export default function ReelsPlayer({ params }) {
+export default function ReelsPlayer({
+  params,
+  initialIndex = 0,
+  previewMode = false,
+  previewOptions = {},
+  onPreviewReady,
+  revealOnLoad = false,
+  revealAlign = false,
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, setUser } = useAuth();
+  const messaging = useMessaging();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const mountRef = useRef(null);
-  const sig = JSON.stringify(params);
+  const previewCanvasRef = useRef(null);
+  // Scroll the square into view once per page visit, and never after the reader has scrolled themselves.
+  const revealedRef = useRef(false);
+  const userScrolledRef = useRef(false);
+  const start = Math.max(0, initialIndex | 0);
+  const sig = JSON.stringify({ ...params, start, viewer: user?.id || null });
+  const previewSig = JSON.stringify(previewOptions || {});
+
+  useEffect(() => {
+    const onNavigate = (event) => {
+      const path = event.detail?.path;
+      if (!path || !path.startsWith('/') || path.startsWith('//')) return;
+      event.preventDefault();
+      navigate(path);
+    };
+    const onAuthRequired = (event) => {
+      event.preventDefault();
+      setUser(null);
+      const next = event.detail?.next || location.pathname + location.search;
+      navigate('/login?next=' + encodeURIComponent(next));
+    };
+    const onShareReel = (event) => {
+      const postId = event.detail?.post_id;
+      if (postId) messaging.openShare({ ...event.detail, kind: 'reel', id: postId });
+    };
+    const onSharePack = (event) => {
+      const packId = event.detail?.pack_id || event.detail?.id;
+      if (packId) messaging.openShare({ ...event.detail, kind: 'pack', id: packId });
+    };
+    const onOpenPack = (event) => {
+      const packId = event.detail?.pack_id;
+      if (packId) navigate('/packs/' + encodeURIComponent(packId));
+    };
+    window.addEventListener('echo:navigate', onNavigate);
+    window.addEventListener('echo:auth-required', onAuthRequired);
+    window.addEventListener('echo:share-reel', onShareReel);
+    window.addEventListener('echo:share-pack', onSharePack);
+    window.addEventListener('echo:open-pack', onOpenPack);
+    return () => {
+      window.removeEventListener('echo:navigate', onNavigate);
+      window.removeEventListener('echo:auth-required', onAuthRequired);
+      window.removeEventListener('echo:share-reel', onShareReel);
+      window.removeEventListener('echo:share-pack', onSharePack);
+      window.removeEventListener('echo:open-pack', onOpenPack);
+    };
+  }, [navigate, location.pathname, location.search, messaging, setUser]);
+
+  // Phones open the player full-bleed; leaving fullscreen yourself opts out only until you leave the player.
+  useEffect(() => () => { window.__sxFsOptOut = false; }, []);
+
+  useEffect(() => {
+    if (!revealOnLoad) return undefined;
+    const mark = () => { userScrolledRef.current = true; };
+    const events = ['wheel', 'touchmove', 'keydown', 'mousedown'];
+    events.forEach((name) => window.addEventListener(name, mark, { passive: true }));
+    return () => events.forEach((name) => window.removeEventListener(name, mark));
+  }, [revealOnLoad]);
 
   useEffect(() => {
     let alive = true;
     setData(null);
     setErr('');
     api
-      .get('/api/reels/player-inline', params)
+      .get('/api/reels/player-inline', { ...params, start })
       .then((d) => {
         if (alive) setData(d);
       })
@@ -42,6 +115,7 @@ export default function ReelsPlayer({ params }) {
     mount.appendChild(style);
 
     const host = document.createElement('div');
+    host.id = 'sxReelsHost';
     host.innerHTML = data.html;
     mount.appendChild(host);
 
@@ -50,8 +124,82 @@ export default function ReelsPlayer({ params }) {
       s.textContent = code;
       mount.appendChild(s);
     }
-    return undefined;
-  }, [data]);
+    let revealTimer = 0;
+    let revealAttempts = 0;
+    if (revealOnLoad && !previewMode && !revealedRef.current) {
+      const tryReveal = () => {
+        const frame = document.getElementById('reelsFrame');
+        const rect = frame ? frame.getBoundingClientRect() : null;
+        // Layout can still be settling for a moment (fonts, the skeleton swap). A timer (not rAF) so a tab
+        // that loads in the background still ends up scrolled.
+        if (!rect || rect.height < 100) {
+          if (revealAttempts < 60) {
+            revealAttempts += 1;
+            revealTimer = window.setTimeout(tryReveal, 50);
+          }
+          return;
+        }
+        revealedRef.current = true;
+                if (userScrolledRef.current) return;
+        const header = document.querySelector('.sx-top-bar');
+        const target = revealScrollTarget({
+          top: rect.top,
+          bottom: rect.bottom,
+          viewportHeight: window.innerHeight,
+          headerBottom: header ? Math.max(0, header.getBoundingClientRect().bottom) : 0,
+          scrollY: window.scrollY,
+          align: revealAlign,
+        });
+        if (target !== null) window.scrollTo({ top: target, behavior: 'auto' });
+      };
+      revealTimer = window.setTimeout(tryReveal, 0);
+    }
+    let previewFrame = 0;
+    let previewAttempts = 0;
+    if (previewMode) {
+      const tryStartPreview = () => {
+        try {
+          const renderer = window.WebXRVR;
+          const canvas = previewCanvasRef.current;
+          if (!renderer?.startPreview || !canvas) throw new Error('Preview renderer did not initialize.');
+          // Layout may still be 0×0 on the first frame (fonts/skeleton swap);
+          // wait a few frames for a real size before binding the GL context.
+          if ((canvas.clientWidth | 0) === 0 && previewAttempts < 30) {
+            previewAttempts += 1;
+            previewFrame = window.requestAnimationFrame(tryStartPreview);
+            return;
+          }
+          renderer.startPreview(canvas, previewOptions);
+          onPreviewReady?.(renderer);
+        } catch (error) {
+          const hint = /webgl/i.test(String(error?.message || ''))
+            ? ' — WebGL context creation failed. Enable hardware acceleration (Chrome: Settings → System → Use graphics acceleration), disable --disable-gpu, and reload. Headless/software-GL browsers need SwiftShader (`--use-gl=swiftshader`).'
+            : '';
+          setErr(String(error?.message || error) + hint);
+        }
+      };
+      previewFrame = window.requestAnimationFrame(tryStartPreview);
+    }
+    // Tear down player timers/handlers (e.g. the image-reel dwell timer).
+    return () => {
+      if (revealTimer) window.clearTimeout(revealTimer);
+      if (previewFrame) window.cancelAnimationFrame(previewFrame);
+      if (previewMode && window.WebXRVR?.stopPreview) {
+        try {
+          window.WebXRVR.stopPreview();
+        } catch {
+          /* best-effort */
+        }
+      }
+      if (typeof window !== 'undefined' && typeof window.__sxReelsCleanup === 'function') {
+        try {
+          window.__sxReelsCleanup();
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+  }, [data, previewMode, previewSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -61,7 +209,21 @@ export default function ReelsPlayer({ params }) {
           <div>{err}</div>
         </div>
       ) : null}
-      <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />
+      {!data && !err ? <ReelsPlayerSkeleton label="Loading reels player" /> : null}
+      {previewMode ? (
+        <div className="sx-immersive-preview-stage">
+          <canvas
+            ref={previewCanvasRef}
+            className="sx-immersive-preview-canvas"
+            tabIndex="0"
+            role="img"
+            aria-label="Interactive desktop preview of the immersive Reels scene"
+          />
+          <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount sx-immersive-preview-source" aria-hidden="true" />
+        </div>
+      ) : (
+        <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />
+      )}
     </div>
   );
 }

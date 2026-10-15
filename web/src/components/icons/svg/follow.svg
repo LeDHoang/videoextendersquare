@@ -1,0 +1,17 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tactical User Monolith Silhouette with Precisely Aligned Center Axis (X = 10.5) -->
+
+  <!-- Faceted Hexagonal Head Node (Centered at X = 10.5) -->
+  <polygon points="7.5,4 10.5,2.2 13.5,4 13.5,7.5 10.5,9.3 7.5,7.5" stroke="#f2f3f5" stroke-width="1.5" stroke-linejoin="bevel" fill="#121315"/>
+  <circle cx="10.5" cy="5.7" r="0.8" fill="#f2f3f5"/>
+
+  <!-- Beveled Torso Chassis (Symmetric across X = 10.5, span X=4 to X=17, top span X=7 to X=14) -->
+  <path d="M4 19.5V17L7 13.5H14L17 17V19.5" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+  <line x1="6.5" y1="17" x2="14.5" y2="17" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.3"/>
+
+  <!-- Leica Vermilion Add/Follow Crosshair Reticle Node (Centered at X = 19.5, Y = 11) -->
+  <line x1="19.5" y1="8" x2="19.5" y2="14" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+  <line x1="16.5" y1="11" x2="22.5" y2="11" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+  <polygon points="19.5,9.8 20.7,11 19.5,12.2 18.3,11" fill="#ff3b1f"/>
+  <circle cx="19.5" cy="11" r="0.5" fill="#f2f3f5"/>
+</svg>

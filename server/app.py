@@ -8,6 +8,7 @@ Serves:
 """
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,17 +21,20 @@ from fastapi.staticfiles import StaticFiles
 
 # Only the Streamlit entrypoint (app.py) called this before; the FastAPI
 # stack never did, so FAL_KEY in .env was invisible to `uvicorn server.app:app`
-# unless it was also exported in the shell or set via the (unauthenticated)
-# /api/config/fal-key endpoint.
-load_dotenv()
+# unless it was also exported in the shell. The platform key is no longer
+# mutable through a public API.
+# override=False so a stray .env baked into the image can never beat
+# production secrets passed via the environment (docker -e / secret manager).
+load_dotenv(override=False)
 
 _CLEANUP_INTERVAL_S = 15 * 60
 
 
 async def _cleanup_loop():
     """Periodically reclaim finished job records and expired staged uploads."""
+    from server.billing.runtime import reap_stale_reservations, reconcile_pending_requests
     from server.jobs import job_manager
-    from server.routers import image, video
+    from server.routers import image, messages, video
 
     while True:
         await asyncio.sleep(_CLEANUP_INTERVAL_S)
@@ -38,13 +42,44 @@ async def _cleanup_loop():
             job_manager.cleanup_old()
             image.cleanup_stale_uploads()
             video.cleanup_stale_uploads()
+            await asyncio.to_thread(messages.cleanup_message_events)
+            await asyncio.to_thread(reconcile_pending_requests)
+            await asyncio.to_thread(reap_stale_reservations)
+            await asyncio.to_thread(_backfill_media_info)
         except Exception:
             pass  # best-effort housekeeping must never crash the loop
+
+
+def _backfill_media_info() -> None:
+    """Fill reel duration/size for posts that predate the probe (see services.backfill_media_info)."""
+    if os.environ.get("SX_MEDIA_BACKFILL", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+    from server.social.services import backfill_media_info
+
+    count = backfill_media_info()
+    if count:
+        logging.getLogger("server.app").info("Backfilled duration/size for %d posts", count)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from core.tooling import ensure_ffmpeg_on_path, pick_encoder
+    from server.social import init_database
+    from server.social.legacy import import_legacy_social
+
+    init_database()
+    await asyncio.to_thread(import_legacy_social)
+    from server.billing.runtime import reap_stale_reservations, reconcile_pending_requests
+    await asyncio.to_thread(reconcile_pending_requests)
+    await asyncio.to_thread(reap_stale_reservations)
+    try:
+        from server.billing.service import require_billing_secrets
+        require_billing_secrets()
+    except Exception as exc:
+        # Option B fail-closed: billing routes 503 on their own; the rest of
+        # the app (free local processing, reels) keeps running. Loud so a
+        # misconfigured deploy cannot sit half-broken unnoticed.
+        logging.getLogger("server.app").error("Billing secrets misconfigured; paid endpoints will refuse work: %s", exc)
 
     # Must run before pipeline modules are imported by routers.
     ensure_ffmpeg_on_path()
@@ -59,29 +94,34 @@ async def lifespan(app: FastAPI):
         pass  # health checks / job errors surface this properly later
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
+    # Off the startup path: probing a large library can take a while.
+    backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))
     try:
         yield
     finally:
         cleanup_task.cancel()
+        backfill_task.cancel()
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan)
 
-    # CORS for the Vite dev server (port 5173)
+    # CORS for the Vite dev server (port 5173). Credentials are on, so keep
+    # the surface tight: only the methods/headers the frontend actually sends
+    # (CSRF protection in server/social/auth.py is the real defense).
     dev_origins = os.environ.get("SX_DEV_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in dev_origins.split(",") if o.strip()],
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-CSRF-Token"],
+        expose_headers=[],
     )
 
-    from server.routers import compare, config, health, image, reels, video
+    from server.routers import account_safety, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, uploads, video
 
-    for module in (health, config, image, video, reels, compare):
+    for module in (health, config, model_info, billing, image, video, account_safety, social, packs, messages, reels, map_tiles, rewards, uploads, compare):
         app.include_router(module.router)
 
     # Static media serving (replaces mediaserver.py port 8502).
@@ -90,6 +130,10 @@ def create_app() -> FastAPI:
     output_dir = Path("output").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=output_dir), name="media")
+
+    avatar_dir = Path("data/avatars").resolve()
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/avatars", StaticFiles(directory=avatar_dir), name="avatars")
 
     # Built React app (production). Mounted last so /api and /media win.
     static_dir = Path(__file__).resolve().parent / "static"

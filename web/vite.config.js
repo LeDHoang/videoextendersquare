@@ -8,10 +8,16 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8000',
       '/media': 'http://localhost:8000',
+      '/avatars': 'http://localhost:8000',
     },
   },
   build: {
     outDir: 'dist',
     sourcemap: false,
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    include: ['src/**/*.test.{js,jsx}'],
   },
 });

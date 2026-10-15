@@ -1,84 +1,135 @@
-import { useState } from 'react';
-import { Outlet, useLocation, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import HeaderBar from './HeaderBar.jsx';
 import Sidebar from './Sidebar.jsx';
+import Footer from './Footer.jsx';
+import MobileBottomNav from './MobileBottomNav.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import { HealthProvider, useHealthContext } from '../../hooks/HealthContext.jsx';
 import { ConfigProvider, useConfigContext } from '../../hooks/ConfigContext.jsx';
-
-const ROUTE_NAMES = {
-  '/image': 'IMAGE EXTENDER',
-  '/video': 'VIDEO EXTENDER',
-  '/compare': 'FAST vs STUDIO',
-  '/reels': 'REELS / VR',
-};
+import { MessagingProvider } from '../../hooks/MessagingContext.jsx';
+import { useAuth } from '../../hooks/AuthContext.jsx';
+import MessageDock from '../messaging/MessageDock.jsx';
+import ReelShareDialog from '../messaging/ReelShareDialog.jsx';
 
 function Shell() {
   const health = useHealthContext();
-  const { config, setFalKey, setModels } = useConfigContext();
+  const { config, setModels } = useConfigContext();
   const location = useLocation();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isVrActive, setIsVrActive] = useState(false);
+  const [isFsActive, setIsFsActive] = useState(false);
+  // The browser's own fullscreen shows only the player element, so the tab bar is for the CSS fullscreen alone.
+  const [isRealFs, setIsRealFs] = useState(false);
+  const [isPhone, setIsPhone] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches,
+  );
 
-  const currentTitle = ROUTE_NAMES[location.pathname] || 'ECHO';
-  const falOk = health?.fal_key?.ok;
-  const probes = Object.values(health?.probes || {});
-  const systemOk = probes.length > 0 && probes.every((p) => p.ok);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 700px)');
+    const onChange = () => setIsPhone(query.matches);
+    onChange();
+    query.addEventListener?.('change', onChange);
+    return () => query.removeEventListener?.('change', onChange);
+  }, []);
+
+  // ── VR / Fullscreen immersive detection (Reels only) ──
+  useEffect(() => {
+    const onVrEnter = () => setIsVrActive(true);
+    const onVrExit = () => setIsVrActive(false);
+    const onVrChange = (e) => {
+      if (e && e.detail && typeof e.detail.inVR === 'boolean') setIsVrActive(e.detail.inVR);
+    };
+    const onFsEnter = () => setIsFsActive(true);
+    const onFsExit = () => setIsFsActive(false);
+    const onFsChange = () => {
+      const el = document.fullscreenElement || document.webkitFullscreenElement;
+      const isReelsFs =
+        !!el &&
+        (el.id === 'reelsFrame' ||
+          el.id === 'sxReelsRoot' ||
+          (el.closest && (el.closest('#sxReelsRoot') || el.closest('#reelsFrame'))) ||
+          (el.querySelector && (el.querySelector('#reelsFrame') || el.querySelector('#sxReelsRoot'))));
+      setIsFsActive(isReelsFs);
+      setIsRealFs(!!el);
+    };
+    window.addEventListener('echo:vr-enter', onVrEnter);
+    window.addEventListener('echo:vr-exit', onVrExit);
+    window.addEventListener('echo:vrchange', onVrChange);
+    window.addEventListener('echo:fullscreen-enter', onFsEnter);
+    window.addEventListener('echo:fullscreen-exit', onFsExit);
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      window.removeEventListener('echo:vr-enter', onVrEnter);
+      window.removeEventListener('echo:vr-exit', onVrExit);
+      window.removeEventListener('echo:vrchange', onVrChange);
+      window.removeEventListener('echo:fullscreen-enter', onFsEnter);
+      window.removeEventListener('echo:fullscreen-exit', onFsExit);
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  const isPlayerRoute = location.pathname === '/reels' || /^\/packs\/[^/]+$/.test(location.pathname);
+  const immersive = isPlayerRoute && (isVrActive || isFsActive);
+  const showBottomNav = isPlayerRoute && isFsActive && isPhone && !isVrActive && !isRealFs;
+  // Left off the messages console and the immersive/fullscreen player (their own full-height layouts) and the
+  // sign-in / recovery screens (single-screen flows that the footer would push past the fold).
+  const showFooter = !immersive && !/^\/(messages|login|signup|forgot-password|reset-password)(\/|$)/.test(location.pathname);
+
+  // Keep html/body class in sync so pure-CSS fallback also hides chrome
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    if (immersive) {
+      root.classList.add('sx-vr-active');
+      body.classList.add('sx-vr-active');
+    } else {
+      // Only clear if not in a transient VR state that webxr_vr.js also manages;
+      // immersive already reflects the true state so safe to remove.
+      root.classList.remove('sx-vr-active');
+      body.classList.remove('sx-vr-active');
+    }
+  }, [immersive]);
+
+  // Close immersive chrome when navigating away from /reels while fullscreen
+  useEffect(() => {
+    if (!isPlayerRoute && document.fullscreenElement) {
+      // Let fullscreen persist but header will re-appear via `immersive` flag
+    }
+  }, [isPlayerRoute]);
 
   return (
     <>
-      {/* Accessible Skip to Content Link */}
+      {/* Accessible Skip Link */}
       <a href="#main-content" className="sx-skip-link">
         Skip to main content
       </a>
 
-      {/* Mobile Top App Bar (only shown on screens < 900px) */}
-      <header className="sx-mobile-header">
-        <Link to="/reels" className="sx-mobile-brand" onClick={() => setMobileOpen(false)}>
-          <img src="/logo.png" alt="ECHO Logo" className="sx-brand-logo sx-brand-logo-sm" />
-          <span className="sx-brand-title" style={{ fontSize: '0.85rem' }}>
-            {currentTitle}
-          </span>
-        </Link>
-        <div className="sx-mobile-actions">
-          <button
-            type="button"
-            className="sx-btn"
-            style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-            onClick={() => setMobileOpen((o) => !o)}
-            aria-label="Toggle Navigation & Settings Menu"
-            aria-expanded={mobileOpen}
-          >
-            <span
-              style={{
-                display: 'inline-block',
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: systemOk && falOk ? 'var(--sx-success)' : !systemOk ? 'var(--sx-danger)' : 'var(--sx-warn)',
-                marginRight: 6,
-              }}
-            />
-            MENU ☰
-          </button>
-        </div>
-      </header>
+      {/* Global High-Density Utility Top Bar — auto-hidden in Reels immersive VR / fullscreen */}
+      <HeaderBar onToggleSidebar={() => setDrawerOpen((prev) => !prev)} hidden={immersive} />
 
       {/* Main Grid Shell */}
-      <div className="sx-shell">
-        {/* Backdrop for Mobile Drawer */}
+      <div
+        className={`sx-shell ${drawerOpen ? 'sx-sidebar-open' : ''} ${immersive ? 'sx-immersive' : ''}`}
+        style={{ minHeight: immersive ? '100dvh' : 'calc(100dvh - 64px)' }}
+      >
+        {/* Backdrop for Settings Drawer on mobile */}
         <div
-          className={`sx-drawer-backdrop ${mobileOpen ? 'sx-open' : ''}`}
-          onClick={() => setMobileOpen(false)}
+          className={`sx-drawer-backdrop ${drawerOpen ? 'sx-open' : ''}`}
+          onClick={() => setDrawerOpen(false)}
           aria-hidden="true"
         />
 
-        {/* Sidebar Component */}
+        {/* Settings / Diagnostics Drawer */}
         <Sidebar
           health={health}
           config={config}
-          setFalKey={setFalKey}
           setModels={setModels}
-          isOpen={mobileOpen}
-          onClose={() => setMobileOpen(false)}
+          isOpen={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
         />
 
         {/* Main Content Area */}
@@ -87,17 +138,25 @@ function Shell() {
             <Outlet />
           </ErrorBoundary>
         </main>
+
+        {showFooter ? <Footer /> : null}
       </div>
+      {showBottomNav ? <MobileBottomNav /> : null}
+      {!immersive && !location.pathname.startsWith('/messages') ? <MessageDock /> : null}
+      {!immersive ? <ReelShareDialog /> : null}
     </>
   );
 }
 
 export default function AppShell() {
+  const { user } = useAuth();
   return (
-    <HealthProvider>
-      <ConfigProvider>
-        <Shell />
-      </ConfigProvider>
-    </HealthProvider>
+    <MessagingProvider key={user?.id || 'anonymous'}>
+      <HealthProvider>
+        <ConfigProvider>
+          <Shell />
+        </ConfigProvider>
+      </HealthProvider>
+    </MessagingProvider>
   );
 }

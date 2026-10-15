@@ -1,15 +1,16 @@
-"""Config router — FAL_KEY and model endpoint settings."""
+"""Read-only platform-key status and administrator-only model settings."""
 
-import os
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from core import models as _models
+from server.features import reel_pack_features
+from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 # In-memory model endpoints config. The static catalogs (labels + pricing)
-# live in core/models.py — this dict holds only the user-editable overrides.
+# live in core/models.py — this dict holds only administrator-editable overrides.
 DEFAULT_MODELS = {
     "outpaint_img": _models.IMAGE_MODELS["outpaint_img"],
     "upscale_img": _models.IMAGE_MODELS["upscale_img"],
@@ -18,10 +19,6 @@ DEFAULT_MODELS = {
 }
 
 _model_config = dict(DEFAULT_MODELS)
-
-
-class FalKeyUpdate(BaseModel):
-    fal_key: str
 
 
 class ModelsUpdate(BaseModel):
@@ -33,35 +30,34 @@ class ModelsUpdate(BaseModel):
 
 @router.get("")
 def get_config():
-    """Return current configuration state (masked FAL key, model overrides,
-    and the full model/pricing catalog the frontend renders from)."""
-    key = os.environ.get("FAL_KEY", "")
-    masked = f"****{key[-4:]}" if len(key) >= 4 else ("set" if key else "")
+    """Return the model/pricing catalog the frontend renders from.
+
+    The platform Fal key is server-owned and never exposed here — not even
+    masked. Operators confirm it via server logs / Stripe dashboard instead.
+    """
     return {
-        "fal_key_set": bool(key),
-        "fal_key_masked": masked,
         "models": _models.config_payload(_model_config),
+        "features": {"reel_packs": reel_pack_features()},
     }
 
 
-@router.put("/fal-key")
-def set_fal_key(body: FalKeyUpdate):
-    """Set or update FAL_KEY in environment."""
-    key = body.fal_key.strip()
-    if key:
-        os.environ["FAL_KEY"] = key
-    elif "FAL_KEY" in os.environ:
-        del os.environ["FAL_KEY"]
-
-    masked = f"****{key[-4:]}" if len(key) >= 4 else ("set" if key else "")
-    return {"status": "ok", "fal_key_set": bool(key), "fal_key_masked": masked}
-
-
 @router.put("/models")
-def update_models(body: ModelsUpdate):
-    """Update model endpoint overrides."""
+def update_models(
+    body: ModelsUpdate,
+    request: Request,
+    context: AuthContext = Depends(require_admin_csrf),
+):
+    """Update model endpoint overrides.
+
+    A non-empty value sets a custom endpoint (unknown ids surface as
+    ``CUSTOM(...)`` options in the extenders). URLs are normalized to bare
+    ids on save. An empty string resets that slot back to its stock default.
+    """
+    validate_origin(request)
     updates = body.model_dump(exclude_unset=True)
     for k, v in updates.items():
-        if v and k in _model_config:
-            _model_config[k] = v.strip()
+        if k not in _model_config:
+            continue
+        norm = _models.normalize_model_id(v or "")
+        _model_config[k] = norm or DEFAULT_MODELS[k]
     return {"status": "ok", "models": _models.config_payload(_model_config)}

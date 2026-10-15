@@ -34,6 +34,18 @@ def _template() -> str:
     img_js_path = assets / "quest_controller_img.js"
     img_js = img_js_path.read_text(encoding="utf-8") if img_js_path.exists() else ""
     html = html.replace("__QUEST_CONTROLLER_IMG_JS__", img_js)
+    feed_state_path = assets / "reels_feed_state.js"
+    feed_state_js = feed_state_path.read_text(encoding="utf-8") if feed_state_path.exists() else ""
+    html = html.replace("__REELS_FEED_STATE_JS__", feed_state_js)
+    pack_state_path = assets / "reels_pack_state.js"
+    pack_state_js = pack_state_path.read_text(encoding="utf-8") if pack_state_path.exists() else ""
+    html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js)
+    three_js_path = assets / "three.min.js"
+    three_js = three_js_path.read_text(encoding="utf-8") if three_js_path.exists() else ""
+    html = html.replace("__THREE_JS__", three_js)
+    vr_ui_path = assets / "vr_ui_canvas.js"
+    vr_ui_js = vr_ui_path.read_text(encoding="utf-8") if vr_ui_path.exists() else ""
+    html = html.replace("__VR_UI_CANVAS_JS__", vr_ui_js)
     # Inline the WebXR VR module so it's available inside the Streamlit iframe
     vr_js_path = assets / "webxr_vr.js"
     vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""
@@ -249,6 +261,7 @@ def render(ctx: dict) -> None:
     vr_js_path = Path(__file__).parent.parent / "assets" / "webxr_vr.js"
     js_mtime = int(vr_js_path.stat().st_mtime) if vr_js_path.exists() else 0
     html = _template().replace("__VIDEO_DATA_JSON__", json.dumps(video_payload))
+    html = html.replace("__FEED_STATE_JSON__", json.dumps({"feed_params": {}, "next_cursor": None, "has_more": False}))
     html = html.replace("</head>", f"<script>const _VR_MTIME={js_mtime};</script></head>", 1)
     components.html(html, height=750)
 

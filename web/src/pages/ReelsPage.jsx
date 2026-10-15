@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { Hero, Section, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
+import { Hero, EmptyState, SpecRow, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
 import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
+import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
+import { useAuth } from '../hooks/AuthContext.jsx';
 
 const SORTS = [
+  { label: 'FOR YOU', value: 'for_you' },
   { label: 'NEWEST', value: 'newest' },
+  { label: 'TOP', value: 'trending' },
+  { label: 'MOST VIEWED', value: 'views' },
+  { label: 'MOST LIKED', value: 'likes' },
   { label: 'OLDEST', value: 'oldest' },
   { label: 'A→Z', value: 'alphabetical' },
   { label: 'SHUFFLE', value: 'shuffle' },
 ];
+const VALID_SORTS = SORTS.map((option) => option.value);
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
   { label: CODEC_DEFAULT, value: CODEC_DEFAULT },
@@ -18,15 +26,55 @@ const CODEC_OPTS = [
 ];
 
 export default function ReelsPage() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading, setUser } = useAuth();
+  // Deep-link support (Explore → Reels): ?folder&codec(h264|hevc|all)
+  // &search&tag&sort&play=<video path> preselects filters and starts the
+  // player at that exact reel. `deepPlay` is consumed (cleared) as soon as
+  // the user touches any filter so later refetches start at index 0.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramSort = searchParams.get('sort');
+  const paramCodec = (searchParams.get('codec') || '').toLowerCase();
+  const deepPost = searchParams.get('post');
   const [data, setData] = useState(null);
-  const [folder, setFolder] = useState('testpipeline');
-  const [codec, setCodec] = useState(CODEC_DEFAULT);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('newest');
+  const [folder, setFolder] = useState(searchParams.get('folder') || 'testpipeline');
+  const [codec, setCodec] = useState(
+    paramCodec === 'h264' ? 'H264 (Browser/VR)' : paramCodec === 'all' ? 'ALL CODECS' : CODEC_DEFAULT,
+  );
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [activeTag, setActiveTag] = useState(searchParams.get('tag') || '');
+  const [activeLocation, setActiveLocation] = useState(searchParams.get('location') || '');
+  const [sort, setSort] = useState(
+    VALID_SORTS.includes(paramSort) ? paramSort : 'for_you',
+  );
+  const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
+  const [feedScope, setFeedScope] = useState(searchParams.get('feed') === 'following' ? 'following' : 'discover');
+  const activeAuthor = searchParams.get('author') || '';
+
+  // Re-sync when navigating Explore → Reels while already mounted (same
+  // route, new query string — state initializers above don't re-run).
+  useEffect(() => {
+    const play = searchParams.get('play');
+    if (play || searchParams.get('post')) {
+      const f = searchParams.get('folder');
+      if (f) setFolder(f);
+      const c = (searchParams.get('codec') || '').toLowerCase();
+      setCodec(c === 'h264' ? 'H264 (Browser/VR)' : c === 'all' ? 'ALL CODECS' : CODEC_DEFAULT);
+      setSearch(searchParams.get('search') || '');
+      setActiveTag(searchParams.get('tag') || '');
+      setActiveLocation(searchParams.get('location') || '');
+      setFeedScope(searchParams.get('feed') === 'following' ? 'following' : 'discover');
+      const s = searchParams.get('sort');
+      if (VALID_SORTS.includes(s)) setSort(s);
+      setDeepPlay(play);
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const [tunnel, setTunnel] = useState('');
   const [showTunnel, setShowTunnel] = useState(false);
   const [proxyBusy, setProxyBusy] = useState(false);
   const [proxyMsg, setProxyMsg] = useState('');
+  const [spatJob, setSpatJob] = useState(null);
+  const [spatMsg, setSpatMsg] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const searchRef = useRef(null);
@@ -40,42 +88,102 @@ export default function ReelsPage() {
     codec === 'ALL CODECS' ? 'all' : codec === 'H264 (Browser/VR)' ? 'h264' : 'hevc';
 
   useEffect(() => {
+    if (feedScope === 'following' && authLoading) return;
+    if (feedScope === 'following' && !user) {
+      const next = '/reels?' + searchParams.toString();
+      navigate('/login?next=' + encodeURIComponent(next), { replace: true });
+      return;
+    }
     api
       .get('/api/reels', {
         folder,
         codec: codecParam,
         search: debouncedSearch,
+        tag: activeTag || undefined,
+        location: activeLocation || undefined,
+        feed: feedScope === 'following' ? 'following' : undefined,
+        author: activeAuthor || undefined,
+        post: deepPost || undefined,
         sort,
         refresh: refreshKey > 0,
       })
       .then((r) => {
         setData(r);
-        if (!r.folders.includes(folder)) {
+        if (folder !== 'ALL FOLDERS' && !r.folders.includes(folder)) {
           setFolder(r.folders.includes('testpipeline') ? 'testpipeline' : r.folders[0] || 'ALL FOLDERS');
         }
       })
-      .catch(() => setData({ total: 0, count: 0, folders: [], videos: [] }));
-  }, [folder, codecParam, debouncedSearch, sort, refreshKey]);
+      .catch((error) => {
+        if (error?.status === 401 && feedScope === 'following') {
+          setUser(null);
+          const next = '/reels?' + searchParams.toString();
+          navigate('/login?next=' + encodeURIComponent(next), { replace: true });
+          return;
+        }
+        setData({ total: 0, count: 0, folders: [], videos: [] });
+      });
+  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+
+  const clearDeepLink = () => {
+    setDeepPlay(null);
+    if (searchParams.get('play') || searchParams.get('post')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('play');
+      nextParams.delete('post');
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
+
+  const clearTagFilter = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('tag');
+    nextParams.delete('location');
+    nextParams.delete('play');
+    nextParams.delete('post');
+    clearDeepLink();
+    setActiveTag('');
+    setActiveLocation('');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const changeFeed = (value) => {
+    if (value === 'following' && !user) {
+      navigate('/login?next=' + encodeURIComponent('/reels?feed=following'));
+      return;
+    }
+    setDeepPlay(null);
+    setFeedScope(value);
+    if (value === 'following') setFolder('ALL FOLDERS');
+    const nextParams = new URLSearchParams(searchParams);
+    if (value === 'following') nextParams.set('feed', 'following');
+    else nextParams.delete('feed');
+    nextParams.delete('play');
+    nextParams.delete('post');
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const videos = data?.videos || [];
+  const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
+  const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
+  const initialIndex = deepPostId ? 0 : (deepIndex >= 0 ? deepIndex : 0);
   const playerParams = {
     folder,
     codec: codecParam,
     search: debouncedSearch,
     sort,
+    ...(activeTag ? { tag: activeTag } : {}),
+    ...(activeLocation ? { location: activeLocation } : {}),
+    ...(feedScope === 'following' ? { feed: 'following' } : {}),
+    ...(activeAuthor ? { author: activeAuthor } : {}),
+    ...(deepPostId ? { post: deepPostId } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
-  const videoOpts = videos.map((v) => ({
-    value: v.path,
-    label: v.filename,
-    tag: `${v.size} · ${v.codec} · ${v.is_proxy ? 'PROXY' : 'MASTER'}`,
-  }));
 
   const generateProxy = async () => {
     setProxyBusy(true);
     setProxyMsg('');
     try {
-      const r = await api.post('/api/reels/proxy', videos.map((v) => v.path));
+      const r = await api.post('/api/reels/proxy', videos.filter((v) => v.media_type !== 'image').map((v) => v.path));
       const n = r.generated.length;
       setProxyMsg(
         n
@@ -91,80 +199,195 @@ export default function ReelsPage() {
   };
 
   const folders = data?.folders || [];
+  const has3d = folders.includes('testpipeline-3d');
+
+  const spatialize = async () => {
+    if (spatJob) return;
+    setSpatMsg('QUEUING LOCAL SPATIALIZATION…');
+    try {
+      const r = await api.post('/api/reels/spatialize', {});
+      setSpatJob(r.job_id);
+      setSpatMsg(`SPATIALIZING ${r.queued.length} CLIP(S) — DEPTH + STEREO WARP (LOCAL)…`);
+    } catch (e) {
+      setSpatMsg(`✗ ${String(e.message || e)}`);
+    }
+  };
+
+  useEffect(() => {
+    if (!spatJob) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const r = await api.get(`/api/reels/spatialize/jobs/${spatJob}`);
+        if (r.messages?.length) setSpatMsg(r.messages[r.messages.length - 1]);
+        if (r.status === 'complete') {
+          clearInterval(t);
+          setSpatJob(null);
+          const n = r.result?.generated?.length || 0;
+          const f = r.result?.failed?.length || 0;
+          setSpatMsg(`✓ ${n} SBS MASTER(S) IN testpipeline-3d${f ? ` — ${f} failed` : ''}`);
+          setRefreshKey((k) => k + 1);
+        } else if (r.status === 'failed') {
+          clearInterval(t);
+          setSpatJob(null);
+          setSpatMsg(`✗ SPATIALIZATION FAILED: ${r.error?.[0] || 'unknown error'}`);
+        }
+      } catch {
+        /* transient poll error — keep polling */
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [spatJob]);
+
   const folderOpts = [{ label: 'ALL FOLDERS', value: 'ALL FOLDERS' }, ...folders.map((f) => ({ label: f, value: f }))];
-  const needsProxy = videos.filter((v) => codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
+  const needsProxy = videos.filter((v) => v.media_type !== 'image' && codecParam !== 'hevc' && !v.is_proxy && v.codec !== 'H264').length;
 
   return (
-    <div>
+    <div className="sx-reels-page sx-wide-page">
       <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
-          <span>VIDEOS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
+          <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
           <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
           <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
+          <span>FEED: <strong>{activeAuthor ? '@' + activeAuthor : feedScope.toUpperCase()}</strong></span>
           <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
         </div>
       </Hero>
 
-      {/* Toolbar */}
-      <div className="sx-toolbar">
-        <div className="sx-toolbar-group">
-          <div style={{ width: '160px' }}>
-            <Dropdown
-              value={folder}
-              options={folderOpts}
-              onChange={setFolder}
-              placeholder="Target folder…"
+      {activeAuthor ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>CREATOR FEED</span>
+          <strong>{'@' + activeAuthor}</strong>
+          <button
+            type="button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.delete('author');
+              nextParams.delete('play');
+              nextParams.delete('post');
+              setDeepPlay(null);
+              setSearchParams(nextParams, { replace: true });
+            }}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
+
+      {activeTag ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>TAG FEED</span>
+          <strong>{'#' + activeTag}</strong>
+          <button
+            type="button"
+            onClick={clearTagFilter}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
+
+      {activeLocation ? (
+        <div className="sx-active-tag-filter" role="status">
+          <span>LOCATION FEED</span>
+          <strong>{activeLocation.toUpperCase()}</strong>
+          <button
+            type="button"
+            onClick={clearTagFilter}
+          >
+            CLEAR ×
+          </button>
+        </div>
+      ) : null}
+
+      {/* ─── Control Section (2 Rows: Filters + Utilities) ── */}
+      <div className="sx-control-rail-stacked">
+        {/* Row 1: Filters (Folder, Codec, Search, Sort) */}
+        <div className="sx-control-rail-row">
+          <div className="sx-control-group" style={{ flex: 1, flexWrap: 'wrap' }}>
+            <Pills
+              options={[
+                { label: 'FOR YOU', value: 'discover' },
+                { label: 'FOLLOWING', value: 'following' },
+              ]}
+              value={feedScope}
+              onChange={changeFeed}
             />
-          </div>
-          <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} />
-          <div style={{ width: '150px', position: 'relative' }}>
-            <input
-              ref={searchRef}
-              className="sx-input"
-              style={{ paddingRight: search ? '28px' : undefined }}
-              placeholder="Search…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search ? (
-              <button
-                type="button"
-                className="sx-search-clear"
-                onClick={() => setSearch('')}
-                aria-label="Clear search filter"
-              >
-                ✕
-              </button>
-            ) : null}
-          </div>
-          <div style={{ width: '120px' }}>
-            <Dropdown
-              value={sort}
-              options={SORTS}
-              onChange={setSort}
-              placeholder="Sort by…"
-            />
+            <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+              <Dropdown
+                value={folder}
+                options={folderOpts}
+                onChange={(v) => { clearDeepLink(); setFolder(v); }}
+                placeholder="Target folder…"
+              />
+            </div>
+            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} />
+            <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
+              <input
+                ref={searchRef}
+                className="sx-input"
+                style={{ paddingRight: search ? '28px' : undefined }}
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => { clearDeepLink(); setSearch(e.target.value); }}
+              />
+              {search ? (
+                <button
+                  type="button"
+                  className="sx-search-clear"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search filter"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+            <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+              <Dropdown
+                value={sort}
+                options={SORTS}
+                onChange={(v) => { clearDeepLink(); setSort(v); }}
+                placeholder="Sort by…"
+              />
+            </div>
           </div>
         </div>
-        <div className="sx-toolbar-group">
-          <Button onClick={() => setRefreshKey((k) => k + 1)}>↻</Button>
-          <Button onClick={() => setShowTunnel((s) => !s)}>
-            {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
-          </Button>
-          {needsProxy ? (
-            <Button
-              primary
-              disabled={proxyBusy}
-              loading={proxyBusy}
-              onClick={generateProxy}
-            >
-              {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+
+        {/* Row 2: Actions & Utilities (Reset, Quest & Tools, Proxy, Spatialize) */}
+        <div className="sx-control-rail-row">
+          <div className="sx-control-group" style={{ flexWrap: 'wrap' }}>
+            <Button onClick={() => setRefreshKey((k) => k + 1)} title="Rescan video library">
+              ↻
             </Button>
-          ) : null}
+            <Button
+              primary={showTunnel}
+              onClick={() => setShowTunnel((s) => !s)}
+            >
+              {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
+            </Button>
+            <Button onClick={() => navigate('/reels/immersive-preview')}>
+              🥽 IMMERSIVE PREVIEW
+            </Button>
+            {needsProxy ? (
+              <Button
+                primary
+                disabled={proxyBusy}
+                loading={proxyBusy}
+                onClick={generateProxy}
+              >
+                {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+              </Button>
+            ) : null}
+            {folder === 'testpipeline' && !has3d ? (
+              <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
+                🥽 Spatialize (2D→3D)
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
 
       {proxyMsg ? <Mono>{proxyMsg}</Mono> : null}
+      {spatMsg ? <Mono>{spatMsg}</Mono> : null}
 
       {showTunnel ? (
         <AccentBlock
@@ -183,44 +406,36 @@ export default function ReelsPage() {
                 onChange={(e) => setTunnel(e.target.value)}
               />
             </Field>
+            <Button onClick={() => navigate('/reels/immersive-preview')}>
+              OPEN DESKTOP IMMERSIVE PREVIEW
+            </Button>
           </div>
         </AccentBlock>
       ) : null}
 
       {/* Player Mount */}
       {data === null ? (
-        <div className="sx-mono">SCANNING OUTPUT MEDIA REPOSITORY…</div>
+        <>
+          <ControlRailSkeleton label="Loading reels controls" />
+          <ReelsPlayerSkeleton label="Loading reels" />
+        </>
       ) : !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-          hint={`folder="${folder}" codec="${codecParam}" search="${debouncedSearch}"`}
+          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"'}
         />
       ) : (
         <div>
-          <ReelsPlayer params={playerParams} />
+          {deepIndex >= 0 ? (
+            <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
+          ) : null}
+          <ReelsPlayer params={playerParams} initialIndex={initialIndex} revealOnLoad />
           {videos.some((v) => v.tunnel_url) ? (
             <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
           ) : null}
         </div>
       )}
-
-      {videos.length > 0 ? (
-        <Section num={2} title="Video Playlist" active>
-          <Dropdown
-            label={`MATCHING PLAYLIST (${videos.length} VIDEOS)`}
-            value={videoOpts[0]?.value ?? ''}
-            options={videoOpts}
-            onChange={() => {}}
-            placeholder={`${videos.length} video(s) in playlist — inspect files`}
-          />
-          <p className="sx-body" style={{ marginTop: 'var(--sx-2)', fontSize: '0.85rem' }}>
-            {needsProxy
-              ? `⚠ ${needsProxy} video(s) in this list require an H.264 proxy for inline browser playback.`
-              : '✓ All files are compatible with standard HTML5 browser & VR playback.'}
-          </p>
-        </Section>
-      ) : null}
     </div>
   );
 }

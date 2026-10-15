@@ -113,14 +113,16 @@ def render(ctx: dict) -> None:
             missing = []
             if not probes["vapoursynth"].ok:
                 missing.append("VapourSynth + vspipe")
+            if not probes["ffms2"].ok:
+                missing.append("the ffms2 source plugin")
             if not probes["znedi3"].ok:
                 missing.append("the znedi3 plugin")
             C.accent_block(
                 "STUDIO RENDERS CANNOT BE PRODUCED ON THIS MACHINE",
                 [f"Missing {' and '.join(missing)}. Pairs must be generated "
                  "elsewhere and copied in."],
-                code=["pip install vapoursynth  + vsznedi3 plugin",
-                      f"venv\\Scripts\\python.exe batch_upscale.py"],
+                code=["pip install vapoursynth  + ffms2 + vsznedi3 plugins",
+                      f".venv/bin/python scripts/batch_upscale.py"],
             )
 
         if st.button("↻  RESCAN", key="sx.cmp.rescan"):

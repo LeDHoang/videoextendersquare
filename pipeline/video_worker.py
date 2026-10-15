@@ -6,9 +6,12 @@ import subprocess
 import fal_client
 from core import models as _models
 from core.tooling import (
+    ffms2_load_lines,
     find_ffms2_plugin,
     find_vspipe,
+    find_znedi3_plugin,
     pick_encoder,
+    znedi3_load_lines,
 )
 from pipeline.utils import (
     get_video_dimensions_and_duration,
@@ -16,6 +19,7 @@ from pipeline.utils import (
     calculate_square_padding,
     has_audio_stream,
     fetch_fal_result,
+    attach_civitai_token,
 )
 
 def extract_video_url(result):
@@ -41,7 +45,10 @@ def extract_video_url(result):
             
     raise ValueError(f"Could not find output video URL in result: {result}")
 
-def poll_job_status(handler, status_prefix, status_callback=None, timeout_s=1800.0):
+def poll_job_status(
+    handler, status_prefix, status_callback=None, timeout_s=1800.0,
+    billing_callback=None, billing_stage=None,
+):
     """
     Polls the status of an asynchronous fal-client job until it completes,
     fails, or exceeds *timeout_s* (default 30 minutes) — a stuck remote job
@@ -77,11 +84,16 @@ def poll_job_status(handler, status_prefix, status_callback=None, timeout_s=1800
             if status_callback:
                 status_callback(f"{status_prefix}: {status_name}")
             if status_name.lower() in ("failed", "error"):
+                if billing_callback and billing_stage:
+                    billing_callback("failed", billing_stage, getattr(handler, "request_id", None))
                 raise RuntimeError(f"{status_prefix}: fal.ai job {status_name.lower()}")
 
         time.sleep(2.0)
 
-    return handler.get()
+    result = handler.get()
+    if billing_callback and billing_stage:
+        billing_callback("completed", billing_stage, getattr(handler, "request_id", None))
+    return result
 
 
 def _is_already_square(path: str, target: int = 3840) -> bool:
@@ -180,10 +192,6 @@ def _process_video_impl(
     upscale_cost = 0.0
     master_time = 0.0
 
-    if (not upscale_only) or (upscale_engine == "fal"):
-        if not fal_key and not os.environ.get("FAL_KEY"):
-            raise ValueError("FAL_KEY must be set in the environment or passed as an argument.")
-
     # Use a per-call client instead of mutating the shared os.environ / the
     # module-level fal_client singleton — both are process-global state and
     # would race across concurrently running jobs with different keys.
@@ -193,6 +201,23 @@ def _process_video_impl(
     trim_start = float(kwargs.get("trim_start", 0.0))
     trim_duration = float(kwargs.get("trim_duration", 15.0))
     trim_duration = min(15.0, max(1.0, trim_duration))
+
+    # Extra fal.ai arguments for CUSTOM(...) models (e.g. aspect_ratio,
+    # resolution). Validated flat scalars; media URLs always stay
+    # pipeline-managed. Applied only to non-stock models so the tuned stock
+    # argument shapes can never be disturbed.
+    def _extras(raw_key: str) -> dict:
+        try:
+            d = _models.parse_custom_args(kwargs.get(raw_key))
+        except ValueError:
+            d = {}
+        d.pop("video_url", None)
+        d.pop("image_url", None)
+        return d
+
+    use_extra_out = {} if _models.is_stock_outpaint_model(outpaint_model) else _extras("custom_outpaint_args")
+    use_extra_up = {} if _models.is_stock_upscale_model(upscale_model) else _extras("custom_upscale_args")
+    billing_callback = kwargs.get("billing_callback")
 
     video_to_process = video_path
     temp_trimmed_path = None
@@ -274,23 +299,27 @@ def _process_video_impl(
         temp_outpaint_path = video_to_process
         outpaint_url = None
     else:
-        # 2. Upload video to fal.ai CDN
-        if status_callback:
-            status_callback("Uploading video file to fal.ai CDN...")
-        t_up_start = time.time()
-        video_url = fal.upload_file(video_to_process)
-        upload_time = time.time() - t_up_start
-        
-        # 3. Outpainting (if not already square)
         if top == 0 and bottom == 0 and left == 0 and right == 0:
             if status_callback:
                 status_callback("Video is already square. Skipping outpainting phase.")
-            outpaint_url = video_url
+            outpaint_url = None
+            temp_outpaint_path = video_to_process
         else:
+            if not fal_key and not os.environ.get("FAL_KEY"):
+                raise ValueError("A Fal API key is required for cloud outpainting.")
+            if status_callback:
+                status_callback("Uploading video file to fal.ai CDN...")
+            t_up_start = time.time()
+            video_url = fal.upload_file(video_to_process)
+            upload_time = time.time() - t_up_start
             if status_callback:
                 status_callback(f"Submitting video outpainting job to {outpaint_model}...")
             
             t_op_start = time.time()
+            default_prompt = (
+                "Seamlessly extend the background environment, cool lighting, "
+                "neutral color temperature, matching original white balance and color palette."
+            )
             model_lower = (outpaint_model or "").lower()
             if "luma" in model_lower or "reframe" in model_lower:
                 arguments = {
@@ -301,9 +330,15 @@ def _process_video_impl(
                     arguments["prompt"] = prompt.strip()
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             elif "ltx" in model_lower:
+                neg_prompt = kwargs.get("ltx_negative_prompt")
+                if neg_prompt is None or not str(neg_prompt).strip():
+                    neg_prompt = "yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
+
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend the background environment, high details, matching texture and lighting. Keep the origin video aethestic and lighting",
+                    "prompt": prompt or default_prompt,
+                    "negative_prompt": str(neg_prompt).strip(),
+                    "enable_prompt_expansion": bool(kwargs.get("ltx_prompt_expansion", kwargs.get("ltx_enable_prompt_expansion", False))),
                     "aspect_ratio": kwargs.get("ltx_aspect_ratio", "1:1"),
                     "output_resolution": kwargs.get("ltx_resolution", "720p"),
                     "source_scale": float(kwargs.get("ltx_source_scale", 1.0)),
@@ -311,40 +346,87 @@ def _process_video_impl(
                     "num_inference_steps": int(kwargs.get("ltx_steps", 15)),
                     "guidance_scale": float(kwargs.get("ltx_guidance", 1.0)),
                     "generate_audio": bool(kwargs.get("ltx_audio", True)),
+                    "num_frames": max(9, int(duration * 24 + 0.5) + 1),
+                    "frames_per_second": 24,
                 }
+                if arguments["num_frames"] > 481:
+                    raise ValueError("LTX outpaint supports at most 481 frames; trim the source video.")
+                if "/lora" in model_lower:
+                    loras = kwargs.get("ltx_loras") or []
+                    loras = [
+                        l for l in loras
+                        if isinstance(l, dict)
+                        and isinstance(l.get("path"), str)
+                        and l["path"].strip()
+                    ]
+                    if loras:
+                        if len(loras) > 3:
+                            raise ValueError("LTX outpaint accepts at most 3 LoRAs.")
+                        arguments["loras"] = [{
+                            "path": attach_civitai_token(str(l["path"]).strip()),
+                            "scale": float(l.get("scale", 1.0)),
+                            "transformer": str(l.get("transformer", "both")),
+                        } for l in loras]
                 _, outpaint_cost = _models.estimate_outpaint_cost(
                     outpaint_model, duration=duration,
                     resolution=kwargs.get("ltx_resolution", "720p"),
                 )
             elif "wan" in model_lower or "vace" in model_lower:
+                wan_frames = max(17, int(duration * 16 + 0.5) + 1)
+                if wan_frames > 241:
+                    raise ValueError("Wan VACE outpaint supports at most 241 frames; trim the source video.")
+                horizontal = left > 0 or right > 0
+                vertical = top > 0 or bottom > 0
+                per_side_ratio = (max(left, right) / max(1, width)) if horizontal else (max(top, bottom) / max(1, height))
+                if per_side_ratio > 1:
+                    raise ValueError("Wan VACE cannot expand this aspect ratio to square in one request.")
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend the background environment beyond the original frame",
-                    "aspect_ratio": kwargs.get("wan_aspect_ratio", "1:1"),
+                    "prompt": prompt or default_prompt,
+                    "aspect_ratio": "1:1",
+                    "resolution": kwargs.get("wan_resolution", "720p"),
+                    "match_input_num_frames": False,
+                    "num_frames": wan_frames,
+                    "match_input_frames_per_second": False,
+                    "frames_per_second": 16,
+                    "expand_left": left > 0,
+                    "expand_right": right > 0,
+                    "expand_top": top > 0,
+                    "expand_bottom": bottom > 0,
+                    "expand_ratio": max(0.0, min(1.0, per_side_ratio)),
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             else:
                 arguments = {
                     "video_url": video_url,
-                    "prompt": prompt or "Seamlessly extend environment context",
+                    "prompt": prompt or default_prompt,
                     "aspect_ratio": "1:1",
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
+
+            if use_extra_out:
+                arguments.update(use_extra_out)
+                if status_callback:
+                    status_callback(f"Custom outpaint args applied: {sorted(use_extra_out)}")
             
             handler = fal.submit(outpaint_model, arguments=arguments)
-            result = poll_job_status(handler, "Outpainting", status_callback)
+            if billing_callback:
+                billing_callback("submitted", "outpaint", getattr(handler, "request_id", None))
+            result = poll_job_status(
+                handler, "Outpainting", status_callback,
+                billing_callback=billing_callback, billing_stage="outpaint",
+            )
             outpaint_url = extract_video_url(result)
             outpaint_time = time.time() - t_op_start
 
-        # 4. Download outpaint video
-        if status_callback:
-            status_callback("Downloading outpainted video for upscaling...")
-            
-        uid = uuid.uuid4().hex[:8]
-        temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_video_temp_{uid}.mp4")
-        temp_paths.append(temp_outpaint_path)
-        fetch_fal_result(outpaint_url, temp_outpaint_path)
-    
+
+            if status_callback:
+                status_callback("Downloading outpainted video for upscaling...")
+            uid = uuid.uuid4().hex[:8]
+            temp_outpaint_path = os.path.join(tempfile.gettempdir(), f"outpainted_video_temp_{uid}.mp4")
+            temp_paths.append(temp_outpaint_path)
+            fetch_fal_result(outpaint_url, temp_outpaint_path)
+
     # Determine output location
     uid = uuid.uuid4().hex[:8]
     output_video_path = os.path.join(tempfile.gettempdir(), f"delivery_4k_square_{uid}.mp4")
@@ -353,6 +435,8 @@ def _process_video_impl(
     
     t_up_stage_start = time.time()
     if upscale_engine == "fal":
+        if not fal_key and not os.environ.get("FAL_KEY"):
+            raise ValueError("A Fal API key is required for cloud upscaling.")
         if status_callback:
             status_callback("Uploading video file to fal.ai CDN for cloud upscale...")
 
@@ -399,8 +483,18 @@ def _process_video_impl(
             arguments = {"video_url": video_url_to_upscale}
             _, upscale_cost = _models.estimate_upscale_cost(upscale_model, duration=duration)
 
+        if use_extra_up:
+            arguments.update(use_extra_up)
+            if status_callback:
+                status_callback(f"Custom upscale args applied: {sorted(use_extra_up)}")
+
         handler = fal.submit(upscale_model, arguments=arguments)
-        result = poll_job_status(handler, "Video Upscaling (FAL AI)", status_callback)
+        if billing_callback:
+            billing_callback("submitted", "upscale", getattr(handler, "request_id", None))
+        result = poll_job_status(
+            handler, "Video Upscaling (FAL AI)", status_callback,
+            billing_callback=billing_callback, billing_stage="upscale",
+        )
         upscaled_video_url = extract_video_url(result)
 
         if status_callback:
@@ -497,14 +591,15 @@ def _process_video_impl(
 
         vpy_path = os.path.join(tempfile.gettempdir(), f"upscale_{uid}.vpy")
 
-        ffms2_plugin = find_ffms2_plugin()
-        load_ffms2 = f"core.std.LoadPlugin(r'{os.path.abspath(ffms2_plugin)}')\n" if ffms2_plugin else ""
+        # Same lines the ffms2/znedi3 health probes smoke-test (core.tooling).
+        load_ffms2 = ffms2_load_lines(find_ffms2_plugin())
+        load_znedi3 = znedi3_load_lines(find_znedi3_plugin())
 
         with open(vpy_path, "w") as f:
             f.write(f'''import vapoursynth as vs
 
 core = vs.core
-{load_ffms2}
+{load_ffms2}{load_znedi3}
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
 clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=2)
@@ -649,7 +744,11 @@ clip.set_output()
         upscale_time = time.time() - t_up_stage_start
     
     # Clean up intermediate video
-    if not upscale_only and os.path.exists(temp_outpaint_path):
+    if (
+        not upscale_only
+        and temp_outpaint_path != video_to_process
+        and os.path.exists(temp_outpaint_path)
+    ):
         os.unlink(temp_outpaint_path)
     if temp_trimmed_path and os.path.exists(temp_trimmed_path):
         os.unlink(temp_trimmed_path)
@@ -669,6 +768,8 @@ clip.set_output()
         "upscale_engine": "FAL AI" if upscale_engine == "fal" else upscale_engine.upper(),
         "upscale_model": upscale_model if upscale_engine == "fal" else f"Local {upscale_engine.upper()}",
         "master_time": round(master_time, 2),
+        "custom_outpaint_args": use_extra_out,
+        "custom_upscale_args": use_extra_up if upscale_engine == "fal" else {},
     }
         
     return (outpaint_url, output_video_path), metrics

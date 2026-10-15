@@ -1,0 +1,488 @@
+# VR Reels Playback Investigation — Quest 3S over USB
+
+> On-device diagnosis of choppy + low-quality immersive WebXR reels playback on
+> Meta Quest 3S connected via USB-C adb reverse. Documents the root cause, every
+> fix attempted (what worked / what regressed), the live telemetry harness built
+> to diagnose it, and the USB debugging workflow for future sessions.
+
+> **Current status — reviewed 2026-09-12 at `ba852d7`:** The original
+> on-device notes below are retained as a historical record. This section
+> supersedes earlier wording that calls one root cause “telemetry-confirmed.”
+> The current evidence supports several interacting causes and does not yet
+> isolate one GPU mechanism.
+
+---
+
+## 0. Current implementation review and ordered fix plan
+
+### Executive conclusion
+
+The current player can make playback choppy even when decoding and networking
+are healthy:
+
+1. For sources at least 3000 px wide, `vrMinStride()` forces upload stride 2.
+   Adaptive logic can increase it to 3. A 30 fps source is therefore displayed
+   at approximately 15 or 10 video-texture updates per second.
+2. The claimed sliding blob cache is not bounded. `blobUrlMap` never evicts
+   entries or calls `URL.revokeObjectURL()`, and full-file fetches are not
+   cancelled when navigation changes.
+3. The main video and a hidden `preload="auto"` video can load concurrently.
+   Manual CACHE fetches can add another complete-file transfer during playback.
+4. Desktop and XR glow sampling both read the playing video through a canvas.
+   Active time-synced comments also re-upload a 1024² texture every XR frame.
+5. The telemetry records XR intervals and JavaScript enqueue duration, but it
+   does not measure GPU completion or correlate each upload with the following
+   frame. The GPU-sync explanation remains a hypothesis.
+6. The UI defaults to the raw 4K HEVC master. The H.264 browser proxy is capped
+   at 2160² but labeled “H.264 4K PROXY,” and stream-copy can preserve an
+   existing low-bitrate HEVC source instead of applying new encoder settings.
+
+Treat the symptoms separately:
+
+- **Choppy motion:** investigate deliberate frame skipping, competing preload
+  work, canvas readbacks, and overlay uploads before attributing everything to
+  the WebGL video upload.
+- **Blurry/inconsistent quality:** verify the actual rendition, dimensions,
+  bitrate, codec profile, source quality, and virtual-screen sampling for every
+  tested reel.
+
+### Corrections to the historical notes below
+
+- `dtMedMs` is currently an arithmetic mean, not a median.
+- `uploadMaxMs` measures only how quickly JavaScript returns from the upload
+  call; WebGL work may complete asynchronously.
+- `VR_TEX_CAP = 2048`, `vrProxyCanvas`, and `vrProxyCtx` are currently
+  unused, so the active WebGL1 path uploads native video dimensions.
+- Current code requests **72 Hz**, not 90 Hz.
+- “Preload next 2” is not a true resident-set limit because old blobs are never
+  evicted or revoked.
+- The 2D path creates two video textures. At 3840² RGBA they total about
+  112.5 MiB before decoder surfaces, XR swapchain images, UI textures, and
+  cached blobs.
+- Commit `a36e6a3` added double-buffering, UI throttling, and adaptive stride
+  after much of the captured telemetry. Earlier measurements do not validate
+  the current path.
+- Starlette `StaticFiles` in the installed environment supports HTTP Range
+  responses. Full-file blob downloads, rather than missing Range support, are
+  the more immediate caching concern.
+- The specific `output/testpipeline` Tron and Travis assets cited below were
+  absent from this checkout during review, so those bitrate values were not
+  independently re-probed.
+
+### Current code anchors
+
+- Frame-stride floor and adaptation: `ui/assets/webxr_vr.js:1984`, `:3042`,
+  and `:3113`.
+- Diagnostic aggregation: `ui/assets/webxr_vr.js:1993`–`:2050`.
+- Double video textures and uploads: `ui/assets/webxr_vr.js:2764` and `:3146`.
+- Hidden preloader and blob cache: `ui/assets/reels.html:1276`, `:1532`,
+  `:2523`, and `:2811`.
+- Desktop/XR glow and comment overlay: `ui/assets/reels.html:3284` and
+  `ui/assets/webxr_vr.js:2527`, `:3195`.
+- Proxy generation/label: `server/media.py:132`, `server/routers/reels.py:993`.
+- Stream-copy and encoder settings: `pipeline/video_worker.py:105`,
+  `core/tooling.py:31`.
+
+
+### Ordered implementation plan
+
+#### Phase 1 — Establish a controlled Quest baseline
+
+- [ ] Add temporary feature switches for video upload stride, desktop glow, XR
+      ambilight, comment overlays, hidden-video preload, and blob caching.
+- [ ] Lock the XR session to 72 Hz for the initial comparison.
+- [ ] Force stride 1 so every newly decoded frame is eligible for display.
+- [ ] Test the same source encoded at 1280², 1536², 2048², and 3840².
+- [ ] Run each rendition with every optional feature disabled, then enable one
+      feature at a time.
+- [ ] Record the exact Quest Browser/Horizon OS version with every capture.
+
+**Exit gate:** identify the smallest reproducible configuration that produces
+the stall, and determine whether frame skipping itself is the dominant source
+of perceived choppiness.
+
+#### Phase 2 — Make telemetry decision-grade
+
+- [ ] Rename `dtMedMs` or calculate a real median plus p50/p95/p99 intervals.
+- [ ] Record each frame's upload decision, selected stride, decoded-frame delta,
+      ready state, network state, and whether an overlay/readback ran.
+- [ ] Record `waiting`, `stalled`, `playing`, `canplay`, and seek events
+      with timestamps and accumulated buffering duration.
+- [ ] Correlate an upload on frame N with the interval until frame N+1.
+- [ ] Use a GPU timing extension or fence only when feature-detected; do not
+      infer GPU completion from `performance.now()` around `texImage2D`.
+- [ ] Keep A/B results per rendition and feature set rather than overwriting one
+      latest diagnostic payload.
+
+**Exit gate:** determine whether each long XR interval correlates with upload,
+network buffering, canvas readback, overlay work, or an unrelated event.
+
+#### Phase 3 — Remove known background contention
+
+- [ ] Stop the desktop ambient-glow interval while an XR session is presenting.
+- [ ] Disable XR ambilight for the baseline; restore it only if A/B data shows
+      adequate headroom.
+- [ ] Update the time-synced comment texture only when dirty and at a bounded
+      rate such as 10 Hz, rather than every XR frame.
+- [ ] Pause and clear the hidden preload video when XR begins.
+- [ ] Avoid running a second video decode/load while the active reel is below a
+      safe buffered-ahead threshold.
+
+**Exit gate:** optional UI effects no longer change playback frame pacing or
+trigger additional video readbacks during the controlled test.
+
+#### Phase 4 — Replace the cache implementation
+
+- [ ] Prefer normal HTTP Range streaming as the default path.
+- [ ] If explicit caching is still beneficial, use an abortable LRU containing
+      only the current, next, and optionally previous reel.
+- [ ] Check `res.ok` before consuming a response.
+- [ ] Use an `AbortController` per pending download and cancel obsolete work
+      immediately after navigation.
+- [ ] Call `URL.revokeObjectURL()` on eviction and runtime cleanup.
+- [ ] Do not fetch two complete 4K files while the active video is struggling.
+- [ ] Track cache bytes, entries, hit rate, aborted requests, and download time.
+
+**Exit gate:** memory stabilizes while repeatedly navigating a long playlist,
+and no stale download continues after its reel leaves the cache window.
+
+#### Phase 5 — Choose the rendering path from measured results
+
+- [ ] Feature-detect a WebXR compositor media layer such as
+      `XRMediaBinding.createQuadLayer` and validate it on the target Quest
+      Browser. Do not assume availability from desktop Chrome.
+- [ ] If a media layer works, use it for the video while retaining the base
+      projection layer for the surrounding scene and controls.
+- [ ] If it is unavailable, select the best measured Quest rendition and upload
+      every decoded frame instead of intentionally reducing 30 fps to 10–15 fps.
+- [ ] Compare single-texture, current double-buffer, and reduced-resolution
+      paths using the Phase 2 telemetry.
+- [ ] Remove adaptive stride from the default experience. Keep it only as an
+      explicit emergency fallback if testing proves it preferable.
+
+**Exit gate:** the chosen path presents every decoded source frame at stable
+72 Hz compositor pacing without sustained buffering.
+
+#### Phase 6 — Standardize the Quest rendition
+
+- [ ] Keep the archival 3840² master, but generate a separate Quest/browser
+      rendition from the highest-quality available source.
+- [ ] Start the on-device test matrix at 1536² and 2048²; retain 1280² as a
+      diagnostic/performance fallback.
+- [ ] Compare H.264 and HEVC on the actual Quest Browser rather than assuming
+      codec behavior.
+- [ ] Define and validate codec profile, pixel format, bitrate/quality mode,
+      short seek-friendly GOP, audio codec, and `faststart`.
+- [ ] Do not stream-copy a source unless `ffprobe` confirms that it satisfies
+      the selected delivery profile.
+- [ ] Return actual width, height, bitrate, and codec in the reels API and use
+      those values in the UI label.
+- [ ] Automatically choose the validated Quest rendition on XR entry instead of
+      depending on the user selecting “H264 (Browser/VR).”
+
+**Exit gate:** test reels have consistent measured encoding properties and pass
+both motion-smoothness and close-view sharpness checks on device.
+
+#### Phase 7 — Regression coverage and documentation
+
+- [ ] Add unit tests for cache eviction, URL revocation, cancellation, and
+      rendition selection.
+- [ ] Add a deterministic diagnostic mode with all optional effects disabled.
+- [ ] Maintain a small standard playback corpus covering 24/30 fps, low/high
+      motion, dark gradients, fine detail, and at least two bitrates.
+- [ ] Record device/browser version, configuration, and telemetry with each
+      manual Quest validation.
+- [ ] Update the historical conclusions below after the controlled comparison.
+- [ ] Mark the VR playback item in `docs/todolist.md` complete only after the
+      on-device exit gates pass.
+
+### Suggested acceptance criteria
+
+- XR callback delivery remains close to the requested 72 Hz during playback.
+- Every newly decoded source frame is presented; no normal-path stride dropping.
+- No `waiting` or `stalled` events after startup on the reference network.
+- No repeated XR-frame spikes correlated with glow or comment-overlay updates.
+- Cache memory remains bounded after cycling through the full playlist.
+- The selected Quest rendition is visibly sharp on the default 4 m screen and
+  has consistent measured encoding properties across reels.
+- Results reproduce after a cold page load and a full Quest Browser restart.
+
+### Verification status for this review
+
+- Static implementation review completed against `ba852d7`.
+- Frontend tests passed: 2 Node tests and 2 Vitest tests.
+- `pytest -q test_reels_discovery.py` could not collect because SQLAlchemy is
+  absent from the current environment.
+- No automated WebXR playback regression tests currently exist.
+- The required Meta documentation lookup was attempted with
+  `npx -y metavr docs search`, but the published CLI reported that
+  `linux-x64` is unsupported.
+- No ADB-connected Quest was available, so compositor-layer support and final
+  performance conclusions remain on-device validation tasks.
+
+
+---
+
+## 1. The reported problem
+
+- **Symptoms:** VR immersive reels playback is choppy; video quality looks "bad."
+  Streaming (no preload) felt *less* choppy than preloading all reels.
+- **Hardware:** Meta Quest 3S (Snapdragon XR2 Gen 2, **Adreno (TM) 740** GPU,
+  ~1832×1920 per-eye panel, ~8 GB RAM), connected to a Mac host over USB-C.
+- **Stack:** Vite dev server `:5173` + FastAPI `:8000`; the reels player inlines
+  `ui/assets/webxr_vr.js` into the page HTML per request (`server/routers/reels.py`).
+  Video served byte-for-byte off disk via Starlette `StaticFiles` at `/media/*`.
+
+---
+
+## 2. Root cause (telemetry-confirmed)
+
+A live telemetry harness was added to the XR render loop (`webxr_vr.js: _postDiag`)
+that POSTs ~1 Hz to `/api/reels/diag` (server in `server/routers/reels.py`).
+CDP cannot see the Quest tab while it's in an immersive WebXR session, so the page
+self-reports. Sample read while playing the Tron master in VR:
+
+| Metric | Value | Meaning |
+|---|---|---|
+| `xrFrames` | ~22/sec | XR loop delivering only ~22 frames (target 72–90 → ~70% dropped) |
+| `dtMedMs` | ~45 | median XR frame interval (should be ~11–14) |
+| `dtMinMs` | ~5.5 | frames with **no** upload are fast → GPU can keep up |
+| `dtMaxMs` | 73–115 | frames **with** a texture upload stall badly |
+| `texUploads` | ~15–20/sec | fix #1 gating is working (not 90/sec) |
+| `newDecoded` | ~30/sec | decoder keeps up (Tron is 30 fps) |
+| `pqDropped` | 0–4 cumulative | **decode is NOT the bottleneck** |
+| `videoW/H` | 3840×3840 | true 4K confirmed on-device |
+| `gl.renderer` | Adreno (TM) 740 | Quest 3S GPU |
+| `uploadMaxMs` | 0.1–0.2 | `texImage2D` JS time is **non-blocking** |
+| `proxyW` (2048 vs 3840) | both stall ~112ms | **stall is size-independent** |
+
+### Conclusion
+
+The stall is a **GPU pipeline sync** that fires once per decoded frame when
+`gl.texImage2D` *re-specifies* a texture that is currently being sampled by the
+render draws. It is:
+
+- ❌ **NOT decode** — `droppedVideoFrames ≈ 0`.
+- ❌ **NOT DMA bandwidth** — uploading 56 MiB (3840²) and 16 MiB (2048²) stall
+  identically (~112 ms). Size-independent.
+- ❌ **NOT the JS upload cost** — `texImage2D` returns in 0.1 ms (non-blocking);
+  the stall manifests later when the GPU samples the re-specified texture.
+- ❌ **NOT network** — preload stores blobs in memory; stalls persist.
+
+So **8K would be strictly worse** (same fixed flush cost, 4× the DMA, zero visible
+gain on the ~1832 px/eye panel). The Quest 3S display physically cannot resolve
+beyond ~2K per eye — 4K is already ~2× oversampled.
+
+The "quality bad" half is a **separate, bitrate** problem: the 4K masters are
+starved (Travis 5.8 Mbps, Tron 11.4 Mbps vs the 14 Mbps encoder target) → soft /
+banded on a 4 m VR screen. **Resolution is already 4K; the fix is more bits, not
+more pixels.**
+
+---
+
+## 3. Fixes attempted
+
+### ✅ Fix #1 — Gate texture uploads to decoded frames (`webxr_vr.js`)
+The original guard re-uploaded every XR frame because it keyed on
+`videoElement.currentTime` (a float that updates continuously):
+
+```js
+// BEFORE (bad): uploads ~90×/sec
+if (hasNewVideoFrame || vt !== lastVideoTime) { gl.texImage2D(..., videoElement); }
+
+// AFTER: keys on getVideoPlaybackQuality().totalVideoFrames (ticks once per
+// decoded frame) → uploads ~30×/sec. Zero quality loss (still full 4K).
+const vf = videoElement.getVideoPlaybackQuality?.()?.totalVideoFrames ?? -1;
+if (hasNewVideoFrame || vf !== lastVideoFrameCount) { gl.texImage2D(...); }
+```
+**Result:** necessary and correct (cut uploads ~3×) but **insufficient alone** —
+each remaining 4K upload still stalls ~100 ms.
+
+### ⚠️ Fix #2 — Cap the GL texture to 2048² via a proxy canvas
+Draw the video into a 2048² 2D canvas (`drawImage`, GPU-side) then upload *that*
+(16 MiB instead of 56 MiB). 4K masters stay on disk; only the in-VR texture is
+capped. Invisible on the Quest 3S panel.
+**Result:** `proxyW=2048` confirmed active, but `dtMax` stayed ~112 ms — **the
+stall is size-independent, so this gave no smoothness gain.** Reverted from the
+hot path (the proxy canvas + `VR_TEX_CAP` vars remain for future use). Could
+still be re-enabled purely as a quality/quality tradeoff knob.
+
+### ❌ texSubImage2D experiment — REGRESSED (black screen)
+Tried updating the texture in place (`texSubImage2D` after a one-time
+`texImage2D` allocation) to avoid the re-specification flush. On the Quest's
+WebGL1 + Adreno/Chromium build this produced a **black screen (audio only)** —
+the in-place update left the texture unrenderable. Reverted to direct
+`texImage2D(videoElement)` (known-good, video visible). The re-spec-flush
+hypothesis therefore remains **unconfirmed**.
+
+### ✅ Fix #3 — Bitrate bump (`core/tooling.py`)
+Raised the HEVC encoder target 14 → **24 Mbps** (maxrate 16→26, bufsize 32→48;
+libx265 CRF 24→20) for VR-grade crispness. **Affects future renders only** —
+existing masters on disk are not re-encoded (transcoding an already-encoded HEVC
+stream adds generation loss without restoring baked-in softness; the real
+quality fix for existing reels is to **re-render from source** through the
+pipeline at the new bitrate).
+
+### ✅ Fix #4 — Preload next-2, not all (`ui/assets/reels.html`)
+The CACHE button used to fetch *every* filtered reel (~210 MiB of blobs) into
+Quest RAM, which triggered blob eviction → the active video re-fetched byte
+ranges over the slow adb-over-USB tunnel mid-playback (why streaming felt
+smoother than preloading). Changed `preloadAllVideos` to fetch only a **sliding
+window of the next 2 reels** (resident set ≤3 blobs).
+
+### ❌ Fix #5 — OES external video texture (zero-copy) — BLOCKED on this device, REVERTED to WebGL1
+The only web-side path that can eliminate the per-frame GPU sync is **zero-copy**:
+bind the `<video>` decoder surface directly as a `TEXTURE_EXTERNAL_OES` and sample
+it with `samplerExternalOES` in the shader — no `texImage2D`, no re-spec, no DMA,
+no sync. Implemented in `webxr_vr.js` as a dual-path, feature-detected change
+with GLSL ES 3.00 shader variants + an in-place `subimage` (`texSubImage2D`) path
+for WebGL2. It does not work in *this* browser build, on both prongs:
+
+- **WebGL1 (`glVersion: "WebGL 1.0 (OpenGL ES 2.0 Chromium)"`):**
+  `OES_texture_external` is **not exposed** (`gl.extOES: false`) → external path
+  unavailable. (WebGL1 also forbids `texSubImage2D` from video/canvas sources —
+  only `ArrayBufferView` — the source of the earlier black-screen regression.)
+- **WebGL2:** creating a WebGL2 `XRWebGLLayer` **regressed** (reproduced, then
+  logcat-confirmed): on entry the system logs
+  `ImmersiveAppChangedCallback: com.oculus.browser, -1` /
+  `OnForegroundVrAppClient: uid -1 pid -1 hasImmersiveApp 0` (the browser never
+  registers a valid compositor client), then auto-exits the session ~0.7 s later
+  (`ImmerseApp -> InHomeVr`) — the "flash then thrown out." A WebGL2 context can
+  run fine as a 2D canvas, but its **XR layer cannot establish a compositor
+  client** on Quest Browser.
+
+**Resolution:** `VR_GL_MODE='auto'` now **prefers WebGL1** (restores a working VR
+session — confirmed on-device), and WebGL2 remains available only when forced
+with `VR_GL_MODE='2'`. Per `hz-iwsdk-webxr`, "Quest Browser is Chromium, not
+desktop Chrome — SharedArrayBuffer, certain WebGL2 extensions, and
+OffscreenCanvas may behave differently or be unavailable" — the compositor-layer
+failure is browser-runtime behavior, not a code bug. **Conclusion: the zero-copy
+path is unreachable in Quest Browser's WebXR; it requires a native/APK approach.**
+
+### ⚙️ Fix #6 — Request 90 Hz (`webxr_vr.js`)
+`hz-iwsdk-webxr`: "Quest Browser defaults to 72 Hz for WebXR sessions; you must
+explicitly request a higher framerate via `xrSession.updateTargetFrameRate(90)`
+after session start." Not previously done. Added now (best-effort, try/catch).
+**Note on expectations:** it does not remove the ~100 ms per-upload stall (that
+is GPU pipeline sync, size-independent), so it changes frame *density* between
+stalls, not the stall itself. Verdict pending on-device telemetry.
+
+Per the skill's other guidance:
+- **Texture memory ceiling ~256 MB** — we're ~56 MB per video texture; 4K blobs
+  are within budget; no headroom for larger sources.
+- **Draw-call budget <100-120** — our scene is ~7 shaders / a handful of draws;
+  geometry is not the bottleneck.
+- Telemetry (`gl.glVersion`, `gl.extOES`, `gl.texTarget`) still reports armor:
+  current live reading: `WebGL 1.0`, `extOES:false`, `texTarget:'2d'`.
+
+---
+
+## 4. The in-headset telemetry harness
+
+Because CDP hides the Quest tab during immersive WebXR (see §5), the page
+self-reports:
+
+- **Client:** `webxr_vr.js` `_postDiag(time)` (called every `onXRFrame`) accumulates
+  XR frame intervals + texture-upload count + decode stats, and `fetch(...,
+  {keepalive:true})` POSTs a snapshot to `/api/reels/diag` ~1 Hz.
+- **Server:** `POST /api/reels/diag` stores the latest payload in a module-level
+  `_diag` dict; `GET /api/reels/diag` returns it.
+- **Read live from the host:**
+  ```bash
+  watch -n1 'curl -s http://localhost:8000/api/reels/diag | python3 -m json.tool'
+  ```
+
+Fields: `xrFrames, dtMedMs, dtMinMs, dtMaxMs, over20, texUploads, uploadMaxMs,
+drawMaxMs, proxyW, newDecoded, pqTotal, pqDropped, videoW, videoH, ct, gl{}`.
+
+---
+
+## 5. USB debugging workflow (Quest 3 / 3S → Mac)
+
+### 5.1 adb reverse (device `localhost` → host)
+
+```bash
+# One-time per session (resets if adb server restarts / device reconnects)
+~/Library/Android/sdk/platform-tools/adb reverse tcp:5173 tcp:5173   # Vite frontend
+~/Library/Android/sdk/platform-tools/adb reverse tcp:8000 tcp:8000   # FastAPI backend
+adb reverse --list                                                    # verify
+```
+On the Quest Browser open `http://localhost:5173/reels`. `localhost` is a secure
+context, so WebXR works over plain HTTP. (The legacy Streamlit ports 8501/8502
+are unused by this stack.)
+
+### 5.2 Chrome DevTools Protocol (CDP) — 2D mode only
+
+The Meta Quest Browser exposes `@chrome_devtools_remote`:
+
+```bash
+adb shell cat /proc/net/unix | grep devtools                       # find the socket
+adb forward tcp:9222 localabstract:chrome_devtools_remote          # bridge to host
+curl http://localhost:9222/json/version                            # Chromium version
+curl http://localhost:9222/json | python3 -m json.tool            # list tabs
+```
+Connect a CDP client to a tab's `webSocketDebuggerUrl` to evaluate JS, read
+console logs, etc. A zero-dependency probe lives at `scripts/debug-quest.cjs`
+(node 26 global `fetch` + `WebSocket`); `scripts/debug-quest-newtab.cjs` spawns a fresh
+controllable tab via `Target.createTarget` (existing VR tabs are hidden).
+
+⚠️ **Limitation:** while a tab is in an **immersive WebXR session**, it is hidden
+from `/json` and `Target.getTargets` (only extension/UI targets remain). Use the
+in-page telemetry harness (§4) to read live VR metrics instead.
+
+### 5.3 Device-level diagnostics
+
+```bash
+adb exec-out screencap -p > quest_view.png          # headset screenshot
+adb logcat -d -s OculusBrowser:V chromium:V WebXR:V  # engine logs
+adb logcat -d | grep -iE "oom|low.?memory|kill"      # memory pressure
+```
+
+### 5.4 Reload discipline (critical)
+
+The reels player inlines `webxr_vr.js` into the page HTML per request, so a
+**full tab close + reopen** is required to run new JS — a soft reload inside an
+active WebXR session keeps the old inlined code alive (confirmed by `t_ms` not
+resetting). Exit VR → close tab → fresh tab → re-enter.
+
+---
+
+## 6. Master file bitrate reference (`output/testpipeline/`, ffprobe)
+
+| Master | Codec | Resolution | Bitrate | Note |
+|---|---|---|---|---|
+| `square_King Von - Back Again` | HEVC | 3840² | 28.8 Mbps | best in folder |
+| `luma_square Ukraine drone` | HEVC | 3840² | 25.8 Mbps | 2 s clip |
+| `square_The Weeknd - Popular` | HEVC | 3840² | 11.4 Mbps | near target |
+| `square_Tron Legacy` | HEVC | 3840² | 11.4 Mbps | near target |
+| `square_Project-X` | HEVC | 3840² | 11.0 Mbps | near target |
+| `square_Travis Scott - MODERN JAM` | HEVC | 3840² | **5.8 Mbps** ⚠️ | starved → soft |
+| `..._001_1080p_cropped` | **H.264** | 1080×778 | 13.1 Mbps | raw ingest, NOT 4K/square |
+
+New renders target **24 Mbps** (`core/tooling.py`). Re-render the starved masters
+from source to realize the quality gain.
+
+---
+
+## 7. Quick verification
+
+```bash
+# Servers up?
+curl -s http://localhost:5173/api/health; curl -s http://localhost:8000/api/health
+# New encoder target in effect?
+rg "24M|crf" core/tooling.py
+# Preload windowed?
+curl -s 'http://localhost:8000/api/reels/player?folder=testpipeline' | rg "NEXT 2|sliding window"
+# Live VR telemetry?
+curl -s http://localhost:8000/api/reels/diag | python3 -m json.tool
+```
+
+## 8. Key file:line references
+
+- Texture upload guard (fix #1): `ui/assets/webxr_vr.js` `onXRFrame`
+- Video texture paths (fix #5): `webxr_vr.js` `initGL` (WebGL2 + GLSL ES 3.00), `EXT_FRAG`/`EXT_FRAG_V2`, `drawVideoGrid`, `onXRFrame` (`subimage` via `texSubImage2D`)
+- Telemetry POST + fields: `ui/assets/webxr_vr.js` `_postDiag` (now incl. `texTarget`, `gl.glVersion`, `gl.extOES`)
+- Diag endpoint: `server/routers/reels.py` `post_diag` / `get_diag`
+- Encoder bitrate: `core/tooling.py` `HEVC_CANDIDATES`
+- Preload window: `ui/assets/reels.html` `preloadAllVideos` / `updatePreloadStatus`
+- CDP probes: `scripts/debug-quest.cjs`, `scripts/debug-quest-newtab.cjs`, `scripts/debug-quest-targets.cjs`

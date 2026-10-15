@@ -1,0 +1,5 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M3 8L5 6H19L21 8V16L19 18H5L3 16V8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
+  <path d="M7 10H9V14H7V10ZM15 10H17V14H15V10Z" fill="var(--sx-accent, #ff3b1f)"/>
+  <path d="M10 18L12 16L14 18" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
+</svg>

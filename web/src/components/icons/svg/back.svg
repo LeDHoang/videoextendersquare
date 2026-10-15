@@ -1,0 +1,14 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Faceted Reversal Chevron Arrowhead (White #f2f3f5) -->
+  <path d="M10.5 5.5L4 12L10.5 18.5" stroke="#f2f3f5" stroke-width="1.8" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Leica Vermilion Center Return Datum Axis (Terminating cleanly inside chevron apex) -->
+  <line x1="5.5" y1="12" x2="20" y2="12" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+
+  <!-- Leica Vermilion Trajectory Diamond Core -->
+  <polygon points="13,9.5 15.5,12 13,14.5 10.5,12" fill="#ff3b1f"/>
+  <circle cx="13" cy="12" r="0.7" fill="#f2f3f5"/>
+
+  <!-- Terminal Return Plate / Vertical Calibrator -->
+  <line x1="20" y1="9.5" x2="20" y2="14.5" stroke="#ff3b1f" stroke-width="1.6" stroke-linecap="square"/>
+</svg>

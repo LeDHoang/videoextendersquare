@@ -1,10 +1,67 @@
 import io
 import json
+import os
 import subprocess
+import urllib.parse
 import urllib.request
 from PIL import Image
 
 MAX_FAL_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2GB — generous ceiling for a 4K master
+
+# Explicit Pillow decompression-bomb ceiling for staged processing uploads
+# (avatars separately guard at 25 MP in social.py). Set explicitly instead
+# of relying on Pillow's default so the bound is a deliberate product
+# decision, visible here.
+MAX_STAGED_IMAGE_PIXELS = 50_000_000
+Image.MAX_IMAGE_PIXELS = MAX_STAGED_IMAGE_PIXELS
+
+
+_CIVITAI_HOSTS = {"civitai.com", "www.civitai.com"}
+_CIVITAI_PATH_PREFIX = "/api/download/models"
+
+
+def _is_civitai_download_url(url: str) -> bool:
+    """True only for real Civitai model-download URLs (hostname allowlist).
+
+    The previous substring check spliced the server-held CIVITAI_KEY onto
+    any URL merely *containing* ``civitai.com/api/download/models``
+    (e.g. ``https://evil.example/?x=civitai.com/api/download/models``),
+    exfiltrating the key to an attacker host.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except (ValueError, AttributeError):
+        return False
+    if parts.scheme.lower() != "https":
+        return False
+    if parts.hostname is None or parts.hostname.lower() not in _CIVITAI_HOSTS:
+        return False
+    return parts.path.lower().startswith(_CIVITAI_PATH_PREFIX)
+
+
+def attach_civitai_token(url: str, api_key: str | None = None) -> str:
+    """Auto-complete a Civitai model-download URL with the user's API token.
+
+    Civitai's direct-download endpoint (civitai.com/api/download/models/<id>)
+    needs ``?token=`` for restricted/authenticated models. Rather than having
+    users paste their key in the browser UI, we keep ``CIVITAI_KEY`` server-side
+    and splice it in right before the URL is handed to fal.ai.
+
+    Only touches URL host+path that look like Civitai model downloads; never
+    overwrites an existing ``token`` param; uses ``&`` when the URL already
+    carries a query string (e.g. ``?fileId=123``).
+    """
+    if not api_key:
+        api_key = os.environ.get("CIVITAI_KEY")
+    if not api_key or not url:
+        return url
+    if not _is_civitai_download_url(url):
+        return url
+    if "token=" in url.lower():
+        return url
+    if "?" in url:
+        return f"{url}&token={api_key}"
+    return f"{url}?token={api_key}"
 
 
 def fetch_fal_result(url: str, dest_path: str, timeout: float = 120.0,
@@ -49,7 +106,12 @@ def get_image_dimensions(image_path_or_bytes):
         image_file = image_path_or_bytes
 
     with Image.open(image_file) as img:
-        return img.size  # (width, height)
+        width, height = img.size
+    if width * height > MAX_STAGED_IMAGE_PIXELS:
+        raise ValueError(
+            f"Image dimensions {width}x{height} exceed the {MAX_STAGED_IMAGE_PIXELS} pixel limit"
+        )
+    return width, height
 
 def get_video_dimensions_and_duration(video_path):
     """
@@ -82,6 +144,34 @@ def get_video_dimensions_and_duration(video_path):
         return width, height, duration
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError) as e:
         raise ValueError(f"Could not read video metadata from {video_path}: {e}")
+
+def get_video_frame_metadata(video_path):
+    """Return authoritative source fps and frame count from ffprobe.
+
+    ``nb_frames`` is not available for every container, so the fallback is the
+    conservative ceiling of duration times the average frame rate.
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=avg_frame_rate,nb_frames,duration", "-of", "json", video_path],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15,
+        )
+        stream = json.loads(result.stdout)["streams"][0]
+        numerator, denominator = str(stream.get("avg_frame_rate") or "0/1").split("/", 1)
+        fps = float(numerator) / max(1.0, float(denominator))
+        duration = float(stream.get("duration") or 0)
+        raw_frames = stream.get("nb_frames")
+        frames = int(raw_frames) if raw_frames not in (None, "", "N/A") else int(duration * fps + 0.999999)
+        if fps <= 0 or frames <= 0:
+            raise ValueError("missing frame rate or frame count")
+        return fps, frames
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError, ValueError, ZeroDivisionError) as exc:
+        raise ValueError(f"Could not read video frame metadata from {video_path}: {exc}") from exc
+
 
 def calculate_square_padding(width, height):
     """

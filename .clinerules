@@ -1,0 +1,14 @@
+# Cline rules for this repository — full conventions in AGENTS.md (read it first)
+
+## Script & file placement (strict — no strays in repo root)
+- Regression tests → `tests/` (`test_*.py`); run via `make test` (never repo-wide pytest).
+- Manual/paid-API/hardware experiment scripts → `scripts/dev/`, named `debug_*` or `experiment_*` — NEVER `test_*` (pytest collection + some spend real money).
+- CDP/browser debug probes → `scripts/` (`debug-*.cjs`); live-endpoint verify probes → `scripts/` (`verify_*.cjs`).
+- Batch pipeline utilities → `scripts/` (`batch_*.py`); bootstrap sys.path to repo root (see AGENTS.md).
+- Generated artifacts/logs → `reports/` or `logs/` (gitignored) — never commit them; never create scripts/tests/docs in the repository root.
+
+## Hard rules
+- Do not implement VR roadmap Phases 0–6 unasked (post-beta; see docs/todolist.md).
+- Do not enable billing flags (`SX_CREDITS_ENABLED` / `SX_STRIPE_ENABLED` / `SX_REEL_REWARDS_ENABLED`) or touch payment code without explicit instruction.
+- Schema truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py`.
+- Consult `docs/to-beta.md` before architectural changes (infrastructure verdicts are decided: VPS + PostgreSQL + Cloudflare-in-front topology).

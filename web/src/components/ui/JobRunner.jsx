@@ -1,10 +1,32 @@
+import { useEffect, useRef } from 'react';
 import { useSSE } from '../../hooks/useSSE.js';
+import { billingErrorMessage } from '../../utils/billingErrors.js';
 import Progress from './Progress.jsx';
 import Emoji from './Emoji.jsx';
 
 // Tracks a single pipeline job over SSE and renders progress + result.
-export default function JobRunner({ jobId, name, kind }) {
+// onDone(result), when provided, fires exactly once when the job completes.
+// showMedia={false} keeps the status + downloads but leaves the rendered
+// media to the caller (the Upload Studio shows it on its stage).
+export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMedia = true }) {
   const { job, error } = useSSE(`/api/${kind}/jobs/${jobId}/stream`);
+  const doneRef = useRef(false);
+  const settledRef = useRef(false);
+
+  const done = job?.status === 'complete' && job.result ? job.result : null;
+  useEffect(() => {
+    if (done && !doneRef.current) {
+      doneRef.current = true;
+      onDone?.(done);
+    }
+  }, [done, onDone]);
+
+  useEffect(() => {
+    if (!settledRef.current && (job?.status === 'complete' || job?.status === 'failed')) {
+      settledRef.current = true;
+      onSettled?.(job);
+    }
+  }, [job, onSettled]);
 
   if (!job && !error) {
     return (
@@ -30,7 +52,7 @@ export default function JobRunner({ jobId, name, kind }) {
           <span className="sx-job-status sx-done">✓ 4K SQUARE COMPLETE</span>
         </div>
 
-        {kind === 'image' ? (
+        {!showMedia ? null : kind === 'image' ? (
           <img
             className="sx-img"
             src={job.result.download_url}
@@ -75,11 +97,12 @@ export default function JobRunner({ jobId, name, kind }) {
 
   if (job?.status === 'failed' || (!job && error)) {
     const detail = job?.error?.[1] || error?.message || 'Unknown pipeline execution error';
+    // Billing/credit failures map to user copy; pipeline errors pass through.
     const headline = job?.error?.[0] || 'PIPELINE EXECUTION FAILED';
     return (
       <div className="sx-error-box" role="alert">
         <div className="sx-error-title">{headline}</div>
-        <div>{detail}</div>
+        <div>{billingErrorMessage({ message: detail })}</div>
       </div>
     );
   }

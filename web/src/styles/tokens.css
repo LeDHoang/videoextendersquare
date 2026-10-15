@@ -2,6 +2,9 @@
    Bold editorial precision theme: Archivo Black, JetBrains Mono, matte-black surfaces, vivid vermilion accents.
 */
 :root {
+  /* Tell the UA this is a dark UI so native form controls, scrollbars,
+     and autofill never fall back to a white default. */
+  color-scheme: dark;
   /* ─── Color Palette ─────────────────────────────────────── */
   --sx-bg: #08090a;
   --sx-surface: #101214;

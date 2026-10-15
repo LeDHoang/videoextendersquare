@@ -1,0 +1,934 @@
+from __future__ import annotations
+
+import json
+import re
+
+from argon2 import PasswordHasher
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from server.routers import account_safety, messages, packs, reels, social
+from server.social import auth
+from server.social.database import Base, get_db
+from server.social.models import Comment, DirectMessage, EngagementEvent, Post, ReelPackItem, ReelPackSave, User
+
+
+PASSWORD = "correct-horse-battery"
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    monkeypatch.setenv("SX_MESSAGE_ENCRYPTION_KEY", "test-only-message-key-with-at-least-32-chars")
+    monkeypatch.setattr(
+        auth,
+        "PASSWORD_HASHER",
+        PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1),
+    )
+    test_engine = create_engine(
+        "sqlite:///" + str(tmp_path / "packs.db"),
+        connect_args={"check_same_thread": False},
+    )
+    testing_session = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
+    Base.metadata.create_all(test_engine)
+
+    application = FastAPI()
+    application.include_router(account_safety.router)
+    application.include_router(social.router)
+    application.include_router(packs.router)
+    application.include_router(messages.router)
+    application.include_router(reels.router)
+
+    def override_get_db():
+        db = testing_session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    application.dependency_overrides[get_db] = override_get_db
+    application.state.testing_session = testing_session
+    yield application
+    Base.metadata.drop_all(test_engine)
+    test_engine.dispose()
+
+
+def register(client: TestClient, username: str, email: str) -> dict:
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "username": username,
+            "password": PASSWORD,
+            "display_name": username.title(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["user"]
+
+
+def csrf_headers(client: TestClient) -> dict[str, str]:
+    token = client.cookies.get("echo_csrf")
+    assert token
+    return {"x-csrf-token": token}
+
+
+def mutate(client: TestClient, method: str, path: str, body: dict | None = None):
+    return client.request(method, path, headers=csrf_headers(client), json=body)
+
+
+def create_posts(app: FastAPI, owner_id: str, count: int = 6) -> list[str]:
+    with app.state.testing_session() as db:
+        owner = db.get(User, owner_id)
+        posts = []
+        for index in range(count):
+            post = Post(
+                owner_id=owner_id,
+                media_path=f"tests/pack-{owner_id[:5]}-{index}.mp4",
+                media_type="video",
+                title=f"Pack reel {index + 1}",
+                caption="",
+                location={"city": "Hanoi", "country": "Vietnam"},
+                source="upload",
+                status="published",
+            )
+            db.add(post)
+            posts.append(post)
+        owner.post_count += count
+        db.commit()
+        return [post.id for post in posts]
+
+
+def create_pack(client: TestClient, post_ids: list[str], title: str = "Vietnam highlights") -> dict:
+    response = mutate(
+        client,
+        "POST",
+        "/api/packs",
+        {
+            "title": title,
+            "description": "An authored sequence.",
+            "visibility": "public",
+            "tags": ["travel", "vietnam"],
+            "location": {"city": "Hanoi", "country": "Vietnam"},
+            "post_ids": post_ids,
+            "cover_post_id": post_ids[0],
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["pack"]
+
+
+def test_pack_authoring_publish_discovery_save_progress_and_reorder(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_owner", "pack-owner@example.com")
+        register(viewer_client, "pack_viewer", "pack-viewer@example.com")
+        post_ids = create_posts(app, owner["id"])
+
+        pack = create_pack(owner_client, post_ids)
+        assert pack["status"] == "draft"
+        assert pack["reel_count"] == 6
+        assert owner_client.get("/api/packs").json()["items"] == []
+
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+        pack = published.json()["pack"]
+        assert pack["status"] == "published"
+
+        discovered = viewer_client.get("/api/packs", params={"search": "Vietnam"})
+        assert [row["id"] for row in discovered.json()["items"]] == [pack["id"]]
+
+        saved = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/save")
+        assert saved.status_code == 200
+        assert saved.json()["saved"] is True
+        saved_again = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/save")
+        assert saved_again.status_code == 200
+        assert saved_again.json()["saves"] == 1
+        removed = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/save")
+        assert removed.status_code == 200
+        assert removed.json()["saves"] == 0
+        removed_again = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/save")
+        assert removed_again.status_code == 200
+        assert removed_again.json()["saves"] == 0
+        saved = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/save")
+        assert saved.json()["saves"] == 1
+        assert viewer_client.get("/api/users/me/saved-packs").json()["items"][0]["id"] == pack["id"]
+
+        detail = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        first_item = detail["items"][0]
+        progress = mutate(
+            viewer_client,
+            "PUT",
+            f"/api/packs/{pack['id']}/progress",
+            {"current_item_id": first_item["id"], "position_ms": 4200, "phase": "playing"},
+        )
+        assert progress.status_code == 200
+        assert progress.json()["progress"]["position_ms"] == 4200
+
+        reordered_ids = list(reversed(post_ids))
+        edited = mutate(
+            owner_client,
+            "PATCH",
+            f"/api/packs/{pack['id']}",
+            {"expected_revision": pack["revision"], "post_ids": reordered_ids},
+        )
+        assert edited.status_code == 200, edited.text
+        edited_pack = edited.json()["pack"]
+        stable = {row["post"]["id"]: row["id"] for row in detail["items"]}
+        assert {row["post"]["id"]: row["id"] for row in edited_pack["items"]} == stable
+
+        conflict = mutate(
+            owner_client,
+            "PATCH",
+            f"/api/packs/{pack['id']}",
+            {"expected_revision": pack["revision"], "title": "Stale edit"},
+        )
+        assert conflict.status_code == 409
+
+        playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert playback.status_code == 200, playback.text
+        assert playback.json()["feed"]["surface"] == "pack"
+        assert playback.json()["feed"]["has_more"] is False
+        assert playback.json()["feed"]["pack_immersive_enabled"] is True
+
+
+def test_pack_engagement_likes_views_and_comment_counters(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client, TestClient(app) as anon_client:
+        owner = register(owner_client, "pack_liker_owner", "pack-liker-owner@example.com")
+        register(viewer_client, "pack_liker", "pack-liker@example.com")
+        post_ids = create_posts(app, owner["id"])
+        pack = create_pack(owner_client, post_ids)
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+
+        # Likes are per-viewer, idempotent, and reflected in the pack payload.
+        liked = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/like")
+        assert liked.status_code == 200, liked.text
+        assert liked.json() == {"pack_id": pack["id"], "likes": 1, "liked_by_me": True}
+        liked_again = mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/like")
+        assert liked_again.json()["likes"] == 1
+        detail = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert detail["likes"] == 1
+        assert detail["liked_by_me"] is True
+        assert detail["viewer_state"]["liked"] is True
+        unliked = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/like")
+        assert unliked.json()["likes"] == 0
+        assert unliked.json()["liked_by_me"] is False
+        unliked_again = mutate(viewer_client, "DELETE", f"/api/packs/{pack['id']}/like")
+        assert unliked_again.json()["likes"] == 0
+
+        # Views count authenticated and anonymous viewers, de-duplicated for
+        # the same viewer inside the rolling window.
+        first = viewer_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert first.status_code == 200 and first.json()["accepted"] is True
+        second = viewer_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert second.status_code == 200
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["views"] == 1
+        anon = anon_client.post("/api/events", json={"event_type": "pack_start", "pack_id": pack["id"]})
+        assert anon.status_code == 200 and anon.json()["accepted"] is True
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["views"] == 2
+
+        # Comments are surfaced as a read-only counter of the member reels.
+        with app.state.testing_session() as db:
+            db.add(Comment(post_id=post_ids[0], author_id=owner["id"], text="Great reel"))
+            db.commit()
+        assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 1
+
+        # Comments by a creator the viewer blocks stop counting, matching the
+        # reels feed behaviour.
+        with TestClient(app) as noisy_client:
+            noisy = register(noisy_client, "pack_noisy", "pack-noisy@example.com")
+            with app.state.testing_session() as db:
+                db.add(Comment(post_id=post_ids[0], author_id=noisy["id"], text="Blocked chatter"))
+                db.commit()
+            assert noisy_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 2
+            blocked = mutate(viewer_client, "PUT", f"/api/users/{noisy['username']}/block")
+            assert blocked.status_code in {200, 409}, blocked.text
+            assert viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]["comments"] == 1
+
+
+def test_pack_rules_unlisted_sharing_messages_and_reports(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_sender", "pack-sender@example.com")
+        viewer = register(viewer_client, "pack_receiver", "pack-receiver@example.com")
+        post_ids = create_posts(app, owner["id"], 7)
+
+        too_short = create_pack(owner_client, post_ids[:2], "Too short")
+        rejected = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{too_short['id']}/publish",
+            {"expected_revision": too_short["revision"]},
+        )
+        assert rejected.status_code == 422
+
+        pack = create_pack(owner_client, post_ids[:5], "Unlisted pack")
+        updated = mutate(
+            owner_client,
+            "PATCH",
+            f"/api/packs/{pack['id']}",
+            {"expected_revision": pack["revision"], "visibility": "unlisted"},
+        ).json()["pack"]
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": updated["revision"]},
+        ).json()["pack"]
+
+        assert viewer_client.get("/api/packs").json()["items"] == []
+        assert viewer_client.get(f"/api/packs/{published['id']}").status_code == 200
+
+        saved = mutate(viewer_client, "PUT", f"/api/packs/{published['id']}/save")
+        assert saved.status_code == 200
+        assert saved.json()["saves"] == 1
+        assert viewer_client.get("/api/users/me/saved-packs").json()["items"][0]["id"] == published["id"]
+
+        first_share = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/share-content",
+            {
+                "kind": "pack",
+                "target_id": published["id"],
+                "usernames": [viewer["username"]],
+                "note": "Open this pack",
+                "client_id": "pack-share-batch-001",
+            },
+        )
+        assert first_share.status_code == 200, first_share.text
+        retry = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/share-content",
+            {
+                "kind": "pack",
+                "target_id": published["id"],
+                "usernames": [viewer["username"]],
+                "note": "Open this pack",
+                "client_id": "pack-share-batch-001",
+            },
+        )
+        assert retry.json()["results"][0]["duplicate"] is True
+
+        requests = viewer_client.get("/api/messages/bootstrap", params={"box": "requests"}).json()
+        attachment = requests["conversations"][0]["last_message"]
+        assert attachment["kind"] == "pack"
+        assert attachment["pack"]["id"] == published["id"]
+        assert attachment["post"] is None
+
+        event = mutate(
+            viewer_client,
+            "POST",
+            "/api/events",
+            {
+                "event_type": "pack_item_view",
+                "pack_id": published["id"],
+                "post_id": post_ids[0],
+                "source": "pack",
+                "client_event_id": "pack-event-attribution-001",
+            },
+        )
+        assert event.status_code == 200, event.text
+        with app.state.testing_session() as db:
+            attributed = db.query(EngagementEvent).filter(
+                EngagementEvent.client_event_id == "pack-event-attribution-001"
+            ).one()
+            assert attributed.pack_id == published["id"]
+            assert attributed.post_id == post_ids[0]
+            assert attributed.source == "pack"
+
+        unpublished_response = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{published['id']}/unpublish",
+            {"expected_revision": published["revision"]},
+        )
+        assert unpublished_response.status_code == 200, unpublished_response.text
+        unpublished = unpublished_response.json()["pack"]
+        assert viewer_client.get("/api/users/me/saved-packs").json()["items"] == []
+        tombstone = viewer_client.get("/api/messages/bootstrap", params={"box": "requests"}).json()
+        tombstone_message = tombstone["conversations"][0]["last_message"]
+        assert tombstone_message["kind"] == "pack"
+        assert tombstone_message["pack"] is None
+        assert tombstone_message["attachment_unavailable"] is True
+
+        republished_response = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{published['id']}/publish",
+            {"expected_revision": unpublished["revision"]},
+        )
+        assert republished_response.status_code == 200, republished_response.text
+        published = republished_response.json()["pack"]
+        assert viewer_client.get("/api/users/me/saved-packs").json()["items"][0]["id"] == published["id"]
+        restored = viewer_client.get("/api/messages/bootstrap", params={"box": "requests"}).json()
+        assert restored["conversations"][0]["last_message"]["pack"]["id"] == published["id"]
+
+        reported = mutate(
+            viewer_client,
+            "POST",
+            "/api/reports",
+            {"target_type": "pack", "target_id": published["id"], "reason": "spam"},
+        )
+        assert reported.status_code == 200
+
+        with app.state.testing_session() as db:
+            assert db.query(DirectMessage).count() == 1
+            assert db.query(ReelPackItem).filter(ReelPackItem.pack_id == published["id"]).count() == 5
+            assert db.query(ReelPackSave).filter(ReelPackSave.pack_id == published["id"]).count() == 1
+
+
+def test_pack_member_validation_and_video_cover_fallback(app):
+    with TestClient(app) as owner_client, TestClient(app) as other_client:
+        owner = register(owner_client, "pack_validator", "pack-validator@example.com")
+        other = register(other_client, "pack_outsider", "pack-outsider@example.com")
+        post_ids = create_posts(app, owner["id"], 31)
+        other_post_id = create_posts(app, other["id"], 1)[0]
+
+        duplicate = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Duplicate", "post_ids": [post_ids[0], post_ids[0]]},
+        )
+        assert duplicate.status_code == 422
+        assert duplicate.json()["detail"]["code"] == "DUPLICATE_PACK_ITEM"
+
+        too_large = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Too large", "post_ids": post_ids[:31]},
+        )
+        assert too_large.status_code == 422
+
+        # Collections may mix in other creators' public reels.
+        foreign = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Mixed creators", "post_ids": post_ids[:4] + [other_post_id]},
+        )
+        assert foreign.status_code == 200, foreign.text
+        mixed = foreign.json()["pack"]
+        foreign_items = [row for row in mixed["items"] if row["post"] and row["post"]["id"] == other_post_id]
+        assert len(foreign_items) == 1
+        assert foreign_items[0]["post"]["creator"]["username"] == other["username"]
+
+        # An unavailable foreign reel is rejected at authoring time.
+        with app.state.testing_session() as db:
+            db.get(Post, other_post_id).status = "deleted"
+            db.commit()
+        gone = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Foreign gone", "post_ids": post_ids[:4] + [other_post_id]},
+        )
+        assert gone.status_code == 422
+        assert gone.json()["detail"]["code"] == "INVALID_PACK_ITEM"
+
+        pack = create_pack(owner_client, post_ids[:5], "Video-only cover")
+        assert not pack["cover_url"] or not pack["cover_url"].casefold().endswith(".mp4")
+
+
+def test_pack_release_flags_are_independent(app, monkeypatch):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_flag_owner", "pack-flag-owner@example.com")
+        register(viewer_client, "pack_flag_viewer", "pack-flag-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Flagged pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+
+        monkeypatch.setenv("SX_REEL_PACK_DISCOVERY_ENABLED", "0")
+        assert viewer_client.get("/api/packs").json() == {"items": [], "next_offset": None, "total": 0}
+        assert viewer_client.get(f"/api/packs/{pack['id']}").status_code == 200
+        assert viewer_client.get(f"/api/users/{owner['username']}/packs").json()["items"] == []
+        assert owner_client.get(f"/api/users/{owner['username']}/packs").json()["items"][0]["id"] == pack["id"]
+
+        monkeypatch.setenv("SX_REEL_PACK_IMMERSIVE_ENABLED", "false")
+        playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert playback.status_code == 200
+        assert playback.json()["feed"]["pack_immersive_enabled"] is False
+
+        monkeypatch.setenv("SX_REEL_PACK_CREATION_ENABLED", "off")
+        blocked = mutate(owner_client, "POST", "/api/packs", {"title": "Disabled"})
+        assert blocked.status_code == 503
+        assert blocked.json()["detail"]["code"] == "PACK_CREATION_DISABLED"
+
+
+def test_pack_search_tag_location_pagination_and_item_timestamps(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_search_owner", "pack-search-owner@example.com")
+        register(viewer_client, "pack_search_viewer", "pack-search-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+
+        definitions = [
+            {
+                "title": "Northern Nights",
+                "description": "Street food journey after dark.",
+                "tags": ["Night Market", "Vietnam"],
+                "location": {"city": "Hanoi", "country": "Vietnam"},
+            },
+            {
+                "title": "Coastal Mornings",
+                "description": "A quiet route beside the sea.",
+                "tags": ["Coast"],
+                "location": {"city": "Da Nang", "country": "Vietnam"},
+            },
+            {
+                "title": "Southern Motion",
+                "description": "A fast city sequence.",
+                "tags": ["City"],
+                "location": {"city": "Ho Chi Minh City", "country": "Vietnam"},
+            },
+        ]
+        published_ids = []
+        first_pack = None
+        for definition in definitions:
+            draft = create_pack(owner_client, post_ids, definition["title"])
+            updated_response = mutate(
+                owner_client,
+                "PATCH",
+                f"/api/packs/{draft['id']}",
+                {
+                    "expected_revision": draft["revision"],
+                    "description": definition["description"],
+                    "tags": definition["tags"],
+                    "location": definition["location"],
+                },
+            )
+            assert updated_response.status_code == 200, updated_response.text
+            updated = updated_response.json()["pack"]
+            published_response = mutate(
+                owner_client,
+                "POST",
+                f"/api/packs/{updated['id']}/publish",
+                {"expected_revision": updated["revision"]},
+            )
+            assert published_response.status_code == 200, published_response.text
+            published = published_response.json()["pack"]
+            published_ids.append(published["id"])
+            if first_pack is None:
+                first_pack = published
+
+        assert first_pack is not None
+        for query in ("Northern", "street food", owner["username"], "night-market"):
+            result = viewer_client.get("/api/packs", params={"search": query}).json()
+            assert first_pack["id"] in {row["id"] for row in result["items"]}
+
+        tagged = viewer_client.get("/api/packs", params={"tag": "#NIGHT MARKET"}).json()
+        assert [row["id"] for row in tagged["items"]] == [first_pack["id"]]
+
+        for location in ("hanoi--vietnam", "hanoi-vietnam"):
+            located = viewer_client.get("/api/packs", params={"location": location}).json()
+            assert [row["id"] for row in located["items"]] == [first_pack["id"]]
+
+        first_page = viewer_client.get("/api/packs", params={"offset": 0, "limit": 2}).json()
+        second_page = viewer_client.get(
+            "/api/packs",
+            params={"offset": first_page["next_offset"], "limit": 2},
+        ).json()
+        assert first_page["total"] == 3
+        assert first_page["next_offset"] == 2
+        assert second_page["next_offset"] is None
+        assert {row["id"] for row in first_page["items"] + second_page["items"]} == set(published_ids)
+
+        detail = viewer_client.get(f"/api/packs/{first_pack['id']}").json()["pack"]
+        assert all(item["created_at"] and item["updated_at"] for item in detail["items"])
+
+        stale_delete = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{first_pack['id']}",
+            {"expected_revision": first_pack["revision"] - 1},
+        )
+        assert stale_delete.status_code == 409
+        deleted = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{first_pack['id']}",
+            {"expected_revision": first_pack["revision"]},
+        )
+        assert deleted.status_code == 200
+
+
+def test_pack_player_uses_db_fallback_when_scan_misses(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_fallback_owner", "pack-fallback-owner@example.com")
+        register(viewer_client, "pack_fallback_viewer", "pack-fallback-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Fallback pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert playback.status_code == 200, playback.text
+        body = playback.json()
+        assert body["count"] == 5
+        assert body["feed"]["surface"] == "pack"
+        # Items are embedded in the inline scripts as JSON; DB media_paths
+        # like tests/pack-*.mp4 are not in output/ scan but must hydrate as
+        # available via the DB fallback, not as unavailable tombstones.
+        scripts = " ".join(body.get("scripts") or [])
+        assert f'"pack_id": "{pack["id"]}"' in scripts or f'"pack_id":"{pack["id"]}"' in scripts
+        assert '"available": true' in scripts or '"available":true' in scripts
+        assert body["feed"]["pack"]["playable_count"] == 5
+
+
+def test_pack_player_items_carry_probed_duration_and_resolution(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_media_owner", "pack-media-owner@example.com")
+        register(viewer_client, "pack_media_viewer", "pack-media-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        with app.state.testing_session() as db:
+            first = db.get(Post, post_ids[0])
+            first.duration_ms, first.width, first.height = 14000, 1920, 1080
+            db.commit()
+        pack = create_pack(owner_client, post_ids, "Media facts pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        body = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()
+        # Inspect the player's own item list (videoData), not the pack metadata that
+        # is also embedded in the scripts, so this proves the playback items carry the facts.
+        match = re.search(r"let videoData = (.*?);\n\s*const initialFeedState =", body["scripts"][-1], re.S)
+        items = {item["post_id"]: item for item in json.loads(match.group(1))}
+        first = items[post_ids[0]]
+        assert (first["duration_ms"], first["width"], first["height"]) == (14000, 1920, 1080)
+        # Reels the probe has not seen stay null so the details column can omit the chip.
+        second = items[post_ids[1]]
+        assert second["duration_ms"] is None and second["width"] is None and second["height"] is None
+
+
+def test_pack_draft_share_blocked_and_progress_rejects_unavailable(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_draft_owner", "pack-draft-owner@example.com")
+        viewer = register(viewer_client, "pack_draft_viewer", "pack-draft-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Draft share pack")
+        # Draft packs must not be shareable even by the owner (receiver would
+        # see an instant tombstone).
+        blocked = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/share-content",
+            {
+                "kind": "pack",
+                "target_id": pack["id"],
+                "usernames": [viewer["username"]],
+                "client_id": "pack-draft-share-001",
+            },
+        )
+        assert blocked.status_code == 422, blocked.text
+        assert blocked.json()["detail"]["code"] == "PACK_NOT_PUBLISHED"
+
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        detail = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        first_item = detail["items"][0]
+        # Soft-delete the underlying post so the item becomes unavailable.
+        with app.state.testing_session() as db:
+            post = db.get(Post, first_item["post"]["id"])
+            post.status = "deleted"
+            db.commit()
+        unavailable = mutate(
+            viewer_client,
+            "PUT",
+            f"/api/packs/{pack['id']}/progress",
+            {"current_item_id": first_item["id"], "position_ms": 1000, "phase": "playing"},
+        )
+        assert unavailable.status_code == 422, unavailable.text
+        assert unavailable.json()["detail"]["code"] == "PACK_ITEM_UNAVAILABLE"
+
+
+def test_pack_delete_accepts_query_revision(app):
+    with TestClient(app) as owner_client:
+        owner = register(owner_client, "pack_query_delete", "pack-query-delete@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Query delete pack")
+        headers = csrf_headers(owner_client)
+        response = owner_client.request(
+            "DELETE",
+            f"/api/packs/{pack['id']}?expected_revision={pack['revision']}",
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+
+
+def test_pack_share_metadata_includes_preview(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_share_owner", "pack-share-owner@example.com")
+        register(viewer_client, "pack_share_viewer", "pack-share-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Share preview pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        shared = viewer_client.get(f"/api/packs/{pack['id']}/share").json()
+        assert shared["kind"] == "pack"
+        assert shared["pack_id"] == pack["id"]
+        assert shared["canonical_url"].endswith(f"/packs/{pack['id']}")
+        assert shared["title"] == "Share preview pack"
+        assert shared["creator"]["username"] == owner["username"]
+        assert shared["reel_count"] == 5
+        assert shared["playable_count"] == 5
+        assert shared["needs_repair"] is False
+
+
+def test_collection_items_endpoints_and_publish_at_three(app):
+    with TestClient(app) as owner_client, TestClient(app) as other_client:
+        owner = register(owner_client, "collection_owner", "collection-owner@example.com")
+        other = register(other_client, "collection_other", "collection-other@example.com")
+        own_ids = create_posts(app, owner["id"], 3)
+        foreign_ids = create_posts(app, other["id"], 5)
+
+        collection = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "My collection", "post_ids": own_ids[:2], "cover_post_id": own_ids[0]},
+        ).json()["pack"]
+
+        added = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{collection['id']}/items",
+            {"post_id": foreign_ids[0]},
+        )
+        assert added.status_code == 200, added.text
+        assert added.json()["added"] is True
+        pack = added.json()["pack"]
+        assert pack["reel_count"] == 3
+
+        # Appending a reel from another creator via the generic message
+        # endpoint is blocked while the collection is a draft, but publishing
+        # at 3+ is allowed.
+        draft_dm = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/direct",
+            {
+                "username": "collection_other",
+                "kind": "pack",
+                "pack_id": pack["id"],
+                "client_id": "collection-draft-dm-001",
+            },
+        )
+        assert draft_dm.status_code == 422
+        assert draft_dm.json()["detail"]["code"] == "PACK_NOT_PUBLISHED"
+
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+        pack = published.json()["pack"]
+
+        # Duplicate adds are idempotent and do not bump the reel count.
+        dupe = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/items",
+            {"post_id": pack["items"][0]["post"]["id"]},
+        )
+        assert dupe.status_code == 200
+        assert dupe.json()["added"] is False
+        assert dupe.json()["pack"]["reel_count"] == 3
+
+        # Stale expected_revision conflicts.
+        stale = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/items",
+            {"post_id": foreign_ids[3], "expected_revision": 1},
+        )
+        assert stale.status_code == 409
+
+        # Removing the cover reel clears the cover reference.
+        cover_post_id = pack["cover_post_id"]
+        assert cover_post_id == own_ids[0]
+        removed = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{pack['id']}/items/{cover_post_id}",
+            {"expected_revision": pack["revision"]},
+        )
+        assert removed.status_code == 200, removed.text
+        pack = removed.json()["pack"]
+        assert pack["cover_post_id"] is None
+        assert pack["reel_count"] == 2
+        assert pack["needs_repair"] is True
+
+        unknown = mutate(
+            owner_client,
+            "DELETE",
+            f"/api/packs/{pack['id']}/items/{cover_post_id}",
+            {"expected_revision": pack["revision"]},
+        )
+        assert unknown.status_code == 404
+        assert unknown.json()["detail"]["code"] == "PACK_ITEM_NOT_FOUND"
+
+
+def test_collection_viewer_blocked_member_renders_tombstone(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client, TestClient(app) as member_client:
+        owner = register(owner_client, "tombstone_owner", "tombstone-owner@example.com")
+        register(viewer_client, "tombstone_viewer", "tombstone-viewer@example.com")
+        member = register(member_client, "tombstone_member", "tombstone-member@example.com")
+        own_ids = create_posts(app, owner["id"], 2)
+        member_ids = create_posts(app, member["id"], 2)
+
+        pack = mutate(
+            owner_client,
+            "POST",
+            "/api/packs",
+            {"title": "Mixed tombstones", "post_ids": own_ids + member_ids[:1]},
+        ).json()["pack"]
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+
+        base = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert base["playable_count"] == 3
+        assert all(row["available"] for row in base["items"])
+
+        # The viewer blocks a member reel's creator: that item becomes a
+        # viewer-specific tombstone while other viewers still see it.
+        mutate(viewer_client, "PUT", f"/api/users/{member['username']}/block")
+        scoped = viewer_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        member_rows = [row for row in scoped["items"] if row["post"] and row["post"]["id"] == member_ids[0]]
+        assert member_rows == [] or member_rows[0]["available"] is False
+        blocked_rows = [row for row in scoped["items"] if not row["available"]]
+        assert len(blocked_rows) == 1
+        assert blocked_rows[0]["post"] is None
+
+        other_view = member_client.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert all(row["available"] for row in other_view["items"])
+
+        # Playback payload hides the blocked member for that viewer only.
+        # (player-inline embeds items in scripts; the feed key omits them.)
+        playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert playback.status_code == 200
+        body = playback.json()
+        scripts = " ".join(body.get("scripts") or [])
+        assert f"tests/pack-{member['id'][:5]}-0.mp4" not in scripts
+        assert f"tests/pack-{owner['id'][:5]}-0.mp4" in scripts
+        assert '"available": false' in scripts or '"available":false' in scripts
+
+
+def test_saved_packs_are_private_to_their_owner(app):
+    with (
+        TestClient(app) as owner_client,
+        TestClient(app) as viewer_client,
+        TestClient(app) as anon_client,
+    ):
+        owner = register(owner_client, "sp_owner", "sp-owner@example.com")
+        register(viewer_client, "sp_viewer", "sp-viewer@example.com")
+        pack = create_pack(owner_client, create_posts(app, owner["id"]))
+        published = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        )
+        assert published.status_code == 200, published.text
+        assert mutate(viewer_client, "PUT", f"/api/packs/{pack['id']}/save").status_code == 200
+
+        assert [row["id"] for row in viewer_client.get("/api/users/me/saved-packs").json()["items"]] == [pack["id"]]
+        assert anon_client.get("/api/users/me/saved-packs").status_code == 401
+        assert owner_client.get("/api/users/me/saved-packs").json()["items"] == []
+        assert anon_client.get("/api/users/sp_viewer/saved-packs").status_code in {404, 405}
+
+
+def test_pack_owner_controls_are_private_to_the_owner(app):
+    with TestClient(app) as owner_client, TestClient(app) as other_client, TestClient(app) as anon_client:
+        owner = register(owner_client, "pack_ctl_owner", "pack-ctl-owner@example.com")
+        register(other_client, "pack_ctl_other", "pack-ctl-other@example.com")
+        post_ids = create_posts(app, owner["id"], 4)
+        pack = create_pack(owner_client, post_ids, "Owner controls pack")
+        pack_id, revision = pack["id"], pack["revision"]
+        assert pack["viewer_state"]["can_edit"] is True
+
+        # A draft is invisible to everyone but its owner, including likes and reports.
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 404
+        assert mutate(other_client, "PUT", f"/api/packs/{pack_id}/like").status_code == 404
+        assert mutate(other_client, "PUT", f"/api/packs/{pack_id}/save").status_code == 404
+
+        publish = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
+        assert publish.status_code == 200, publish.text
+        published = publish.json()["pack"]
+        assert published["status"] == "published"
+
+        # Once visible, a non-owner sees it read-only and every owner mutation is refused.
+        seen = other_client.get(f"/api/packs/{pack_id}").json()["pack"]
+        assert seen["viewer_state"]["can_edit"] is False
+        for method, path, body in (
+            ("PATCH", f"/api/packs/{pack_id}", {"expected_revision": published["revision"], "visibility": "unlisted"}),
+            ("POST", f"/api/packs/{pack_id}/publish", {"expected_revision": published["revision"]}),
+            ("POST", f"/api/packs/{pack_id}/unpublish", {"expected_revision": published["revision"]}),
+            ("DELETE", f"/api/packs/{pack_id}?expected_revision={published['revision']}", None),
+        ):
+            refused = mutate(other_client, method, path, body)
+            assert refused.status_code == 403, (method, path, refused.text)
+            assert refused.json()["detail"]["code"] == "PACK_FORBIDDEN"
+        assert other_client.get(f"/api/packs/{pack_id}").json()["pack"]["status"] == "published"
+
+        # Likes and saves need an account.
+        assert anon_client.put(f"/api/packs/{pack_id}/like").status_code in {401, 403}
+
+        # Owner can change visibility of a published pack, then move it back to draft.
+        unlisted = mutate(
+            owner_client,
+            "PATCH",
+            f"/api/packs/{pack_id}",
+            {"expected_revision": published["revision"], "visibility": "unlisted"},
+        )
+        assert unlisted.status_code == 200, unlisted.text
+        assert unlisted.json()["pack"]["visibility"] == "unlisted"
+        assert other_client.get("/api/packs").json()["items"] == []
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 200  # link still works
+
+        revision = unlisted.json()["pack"]["revision"]
+        draft = mutate(owner_client, "POST", f"/api/packs/{pack_id}/unpublish", {"expected_revision": revision})
+        assert draft.status_code == 200, draft.text
+        assert draft.json()["pack"]["status"] == "draft"
+        assert other_client.get(f"/api/packs/{pack_id}").status_code == 404
+
+        # A stale revision is rejected instead of silently overwriting.
+        stale = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
+        assert stale.status_code == 409, stale.text

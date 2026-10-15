@@ -1,1 +1,18 @@
-{}
+{
+  "remote.autoForwardPorts": true,
+  "remote.restoreForwardedPorts": true,
+  "remote.portsAttributes": {
+    "5173": {
+      "label": "ECHO Frontend",
+      "onAutoForward": "openPreview",
+      "protocol": "http",
+      "requireLocalPort": true
+    },
+    "8000": {
+      "label": "ECHO API",
+      "onAutoForward": "silent",
+      "protocol": "http",
+      "requireLocalPort": true
+    }
+  }
+}

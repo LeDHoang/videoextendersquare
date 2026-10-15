@@ -2,8 +2,19 @@ streamlit>=1.60,<2
 fal-client>=1.0
 Pillow>=10
 python-dotenv>=1.0
-vapoursynth==78
+# vapoursynth has no manylinux wheels (R78 ships macOS/win/musllinux only), so it
+# would fail the Linux Docker build; it is only needed for the local macOS
+# "Studio" upscale engine. The container already runs without it (Dockerfile
+# comment) and detects its absence gracefully.
+vapoursynth==78; sys_platform != "linux"
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 sse-starlette>=2.0
+SQLAlchemy>=2.0,<3
+alembic>=1.13,<2
+argon2-cffi>=23.1
+email-validator>=2.1
+psycopg[binary]>=3.1
+cryptography>=42,<49
+stripe>=11,<13

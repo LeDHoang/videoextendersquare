@@ -1,0 +1,18 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Precision Open Chamfered Docking Tray -->
+  <path d="M4.5 14V18.5L7 21H17L19.5 18.5V14" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+  <line x1="8" y1="18.2" x2="16" y2="18.2" stroke="#f2f3f5" stroke-width="1" stroke-opacity="0.3"/>
+
+  <!-- Faceted Upward Chevron Roof with Enclosed Inner Peak -->
+  <path d="M6.5 9.5L12 4L17.5 9.5" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Optical Sensor Horizon Diamond nestled just beneath the roof apex -->
+  <polygon points="12,5.2 14.8,8 12,10.8 9.2,8" fill="#ff3b1f"/>
+  <circle cx="12" cy="8" r="0.8" fill="#f2f3f5"/>
+
+  <!-- Downward Trajectory Core Stem extending toward the tray base -->
+  <line x1="12" y1="10.8" x2="12" y2="16.5" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+
+  <!-- Subtle horizontal telemetry tick across the vertical axis -->
+  <line x1="10" y1="14" x2="14" y2="14" stroke="#ff3b1f" stroke-width="1.2" stroke-opacity="0.6"/>
+</svg>
