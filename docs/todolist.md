@@ -50,11 +50,11 @@ Follow the phases in order unless measured results change a dependency.
 
 ### Phase 1 — Immersive-media contract
 
-- [ ] Store explicit projection, stereo-layout, presentation-mode, orientation, and comfort metadata.
+- [ ] Store explicit projection, stereo-layout, presentation-mode, orientation, and comfort metadata. *(Partial, 2026-10-16: `posts.stereo_layout` (`mono` / `sbs` / `tb`) shipped with 3D Reels. See `docs/stereo-3d-reels.md`. Projection, presentation mode, orientation and comfort are still open.)*
 - [ ] Store codec, dimensions, bitrate, frame rate, device target, and fallback for every rendition.
 - [ ] Add caption, translation, audio-description, generated-asset, and provenance metadata.
-- [ ] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration.
-- [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets.
+- [x] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration. *(3D Reels: migration `20261015_0013` backfills `testpipeline-3d/` 2:1 rows. The player regex is gone.)*
+- [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets. *(Partial: in VR, a stereo file that fails to load falls back to its 2D left-eye rendition. Stereo posts without a rendition are CSS-cropped in 2D.)*
 
 ### Phase 2 — Reel Packs
 
