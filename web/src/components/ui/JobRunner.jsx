@@ -6,7 +6,9 @@ import Emoji from './Emoji.jsx';
 
 // Tracks a single pipeline job over SSE and renders progress + result.
 // onDone(result), when provided, fires exactly once when the job completes.
-export default function JobRunner({ jobId, name, kind, onDone, onSettled }) {
+// showMedia={false} keeps the status + downloads but leaves the rendered
+// media to the caller (the Upload Studio shows it on its stage).
+export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMedia = true }) {
   const { job, error } = useSSE(`/api/${kind}/jobs/${jobId}/stream`);
   const doneRef = useRef(false);
   const settledRef = useRef(false);
@@ -50,7 +52,7 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled }) {
           <span className="sx-job-status sx-done">✓ 4K SQUARE COMPLETE</span>
         </div>
 
-        {kind === 'image' ? (
+        {!showMedia ? null : kind === 'image' ? (
           <img
             className="sx-img"
             src={job.result.download_url}

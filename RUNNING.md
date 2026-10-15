@@ -66,7 +66,7 @@ auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
 | Variable | Purpose | Default |
 |---|---|---|
 | `FAL_KEY` | Server-owned fal.ai key for ECHO Credit-funded jobs; never exposed to users | — |
-| `SX_CREDITS_ENABLED` | Enables server-funded quotes and credit spending | `0` |
+| `SX_CREDITS_ENABLED` | Enables server-funded quotes and credit spending. When off, the render panels still show price estimates (`POST /api/billing/estimate`: same pricing, no quote row, cannot fund a render) | `0` |
 | `SX_STRIPE_ENABLED` | Enables Stripe Checkout pack purchases | `0` |
 | `SX_REEL_REWARDS_ENABLED` | Enables qualified reel-view credit rewards | `0` |
 | `SX_FAL_KEY_ENCRYPTION_KEY` | Stable dedicated secret for AES-GCM encryption of personal Fal keys | required to save BYOK keys |

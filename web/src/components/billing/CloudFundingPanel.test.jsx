@@ -56,6 +56,73 @@ describe('CloudFundingPanel', () => {
     expect(onChange).toHaveBeenCalledWith('byok');
   });
 
+  it('shows estimates while ECHO credits are disabled, without the insufficient warning', () => {
+    mocks.catalog = { credits_enabled: false };
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel
+          required
+          paymentSource="credits"
+          onChange={() => {}}
+          quoteState={{ ...quoteState, estimate: true, quotes: [{ quote_id: null, estimate: true }] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/5 credits \(estimate only\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Estimated cost/)).toBeInTheDocument();
+    expect(screen.getByText(/\$0\.0350 USD across 1 item\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/ECHO CREDITS ARE DISABLED/)).toBeInTheDocument();
+    expect(screen.queryByText(/INSUFFICIENT ECHO CREDITS/)).toBeNull();
+  });
+
+  it('shows the provider estimate when paying with MY FAL KEY', () => {
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel
+          required
+          paymentSource="byok"
+          onChange={() => {}}
+          quoteState={quoteState}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/\$0\.0350 USD across 1 item\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Charges go directly to your Fal account/)).toBeInTheDocument();
+  });
+
+  it('marks approximate estimates', () => {
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel
+          required
+          paymentSource="byok"
+          onChange={() => {}}
+          quoteState={{ ...quoteState, approximate: true }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/≈ \$0\.0350 USD across 1 item\(s\) \(approximate\)/)).toBeInTheDocument();
+  });
+
+  it('hides the provider estimate in BYOK mode when nothing was priced', () => {
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel
+          required
+          paymentSource="byok"
+          onChange={() => {}}
+          quoteState={{ ...quoteState, quotes: [], totalProviderUsd: 0 }}
+          byokOnly
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText(/Provider estimate/)).toBeNull();
+  });
+
   it('locks credit selection for BYOK-only models', () => {
     render(
       <MemoryRouter>

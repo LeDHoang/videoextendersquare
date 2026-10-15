@@ -40,6 +40,13 @@ class QuoteError(BillingError):
     code = "INVALID_QUOTE"
 
 
+class PricingUnavailable(QuoteError):
+    """The job cannot be priced as configured (model limit, BYOK-only chain,
+    spend cap). Unlike a stale quote, the message says why and is safe to show."""
+
+    code = "PRICING_UNAVAILABLE"
+
+
 class RewardError(BillingError):
     code = "REWARD_INELIGIBLE"
 
@@ -361,6 +368,55 @@ def reserve_credits(db: Session, user_id: str, amount: int, *, job_id: str) -> C
     return account
 
 
+def price_job(
+    *,
+    kind: str,
+    width: int,
+    height: int,
+    duration: float | None,
+    params: dict[str, Any],
+    source_fps: float | None = None,
+    source_frames: int | None = None,
+    estimate: bool = False,
+) -> dict[str, Any]:
+    """Pricing snapshot for one staged item. Pure: no ledger, no quote row."""
+    kind = str(kind).casefold()
+    try:
+        snapshot = (
+            quote_video(
+                width=width, height=height, duration=float(duration or 0), params=params,
+                source_fps=source_fps, source_frames=source_frames, estimate=estimate,
+            )
+            if kind == "video"
+            else quote_image(width=width, height=height, params=params)
+            if kind == "image"
+            else None
+        )
+    except PricingError as exc:
+        raise PricingUnavailable(str(exc)) from exc
+    if snapshot is None:
+        raise PricingUnavailable("Unsupported quote kind")
+    return snapshot
+
+
+def estimate_payload(snapshot: dict[str, Any], *, kind: str, stage_id: str) -> dict[str, Any]:
+    """Informational price for a staged item. Same numbers as a quote, but it
+    is never persisted and carries no quote_id, so it cannot fund a render."""
+    return {
+        "quote_id": None,
+        "estimate": True,
+        "kind": str(kind).casefold(),
+        "stage_id": stage_id,
+        "pricing_version": snapshot.get("pricing_version"),
+        "provider_cost_usd": snapshot.get("provider_cost_usd"),
+        "provider_cost_microusd": int(snapshot.get("provider_cost_microusd", 0)),
+        "credits": int(snapshot.get("credits", 0)),
+        "approximate": any((stage.get("details") or {}).get("approximate") for stage in snapshot.get("stages", [])),
+        "stages": snapshot.get("stages", []),
+        "details": snapshot.get("details", {}),
+    }
+
+
 def create_quote(
     db: Session,
     *,
@@ -376,27 +432,16 @@ def create_quote(
     fingerprint: dict[str, Any] | None = None,
 ) -> BillingQuote:
     kind = str(kind).casefold()
-    try:
-        snapshot = (
-            quote_video(
-                width=width, height=height, duration=float(duration or 0), params=params,
-                source_fps=source_fps, source_frames=source_frames,
-            )
-            if kind == "video"
-            else quote_image(width=width, height=height, params=params)
-            if kind == "image"
-            else None
-        )
-    except PricingError as exc:
-        raise QuoteError(str(exc)) from exc
-    if snapshot is None:
-        raise QuoteError("Unsupported quote kind")
+    snapshot = price_job(
+        kind=kind, width=width, height=height, duration=duration, params=params,
+        source_fps=source_fps, source_frames=source_frames,
+    )
     try:
         max_quote_usd = float(os.environ.get("SX_FAL_MAX_QUOTE_USD", "10"))
     except (TypeError, ValueError):
         max_quote_usd = 10.0
     if max_quote_usd > 0 and float(snapshot.get("provider_cost_microusd", 0)) > max_quote_usd * 1_000_000:
-        raise QuoteError(
+        raise PricingUnavailable(
             f"Quote exceeds the per-job spend cap (${max_quote_usd:g}); "
             "reduce duration/resolution or choose a cheaper model."
         )

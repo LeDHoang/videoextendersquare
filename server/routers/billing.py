@@ -18,9 +18,11 @@ from server.billing.service import (
     BillingNotConfigured,
     QuoteError,
     create_quote,
+    estimate_payload,
     flag_enabled,
     get_wallet,
     list_transactions,
+    price_job,
     quote_payload,
     require_billing_secrets,
     stage_fingerprint,
@@ -152,6 +154,13 @@ def transactions(
         _billing_http_error(exc)
 
 
+def _quote_rpm() -> int:
+    try:
+        return max(1, int(os.environ.get("SX_QUOTE_RPM", "15")))
+    except (TypeError, ValueError):
+        return 15
+
+
 @router.post("/api/billing/quote")
 def quote(
     body: QuoteRequest,
@@ -162,10 +171,7 @@ def quote(
     validate_origin(request)
     if not flag_enabled("SX_CREDITS_ENABLED"):
         raise HTTPException(status_code=503, detail={"code": "CREDITS_DISABLED", "message": "ECHO Credits are disabled."})
-    try:
-        quote_rpm = max(1, int(os.environ.get("SX_QUOTE_RPM", "15")))
-    except (TypeError, ValueError):
-        quote_rpm = 15
+    quote_rpm = _quote_rpm()
     rate_limiter.check(db, f"quote:{context.user.id}", quote_rpm, 60)
     rate_limiter.check(db, f"quote-ip:{request_identity(request)}", max(quote_rpm * 4, 60), 60)
     try:
@@ -192,6 +198,45 @@ def quote(
     except BillingError as exc:
         _billing_http_error(exc)
     return quote_payload(row)
+
+
+@router.post("/api/billing/estimate")
+def estimate(
+    body: QuoteRequest,
+    request: Request,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    """Price a staged item without creating a quote.
+
+    Works while ECHO Credits are disabled so the UI can still show what a
+    cloud render costs (e.g. before paying with MY FAL KEY). Nothing is
+    persisted and no quote_id is issued, so an estimate can never fund a
+    render; credit renders still need /api/billing/quote.
+    """
+    validate_origin(request)
+    # Pure pricing (probe results are cached), re-run on every settings change
+    # and once per batch item, so it gets a wider budget than real quotes.
+    quote_rpm = _quote_rpm()
+    rate_limiter.check(db, f"estimate:{context.user.id}", max(quote_rpm * 4, 60), 60)
+    rate_limiter.check(db, f"estimate-ip:{request_identity(request)}", max(quote_rpm * 16, 240), 60)
+    kind = body.kind.strip().casefold()
+    _stage_path, width, height, duration, source_fps, source_frames = _staged_metadata(kind, body.stage_id, request, context)
+    parameters = image_parameters(body.parameters) if kind == "image" else video_parameters(body.parameters)
+    try:
+        snapshot = price_job(
+            kind=kind,
+            width=width,
+            height=height,
+            duration=duration,
+            params=parameters,
+            source_fps=source_fps,
+            source_frames=source_frames,
+            estimate=True,
+        )
+    except BillingError as exc:
+        _billing_http_error(exc)
+    return estimate_payload(snapshot, kind=kind, stage_id=body.stage_id)
 
 
 @router.post("/api/billing/checkout-session")

@@ -1,68 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, BlockingBanner, GatedReason, Mono, AccentBlock } from '../components/ui/primitives.jsx';
-import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
-import UploadZone from '../components/ui/UploadZone.jsx';
-import JobRunner from '../components/ui/JobRunner.jsx';
-import { Skeleton } from '../components/ui/Skeleton.jsx';
-import CustomModelPanel from '../components/ui/CustomModelPanel.jsx';
-import LocationField from '../components/ui/LocationField.jsx';
+import { BlockingBanner, Mono } from '../components/ui/primitives.jsx';
+import { Segmented, Button } from '../components/ui/controls.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
-import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
-import CloudFundingPanel from '../components/billing/CloudFundingPanel.jsx';
-import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { appendProcessingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import StudioStage from '../components/upload/StudioStage.jsx';
+import { useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
+import { useRenderFunding } from '../components/upload/useRenderFunding.js';
+import { pipelineSummary } from '../components/upload/stageGeometry.js';
+import { DeckSection, CoreEngineSection, AdvancedSection, UpscaleSection, ExecuteSection } from '../components/upload/ExtendDeck.jsx';
+import { DetailsSection, ShareSection, TITLE_MAX, TAGS_MAX } from '../components/upload/PostDeck.jsx';
 
-// Upload wizard — single-file intake that will eventually replace the
-// standalone Image/Video extender pages (which stay mounted for now).
-// The extend step below mirrors those pages' full pipeline options
-// (models, custom endpoints, LoRA, trim, cost estimate) per media kind.
+// Upload Studio — one place to extend and share. Left: the 1:1 master stage
+// (original + extended result). Right: every extender setting of the
+// standalone Image/Video pages (which stay mounted), then post details and
+// share. BATCH EXTEND renders many files with one configuration and no
+// publishing, like the standalone pages' multi-file mode.
 
+const STUDIO_MODES = ['POST', 'BATCH EXTEND'];
 const PATH_OPTS = ['SHARE DIRECTLY', 'EXTEND ANYWAY'];
-const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
-const IMG_ENGINES = ['FAST', 'FAL AI'];
-const VID_ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
-const TITLE_MAX = 100;
-const CAPTION_MAX = 2200;
-const TAGS_MAX = 5;
 // One post is either a single video or 1–10 images (a slideshow), never both.
 const MAX_POST_IMAGES = 10;
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp'];
 const VIDEO_EXTS = ['mp4', 'mov', 'avi', 'webm'];
-
-const FALLBACK_FAL_MODELS = ['Clarity Upscaler', 'CCSR', 'AuraSR', 'ESRGAN'];
-const FALLBACK_FAL_MODEL_IDS = {
-  'Clarity Upscaler': 'fal-ai/clarity-upscaler',
-  CCSR: 'fal-ai/ccsr',
-  AuraSR: 'fal-ai/aura-sr',
-  ESRGAN: 'fal-ai/esrgan',
-};
-const STOCK_OUTPAINT_IMG = 'fal-ai/image-apps-v2/outpaint';
-const IMG_PROMPT_DEFAULT = 'Seamlessly extend the background environment, high details, matching texture and lighting.';
-const VID_PROMPT_DEFAULT = 'Seamlessly extend the background environment, cool lighting, neutral color temperature, matching original white balance and color palette.';
-const VID_NEG_DEFAULT = 'yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated';
-const CREDIT_VIDEO_OUTPAINT_MODELS = new Set([
-  'fal-ai/ltx-2.3-quality/outpaint',
-  'fal-ai/ltx-2.3-quality/outpaint/lora',
-  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
-  'fal-ai/wan-vace-14b/outpainting',
-]);
-const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
-  'fal-ai/bytedance-upscaler/upscale/video',
-  'fal-ai/seedvr/upscale/video',
-]);
-
-function fmtBytes(n) {
-  if (!n) return '—';
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+const ACCEPT = '.png,.jpg,.jpeg,.webp,.mp4,.mov,.avi,.webm';
 
 function kindOf(name) {
   const ext = (name || '').split('.').pop().toLowerCase();
@@ -71,29 +38,29 @@ function kindOf(name) {
   return null;
 }
 
+const isSquareMeta = (meta) => !!meta && (meta.orientation === 'SQUARE' || (meta.width && meta.width === meta.height));
+const titleFromName = (name) => name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX);
+const releaseEntries = (entries) => {
+  for (const entry of entries) URL.revokeObjectURL(entry.url);
+};
+
 export default function UploadPage() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { wallet, catalog, falKey, refresh: refreshWallet } = useWallet();
   const health = useHealthContext();
-  const cfg = useConfigContext();
+  const cfgCtx = useConfigContext();
   const probes = health?.probes || {};
   const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
+  const models = cfgCtx?.config?.models || {};
 
-  const models = cfg?.config?.models || {};
-  // Image catalogs (mirror ImagePage).
-  const imgOutpaintCatalog = models.image_outpaint_catalog || [];
-  const imgUpscaleCatalog = models.image_upscale_catalog || [];
-  const imgUpscaleOptions = imgUpscaleCatalog.length
-    ? imgUpscaleCatalog.map((e) => e.label)
-    : FALLBACK_FAL_MODELS;
-  // Video catalogs (mirror VideoPage).
-  const vidOutpaintCatalog = models.video_outpaint_catalog || [];
-  const vidUpscaleCatalog = models.video_upscale_catalog || [];
-  const vidOutpaintOptions = vidOutpaintCatalog.map((e) => e.label);
-  const vidUpscaleOptions = vidUpscaleCatalog.map((e) => e.label);
+  // Each kind keeps its own extender settings for the whole visit.
+  const imageCfg = useImageExtendConfig(models);
+  const videoCfg = useVideoExtendConfig(models);
 
-  // ── 01 Select ──
+  const [studioMode, setStudioMode] = useState('post');
+  const isBatch = studioMode === 'batch';
+
+  // ── POST: one video, one image, or a 1–10 image slideshow ──
   const [file, setFile] = useState(null);
   const [kind, setKind] = useState(null);
   const [staged, setStaged] = useState(null);
@@ -101,202 +68,59 @@ export default function UploadPage() {
   // Multi-image post: every staged image in post order ({ key, file, meta, url }).
   // Empty for single-file uploads; file/staged then mirror gallery[0].
   const [gallery, setGallery] = useState([]);
+  const [galleryView, setGalleryView] = useState(null);
   const isSlideshow = gallery.length > 1;
-
-  // ── 02 Square gate + pipeline config ──
   const [path, setPath] = useState('skip'); // 'skip' | 'extend'
-  const [mode, setMode] = useState(MODES[0]);
-  const [engine, setEngine] = useState('FAST');
-  const [prompt, setPrompt] = useState(IMG_PROMPT_DEFAULT);
-  const [sharpening, setSharpening] = useState(0.5);
   const [job, setJob] = useState(null);
   const [jobDone, setJobDone] = useState(null);
+  const [jobSettled, setJobSettled] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [renderError, setRenderError] = useState('');
+  // Why the last file selection was refused (a refused selection keeps
+  // whatever was staged before).
+  const [pickError, setPickError] = useState('');
 
-  // Image-only options.
-  const [imgFalModel, setImgFalModel] = useState(FALLBACK_FAL_MODELS[0]);
-  const [imgOutArgs, setImgOutArgs] = useState({ args: {}, ok: true, error: '' });
-  const [imgUpArgs, setImgUpArgs] = useState({ args: {}, ok: true, error: '' });
-
-  // Video-only options.
-  const [outpaintOpt, setOutpaintOpt] = useState(vidOutpaintOptions[0] || 'LTX 2.3 Quality');
-  const [falUpscale, setFalUpscale] = useState(vidUpscaleOptions[0] || 'Bytedance Upscaler');
-  const [ltxRes, setLtxRes] = useState('720p');
-  const [ltxAudio, setLtxAudio] = useState(true);
-  const [ltxGuidance, setLtxGuidance] = useState(1.0);
-  const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
-  const [ltxNegativePrompt, setLtxNegativePrompt] = useState(VID_NEG_DEFAULT);
-  const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
-  const [seedvrFactor, setSeedvrFactor] = useState(2.0);
-  const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('4k');
-  const [btdFps, setBtdFps] = useState('30fps');
-  const [btdTier, setBtdTier] = useState('fast');
-  const [btdPreset, setBtdPreset] = useState('general');
-  const [btdFidelity, setBtdFidelity] = useState('medium');
-  const [trimEnabled, setTrimEnabled] = useState(false);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimDur, setTrimDur] = useState(15);
-  const [outArgs, setOutArgs] = useState({ args: {}, ok: true, error: '' });
-  const [upArgs, setUpArgs] = useState({ args: {}, ok: true, error: '' });
-  const [paymentSource, setPaymentSource] = useState('credits');
-  const autoByokRef = useRef(false);
-
-  // ── 03 Details ──
   const [title, setTitle] = useState('');
+  // The title last filled in from a file name: a new pick may replace it,
+  // but never a title the user typed.
+  const autoTitleRef = useRef('');
   const [caption, setCaption] = useState('');
   const [tags, setTags] = useState([]);
   const [tagDraft, setTagDraft] = useState('');
+  const [tagError, setTagError] = useState('');
   const [location, setLocation] = useState({ city: '', country: '', display_name: '' });
-
-  // ── 04 Share ──
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(null);
-  const [error, setError] = useState('');
-  // Why the last file selection was refused (shown in step 01; a refused
-  // selection keeps whatever was staged before).
-  const [pickError, setPickError] = useState('');
+  const [shareError, setShareError] = useState('');
 
+  // ── BATCH: many videos or many images, same settings, no publishing ──
+  const [batch, setBatch] = useState([]);
+  const [batchKind, setBatchKind] = useState(null);
+  const [batchSelected, setBatchSelected] = useState(null);
+  const [batchStaging, setBatchStaging] = useState(false);
+  const [batchPickError, setBatchPickError] = useState('');
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const [batchJobs, setBatchJobs] = useState([]);
+
+  const activeKind = isBatch ? batchKind : kind;
+  const cfg = activeKind === 'video' ? videoCfg : imageCfg;
   const previewUrl = useObjectUrl(file);
-  const isSquare = !!staged && (staged.orientation === 'SQUARE' || (staged.width && staged.width === staged.height));
-  const upscaleOnly = mode === 'UPSCALE ONLY';
-  const falPicked = engine === 'FAL AI';
-  const studioPicked = engine === 'STUDIO';
-  const canShareSource = path === 'skip' ? !!staged : !!jobDone;
+  const isSquare = isSquareMeta(staged);
 
-  const blockedIds = kind === 'video' ? ['ffmpeg', 'ffprobe', 'encoder'] : ['ffmpeg', 'ffprobe'];
+  const renderItems = useMemo(() => {
+    if (isBatch) return batch.map((entry) => entry.meta);
+    return path === 'extend' && staged ? [staged] : [];
+  }, [isBatch, batch, path, staged]);
+  const funding = useRenderFunding({ kind: activeKind, items: renderItems, config: cfg, user, wallet, catalog, falKey });
+
+  const blockedIds = activeKind === 'video' ? ['ffmpeg', 'ffprobe', 'encoder'] : ['ffmpeg', 'ffprobe'];
   const blocked = blockedIds.filter((id) => probes[id] && !probes[id].ok).map((id) => probes[id]);
+  const studioBlocked = activeKind === 'video' && cfg.studioPicked && !studioOk;
 
-  // ── Image derived (mirror ImagePage) ──
-  const imgUpscaleEntry = imgUpscaleCatalog.find((e) => e.label === imgFalModel) || null;
-  const imgUpscaleModel = imgUpscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[imgFalModel] || models.upscale_img;
-  const imgOutpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
-  const imgOutpaintEntry = imgOutpaintCatalog.find((entry) => entry.model === imgOutpaintModel) || null;
-  const imgOutpaintCustom = imgOutpaintModel !== STOCK_OUTPAINT_IMG;
-  const imgOutpaintShort = (imgOutpaintModel || '').split('/').filter(Boolean).pop() || 'custom';
-
-  // ── Video derived (mirror VideoPage) ──
-  const vidOutpaintEntry = vidOutpaintCatalog.find((e) => e.label === outpaintOpt) || vidOutpaintCatalog[0];
-  const vidUpscaleEntry = vidUpscaleCatalog.find((e) => e.label === falUpscale) || vidUpscaleCatalog[0];
-  const vidOutpaintModel = vidOutpaintEntry?.model || models.outpaint_vid;
-  const vidUpscaleModel = vidUpscaleEntry?.model || models.upscale_vid;
-  const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (vidOutpaintModel || '').includes('/lora'));
-  const loraList = useMemo(
-    () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
-    [loraPicked, ltxLoras],
-  );
-  const maxSourceDur = staged?.duration || 60;
-
-  const processingParameters = useMemo(() => kind === 'video'
-    ? videoBillingParameters({
-        prompt,
-        upscaleOnly,
-        falPicked,
-        studioPicked,
-        sharpening,
-        outpaintModel: vidOutpaintModel,
-        upscaleModel: vidUpscaleModel,
-        ltxResolution: ltxRes,
-        ltxAudio,
-        ltxGuidance,
-        ltxPromptExpansion,
-        ltxNegativePrompt,
-        ltxLoras: loraList,
-        // Pinned like VideoPage: no selector in the UI, so quote the top
-        // tier rather than risk understating the charge.
-        wanResolution: '720p',
-        seedvrFactor,
-        seedvrTarget,
-        bytedanceTargetRes: btdRes,
-        bytedanceTargetFps: btdFps,
-        bytedanceTier: btdTier,
-        bytedancePreset: btdPreset,
-        bytedanceFidelity: btdFidelity,
-        trimEnabled,
-        trimStart,
-        trimDuration: trimDur,
-        customOutpaintArgs: vidOutpaintEntry?.is_custom ? outArgs.args : {},
-        customUpscaleArgs: vidUpscaleEntry?.is_custom ? upArgs.args : {},
-      })
-    : imageBillingParameters({
-        prompt,
-        upscaleOnly,
-        sharpening,
-        falPicked,
-        upscaleModel: imgUpscaleModel,
-        outpaintModel: imgOutpaintModel,
-        customOutpaintArgs: imgOutpaintCustom ? imgOutArgs.args : {},
-        customUpscaleArgs: imgUpscaleEntry?.is_custom ? imgUpArgs.args : {},
-      }), [kind, prompt, upscaleOnly, falPicked, studioPicked, sharpening, vidOutpaintModel, vidUpscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, vidOutpaintEntry?.is_custom, outArgs.args, vidUpscaleEntry?.is_custom, upArgs.args, imgUpscaleModel, imgOutpaintModel, imgOutpaintCustom, imgOutArgs.args, imgUpscaleEntry?.is_custom, imgUpArgs.args]);
-  const quoteItems = useMemo(
-    () => path === 'extend' && staged && stagedItemNeedsCloud(staged, processingParameters)
-      ? [{ stage_id: staged.stage_id }]
-      : [],
-    [path, staged, processingParameters],
-  );
-  const cloudRequired = quoteItems.length > 0;
-  const needsOutpaintCloud = path === 'extend' && !upscaleOnly && !isSquare;
-  const imageOutpaintCreditSupported = imgOutpaintEntry?.credit_enabled ?? !imgOutpaintCustom;
-  const imageUpscaleCreditSupported = imgUpscaleEntry?.credit_enabled ?? imgUpscaleModel === 'fal-ai/clarity-upscaler';
-  const videoOutpaintCreditSupported = vidOutpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(vidOutpaintModel);
-  const videoUpscaleCreditSupported = vidUpscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(vidUpscaleModel);
-  const byokOnly = kind === 'video'
-    ? (needsOutpaintCloud && !videoOutpaintCreditSupported) || (falPicked && !videoUpscaleCreditSupported)
-    : (needsOutpaintCloud && !imageOutpaintCreditSupported) || (falPicked && !imageUpscaleCreditSupported);
-  const quoteState = useCreditQuotes({
-    kind: kind || 'image',
-    items: quoteItems,
-    parameters: processingParameters,
-    enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
-  });
-  const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
-  // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
-  // button stays clickable and startExtend() re-fetches fresh quotes first.
-  const quoteStale = cloudRequired && paymentSource === 'credits' && !byokOnly && Boolean(catalog?.credits_enabled) && (
-    quoteState.loading || Boolean(quoteState.error) || quoteState.quotes.length !== quoteItems.length
-  );
-  const fundingBlocked = cloudRequired && (
-    !user ||
-    (paymentSource === 'byok' && !falKey?.configured) ||
-    (paymentSource === 'credits' && (
-      byokOnly || !catalog?.credits_enabled || insufficientCredits
-    ))
-  );
-
-  // Preselect sidebar CUSTOM overrides once catalogs arrive (mirrors both pages).
-  const customInit = useRef(false);
-  useEffect(() => {
-    if (customInit.current) return;
-    if (kind === 'image' && imgUpscaleCatalog.length) {
-      customInit.current = true;
-      const match = imgUpscaleCatalog.find((e) => e.model === models.upscale_img);
-      if (match?.is_custom) setImgFalModel(match.label);
-    } else if (kind === 'video' && vidOutpaintCatalog.length && vidUpscaleCatalog.length) {
-      customInit.current = true;
-      const oc = vidOutpaintCatalog.find((e) => e.model === models.outpaint_vid);
-      if (oc?.is_custom) setOutpaintOpt(oc.label);
-      const uc = vidUpscaleCatalog.find((e) => e.model === models.upscale_vid);
-      if (uc?.is_custom) setFalUpscale(uc.label);
-    }
-  }, [kind, imgUpscaleCatalog, vidOutpaintCatalog, vidUpscaleCatalog, models]);
-
-  useEffect(() => {
-    if (byokOnly) {
-      if (paymentSource !== 'byok') {
-        autoByokRef.current = true;
-        setPaymentSource('byok');
-      }
-    } else if (autoByokRef.current) {
-      // The switch to BYOK was automatic: restore credits now that a
-      // credit-supported model is selected again. An explicit user choice
-      // of BYOK is left untouched.
-      autoByokRef.current = false;
-      setPaymentSource('credits');
-    }
-  }, [byokOnly, paymentSource]);
-
-  const extendDisabled =
-    blocked.length > 0 || fundingBlocked || (kind === 'video' && studioPicked && !studioOk) || busy;
+  const postRendering = busy || (!!job && !jobSettled);
+  const batchRendering = batchBusy || batch.some((entry) => entry.status === 'rendering');
+  const canShareSource = path === 'skip' ? !!staged : !!jobDone;
 
   const captionTags = useMemo(() => {
     const found = [];
@@ -317,16 +141,14 @@ export default function UploadPage() {
     return merged;
   }, [tags, captionTags]);
 
-  const shareDisabled =
-    blocked.length > 0 ||
-    !staged ||
-    !title.trim() ||
-    !canShareSource ||
-    publishing ||
-    busy;
+  const shareDisabled = blocked.length > 0 || !staged || !title.trim() || !canShareSource || publishing || busy;
 
-  const releaseGallery = (entries) => {
-    for (const entry of entries) URL.revokeObjectURL(entry.url);
+  // ── POST intake ──
+  const suggestTitle = (name) => {
+    if (title && title !== autoTitleRef.current) return;
+    const next = titleFromName(name);
+    autoTitleRef.current = next;
+    setTitle(next);
   };
 
   // Keep the cover (file/staged) in step with the slideshow order.
@@ -336,18 +158,17 @@ export default function UploadPage() {
       setFile(next[0].file);
       setStaged(next[0].meta);
       setPath('skip');
+      setGalleryView((current) => (next.some((entry) => entry.key === current) ? current : next[0].key));
       return;
     }
-    releaseGallery(next);
+    releaseEntries(next);
     setGallery([]);
+    setGalleryView(null);
     const only = next[0];
     setFile(only ? only.file : null);
     setStaged(only ? only.meta : null);
     setKind(only ? 'image' : null);
-    if (only) {
-      const square = only.meta.orientation === 'SQUARE' || (only.meta.width && only.meta.width === only.meta.height);
-      setPath(square ? 'skip' : 'extend');
-    }
+    if (only) setPath(isSquareMeta(only.meta) ? 'skip' : 'extend');
   };
 
   const moveGalleryItem = (index, delta) => {
@@ -378,7 +199,7 @@ export default function UploadPage() {
         meta: metas[index],
         url: URL.createObjectURL(image),
       })));
-      if (!title) setTitle(images[0].name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX));
+      suggestTitle(images[0].name);
     } catch (e) {
       setPickError(`Could not stage the images: ${e.message}`);
       setKind(null);
@@ -387,7 +208,7 @@ export default function UploadPage() {
     }
   };
 
-  const onFiles = async (files) => {
+  const onPostFiles = async (files) => {
     const list = Array.from(files || []);
     const picked = list[0];
     if (!picked) return;
@@ -398,19 +219,22 @@ export default function UploadPage() {
       return;
     }
     if (list.length > 1 && list.some((entry) => kindOf(entry.name) === 'video')) {
-      setPickError('A post is either one video or up to 10 images. Images and videos cannot be mixed, and a post holds one video.');
+      setPickError('A post is either one video or up to 10 images. Images and videos cannot be mixed, and a post holds one video. Use BATCH EXTEND to render several videos.');
       return;
     }
     if (list.length > MAX_POST_IMAGES) {
       setPickError(`An image post holds at most ${MAX_POST_IMAGES} images (you picked ${list.length}).`);
       return;
     }
-    setError('');
+    setRenderError('');
+    setShareError('');
     setPublished(null);
     setJob(null);
     setJobDone(null);
-    releaseGallery(gallery);
+    setJobSettled(false);
+    releaseEntries(gallery);
     setGallery([]);
+    setGalleryView(null);
     if (list.length > 1) {
       await stageGallery(list);
       return;
@@ -420,17 +244,11 @@ export default function UploadPage() {
     setKind(k);
     setStaged(null);
     setStaging(true);
-    // Reset the extend config to this kind's defaults (pages keep theirs per
-    // kind; the wizard is single-file so a clean slate is least surprising).
-    setEngine('FAST');
-    setMode(MODES[0]);
-    setPrompt(k === 'image' ? IMG_PROMPT_DEFAULT : VID_PROMPT_DEFAULT);
     try {
       const meta = await api.upload(k === 'image' ? '/api/image/upload' : '/api/video/upload', picked);
       setStaged(meta);
-      const square = meta.orientation === 'SQUARE' || (meta.width && meta.width === meta.height);
-      setPath(square ? 'skip' : 'extend');
-      if (!title) setTitle(picked.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX));
+      setPath(isSquareMeta(meta) ? 'skip' : 'extend');
+      suggestTitle(picked.name);
     } catch (e) {
       setPickError(`Could not stage ${picked.name}: ${e.message}`);
       setFile(null);
@@ -440,76 +258,162 @@ export default function UploadPage() {
     }
   };
 
-  const startExtend = async () => {
-    if (!staged) return;
-    setError('');
-    if (kind === 'image') {
-      if (!upscaleOnly && imgOutpaintCustom && !imgOutArgs.ok) {
-        setError(`Outpaint custom args: ${imgOutArgs.error}`);
-        return;
-      }
-      if (falPicked && imgUpscaleEntry?.is_custom && !imgUpArgs.ok) {
-        setError(`Upscale custom args: ${imgUpArgs.error}`);
-        return;
-      }
-    } else {
-      if (!upscaleOnly && vidOutpaintEntry?.is_custom && !outArgs.ok) {
-        setError(`Outpaint custom args: ${outArgs.error}`);
-        return;
-      }
-      if (falPicked && vidUpscaleEntry?.is_custom && !upArgs.ok) {
-        setError(`Upscale custom args: ${upArgs.error}`);
-        return;
+  // ── BATCH intake ──
+  const clearBatch = () => {
+    releaseEntries(batch);
+    setBatch([]);
+    setBatchKind(null);
+    setBatchSelected(null);
+    setBatchJobs([]);
+    setBatchError('');
+  };
+
+  const onBatchFiles = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setBatchPickError('');
+    const unsupported = list.find((entry) => !kindOf(entry.name));
+    if (unsupported) {
+      setBatchPickError(`Unsupported file type: ${unsupported.name}. Use PNG/JPG/WEBP or MP4/MOV/AVI/WEBM.`);
+      return;
+    }
+    const kinds = new Set(list.map((entry) => kindOf(entry.name)));
+    if (kinds.size > 1) {
+      setBatchPickError('A batch is all videos or all images — they use different pipelines. Pick one kind.');
+      return;
+    }
+    const k = kindOf(list[0].name);
+    clearBatch();
+    setBatchKind(k);
+    setBatchStaging(true);
+    const stagedEntries = [];
+    for (const entry of list) {
+      try {
+        const meta = await api.upload(k === 'image' ? '/api/image/upload' : '/api/video/upload', entry);
+        stagedEntries.push({ key: meta.stage_id, name: entry.name, file: entry, kind: k, meta, url: URL.createObjectURL(entry), status: null, result: null });
+      } catch (e) {
+        setBatchError(`Could not read ${k} ${entry.name}: ${e.message}`);
       }
     }
-    if (fundingBlocked) {
-      setError('Choose an available cloud payment source and wait for a valid quote.');
+    setBatch(stagedEntries);
+    setBatchSelected(stagedEntries[0]?.key || null);
+    if (!stagedEntries.length) setBatchKind(null);
+    setBatchStaging(false);
+  };
+
+  const removeBatchItem = (key) => {
+    const next = batch.filter((entry) => entry.key !== key);
+    const removed = batch.find((entry) => entry.key === key);
+    if (removed) URL.revokeObjectURL(removed.url);
+    setBatch(next);
+    if (!next.length) setBatchKind(null);
+    if (batchSelected === key) setBatchSelected(next[0]?.key || null);
+  };
+
+  const patchBatchItem = (key, patch) => {
+    setBatch((current) => current.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)));
+  };
+
+  // ── Render ──
+  const processForm = (meta, quoteByStage, name) => {
+    const fd = new FormData();
+    fd.append('stage_id', meta.stage_id);
+    appendProcessingParameters(fd, cfg.parameters);
+    if (funding.needsCloud(meta)) {
+      fd.append('payment_source', funding.paymentSource);
+      if (funding.paymentSource === 'credits') {
+        const quote = quoteByStage.get(meta.stage_id);
+        if (!quote?.quote_id) throw new Error(name ? `A fresh quote is unavailable for ${name}.` : 'A fresh quote is unavailable for this upload.');
+        fd.append('quote_id', quote.quote_id);
+      }
+    }
+    return fd;
+  };
+
+  const startExtend = async () => {
+    if (!staged) return;
+    setRenderError('');
+    const invalid = cfg.validate();
+    if (invalid) {
+      setRenderError(invalid);
+      return;
+    }
+    if (funding.fundingBlocked) {
+      setRenderError('Choose an available cloud payment source and wait for a valid quote.');
       return;
     }
     setBusy(true);
     setJob(null);
     setJobDone(null);
+    setJobSettled(false);
     try {
-      const freshQuotes = paymentSource === 'credits' && cloudRequired ? await quoteState.refresh() : [];
-      const fd = new FormData();
-      fd.append('stage_id', staged.stage_id);
-      appendProcessingParameters(fd, processingParameters);
-      if (cloudRequired) {
-        fd.append('payment_source', paymentSource);
-        if (paymentSource === 'credits') {
-          const quote = freshQuotes.find((entry) => entry.stage_id === staged.stage_id);
-          if (!quote?.quote_id) throw new Error('A fresh quote is unavailable for this upload.');
-          fd.append('quote_id', quote.quote_id);
-        }
-      }
+      const freshQuotes = funding.paymentSource === 'credits' && funding.cloudRequired ? await funding.quoteState.refresh() : [];
+      const fd = processForm(staged, new Map(freshQuotes.map((quote) => [quote.stage_id, quote])));
       const res = await api.form(kind === 'image' ? '/api/image/process' : '/api/video/process', fd);
       setJob({ jobId: res.job_id, name: file?.name || 'upload', kind });
-      if (cloudRequired) await refreshWallet();
+      if (funding.cloudRequired) await refreshWallet();
     } catch (requestError) {
-      setError(billingErrorMessage(requestError, 'Could not start cloud processing.'));
+      setRenderError(billingErrorMessage(requestError, 'Could not start cloud processing.'));
     } finally {
       setBusy(false);
     }
   };
 
+  const renderBatch = async () => {
+    setBatchError('');
+    const invalid = cfg.validate();
+    if (invalid) {
+      setBatchError(invalid);
+      return;
+    }
+    if (funding.fundingBlocked) {
+      setBatchError('Choose an available cloud payment source and wait for a valid quote.');
+      return;
+    }
+    setBatchBusy(true);
+    const jobList = [];
+    try {
+      const freshQuotes = funding.paymentSource === 'credits' && funding.cloudRequired ? await funding.quoteState.refresh() : [];
+      const quoteByStage = new Map(freshQuotes.map((quote) => [quote.stage_id, quote]));
+      for (const entry of batch) {
+        const fd = processForm(entry.meta, quoteByStage, entry.name);
+        try {
+          const res = await api.form(`/api/${batchKind}/process`, fd);
+          jobList.push({ jobId: res.job_id, name: entry.name, kind: batchKind, key: entry.key });
+          patchBatchItem(entry.key, { status: 'rendering', result: null });
+        } catch (submissionError) {
+          setBatchError(billingErrorMessage(submissionError));
+          patchBatchItem(entry.key, { status: 'failed', result: null });
+        }
+      }
+      setBatchJobs(jobList);
+      if (funding.cloudRequired) await refreshWallet();
+    } catch (requestError) {
+      setBatchError(billingErrorMessage(requestError, 'Could not prepare cloud billing.'));
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  // ── Details + share ──
   const addTag = () => {
     const t = tagDraft.trim().replace(/^#+/, '').toLowerCase().replace(/\s+/g, '_');
     setTagDraft('');
     if (!t || tags.includes(t)) return;
     if (tags.length >= TAGS_MAX) {
-      setError(`At most ${TAGS_MAX} tags.`);
+      setTagError(`At most ${TAGS_MAX} tags.`);
       return;
     }
     if (!/^[a-z0-9_]{1,30}$/.test(t)) {
-      setError('Tags use 1–30 lowercase letters, numbers, or _.');
+      setTagError('Tags use 1–30 lowercase letters, numbers, or _.');
       return;
     }
-    setError('');
+    setTagError('');
     setTags([...tags, t]);
   };
 
   const share = async () => {
-    setError('');
+    setShareError('');
     setPublishing(true);
     try {
       const body = {
@@ -531,7 +435,7 @@ export default function UploadPage() {
       const res = await api.post('/api/uploads/publish', body);
       setPublished(res);
     } catch (e) {
-      setError(e.message);
+      setShareError(e.message);
     } finally {
       setPublishing(false);
     }
@@ -539,28 +443,238 @@ export default function UploadPage() {
 
   const reset = () => {
     setPickError('');
-    releaseGallery(gallery);
+    releaseEntries(gallery);
     setGallery([]);
+    setGalleryView(null);
     setFile(null);
     setKind(null);
     setStaged(null);
     setJob(null);
     setJobDone(null);
+    setJobSettled(false);
     setTitle('');
+    autoTitleRef.current = '';
     setCaption('');
     setTags([]);
     setTagDraft('');
+    setTagError('');
     setLocation({ city: '', country: '', display_name: '' });
     setPublished(null);
-    setError('');
+    setRenderError('');
+    setShareError('');
     setPath('skip');
   };
 
-  const engines = kind === 'video' ? VID_ENGINES : IMG_ENGINES;
+  // ── Stage entries ──
+  let stageLayoutMode = 'empty';
+  let stageEntries = [];
+  let stageSelected = null;
+  if (isBatch) {
+    stageEntries = batch;
+    stageSelected = batchSelected;
+    stageLayoutMode = batch.length ? 'batch' : 'empty';
+  } else if (isSlideshow) {
+    stageEntries = gallery.map((entry) => ({ key: entry.key, name: entry.file.name, kind: 'image', meta: entry.meta, url: entry.url }));
+    stageSelected = galleryView;
+    stageLayoutMode = 'slideshow';
+  } else if (staged) {
+    stageEntries = [{ key: staged.stage_id || 'single', name: file?.name || staged.filename || 'upload', kind, meta: staged, url: previewUrl, result: path === 'extend' ? jobDone : null }];
+    stageLayoutMode = 'single';
+  }
+  const maxSourceDur = isBatch
+    ? (batch.length ? Math.max(...batch.map((entry) => entry.meta.duration || 0)) : 60)
+    : (staged?.duration || 60);
+
+  const extending = isBatch ? batch.length > 0 : !!staged && path === 'extend' && !isSlideshow;
+  const summary = pipelineSummary({
+    kind: activeKind,
+    path: extending ? 'extend' : (isBatch || !staged ? 'extend' : 'skip'),
+    upscaleOnly: cfg.upscaleOnly,
+    outpaintLabel: cfg.outpaintLabel,
+    engine: cfg.engine,
+    upscaleLabel: cfg.upscaleLabel,
+    bytedanceRes: cfg.btdRes,
+  });
+
+  // ── Deck ──
+  let sectionNum = 0;
+  const next = () => {
+    sectionNum += 1;
+    return sectionNum;
+  };
+  const showAdvanced = activeKind === 'video' && (cfg.ltxPicked || cfg.loraPicked);
+  const disabledRender = blocked.length > 0 || funding.fundingBlocked || studioBlocked || (isBatch ? batchBusy : busy);
+  const renderLabel = isBatch
+    ? `▶ RENDER ${batch.length ? `${batch.length} ` : ''}${batchKind === 'video' ? 'VIDEO(S)' : 'IMAGE(S)'} 4K SQUARE`
+    : '▶ RENDER 4K SQUARE MASTER';
+
+  const renderExtendSections = () => (
+    <>
+      <CoreEngineSection cfg={cfg} num={next()} />
+      {showAdvanced ? <AdvancedSection cfg={cfg} num={next()} /> : null}
+      <UpscaleSection cfg={cfg} num={next()} probes={probes} studioOk={studioOk} maxSourceDur={maxSourceDur} />
+      <ExecuteSection
+        num={next()}
+        cfg={cfg}
+        funding={funding}
+        blocked={blocked}
+        studioOk={studioOk}
+        disabled={isBatch ? disabledRender || !batch.length : disabledRender}
+        busy={isBatch ? batchBusy : busy}
+        label={renderLabel}
+        onRender={isBatch ? renderBatch : startExtend}
+        error={isBatch ? batchError : renderError}
+        jobs={isBatch ? batchJobs : (job ? [job] : [])}
+        onJobDone={(doneJob, result) => {
+          if (isBatch) patchBatchItem(doneJob.key, { status: 'done', result });
+          else setJobDone(result);
+        }}
+        onJobSettled={(settledJob, state) => {
+          if (settledJob.key) {
+            if (state?.status === 'failed') patchBatchItem(settledJob.key, { status: 'failed' });
+          } else {
+            setJobSettled(true);
+          }
+          refreshWallet({ silent: true });
+        }}
+        footer={isBatch ? (
+          batchJobs.length ? (
+            <div className="sx-studio-results">
+              <div className="sx-studio-results-head">
+                <span>RESULTS</span>
+                <span>{batchJobs.length} ITEM(S) · 3840×3840 · {batchKind === 'video' ? 'HEVC 4K MASTER' : 'PNG MASTER'}</span>
+              </div>
+              <Mono>{batchJobs.map((j) => `/api/${j.kind}/jobs/${j.jobId}/result`).join('\n')}</Mono>
+            </div>
+          ) : null
+        ) : jobDone ? <Mono>✓ RENDER COMPLETE — READY TO SHARE</Mono> : null}
+      />
+    </>
+  );
+
+  let deck;
+  if (isBatch) {
+    deck = (
+      <>
+        <DeckSection num={next()} title="BATCH SOURCE" badge={batch.length ? `${batch.length} ${batchKind === 'video' ? 'VIDEOS' : 'IMAGES'}` : 'NO PUBLISH'} badgeTone="muted">
+          <p className="sx-studio-note">Render many videos or many images with the same settings and download the 4K masters. Batch renders are not published; use POST to share.</p>
+          {batch.length ? (
+            <div className="sx-studio-actions">
+              <Button onClick={clearBatch} disabled={batchRendering}>CLEAR BATCH</Button>
+            </div>
+          ) : (
+            <Mono>AWAITING SOURCE FILES…</Mono>
+          )}
+        </DeckSection>
+        {batch.length ? renderExtendSections() : null}
+      </>
+    );
+  } else {
+    deck = (
+      <>
+        <DeckSection
+          num={next()}
+          title="SOURCE & PUBLISH PATH"
+          badge={!staged ? 'AWAITING SOURCE' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : 'SHARE DIRECTLY'}
+          badgeTone={path === 'extend' && staged ? 'accent' : 'muted'}
+        >
+          {!staged ? (
+            <>
+              <p className="sx-studio-note">Drop one video, or up to 10 images for a slideshow post, on the stage. PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM.</p>
+              <Mono>AWAITING SOURCE FILE…</Mono>
+            </>
+          ) : isSlideshow ? (
+            <div className="sx-accent-block" role="note">
+              <div className="sx-accent-block-title">MULTI-IMAGE POST — PUBLISHED AS-IS</div>
+              <div className="sx-accent-block-body">
+                <p>Slideshow posts skip the extender. Each image is shown center-cropped to 1:1 in the player. To extend an image, upload it on its own.</p>
+              </div>
+            </div>
+          ) : isSquare ? (
+            <>
+              <div className="sx-accent-block" role="note">
+                <div className="sx-accent-block-title">✓ ALREADY 1:1 — YOU CAN SKIP EXTENDING</div>
+                <div className="sx-accent-block-body">
+                  <p>Your media is already square. Share it directly, or extend anyway for AI outpainting and the 4K master.</p>
+                </div>
+              </div>
+              <Segmented
+                options={PATH_OPTS}
+                value={path === 'skip' ? PATH_OPTS[0] : PATH_OPTS[1]}
+                onChange={(v) => {
+                  setPath(v === PATH_OPTS[0] ? 'skip' : 'extend');
+                  setJob(null);
+                  setJobDone(null);
+                  setJobSettled(false);
+                }}
+                disabled={postRendering}
+                ariaLabel="Publish path"
+              />
+            </>
+          ) : (
+            <div className="sx-accent-block sx-warn" role="note">
+              <div className="sx-accent-block-title">1:1 REQUIRED — EXTEND TO CONTINUE</div>
+              <div className="sx-accent-block-body">
+                <p>This media is {staged.orientation}. Configure the extender pipeline below.</p>
+              </div>
+            </div>
+          )}
+        </DeckSection>
+        {staged && path === 'extend' && !isSlideshow ? renderExtendSections() : null}
+        {staged ? (
+          <>
+            <DetailsSection
+              num={next()}
+              title={title}
+              setTitle={setTitle}
+              caption={caption}
+              setCaption={setCaption}
+              tags={tags}
+              setTags={setTags}
+              tagDraft={tagDraft}
+              setTagDraft={setTagDraft}
+              captionTags={captionTags}
+              effectiveTags={effectiveTags}
+              addTag={addTag}
+              location={location}
+              setLocation={setLocation}
+              tagError={tagError}
+            />
+            <ShareSection
+              num={next()}
+              user={user}
+              title={title}
+              path={path}
+              jobDone={jobDone}
+              shareDisabled={shareDisabled}
+              publishing={publishing}
+              onShare={share}
+              published={published}
+              onReset={reset}
+              error={shareError}
+            />
+          </>
+        ) : null}
+      </>
+    );
+  }
 
   return (
-    <div>
-      <Hero title="UPLOAD" kicker="ECHO · SHARE A REEL · FULL EXTENDER PIPELINE · SKIP WHEN ALREADY SQUARE" />
+    <div className="sx-upload-studio">
+      <div className="sx-studio-banner">
+        <div className="sx-studio-banner-title">
+          <span className="sx-studio-dot sx-pulse" aria-hidden="true" />
+          <h1>UPLOAD STUDIO</h1>
+        </div>
+        <Segmented
+          options={STUDIO_MODES}
+          value={isBatch ? STUDIO_MODES[1] : STUDIO_MODES[0]}
+          onChange={(value) => setStudioMode(value === STUDIO_MODES[1] ? 'batch' : 'post')}
+          disabledOptions={postRendering ? [STUDIO_MODES[1]] : batchRendering ? [STUDIO_MODES[0]] : []}
+          ariaLabel="Studio mode"
+        />
+        <div className="sx-studio-banner-meta">PIPELINE: <b>{summary}</b></div>
+      </div>
 
       {blocked.length ? (
         <BlockingBanner
@@ -569,597 +683,30 @@ export default function UploadPage() {
         />
       ) : null}
 
-      <Section num={1} title="Select Source" active note="1 video or up to 10 images · PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM">
-        <UploadZone
-          accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.avi,.webm"
-          multiple
-          onFiles={onFiles}
-          caption="Drop one video, or up to 10 images for a slideshow post"
+      <div className="sx-studio-grid">
+        <StudioStage
+          layout={stageLayoutMode}
+          entries={stageEntries}
+          selectedKey={stageSelected}
+          onSelect={isBatch ? setBatchSelected : setGalleryView}
+          staging={isBatch ? batchStaging : staging}
+          pickError={isBatch ? batchPickError : pickError}
+          accept={ACCEPT}
+          onFiles={isBatch ? onBatchFiles : onPostFiles}
+          dropCaption={isBatch
+            ? 'Drop several videos or several images — rendered with the same settings, not published'
+            : 'Drop one video, or up to 10 images for a slideshow post'}
+          extendPath={isBatch || path === 'extend'}
+          upscaleOnly={cfg.upscaleOnly}
+          outpaintActive={!cfg.upscaleOnly}
+          trim={activeKind === 'video' ? { enabled: cfg.trimEnabled, start: cfg.trimStart, dur: cfg.trimDur } : null}
+          onMoveGalleryItem={moveGalleryItem}
+          onRemoveGalleryItem={removeGalleryItem}
+          onRemoveBatchItem={removeBatchItem}
+          locked={isBatch ? batchRendering : postRendering || publishing}
         />
-        {pickError ? (
-          <div className="sx-error-box" role="alert" style={{ marginTop: 'var(--sx-3)' }}>
-            <div className="sx-error-title">FILES NOT ADDED</div>
-            <div>{pickError}</div>
-          </div>
-        ) : null}
-        {staging ? (
-          <div style={{ marginTop: 'var(--sx-3)' }} role="status" aria-busy="true" aria-label="Staging upload">
-            <Skeleton h={86} />
-            <Mono>STAGING UPLOAD…</Mono>
-          </div>
-        ) : null}
-        {staged && isSlideshow ? (
-          <div style={{ marginTop: 'var(--sx-4)' }}>
-            <SpecRow
-              cells={[
-                ['IMAGES', String(gallery.length), 'SLIDESHOW POST'],
-                ['DWELL', '15s', 'SPLIT ACROSS THE IMAGES'],
-                ['FORMAT', 'AS-IS', 'NO EXTEND · SHOWN 1:1 IN THE PLAYER'],
-              ]}
-            />
-            <ol className="sx-upload-gallery" aria-label="Images in post order">
-              {gallery.map((entry, index) => (
-                <li key={entry.key} className="sx-upload-gallery-item">
-                  <img src={entry.url} alt={entry.file.name} />
-                  <span className="sx-upload-gallery-pos">{index === 0 ? 'COVER' : index + 1}</span>
-                  <div className="sx-upload-gallery-actions">
-                    <button type="button" onClick={() => moveGalleryItem(index, -1)} disabled={index === 0} aria-label={`Move ${entry.file.name} earlier`}>←</button>
-                    <button type="button" onClick={() => moveGalleryItem(index, 1)} disabled={index === gallery.length - 1} aria-label={`Move ${entry.file.name} later`}>→</button>
-                    <button type="button" onClick={() => removeGalleryItem(index)} aria-label={`Remove ${entry.file.name}`}>×</button>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-        ) : staged ? (
-          <div style={{ marginTop: 'var(--sx-4)' }}>
-            <SpecRow
-              cells={
-                kind === 'image'
-                  ? [
-                    ['SOURCE', `${staged.width}×${staged.height}`, `${staged.orientation} · ${fmtBytes(staged.size_bytes)}`],
-                    ['FORMAT', isSquare ? '1:1 SQUARE' : 'NEEDS EXTENDING', staged.filename || ''],
-                    ['TARGET', '3840×3840', '1:1 SQUARE MASTER'],
-                  ]
-                  : [
-                    ['SOURCE', `${staged.width}×${staged.height}`, `${staged.orientation} · ${fmtBytes(staged.size_bytes)}`],
-                    ['DURATION', `${staged.duration}s`, 'ORIGINAL CLIP'],
-                    ['FORMAT', isSquare ? '1:1 SQUARE' : 'NEEDS EXTENDING', 'HEVC MASTER AFTER EXTEND'],
-                  ]
-              }
-            />
-            {kind === 'video' && staged.duration > 10 ? (
-              <AccentBlock
-                tone="warn"
-                title={`${staged.duration}s EXCEEDS THE 10s THRESHOLD`}
-                lines={['Cloud video outpainting is billed per second. Consider enabling the 15s Trimmer below to optimize costs.']}
-              />
-            ) : null}
-            <div style={{ marginTop: 'var(--sx-3)' }}>
-              {kind === 'image' ? (
-                <img className="sx-img" style={{ maxHeight: 320, objectFit: 'contain' }} src={previewUrl} alt={file?.name} />
-              ) : (
-                <video className="sx-video" src={previewUrl} controls playsInline aria-label="Source video preview" />
-              )}
-            </div>
-          </div>
-        ) : null}
-      </Section>
-
-      <Section num={2} title="Square Gate" active={!!staged} note="EXTEND TO 1:1 OR SKIP">
-        {!staged ? (
-          <Mono>AWAITING SOURCE FILE…</Mono>
-        ) : isSlideshow ? (
-          <div className="sx-accent-block" role="note">
-            <div className="sx-accent-block-title">MULTI-IMAGE POST — PUBLISHED AS-IS</div>
-            <div className="sx-accent-block-body">
-              <p>Slideshow posts skip the extender. Each image is shown center-cropped to 1:1 in the player. To extend an image, upload it on its own.</p>
-            </div>
-          </div>
-        ) : isSquare ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
-            <div className="sx-accent-block" role="note">
-              <div className="sx-accent-block-title">✓ ALREADY 1:1 — YOU CAN SKIP EXTENDING</div>
-              <div className="sx-accent-block-body">
-                <p>Your media is already square. Share it directly, or extend anyway for AI outpainting.</p>
-              </div>
-            </div>
-            <div>
-              <Eyebrow>PUBLISH PATH</Eyebrow>
-              <Segmented
-                options={PATH_OPTS}
-                value={path === 'skip' ? PATH_OPTS[0] : PATH_OPTS[1]}
-                onChange={(v) => {
-                  setPath(v === PATH_OPTS[0] ? 'skip' : 'extend');
-                  setJob(null);
-                  setJobDone(null);
-                }}
-                ariaLabel="Publish path"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="sx-accent-block sx-warn" role="note">
-            <div className="sx-accent-block-title">1:1 REQUIRED — EXTEND TO CONTINUE</div>
-            <div className="sx-accent-block-body">
-              <p>This media is {staged.orientation}. Configure the full extender pipeline below.</p>
-            </div>
-          </div>
-        )}
-
-        {staged && path === 'extend' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)', marginTop: 'var(--sx-4)' }}>
-            <div>
-              <Eyebrow>PIPELINE MODE</Eyebrow>
-              <Segmented options={MODES} value={mode} onChange={setMode} ariaLabel="Pipeline Mode" />
-            </div>
-
-            {!upscaleOnly ? (
-              <>
-                {kind === 'video' && vidOutpaintOptions.length ? (
-                  <div>
-                    <Eyebrow>OUTPAINT MODEL</Eyebrow>
-                    <Segmented options={vidOutpaintOptions} value={outpaintOpt} onChange={setOutpaintOpt} ariaLabel="Outpaint Model" />
-                  </div>
-                ) : null}
-                {kind === 'video' && vidOutpaintEntry?.is_custom ? (
-                  <CustomModelPanel model={vidOutpaintEntry.model} kind="outpaint" entry={vidOutpaintEntry} onArgs={setOutArgs} />
-                ) : null}
-                {kind === 'image' && imgOutpaintCustom ? (
-                  <CustomModelPanel
-                    model={imgOutpaintModel}
-                    kind="image_outpaint"
-                    onArgs={setImgOutArgs}
-                    entry={{
-                      label: `CUSTOM OUTPAINT (${imgOutpaintShort})`,
-                      requirements: 'A saved personal Fal key is required; the source image is uploaded by the pipeline.',
-                      cost_note: 'No estimate stored — pull live pricing via MODEL INFO below before rendering.',
-                      expects: 'Sends {image_url, prompt}; expand_* arguments are applied only to the stock Image Apps outpaint model. Check MODEL INFO for the live schema.',
-                    }}
-                  />
-                ) : null}
-                <Field label="OUTPAINT EXTENSION PROMPT">
-                  <textarea
-                    className="sx-textarea"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Describe the extended square background environment..."
-                  />
-                </Field>
-
-                {kind === 'video' && outpaintOpt.includes('LTX') ? (
-                  <details className="sx-expander">
-                    <summary>▸ LTX 2.3 ADVANCED OUTPAINT SETTINGS</summary>
-                    <div className="sx-expander-body sx-cols sx-cols-2">
-                      <Field label="OUTPUT RESOLUTION TIER">
-                        <select className="sx-select" value={ltxRes} onChange={(e) => setLtxRes(e.target.value)}>
-                          {['720p', '1080p', '480p'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="GUIDANCE SCALE (CFG)">
-                        <input
-                          className="sx-input"
-                          type="number"
-                          min={1.0}
-                          max={20.0}
-                          step={0.1}
-                          value={ltxGuidance}
-                          onChange={(e) => setLtxGuidance(Number(e.target.value))}
-                        />
-                      </Field>
-                      <Field label="NEGATIVE PROMPT" style={{ gridColumn: '1 / -1' }}>
-                        <input
-                          className="sx-input"
-                          type="text"
-                          value={ltxNegativePrompt}
-                          onChange={(e) => setLtxNegativePrompt(e.target.value)}
-                          placeholder="yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
-                        />
-                      </Field>
-                      <div style={{ alignSelf: 'center' }}>
-                        <ToggleRow label="Preserve Audio Track" checked={ltxAudio} onChange={setLtxAudio} />
-                      </div>
-                      <div style={{ alignSelf: 'center' }}>
-                        <ToggleRow label="Enable Prompt Expansion (LLM Enrich)" checked={ltxPromptExpansion} onChange={setLtxPromptExpansion} />
-                      </div>
-                    </div>
-                  </details>
-                ) : null}
-
-                {kind === 'video' && loraPicked ? (
-                  <details className="sx-expander" open>
-                    <summary>▸ CUSTOM LoRA STACK (MAX 3)</summary>
-                    <div className="sx-expander-body sx-cols sx-cols-2">
-                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-muted)', marginBottom: 'var(--sx-2)' }}>
-                        Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot.
-                      </div>
-                      {ltxLoras.map((lora, i) => (
-                        <div key={i} className="sx-cols sx-cols-2" style={{ gridColumn: '1 / -1', gap: 'var(--sx-3)' }}>
-                          <Field label={`LoRA #${i + 1} — SAFETENSORS URL`}>
-                            <input
-                              className="sx-input"
-                              type="url"
-                              placeholder="https://example.com/path/to/lora.safetensors"
-                              value={lora.path}
-                              onChange={(e) => {
-                                const next = [...ltxLoras];
-                                next[i] = { ...next[i], path: e.target.value };
-                                setLtxLoras(next);
-                              }}
-                            />
-                          </Field>
-                          <div className="sx-cols sx-cols-2" style={{ gap: 'var(--sx-3)' }}>
-                            <Field label="SCALE">
-                              <input
-                                className="sx-input"
-                                type="number"
-                                min={0}
-                                max={2}
-                                step={0.05}
-                                value={lora.scale}
-                                onChange={(e) => {
-                                  const next = [...ltxLoras];
-                                  next[i] = { ...next[i], scale: Number(e.target.value) };
-                                  setLtxLoras(next);
-                                }}
-                              />
-                            </Field>
-                            <Field label="TRANSFORMER">
-                              <select
-                                className="sx-select"
-                                value={lora.transformer}
-                                onChange={(e) => {
-                                  const next = [...ltxLoras];
-                                  next[i] = { ...next[i], transformer: e.target.value };
-                                  setLtxLoras(next);
-                                }}
-                              >
-                                {['both', 'high', 'low'].map((o) => (
-                                  <option key={o}>{o}</option>
-                                ))}
-                              </select>
-                            </Field>
-                          </div>
-                          {i > 0 ? (
-                            <button
-                              type="button"
-                              className="sx-link-danger"
-                              onClick={() => setLtxLoras(ltxLoras.filter((_, j) => j !== i))}
-                            >
-                              REMOVE LoRA #{i + 1}
-                            </button>
-                          ) : null}
-                        </div>
-                      ))}
-                      {ltxLoras.length < 3 ? (
-                        <button
-                          type="button"
-                          className="sx-link"
-                          style={{ gridColumn: '1 / -1', alignSelf: 'start' }}
-                          onClick={() => setLtxLoras([...ltxLoras, { path: '', scale: 1, transformer: 'both' }])}
-                        >
-                          + ADD LoRA
-                        </button>
-                      ) : null}
-                    </div>
-                  </details>
-                ) : null}
-              </>
-            ) : null}
-
-            <div>
-              <Eyebrow>UPSCALE ENGINE</Eyebrow>
-              <Segmented options={engines} value={engine} onChange={setEngine} ariaLabel="Upscale Engine" />
-            </div>
-
-            {falPicked && kind === 'image' ? (
-              <>
-                <div>
-                  <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
-                  <Segmented options={imgUpscaleOptions} value={imgFalModel} onChange={setImgFalModel} ariaLabel="FAL Model" />
-                </div>
-                {imgUpscaleEntry?.is_custom ? (
-                  <CustomModelPanel model={imgUpscaleEntry.model} kind="image_upscale" entry={imgUpscaleEntry} onArgs={setImgUpArgs} />
-                ) : null}
-              </>
-            ) : null}
-
-            {falPicked && kind === 'video' ? (
-              <>
-                {vidUpscaleOptions.length ? (
-                  <div>
-                    <Eyebrow>FAL AI UPSCALE MODEL</Eyebrow>
-                    <Segmented options={vidUpscaleOptions} value={falUpscale} onChange={setFalUpscale} ariaLabel="FAL Upscale Model" />
-                  </div>
-                ) : null}
-                {vidUpscaleEntry?.is_custom ? (
-                  <CustomModelPanel model={vidUpscaleEntry.model} kind="upscale" entry={vidUpscaleEntry} onArgs={setUpArgs} />
-                ) : null}
-
-                {falUpscale.includes('Bytedance') ? (
-                  <details className="sx-expander">
-                    <summary>▸ BYTEDANCE UPSCALER SETTINGS</summary>
-                    <div className="sx-expander-body sx-cols sx-cols-2">
-                      <Field label="TARGET RESOLUTION">
-                        <select className="sx-select" value={btdRes} onChange={(e) => setBtdRes(e.target.value)}>
-                          {['4k', '2k', '1080p'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="TARGET FPS">
-                        <select className="sx-select" value={btdFps} onChange={(e) => setBtdFps(e.target.value)}>
-                          {['30fps', '60fps'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="QUALITY TIER">
-                        <select className="sx-select" value={btdTier} onChange={(e) => setBtdTier(e.target.value)}>
-                          {['fast', 'standard', 'pro'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="SCENARIO PRESET">
-                        <select className="sx-select" value={btdPreset} onChange={(e) => setBtdPreset(e.target.value)}>
-                          {['general', 'ugc', 'short_series', 'aigc', 'old_film'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="FIDELITY INTENSITY">
-                        <select className="sx-select" value={btdFidelity} onChange={(e) => setBtdFidelity(e.target.value)}>
-                          {['medium', 'high'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                    </div>
-                  </details>
-                ) : null}
-
-                {falUpscale.includes('SeedVR') ? (
-                  <details className="sx-expander">
-                    <summary>▸ SEEDVR2 UPSCALE SETTINGS</summary>
-                    <div className="sx-expander-body sx-cols sx-cols-2">
-                      <Field label="UPSCALE FACTOR">
-                        <input
-                          className="sx-input"
-                          type="number"
-                          min={1}
-                          max={4}
-                          step={0.5}
-                          value={seedvrFactor}
-                          onChange={(e) => setSeedvrFactor(Number(e.target.value))}
-                        />
-                      </Field>
-                      <Field label="TARGET RESOLUTION TIER">
-                        <select className="sx-select" value={seedvrTarget} onChange={(e) => setSeedvrTarget(e.target.value)}>
-                          {['1080p', '2160p', '1440p', '720p'].map((o) => (
-                            <option key={o}>{o}</option>
-                          ))}
-                        </select>
-                      </Field>
-                    </div>
-                  </details>
-                ) : null}
-              </>
-            ) : null}
-
-            {kind === 'video' && studioPicked && !studioOk ? (
-              <AccentBlock
-                title="STUDIO ENGINE UNAVAILABLE"
-                tone="warn"
-                lines={[
-                  'This system is missing VapourSynth + the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
-                  'FAST engine uses Lanczos4 + CAS and is fully operational.',
-                ]}
-                code={['pip install vapoursynth', '+ vsznedi3 plugin']}
-              />
-            ) : null}
-
-            {!studioPicked ? (
-              <div>
-                <Eyebrow>CONTRAST ADAPTIVE SHARPENING (CAS)</Eyebrow>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sx-4)' }}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={sharpening}
-                    disabled={!probes.cas?.ok}
-                    onChange={(e) => setSharpening(Number(e.target.value))}
-                    aria-label="CAS Sharpening level"
-                    aria-valuemin={0}
-                    aria-valuemax={1}
-                    aria-valuenow={sharpening}
-                  />
-                  <span className="sx-stat-value" style={{ fontSize: '1.2rem', minWidth: '4ch' }}>
-                    {Math.round(sharpening * 100)}%
-                  </span>
-                </div>
-                {!probes.cas?.ok ? <GatedReason>CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED</GatedReason> : null}
-              </div>
-            ) : null}
-
-            {kind === 'video' ? (
-              <div>
-                <Eyebrow>CLIP TRIMMING (MAX 15 SECONDS)</Eyebrow>
-                <ToggleRow label="Enable 15s Video Trimming" checked={trimEnabled} onChange={setTrimEnabled} />
-                {trimEnabled ? (
-                  <div className="sx-cols sx-cols-2" style={{ marginTop: 'var(--sx-2)' }}>
-                    <Field label={`START TIME (s) — MAX ${Math.max(0, maxSourceDur - 1).toFixed(1)}`}>
-                      <input
-                        className="sx-input"
-                        type="number"
-                        min={0}
-                        max={Math.max(0, maxSourceDur - 1)}
-                        step={0.5}
-                        value={trimStart}
-                        onChange={(e) => setTrimStart(Number(e.target.value))}
-                      />
-                    </Field>
-                    <Field label="CLIP DURATION (s — MAX 15s)">
-                      <input
-                        className="sx-input"
-                        type="number"
-                        min={1}
-                        max={15}
-                        step={0.5}
-                        value={trimDur}
-                        onChange={(e) => setTrimDur(Number(e.target.value))}
-                      />
-                    </Field>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            <CloudFundingPanel
-              required={cloudRequired}
-              paymentSource={paymentSource}
-              onChange={setPaymentSource}
-              quoteState={quoteState}
-              byokOnly={byokOnly}
-            />
-
-            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-            {!blocked.length && kind === 'video' && studioPicked && !studioOk ? (
-              <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-            ) : null}
-
-            <div style={{ marginTop: 'var(--sx-2)' }}>
-              <Button primary disabled={extendDisabled} loading={busy} onClick={startExtend}>
-                {quoteStale ? '↻ RETRY QUOTE & RENDER' : '▶ RENDER 1:1 SQUARE'}
-              </Button>
-            </div>
-
-            {error ? (
-              <div className="sx-error-box" role="alert">
-                <div className="sx-error-title">EXECUTION ERROR</div>
-                <div>{error}</div>
-              </div>
-            ) : null}
-            {job ? <JobRunner jobId={job.jobId} name={job.name} kind={job.kind} onDone={setJobDone} onSettled={() => refreshWallet({ silent: true })} /> : null}
-            {jobDone ? <Mono>✓ RENDER COMPLETE — READY TO SHARE</Mono> : null}
-          </div>
-        ) : null}
-      </Section>
-
-      <Section num={3} title="Details" active={!!staged} note="TITLE · CAPTION · TAGS · LOCATION">
-        {!staged ? (
-          <Mono>AWAITING SOURCE FILE…</Mono>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-3)' }}>
-            <Field label={`TITLE (COVER TITLE · MAX ${TITLE_MAX})`}>
-              <input
-                className="sx-input"
-                value={title}
-                maxLength={TITLE_MAX}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Give your reel a title…"
-              />
-            </Field>
-            <div className="sx-monospace-sm">{title.length}/{TITLE_MAX}</div>
-            <Field label={`CAPTION (MAX ${CAPTION_MAX} · #HASHTAGS AUTO-TAGGED)`}>
-              <textarea
-                className="sx-textarea"
-                value={caption}
-                maxLength={CAPTION_MAX}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder="Say something about this reel… #neon #viral"
-              />
-            </Field>
-            <div className="sx-monospace-sm">{caption.length}/{CAPTION_MAX}</div>
-            <Field label={`TAGS (MAX ${TAGS_MAX})`}>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input
-                  className="sx-input"
-                  style={{ flex: '1 1 160px', minWidth: 0 }}
-                  value={tagDraft}
-                  onChange={(e) => setTagDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ',') {
-                      e.preventDefault();
-                      addTag();
-                    }
-                  }}
-                  placeholder="Add a tag… (Enter)"
-                />
-                <Button onClick={addTag}>+ ADD</Button>
-              </div>
-            </Field>
-            {effectiveTags.length ? (
-              <div className="sx-tag-row" aria-label="Tags">
-                {tags.map((t) => (
-                  <button type="button" key={t} className="sx-tag-chip" onClick={() => setTags(tags.filter((x) => x !== t))} title="Remove tag">
-                    #{t} ✕
-                  </button>
-                ))}
-                {captionTags.filter((t) => !tags.includes(t)).map((t) => (
-                  <span key={`c-${t}`} className="sx-tag-chip sx-tag-auto" title="Auto-tagged from caption">
-                    #{t}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <div className="sx-monospace-sm">No tags yet — type above or add #hashtags in the caption.</div>
-            )}
-            <Field label="LOCATION (FREE TEXT · MATCHED TO MAP)">
-              <LocationField value={location} onChange={setLocation} />
-            </Field>
-            {location?.display_name ? (
-              <Mono>📍 {location.display_name}</Mono>
-            ) : location?.city ? (
-              <Mono>📍 {location.city}{location.country ? `, ${location.country}` : ''} (CUSTOM)</Mono>
-            ) : null}
-          </div>
-        )}
-      </Section>
-
-      <Section num={4} title="Share" active={!!staged} note="PUBLISH TO EXPLORE + REELS">
-        {!staged ? (
-          <Mono>AWAITING SOURCE FILE…</Mono>
-        ) : published ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-3)' }}>
-            <div className="sx-accent-block" role="status">
-              <div className="sx-accent-block-title">✓ SHARED — LIVE IN EXPLORE + REELS</div>
-              <div className="sx-accent-block-body">
-                <p>{published.meta?.title}</p>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Button primary onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(published.rel_path)}`)}>
-                ▶ PLAY IN REELS
-              </Button>
-              <Button onClick={() => navigate('/explore')}>EXPLORE GRID</Button>
-              <Button onClick={() => navigate('/profile/' + (published.meta?.creator?.username || user.username))}>VIEW ON PROFILE</Button>
-              <Button onClick={reset}>+ NEW UPLOAD</Button>
-            </div>
-            <Mono>{published.media_url}</Mono>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-3)' }}>
-            {!title.trim() ? <GatedReason>TITLE IS REQUIRED BEFORE SHARING</GatedReason> : null}
-            {path === 'extend' && !jobDone ? <GatedReason>RENDER THE 1:1 EXTEND FIRST (STEP 02)</GatedReason> : null}
-            <div>
-              <Button primary disabled={shareDisabled} loading={publishing} onClick={share}>
-                SHARE REEL TO UPLOADS
-              </Button>
-            </div>
-            {error ? (
-              <div className="sx-error-box" role="alert">
-                <div className="sx-error-title">SHARE FAILED</div>
-                <div>{error}</div>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Section>
+        <div className="sx-studio-deck">{deck}</div>
+      </div>
     </div>
   );
 }

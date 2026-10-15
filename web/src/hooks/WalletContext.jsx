@@ -72,6 +72,12 @@ export function WalletProvider({ children }) {
     api.post('/api/billing/quote', { kind, stage_id: stageId, parameters }, signal ? { signal } : undefined)
   ), []);
 
+  // Same pricing as `quote`, but informational only: no quote_id, works while
+  // ECHO Credits are disabled, and can never fund a render.
+  const estimate = useCallback((kind, stageId, parameters, signal) => (
+    api.post('/api/billing/estimate', { kind, stage_id: stageId, parameters }, signal ? { signal } : undefined)
+  ), []);
+
   const saveFalKey = useCallback(async (value) => {
     const result = await api.put('/api/account/fal-key', { fal_key: value });
     setFalKey(result);
@@ -92,9 +98,10 @@ export function WalletProvider({ children }) {
     loading,
     refresh,
     quote,
+    estimate,
     saveFalKey,
     deleteFalKey,
-  }), [wallet, catalog, catalogStatus, falKey, loading, refresh, quote, saveFalKey, deleteFalKey]);
+  }), [wallet, catalog, catalogStatus, falKey, loading, refresh, quote, estimate, saveFalKey, deleteFalKey]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

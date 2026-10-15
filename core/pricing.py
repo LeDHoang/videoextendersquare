@@ -116,7 +116,11 @@ def _stage(stage: str, entry: dict, cost: Decimal, **details: Any) -> StageCost:
 def quote_video(
     *, width: int, height: int, duration: float, params: dict[str, Any],
     source_fps: float | None = None, source_frames: int | None = None,
+    estimate: bool = False,
 ) -> dict[str, Any]:
+    """Price a video job. ``estimate=True`` (informational, never charged)
+    also prices chains whose provider output is not deterministic, using an
+    approximation that is flagged ``approximate`` in the stage details."""
     effective = _effective_duration(duration, params)
     if effective <= 0:
         raise PricingError("The selected video segment has no billable duration.")
@@ -130,6 +134,7 @@ def quote_video(
     outpaint_entry = _catalog_entry(outpaint_model, models.VIDEO_OUTPAINT)
     outpaint_frames = None
     outpaint_fps = None
+    seedvr_approximate = False
 
     if not upscale_only and not is_square:
         if not outpaint_entry:
@@ -243,14 +248,18 @@ def quote_video(
             else:
                 if not (source_fps and source_frames):
                     raise PricingError("SeedVR credit quotes require source frame metadata.")
-                if not upscale_only and not is_square:
+                chained = not upscale_only and not is_square
+                if chained and not estimate:
                     raise PricingError("Luma-to-SeedVR chaining is BYOK-only because output frame count is not deterministic.")
                 fps = float(source_fps)
                 frame_count = (
                     max(1, int((effective * _decimal(source_fps)).to_integral_value(rounding=ROUND_CEILING)))
-                    if bool(params.get("trim_enabled", False))
+                    if bool(params.get("trim_enabled", False)) or chained
                     else int(source_frames)
                 )
+                if chained:
+                    # Estimate only: assume Luma returns the source frame rate.
+                    seedvr_approximate = True
             if not upscale_only or is_square:
                 out_w = out_h = side
             elif width >= height:
@@ -273,6 +282,7 @@ def quote_video(
                     output_height=out_h,
                     generated_megapixels=float(generated_mp),
                     resolution=resolution,
+                    **({"approximate": True} if seedvr_approximate else {}),
                 )
             )
         else:

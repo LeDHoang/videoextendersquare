@@ -17,7 +17,7 @@ from server.jobs import JobStatus, job_manager
 from server.routers import billing, image, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import CloudGenerationBilling, FalCredential
+from server.social.models import BillingQuote, CloudGenerationBilling, FalCredential
 
 
 PASSWORD = "correct-horse-battery"
@@ -205,6 +205,63 @@ def test_anonymous_upload_survives_sign_in_on_same_browser(app, tmp_path, monkey
             headers=csrf_headers(client),
         )
         assert quoted.status_code == 200, quoted.text
+
+
+def test_estimate_prices_without_credits_and_matches_the_quote(app, monkeypatch):
+    monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 500))
+    monkeypatch.setattr(billing, "get_image_dimensions", lambda _path: (1000, 500))
+    params = {
+        "prompt": "",
+        "upscale_only": False,
+        "sharpening": 0.0,
+        "upscale_engine": "fal",
+        "upscale_model": "fal-ai/clarity-upscaler",
+        "outpaint_model": "fal-ai/image-apps-v2/outpaint",
+        "custom_outpaint_args": {},
+        "custom_upscale_args": {},
+    }
+    with TestClient(app) as owner_client, TestClient(app) as other_client, TestClient(app) as anonymous:
+        register(owner_client, "estimate_owner")
+        register(other_client, "estimate_other")
+        uploaded = owner_client.post("/api/image/upload", files={"file": ("wide.png", b"staged", "image/png")})
+        assert uploaded.status_code == 200, uploaded.text
+        stage_id = uploaded.json()["stage_id"]
+        app.state.staged_ids.append(stage_id)
+        body = {"kind": "image", "stage_id": stage_id, "parameters": params}
+
+        # Credits off: quotes are refused, estimates still price the job.
+        monkeypatch.setenv("SX_CREDITS_ENABLED", "0")
+        assert owner_client.post("/api/billing/quote", json=body, headers=csrf_headers(owner_client)).status_code == 503
+        estimated = owner_client.post("/api/billing/estimate", json=body, headers=csrf_headers(owner_client))
+        assert estimated.status_code == 200, estimated.text
+        estimate = estimated.json()
+        assert estimate["estimate"] is True
+        assert estimate["quote_id"] is None
+        assert estimate["credits"] > 0
+        assert estimate["provider_cost_microusd"] > 0
+        with app.state.testing_session() as db:
+            assert db.query(BillingQuote).count() == 0
+
+        # Same pricing as the authoritative quote once credits are on.
+        monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
+        quoted = owner_client.post("/api/billing/quote", json=body, headers=csrf_headers(owner_client))
+        assert quoted.status_code == 200, quoted.text
+        for key in ("credits", "provider_cost_microusd", "provider_cost_usd", "pricing_version", "stages"):
+            assert quoted.json()[key] == estimate[key], key
+
+        # A job that cannot be priced says why, instead of a stale-quote error.
+        unpriced = {**body, "parameters": {**params, "upscale_model": "fal-ai/ccsr"}}
+        for path in ("/api/billing/estimate", "/api/billing/quote"):
+            refused = owner_client.post(path, json=unpriced, headers=csrf_headers(owner_client))
+            assert refused.status_code == 409, path
+            assert refused.json()["detail"]["code"] == "PRICING_UNAVAILABLE"
+            assert "CCSR requires a personal Fal key" in refused.json()["detail"]["message"]
+
+        foreign = other_client.post("/api/billing/estimate", json=body, headers=csrf_headers(other_client))
+        assert foreign.status_code == 400
+        assert foreign.json()["detail"]["code"] == "INVALID_STAGE"
+        assert owner_client.post("/api/billing/estimate", json=body).status_code == 403
+        assert anonymous.post("/api/billing/estimate", json=body).status_code in {401, 403}
 
 
 def test_billing_refuses_paid_work_with_placeholder_secrets(app, monkeypatch):

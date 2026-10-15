@@ -126,3 +126,26 @@ def test_parameter_hash_is_stable_and_stage_bound():
     assert parameter_hash(kind="image", stage_id="abc", params=params_a) != parameter_hash(
         kind="image", stage_id="other", params=params_a
     )
+
+
+def test_luma_to_seedvr_is_refused_for_quotes_but_estimated_approximately():
+    params = {
+        "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+        "upscale_engine": "fal",
+        "upscale_model": "fal-ai/seedvr/upscale/video",
+        "seedvr_target": "1080p",
+    }
+    with pytest.raises(PricingError, match="Luma-to-SeedVR"):
+        quote_video(width=1920, height=1080, duration=5, params=params, source_fps=24, source_frames=120)
+
+    estimate = quote_video(
+        width=1920, height=1080, duration=5, params=params, source_fps=24, source_frames=120, estimate=True,
+    )
+    luma, seedvr = estimate["stages"]
+    assert luma["credits"] == 41
+    assert "approximate" not in luma["details"]
+    assert seedvr["details"]["approximate"] is True
+    # Assumes Luma returns the source frame rate: 5s x 24fps at 1080x1080.
+    assert seedvr["details"]["frames"] == 120
+    assert seedvr["details"]["output_width"] == seedvr["details"]["output_height"] == 1080
+    assert Decimal(seedvr["provider_cost_usd"]) == Decimal("0.001") * Decimal(1080 * 1080 * 120) / Decimal(1_000_000)

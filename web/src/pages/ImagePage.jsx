@@ -92,7 +92,7 @@ export default function ImagePage() {
     kind: 'image',
     items: quoteItems,
     parameters,
-    enabled: cloudRequired && Boolean(user) && !byokOnly && Boolean(catalog?.credits_enabled),
+    enabled: cloudRequired && Boolean(user) && !byokOnly,
   });
   const insufficientCredits = paymentSource === 'credits' && Number(wallet?.available_credits || 0) < quoteState.totalCredits;
   // Stale quotes (loading / error / count mismatch) must NOT hard-block: the
