@@ -32,6 +32,9 @@
 #                          .venv/bin/python scripts/batch_backfill_media_info.py
 #                            (fills reel duration/size for posts whose media is on disk;
 #                             the server also does this at startup and every 15 min)
+#                          .venv/bin/python scripts/batch_stereo_mono.py [--dry-run]
+#                            (builds missing left-eye 2D renditions + grid assets for
+#                             stereo SBS/top-bottom posts; see docs/stereo-3d-reels.md)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
 #   dev/               — one-off paid-API / hardware experiment scripts, NOT

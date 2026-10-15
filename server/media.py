@@ -210,7 +210,12 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
 
     dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
     if dest.exists() and dest.stat().st_size > 0:
-        return str(dest)
+        if not stereo:
+            return str(dest)
+        # A proxy cached before the stereo cap existed may be too large.
+        cached = probe_media_info(str(dest)) or {}
+        if max(cached.get("width") or 0, cached.get("height") or 0) <= STEREO_PROXY_LONG_SIDE:
+            return str(dest)
 
     if stereo == "sbs":
         vf_args = ["-vf", f"scale='2*trunc(min(iw,{STEREO_PROXY_LONG_SIDE})/2)':-2"]
