@@ -312,6 +312,8 @@ def render(ctx: dict) -> None:
             missing = []
             if not probes["vapoursynth"].ok:
                 missing.append("VapourSynth + vspipe")
+            if not probes["ffms2"].ok:
+                missing.append("the ffms2 source plugin")
             if not probes["znedi3"].ok:
                 missing.append("the znedi3 plugin")
             C.accent_block(
@@ -319,7 +321,7 @@ def render(ctx: dict) -> None:
                 [f"This machine is missing {' and '.join(missing)}, so the "
                  "znedi3 neural upscale cannot run.",
                  "FAST uses Lanczos4 + CAS via FFmpeg and works now."],
-                code=["pip install vapoursynth", "+ vsznedi3 plugin"],
+                code=["pip install vapoursynth", "+ ffms2 + vsznedi3 plugins"],
             )
 
         cas_ok = probes["cas"].ok

@@ -320,10 +320,10 @@ export function UpscaleSection({ cfg, num, probes, studioOk, maxSourceDur }) {
           title="STUDIO ENGINE UNAVAILABLE"
           tone="warn"
           lines={[
-            'This system is missing VapourSynth + the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
+            'This system is missing VapourSynth, the ffms2 source plugin or the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
             'FAST engine uses Lanczos4 + CAS and is fully operational.',
           ]}
-          code={['pip install vapoursynth', '+ vsznedi3 plugin']}
+          code={['pip install vapoursynth', '+ ffms2 + vsznedi3 plugins']}
         />
       ) : null}
 

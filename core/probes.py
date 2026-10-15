@@ -78,7 +78,8 @@ def build_probes() -> dict[str, Probe]:
     out["encoder"] = Probe(
         "encoder", "ENCODER", bool(enc_name), "block",
         enc_name or "none working",
-        "No HEVC encoder passed a smoke test. libx265 is the software fallback.",
+        f"No HEVC encoder passed a {tooling.SMOKE_ENCODE_SIZE} smoke test. "
+        "libx265 is the software fallback.",
     )
 
     has_264 = "libx264" in encoders and bool(ff)
@@ -95,14 +96,28 @@ def build_probes() -> dict[str, Probe]:
         "Studio engine needs VapourSynth + vspipe on PATH. Fast engine is unaffected.",
     )
 
+    # A plugin file on disk is not proof: smoke-test each studio plugin
+    # through vspipe with the same load lines a studio render uses.
+    ffms2 = tooling.find_ffms2_plugin()
+    has_ffms2, ffms2_err = tooling.smoke_ffms2(ffms2) if has_vs else (False, "")
+    out["ffms2"] = Probe(
+        "ffms2", "FFMS2", has_ffms2, "degrade",
+        "available" if has_ffms2 else ("not loadable" if ffms2 else "not found"),
+        "Studio engine decodes video through the ffms2 source plugin."
+        + (f" Found at: {ffms2}" if ffms2 else
+           " Install it (macOS: brew install ffms2, Windows: vsrepo install ffms2).")
+        + (f" vspipe smoke test failed: {ffms2_err}" if ffms2_err else ""),
+    )
+
     plugin = tooling.find_znedi3_plugin()
-    has_znedi3 = bool(plugin and (plugin == "pip:vapoursynth" or os.path.isfile(plugin)))
+    has_znedi3, znedi3_err = tooling.smoke_znedi3(plugin) if has_vs else (False, "")
     out["znedi3"] = Probe(
         "znedi3", "ZNEDI3", has_znedi3, "degrade",
-        "available" if has_znedi3 else "not found",
+        "available" if has_znedi3 else ("not loadable" if plugin else "not found"),
         f"Studio engine needs the znedi3 plugin."
         + (f" Found at: {plugin}" if plugin else
-           " Install VapourSynth via winget or pip install vapoursynth."),
+           " Install VapourSynth via winget or pip install vapoursynth.")
+        + (f" vspipe smoke test failed: {znedi3_err}" if znedi3_err else ""),
     )
 
     return out
@@ -121,7 +136,7 @@ def fal_key_probe() -> Probe:
 
 
 def studio_available(probes: dict[str, Probe]) -> bool:
-    return probes["vapoursynth"].ok and probes["znedi3"].ok
+    return probes["vapoursynth"].ok and probes["ffms2"].ok and probes["znedi3"].ok
 
 
 def blockers(probes: dict[str, Probe], *, need_video: bool = False) -> list[Probe]:

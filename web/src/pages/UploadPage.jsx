@@ -50,7 +50,7 @@ export default function UploadPage() {
   const health = useHealthContext();
   const cfgCtx = useConfigContext();
   const probes = health?.probes || {};
-  const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
+  const studioOk = probes.vapoursynth?.ok && probes.ffms2?.ok && probes.znedi3?.ok;
   const models = cfgCtx?.config?.models || {};
 
   // Each kind keeps its own extender settings for the whole visit.

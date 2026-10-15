@@ -44,7 +44,7 @@ export default function VideoPage() {
   const blocked = ['ffmpeg', 'ffprobe', 'encoder']
     .filter((id) => probes[id] && !probes[id].ok)
     .map((id) => probes[id]);
-  const studioOk = probes.vapoursynth?.ok && probes.znedi3?.ok;
+  const studioOk = probes.vapoursynth?.ok && probes.ffms2?.ok && probes.znedi3?.ok;
 
   const models = cfg?.config?.models || {};
   const outpaintCatalog = models.video_outpaint_catalog || [];
@@ -550,10 +550,10 @@ export default function VideoPage() {
                 title="STUDIO ENGINE UNAVAILABLE"
                 tone="warn"
                 lines={[
-                  'This system is missing VapourSynth + the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
+                  'This system is missing VapourSynth, the ffms2 source plugin or the znedi3 plugin, so the neural STUDIO upscale engine cannot execute.',
                   'FAST engine uses Lanczos4 + CAS and is fully operational.',
                 ]}
-                code={['pip install vapoursynth', '+ vsznedi3 plugin']}
+                code={['pip install vapoursynth', '+ ffms2 + vsznedi3 plugins']}
               />
             ) : null}
 

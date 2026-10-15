@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import threading
 from importlib.util import find_spec
 
@@ -106,13 +107,20 @@ def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess | Non
         return None
 
 
-def smoke_encode(name: str, opts: list[str]) -> bool:
-    """Encode one frame to /dev/null. Presence in -encoders is NOT enough:
-    hevc_nvenc lists fine but dies on 'Cannot load nvcuda.dll' with no NVIDIA GPU.
+# Every 4K-square master (fast, fal and studio paths) is encoded at this size.
+SMOKE_ENCODE_SIZE = "3840x3840"
+
+
+def smoke_encode(name: str, opts: list[str], size: str = SMOKE_ENCODE_SIZE) -> bool:
+    """Encode one frame at the real master size to /dev/null. Presence in
+    -encoders is NOT enough: hevc_nvenc lists fine but dies on 'Cannot load
+    nvcuda.dll' with no NVIDIA GPU. A tiny frame is not enough either:
+    hardware encoders have per-chip resolution/level limits that 64x64 never
+    reaches. One 3840x3840 frame costs ~0.4s on VideoToolbox, ~1s on libx265.
     """
     p = run([
         "ffmpeg", "-hide_banner", "-v", "error",
-        "-f", "lavfi", "-i", "testsrc=d=0.1:s=64x64",
+        "-f", "lavfi", "-i", f"testsrc=d=0.1:s={size}",
         "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-",
     ], timeout=40)
     return bool(p and p.returncode == 0)
@@ -230,6 +238,100 @@ def find_znedi3_plugin() -> str | None:
         pass
     candidates.extend(explicit)
     return next((p for p in candidates if os.path.isfile(p)), None)
+
+
+def _guarded_load_lines(namespace: str, plugin: str | None) -> str:
+    """VapourSynth script lines that LoadPlugin `plugin` for `core.<namespace>`.
+
+    None or the 'pip:vapoursynth' sentinel emits nothing (autoload). An
+    explicit path is loaded only while the namespace is still missing: vspipe
+    may run a different VapourSynth than this process (the pip wheel
+    autoloads nothing, a system install autoloads plugins64), and LoadPlugin
+    on an already-loaded plugin raises.
+    """
+    if not plugin or plugin == "pip:vapoursynth":
+        return ""
+    return (
+        f"if not hasattr(core, {namespace!r}):\n"
+        f"    core.std.LoadPlugin({os.path.abspath(plugin)!r})\n"
+    )
+
+
+def ffms2_load_lines(plugin: str | None) -> str:
+    """VapourSynth script lines that make `core.ffms2` available.
+
+    Single source of truth for the studio worker's .vpy and smoke_ffms2(),
+    so the health probe exercises exactly what a render does.
+    """
+    return _guarded_load_lines("ffms2", plugin)
+
+
+def znedi3_load_lines(plugin: str | None) -> str:
+    """VapourSynth script lines that make `core.znedi3` available.
+
+    Single source of truth for the studio worker's .vpy and smoke_znedi3(),
+    so the health probe exercises exactly what a render does.
+    """
+    return _guarded_load_lines("znedi3", plugin)
+
+
+# One blank frame through the same nnedi3 call the studio worker makes.
+_ZNEDI3_SMOKE_VPY = """import vapoursynth as vs
+core = vs.core
+{load}clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.YUV420P8)
+clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=2)
+clip.set_output()
+"""
+
+# Resolves core.ffms2 inside vspipe and calls into the plugin. A real
+# Source() would need a sample video; the missing namespace is what bites.
+_FFMS2_SMOKE_VPY = """import vapoursynth as vs
+core = vs.core
+{load}core.ffms2.Version()
+core.std.BlankClip(width=16, height=16, length=1, format=vs.YUV420P8).set_output()
+"""
+
+
+def _smoke_vpy(script: str, name: str, timeout: int) -> tuple[bool, str]:
+    """Run `script` through vspipe for frame 0 with no output.
+    Returns (ok, last error line).
+
+    A plugin file on disk (or the namespace in *this* process) is NOT enough:
+    renders go through vspipe, which only sees what its script loads or its
+    own VapourSynth autoloads. The old file-exists check reported znedi3 ok
+    while every studio render died on 'No attribute with the name znedi3'.
+    """
+    vspipe = _vspipe_quietly()
+    if not vspipe:
+        return False, "vspipe not found"
+    fd, vpy_path = tempfile.mkstemp(prefix=f"{name}_probe_", suffix=".vpy")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(script)
+        # "--" = request the frame but write no output (vspipe R63+).
+        p = run([vspipe, "--end", "0", vpy_path, "--"], timeout=timeout)
+    finally:
+        try:
+            os.unlink(vpy_path)
+        except OSError:
+            pass
+    if p is None:
+        return False, f"vspipe failed to start or exceeded {timeout}s"
+    if p.returncode == 0:
+        return True, ""
+    lines = [ln.strip() for ln in (p.stderr or "").splitlines() if ln.strip()]
+    return False, lines[-1] if lines else f"vspipe exited with code {p.returncode}"
+
+
+def smoke_ffms2(plugin: str | None, timeout: int = 20) -> tuple[bool, str]:
+    """Check core.ffms2 loads in vspipe the way the studio worker loads it."""
+    return _smoke_vpy(_FFMS2_SMOKE_VPY.format(load=ffms2_load_lines(plugin)), "ffms2", timeout)
+
+
+def smoke_znedi3(plugin: str | None, timeout: int = 20) -> tuple[bool, str]:
+    """Render one frame through core.znedi3 with vspipe, loading the plugin
+    the same way the studio worker does."""
+    return _smoke_vpy(_ZNEDI3_SMOKE_VPY.format(load=znedi3_load_lines(plugin)), "znedi3", timeout)
 
 
 def find_vspipe() -> str:

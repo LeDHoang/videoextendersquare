@@ -6,9 +6,12 @@ import subprocess
 import fal_client
 from core import models as _models
 from core.tooling import (
+    ffms2_load_lines,
     find_ffms2_plugin,
     find_vspipe,
+    find_znedi3_plugin,
     pick_encoder,
+    znedi3_load_lines,
 )
 from pipeline.utils import (
     get_video_dimensions_and_duration,
@@ -588,14 +591,15 @@ def _process_video_impl(
 
         vpy_path = os.path.join(tempfile.gettempdir(), f"upscale_{uid}.vpy")
 
-        ffms2_plugin = find_ffms2_plugin()
-        load_ffms2 = f"core.std.LoadPlugin(r'{os.path.abspath(ffms2_plugin)}')\n" if ffms2_plugin else ""
+        # Same lines the ffms2/znedi3 health probes smoke-test (core.tooling).
+        load_ffms2 = ffms2_load_lines(find_ffms2_plugin())
+        load_znedi3 = znedi3_load_lines(find_znedi3_plugin())
 
         with open(vpy_path, "w") as f:
             f.write(f'''import vapoursynth as vs
 
 core = vs.core
-{load_ffms2}
+{load_ffms2}{load_znedi3}
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
 clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=2)

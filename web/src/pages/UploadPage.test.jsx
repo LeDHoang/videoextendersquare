@@ -46,7 +46,7 @@ vi.mock('../components/ui/JobRunner.jsx', () => ({
 }));
 
 const OK = { ok: true };
-const ALL_PROBES = { ffmpeg: OK, ffprobe: OK, encoder: OK, cas: OK, vapoursynth: OK, znedi3: OK };
+const ALL_PROBES = { ffmpeg: OK, ffprobe: OK, encoder: OK, cas: OK, vapoursynth: OK, ffms2: OK, znedi3: OK };
 
 const MODELS = {
   outpaint_vid: 'fal-ai/ltx-2.3-quality/outpaint',
@@ -295,6 +295,16 @@ describe('UploadPage studio — video extender parity', () => {
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(screen.getByText('STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI')).toBeInTheDocument();
     expect(screen.queryByLabelText('CAS Sharpening level')).toBeNull();
+    expect(renderButton()).toBeDisabled();
+  });
+
+  it('gates STUDIO when the ffms2 source plugin does not load', async () => {
+    mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    fireEvent.click(radio('Upscale Engine', 'STUDIO'));
+    expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toBeDisabled();
   });
 
