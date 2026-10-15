@@ -1,8 +1,8 @@
 """Uploads router — publish staged or pipeline-rendered media as reels.
 
 Single-file flow backing the /upload page: the user either skips the
-extender (already-square source) or renders through the image/video
-pipeline first, fills in title/caption/tags/location, and Shares. The
+extender (already-square source, or a 3D stereo upload with one square per
+eye) or renders through the image/video pipeline first, fills in title/caption/tags/location, and Shares. The
 publish step copies the chosen file into output/uploads/ (the one folder
 the Upload page owns) and writes real user metadata via
 reels.upsert_upload_meta so the item appears in Explore + Reels with
@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
+from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
@@ -59,6 +60,9 @@ class PublishRequest(BaseModel):
     # More staged images for a multi-image (slideshow) post, after the cover
     # stage_id. Image posts only, published as-is (no extend pipeline).
     extra_stage_ids: list[str] = []
+    # Stereoscopic layout of an as-is upload: "sbs" (full side-by-side, 2:1)
+    # or "tb" (full top-bottom, 1:2). Every image of a slideshow must match.
+    stereo_layout: Literal["mono", "sbs", "tb"] = "mono"
 
     @field_validator("title")
     @classmethod
@@ -115,6 +119,54 @@ def _resolve_extra_images(
     if len(set(extras)) != len(extras) or req.stage_id in extras:
         raise HTTPException(status_code=400, detail="The same image was added twice.")
     return [_resolve_source("image", stage_id, None, request, context)[0] for stage_id in extras]
+
+
+_STEREO_NAMES = {"sbs": "side-by-side (2:1)", "tb": "top-bottom (1:2)"}
+
+
+def _check_stereo_pointer(req: "PublishRequest") -> None:
+    """Stereo posts are published as-is: extended renders are always 2D."""
+    if req.stereo_layout != "mono" and (req.job_id or not req.stage_id):
+        raise HTTPException(
+            status_code=422,
+            detail="3D stereo posts are published as-is; extended renders are always 2D.",
+        )
+
+
+def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
+    """Every file of a stereo post must hold the layout: one square per eye."""
+    layout = req.stereo_layout
+    if layout == "mono":
+        return
+    for source in sources:
+        info = SM.probe_media_info(source) or {}
+        width, height = info.get("width"), info.get("height")
+        if not layout_matches(layout, width, height):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"3D {_STEREO_NAMES[layout]} needs an exact "
+                    f"{'2:1' if layout == 'sbs' else '1:2'} frame with one square per eye; "
+                    f"got {width or '?'}x{height or '?'}."
+                ),
+            )
+        eye_w, eye_h = eye_size(layout, width, height)
+        if eye_w < 64 or eye_h < 64:
+            raise HTTPException(status_code=422, detail="3D stereo frames need at least 64x64 per eye.")
+
+
+def _derived_files(stored: Path) -> list[Path]:
+    """Every generated sibling a stored upload can own (cleanup on failure)."""
+    mono = SM.mono_sibling_path(str(stored))
+    return [
+        stored,
+        SM.explore_preview_path(str(stored)),
+        SM.explore_poster_path(str(stored)),
+        stored.with_name(stored.stem + "-preview.mp4"),
+        mono,
+        SM.explore_preview_path(str(mono)),
+        SM.explore_poster_path(str(mono)),
+    ]
 
 
 def _slugify(text: str, fallback: str = "upload") -> str:
@@ -193,8 +245,11 @@ def publish_upload(
         daily_cap = 20
     rate_limiter.check(db, f"publish-hour:{context.user.id}", hourly_cap, 60 * 60)
     rate_limiter.check(db, f"publish-day:{context.user.id}", daily_cap, 24 * 60 * 60)
+    _check_stereo_pointer(req)
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     extra_sources = _resolve_extra_images(req, request, context)
+    _check_stereo_sources(req, [src_path, *extra_sources])
+    stereo = req.stereo_layout if req.stereo_layout != "mono" else None
     src_ext = Path(src_path).suffix.lstrip(".").lower() or ("png" if req.kind == "image" else "mp4")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -214,9 +269,23 @@ def publish_upload(
         for target in copied:
             target.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Could not store upload: {ex}") from ex
+
+    # Stereo: every 2D surface plays the left-eye rendition, so the post is
+    # only created once each stored file has one.
+    if stereo:
+        for target in (dest, *extra_dests):
+            if not SM.make_left_eye_rendition(str(target), stereo):
+                for stored in (dest, *extra_dests):
+                    for candidate in _derived_files(stored):
+                        Path(candidate).unlink(missing_ok=True)
+                raise HTTPException(status_code=500, detail="Could not build the 2D view of this 3D upload.")
+    # 2D posters/previews come from the left eye of a stereo upload.
+    def grid_source(stored: Path) -> str:
+        return str(SM.mono_sibling_path(str(stored))) if stereo else str(stored)
+
     for extra_dest in extra_dests:
         try:
-            SM.make_image_poster(str(extra_dest))
+            SM.make_image_poster(grid_source(extra_dest))
         except Exception:
             pass
 
@@ -226,24 +295,24 @@ def publish_upload(
     try:
         if req.kind == "video":
             try:
-                SM.make_web_preview(str(dest))
+                SM.make_web_preview(str(dest), stereo=stereo)
             except Exception:
                 pass
             try:
-                preview = SM.make_explore_preview(str(dest))
+                preview = SM.make_explore_preview(grid_source(dest))
                 if preview:
                     preview_url = f"/media/{Path(preview).resolve().relative_to(root).as_posix()}"
             except Exception:
                 pass
             try:
-                poster = SM.make_explore_poster(str(dest))
+                poster = SM.make_explore_poster(grid_source(dest))
                 if poster:
                     poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
             except Exception:
                 pass
         else:
             try:
-                poster = SM.make_image_poster(str(dest))
+                poster = SM.make_image_poster(grid_source(dest))
                 if poster:
                     poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
             except Exception:
@@ -283,17 +352,14 @@ def publish_upload(
             },
             source="extended" if req.job_id else "upload",
             slide_paths=[target.resolve().relative_to(root).as_posix() for target in extra_dests] if req.kind == "image" else None,
+            stereo_layout=req.stereo_layout,
         )
         db.commit()
         db.refresh(post)
     except Exception as ex:
         db.rollback()
         for stored in (dest, *extra_dests):
-            for candidate in (
-                stored,
-                SM.explore_preview_path(str(stored)),
-                SM.explore_poster_path(str(stored)),
-            ):
+            for candidate in _derived_files(stored):
                 try:
                     Path(candidate).unlink(missing_ok=True)
                 except OSError:

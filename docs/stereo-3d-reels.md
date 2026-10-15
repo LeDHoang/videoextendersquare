@@ -103,9 +103,9 @@ Per-eye meshes already give true stereo.
 - [x] Branch `3dreels` from `origin/main` (local `main` was stale). Upstream unset so a bare `git push` cannot hit `main`.
 - [x] **Migration + model:** `20261015_0013_post_stereo_layout`, plus the `Post.stereo_layout` column. Bump `EXPECTED_SCHEMA_REVISION` and update `AGENTS.md` and the `docs/to-beta.md` mentions.
 - [x] **Detection:** `pipeline/stereo_detect.py`, plus the `stereo` block in the `/api/video/upload` and `/api/image/upload` stage responses.
-- [ ] **Media:** `mono_sibling_path`, `make_left_eye_rendition`, the stereo cap in `make_web_preview`, and `-mono.` added to the derived-sibling skip filters.
-- [ ] **Publish:** `PublishRequest.stereo_layout`, the geometry and as-is validation, the slideshow check, atomic rendition generation, and the layout threaded into `create_or_update_post`.
-- [ ] **Serialization:** `post_card`, `reel_records` / `metadata_for_paths`, slide entries, the `reels.py` `_build_payload` (video and image, location feed), and the pack DB fallback.
+- [x] **Media:** `mono_sibling_path`, `make_left_eye_rendition`, the stereo cap in `make_web_preview`, and `-mono.` added to the derived-sibling skip filters.
+- [x] **Publish:** `PublishRequest.stereo_layout`, the geometry and as-is validation, the slideshow check, atomic rendition generation, and the layout threaded into `create_or_update_post`.
+- [x] **Serialization:** `post_card`, `reel_records` / `metadata_for_paths`, slide entries, the `reels.py` `_build_payload` (video and image, location feed), and the pack DB fallback.
 - [ ] **Legacy:** remove the filename regex, and map the `testpipeline-3d` folder to `sbs` on the server.
 - [ ] **2D player** (`reels.html`): URL choice by presenting state, blob cache keyed by URL, the swap on XR enter/exit, `setSourceStereo`, the legacy crop classes, the glow sampler, and the RES chip.
 - [ ] **VR engine:** split the flags, the stereo canvas, per-eye meshes, `applyStereoVisibility`, the per-eye layers in `renderStereoPair`, glow, diagnostics, and a `VR_VERSION` bump.
@@ -117,4 +117,9 @@ Per-eye meshes already give true stereo.
 
 ## Notes / deviations
 
-_(append as work progresses)_
+- **Legacy backfill in the migration.** The 0011 probe stored legacy media sizes, so `20261015_0013` marks exact 2:1 rows under `testpipeline-3d/` as `sbs`. On the dev DB that is 6 posts. The legacy importer applies the same folder rule (`server.media.legacy_stereo_layout`).
+- **`stereo_crop` flag.** Stereo rows with no `<stem>-mono` rendition on disk (the legacy rows) serve `url == stereo_url` plus `stereo_crop: true`. The 2D player then CSS-crops to the left eye. `scripts/batch_stereo_mono.py` can generate the missing renditions.
+- **Publish errors.**
+  - The stereo checks return **422**: wrong geometry, a `job_id` source, or a mixed slideshow. Each eye must be at least 64×64.
+  - A failed rendition returns **500** after removing every copied and derived file.
+- **Stereo proxy rule.** Mono uploads keep the old rule: an H.264 source plays as-is. Stereo uploads also get a `-preview.mp4` when an H.264 source is longer than 4096 px.

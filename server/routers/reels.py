@@ -26,11 +26,13 @@ from server.social.models import Comment, EngagementEvent, Post, PostLike, PostS
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import (
     IMAGE_POST_DWELL_MS,
+    _image_entry,
     get_post_by_reference,
     metadata_for_paths,
     reel_records,
     scoped_media_paths,
     slide_media_paths,
+    stereo_fields,
 )
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
@@ -1384,6 +1386,18 @@ def _build_payload(
             "tunnel_url": tunnel.strip(),
             "comments": comments,
         }
+        # Stereo layout: the post's stored value; loose files without a post
+        # fall back to the legacy folder rule (spatialize output is SBS).
+        layout = (
+            social_row.get("stereo_layout")
+            if social_row is not None
+            else SM.legacy_stereo_layout(item["rel_path"])
+        ) or "mono"
+        stereo = stereo_fields(item["rel_path"], layout)
+        base["stereo_layout"] = stereo["stereo_layout"]
+        base["stereo_url"] = stereo["stereo_url"]
+        base["stereo_crop"] = stereo["stereo_crop"]
+        is_stereo = stereo["stereo_layout"] != "mono"
 
 
         if _is_image_item(item):
@@ -1392,26 +1406,53 @@ def _build_payload(
                 rel = Path(src_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
             except (OSError, ValueError):
                 continue
-            poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path))
-            # Every image of the post in order (a loose file is a 1-image post).
-            images = (social_row or {}).get("images") or [{
-                "path": rel,
-                "url": f"/media/{rel}",
-                "poster_url": poster_url or f"/media/{rel}",
-                "width": meta.get("width"),
-                "height": meta.get("height"),
-            }]
+            if is_stereo:
+                # 2D shows the left-eye rendition; stereo_url is the full still.
+                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout)
+                url, poster_url = cover["url"], cover["poster_url"]
+                images = (social_row or {}).get("images") or [cover]
+            else:
+                url = f"/media/{rel}"
+                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path)) or url
+                # Every image of the post in order (a loose file is a 1-image post).
+                images = (social_row or {}).get("images") or [{
+                    "path": rel,
+                    "url": url,
+                    "poster_url": poster_url,
+                    "width": meta.get("width"),
+                    "height": meta.get("height"),
+                    "stereo_layout": "mono",
+                    "stereo_url": None,
+                    "stereo_crop": False,
+                }]
             payload.append({
                 **base,
                 "media_type": "image",
-                "url": f"/media/{rel}",
-                "preview_url": f"/media/{rel}",
-                "poster_url": poster_url or f"/media/{rel}",
+                "url": url,
+                "preview_url": url,
+                "poster_url": poster_url,
                 "images": images,
                 "dwell_ms": (social_row or {}).get("dwell_ms") or IMAGE_POST_DWELL_MS,
                 "codec": "IMG",
                 "is_proxy": False,
-                "stream_tag": "IMAGE",
+                "stream_tag": "IMAGE 3D" if is_stereo else "IMAGE",
+            })
+            continue
+
+        if is_stereo and not stereo["stereo_crop"]:
+            # 2D plays the H.264 left-eye rendition; grid assets derive from it.
+            mono_path = str(SM.mono_sibling_path(src_path))
+            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path))
+            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path))
+            payload.append({
+                **base,
+                "media_type": "video",
+                "url": stereo["url"],
+                "preview_url": preview_url,
+                "poster_url": poster_url,
+                "codec": "H264",
+                "is_proxy": True,
+                "stream_tag": f"H.264 2D · 3D {layout.upper()}",
             })
             continue
 
@@ -1520,6 +1561,9 @@ def _pack_feed_data(
             "duration_ms": card.get("duration_ms"),
             "width": card.get("width"),
             "height": card.get("height"),
+            "stereo_layout": card.get("stereo_layout") or "mono",
+            "stereo_url": card.get("stereo_url"),
+            "stereo_crop": bool(card.get("stereo_crop")),
             "images": card.get("images") or [],
             "dwell_ms": card.get("dwell_ms"),
             "comments": [],
@@ -2695,7 +2739,7 @@ def vr_video_path_ab(
         try:
             candidates = [
                 p for p in OUTPUT_DIR.rglob("*.mp4")
-                if not any(s in p.name for s in ("-preview", "-explore", "-quest"))
+                if not any(s in p.name for s in ("-preview", "-explore", "-quest", SM.MONO_SUFFIX + "."))
             ]
             if candidates:
                 biggest = max(candidates, key=lambda p: p.stat().st_size)

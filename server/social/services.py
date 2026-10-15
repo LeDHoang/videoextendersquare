@@ -271,6 +271,7 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
                 "duration_ms": post.duration_ms,
                 "width": post.width,
                 "height": post.height,
+                "stereo_layout": post.stereo_layout or "mono",
                 **post_image_fields(post),
                 "author_name": post.owner.username,
                 "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
@@ -312,31 +313,82 @@ def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
     }
 
 
-def _image_entry(media_path: str, width: int | None, height: int | None) -> dict:
-    """One image of an image post as the player needs it."""
+def _output_url(path: Path) -> str | None:
+    try:
+        return f"/media/{path.resolve().relative_to(Path('output').resolve()).as_posix()}"
+    except (OSError, ValueError):
+        return None
+
+
+def stereo_fields(media_path: str, layout: str | None) -> dict:
+    """Playback fields for a post's stereo layout (docs/stereo-3d-reels.md).
+
+    Mono posts get {"stereo_layout": "mono", "stereo_url": None}. Stereo posts
+    also get "url" pointing at the left-eye <stem>-mono rendition every 2D
+    surface plays, "stereo_url" at the full stereo file (or its H.264 proxy)
+    the VR player samples per eye, and "stereo_crop" when no rendition exists
+    yet so 2D shows the raw file cropped to the left eye instead.
+    """
     from server import media as media_service
 
-    url = f"/media/{media_path}"
+    layout = layout if layout in media_service.STEREO_LAYOUTS else "mono"
+    if layout == "mono":
+        return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False}
+    source = Path("output") / media_path
+    mono, stereo = media_service.stereo_paths(str(source))
+    raw_url = f"/media/{media_path}"
+    mono_url = _output_url(mono) if mono else None
+    return {
+        "stereo_layout": layout,
+        "url": mono_url or raw_url,
+        "stereo_url": _output_url(stereo) or raw_url,
+        "stereo_crop": mono_url is None,
+    }
+
+
+def _image_entry(media_path: str, width: int | None, height: int | None, layout: str = "mono") -> dict:
+    """One image of an image post as the player needs it.
+
+    For stereo images "url"/"poster_url" are the left-eye rendition and its
+    poster, and "stereo_url" is the full stereo still.
+    """
+    from server import media as media_service
+
+    stereo = stereo_fields(media_path, layout)
+    url = stereo.get("url") or f"/media/{media_path}"
     poster_url = url
     try:
         source = Path("output") / media_path
+        if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
+            source = media_service.mono_sibling_path(str(source))
         poster = Path(media_service.explore_poster_path(str(source)))
         if poster.is_file() and poster.stat().st_size > 0 and poster.stat().st_mtime >= source.stat().st_mtime:
-            poster_url = f"/media/{poster.resolve().relative_to(Path('output').resolve()).as_posix()}"
+            poster_url = _output_url(poster) or poster_url
     except (OSError, ValueError):
         pass
-    return {"path": media_path, "url": url, "poster_url": poster_url, "width": width, "height": height}
+    return {
+        "path": media_path,
+        "url": url,
+        "poster_url": poster_url,
+        "width": width,
+        "height": height,
+        "stereo_layout": stereo["stereo_layout"],
+        "stereo_url": stereo["stereo_url"],
+        "stereo_crop": stereo["stereo_crop"],
+    }
 
 
 def post_image_fields(post: Post) -> dict:
     """Slideshow fields for an image post: every image in order and the dwell.
 
     Video posts get an empty image list so callers can branch on media_type.
+    Every slide of a stereo post shares the post's stereo layout.
     """
     if post.media_type != "image":
         return {"images": [], "dwell_ms": None}
-    images = [_image_entry(post.media_path, post.width, post.height)]
-    images.extend(_image_entry(slide.media_path, slide.width, slide.height) for slide in post.slides)
+    layout = post.stereo_layout or "mono"
+    images = [_image_entry(post.media_path, post.width, post.height, layout)]
+    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout) for slide in post.slides)
     return {"images": images, "dwell_ms": int(post.dwell_ms or IMAGE_POST_DWELL_MS)}
 
 
@@ -482,6 +534,7 @@ def create_or_update_post(
     legacy_views: int = 0,
     stable_legacy_id: bool = False,
     slide_paths: list[str] | None = None,
+    stereo_layout: str | None = None,
 ) -> Post:
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
@@ -508,6 +561,10 @@ def create_or_update_post(
     post.source = str(source or "upload")[:32]
     post.status = "published"
     post.deleted_at = None
+    if stereo_layout is not None:
+        post.stereo_layout = stereo_layout if stereo_layout in {"mono", "sbs", "tb"} else "mono"
+    elif not post.stereo_layout:
+        post.stereo_layout = "mono"
     apply_media_info(post)
     post.legacy_like_count = max(0, int(legacy_likes or 0))
     post.legacy_view_count = max(0, int(legacy_views or 0))
@@ -530,10 +587,18 @@ def shared_preview_urls(post: Post) -> dict:
     from server import media as media_service
 
     url = f"/media/{post.media_path}"
+    stereo = stereo_fields(post.media_path, post.stereo_layout)
     if post.media_type == "image":
+        if stereo["stereo_layout"] != "mono":
+            cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"])
+            return {"preview_url": cover["url"], "poster_url": cover["poster_url"]}
         return {"preview_url": url, "poster_url": url}
     try:
         source = Path("output") / post.media_path
+        if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
+            # Grid assets of a stereo video come from its left-eye rendition.
+            source = media_service.mono_sibling_path(str(source))
+            url = stereo["url"]
         root = Path("output").resolve()
 
         def sibling_url(path: Path) -> str | None:
@@ -592,6 +657,7 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         },
         "created_at": post.created_at.isoformat() if post.created_at else None,
     }
+    card.update(stereo_fields(post.media_path, post.stereo_layout))
     card.update(shared_preview_urls(post))
     return card
 

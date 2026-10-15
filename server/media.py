@@ -19,6 +19,18 @@ VIDEO_EXTS = {"mp4", "mov", "avi", "webm"}
 MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
 
+# Stereoscopic posts (see docs/stereo-3d-reels.md). The original stereo file
+# is the VR source; <stem>-mono.<ext> holds the left eye for 2D surfaces.
+STEREO_LAYOUTS = ("mono", "sbs", "tb")
+MONO_SUFFIX = "-mono"
+# Long side of the H.264 stereo proxy: 2048 px per eye, inside the Quest
+# H.264 decoder limits.
+STEREO_PROXY_LONG_SIDE = 4096
+# Left-eye 2D video renditions match the square web preview cap.
+MONO_VIDEO_MAX_SIDE = 2160
+# Left-eye 2D stills keep up to the square master size.
+MONO_IMAGE_MAX_SIDE = 3840
+
 
 class UploadRejected(Exception):
     """Raised when a staged upload fails an extension or size check."""
@@ -180,17 +192,33 @@ def has_web_preview(src: str) -> bool:
     return dest.exists() and dest.stat().st_size > 0
 
 
-def make_web_preview(src: str, height: int | None = 3840) -> str | None:
-    """Transcode an H.264 proxy for in-browser playback (mirrors ui/media)."""
+def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = None) -> str | None:
+    """Transcode an H.264 proxy for in-browser playback (mirrors ui/media).
+
+    With a stereo layout ("sbs" / "tb") the proxy keeps the full stereo frame
+    and caps its long side at STEREO_PROXY_LONG_SIDE (2048 px per eye); an
+    H.264 source larger than that also gets a proxy, since Quest cannot
+    decode H.264 past ~4096 px.
+    """
+    stereo = stereo if stereo in ("sbs", "tb") else None
     if get_video_codec(src) in {"h264", "avc1"}:
-        return src
+        if not stereo:
+            return src
+        info = probe_media_info(src) or {}
+        if max(info.get("width") or 0, info.get("height") or 0) <= STEREO_PROXY_LONG_SIDE:
+            return src
 
     dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
     if dest.exists() and dest.stat().st_size > 0:
         return str(dest)
 
-    target_h = min(height or 2160, 2160)
-    vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
+    if stereo == "sbs":
+        vf_args = ["-vf", f"scale='2*trunc(min(iw,{STEREO_PROXY_LONG_SIDE})/2)':-2"]
+    elif stereo == "tb":
+        vf_args = ["-vf", f"scale=-2:'2*trunc(min(ih,{STEREO_PROXY_LONG_SIDE})/2)'"]
+    else:
+        target_h = min(height or 2160, 2160)
+        vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
@@ -219,6 +247,132 @@ def explore_preview_path(src: str) -> Path:
 def explore_poster_path(src: str) -> Path:
     """Sibling path for the Explore-grid poster thumbnail (<stem>-poster.jpg)."""
     return Path(src).with_name(Path(src).stem + "-poster.jpg")
+
+
+def mono_sibling_path(src: str) -> Path:
+    """Sibling path for the left-eye 2D rendition of a stereo original.
+
+    Videos always become <stem>-mono.mp4 (H.264); stills keep their format.
+    """
+    path = Path(src)
+    ext = path.suffix.lower()
+    if ext.lstrip(".") in VIDEO_EXTS:
+        ext = ".mp4"
+    return path.with_name(path.stem + MONO_SUFFIX + ext)
+
+
+# Folders whose loose files predate stored stereo metadata and are known to
+# hold full SBS (admin spatialize output). Only consulted for media without a
+# post row, and by the 20261015_0013 backfill.
+LEGACY_SBS_FOLDERS = ("testpipeline-3d",)
+
+
+def legacy_stereo_layout(rel_path: str) -> str:
+    """Stereo layout implied by where a loose output/ file lives."""
+    first = Path(rel_path).parts[0] if Path(rel_path).parts else ""
+    return "sbs" if first in LEGACY_SBS_FOLDERS else "mono"
+
+
+def is_derived_media(name: str) -> bool:
+    """True for generated siblings that must never surface as their own tile."""
+    if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg")):
+        return True
+    return Path(name).stem.endswith(MONO_SUFFIX)
+
+
+def stereo_paths(src: str) -> tuple[Path | None, Path]:
+    """(left-eye mono rendition or None, best stereo playback file) of an original."""
+    path = Path(src)
+    mono = mono_sibling_path(src)
+    try:
+        has_mono = mono.is_file() and mono.stat().st_size > 0
+    except OSError:
+        has_mono = False
+    stereo = path
+    if path.suffix.lstrip(".").lower() in VIDEO_EXTS:
+        proxy = path.with_name(path.stem + "-preview.mp4")
+        try:
+            if proxy.is_file() and proxy.stat().st_size > 0:
+                stereo = proxy
+        except OSError:
+            pass
+    return (mono if has_mono else None), stereo
+
+
+def _left_eye_crop(layout: str) -> str:
+    if layout == "sbs":
+        return "crop=iw/2:ih:0:0"
+    if layout == "tb":
+        return "crop=iw:ih/2:0:0"
+    raise ValueError(f"not a stereo layout: {layout!r}")
+
+
+def make_left_eye_rendition(src: str, layout: str) -> str | None:
+    """Write the square left eye of a stereo original next to it.
+
+    Video: H.264 + AAC, faststart, at most MONO_VIDEO_MAX_SIDE square.
+    Image: same format as the source, at most MONO_IMAGE_MAX_SIDE square.
+    Returns the rendition path, or None when it could not be produced.
+    """
+    crop = _left_eye_crop(layout)
+    dest = mono_sibling_path(src)
+    try:
+        if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
+            return str(dest)
+    except OSError:
+        return None
+
+    if Path(src).suffix.lstrip(".").lower() in IMAGE_EXTS:
+        return _make_left_eye_still(src, layout, dest)
+
+    side = MONO_VIDEO_MAX_SIDE
+    vf = f"{crop},scale='2*trunc(min(iw,{side})/2)':'2*trunc(min(iw,{side})/2)'"
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error",
+        "-i", src,
+        "-vf", vf,
+        "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-c:a", "aac", "-b:a", "192k",
+        str(dest),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=600,
+                           creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        dest.unlink(missing_ok=True)
+        return None
+    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+        dest.unlink(missing_ok=True)
+        return None
+    return str(dest)
+
+
+def _make_left_eye_still(src: str, layout: str, dest: Path) -> str | None:
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(src) as img:
+            img = ImageOps.exif_transpose(img)
+            w, h = img.size
+            box = (0, 0, w // 2, h) if layout == "sbs" else (0, 0, w, h // 2)
+            eye = img.crop(box)
+            if max(eye.size) > MONO_IMAGE_MAX_SIDE:
+                eye = eye.resize((MONO_IMAGE_MAX_SIDE, MONO_IMAGE_MAX_SIDE), Image.LANCZOS)
+            fmt = (img.format or "").upper()
+            ext = dest.suffix.lower()
+            if ext in (".jpg", ".jpeg"):
+                eye.convert("RGB").save(dest, "JPEG", quality=92)
+            elif ext == ".webp":
+                eye.save(dest, "WEBP", quality=92)
+            else:
+                eye.save(dest, fmt or "PNG")
+    except (OSError, ValueError):
+        dest.unlink(missing_ok=True)
+        return None
+    if not dest.exists() or dest.stat().st_size == 0:
+        return None
+    return str(dest)
 
 
 def _sibling_is_fresh(sibling: Path, src: str) -> bool:
@@ -333,7 +487,7 @@ def scan_output_videos(root: str = "output") -> list[dict]:
     for file in base.rglob("*"):
         if not file.is_file():
             continue
-        if file.name.startswith(".") or file.name.endswith("-preview.mp4") or file.name.endswith("-explore.mp4"):
+        if file.name.startswith(".") or is_derived_media(file.name):
             continue
         ext = file.suffix.lstrip(".").lower()
         if ext not in VIDEO_EXTS:
@@ -364,7 +518,8 @@ def scan_output_images(root: str = "output") -> list[dict]:
     """Recursively scan root directory for image files (single image tiles).
 
     Mirrors scan_output_videos: excludes generated poster thumbs
-    (<stem>-poster.jpg) so derived assets never appear as their own tiles.
+    (<stem>-poster.jpg) and left-eye stereo renditions (<stem>-mono.<ext>)
+    so derived assets never appear as their own tiles.
     """
     base = Path(root)
     if not base.exists():
@@ -374,7 +529,7 @@ def scan_output_images(root: str = "output") -> list[dict]:
     for file in base.rglob("*"):
         if not file.is_file():
             continue
-        if file.name.startswith(".") or file.name.endswith("-poster.jpg"):
+        if file.name.startswith(".") or is_derived_media(file.name):
             continue
         ext = file.suffix.lstrip(".").lower()
         if ext not in IMAGE_EXTS:
@@ -458,7 +613,7 @@ def scan_pairs(root: str = "output/pairs") -> list[dict]:
 
         fast_files = sorted(list(base.glob("*_fast.mp4")) + list(base.glob("*_fast_4k.mp4")))
         for fast in fast_files:
-            if fast.name.endswith("-preview.mp4") or fast.name.endswith("-explore.mp4"):
+            if is_derived_media(fast.name):
                 continue
             fast_suffix = "_fast_4k.mp4" if fast.name.endswith("_fast_4k.mp4") else "_fast.mp4"
             stem = fast.name[: -len(fast_suffix)]

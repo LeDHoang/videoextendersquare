@@ -624,6 +624,34 @@ def test_pack_player_items_carry_probed_duration_and_resolution(app):
         assert second["duration_ms"] is None and second["width"] is None and second["height"] is None
 
 
+def test_pack_player_items_carry_stereo_layout(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_stereo_owner", "pack-stereo-owner@example.com")
+        register(viewer_client, "pack_stereo_viewer", "pack-stereo-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        with app.state.testing_session() as db:
+            first = db.get(Post, post_ids[0])
+            first.stereo_layout, first.width, first.height = "sbs", 3840, 1920
+            db.commit()
+        pack = create_pack(owner_client, post_ids, "Stereo pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        body = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()
+        match = re.search(r"let videoData = (.*?);\n\s*const initialFeedState =", body["scripts"][-1], re.S)
+        items = {item["post_id"]: item for item in json.loads(match.group(1))}
+        stereo = items[post_ids[0]]
+        assert stereo["stereo_layout"] == "sbs"
+        # No rendition on disk for this fixture: the raw file plays cropped in 2D.
+        assert stereo["stereo_url"] == stereo["url"]
+        assert stereo["stereo_crop"] is True
+        assert items[post_ids[1]]["stereo_layout"] == "mono"
+        assert items[post_ids[1]]["stereo_url"] is None
+
+
 def test_pack_draft_share_blocked_and_progress_rejects_unavailable(app):
     with TestClient(app) as owner_client, TestClient(app) as viewer_client:
         owner = register(owner_client, "pack_draft_owner", "pack-draft-owner@example.com")
