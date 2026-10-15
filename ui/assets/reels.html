@@ -225,6 +225,17 @@
     display: block;
     background: #000;
   }
+  /* Stereo posts without a left-eye 2D rendition yet play the raw stereo
+     file in 2D: cover-fit in the 1:1 frame, anchored to the left eye
+     (left half of side-by-side, top half of top-bottom). */
+  .reels-video-wrap.stereo-crop-sbs video,
+  .reels-video-wrap.stereo-crop-sbs img {
+    object-position: 0% 50% !important;
+  }
+  .reels-video-wrap.stereo-crop-tb video,
+  .reels-video-wrap.stereo-crop-tb img {
+    object-position: 50% 0% !important;
+  }
   /* Image reels have no timeline — the scrubber hides during the dwell. */
   .reels-progress-wrap.image-hidden {
     visibility: hidden;
@@ -2531,6 +2542,9 @@
     const commentSubmitBtn = document.getElementById('commentSubmitBtn');
 
     const blobUrlMap = {};
+    // Which URL each cached blob was fetched from: an index can hold the 2D
+    // or the stereo file of a 3D post, and only the matching one may be used.
+    const blobSourceMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
     // v8.9: background transfers started during rapid prev/next flight
@@ -2541,6 +2555,61 @@
     function isImageItem(item) {
       return !!item && item.media_type === 'image';
     }
+
+    // <reels-stereo>
+    // 3D posts (docs/stereo-3d-reels.md): `url` is the left-eye 2D rendition,
+    // `stereo_url` the full side-by-side / top-bottom file. The stereo file is
+    // only loaded while a WebXR session presents, so each eye gets its half.
+    // Stereo layout of the media now loaded in #reelsVideo / #reelsImage
+    // ('mono' | 'sbs' | 'tb'), and the left-eye CSS crop applied in 2D.
+    let activeVisualLayout = 'mono';
+    let activeCropLayout = '';
+
+    function entryStereoLayout(entry) {
+      const layout = entry && entry.stereo_layout;
+      return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+    }
+
+    function wantsStereoSource() {
+      try { return !!(typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
+    }
+
+    // What to load for a post or slide right now: {url, layout, crop}.
+    // `layout` is the stereo layout of that file; `crop` names the layout to
+    // crop to the left eye in 2D when no rendition exists yet.
+    function playbackFor(entry, item) {
+      const layout = entryStereoLayout(entry);
+      const failed = !!(item && item.stereoFailed);
+      if (layout !== 'mono' && entry.stereo_url && !failed && wantsStereoSource()) {
+        return { url: entry.stereo_url, layout: layout, crop: '' };
+      }
+      const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
+      return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
+    }
+
+    function playbackUrlFor(entry, item) {
+      return resolveItemUrl({ url: playbackFor(entry, item).url, tunnel_url: item && item.tunnel_url });
+    }
+
+    function blobFor(index, url) {
+      return blobUrlMap[index] && blobSourceMap[index] === url ? blobUrlMap[index] : '';
+    }
+
+    // Record what the element now shows and tell the VR engine how to
+    // sample it; in 2D a raw stereo file is cropped to the left eye.
+    function applyEntryStereo(playback) {
+      const crop = wantsStereoSource() ? '' : (playback.crop || '');
+      activeVisualLayout = playback.layout;
+      activeCropLayout = crop;
+      if (videoWrap && videoWrap.classList) {
+        videoWrap.classList.toggle('stereo-crop-sbs', crop === 'sbs');
+        videoWrap.classList.toggle('stereo-crop-tb', crop === 'tb');
+      }
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceStereo) {
+        WebXRVR.setSourceStereo(activeVisualLayout);
+      }
+    }
+    // </reels-stereo>
 
     // <reels-image-slides>
     // Every image of an image post, in order (older payloads carry only url).
@@ -2567,9 +2636,10 @@
     function resolveSlideUrl(item, slideIndex) {
       const slide = imagePostSlides[slideIndex];
       if (!slide) return '';
+      const url = playbackUrlFor(slide, item);
       // The cover may already be cached as a blob by the preloader.
-      if (slideIndex === 0 && blobUrlMap[idx]) return blobUrlMap[idx];
-      return resolveItemUrl({ url: slide.url, tunnel_url: item && item.tunnel_url });
+      if (slideIndex === 0) return blobFor(idx, url) || url;
+      return url;
     }
 
     // Show one image of the current post and warm the one after it.
@@ -2578,6 +2648,7 @@
       if (!reelsImage || !imagePostSlides.length) return;
       imageSlideIndex = Math.max(0, Math.min(imagePostSlides.length - 1, slideIndex));
       const url = resolveSlideUrl(item, imageSlideIndex);
+      applyEntryStereo(playbackFor(imagePostSlides[imageSlideIndex], item));
       if (url && reelsImage.getAttribute('src') !== url) reelsImage.src = url;
       const label = (item && (item.title || item.filename)) || 'Image post';
       reelsImage.alt = imagePostSlides.length > 1
@@ -2880,6 +2951,7 @@
           currentTime: imageElapsedNow() / 1000,
           duration: imagePostDwellMs / 1000,
           version: String(reelsImage && reelsImage.currentSrc || ''),
+          stereo: activeVisualLayout,
         };
       }
       return {
@@ -2891,8 +2963,51 @@
         currentTime: video ? video.currentTime || 0 : 0,
         duration: video && Number.isFinite(video.duration) ? video.duration : 0,
         version: String(video && video.currentSrc || ''),
+        stereo: activeVisualLayout,
       };
     }
+
+    // <reels-stereo-sync>
+    // Entering or leaving VR swaps a 3D post between its 2D rendition and its
+    // stereo file in place: same reel, same playhead, same play/pause state.
+    // Unlike loadVideo it records no new view and touches no feed state.
+    function syncStereoSource() {
+      const item = videoData[idx];
+      if (!item || item.available === false || item.media_type === 'static') return;
+      if (isImageItem(item)) {
+        if (imagePostSlides.length) showImageSlide(imageSlideIndex);
+        notifyVisualSourceChange();
+        return;
+      }
+      const playback = playbackFor(item, item);
+      const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
+      const nextUrl = blobFor(idx, playUrl) || playUrl;
+      if (video.getAttribute('src') === nextUrl) {
+        applyEntryStereo(playback);
+        return;
+      }
+      const resumeAt = video.currentTime || 0;
+      const wasPlaying = !video.paused;
+      applyEntryStereo(playback);
+      video.src = nextUrl;
+      video.muted = isMuted;
+      if (resumeAt > 0) {
+        video.addEventListener('loadedmetadata', function () {
+          try { video.currentTime = Math.min(resumeAt, video.duration || resumeAt); } catch (e) {}
+        }, { once: true });
+      }
+      if (wasPlaying) {
+        video.play().catch(function () {
+          video.muted = true;
+          isMuted = true;
+          updateSoundBtnUI(true);
+          video.play().catch(function () { updatePlayBtnUI(false); });
+        });
+      }
+      preloadNext(idx);
+      notifyVisualSourceChange();
+    }
+    // </reels-stereo-sync>
 
     function notifyVisualSourceChange() {
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) WebXRVR.onVideoChange();
@@ -3913,6 +4028,7 @@
       Object.keys(blobUrlMap).forEach((key) => {
         try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
         delete blobUrlMap[key];
+        delete blobSourceMap[key];
       });
     }
 
@@ -3922,6 +4038,7 @@
         if (keep.has(key)) return;
         try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
         delete blobUrlMap[key];
+        delete blobSourceMap[key];
       });
     }
 
@@ -5138,12 +5255,15 @@
         // decode image files.
         try {
           const warmer = new Image();
-          warmer.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
+          const nextUrl = playbackUrlFor(nextItem, nextItem);
+          warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
         } catch (e) {}
         return;
       }
       if (preloadVideo) {
-        preloadVideo.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
+        // Warm the variant the next load will use (2D, or stereo in VR).
+        const nextUrl = playbackUrlFor(nextItem, nextItem);
+        preloadVideo.src = blobFor(nextIdx, nextUrl) || nextUrl;
         preloadVideo.load();
       }
     }
@@ -5170,10 +5290,7 @@
       // Preload subsequent track in background
       preloadNext(idx);
 
-      // Stills carry no stereo layout; reset any SBS sampling from video reels.
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
-        WebXRVR.setStereo(false);
-      }
+      // showImageSlide already told the VR engine the slide's stereo layout.
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
       }
@@ -5257,7 +5374,10 @@
       if (videoWrap) videoWrap.classList.remove('image-mode');
       if (progressWrap) progressWrap.classList.remove('image-hidden');
 
-      const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
+      const playback = playbackFor(item, item);
+      const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
+      const itemUrl = blobFor(idx, playUrl) || playUrl;
+      applyEntryStereo(playback);
       video.src = itemUrl;
       video.muted = isMuted;
       const requestedTime = Number(loadOptions.seekTo);
@@ -5275,15 +5395,6 @@
 
       // Preload subsequent video track in background
       preloadNext(idx);
-
-      // SBS stereo detection: enable per-eye half-frame sampling in VR mode for
-      // spatialized reels (e.g. folder "testpipeline-3d" or *_sbs/_3d filenames).
-      const isSbs =
-        /(^|[\s_\-.])(sbs|3d)([\s_\-.]|$)/i.test(item.filename || '') ||
-        /3d/i.test(item.folder || '');
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
-        WebXRVR.setStereo(isSbs);
-      }
 
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
@@ -5381,6 +5492,15 @@
       const err = video.error;
       console.error('[ReelsPlayer] Video load error:', err, 'src:', video.src);
       if (!video.src) return;
+      // A stereo file that fails in VR falls back to the 2D rendition
+      // (mono-flat) instead of an error card.
+      const failedItem = videoData[idx];
+      if (activeVisualLayout !== 'mono' && failedItem && !failedItem.stereoFailed && wantsStereoSource()) {
+        console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', video.src);
+        failedItem.stereoFailed = true;
+        syncStereoSource();
+        return;
+      }
       
       const isProxy = video.src.includes('-preview.mp4');
       if (window.location.protocol === 'https:' && video.src.startsWith('http:')) {
@@ -5499,13 +5619,13 @@
 
       for (let off = 1; off <= total; off++) {
         const i = idx + off;
-        if (blobUrlMap[i]) {
+        const url = playbackUrlFor(videoData[i], videoData[i]);
+        if (blobFor(i, url)) {
           preloadedCount++;
           updatePreloadStatus();
           continue;
         }
         try {
-          const url = resolveItemUrl(videoData[i]);
           const res = await fetch(url, {
             signal: preloadController ? preloadController.signal : undefined,
           });
@@ -5515,7 +5635,11 @@
             URL.revokeObjectURL(blobUrl);
             break;
           }
+          if (blobUrlMap[i]) {
+            try { URL.revokeObjectURL(blobUrlMap[i]); } catch (e) {}
+          }
           blobUrlMap[i] = blobUrl;
+          blobSourceMap[i] = url;
           preloadedCount++;
           updatePreloadStatus();
         } catch (e) {
@@ -6349,7 +6473,16 @@
       const height = Number(item.height);
       const durationMs = Number(item.duration_ms);
       if (item.size) sideSpecs.appendChild(specChip('SIZE', item.size));
-      if (width > 0 && height > 0) sideSpecs.appendChild(specChip('RES', width + '×' + height));
+      const stereoLayout = entryStereoLayout(item);
+      if (width > 0 && height > 0 && stereoLayout !== 'mono') {
+        // 3D: report one eye's square and the stereo layout.
+        const eyeW = stereoLayout === 'sbs' ? Math.round(width / 2) : width;
+        const eyeH = stereoLayout === 'tb' ? Math.round(height / 2) : height;
+        sideSpecs.appendChild(specChip('RES', eyeW + '×' + eyeH + ' ×2'));
+        sideSpecs.appendChild(specChip('3D', stereoLayout === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM'));
+      } else if (width > 0 && height > 0) {
+        sideSpecs.appendChild(specChip('RES', width + '×' + height));
+      }
       if (durationMs > 0 && !isImageItem(item)) sideSpecs.appendChild(specChip('DUR', formatTime(durationMs / 1000)));
     }
     // Everything in the column that depends on WHICH reel is playing.
@@ -6566,6 +6699,9 @@
         onSeek: seekRelative,
         onToggleMute: toggleSound,
         getVisualSource: currentVisualSource,
+        // 3D posts switch between their 2D rendition and stereo file.
+        onEnterVR: syncStereoSource,
+        onExitVR: syncStereoSource,
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {
           if (!isPackMode || !packState.pack) return null;
@@ -6743,6 +6879,7 @@
               showFlash('VR SESSION FAILED — CHECK CONSOLE');
             } else {
               showFlash('ENTERING IMMERSIVE VR');
+              syncStereoSource();
             }
           } catch (err) {
             console.error('[WebXRVR] enterVR error:', err);
@@ -6765,7 +6902,14 @@
         if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) return;
       } catch (e) {}
       try {
-        glowCtx.drawImage(video, 0, 0, 4, 4);
+        if (activeCropLayout && video.videoWidth && video.videoHeight) {
+          // Raw stereo file in 2D: sample only the left eye that is on screen.
+          const eyeW = activeCropLayout === 'sbs' ? video.videoWidth / 2 : video.videoWidth;
+          const eyeH = activeCropLayout === 'tb' ? video.videoHeight / 2 : video.videoHeight;
+          glowCtx.drawImage(video, 0, 0, eyeW, eyeH, 0, 0, 4, 4);
+        } else {
+          glowCtx.drawImage(video, 0, 0, 4, 4);
+        }
         const data = glowCtx.getImageData(0, 0, 4, 4).data;
         let r = 0, g = 0, b = 0;
         for (let i = 0; i < data.length; i += 4) {

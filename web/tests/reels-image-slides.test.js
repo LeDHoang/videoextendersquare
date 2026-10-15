@@ -73,6 +73,7 @@ function loadPlayer(items, { autoNext = true } = {}) {
     idx: 0,
     isAutoNext: autoNext,
     blobUrlMap: {},
+    blobSourceMap: {},
     reelsImage: image,
     videoWrap: wrap,
     isImageItem: (item) => !!item && item.media_type === 'image',
@@ -84,7 +85,7 @@ function loadPlayer(items, { autoNext = true } = {}) {
     nextVideo: (reason) => calls.next.push(reason),
   };
   vm.createContext(context);
-  vm.runInContext(`${block('reels-image-state')}\n${block('reels-image-slides')}
+  vm.runInContext(`${block('reels-stereo')}\n${block('reels-image-state')}\n${block('reels-image-slides')}
     this.player = {
       start(item) { resetImagePost(item); showImageSlide(0); armImageTimer(); },
       pause: clearImageTimer,

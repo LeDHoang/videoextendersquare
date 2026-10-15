@@ -7,11 +7,14 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.18-20260922-earth-zoom-map';
+  const VR_VERSION = 'v8.19-20261016-stereo-3d';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
   const VR_TEX_CAP = 2048;
+  // Per-eye edge of the stereo proxy (docs/stereo-3d-reels.md): SBS sources
+  // blit into a 2E x E canvas, top-bottom into E x 2E. ?vrstereoeye=1536 A/B.
+  const VR_STEREO_EYE_CAP = 2048;
   const EARTH_RADIUS = 0.676;
   const EARTH_MAP_W = 4096;
   const EARTH_MAP_H = 2048;
@@ -117,6 +120,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
+    stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -141,6 +145,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
       if (has('horizonhud', '1')) debugFlags.horizonhud = true;
+      const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
+      if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -835,6 +841,21 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the screen material, bypassing the canvas blit + re-upload entirely.
   let directVideoTexture = null;
   let directVideoElement = null;
+  // Stereoscopic 3D sources (docs/stereo-3d-reels.md). sourceStereo is what
+  // the host says is loaded ('mono' | 'sbs' | 'tb'); textureStereo is the
+  // layout of the frame actually in the screen texture, so a switch only
+  // takes effect once the new frame is uploaded. In XR, eyeMeshL/R (layers
+  // 1/2, children of screenMesh) show each eye's half; screenMesh keeps the
+  // left eye for the desktop preview and stays the layer-0 raycast target.
+  let sourceStereo = 'mono';
+  let textureStereo = 'mono';
+  let stereoCanvas = null;
+  let stereoCtx = null;
+  let stereoTexture = null;
+  let stereoCanvasLayout = '';
+  let eyeTextures = null; // { base, layout, L, R }
+  let eyeMeshL = null;
+  let eyeMeshR = null;
   let screenMapBeforeDebug = null;
   let controlsCanvas = null;
   let controlsCtx = null;
@@ -5791,6 +5812,142 @@ window.WebXRVR = window.WebXRVR || (function () {
     return String(source.kind || '') + '|' + String(source.version || '');
   }
 
+  function normalizeStereoLayout(layout) {
+    return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+  }
+
+  // Layout of a visual source: the per-source field wins (it follows the
+  // element), else the host's setSourceStereo value. Static cards are mono.
+  function sourceStereoLayout(source) {
+    if (!source || source.kind === 'static-card') return 'mono';
+    if (source.stereo !== undefined && source.stereo !== null) return normalizeStereoLayout(source.stereo);
+    return sourceStereo;
+  }
+
+  // UV window of each eye inside a stereo frame (CanvasTexture flipY: v=1 is
+  // the top row, so the top-bottom left eye sits at offset y = 0.5).
+  function stereoEyeUv(layout) {
+    if (layout === 'tb') return { repeat: [1, 0.5], L: [0, 0.5], R: [0, 0] };
+    return { repeat: [0.5, 1], L: [0, 0], R: [0.5, 0] };
+  }
+
+  function releaseEyeTextures() {
+    if (!eyeTextures) return;
+    try { eyeTextures.L.dispose(); } catch (e) {}
+    try { eyeTextures.R.dispose(); } catch (e) {}
+    eyeTextures = null;
+  }
+
+  // Two views of one texture: the clones share its Source, so a frame is
+  // uploaded once and each eye samples its own half.
+  function ensureEyeTextures(base, layout) {
+    if (!base || layout === 'mono') return null;
+    if (eyeTextures && eyeTextures.base === base && eyeTextures.layout === layout) return eyeTextures;
+    releaseEyeTextures();
+    const uv = stereoEyeUv(layout);
+    const make = (offset) => {
+      const tex = base.clone();
+      tex.repeat.set(uv.repeat[0], uv.repeat[1]);
+      tex.offset.set(offset[0], offset[1]);
+      tex.needsUpdate = true;
+      return tex;
+    };
+    eyeTextures = { base, layout, L: make(uv.L), R: make(uv.R) };
+    return eyeTextures;
+  }
+
+  function stereoProxySize(layout) {
+    const eye = debugFlags.stereoEye || VR_STEREO_EYE_CAP;
+    return layout === 'tb' ? [eye, eye * 2] : [eye * 2, eye];
+  }
+
+  // One stereo proxy canvas + texture, reshaped (and the GPU texture
+  // recreated) only when the layout flips between SBS and top-bottom.
+  function ensureStereoProxy(layout) {
+    if (layout === 'mono' || typeof document === 'undefined' || !THREE) return null;
+    if (stereoTexture && stereoCanvasLayout === layout) return stereoTexture;
+    const size = stereoProxySize(layout);
+    if (!stereoCanvas) {
+      stereoCanvas = document.createElement('canvas');
+      stereoCtx = stereoCanvas.getContext('2d', { alpha: false });
+    }
+    stereoCanvas.width = size[0];
+    stereoCanvas.height = size[1];
+    if (stereoTexture) {
+      if (eyeTextures && eyeTextures.base === stereoTexture) releaseEyeTextures();
+      try { stereoTexture.dispose(); } catch (e) {}
+    }
+    stereoTexture = applyLinearSampling(new THREE.CanvasTexture(stereoCanvas));
+    try { if (THREE.SRGBColorSpace !== undefined) stereoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    stereoCanvasLayout = layout;
+    return stereoTexture;
+  }
+
+  function releaseStereoTextures() {
+    releaseEyeTextures();
+    if (stereoTexture) { try { stereoTexture.dispose(); } catch (e) {} }
+    stereoTexture = null;
+    stereoCanvasLayout = '';
+    stereoCanvas = null;
+    stereoCtx = null;
+    textureStereo = 'mono';
+    eyeMeshL = null;
+    eyeMeshR = null;
+  }
+
+  function ensureEyeMeshes() {
+    if (!screenMesh || !THREE) return;
+    if (eyeMeshL && eyeMeshL.parent === screenMesh) return;
+    const make = (layer) => {
+      const mesh = new THREE.Mesh(screenMesh.geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+      mesh.layers.set(layer);
+      mesh.visible = false;
+      mesh.renderOrder = screenMesh.renderOrder || 0;
+      // Clicks hit the parent screen (layer 0); eye meshes never raycast.
+      mesh.raycast = function () {};
+      screenMesh.add(mesh);
+      return mesh;
+    };
+    eyeMeshL = make(1);
+    eyeMeshR = make(2);
+  }
+
+  // The screen's 2D map: the left eye of a stereo frame, else the frame.
+  function monoScreenMap(base) {
+    if (textureStereo !== 'mono' && eyeTextures && eyeTextures.base === base) return eyeTextures.L;
+    return base;
+  }
+
+  // Show per-eye meshes while an XR session presents a stereo frame; the
+  // desktop preview keeps the single left-eye screen. Earth mode hides the
+  // screen and with it both children.
+  function applyStereoVisibility() {
+    const split = !!(xrSession && textureStereo !== 'mono' && eyeTextures);
+    if (split) ensureEyeMeshes();
+    if (eyeMeshL && eyeMeshR) {
+      eyeMeshL.visible = split;
+      eyeMeshR.visible = split;
+      if (split) {
+        if (eyeMeshL.material.map !== eyeTextures.L) { eyeMeshL.material.map = eyeTextures.L; eyeMeshL.material.needsUpdate = true; }
+        if (eyeMeshR.material.map !== eyeTextures.R) { eyeMeshR.material.map = eyeTextures.R; eyeMeshR.material.needsUpdate = true; }
+      }
+    }
+    if (screenMesh && screenMesh.material) screenMesh.material.visible = !split;
+  }
+
+  // Record the layout of the frame now in `base` and rebind the screen.
+  function commitTextureStereo(base, layout) {
+    textureStereo = layout;
+    if (layout !== 'mono') ensureEyeTextures(base, layout);
+    bindScreenMap(monoScreenMap(base));
+    applyStereoVisibility();
+  }
+
+  function setSourceStereo(layout) {
+    sourceStereo = normalizeStereoLayout(layout);
+    emitPreviewState();
+  }
+
   function bindScreenMap(tex) {
     try {
       if (screenMesh && screenMesh.material && screenMesh.material.map !== tex) {
@@ -5815,8 +5972,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   function updateDirectVideoBinding(source, force) {
     if (!directVideoEligible(source)) return false;
     const el = source.element;
+    const layout = sourceStereoLayout(source);
     if (directVideoTexture && directVideoElement === el &&
-        screenMesh.material.map === directVideoTexture) {
+        screenMesh.material.map === monoScreenMap(directVideoTexture)) {
+      if (layout !== textureStereo) commitTextureStereo(directVideoTexture, layout);
       return true;
     }
     const rs = Number((el && el.readyState) || 0);
@@ -5832,7 +5991,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       return false;
     }
     directVideoElement = el;
-    bindScreenMap(directVideoTexture);
+    commitTextureStereo(directVideoTexture, layout);
     lastUploadedSource = el;
     lastVisualKind = source.kind;
     lastVisualVersion = visualSourceSignature(source);
@@ -5847,6 +6006,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function releaseDirectVideoBinding() {
+    if (eyeTextures && eyeTextures.base === directVideoTexture) releaseEyeTextures();
     if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
     directVideoTexture = null;
     directVideoElement = null;
@@ -5857,7 +6017,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const sig = visualSourceSignature(source);
     const visualChanged = source.kind !== lastVisualKind ||
       sig !== lastVisualVersion ||
-      source.element !== lastVisualElement;
+      source.element !== lastVisualElement ||
+      sourceStereoLayout(source) !== textureStereo;
     if (visualChanged) return true;
     if (source.kind === 'video') {
       // v8.11 upload throttle: steady-playback telemetry measured 41–73/s
@@ -5892,8 +6053,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!vrProxyCtx || !source.element) return false;
     // v8.13: sources that don't use the direct texture (static cards/images,
     // or the flag off) render through the canvas proxy — make sure it is bound.
-    if (!(debugFlags.vrtex && source.kind === 'video')) bindScreenMap(videoTexture);
+    if (!(debugFlags.vrtex && source.kind === 'video')) {
+      bindScreenMap(monoScreenMap(textureStereo !== 'mono' && stereoTexture ? stereoTexture : videoTexture));
+    }
     if (!force && !shouldUploadVisual(source)) return false;
+    // Stereo frames blit whole into the 2:1 / 1:2 stereo proxy; each eye
+    // then samples its half (see ensureEyeTextures).
+    const layout = sourceStereoLayout(source);
+    const stereoBase = layout !== 'mono' ? ensureStereoProxy(layout) : null;
+    const ctx = stereoBase ? stereoCtx : vrProxyCtx;
+    const texW = stereoBase ? stereoCanvas.width : VR_TEX_CAP;
+    const texH = stereoBase ? stereoCanvas.height : VR_TEX_CAP;
     try {
       if (source.kind === 'static-card' || source.kind === 'image') {
         // Trust the caller's ready flag: a genuinely incomplete image
@@ -5901,9 +6071,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         // frame). Refusing here would stall mock/test elements that carry
         // no complete/naturalWidth signals.
         if (source.ready === false && !force) return false;
-        vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        ctx.clearRect(0, 0, texW, texH);
         try {
-          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+          ctx.drawImage(source.element, 0, 0, texW, texH);
         } catch (drawErr) {
           return false;
         }
@@ -5925,22 +6095,26 @@ window.WebXRVR = window.WebXRVR || (function () {
           }
         }
         try {
-          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+          ctx.drawImage(source.element, 0, 0, texW, texH);
         } catch (drawErr) {
           return false;
         }
       } else {
         return false;
       }
-      if (videoTexture) {
+      const uploaded = stereoBase || videoTexture;
+      if (uploaded) {
         // v8.4 A/B: 'respec' forces a full texImage2D re-specification per
         // upload (legacy behavior) instead of three's same-size
         // texSubImage2D path — decisive test for the Quest sub-image driver
         // suspicion behind the black-square glitches. Default stays subimage.
         if (videoUploadMode === 'respec') {
-          try { videoTexture.dispose(); } catch (e) {}
+          try { uploaded.dispose(); } catch (e) {}
         }
-        videoTexture.needsUpdate = true;
+        uploaded.needsUpdate = true;
+        // ?vrtex=video keeps the direct texture bound for videos (it tracks
+        // its own layout in updateDirectVideoBinding).
+        if (!(debugFlags.vrtex && source.kind === 'video')) commitTextureStereo(uploaded, layout);
       }
       lastUploadedSource = source.element;
       lastVisualKind = source.kind;
@@ -5996,7 +6170,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     const source = getVisualSource();
     if (!source.ready || source.kind !== 'video' || source.paused || !source.element) return;
     try {
-      glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
+      const layout = sourceStereoLayout(source);
+      const vw = Number(source.element.videoWidth) || 0;
+      const vh = Number(source.element.videoHeight) || 0;
+      if (layout !== 'mono' && vw > 0 && vh > 0) {
+        // Stereo: average the left eye only.
+        glowProbeCtx.drawImage(source.element, 0, 0,
+          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh, 0, 0, 8, 8);
+      } else {
+        glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
+      }
       const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
       let r = 0, g = 0, b = 0;
       for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
@@ -6250,6 +6433,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       cameraMode: previewCameraMode,
       sceneMode,
       stereo: stereoMode,
+      sourceStereo,
+      textureStereo,
       reducedMotion,
       curvatureMode: getCurvatureMode(),
       lockToViewer,
@@ -6270,21 +6455,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     const cssW = (previewCanvas && previewCanvas.clientWidth) || 960;
     const cssH = (previewCanvas && previewCanvas.clientHeight) || 540;
     const halfW = cssW / 2;
+    // A stereo source shows each eye's half like the headset does: the eye
+    // meshes (layers 1/2) replace the left-eye screen for the pair.
+    const perEye = !!(textureStereo !== 'mono' && eyeTextures && screenMesh && screenMesh.visible);
+    if (perEye) {
+      ensureEyeMeshes();
+      eyeMeshL.material.map = eyeTextures.L;
+      eyeMeshR.material.map = eyeTextures.R;
+      eyeMeshL.visible = true;
+      eyeMeshR.visible = true;
+      screenMesh.material.visible = false;
+    }
+    const baseMask = camera.layers.mask;
     renderer.setScissorTest(true);
     camera.position.x -= 0.032;
     camera.updateMatrixWorld();
+    if (perEye) camera.layers.mask = baseMask | 0b010;
     renderer.setViewport(0, 0, halfW, cssH);
     renderer.setScissor(0, 0, halfW, cssH);
     renderer.render(scene, camera);
     camera.position.x += 0.064;
     camera.updateMatrixWorld();
+    if (perEye) camera.layers.mask = baseMask | 0b100;
     renderer.setViewport(halfW, 0, cssW - halfW, cssH);
     renderer.setScissor(halfW, 0, cssW - halfW, cssH);
     renderer.render(scene, camera);
+    camera.layers.mask = baseMask;
     camera.position.x -= 0.032;
     camera.updateMatrixWorld();
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, cssW, cssH);
+    if (perEye) applyStereoVisibility();
   }
 
   function onPreviewFrame(time) {
@@ -7312,6 +7513,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (screenMesh) {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
       screenMesh.geometry = createScreenGeometry(curvatureMode);
+      // Stereo eye meshes share the screen's geometry.
+      if (eyeMeshL) eyeMeshL.geometry = screenMesh.geometry;
+      if (eyeMeshR) eyeMeshR.geometry = screenMesh.geometry;
     }
     if (overlayMesh) {
       if (overlayMesh.geometry) overlayMesh.geometry.dispose();
@@ -7405,6 +7609,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHudLastT = -1;
     }
     if (screenMesh) screenMesh.visible = !isEarth;
+    applyStereoVisibility();
     if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
     if (overlayMesh) {
       const source = getVisualSource();
@@ -8984,6 +9189,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         document.documentElement.classList.add('sx-vr-active');
         if (document.body) document.body.classList.add('sx-vr-active');
       }
+      // The host may now swap 3D posts to their stereo file.
+      if (callbacks.onEnterVR) {
+        try { callbacks.onEnterVR(); } catch (e) {}
+      }
 
       // Single animation loop: clear any stale loop before installing the
       // XR one (preview uses rAF and was torn down above, but be explicit).
@@ -9112,6 +9321,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (videoTexture) { try { videoTexture.dispose(); } catch (e) {} videoTexture = null; }
     releaseDirectVideoBinding();
+    releaseStereoTextures();
     screenMapBeforeDebug = null;
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
@@ -9621,7 +9831,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     },
     showNotification,
+    // Desktop preview split-screen (two camera views), not the content layout.
     setStereo(enabled) { stereoMode = !!enabled; },
+    // Stereo layout of the loaded visual: 'mono' | 'sbs' | 'tb'.
+    setSourceStereo,
+    getSourceStereo() { return sourceStereo; },
 
     __test: {
       locationToUnit,
@@ -9676,6 +9890,9 @@ window.WebXRVR = window.WebXRVR || (function () {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
+        if (p.stereoEye !== undefined) {
+          debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(p.stereoEye) || VR_STEREO_EYE_CAP));
+        }
         return { ...debugFlags };
       },
       processXRInput,
@@ -9758,6 +9975,30 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       getLastUploadedSource() { return lastUploadedSource; },
       getLastRenderError() { return lastRenderError; },
+      // Stereo seams: what each eye samples and which meshes draw.
+      getStereoState() {
+        const eye = (mesh, tex) => mesh ? {
+          layers: mesh.layers.mask,
+          visible: !!mesh.visible,
+          parentIsScreen: mesh.parent === screenMesh,
+          sharesGeometry: !!(screenMesh && mesh.geometry === screenMesh.geometry),
+          repeat: tex ? [tex.repeat.x, tex.repeat.y] : null,
+          offset: tex ? [tex.offset.x, tex.offset.y] : null,
+          mapIsEye: !!(tex && mesh.material.map === tex),
+        } : null;
+        return {
+          sourceStereo,
+          textureStereo,
+          canvas: stereoCanvas ? [stereoCanvas.width, stereoCanvas.height] : null,
+          screenShowsLeftEye: !!(eyeTextures && screenMesh && screenMesh.material.map === eyeTextures.L),
+          screenMaterialVisible: !!(screenMesh && screenMesh.material && screenMesh.material.visible),
+          screenVisible: !!(screenMesh && screenMesh.visible),
+          left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
+          right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
+        };
+      },
+      // Pretend an XR session presents (stereo visibility keys off it).
+      setXrSessionForTest(session) { xrSession = session || null; applyStereoVisibility(); },
       // Downsampled mean/variance of the earth base canvas: photo re-style
       // has high variance (land/ocean/edges), flat fallback has low variance.
       // Proves an arrived photo survives subsequent zone repaints.
@@ -9860,6 +10101,8 @@ window.WebXRVR = window.WebXRVR || (function () {
               mapSize: (screenMesh.material && screenMesh.material.map && screenMesh.material.map.image)
                 ? [screenMesh.material.map.image.width, screenMesh.material.map.image.height]
                 : null,
+              stereo: textureStereo,
+              eyeMeshes: !!(eyeMeshL && eyeMeshL.visible && eyeMeshR && eyeMeshR.visible),
             };
           }
           // UI paint-order ladder (legacy painter's order): screen 0, overlay

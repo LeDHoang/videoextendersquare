@@ -4935,3 +4935,159 @@ test('RESET ROTATION on the EARTH ACTIVITY globe stands it upright, keeping the 
   assert.ok(Math.abs(e2.pitch) < 1e-6 && Math.abs(e2.roll) < 1e-4, `upright (${e2.pitch}, ${e2.roll})`);
   renderer.stopPreview();
 });
+
+// ─── Stereoscopic 3D sources (docs/stereo-3d-reels.md) ──────────────────
+
+function stereoHarness(initialSource) {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  let source = initialSource;
+  const renderer = loadRenderer({ gl });
+  renderer.init(initialSource.element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  let t = 16;
+  const frame = () => { renderer.__runScheduledFrame(t); t += 16; };
+  const setSource = (next) => { source = next; renderer.onVideoChange(); };
+  return { renderer, api: renderer.__test, frame, setSource };
+}
+
+function stereoVideo(version, stereo, w = 3840, h = 1920) {
+  return {
+    kind: 'video',
+    element: {
+      readyState: 4, paused: false, currentTime: 1, duration: 10, muted: true,
+      videoWidth: w, videoHeight: h,
+      addEventListener() {}, removeEventListener() {},
+    },
+    ready: true, paused: false, muted: true, currentTime: 1, duration: 10,
+    version,
+    stereo,
+  };
+}
+
+test('an SBS source fills a 4096x2048 proxy; each XR eye samples its own half', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-1', 'sbs'));
+  frame();
+  let state = api.getStereoState();
+  assert.equal(state.textureStereo, 'sbs');
+  assert.equal(state.canvas.join(','), '4096,2048');
+  // Desktop preview: one screen showing the left eye, no per-eye meshes.
+  assert.equal(state.screenShowsLeftEye, true);
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '4096,2048');
+
+  api.setXrSessionForTest({});
+  frame();
+  state = api.getStereoState();
+  assert.equal(state.screenMaterialVisible, false);
+  assert.equal(state.screenVisible, true);
+  // Left eye: layer 1 only, left half. Right eye: layer 2 only, right half.
+  assert.equal(state.left.layers, 0b010);
+  assert.equal(state.right.layers, 0b100);
+  assert.equal(state.left.visible && state.right.visible, true);
+  assert.equal(state.left.parentIsScreen && state.right.parentIsScreen, true);
+  assert.equal(state.left.sharesGeometry && state.right.sharesGeometry, true);
+  assert.equal(state.left.mapIsEye && state.right.mapIsEye, true);
+  assert.deepEqual([...state.left.repeat], [0.5, 1]);
+  assert.deepEqual([...state.left.offset], [0, 0]);
+  assert.deepEqual([...state.right.offset], [0.5, 0]);
+  assert.equal(api.getSceneInfo().screen.eyeMeshes, true);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('a top-bottom image uses a 2048x4096 proxy with the left eye on top', () => {
+  const image = {
+    kind: 'image', element: { complete: true, naturalWidth: 1920, naturalHeight: 3840 },
+    ready: true, paused: true, currentTime: 0, duration: 8, version: 'tb-1', stereo: 'tb',
+  };
+  const { renderer, api, frame } = stereoHarness(image);
+  api.setXrSessionForTest({});
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.textureStereo, 'tb');
+  assert.equal(state.canvas.join(','), '2048,4096');
+  assert.deepEqual([...state.left.repeat], [1, 0.5]);
+  assert.deepEqual([...state.left.offset], [0, 0.5]);
+  assert.deepEqual([...state.right.offset], [0, 0]);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('switching back to a mono reel restores the square screen in XR', () => {
+  const { renderer, api, frame, setSource } = stereoHarness(stereoVideo('sbs-2', 'sbs'));
+  api.setXrSessionForTest({});
+  frame();
+  assert.equal(api.getStereoState().left.visible, true);
+  setSource(stereoVideo('mono-1', 'mono', 2160, 2160));
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.textureStereo, 'mono');
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(state.left.visible || state.right.visible, false);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('Earth mode hides the stereo screen and returning to reels restores it', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-3', 'sbs'));
+  api.setXrSessionForTest({});
+  frame();
+  renderer.setSceneMode('earth');
+  frame();
+  // Eye meshes are children of the screen, so a hidden screen hides both.
+  assert.equal(api.getStereoState().screenVisible, false);
+  renderer.setSceneMode('reels');
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.screenVisible, true);
+  assert.equal(state.textureStereo, 'sbs');
+  assert.equal(state.left.visible && state.right.visible, true);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-4', 'sbs'));
+  api.setDebugFlags({ stereoEye: 1536 });
+  frame();
+  assert.equal(api.getStereoState().canvas.join(','), '3072,1536');
+  renderer.stopPreview();
+});
+
+test('preview split-screen and the content stereo layout are independent', () => {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { stereo: true });
+  assert.equal(renderer.getPreviewState().stereo, true);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'mono');
+  renderer.setSourceStereo('sbs');
+  assert.equal(renderer.getPreviewState().stereo, true);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'sbs');
+  renderer.setStereo(false);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'sbs');
+  renderer.setSourceStereo('nonsense');
+  assert.equal(renderer.getPreviewState().sourceStereo, 'mono');
+  renderer.stopPreview();
+});
+
+test('the split preview renders an SBS source per eye without errors', () => {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  const source = stereoVideo('sbs-6', 'sbs');
+  const renderer = loadRenderer({ gl });
+  renderer.init(source.element, { getVisualSource: () => source, getPlaylist: () => [], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { stereo: true });
+  renderer.__runScheduledFrame(16);
+  renderer.__runScheduledFrame(32);
+  assert.ok(!renderer.__test.getLastRenderError());
+  const state = renderer.__test.getStereoState();
+  // After the pair the single-screen state is restored (no XR session).
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(state.left.visible, false);
+  renderer.stopPreview();
+});

@@ -106,9 +106,9 @@ Per-eye meshes already give true stereo.
 - [x] **Media:** `mono_sibling_path`, `make_left_eye_rendition`, the stereo cap in `make_web_preview`, and `-mono.` added to the derived-sibling skip filters.
 - [x] **Publish:** `PublishRequest.stereo_layout`, the geometry and as-is validation, the slideshow check, atomic rendition generation, and the layout threaded into `create_or_update_post`.
 - [x] **Serialization:** `post_card`, `reel_records` / `metadata_for_paths`, slide entries, the `reels.py` `_build_payload` (video and image, location feed), and the pack DB fallback.
-- [ ] **Legacy:** remove the filename regex, and map the `testpipeline-3d` folder to `sbs` on the server.
-- [ ] **2D player** (`reels.html`): URL choice by presenting state, blob cache keyed by URL, the swap on XR enter/exit, `setSourceStereo`, the legacy crop classes, the glow sampler, and the RES chip.
-- [ ] **VR engine:** split the flags, the stereo canvas, per-eye meshes, `applyStereoVisibility`, the per-eye layers in `renderStereoPair`, glow, diagnostics, and a `VR_VERSION` bump.
+- [x] **Legacy:** remove the filename regex, and map the `testpipeline-3d` folder to `sbs` on the server.
+- [x] **2D player** (`reels.html`): URL choice by presenting state, blob cache keyed by URL, the swap on XR enter/exit, `setSourceStereo`, the legacy crop classes, the glow sampler, and the RES chip.
+- [x] **VR engine:** split the flags, the stereo canvas, per-eye meshes, `applyStereoVisibility`, the per-eye layers in `renderStereoPair`, glow, diagnostics, and a `VR_VERSION` bump.
 - [ ] **VR flows:** next/prev/auto-next, seek, packs, slideshows, Earth open/close, the location feed, and enter/exit mid-reel.
 - [ ] **Upload Studio:** the 3D toggle (auto-on when detected), the skip path, the stage preview, the slideshow rule, the batch warning, the `mediaFormat` helpers, the 3D badges, and a rebuild of the prod bundle.
 - [ ] **Tests:** `tests/test_stereo_posts.py`, `tests/test_stereo_detect.py`, `web/tests/reels-stereo.test.js`, the `webxr-earth.test.js` cases, and the `UploadPage.test.jsx` cases.
@@ -122,4 +122,8 @@ Per-eye meshes already give true stereo.
 - **Publish errors.**
   - The stereo checks return **422**: wrong geometry, a `job_id` source, or a mixed slideshow. Each eye must be at least 64×64.
   - A failed rendition returns **500** after removing every copied and derived file.
+- **Blob cache.** It stays keyed by feed index, so the existing pruning keeps working. A parallel `blobSourceMap` records which URL each blob came from, and `blobFor(index, url)` only reuses a blob when the variant matches.
+- **VR swap without `loadVideo`.** Entering or exiting VR calls `syncStereoSource()`, which the engine fires through the new `onEnterVR` / `onExitVR` callbacks. It swaps `src` in place and keeps the playhead and the play/pause state. It does not re-run `loadVideo`, which would record a second view and a second pack event.
+- **Layout follows the uploaded frame.** The engine binds per-eye meshes from `textureStereo`, the layout of the frame actually uploaded, rather than from the host flag. A mono→stereo switch therefore holds the last mono frame until the first stereo frame arrives, keeping the v8.10 first-frame hold.
+- **Test seams.** `__test.getStereoState()` and `__test.setXrSessionForTest()` let `webxr-earth.test.js` check per-eye layers, offsets and visibility without a headset.
 - **Stereo proxy rule.** Mono uploads keep the old rule: an H.264 source plays as-is. Stereo uploads also get a `-preview.mp4` when an H.264 source is longer than 4096 px.
