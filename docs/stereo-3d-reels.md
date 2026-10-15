@@ -100,7 +100,7 @@ Per-eye meshes already give true stereo.
 ## Checklist
 
 - [x] Branch `3dreels` from `origin/main` (local `main` was stale). Upstream unset so a bare `git push` cannot hit `main`.
-- [ ] **Migration + model:** `20261015_0013_post_stereo_layout`, plus the `Post.stereo_layout` column. Bump `EXPECTED_SCHEMA_REVISION` and update `AGENTS.md` and the `docs/to-beta.md` mentions.
+- [x] **Migration + model:** `20261015_0013_post_stereo_layout`, plus the `Post.stereo_layout` column. Bump `EXPECTED_SCHEMA_REVISION` and update `AGENTS.md` and the `docs/to-beta.md` mentions.
 - [ ] **Detection:** `pipeline/stereo_detect.py`, plus the `stereo` block in the `/api/video/upload` and `/api/image/upload` stage responses.
 - [ ] **Media:** `mono_sibling_path`, `make_left_eye_rendition`, the stereo cap in `make_web_preview`, and `-mono.` added to the derived-sibling skip filters.
 - [ ] **Publish:** `PublishRequest.stereo_layout`, the geometry and as-is validation, the slideshow check, atomic rendition generation, and the layout threaded into `create_or_update_post`.

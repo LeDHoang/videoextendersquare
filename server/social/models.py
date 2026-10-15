@@ -122,6 +122,11 @@ class Post(Base):
     # How long an image post stays on screen in the player; NULL means the
     # default (IMAGE_POST_DWELL_MS). Unused for video posts.
     dwell_ms = Column(Integer, nullable=True)
+    # Stereoscopic layout of the original file: "mono", "sbs" (full
+    # side-by-side, left eye left) or "tb" (full top-bottom, left eye top).
+    # Stereo posts keep the original at media_path (the VR source) and a
+    # left-eye <stem>-mono sibling for every 2D surface.
+    stereo_layout = Column(String(16), nullable=False, default="mono", server_default="mono")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)

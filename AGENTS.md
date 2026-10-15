@@ -33,7 +33,7 @@ Single source of truth for where generated files belong. Follow this on every ta
 ## Test conventions
 
 - Backend suite: `make test` → `pytest -q tests` + `cd web && npm test`. Never widen pytest collection scope (no repo-wide `pytest` — it hits the user-owned `ComfyUI/` tree and hardware deps).
-- Schema truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py` (currently `20261011_0012`).
+- Schema truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py` (currently `20261015_0013`).
 - Concurrency/billing tests must eventually run against PostgreSQL (launch verdict in `docs/to-beta.md`); SQLite-only green is not sufficient for billing paths.
 
 ## Key docs to consult before acting
