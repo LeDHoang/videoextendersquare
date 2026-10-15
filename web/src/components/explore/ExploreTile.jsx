@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
-import { formatClock, formatDuration, imagePostLabel } from '../../utils/mediaFormat.js';
+import { formatClock, formatDuration, imagePostLabel, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
 
 export function formatCompactCount(value) {
   const count = Number(value) || 0;
@@ -103,7 +103,12 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename || video.path?.split('/').pop() || 'Untitled reel';
-  const badge = contextTag ? '#' + contextTag : imagePostLabel(video);
+  // 3D posts carry a "3D" tag next to the kind/context badge.
+  const badge = [contextTag ? '#' + contextTag : imagePostLabel(video), stereoLayout(video) !== 'mono' ? '3D' : '']
+    .filter(Boolean)
+    .join(' · ');
+  const crop = stereoCropClass(video);
+  const withCrop = (name) => (crop ? `${name} ${crop}` : name);
   const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
 
   return (
@@ -125,7 +130,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
       {isImage ? (
         <img
           src={video.poster_url || video.preview_url || video.url}
-          className="sx-explore-image"
+          className={withCrop('sx-explore-image')}
           alt={label}
           loading="lazy"
           draggable="false"
@@ -137,7 +142,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           {video.poster_url ? (
             <img
               src={video.poster_url}
-              className="sx-explore-poster"
+              className={withCrop('sx-explore-poster')}
               alt=""
               loading="lazy"
               draggable="false"
@@ -153,7 +158,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           ) : (
             <video
               ref={videoRef}
-              className="sx-explore-video"
+              className={withCrop('sx-explore-video')}
               src={src}
               muted
               loop

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
 import { AccentBlock } from '../ui/primitives.jsx';
 import { MASTER_SIDE, formatClock, stageLayout } from './stageGeometry.js';
+import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 
 // Left half of the Upload Studio: the 1:1 master stage. Shows where the
 // source sits inside the square, which bands the outpaint model will
@@ -159,6 +160,7 @@ export default function StudioStage({
   onFiles,
   dropCaption,
   extendPath,
+  stereo,
   upscaleOnly,
   trim,
   outpaintActive,
@@ -183,13 +185,17 @@ export default function StudioStage({
   }, [resultUrl, selected?.key]);
 
   const showExtended = view === 'extended' && resultUrl;
-  const showZones = !showExtended && !isSlideshow && geometry && !geometry.square && extendPath && !upscaleOnly;
+  // 3D stereo uploads show their left eye filling the square, as 2D views will.
+  const stereoEye = stereo && geometry ? stereoEyeSize(stereo, geometry.width, geometry.height) : null;
+  const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
     ? `EXTENDED MASTER (${MASTER_SIDE}×${MASTER_SIDE})`
-    : isSlideshow
-      ? 'PLAYER VIEW · 1:1 CROP'
-      : geometry ? `ORIGINAL ${kind === 'video' ? 'CLIP' : 'IMAGE'} (${geometry.width}×${geometry.height})` : '';
+    : stereoEye
+      ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
+      : isSlideshow
+        ? 'PLAYER VIEW · 1:1 CROP'
+        : geometry ? `ORIGINAL ${kind === 'video' ? 'CLIP' : 'IMAGE'} (${geometry.width}×${geometry.height})` : '';
 
   return (
     <div className="sx-studio-stage-col">
@@ -211,7 +217,12 @@ export default function StudioStage({
             ))}
           </div>
           <div className="sx-studio-pills">
-            {geometry && !isSlideshow ? (
+            {stereoEye ? (
+              <>
+                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />3D {STEREO_LABELS[stereo]} · {geometry.width}×{geometry.height}</span>
+                <span className="sx-studio-pill sx-accent">EYE: {stereoEye.width}×{stereoEye.height} ×2</span>
+              </>
+            ) : geometry && !isSlideshow ? (
               <>
                 <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{geometry.width}×{geometry.height} ➔ {MASTER_SIDE}×{MASTER_SIDE}</span>
                 <span className="sx-studio-pill sx-accent">PAD: {geometry.padLabel}</span>
@@ -239,7 +250,13 @@ export default function StudioStage({
           ) : null}
 
           {selected && !showExtended && selected.url ? (
-            isSlideshow ? (
+            stereo ? (
+              kind === 'video' ? (
+                <StageVideo src={selected.url} label="Left eye of the 3D source" onElement={setVideoEl} className={`sx-studio-fill sx-stereo-${stereo}`} />
+              ) : (
+                <img className={`sx-studio-fill sx-stereo-${stereo}`} src={selected.url} alt={`${selected.name} (left eye)`} />
+              )
+            ) : isSlideshow ? (
               <img className="sx-studio-fill sx-cover" src={selected.url} alt={selected.name} />
             ) : (
               <div
@@ -268,6 +285,9 @@ export default function StudioStage({
           {selected && stageLabel ? <span className="sx-studio-stage-label">{stageLabel}</span> : null}
           {selected && !showExtended && geometry?.square && !isSlideshow ? (
             <span className="sx-studio-flag sx-ok">ALREADY 1:1</span>
+          ) : null}
+          {selected && !showExtended && stereo ? (
+            <span className="sx-studio-flag sx-ok">3D · ONE SQUARE PER EYE</span>
           ) : null}
           {selected && !showExtended && !extendPath && layout !== 'batch' ? (
             <span className="sx-studio-flag">PUBLISHED AS-IS</span>

@@ -65,3 +65,50 @@ export function packRuntime(items) {
   }
   return { ms, known, complete: unknown === 0 };
 }
+
+// ─── Stereoscopic 3D posts (docs/stereo-3d-reels.md) ─────────────────────
+
+/** 'sbs' | 'tb' for a 3D post (or a staged upload's chosen layout), else 'mono'. */
+export function stereoLayout(item) {
+  const layout = item?.stereo_layout;
+  return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+}
+
+/** The stereo layout an exact 2:1 / 1:2 frame could hold, else null. */
+export function stereoCandidate(width, height) {
+  const w = Math.trunc(Number(width));
+  const h = Math.trunc(Number(height));
+  if (!(w > 0 && h > 0)) return null;
+  if (w === 2 * h) return 'sbs';
+  if (h === 2 * w) return 'tb';
+  return null;
+}
+
+/** One eye of a stereo frame: half the width (SBS) or half the height (TB). */
+export function stereoEyeSize(layout, width, height) {
+  const w = Math.trunc(Number(width)) || 0;
+  const h = Math.trunc(Number(height)) || 0;
+  if (layout === 'sbs') return { width: Math.round(w / 2), height: h };
+  if (layout === 'tb') return { width: w, height: Math.round(h / 2) };
+  return { width: w, height: h };
+}
+
+export const STEREO_LABELS = { sbs: 'SIDE-BY-SIDE', tb: 'TOP-BOTTOM' };
+
+/** "2048×2048 ×2 · 3D" for a stereo post, the plain resolution otherwise. */
+export function formatPostResolution(post) {
+  const layout = stereoLayout(post);
+  if (layout === 'mono') return formatResolution(post?.width, post?.height);
+  const eye = stereoEyeSize(layout, post?.width, post?.height);
+  const res = formatResolution(eye.width, eye.height);
+  return res ? `${res} ×2 · 3D` : '3D';
+}
+
+/**
+ * CSS class that crops a raw stereo file to its left eye ('' when not
+ * needed). Only legacy 3D posts without a 2D rendition serve the raw file.
+ */
+export function stereoCropClass(post) {
+  const layout = stereoLayout(post);
+  return layout !== 'mono' && post?.stereo_crop ? `sx-stereo-crop-${layout}` : '';
+}

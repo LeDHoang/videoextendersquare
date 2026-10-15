@@ -4730,6 +4730,16 @@ button.sx-explore-loc-link:hover {
 }
 
 /* Media-kind badge, top-right. */
+/* Legacy 3D posts without a 2D rendition serve the raw stereo file: crop
+   every cover-fit view of it to the left eye. */
+.sx-stereo-crop-sbs {
+  object-position: 0% 50% !important;
+}
+
+.sx-stereo-crop-tb {
+  object-position: 50% 0% !important;
+}
+
 .sx-explore-kind {
   position: absolute;
   right: 8px;
@@ -10118,6 +10128,21 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-studio-fill.sx-cover {
   object-fit: cover;
+}
+
+/* 3D stereo upload: the stage shows the left eye, as every 2D view will. */
+.sx-studio-fill.sx-stereo-sbs {
+  object-fit: cover;
+  object-position: 0% 50%;
+}
+
+.sx-studio-fill.sx-stereo-tb {
+  object-fit: cover;
+  object-position: 50% 0%;
+}
+
+.sx-studio-stereo {
+  margin-bottom: var(--sx-2);
 }
 
 .sx-studio-zones {

@@ -110,7 +110,7 @@ Per-eye meshes already give true stereo.
 - [x] **2D player** (`reels.html`): URL choice by presenting state, blob cache keyed by URL, the swap on XR enter/exit, `setSourceStereo`, the legacy crop classes, the glow sampler, and the RES chip.
 - [x] **VR engine:** split the flags, the stereo canvas, per-eye meshes, `applyStereoVisibility`, the per-eye layers in `renderStereoPair`, glow, diagnostics, and a `VR_VERSION` bump.
 - [ ] **VR flows:** next/prev/auto-next, seek, packs, slideshows, Earth open/close, the location feed, and enter/exit mid-reel.
-- [ ] **Upload Studio:** the 3D toggle (auto-on when detected), the skip path, the stage preview, the slideshow rule, the batch warning, the `mediaFormat` helpers, the 3D badges, and a rebuild of the prod bundle.
+- [x] **Upload Studio:** the 3D toggle (auto-on when detected), the skip path, the stage preview, the slideshow rule, the batch warning, the `mediaFormat` helpers, the 3D badges, and a rebuild of the prod bundle.
 - [ ] **Tests:** `tests/test_stereo_posts.py`, `tests/test_stereo_detect.py`, `web/tests/reels-stereo.test.js`, the `webxr-earth.test.js` cases, and the `UploadPage.test.jsx` cases.
 - [ ] **Docs:** this file, the partial ticks in the `docs/todolist.md` Phase 1 items, and the schema revision mentions.
 - [ ] **Verification:** `make test`; browser checks for upload, 2D, grids and the split-stereo preview; the IWER emulator flows; on-device Quest checks for depth, swap, frame pacing and the TB proxy decode.
@@ -126,4 +126,12 @@ Per-eye meshes already give true stereo.
 - **VR swap without `loadVideo`.** Entering or exiting VR calls `syncStereoSource()`, which the engine fires through the new `onEnterVR` / `onExitVR` callbacks. It swaps `src` in place and keeps the playhead and the play/pause state. It does not re-run `loadVideo`, which would record a second view and a second pack event.
 - **Layout follows the uploaded frame.** The engine binds per-eye meshes from `textureStereo`, the layout of the frame actually uploaded, rather than from the host flag. A mono→stereo switch therefore holds the last mono frame until the first stereo frame arrives, keeping the v8.10 first-frame hold.
 - **Test seams.** `__test.getStereoState()` and `__test.setXrSessionForTest()` let `webxr-earth.test.js` check per-eye layers, offsets and visibility without a headset.
+- **Prod bundle.** `server/static/` and `web/dist/` are gitignored, so there is no bundle commit. `vite build` compiles cleanly; rebuild on deploy as usual.
+- **Upload Studio toggle.**
+  - It is a `ToggleRow` labelled "STEREOSCOPIC 3D · SIDE-BY-SIDE / TOP-BOTTOM". It turns on automatically when the stage says `detected`, with a hint giving the method.
+  - An undetected exact 2:1 / 1:2 frame shows the toggle off, so a phone screen recording still goes to extend.
+  - Switching it off goes back to the extender.
+  - Slideshows offer the toggle only when every image is the same candidate.
+  - Batch mode warns that 3D files render as flat 2D.
+- **Badges.** Explore/profile/pack-gallery tiles append "3D" to their kind badge. Legacy raw stereo files get the `sx-stereo-crop-*` classes on tiles and pack covers.
 - **Stereo proxy rule.** Mono uploads keep the old rule: an H.264 source plays as-is. Stereo uploads also get a `-preview.mp4` when an H.264 source is longer than 4096 px.

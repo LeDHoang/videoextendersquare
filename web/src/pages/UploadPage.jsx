@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { BlockingBanner, Mono } from '../components/ui/primitives.jsx';
-import { Segmented, Button } from '../components/ui/controls.jsx';
+import { Segmented, Button, ToggleRow } from '../components/ui/controls.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { STEREO_LABELS, stereoCandidate, stereoEyeSize } from '../utils/mediaFormat.js';
 import StudioStage from '../components/upload/StudioStage.jsx';
 import { useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
 import { useRenderFunding } from '../components/upload/useRenderFunding.js';
@@ -39,10 +40,45 @@ function kindOf(name) {
 }
 
 const isSquareMeta = (meta) => !!meta && (meta.orientation === 'SQUARE' || (meta.width && meta.width === meta.height));
+// Stereo layout a staged upload could hold: the server's detection block, or
+// the exact 2:1 / 1:2 geometry for older stage responses.
+const metaStereoCandidate = (meta) => meta?.stereo?.candidate || stereoCandidate(meta?.width, meta?.height);
+const metaStereoDetected = (meta) => !!(meta?.stereo?.detected && metaStereoCandidate(meta));
 const titleFromName = (name) => name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX);
 const releaseEntries = (entries) => {
   for (const entry of entries) URL.revokeObjectURL(entry.url);
 };
+
+// Detection result + 3D toggle for an exact 2:1 / 1:2 upload.
+function StereoChoice({ choice, meta, on, onToggle, disabled, slideshow }) {
+  const label = STEREO_LABELS[choice.candidate];
+  const eye = stereoEyeSize(choice.candidate, meta?.width, meta?.height);
+  const how = choice.method === 'metadata'
+    ? 'Detected from the file\'s stereo metadata.'
+    : choice.method === 'content'
+      ? 'Detected: the two halves show the same scene from two eyes.'
+      : null;
+  return (
+    <div className="sx-studio-stereo">
+      <div className={`sx-accent-block ${on ? '' : 'sx-muted'}`} role="note">
+        <div className="sx-accent-block-title">
+          {choice.detected ? `3D ${label} DETECTED` : `${choice.candidate === 'sbs' ? '2:1' : '1:2'} FRAME — IS THIS 3D ${label}?`}
+        </div>
+        <div className="sx-accent-block-body">
+          <p>
+            {on
+              ? `Published as-is as stereoscopic 3D: each eye gets one ${eye.width}×${eye.height} square in VR, and 2D views show the left eye.`
+              : `Turn on if ${slideshow ? 'these images hold' : 'this file holds'} a left/right eye pair ${choice.candidate === 'sbs' ? 'side by side' : 'stacked top over bottom'}. Off extends it to a flat 1:1 square instead.`}
+          </p>
+          {how ? <p className="sx-monospace-sm">{how}</p> : null}
+        </div>
+      </div>
+      {disabled ? null : (
+        <ToggleRow label={`STEREOSCOPIC 3D · ${label}`} checked={on} onChange={onToggle} help="One square per eye; skips the extender" />
+      )}
+    </div>
+  );
+}
 
 export default function UploadPage() {
   const { user } = useAuth();
@@ -71,6 +107,9 @@ export default function UploadPage() {
   const [galleryView, setGalleryView] = useState(null);
   const isSlideshow = gallery.length > 1;
   const [path, setPath] = useState('skip'); // 'skip' | 'extend'
+  // 3D: publish an exact 2:1 / 1:2 upload as full side-by-side / top-bottom
+  // stereo (as-is, one square per eye). On by default when detected.
+  const [stereoOn, setStereoOn] = useState(false);
   const [job, setJob] = useState(null);
   const [jobDone, setJobDone] = useState(null);
   const [jobSettled, setJobSettled] = useState(false);
@@ -107,6 +146,20 @@ export default function UploadPage() {
   const cfg = activeKind === 'video' ? videoCfg : imageCfg;
   const previewUrl = useObjectUrl(file);
   const isSquare = isSquareMeta(staged);
+
+  // Every image of a slideshow must hold the same stereo layout.
+  const stereoChoice = useMemo(() => {
+    if (isBatch || !staged) return null;
+    const metas = isSlideshow ? gallery.map((entry) => entry.meta) : [staged];
+    const candidate = metaStereoCandidate(metas[0]);
+    if (!candidate || metas.some((meta) => metaStereoCandidate(meta) !== candidate)) return null;
+    return {
+      candidate,
+      detected: metas.every(metaStereoDetected),
+      method: metas[0]?.stereo?.method || null,
+    };
+  }, [isBatch, staged, isSlideshow, gallery]);
+  const stereo = stereoOn && stereoChoice ? stereoChoice.candidate : null;
 
   const renderItems = useMemo(() => {
     if (isBatch) return batch.map((entry) => entry.meta);
@@ -168,7 +221,7 @@ export default function UploadPage() {
     setFile(only ? only.file : null);
     setStaged(only ? only.meta : null);
     setKind(only ? 'image' : null);
-    if (only) setPath(isSquareMeta(only.meta) ? 'skip' : 'extend');
+    if (only) setPath(isSquareMeta(only.meta) || (stereoOn && metaStereoCandidate(only.meta)) ? 'skip' : 'extend');
   };
 
   const moveGalleryItem = (index, delta) => {
@@ -193,6 +246,8 @@ export default function UploadPage() {
     setPath('skip');
     try {
       const metas = await Promise.all(images.map((image) => api.upload('/api/image/upload', image)));
+      const layouts = new Set(metas.map(metaStereoCandidate));
+      setStereoOn(layouts.size === 1 && metas.every(metaStereoDetected));
       applyGallery(images.map((image, index) => ({
         key: metas[index].stage_id,
         file: image,
@@ -246,8 +301,10 @@ export default function UploadPage() {
     setStaging(true);
     try {
       const meta = await api.upload(k === 'image' ? '/api/image/upload' : '/api/video/upload', picked);
+      const detected = metaStereoDetected(meta);
       setStaged(meta);
-      setPath(isSquareMeta(meta) ? 'skip' : 'extend');
+      setStereoOn(detected);
+      setPath(isSquareMeta(meta) || detected ? 'skip' : 'extend');
       suggestTitle(picked.name);
     } catch (e) {
       setPickError(`Could not stage ${picked.name}: ${e.message}`);
@@ -431,6 +488,7 @@ export default function UploadPage() {
         },
         ...(path === 'skip' ? { stage_id: staged.stage_id } : { job_id: job.jobId }),
         ...(isSlideshow ? { extra_stage_ids: gallery.slice(1).map((entry) => entry.meta.stage_id) } : {}),
+        ...(stereo && path === 'skip' ? { stereo_layout: stereo } : {}),
       };
       const res = await api.post('/api/uploads/publish', body);
       setPublished(res);
@@ -463,6 +521,17 @@ export default function UploadPage() {
     setRenderError('');
     setShareError('');
     setPath('skip');
+    setStereoOn(false);
+  };
+
+  const onStereoToggle = (on) => {
+    setStereoOn(on);
+    setJob(null);
+    setJobDone(null);
+    setJobSettled(false);
+    // 3D posts are published as-is; a 2D wide/tall frame goes back to extend.
+    if (on) setPath('skip');
+    else if (!isSquare && !isSlideshow) setPath('extend');
   };
 
   // ── Stage entries ──
@@ -486,7 +555,7 @@ export default function UploadPage() {
     : (staged?.duration || 60);
 
   const extending = isBatch ? batch.length > 0 : !!staged && path === 'extend' && !isSlideshow;
-  const summary = pipelineSummary({
+  const pipeline = pipelineSummary({
     kind: activeKind,
     path: extending ? 'extend' : (isBatch || !staged ? 'extend' : 'skip'),
     upscaleOnly: cfg.upscaleOnly,
@@ -495,6 +564,7 @@ export default function UploadPage() {
     upscaleLabel: cfg.upscaleLabel,
     bytedanceRes: cfg.btdRes,
   });
+  const summary = stereo ? `3D ${STEREO_LABELS[stereo]} · AS-IS · NO EXTEND` : pipeline;
 
   // ── Deck ──
   let sectionNum = 0;
@@ -558,6 +628,14 @@ export default function UploadPage() {
       <>
         <DeckSection num={next()} title="BATCH SOURCE" badge={batch.length ? `${batch.length} ${batchKind === 'video' ? 'VIDEOS' : 'IMAGES'}` : 'NO PUBLISH'} badgeTone="muted">
           <p className="sx-studio-note">Render many videos or many images with the same settings and download the 4K masters. Batch renders are not published; use POST to share.</p>
+          {batch.some((entry) => metaStereoDetected(entry.meta)) ? (
+            <div className="sx-accent-block sx-warn" role="note">
+              <div className="sx-accent-block-title">3D FILES ARE NOT SUPPORTED IN BATCH</div>
+              <div className="sx-accent-block-body">
+                <p>Some files look like 3D stereo. Batch extend renders them as flat 2D squares. Publish 3D files one at a time from POST.</p>
+              </div>
+            </div>
+          ) : null}
           {batch.length ? (
             <div className="sx-studio-actions">
               <Button onClick={clearBatch} disabled={batchRendering}>CLEAR BATCH</Button>
@@ -575,15 +653,18 @@ export default function UploadPage() {
         <DeckSection
           num={next()}
           title="SOURCE & PUBLISH PATH"
-          badge={!staged ? 'AWAITING SOURCE' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : 'SHARE DIRECTLY'}
-          badgeTone={path === 'extend' && staged ? 'accent' : 'muted'}
+          badge={!staged ? 'AWAITING SOURCE' : stereo ? '3D · AS-IS' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : 'SHARE DIRECTLY'}
+          badgeTone={(path === 'extend' && staged) || stereo ? 'accent' : 'muted'}
         >
+          {staged && stereoChoice ? (
+            <StereoChoice choice={stereoChoice} meta={staged} on={!!stereo} onToggle={onStereoToggle} disabled={postRendering} slideshow={isSlideshow} />
+          ) : null}
           {!staged ? (
             <>
-              <p className="sx-studio-note">Drop one video, or up to 10 images for a slideshow post, on the stage. PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM.</p>
+              <p className="sx-studio-note">Drop one video, or up to 10 images for a slideshow post, on the stage. PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM. 3D side-by-side (2:1) and top-bottom (1:2) files are published as-is.</p>
               <Mono>AWAITING SOURCE FILE…</Mono>
             </>
-          ) : isSlideshow ? (
+          ) : stereo ? null : isSlideshow ? (
             <div className="sx-accent-block" role="note">
               <div className="sx-accent-block-title">MULTI-IMAGE POST — PUBLISHED AS-IS</div>
               <div className="sx-accent-block-body">
@@ -697,6 +778,7 @@ export default function UploadPage() {
             ? 'Drop several videos or several images — rendered with the same settings, not published'
             : 'Drop one video, or up to 10 images for a slideshow post'}
           extendPath={isBatch || path === 'extend'}
+          stereo={isBatch ? null : stereo}
           upscaleOnly={cfg.upscaleOnly}
           outpaintActive={!cfg.upscaleOnly}
           trim={activeKind === 'video' ? { enabled: cfg.trimEnabled, start: cfg.trimStart, dur: cfg.trimDur } : null}

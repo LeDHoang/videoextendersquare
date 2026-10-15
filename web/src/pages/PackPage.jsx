@@ -11,7 +11,7 @@ import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
-import { formatDuration, formatResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
+import { formatDuration, formatPostResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
 import { REPORT_REASONS } from '../utils/messageFormat.js';
 
 const VISIBILITY_OPTIONS = [
@@ -110,7 +110,7 @@ function ReelRow({ item, index, pack, onPlay }) {
   const owner = post.creator?.username || pack.creator?.username || 'creator';
   const place = [post.location?.city, post.location?.country].filter(Boolean).join(', ');
   const comments = post.comments_count ?? 0;
-  const resolution = formatResolution(post.width, post.height);
+  const resolution = formatPostResolution(post);
   const imageLabel = imagePostLabel(post);
   const duration = formatDuration(imageLabel ? imageDwellMs(post) : post.duration_ms);
   return (

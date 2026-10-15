@@ -178,3 +178,33 @@ describe('ExploreTile autoplay', () => {
     expect(play).not.toHaveBeenCalled();
   });
 });
+
+describe('ExploreTile 3D posts', () => {
+  beforeEach(() => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('tags stereo posts as 3D and plays their 2D preview uncropped', () => {
+    const { container } = renderTile({ video: video({ stereo_layout: 'sbs', stereo_crop: false, url: '/media/a-mono.mp4' }) });
+    expect(container.querySelector('.sx-explore-kind').textContent).toBe('3D');
+    expect(container.querySelector('video').className).toBe('sx-explore-video');
+  });
+
+  it('crops legacy stereo files without a 2D rendition to the left eye', () => {
+    const { container } = renderTile({
+      video: video({ stereo_layout: 'tb', stereo_crop: true, poster_url: '/media/a-poster.jpg', media_type: 'image', images: [{}, {}] }),
+    });
+    expect(container.querySelector('.sx-explore-kind').textContent).toBe('IMAGES · 2 · 3D');
+    expect(container.querySelector('img').className).toContain('sx-stereo-crop-tb');
+  });
+
+  it('keeps mono tiles unbadged', () => {
+    const { container } = renderTile({ video: video({ stereo_layout: 'mono' }) });
+    expect(container.querySelector('.sx-explore-kind')).toBeNull();
+  });
+});
