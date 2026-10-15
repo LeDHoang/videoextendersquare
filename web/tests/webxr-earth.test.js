@@ -164,7 +164,7 @@ function loadRenderer(options = {}) {
     self: window,
     document: mockDocument,
     navigator: { userAgent: 'NodeTest' },
-    console: { log() {}, warn() {}, error() {} },
+    console: options.console || { log() {}, warn() {}, error() {} },
     performance: { now: options.now || (() => 0) },
     fetch: options.fetch || (async () => ({ ok: true, json: async () => ({ locations: [] }) })),
     AbortController,
@@ -1101,6 +1101,82 @@ test('selecting a zone with reels switches to the location playlist', async () =
   renderer.stopPreview();
 });
 
+test('the Earth control restores all locations while a location feed is active', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const calls = [];
+  let feedActive = true;
+  renderer.init(null, {
+    isLocationFeedActive: () => feedActive,
+    onRestoreAllLocations: () => { calls.push('restore'); feedActive = false; return Promise.resolve(true); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['restore']);
+  // Restoring does not open the globe; the feed is whole again.
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  // Feed no longer filtered: the same control now opens Earth.
+  renderer.__test.executeControl('earth');
+  assert.equal(renderer.getPreviewState().sceneMode, 'earth');
+  assert.deepEqual(calls, ['restore']);
+  renderer.stopPreview();
+});
+
+test('with a location feed active, Earth mode itself still closes back to reels', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const calls = [];
+  renderer.init(null, {
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { calls.push('restore'); return Promise.resolve(true); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  renderer.__test.executeControl('earth');
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  assert.deepEqual(calls, []);
+  renderer.stopPreview();
+});
+
+test('a failing all-locations restore is contained and keeps the control usable', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const errors = [];
+  const renderer = loadRenderer({
+    gl,
+    console: { log() {}, warn() {}, error: (...args) => errors.push(args.map(String).join(' ')) },
+  });
+  let attempts = 0;
+  renderer.init(null, {
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { attempts += 1; throw new Error('feed offline'); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__test.executeControl('earth');
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /All locations restore failed/);
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  renderer.stopPreview();
+});
+
+test('pack mode keeps the Earth control on the queue even if a location feed is flagged', async () => {
+  const calls = [];
+  const renderer = loadRenderer();
+  renderer.init(null, {
+    isPackMode: () => true,
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { calls.push('restore'); },
+    onTogglePackQueue: () => calls.push('queue'),
+  });
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['queue']);
+});
+
 test('selecting a zone without reels stays on the globe', async () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -1883,6 +1959,23 @@ test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   const free = makeRecordingCtx();
   ui.renderControlsCanvas(free.ctx, dockRenderOptions({ lockToViewer: false }));
   assert.ok(firstToken(free.texts, 'FREE'), `has FREE label: ${free.texts.join('|')}`);
+});
+
+test('dock Earth button reads ALL LOCATIONS while a location feed is active', () => {
+  const ui = loadUICanvasStandalone();
+  const plain = makeRecordingCtx();
+  ui.renderControlsCanvas(plain.ctx, dockRenderOptions());
+  assert.ok(plain.texts.some((t) => t.split(' ')[0] === 'EARTH'), `has EARTH MAP: ${plain.texts.join('|')}`);
+  assert.ok(!plain.texts.some((t) => t.startsWith('ALL LOCATIONS')));
+  const filtered = makeRecordingCtx();
+  ui.renderControlsCanvas(filtered.ctx, dockRenderOptions({ locationFeedActive: true }));
+  assert.ok(filtered.texts.some((t) => t.startsWith('ALL LOCATIONS')), `has ALL LOCATIONS: ${filtered.texts.join('|')}`);
+  assert.ok(!filtered.texts.some((t) => t.startsWith('EARTH MAP')));
+  // Pack mode keeps its QUEUE label whatever the flag says.
+  const pack = makeRecordingCtx();
+  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true, locationFeedActive: true }));
+  assert.ok(pack.texts.some((t) => t.startsWith('QUEUE')));
+  assert.ok(!pack.texts.some((t) => t.startsWith('ALL LOCATIONS')));
 });
 
 test('guide panel renders the controller artwork without errors', () => {

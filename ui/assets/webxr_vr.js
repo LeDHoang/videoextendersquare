@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.19-20261016-stereo-3d';
+  const VR_VERSION = 'v8.20-20261016-earth-restore-all';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -6366,6 +6366,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer,
         autoNext: getAutoNext(),
         sceneMode,
+        locationFeedActive: locationFeedActive(),
         earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
@@ -9514,6 +9515,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
   }
 
+  // A location picked on the globe filters the feed; the dock's Earth button
+  // then reads ALL LOCATIONS and brings the full feed back (upstream parity).
+  function locationFeedActive() {
+    if (isPackExperience() || typeof callbacks.isLocationFeedActive !== 'function') return false;
+    try { return !!callbacks.isLocationFeedActive(); } catch (e) { return false; }
+  }
+
+  function restoreAllLocations() {
+    if (typeof callbacks.onRestoreAllLocations !== 'function') return;
+    Promise.resolve()
+      .then(() => callbacks.onRestoreAllLocations())
+      .catch((error) => console.error('[WebXRVR] All locations restore failed:', error));
+  }
+
   function executeControlButton(index) {
     const ui = getUICanvas();
     const btns = ui ? ui.CTRL_BUTTONS : [];
@@ -9548,6 +9563,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'comments': toggleCommentsPanel(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
+        else if (sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();
         else setSceneMode(sceneMode === 'earth' ? 'reels' : 'earth');
         break;
       // Earth zoom map dock actions (earth mode only, Z1).

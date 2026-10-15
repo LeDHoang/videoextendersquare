@@ -361,6 +361,7 @@
       lockToViewer = false,
       autoNext = true,
       sceneMode = 'reels',
+      locationFeedActive = false,
       notificationText = '',
       notificationUntil = 0,
       callbacks = {},
@@ -453,7 +454,11 @@
     ctx.fillStyle = earthActive ? '#FFFFFF' : '#55E7FF';
     ctx.font = 'bold 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(packMode ? 'QUEUE' : 'EARTH MAP', earthButton.x + earthButton.w / 2, earthButton.y + earthButton.h / 2);
+    ctx.fillText(
+      packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
+      earthButton.x + earthButton.w / 2,
+      earthButton.y + earthButton.h / 2
+    );
 
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');

@@ -215,6 +215,6 @@ A form and function pass over every surface a 3D post reaches. It ran on the sam
 - **B2.** With 3D on, the Upload Studio slideshow strip thumbnails were centre-cropped and straddled both eyes. They now get `sx-stereo-crop-{layout}` and show the left eye. Covered in `UploadPage.test.jsx`.
 
 **Observations, not 3D bugs.**
-- **VR Earth "all locations" restore is unwired.** The pre-Three.js engine restored all locations when Earth was pressed during a location feed (`toggleEarthMode` → `onRestoreAllLocations`). `0da05fa` dropped that call, so in VR a location feed has no way back to all locations. `reels.html` still passes `onRestoreAllLocations` and `isLocationFeedActive`. This is on `main` as well.
+- **VR Earth "all locations" restore was unwired (fixed, not 3D-specific).** The pre-Three.js engine restored all locations when Earth was pressed during a location feed (`toggleEarthMode` → `onRestoreAllLocations`). `0da05fa` dropped that call, so in VR a location feed had no way back to all locations. The dock's Earth button now reads `ALL LOCATIONS` while a location feed is active and Earth is closed, and pressing it calls `onRestoreAllLocations`. Pack mode keeps `QUEUE`; with Earth open the button still returns to reels. Engine `v8.20-20261016-earth-restore-all`, with tests in `web/tests/webxr-earth.test.js`. It is one self-contained commit and can be cherry-picked onto `main`.
 - **Share links use the page origin.** In dev that is `localhost:5173`; this is pre-existing.
 - **`/api/rewards/reels` returns 503 in the QA env.** Rewards were disabled there.
