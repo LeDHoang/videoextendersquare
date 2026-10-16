@@ -23,7 +23,7 @@ import os
 import threading
 
 from argon2 import PasswordHasher
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine, event
@@ -277,9 +277,12 @@ def test_payload_fallbacks_do_not_requery_after_a_failed_batch_lookup(tmp_path, 
     monkeypatch.setattr(reels, "reel_records", starved_reel_records)
     monkeypatch.setattr(reels, "metadata_for_paths", counting_metadata_for_paths)
 
-    payload = reels._build_payload([dict(row) for row in SCAN_ROWS], "hevc")
+    # A failed batch is a retryable 503 (never fabricated fallback metadata;
+    # see tests/test_reels_metadata_failures.py).
+    with pytest.raises(HTTPException) as raised:
+        reels._build_payload([dict(row) for row in SCAN_ROWS], "hevc")
 
-    assert [item["path"] for item in payload] == [row["rel_path"] for row in SCAN_ROWS]
+    assert raised.value.status_code == 503
     # One batched lookup; a failure must not fan out into per-item retries
     # that each wait out another pool timeout.
     assert calls == {"reel_records": 1, "metadata_for_paths": 0}

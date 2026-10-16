@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server import media as SM
@@ -213,9 +214,9 @@ def _get_comments_for_video(rel_path: str, filename: str = "") -> list[dict]:
     """Read-only legacy JSON comments for a path the batched reel_records
     lookup in _build_payload did not return.
 
-    Deliberately no per-item database retry: when the batch failed (e.g. pool
-    starvation) each retry would wait out another pool timeout, and when it
-    succeeded the path simply has no published post.
+    Deliberately no per-item database retry: the batch succeeded, so the path
+    simply has no published post (a failed batch raises a 503 in
+    _build_payload and never reaches this fallback).
     """
     key = rel_path.strip().replace(chr(92), "/")
     all_comments = _load_comments_raw()
@@ -314,19 +315,42 @@ def _safe_int(value) -> int:
         return 0
 
 
+REEL_DATA_RETRY_AFTER_SECONDS = 5
+
+
+def _reel_data_unavailable() -> HTTPException:
+    """503 for a failed batched social-database lookup.
+
+    The legacy JSON / ``_seed_meta`` fallbacks are only for paths the
+    database *answered* has no published post (local, unpublished
+    ``output/`` files). When the lookup itself fails we cannot tell a
+    published post from a local file, so serving either fallback would show
+    a real post with invented (or zeroed) likes/views, no ``post_id`` and
+    no viewer state — and could hide an outage behind plausible data.
+    """
+    return HTTPException(
+        status_code=503,
+        detail="Reel data is temporarily unavailable. Retry shortly.",
+        headers={"Retry-After": str(REEL_DATA_RETRY_AFTER_SECONDS)},
+    )
+
+
 def _metadata_snapshot(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
     """Build metadata from the social database with legacy fallback.
 
     Routes pass their request ``db`` (here and in every helper below that
     takes one) so a request never holds one pooled connection while waiting
     for a second.
+
+    The legacy fallback covers only paths without a published post; a
+    database failure raises a 503 instead (see _reel_data_unavailable).
     """
     persisted = _load_meta_raw()
     keys = [str(item.get("rel_path", "")).strip().replace(chr(92), "/") for item in raw]
     try:
         database_rows = metadata_for_paths(keys, db=db)
-    except Exception:
-        database_rows = {}
+    except SQLAlchemyError as exc:
+        raise _reel_data_unavailable() from exc
     snapshot: dict[str, dict] = {}
     for item in raw:
         key = str(item.get("rel_path", "")).strip().replace(chr(92), "/")
@@ -1121,7 +1145,8 @@ def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
 def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
     """Read-only legacy JSON metadata for a path the batched reel_records
     lookup in _build_payload did not return (no per-item database retry;
-    see _get_comments_for_video)."""
+    see _get_comments_for_video). Seeded metadata is for local, unpublished
+    files only: callers must not reach this after a failed lookup."""
     key = rel_path.strip().replace(chr(92), "/")
     all_meta = _load_meta_raw()
     if key in all_meta and isinstance(all_meta[key], dict):
@@ -1343,8 +1368,10 @@ def _build_payload(
     paths = [item["rel_path"] for item in videos]
     try:
         social_rows = reel_records(paths, viewer_id=viewer_id, db=db)
-    except Exception:
-        social_rows = {}
+    except SQLAlchemyError as exc:
+        # Never fall through to the per-item legacy/seed fallbacks on a
+        # failed lookup: published posts would get fabricated engagement.
+        raise _reel_data_unavailable() from exc
     for item in videos:
         src_path = item["path"]
         social_row = social_rows.get(item["rel_path"])
