@@ -261,8 +261,8 @@ The seed above was extended with 10 real-footage posts made from local SBS sampl
 **Bug found and fixed.**
 - **F1.** A paused 3D reel started playing again after entering or leaving VR. The `<video autoplay>` attribute restarts playback when `syncStereoSource` swaps the src. The swap now calls `pause()` again when the reel was paused. Covered in `web/tests/reels-stereo.test.js`, and checked live: the reel stays paused at the same playhead.
 
-**Observations: pre-existing, not 3D-specific (identical on `origin/main`).**
-- **O1, high: DB pool hold-and-wait deadlock.**
+**Observations: pre-existing, not 3D-specific (identical on `origin/main`).** O1–O3 are now fixed on `3dreels`; each fix was written against `origin/main` and cherry-picked.
+- **O1, high: DB pool hold-and-wait deadlock (fixed in `efd199e`).**
   - **Mechanism.** `get_optional_auth` leaves its request session holding a pooled connection until the request ends. It only commits when `last_used_at` is at least 300 s old. Helpers then open their own `SessionLocal()`:
     - `unavailable_media_paths_for_viewer`;
     - `slide_media_paths` via `_scan_cached`;
@@ -279,12 +279,19 @@ The seed above was extended with 10 real-footage posts made from local SBS sampl
     - `/api/reels/comments`.
 
     Default `/api/reels/feed` commits first and is not affected.
-  - **Fix direction.** Commit at the end of `get_optional_auth`, then pass the request `db` into the helpers.
-- **O2, medium: Earth hover preview request storm.** The preview fetch has no per-slug cache, no in-flight dedupe and no dwell.
+  - **Fix (`efd199e`).** `get_optional_auth` now commits on every path that queried. The nested helpers take an optional `db`, and every `reels.py` route passes its request session. The per-item fallbacks no longer re-query. `tests/test_db_pool_isolation.py` checks for at most 1 checkout per request, including concurrent signed-in requests on `pool_size=1`. It runs on SQLite and PostgreSQL 15.
+- **O2, medium: Earth hover preview request storm (fixed in `372b792`, engine `v8.21-20261016-earth-preview-cache`).** Before the fix, the preview fetch had no per-slug cache, no in-flight dedupe and no dwell.
   - **Trigger.** A ray resting on the Earth title label after a hover kept the panel-grace path (`updateEarthHoverFromRay`) re-hovering the last zone. That sent about 120 `GET /api/reels/locations/<slug>` requests per second for the same slug.
   - **Why it hurts.** Client aborts do not stop the server's sync handlers, so the requests feed O1 and wedge the backend. The globe's spin hold together with jitter at a zone edge causes the same flip-flop at a lower rate.
-  - **Side bug.** An aborted fetch leaves `earthPreviewStatus` set to `error`.
-- **O3, medium: SHARE REEL is invisible in feed-mode VR.** SHARE REEL and REPORT (signed in) open DOM-only UI during feed-mode VR: the share dialog and `window.prompt`, which nobody sees in a headset. Pack mode exits VR first. Fix: exit XR before DOM UI in every mode.
+  - **Side bug.** An aborted fetch left `earthPreviewStatus` set to `error`.
+  - **Fix (`372b792`).**
+    - Panel grace restores a zone once per departure and no longer renews itself.
+    - Per-location preview cache: 30 s TTL, LRU 32, with the in-flight request shared.
+    - Leaving a zone no longer aborts the request; the late result fills the cache.
+    - An AbortError is never reported as `error`, and real failures are held for 5 s.
+
+    Covered in `web/tests/webxr-earth.test.js`.
+- **O3, medium: SHARE REEL is invisible in feed-mode VR (fixed in `4ae8baf`).** SHARE REEL and REPORT (signed in) open DOM-only UI during feed-mode VR: the share dialog and `window.prompt`, which nobody sees in a headset. Pack mode exits VR first. **Fixed in `4ae8baf`:** `exitXrForDomUi()` now leaves XR before the share dialog or report prompt in every mode. Covered in `web/tests/reels-xr-dom-ui.test.js`.
 - **Not a bug.** A NEXT pressed about 1.5 s after PREV looked dropped. No input is lost: the screen holds the previous frame until the new video has data (`FRESH_VISUAL_MAX_HOLD_MS` 2500).
 - **Product gap.** SBS or TB footage whose eyes are not square has no 3D path. An example is 3840×1080 SBS (16:9 per eye), which covers most of the real samples. The toggle only appears for an exact 2:1 or 1:2 frame.
 
