@@ -3561,16 +3561,28 @@
       if (packVisualMode) renderPackVisual(packVisualMode);
     }
 
+    // <reels-xr-dom-ui> (extracted by web/tests/reels-xr-dom-ui.test.js)
+    // The immersive-vr session requests no dom-overlay, so DOM UI (share
+    // dialogs, report prompts) is invisible while presenting: leave XR first.
+    async function exitXrForDomUi() {
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting() && WebXRVR.exitVR) {
+          await WebXRVR.exitVR();
+        }
+      } catch (e) {}
+    }
+
     async function shareCurrentPack() {
       if (!isPackMode || !packState.pack) return;
       pauseCurrentPlayback();
       await persistPackProgress(true);
       recordPackEvent('pack_share');
-      try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+      await exitXrForDomUi();
       const detail = { kind: 'pack', id: packState.pack.id, pack_id: packState.pack.id, title: packState.pack.title || 'Reel Pack' };
       window.dispatchEvent(new CustomEvent('echo:share-pack', { detail }));
       try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-pack', { detail })); } catch (e) {}
     }
+    // </reels-xr-dom-ui>
 
     function returnToPack() {
       if (!isPackMode || !packState.pack) return;
@@ -4391,14 +4403,16 @@
       refreshEngagementUI();
     }
 
+    // <reels-share-reel> (extracted by web/tests/reels-xr-dom-ui.test.js)
     async function shareCurrentReel() {
       const item = videoData[idx];
       if (!item || !item.post_id) return;
       if (isPackMode) {
         pauseCurrentPlayback();
         await persistPackProgress(true);
-        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
       }
+      // ReelShareDialog is DOM-only, in feed mode as well as pack mode.
+      await exitXrForDomUi();
       requestJson('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4422,6 +4436,7 @@
         if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
       } catch (e) {}
     }
+    // </reels-share-reel>
 
     function setCreatorFollowing(creatorId, following) {
       videoData.forEach((entry) => {
@@ -4500,17 +4515,20 @@
       showFlash(action === 'hide_creator' ? 'CREATOR HIDDEN' : 'SHOWING FEWER');
       loadVideo(idx);
     }
+    // <reels-report> (extracted by web/tests/reels-xr-dom-ui.test.js)
     async function reportTarget(targetType, targetId) {
       if (!targetId) return;
       if (isPackMode) {
         pauseCurrentPlayback();
         await persistPackProgress(true);
-        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+        await exitXrForDomUi();
       }
       if (!currentUser) {
         requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
         return;
       }
+      // window.prompt() is invisible in the headset and blocks the XR frame loop.
+      await exitXrForDomUi();
       const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
       if (!reason) return;
       const details = window.prompt('Optional details') || '';
@@ -4529,6 +4547,7 @@
         } else showFlash('REPORT FAILED');
       }
     }
+    // </reels-report>
 
 
     function playbackMeasurements(item, state) {
