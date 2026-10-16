@@ -1232,6 +1232,11 @@ class CommentCreate(BaseModel):
 # ─── SCAN & FILTER ───────────────────────────────────────────────────────
 
 def _scan_cached(db: Session | None = None) -> list[dict]:
+    """Scan output/ (cached for _SCAN_TTL) minus the extra slides of posts.
+
+    A failed slide lookup raises a 503 (see _reel_data_unavailable) and
+    leaves the cache stale, so the next request retries the lookup.
+    """
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
@@ -1240,8 +1245,12 @@ def _scan_cached(db: Session | None = None) -> list[dict]:
         # never surface as tiles of their own.
         try:
             slides = slide_media_paths(db)
-        except Exception:
-            slides = set()
+        except SQLAlchemyError as exc:
+            # Never cache or serve a scan without the slide filter: a slide
+            # is not any post's media_path, so _build_payload would seed it
+            # with fabricated metadata until the cache expired.
+            invalidate_scan_cache()
+            raise _reel_data_unavailable() from exc
         _scan_cache["data"] = [item for item in scanned if item["rel_path"] not in slides]
     return _scan_cache["data"]
 
