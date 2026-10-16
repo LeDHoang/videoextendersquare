@@ -120,7 +120,7 @@ def test_scan_hides_slides_behind_their_post(monkeypatch):
         {"rel_path": "uploads/clip.mp4", "filename": "clip.mp4", "media_type": "video"},
     ]
     monkeypatch.setattr(reels.SM, "scan_output_media", lambda _root: list(scanned))
-    monkeypatch.setattr(reels, "slide_media_paths", lambda: {"uploads/b.png"})
+    monkeypatch.setattr(reels, "slide_media_paths", lambda db=None: {"uploads/b.png"})
     monkeypatch.setitem(reels._scan_cache, "at", 0.0)
     monkeypatch.setitem(reels._scan_cache, "data", [])
     assert [item["rel_path"] for item in reels._scan_cached()] == ["uploads/a.png", "uploads/clip.mp4"]

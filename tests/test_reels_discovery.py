@@ -142,7 +142,7 @@ class ReelDiscoveryTests(unittest.TestCase):
             patch.object(
                 reels,
                 "_build_payload",
-                side_effect=lambda items, codec, viewer_id=None: [
+                side_effect=lambda items, codec, viewer_id=None, db=None: [
                     item["rel_path"] for item in items
                 ],
             ),
@@ -300,7 +300,7 @@ class ReelDiscoveryTests(unittest.TestCase):
             patch.object(
                 reels,
                 "_build_payload",
-                side_effect=lambda items, codec, viewer_id=None: [
+                side_effect=lambda items, codec, viewer_id=None, db=None: [
                     item["rel_path"] for item in items
                 ],
             ),

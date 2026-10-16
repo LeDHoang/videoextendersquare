@@ -178,23 +178,35 @@ def clear_auth_cookies(response: Response) -> None:
 
 
 def get_optional_auth(request: Request, db: Session = Depends(get_db)) -> AuthContext | None:
+    """Resolve the signed-in user, then end the read transaction.
+
+    Every path that touched the database commits before returning, so the
+    request session hands its pooled connection back before the endpoint
+    runs (an open read would pin it for the whole request — or a 30-minute
+    SSE stream — while helpers wait for a second one). Commit, not rollback:
+    expire_on_commit=False keeps ``user``/``row`` loaded.
+    """
     raw = request.cookies.get(SESSION_COOKIE)
     if not raw:
         return None
     row = db.query(AuthSession).filter(AuthSession.token_hash == token_hash(raw)).first()
     if not row or row.revoked_at is not None or aware(row.expires_at) <= utcnow():
+        db.commit()
         return None
     user = db.query(User).filter(User.id == row.user_id, User.status == "active").first()
     if not user:
+        db.commit()
         return None
     if (utcnow() - aware(row.last_used_at)).total_seconds() >= 300:
         row.last_used_at = utcnow()
         user.last_seen_at = utcnow()
-        db.commit()
+    db.commit()
     return AuthContext(user=user, session=row)
 
 
 def require_auth(context: AuthContext | None = Depends(get_optional_auth)) -> AuthContext:
+    # get_optional_auth (same per-request db) has already committed, so a
+    # require_auth endpoint starts with no connection checked out.
     if context is None:
         raise HTTPException(
             status_code=401,

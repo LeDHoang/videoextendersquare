@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -51,9 +53,13 @@ def recompute_follow_counts(db: Session, user_ids: set[str]) -> None:
         user.following_count = db.query(Follow.id).filter(Follow.follower_id == user_id).count()
 
 
-def unavailable_media_paths_for_viewer(viewer_id: str | None) -> set[str]:
-    """Paths hidden because content is deleted, its owner is inactive, or users blocked each other."""
-    with SessionLocal() as db:
+def unavailable_media_paths_for_viewer(viewer_id: str | None, db: Session | None = None) -> set[str]:
+    """Paths hidden because content is deleted, its owner is inactive, or users blocked each other.
+
+    Routes pass their request ``db``: opening a second session while the
+    request session holds a connection is a hold-and-wait on the pool.
+    """
+    with (nullcontext(db) if db is not None else SessionLocal()) as db:
         query = db.query(Post.media_path).join(User, User.id == Post.owner_id).filter(
             or_(Post.status != "published", Post.deleted_at.is_not(None), User.status != "active")
         )

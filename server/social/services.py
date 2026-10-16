@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -176,13 +177,30 @@ def serialize_comment(
     }
 
 
-def reel_records(paths: list[str], viewer_id: str | None = None, include_comments: bool = True) -> dict[str, dict]:
-    if not paths:
-        return {}
+def _session_scope(db: Session | None):
+    """The caller's session when given, else a short-lived one of our own.
+
+    Routes pass their request ``db`` so one request holds at most one pooled
+    connection; a helper that opens a second session while the request
+    session holds the first is a hold-and-wait that deadlocks a busy pool.
+    """
+    if db is not None:
+        return nullcontext(db)
     from .database import SessionLocal
 
+    return SessionLocal()
+
+
+def reel_records(
+    paths: list[str],
+    viewer_id: str | None = None,
+    include_comments: bool = True,
+    db: Session | None = None,
+) -> dict[str, dict]:
+    if not paths:
+        return {}
     normalized = [normalize_media_path(path) for path in paths]
-    with SessionLocal() as db:
+    with _session_scope(db) as db:
         from .safety import blocked_user_ids
 
         hidden_ids = blocked_user_ids(db, viewer_id)
@@ -293,8 +311,8 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
         return records
 
 
-def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
-    records = reel_records(paths, include_comments=False)
+def metadata_for_paths(paths: list[str], db: Session | None = None) -> dict[str, dict]:
+    records = reel_records(paths, include_comments=False, db=db)
     return {
         path: {
             "post_id": row["post_id"],
@@ -802,13 +820,12 @@ def scoped_media_paths(
     viewer_id: str | None = None,
     feed: str | None = None,
     author: str | None = None,
+    db: Session | None = None,
 ) -> list[str] | None:
     """Return an ordered media-path allowlist for a creator or Following feed."""
     if not feed and not author:
         return None
-    from .database import SessionLocal
-
-    with SessionLocal() as db:
+    with _session_scope(db) as db:
         query = db.query(Post).join(User, User.id == Post.owner_id).filter(
             Post.status == "published",
             Post.deleted_at.is_(None),

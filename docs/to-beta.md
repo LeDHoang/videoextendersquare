@@ -181,6 +181,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Run automated database and media backups on a documented schedule — **specify:** cron'd `pg_dump` with off-box copy (or Hetzner volume snapshots) + documented retention.
 - [ ] Perform and record a full restore drill, including message decryption and media availability.
 - [ ] Document deployment rollback, schema rollback limitations, and recovery from an interrupted migration.
+- [x] **New (2026-10-16):** Fix the request-path DB pool deadlock (pre-existing on `main`, found in WebXR Earth QA). `get_optional_auth` kept the request session's connection checked out (it only committed when `last_used_at` was ≥300 s stale) while reels helpers opened a second `SessionLocal()` per call; ~15 concurrent signed-in requests held all 5+10 QueuePool connections waiting for another, starved every AnyIO worker (even `/api/health`), and in QA one request pinned a connection for 17+ minutes until restart. **Fix:** `get_optional_auth` commits on every path that queried (so `require_auth` endpoints — including the 30-minute `GET /api/messages/events` SSE stream — start with no connection held); `unavailable_media_paths_for_viewer`, `reel_records`, `metadata_for_paths`, and `scoped_media_paths` take an optional `db` that every `reels.py` route threads through (one request, one connection); the per-item `_get_comments_for_video` / `_get_meta_for_video` fallbacks no longer re-query after the batched lookup. **Tests:** `tests/test_db_pool_isolation.py` (peak checkouts per request ≤ 1 across the affected endpoints, concurrent signed-in requests on a `pool_size=1` pool, auth releases its connection, no per-item retries) — fail on `main`, pass with the fix, on SQLite **and PostgreSQL 15** (local throwaway cluster via `SX_TEST_POSTGRES_URL`). `tests/conftest.py` now points the global `SessionLocal` fallback at a throwaway DB so tests never read the developer's `data/echo.db`. **Still open:** `/api/reels/tags` and `/api/reels/locations` (no auth, no request session) open helper sessions sequentially — safe, but not yet single-session; `_metadata_snapshot` / `_get_meta_for_video` still fall back to fabricated `_seed_meta` engagement when the database lookup fails.
 - [ ] **New:** Graceful shutdown — lifespan teardown currently only cancels the cleanup task; `ThreadPoolExecutor` pools are never shut down, so SIGTERM kills in-flight ffmpeg mid-write. Drain pools on shutdown; document restart-during-job behavior (reservation reconciliation at next boot already exists — `app.py:52–53` — but is undocumented).
 - [ ] **New:** Container hygiene — run as non-root (`USER`), pin the base image digest + ffmpeg version, and split Streamlit out of the production requirements (it bakes pyarrow et al. into the prod image). Also standardize dev/prod interpreters (repo `.venv` is CPython 3.14; the image is 3.12).
 
@@ -212,7 +213,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Run Python compilation and frontend/inline JavaScript parse checks.
 - [ ] Run `make migrate` on a production-like database and verify the schema reaches **`20261015_0013`** (updated from the stale `20260912_0004`; source of truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py:14`).
 - [ ] Test fresh database creation, upgrade from the oldest supported production schema, failed-migration recovery, and backup restoration.
-- [ ] Test the chosen production database rather than relying only on SQLite test runs — **priority:** re-run the billing suite and the recommendation concurrency tests (`tests/test_recommendations.py -k concurrent`, currently SQLite-fixture-only) against PostgreSQL.
+- [ ] Test the chosen production database rather than relying only on SQLite test runs — **priority:** re-run the billing suite and the recommendation concurrency tests (`tests/test_recommendations.py -k concurrent`, currently SQLite-fixture-only) against PostgreSQL. **Partial (2026-10-16):** the DB-pool isolation tests take `SX_TEST_POSTGRES_URL` and passed 13/13 on a local PostgreSQL 15.15 cluster; billing and recommendation concurrency fixtures are still SQLite-only.
 - [ ] Require CI success, migration success, a clean worktree, and an approved release checklist before deployment.
 
 ## Functional, concurrency, and device verification
@@ -335,6 +336,12 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - [x] Prod-env fixes (2026-09-20): `load_dotenv(override=False)`, immersive-preview behind auth, rewards IP floor removal.
 
 ## Latest recorded automated verification
+
+**2026-10-16 DB pool deadlock fix (branch `fix/db-pool-deadlock`, based on `origin/main` `dcaa4e4`):**
+
+- `make test`: backend **289 passed** (`pytest -q tests`, ~45s; includes 13 new `tests/test_db_pool_isolation.py` tests), frontend **341 vitest passed**.
+- New pool tests on unmodified `origin/main`: **13 failed** (2 connections per request; `QueuePool limit of size 1 overflow 0 reached` under concurrency; 4 `reel_records` + 3 `metadata_for_paths` calls for a 3-item payload after a failed batch). With the fix: 13 passed; 10 consecutive reruns green.
+- PostgreSQL check: same 13 tests with `SX_TEST_POSTGRES_URL=postgresql+psycopg://postgres@127.0.0.1:55432/pool_test` against a throwaway PostgreSQL 15.15 cluster — 13 passed on the fix, 13 failed on `origin/main`. The rest of the suite was not run on PostgreSQL.
 
 **2026-09-20 security/money + edge verification (uncommitted working tree):**
 

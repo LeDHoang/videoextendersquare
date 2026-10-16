@@ -69,10 +69,10 @@ def app(tmp_path, monkeypatch):
     application.state.testing_session = testing_session
     application.state.scan_rows = []
 
-    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", lambda _viewer_id: set())
-    monkeypatch.setattr(reels, "_scan_cached", lambda: list(application.state.scan_rows))
+    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", lambda _viewer_id, db=None: set())
+    monkeypatch.setattr(reels, "_scan_cached", lambda db=None: list(application.state.scan_rows))
 
-    def payload(items, _codec, tunnel="", viewer_id=None):
+    def payload(items, _codec, tunnel="", viewer_id=None, db=None):
         paths = [item["rel_path"] for item in items]
         with testing_session() as db:
             posts = (

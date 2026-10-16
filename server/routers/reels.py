@@ -210,15 +210,14 @@ def _generate_seed_comments(rel_path: str, filename: str) -> list[dict]:
 
 
 def _get_comments_for_video(rel_path: str, filename: str = "") -> list[dict]:
-    """Retrieve comments from the social database with read-only JSON fallback."""
-    key = rel_path.strip().replace(chr(92), "/")
-    try:
-        record = reel_records([key]).get(key)
-        if record is not None:
-            return record.get("comments", [])
-    except Exception:
-        pass
+    """Read-only legacy JSON comments for a path the batched reel_records
+    lookup in _build_payload did not return.
 
+    Deliberately no per-item database retry: when the batch failed (e.g. pool
+    starvation) each retry would wait out another pool timeout, and when it
+    succeeded the path simply has no published post.
+    """
+    key = rel_path.strip().replace(chr(92), "/")
     all_comments = _load_comments_raw()
     if key in all_comments and isinstance(all_comments[key], list):
         return all_comments[key]
@@ -315,12 +314,17 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _metadata_snapshot(raw: list[dict]) -> dict[str, dict]:
-    """Build metadata from the social database with legacy fallback."""
+def _metadata_snapshot(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
+    """Build metadata from the social database with legacy fallback.
+
+    Routes pass their request ``db`` (here and in every helper below that
+    takes one) so a request never holds one pooled connection while waiting
+    for a second.
+    """
     persisted = _load_meta_raw()
     keys = [str(item.get("rel_path", "")).strip().replace(chr(92), "/") for item in raw]
     try:
-        database_rows = metadata_for_paths(keys)
+        database_rows = metadata_for_paths(keys, db=db)
     except Exception:
         database_rows = {}
     snapshot: dict[str, dict] = {}
@@ -356,9 +360,11 @@ def _item_search_text(item: dict, meta: dict, include_tags: bool = True) -> str:
     return " ".join(str(value) for value in values if value).casefold()
 
 
-def _tag_catalog(raw: list[dict]) -> tuple[dict[str, dict], list[tuple[str, str, list[str]]]]:
+def _tag_catalog(
+    raw: list[dict], db: Session | None = None
+) -> tuple[dict[str, dict], list[tuple[str, str, list[str]]]]:
     """Aggregate tag stats, co-occurrence, and searchable reel context."""
-    snapshot = _metadata_snapshot(raw)
+    snapshot = _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     contexts: list[tuple[str, str, list[str]]] = []
 
@@ -504,9 +510,9 @@ def _haversine_km(first: tuple[float, float], second: tuple[float, float]) -> fl
     return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(inner)))
 
 
-def _location_catalog(raw: list[dict]) -> dict[str, dict]:
+def _location_catalog(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
     """Aggregate reel stats per city+country place."""
-    snapshot = _metadata_snapshot(raw)
+    snapshot = _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     for item in raw:
         meta = _item_meta(item, snapshot)
@@ -736,9 +742,10 @@ def _location_activity_rows(
     activity_by_path: dict[str, dict],
     metadata: dict[str, dict] | None = None,
     limit: int = 128,
+    db: Session | None = None,
 ) -> list[dict]:
     """Aggregate activity into privacy-safe city centroids and normalized heat."""
-    snapshot = metadata if metadata is not None else _metadata_snapshot(raw)
+    snapshot = metadata if metadata is not None else _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     for item in raw:
         path = str(item.get("rel_path") or "").strip().replace("\\", "/")
@@ -1112,15 +1119,10 @@ def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
 
 
 def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
-    """Retrieve database metadata with read-only legacy JSON fallback."""
+    """Read-only legacy JSON metadata for a path the batched reel_records
+    lookup in _build_payload did not return (no per-item database retry;
+    see _get_comments_for_video)."""
     key = rel_path.strip().replace(chr(92), "/")
-    try:
-        record = metadata_for_paths([key]).get(key)
-        if record is not None:
-            return record
-    except Exception:
-        pass
-
     all_meta = _load_meta_raw()
     if key in all_meta and isinstance(all_meta[key], dict):
         entry = dict(all_meta[key])
@@ -1204,7 +1206,7 @@ class CommentCreate(BaseModel):
 
 # ─── SCAN & FILTER ───────────────────────────────────────────────────────
 
-def _scan_cached() -> list[dict]:
+def _scan_cached(db: Session | None = None) -> list[dict]:
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
@@ -1212,7 +1214,7 @@ def _scan_cached() -> list[dict]:
         # Extra images of a multi-image post play inside that post, so they
         # never surface as tiles of their own.
         try:
-            slides = slide_media_paths()
+            slides = slide_media_paths(db)
         except Exception:
             slides = set()
         _scan_cache["data"] = [item for item in scanned if item["rel_path"] not in slides]
@@ -1228,7 +1230,8 @@ def _is_image_item(item: dict) -> bool:
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
                    sort: str, media: str | None = None,
                    tag: str | None = None, location: str | None = None,
-                   recent_activity: dict[str, dict] | None = None) -> list[dict]:
+                   recent_activity: dict[str, dict] | None = None,
+                   db: Session | None = None) -> list[dict]:
     videos = list(raw)
     metadata = None
     if media in ("video", "videos"):
@@ -1239,7 +1242,7 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
         videos = [v for v in videos if v["folder"] == folder]
     if tag and _tag_slug(tag):
         wanted = _tag_slug(tag)
-        metadata = _metadata_snapshot(videos)
+        metadata = _metadata_snapshot(videos, db)
         videos = [
             video
             for video in videos
@@ -1250,12 +1253,12 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
         ]
     if location and _location_key(*_split_location_key(location)):
         wanted_loc = _location_key(*_split_location_key(location))
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
         videos = [video for video in videos if _item_location_key(video, metadata) == wanted_loc]
     if search.strip():
         query_text = search.strip().casefold().lstrip("#")
         query_key = _search_key(query_text)
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
         videos = [
             video
             for video in videos
@@ -1281,7 +1284,7 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
 
         videos.sort(key=_recent_score, reverse=True)
     elif sort in ("views", "likes", "trending"):
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
 
         def _engagement(item: dict) -> tuple[int, float]:
             meta = _item_meta(item, metadata)
@@ -1327,6 +1330,7 @@ def _build_payload(
     codec: str | None,
     tunnel: str = "",
     viewer_id: str | None = None,
+    db: Session | None = None,
 ) -> list[dict]:
     """Map scanned media to the reels player payload (relative /media/ URLs),
     including embedded time-synced and general comments.
@@ -1338,7 +1342,7 @@ def _build_payload(
     payload = []
     paths = [item["rel_path"] for item in videos]
     try:
-        social_rows = reel_records(paths, viewer_id=viewer_id)
+        social_rows = reel_records(paths, viewer_id=viewer_id, db=db)
     except Exception:
         social_rows = {}
     for item in videos:
@@ -1509,14 +1513,14 @@ def _pack_feed_data(
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     pack = get_pack_for_viewer(db, pack_id, viewer_id)
-    scanned = {item["rel_path"]: item for item in _scan_cached()}
+    scanned = {item["rel_path"]: item for item in _scan_cached(db)}
     available_scan = [
         scanned[item.post.media_path]
         for item in sorted(pack.items, key=lambda row: row.position)
         if item.post and item.post.media_path in scanned
         and member_available_for_viewer(db, item, viewer_id)
     ]
-    hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id)
+    hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
     by_path = {item.get("path"): item for item in hydrated}
     # DB fallback for active items whose media file is not (or not yet) in the
     # output/ scan — e.g. fresh uploads, test fixtures, cache TTL gaps. Without
@@ -1709,8 +1713,8 @@ def _recommendation_feed_data(
             detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."},
         )
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity_days = _bounded_activity_window(window_days)
     recent_activity = _recent_activity_by_path(db, raw, activity_days) if sort == "recent_trending" else None
 
@@ -1721,7 +1725,7 @@ def _recommendation_feed_data(
             detail={"code": "POST_NOT_FOUND", "message": "Reel not found."},
         )
     if requested_surface == "related":
-        videos = _apply_filters(raw, folder, "", "newest", media)
+        videos = _apply_filters(raw, folder, "", "newest", media, db=db)
         if seed_post and seed_post.media_path not in {video["rel_path"] for video in videos}:
             seed_video = next((video for video in raw if video["rel_path"] == seed_post.media_path), None)
             if seed_video:
@@ -1736,9 +1740,10 @@ def _recommendation_feed_data(
             tag,
             location,
             recent_activity=recent_activity,
+            db=db,
         )
 
-    scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author)
+    scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author, db=db)
     if scoped_paths is not None and requested_surface != "related":
         positions = {value: index for index, value in enumerate(scoped_paths)}
         videos = [video for video in videos if video["rel_path"] in positions]
@@ -1801,7 +1806,7 @@ def _recommendation_feed_data(
         for item in page.items
         if item.target_id in post_id_to_video
     ]
-    hydrated = _build_payload(selected_videos, codec, tunnel=tunnel, viewer_id=viewer_id)
+    hydrated = _build_payload(selected_videos, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
     payload_by_post = {item.get("post_id"): item for item in hydrated if item.get("post_id")}
     items = []
     for recommendation in page.items:
@@ -1866,9 +1871,9 @@ def list_reels(
     """
     if refresh:
         _scan_cache["at"] = 0.0
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
 
     if post:
@@ -1886,11 +1891,13 @@ def list_reels(
             tag,
             location,
             recent_activity=recent_activity,
+            db=db,
         )
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
         author=author,
+        db=db,
     )
     if feed == "following" and not isinstance(viewer, AuthContext):
         raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
@@ -1903,7 +1910,7 @@ def list_reels(
         "count": len(videos),
         "folders": sorted({v["folder"] for v in raw}),
         "active_tag": _tag_slug(tag) if tag else None,
-        "videos": _build_payload(videos, codec, viewer_id=viewer_id),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -1988,11 +1995,12 @@ def get_reel_tag(
     if refresh:
         _scan_cache["at"] = 0.0
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    catalog, _ = _tag_catalog(raw)
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
+    catalog, _ = _tag_catalog(raw, db)
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
-    videos = _apply_filters(raw, folder, "", sort, tag=slug, recent_activity=recent_activity)
+    videos = _apply_filters(raw, folder, "", sort, tag=slug, recent_activity=recent_activity, db=db)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -2011,7 +2019,7 @@ def get_reel_tag(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_tags": _related_tag_rows(slug, catalog),
-        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -2080,10 +2088,10 @@ def list_reel_location_activity(
     days = _bounded_activity_window(window_days)
     bounded_limit = max(1, min(int(limit), 128))
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity = _recent_activity_by_path(db, raw, days)
-    locations = _location_activity_rows(raw, activity, limit=bounded_limit)
+    locations = _location_activity_rows(raw, activity, limit=bounded_limit, db=db)
     if zoom is None:
         return {
             "strategy": "recent-activity-v1",
@@ -2133,11 +2141,12 @@ def get_reel_location(
     if refresh:
         _scan_cache["at"] = 0.0
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    catalog = _location_catalog(raw)
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
+    catalog = _location_catalog(raw, db)
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
-    videos = _apply_filters(raw, folder, "", sort, location=slug, recent_activity=recent_activity)
+    videos = _apply_filters(raw, folder, "", sort, location=slug, recent_activity=recent_activity, db=db)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -2159,7 +2168,7 @@ def get_reel_location(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_locations": _related_location_rows(slug, catalog),
-        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -2279,11 +2288,13 @@ def get_diag():
 def get_comments(
     video_path: str,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Return database-backed comments for the legacy player route."""
     records = reel_records(
         [video_path.strip().replace(chr(92), "/")],
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+        db=db,
     )
     return {"video_path": video_path, "comments": records.get(video_path, {}).get("comments", [])}
 
