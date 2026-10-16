@@ -218,3 +218,77 @@ A form and function pass over every surface a 3D post reaches. It ran on the sam
 - **VR Earth "all locations" restore was unwired (fixed, not 3D-specific).** The pre-Three.js engine restored all locations when Earth was pressed during a location feed (`toggleEarthMode` → `onRestoreAllLocations`). `0da05fa` dropped that call, so in VR a location feed had no way back to all locations. The dock's Earth button now reads `ALL LOCATIONS` while a location feed is active and Earth is closed, and pressing it calls `onRestoreAllLocations`. Pack mode keeps `QUEUE`; with Earth open the button still returns to reels. Engine `v8.20-20261016-earth-restore-all`, with tests in `web/tests/webxr-earth.test.js`. It is one self-contained commit and can be cherry-picked onto `main`.
 - **Share links use the page origin.** In dev that is `localhost:5173`; this is pre-existing.
 - **`/api/rewards/reels` returns 503 in the QA env.** Rewards were disabled there.
+
+### Emulated XR session QA (Chrome + Immersive Web Emulator, 2026-10-16)
+
+A real (emulated) `immersive-vr` session in Chrome with the Immersive Web Emulator (Quest 3 profile). Input was driven through the emulated controllers: pose set programmatically, trigger and thumbstick pressed through the device API, so dock presses went through the real ray, raycast and select path, not only through `__test` hooks. It ran on the same isolated stack (backend :8010, Vite :5183).
+
+The seed above was extended with 10 real-footage posts made from local SBS samples:
+- exact 2:1 and 1:2 derived clips;
+- one 8K HEVC SBS clip;
+- spread over Hanoi, Tokyo, Paris, NYC and Sydney.
+
+`make test` was green afterwards: pytest 305, node 312, vitest 353.
+
+**Detection on real footage.**
+- Derived 2:1 SBS clips scored 0.807–0.903 and the TB clip 0.888, so all were detected by content.
+- The original non-2:1 files got no candidate, which is by design (see the product gap below).
+- The 8K HEVC source got a 4096×2048 H.264 `-preview.mp4` proxy, a 2160² `-mono.mp4` and 720² explore assets.
+
+**Passed.**
+- **Enter/exit.**
+  - Entering XR swaps to the stereo file. For example, 3840×1920 gives `sourceStereo` `sbs` on the 4096×2048 canvas, with the mono screen material hidden.
+  - Exit returns to `-mono.mp4` at the same playhead. Several cycles stayed stable.
+- **Per-eye output in a true XR session.** With the emulator's stereo view on, the tinted SBS clip and a tinted TB clip showed red in the left eye and blue in the right.
+- **Eye meshes.** Layers 1/2, and the right `repeat`/`offset` for SBS and for TB (2048×4096 canvas).
+- **Mixed pack traversal in XR.** SBS → TB → 3D slideshow → mono images → end card. The layout switches per item.
+- **Dock through the real controller ray and trigger.**
+  - Comments panel, curvature, mode, mute, lock and play/pause all work.
+  - Like and save send `PUT`, and next/prev navigate.
+  - Follow is a no-op on your own post, which is correct.
+  - Share opens the share dialog (see O3).
+- **Earth in XR.**
+  - Open and close from the dock.
+  - Selecting Paris loads its location feed in XR: the TB 720×1440 stereo file on the 2048×4096 canvas.
+  - Selecting Tokyo loads the SBS feed, and the 8K HEVC post plays its 4096×2048 H.264 proxy (readyState 4, advancing).
+  - A real press on the `ALL LOCATIONS` dock button restores the full feed. With no location feed active, Earth opens again.
+- **3D slideshow in XR.** Loads the stereo originals (3840×1920, not `-mono`) as `sbs`. Thumbstick X flicks step slides 1 → 2 → 3 → 2. The dock hides REW/FWD for images by design (`isControlVisible`).
+- **Pop-up comments in XR.** They appear over the SBS stereo video on schedule (1.0 s, 2.0 s and 3.5 s).
+- **Leak check.**
+  - 4 exit/enter cycles kept the scene children constant (14), and the JS heap was collected (62 → 43 MB).
+  - No console errors, and `getLastRenderError` stayed empty throughout.
+
+**Bug found and fixed.**
+- **F1.** A paused 3D reel started playing again after entering or leaving VR. The `<video autoplay>` attribute restarts playback when `syncStereoSource` swaps the src. The swap now calls `pause()` again when the reel was paused. Covered in `web/tests/reels-stereo.test.js`, and checked live: the reel stays paused at the same playhead.
+
+**Observations: pre-existing, not 3D-specific (identical on `origin/main`).**
+- **O1, high: DB pool hold-and-wait deadlock.**
+  - **Mechanism.** `get_optional_auth` leaves its request session holding a pooled connection until the request ends. It only commits when `last_used_at` is at least 300 s old. Helpers then open their own `SessionLocal()`:
+    - `unavailable_media_paths_for_viewer`;
+    - `slide_media_paths` via `_scan_cached`;
+    - `reel_records` / `metadata_for_paths` via `_location_catalog`, `_apply_filters` and `_build_payload`.
+  - **Effect.** About 15 concurrent authenticated requests (the default QueuePool is 5 + 10 with a 30 s timeout) each hold one connection and wait for a second.
+    - All 40 threadpool workers block, so even `/api/health` stops answering.
+    - The swallowed timeouts chain 30 s waits per item, so one request held a connection for over 17 minutes.
+    - The QA backend had to be restarted.
+  - **Affected endpoints.** The same pattern is in:
+    - `GET /api/reels/locations/{key}`;
+    - `/api/reels/tags/{tag}`;
+    - `GET /api/reels`;
+    - `/api/reels/locations/activity`;
+    - `/api/reels/comments`.
+
+    Default `/api/reels/feed` commits first and is not affected.
+  - **Fix direction.** Commit at the end of `get_optional_auth`, then pass the request `db` into the helpers.
+- **O2, medium: Earth hover preview request storm.** The preview fetch has no per-slug cache, no in-flight dedupe and no dwell.
+  - **Trigger.** A ray resting on the Earth title label after a hover kept the panel-grace path (`updateEarthHoverFromRay`) re-hovering the last zone. That sent about 120 `GET /api/reels/locations/<slug>` requests per second for the same slug.
+  - **Why it hurts.** Client aborts do not stop the server's sync handlers, so the requests feed O1 and wedge the backend. The globe's spin hold together with jitter at a zone edge causes the same flip-flop at a lower rate.
+  - **Side bug.** An aborted fetch leaves `earthPreviewStatus` set to `error`.
+- **O3, medium: SHARE REEL is invisible in feed-mode VR.** SHARE REEL and REPORT (signed in) open DOM-only UI during feed-mode VR: the share dialog and `window.prompt`, which nobody sees in a headset. Pack mode exits VR first. Fix: exit XR before DOM UI in every mode.
+- **Not a bug.** A NEXT pressed about 1.5 s after PREV looked dropped. No input is lost: the screen holds the previous frame until the new video has data (`FRESH_VISUAL_MAX_HOLD_MS` 2500).
+- **Product gap.** SBS or TB footage whose eyes are not square has no 3D path. An example is 3840×1080 SBS (16:9 per eye), which covers most of the real samples. The toggle only appears for an exact 2:1 or 1:2 frame.
+
+**Still needs a Quest.** The emulator proves the per-eye routing, but not:
+- perceived depth;
+- frame pacing at 2048/eye;
+- TB 2048×4096 H.264 decode on the device.

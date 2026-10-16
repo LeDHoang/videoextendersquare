@@ -2997,6 +2997,10 @@
       applyEntryStereo(playback);
       video.src = nextUrl;
       video.muted = isMuted;
+      // The element has the autoplay attribute, which would restart a paused
+      // reel after the swap; pause() clears the autoplaying flag the new
+      // load just set.
+      if (!wasPlaying) video.pause();
       if (resumeAt > 0) {
         video.addEventListener('loadedmetadata', function () {
           try { video.currentTime = Math.min(resumeAt, video.duration || resumeAt); } catch (e) {}

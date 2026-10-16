@@ -34,12 +34,14 @@ function fakeVideo() {
     paused: true,
     muted: false,
     plays: 0,
+    pauses: 0,
     get src() { return this.attributes.src || ''; },
     set src(value) { this.attributes.src = String(value); },
     getAttribute(name) { return name in this.attributes ? this.attributes[name] : null; },
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
     fire(type) { (listeners[type] || []).splice(0).forEach((fn) => fn()); },
     play() { this.paused = false; this.plays += 1; return Promise.resolve(); },
+    pause() { this.paused = true; this.pauses += 1; },
   };
   return video;
 }
@@ -168,6 +170,7 @@ test('entering and leaving VR swaps the source in place and keeps the playhead',
   assert.equal(layout(), 'sbs');
   assert.equal(engine.layouts.at(-1), 'sbs');
   assert.equal(video.plays, 1, 'keeps playing');
+  assert.equal(video.pauses, 0, 'a playing reel is not paused by the swap');
   video.currentTime = 0; // a new src starts at 0 ...
   video.fire('loadedmetadata'); // ... until metadata restores the playhead
   assert.equal(video.currentTime, 12.5);
@@ -180,6 +183,8 @@ test('entering and leaving VR swaps the source in place and keeps the playhead',
   assert.equal(video.src, post.url);
   assert.equal(layout(), 'mono');
   assert.equal(video.plays, 1, 'stays paused');
+  // The real element autoplays on a new src; pause() after the swap stops it.
+  assert.equal(video.pauses, 1, 'a paused reel is re-paused so autoplay cannot restart it');
   video.fire('loadedmetadata');
   assert.equal(video.currentTime, 20);
 
