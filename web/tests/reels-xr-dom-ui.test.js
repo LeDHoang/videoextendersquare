@@ -16,13 +16,22 @@ function block(name) {
 
 // Runs the real share/report actions from reels.html against a fake WebXRVR.
 // `log` records the order of XR exit vs. DOM UI so tests can assert exit comes first.
-function loadActions({ presenting, packMode = false, signedIn = true, promptAnswers = [] }) {
+function loadActions({ presenting, packMode = false, signedIn = true, promptAnswers = [], holdExit = false }) {
   const log = [];
   const engine = {
     presenting,
     exits: 0,
     isPresenting() { return this.presenting; },
-    exitVR() { this.exits += 1; this.presenting = false; log.push('exitVR'); },
+    // Like the real engine: the promise settles only once the session has
+    // ended (log 'xr ended'); releaseExit() is that moment.
+    releaseExit: null,
+    exitVR() {
+      this.exits += 1; this.presenting = false; log.push('exitVR');
+      return new Promise((resolve) => {
+        this.releaseExit = () => { log.push('xr ended'); resolve(); };
+        if (!holdExit) this.releaseExit();
+      });
+    },
   };
   const answers = promptAnswers.slice();
   const window = {
@@ -124,4 +133,41 @@ test('share and report do not call exitVR when not presenting', async () => {
   await pack.context.shareCurrentPack();
   assert.equal(pack.engine.exits, 0);
   assert.ok(pack.log.includes('echo:share-pack'));
+});
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+test('SHARE REEL and SHARE PACK open the share dialog only after the XR session has ended', async () => {
+  for (const [packMode, action, event] of [
+    [false, 'shareCurrentReel', 'echo:share-reel'],
+    [true, 'shareCurrentPack', 'echo:share-pack'],
+  ]) {
+    const { context, engine, log } = loadActions({ presenting: true, packMode, holdExit: true });
+    const done = context[action]();
+    await tick();
+    assert.ok(log.includes('exitVR'), `${action} requested the exit`);
+    assert.equal(log.includes(event), false, `${action} must not open the dialog while XR is still ending`);
+    engine.releaseExit();
+    await done;
+    assert.ok(log.indexOf('xr ended') < log.indexOf(event), `${action}: ${log.join(', ')}`);
+  }
+});
+
+test('REPORT opens window.prompt only after the XR session has ended', async () => {
+  for (const packMode of [false, true]) {
+    const { context, engine, log } = loadActions({ presenting: true, packMode, holdExit: true, promptAnswers: ['spam', ''] });
+    const done = context.reportTarget('post', 'post-1');
+    await tick();
+    assert.equal(log.includes('prompt'), false, `packMode=${packMode}: no prompt while XR is still ending`);
+    engine.releaseExit();
+    await done;
+    assert.ok(log.indexOf('xr ended') < log.indexOf('prompt'), log.join(', '));
+  }
+});
+
+test('a failing exitVR does not block the DOM UI', async () => {
+  const { context, engine, log } = loadActions({ presenting: true });
+  engine.exitVR = () => Promise.reject(new Error('xr gone'));
+  await context.shareCurrentReel();
+  assert.ok(log.includes('echo:share-reel'));
 });

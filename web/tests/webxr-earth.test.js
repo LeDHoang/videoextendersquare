@@ -179,6 +179,7 @@ function loadRenderer(options = {}) {
     Uint16Array,
     Uint32Array,
     Math,
+    ...(options.globals || {}),
   });
   vm.runInContext(threeSource, context, { filename: 'three.min.js' });
   vm.runInContext(uiCanvasSource, context, { filename: 'vr_ui_canvas.js' });
@@ -1863,6 +1864,131 @@ test('xrCompatible outcome is recorded for diagnostics', async () => {
   assert.equal(info.xr.presenting, false);
   assert.equal(info.xr.compat, compat);
   assert.equal(renderer.getPreviewState().xrCompat, compat);
+});
+
+// A session the real three.js XR manager accepts. Like a real runtime,
+// end() never fires 'end' synchronously: tests fire it via session.fire('end').
+function makeLiveXrSession(extra = {}) {
+  const listeners = {};
+  const session = {
+    ended: 0,
+    renderState: {},
+    inputSources: [],
+    environmentBlendMode: 'opaque',
+    enabledFeatures: [],
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter((f) => f !== fn); },
+    fire(type) { (listeners[type] || []).slice().forEach((fn) => fn({ type })); },
+    updateRenderState() {},
+    requestReferenceSpace: async () => ({}),
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+    end() { this.ended += 1; return Promise.resolve(); },
+    ...extra,
+  };
+  return session;
+}
+
+async function enterLiveSession(options = {}, sessionExtra = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const log = [];
+  const classes = { add: (c) => log.push('class+' + c), remove: (c) => log.push('class-' + c) };
+  const renderer = loadRenderer({
+    gl,
+    globals: { XRWebGLLayer: class { constructor() { this.framebuffer = null; } } },
+    ...options,
+  });
+  renderer.init(null, { onExitVR: () => log.push('onExitVR'), onVRError: (r) => log.push('error ' + r) });
+  const session = makeLiveXrSession(sessionExtra);
+  await renderer.enterVR({ xr: { requestSession: async () => session } });
+  return { renderer, session, log, classes };
+}
+
+test('exitVR resolves immediately when no session is active', async () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
+  renderer.init(null, {});
+  const result = renderer.exitVR();
+  assert.ok(result && typeof result.then === 'function', 'always returns a promise');
+  await result;
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('await exitVR() resolves only after the session end handler ran', async () => {
+  const { renderer, session, log } = await enterLiveSession();
+  assert.equal(renderer.isPresenting(), true, 'precondition: live session bound');
+  assert.deepEqual(log.filter((e) => e.startsWith('error')), []);
+
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; log.push('exitVR resolved'); });
+  assert.equal(session.ended, 1, 'session.end() requested once');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(settled, false, 'end() returning is not enough: waits for the end event');
+  assert.equal(log.includes('onExitVR'), false);
+
+  session.fire('end');
+  await exiting;
+  assert.ok(log.indexOf('onExitVR') !== -1 && log.indexOf('onExitVR') < log.indexOf('exitVR resolved'),
+    'onExitVR (3D → mono source swap) runs before the awaiter continues: ' + log.join(', '));
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('exitVR waits for the end event even when it fires after end() resolved', async () => {
+  const { renderer, session, log } = await enterLiveSession();
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; });
+  await session.end(); // a runtime resolving end() ahead of the event
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(settled, false);
+  session.fire('end');
+  await exiting;
+  assert.equal(settled, true);
+  assert.equal(log.filter((e) => e === 'onExitVR').length, 1);
+});
+
+test('concurrent exitVR calls share one end request and one wait', async () => {
+  const { renderer, session } = await enterLiveSession();
+  const first = renderer.exitVR();
+  const second = renderer.exitVR();
+  assert.equal(session.ended, 1, 'end() not issued twice');
+  session.fire('end');
+  await Promise.all([first, second]);
+  // After the session is gone a fresh call is a no-op that resolves at once.
+  await renderer.exitVR();
+  assert.equal(session.ended, 1);
+});
+
+test('exitVR resolves when end() throws (session already ended)', async () => {
+  const { renderer } = await enterLiveSession({}, { end() { throw new Error('InvalidStateError'); } });
+  await renderer.exitVR();
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('exitVR resolves when end() rejects', async () => {
+  const { renderer } = await enterLiveSession({}, { end() { return Promise.reject(new Error('already ended')); } });
+  await renderer.exitVR();
+});
+
+test('exitVR times out if the runtime never fires end, and a later session exits normally', async () => {
+  const timers = [];
+  const { renderer, session } = await enterLiveSession({
+    globals: {
+      XRWebGLLayer: class { constructor() { this.framebuffer = null; } },
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeout: () => {},
+    },
+  });
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  const guard = timers.find((t) => t.ms >= 1000 && t.ms <= 5000);
+  assert.ok(guard, 'a bounded fallback timer guards a missing end event');
+  guard.fn();
+  await exiting;
+  assert.equal(settled, true);
+  assert.equal(session.ended, 1);
+  // Stale pending state must not leak into the next exit.
+  await renderer.exitVR();
 });
 
 test('reels.html localhost gate attempts instead of blocking', () => {  const html = readFileSync(new URL('../../ui/assets/reels.html', import.meta.url), 'utf8');

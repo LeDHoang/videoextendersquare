@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.22-20261016-earth-preview-dwell';
+  const VR_VERSION = 'v8.23-20261016-exit-vr-awaits-end';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -48,6 +48,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let videoElement = null;
   let callbacks = {};
   let xrSession = null;
+  // exitVR() in flight: { promise, settle }. Settled by the session 'end'
+  // handler (after engine teardown and onExitVR), or by the timeout.
+  let xrExit = null;
+  const XR_EXIT_TIMEOUT_MS = 1500;
   let xrRefSpace = null;
   let previewRunning = false;
   let previewAnimId = null;
@@ -9360,37 +9364,66 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     session.addEventListener('end', () => {
-      xrSession = null;
-      if (renderer) {
-        try { renderer.setAnimationLoop(null); } catch (e) {}
+      try {
+        xrSession = null;
+        if (renderer) {
+          try { renderer.setAnimationLoop(null); } catch (e) {}
+        }
+        stopVideoFrameTracking();
+        if (xrCanvas) {
+          try {
+            if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
+          } catch (e) {}
+          xrCanvas = null;
+        }
+        if (typeof document !== 'undefined') {
+          document.documentElement.classList.remove('sx-vr-active');
+          if (document.body) document.body.classList.remove('sx-vr-active');
+        }
+        if (callbacks.onExitVR) {
+          try { callbacks.onExitVR(); } catch (e) {}
+        }
+        // Restore the desktop preview torn down on entry, if its canvas is
+        // still attached (SPA may have navigated away — then skip silently).
+        restorePreviewSnapshot();
+      } finally {
+        settleXrExit();
       }
-      stopVideoFrameTracking();
-      if (xrCanvas) {
-        try {
-          if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
-        } catch (e) {}
-        xrCanvas = null;
-      }
-      if (typeof document !== 'undefined') {
-        document.documentElement.classList.remove('sx-vr-active');
-        if (document.body) document.body.classList.remove('sx-vr-active');
-      }
-      if (callbacks.onExitVR) {
-        try { callbacks.onExitVR(); } catch (e) {}
-      }
-      // Restore the desktop preview torn down on entry, if its canvas is
-      // still attached (SPA may have navigated away — then skip silently).
-      restorePreviewSnapshot();
     });
 
     return session;
   }
 
+  function settleXrExit() {
+    const pending = xrExit;
+    xrExit = null;
+    if (pending) pending.settle();
+  }
+
+  // Resolves once the session has ended AND the 'end' handler has finished
+  // (canvas removed, sx-vr-active cleared, onExitVR run), so DOM UI that
+  // browsers block while immersive (prompt, dialogs) can open safely after
+  // `await exitVR()`. Resolves immediately without a session; never rejects.
   function exitVR() {
-    if (xrSession) {
-      try { xrSession.end(); } catch (e) {}
-      xrSession = null;
+    if (xrExit) return xrExit.promise;
+    const session = xrSession;
+    if (!session) return Promise.resolve();
+    const pending = {};
+    pending.promise = new Promise((resolve) => {
+      // Some runtimes never fire 'end' for a dead session: don't hang the UI.
+      const timer = setTimeout(settleXrExit, XR_EXIT_TIMEOUT_MS);
+      pending.settle = () => { clearTimeout(timer); resolve(); };
+    });
+    // Set before end(): a synchronous 'end' event must find it.
+    xrExit = pending;
+    try {
+      const ended = session.end();
+      if (ended && typeof ended.catch === 'function') ended.catch(settleXrExit);
+    } catch (e) {
+      settleXrExit();
     }
+    xrSession = null;
+    return pending.promise;
   }
 
   // ─── Resource Cleanup ───────────────────────────────────────────────
