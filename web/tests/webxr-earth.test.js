@@ -405,49 +405,64 @@ test('Reels frames skip Earth draws and Earth frames pause video texture uploads
   renderer.stopPreview();
 });
 
-test('hovering a heat zone loads at most three cancellable location reel previews', async () => {
+// Preview requests that settle or abort on demand (the host's fetch rejects
+// with an AbortError when its signal fires).
+function deferredPreviews() {
+  const requests = [];
+  const onPreviewLocation = (location, options) => new Promise((resolve, reject) => {
+    const signal = options && options.signal;
+    requests.push({ slug: location.slug, signal, resolve, reject });
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        const error = new Error('The operation was aborted.');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    }
+  });
+  return { requests, onPreviewLocation };
+}
+
+const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
+test('hovering a heat zone loads at most three location reel previews; only a different zone cancels a pending one', async () => {
   const gl = makeMockGl({ deleted: 0 });
-  let requestedLocation = null;
-  let requestedSignal = null;
-  let firstResolve = null;
-  let requestCount = 0;
   const previewRows = [
     { url: '/media/one.mp4', title: 'One' },
     { url: '/media/two.mp4', title: 'Two' },
     { url: '/media/three.mp4', title: 'Three' },
     { url: '/media/four.mp4', title: 'Four' },
   ];
+  const { requests, onPreviewLocation } = deferredPreviews();
   const renderer = loadRenderer({ gl });
-  renderer.init(null, {
-    onPreviewLocation: async (location, options) => {
-      requestCount += 1;
-      requestedLocation = location.slug;
-      requestedSignal = options.signal;
-      if (requestCount === 1) return new Promise((resolve) => { firstResolve = resolve; });
-      return previewRows;
-    },
-  });
+  renderer.init(null, { onPreviewLocation });
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.setSceneMode('earth');
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushPromises();
   renderer.__test.setLocationActivity([
     { slug: 'tokyo-japan', name: 'Tokyo, Japan', lat: 35.67, lon: 139.65, heat: 0.9 },
+    { slug: 'paris-france', name: 'Paris, France', lat: 48.85, lon: 2.35, heat: 0.8 },
   ]);
 
   const stalePreview = renderer.__test.loadEarthPreviewNow(0);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(requestedSignal);
-  renderer.__test.setEarthHoveredIndex(-1);
-  assert.equal(requestedSignal.aborted, true);
-  firstResolve(previewRows);
+  assert.equal(requests.length, 1, 'hover + explicit load share one request');
+  assert.equal(requests[0].slug, 'tokyo-japan');
+  // Moving to another zone abandons Tokyo; its abort is not an error.
+  const preview = renderer.__test.loadEarthPreviewNow(1);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].signal.aborted, true);
+  assert.equal(requests[1].slug, 'paris-france');
   await stalePreview;
-  assert.equal(renderer.__test.getEarthState().previewItemCount, 0);
-
-  await renderer.__test.loadEarthPreviewNow(0);
   let state = renderer.__test.getEarthState();
-  assert.equal(requestedLocation, 'tokyo-japan');
-  assert.equal(state.previewLocationIndex, 0);
+  assert.equal(state.previewStatus, 'loading');
+  assert.equal(state.previewItemCount, 0);
+
+  requests[1].resolve(previewRows);
+  await preview;
+  state = renderer.__test.getEarthState();
+  assert.equal(state.previewLocationIndex, 1);
   assert.equal(state.previewItemCount, 3);
+  assert.equal(state.previewStatus, 'ready');
   renderer.__runScheduledFrame(48);
   state = renderer.__test.getEarthState();
   assert.ok(state.renderStats.earthPreviewUploads > 0);
@@ -456,6 +471,130 @@ test('hovering a heat zone loads at most three cancellable location reel preview
   state = renderer.__test.getEarthState();
   assert.equal(state.previewLocationIndex, -1);
   assert.equal(state.previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+test('hover preview flip-flop A → -1 → A within the TTL sends one request', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity([{ slug: 'hanoi-vietnam', name: 'Hanoi, Vietnam', lat: 21.03, lon: 105.85, heat: 0.9 }]);
+  const rows = [{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }];
+
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1);
+  // Leaving keeps the request alive (the server finishes it regardless).
+  api.setEarthHoveredIndex(-1);
+  assert.equal(requests[0].signal.aborted, false);
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  // Re-hovering while it is still loading shares it.
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1);
+  assert.equal(api.getEarthState().previewStatus, 'loading');
+  api.setEarthHoveredIndex(-1);
+  // The late result fills the cache but stays off the closed card.
+  requests[0].resolve(rows);
+  await flushPromises();
+  let state = api.getEarthState();
+  assert.equal(state.previewItemCount, 0);
+  assert.equal(state.previewStatus, 'idle');
+  // A fresh hit applies synchronously, without a request.
+  clock += 29000;
+  api.setEarthHoveredIndex(0);
+  state = api.getEarthState();
+  assert.equal(requests.length, 1);
+  assert.equal(state.previewItemCount, 2);
+  assert.equal(state.previewStatus, 'ready');
+  for (let i = 0; i < 20; i++) {
+    api.setEarthHoveredIndex(-1);
+    api.setEarthHoveredIndex(0);
+  }
+  assert.equal(requests.length, 1, 'zone-edge jitter never refetches');
+  // Past the TTL the next hover refreshes.
+  clock += 31000;
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 2);
+  renderer.stopPreview();
+});
+
+test('hover preview cache is LRU-capped and briefly holds failures', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  const rows = Array.from({ length: 40 }, (_, i) => ({ slug: `zone-${i}`, name: `Zone ${i}`, lat: (i % 9) * 10 - 40, lon: i * 9 - 180, heat: 0.5 }));
+  api.setLocationActivity(rows);
+  for (let i = 0; i < 34; i++) {
+    api.setEarthHoveredIndex(i);
+    requests[i].resolve([{ url: `/media/${i}.mp4` }]);
+    await flushPromises();
+  }
+  assert.equal(requests.length, 34);
+  api.setEarthHoveredIndex(33);
+  api.setEarthHoveredIndex(2);
+  assert.equal(requests.length, 34, 'recent entries stay cached');
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 35, 'oldest entries were evicted');
+
+  // A failure is shown, then held so a flip-flop does not retry it.
+  api.setEarthHoveredIndex(36);
+  requests[35].reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+  await flushPromises();
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(36);
+  assert.equal(requests.length, 36);
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  clock += 6000;
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(36);
+  assert.equal(requests.length, 37, 'retried after the hold');
+  renderer.stopPreview();
+});
+
+test('an aborted hover preview after leaving a zone never reports an error', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity([
+    { slug: 'sydney-australia', name: 'Sydney, Australia', lat: -33.87, lon: 151.21, heat: 0.9 },
+    { slug: 'nyc-us', name: 'New York, US', lat: 40.71, lon: -74.0, heat: 0.9 },
+  ]);
+  // The host aborts the request after the ray left the zone.
+  const pending = api.loadEarthPreviewNow(0);
+  api.setEarthHoveredIndex(-1);
+  const abort = new Error('The operation was aborted.');
+  abort.name = 'AbortError';
+  requests[0].reject(abort);
+  await pending;
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  // Aborted requests are not cached: the next hover asks again.
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 2);
+  // An abort for the zone still under the ray settles to idle, not error.
+  const current = api.loadEarthPreviewNow(1);
+  await flushPromises();
+  assert.equal(requests[1].signal.aborted, true, 'superseded by the other zone');
+  requests[2].reject(abort);
+  await current;
+  assert.equal(api.getEarthState().previewStatus, 'idle');
   renderer.stopPreview();
 });
 
@@ -4968,6 +5107,65 @@ test('WORLD › location panel: RESET ROTATION button keeps the location and tur
   closeTo(st.focus.lon, 72.88, 1e-9);
   closeTo(focusFacing(renderer, api), 1, 1e-6);
   closeTo(screenNorthAlignment(renderer, api), 1, 1e-6);
+  renderer.stopPreview();
+});
+
+test('a ray resting on the location panel re-hovers the zone it left once, not every frame', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  let calls = 0;
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, {
+    onPreviewLocation: async () => { calls += 1; return [{ url: '/media/one.mp4', title: 'One' }]; },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  const api = renderer.__test;
+  await flushPromises();
+  api.setLocationActivity([{ slug: 'mumbai-india', name: 'Mumbai, India', lat: 19.07, lon: 72.88, heat: 0.9 }]);
+  api.setEarthZoom(64, { lat: 19.0, lon: 72.7 });
+  api.setEarthHoveredIndex(0);
+  await flushPromises();
+  for (let t = 1000; t < 1600; t += 200) renderer.__runScheduledFrame(t);
+  assert.equal(calls, 1);
+  const T = renderer.getThree();
+  const label = api.earthLabelMeshForTest();
+  label.updateMatrixWorld(true);
+  const H = 148, W = 640, halfH = 0.86 * H / W / 2;
+  const origin = new T.Vector3(0, 1.6, 0);
+  const world = label.localToWorld(new T.Vector3((532 / W - 0.5) * 0.86, (0.5 - 126 / H) * halfH * 2, 0));
+  const onLabel = world.sub(origin).normalize();
+  const sky = { x: 0, y: 1, z: 0 };
+  // Leave the zone across bare globe, then land on RESET ROTATION.
+  assert.equal(api.updateEarthHoverFromRay(origin, sky), -1);
+  assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  assert.equal(api.getEarthState().previewLocationIndex, 0, 'grace restored the zone just left');
+  // Resting on the panel: frames never refetch or re-hover.
+  for (let i = 0; i < 120; i++) {
+    clock += 11;
+    renderer.__runScheduledFrame(clock);
+    assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  }
+  assert.equal(api.getEarthState().previewLocationIndex, 0);
+  assert.equal(calls, 1);
+  // Panels move with the hover state, so a ray on a panel edge can flip
+  // panel ↔ bare globe every frame. The grace is spent after one restore.
+  let restores = 0;
+  for (let i = 0; i < 120; i++) {
+    clock += 11;
+    api.updateEarthHoverFromRay(origin, sky);
+    api.updateEarthHoverFromRay(origin, onLabel);
+    if (api.getEarthState().previewLocationIndex === 0) restores += 1;
+    await flushPromises();
+  }
+  assert.equal(restores, 0, 'the restore does not renew its own grace');
+  assert.equal(calls, 1);
+  // Hovering the zone itself re-arms the grace.
+  api.setEarthHoveredIndex(0);
+  api.updateEarthHoverFromRay(origin, sky);
+  assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  assert.equal(api.getEarthState().previewLocationIndex, 0);
+  assert.equal(calls, 1);
   renderer.stopPreview();
 });
 

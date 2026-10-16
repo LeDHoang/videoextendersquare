@@ -762,7 +762,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Earth async management
   let earthActivityGeneration = 0;
   let earthActivityAbort = null;
-  let earthPreviewAbortController = null;
 
   // 3D Objects & Meshes
   let screenMesh = null;
@@ -7900,10 +7899,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     const panelHit = earthHudPanelHit(origin, direction);
     setEarthPanelHover(panelHit);
     if (panelHit) {
-      if (earthHoveredIndex < 0 && earthRecentHover.index >= 0 &&
-          earthRecentHover.index < earthLocations.length &&
-          earthNowMs() - earthRecentHover.at < EARTH_PANEL_HOVER_GRACE_MS) {
-        setEarthHoveredIndex(earthRecentHover.index);
+      const recent = earthRecentHover;
+      if (earthHoveredIndex < 0 && !recent.used && recent.index >= 0 &&
+          recent.index < earthLocations.length &&
+          earthNowMs() - recent.at < EARTH_PANEL_HOVER_GRACE_MS) {
+        setEarthHoveredIndex(recent.index);
+        // One restore per departure, and it must not renew its own grace:
+        // the panels move with the hover state (pin keep-out, card
+        // separation), so a ray resting on a panel edge can flip panel ↔
+        // bare globe every frame, and a self-renewing grace re-hovered (and
+        // refetched) on every flip.
+        earthRecentHover = { index: recent.index, at: recent.at, used: true };
       }
       return panelHit.panel === 'card' ? 'preview' : 'label';
     }
@@ -7946,10 +7952,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (index >= 0 && sceneMode === 'earth' && xrSession) pulseInput(activeRayInputSource, 0.18, 35);
     }
     if (index < 0) {
-      if (earthPreviewAbortController) {
-        try { earthPreviewAbortController.abort(); } catch (e) {}
-        earthPreviewAbortController = null;
-      }
+      // Leaving does not abort: the server finishes a sync handler anyway,
+      // so the late result is kept in the cache for a re-hover. The
+      // generation bump keeps it off the closed card.
+      if (changed) earthPreviewGeneration += 1;
       earthPreviewStatus = 'idle';
       earthPreviewItems = [];
       resetEarthPreviewYaw(null);
@@ -7961,34 +7967,105 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // Hover previews are cached per location (TTL + LRU, like the poster
+  // cache) and an in-flight request is shared, so a hover flip-flop
+  // (A → -1 → A, zone-edge jitter, panel grace) never refetches. Client
+  // aborts do not stop the server's work, so only a different location
+  // starting abandons a request. Failures are held briefly too, so a
+  // struggling backend is not retried every frame.
+  const EARTH_PREVIEW_CACHE_TTL_MS = 30000;
+  const EARTH_PREVIEW_ERROR_TTL_MS = 5000;
+  const EARTH_PREVIEW_CACHE_MAX = 32;
+  const earthPreviewCache = new Map(); // key → { items, error, at, promise }
+  let earthPreviewInflight = null;     // { key, entry, controller }
+  function earthPreviewKey(loc) {
+    if (!loc) return '';
+    if (loc.slug) return 'slug:' + loc.slug;
+    return 'loc:' + (loc.name || '') + '@' + loc.lat + ',' + loc.lon;
+  }
+  function earthPreviewCacheStore(key, entry) {
+    earthPreviewCache.delete(key); // re-insert = most recently used
+    earthPreviewCache.set(key, entry);
+    if (earthPreviewCache.size > EARTH_PREVIEW_CACHE_MAX) earthPreviewCache.delete(earthPreviewCache.keys().next().value);
+  }
+  function isEarthPreviewAbort(error, signal) {
+    return !!((error && error.name === 'AbortError') || (signal && signal.aborted));
+  }
+  function applyEarthPreviewItems(items) {
+    earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
+    earthPreviewIndex = 0;
+    earthPreviewCycleAt = -1;
+    earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
+  }
+
   function loadEarthPreviewForIndex(index, generation) {
     if (index < 0 || index >= earthLocations.length) return Promise.resolve([]);
-    if (earthPreviewAbortController) {
-      try { earthPreviewAbortController.abort(); } catch (e) {}
-    }
-    earthPreviewAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const signal = earthPreviewAbortController ? earthPreviewAbortController.signal : null;
+    if (!callbacks.onPreviewLocation) return Promise.resolve([]);
     const loc = earthLocations[index];
-    earthPreviewStatus = 'loading';
-    if (callbacks.onPreviewLocation) {
-      return Promise.resolve(callbacks.onPreviewLocation(loc, { signal }))
-        .then((items) => {
-          if (earthPreviewGeneration === generation && (!signal || !signal.aborted)) {
-            earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
-            earthPreviewIndex = 0;
-            earthPreviewCycleAt = -1;
-            earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
-          }
-          return earthPreviewItems;
-        })
-        .catch(() => {
-          if (earthPreviewGeneration === generation) {
-            earthPreviewStatus = 'error';
-          }
-          return [];
-        });
+    const key = earthPreviewKey(loc);
+    const now = earthNowMs();
+    let entry = earthPreviewCache.get(key) || null;
+    if (entry && !entry.promise) {
+      const ttl = entry.error ? EARTH_PREVIEW_ERROR_TTL_MS : EARTH_PREVIEW_CACHE_TTL_MS;
+      if (now - entry.at < ttl) {
+        // Fresh hit: applied synchronously, no request.
+        earthPreviewCacheStore(key, entry);
+        if (earthPreviewGeneration === generation) {
+          if (entry.error) earthPreviewStatus = 'error';
+          else applyEarthPreviewItems(entry.items);
+        }
+        return Promise.resolve(entry.error ? [] : earthPreviewItems);
+      }
+      entry = null;
     }
-    return Promise.resolve([]);
+    if (!entry) {
+      const inflight = earthPreviewInflight;
+      if (inflight && inflight.key !== key) {
+        // A different location supersedes the one still loading.
+        earthPreviewInflight = null;
+        if (earthPreviewCache.get(inflight.key) === inflight.entry) earthPreviewCache.delete(inflight.key);
+        if (inflight.controller) { try { inflight.controller.abort(); } catch (e) {} }
+      }
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const signal = controller ? controller.signal : null;
+      const created = { items: null, error: false, at: now, promise: null };
+      let request;
+      try { request = Promise.resolve(callbacks.onPreviewLocation(loc, { signal })); }
+      catch (e) { request = Promise.reject(e); }
+      created.promise = request.then((items) => {
+        const list = Array.isArray(items) ? items.slice(0, 3) : [];
+        if (earthPreviewCache.get(key) === created) {
+          created.items = list;
+          created.at = earthNowMs();
+          created.promise = null;
+        }
+        return list;
+      }, (error) => {
+        if (earthPreviewCache.get(key) === created) {
+          if (isEarthPreviewAbort(error, signal)) {
+            earthPreviewCache.delete(key);
+          } else {
+            created.error = true;
+            created.at = earthNowMs();
+            created.promise = null;
+          }
+        }
+        throw error;
+      }).finally(() => {
+        if (earthPreviewInflight && earthPreviewInflight.entry === created) earthPreviewInflight = null;
+      });
+      earthPreviewInflight = { key, entry: created, controller };
+      earthPreviewCacheStore(key, created);
+      entry = created;
+    }
+    if (earthPreviewGeneration === generation) earthPreviewStatus = 'loading';
+    return entry.promise.then((list) => {
+      if (earthPreviewGeneration === generation) applyEarthPreviewItems(list);
+      return earthPreviewItems;
+    }, (error) => {
+      if (earthPreviewGeneration === generation) earthPreviewStatus = isEarthPreviewAbort(error) ? 'idle' : 'error';
+      return [];
+    });
   }
 
   // Zone tap → location reel playlist (upstream selectEarthLocation
