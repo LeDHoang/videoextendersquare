@@ -486,8 +486,11 @@ test('hover preview flip-flop A → -1 → A within the TTL sends one request', 
   const api = renderer.__test;
   api.setLocationActivity([{ slug: 'hanoi-vietnam', name: 'Hanoi, Vietnam', lat: 21.03, lon: 105.85, heat: 0.9 }]);
   const rows = [{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }];
+  const rest = (i) => { api.setEarthHoveredIndex(i); clock += 250; api.tickEarthPreviewDwell(); };
 
   api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 0, 'an uncached zone waits out the dwell');
+  rest(0);
   assert.equal(requests.length, 1);
   // Leaving keeps the request alive (the server finishes it regardless).
   api.setEarthHoveredIndex(-1);
@@ -520,6 +523,8 @@ test('hover preview flip-flop A → -1 → A within the TTL sends one request', 
   clock += 31000;
   api.setEarthHoveredIndex(-1);
   api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1, 'a stale entry waits out the dwell too');
+  rest(0);
   assert.equal(requests.length, 2);
   renderer.stopPreview();
 });
@@ -536,8 +541,9 @@ test('hover preview cache is LRU-capped and briefly holds failures', async () =>
   const api = renderer.__test;
   const rows = Array.from({ length: 40 }, (_, i) => ({ slug: `zone-${i}`, name: `Zone ${i}`, lat: (i % 9) * 10 - 40, lon: i * 9 - 180, heat: 0.5 }));
   api.setLocationActivity(rows);
+  const rest = (i) => { api.setEarthHoveredIndex(i); clock += 250; api.tickEarthPreviewDwell(); };
   for (let i = 0; i < 34; i++) {
-    api.setEarthHoveredIndex(i);
+    rest(i);
     requests[i].resolve([{ url: `/media/${i}.mp4` }]);
     await flushPromises();
   }
@@ -545,11 +551,11 @@ test('hover preview cache is LRU-capped and briefly holds failures', async () =>
   api.setEarthHoveredIndex(33);
   api.setEarthHoveredIndex(2);
   assert.equal(requests.length, 34, 'recent entries stay cached');
-  api.setEarthHoveredIndex(0);
+  rest(0);
   assert.equal(requests.length, 35, 'oldest entries were evicted');
 
   // A failure is shown, then held so a flip-flop does not retry it.
-  api.setEarthHoveredIndex(36);
+  rest(36);
   requests[35].reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
   await flushPromises();
   assert.equal(api.getEarthState().previewStatus, 'error');
@@ -559,15 +565,16 @@ test('hover preview cache is LRU-capped and briefly holds failures', async () =>
   assert.equal(api.getEarthState().previewStatus, 'error');
   clock += 6000;
   api.setEarthHoveredIndex(-1);
-  api.setEarthHoveredIndex(36);
+  rest(36);
   assert.equal(requests.length, 37, 'retried after the hold');
   renderer.stopPreview();
 });
 
 test('an aborted hover preview after leaving a zone never reports an error', async () => {
   const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
   const { requests, onPreviewLocation } = deferredPreviews();
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, now: () => clock });
   renderer.init(null, { onPreviewLocation });
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.setSceneMode('earth');
@@ -585,8 +592,10 @@ test('an aborted hover preview after leaving a zone never reports an error', asy
   requests[0].reject(abort);
   await pending;
   assert.equal(api.getEarthState().previewStatus, 'idle');
-  // Aborted requests are not cached: the next hover asks again.
+  // Aborted requests are not cached: the next hover asks again (after the dwell).
   api.setEarthHoveredIndex(0);
+  clock += 250;
+  api.tickEarthPreviewDwell();
   assert.equal(requests.length, 2);
   // An abort for the zone still under the ray settles to idle, not error.
   const current = api.loadEarthPreviewNow(1);
@@ -595,6 +604,113 @@ test('an aborted hover preview after leaving a zone never reports an error', asy
   requests[2].reject(abort);
   await current;
   assert.equal(api.getEarthState().previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+// Hover dwell: an uncached zone must be rested on for ~200 ms before its
+// first request, so a fast sweep across many zones sends none (the server
+// keeps working on a sync handler even after the client aborts).
+async function previewDwellHarness() {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity(Array.from({ length: 6 }, (_, i) => ({
+    slug: `zone-${i}`, name: `Zone ${i}`, lat: i * 10 - 25, lon: i * 20 - 50, heat: 0.7,
+  })));
+  // Hold the current hover for `ms`, with a frame tick every 20 ms.
+  const hold = (ms) => {
+    for (let t = 0; t < ms; t += 20) { clock += 20; api.tickEarthPreviewDwell(); }
+  };
+  return { renderer, api, requests, hold, advance: (ms) => { clock += ms; } };
+}
+
+test('a sweep across zones, each shorter than the dwell, sends no request', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  for (let i = 0; i < 5; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(160);
+    assert.equal(api.getEarthState().previewStatus, 'loading', `zone ${i} shows the card loading`);
+  }
+  api.setEarthHoveredIndex(-1);
+  hold(400);
+  assert.equal(requests.length, 0, 'five zones swept, zero requests');
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+test('resting past the dwell on the last swept zone sends exactly one request', async () => {
+  const { renderer, api, requests, hold, advance } = await previewDwellHarness();
+  for (let i = 0; i < 4; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(120);
+  }
+  api.setEarthHoveredIndex(4);
+  hold(180);
+  assert.equal(requests.length, 0, 'still inside the dwell');
+  advance(20);
+  renderer.__runScheduledFrame(48); // the render-loop frame is a tick too
+  assert.equal(requests.length, 1, 'dwell reached');
+  assert.equal(requests[0].slug, 'zone-4', 'only the zone rested on is requested');
+  hold(2000);
+  assert.equal(requests.length, 1, 'holding still never refetches');
+  requests[0].resolve([{ url: '/media/one.mp4', title: 'One' }]);
+  await flushPromises();
+  const state = api.getEarthState();
+  assert.equal(state.previewStatus, 'ready');
+  assert.equal(state.previewLocationIndex, 4);
+  assert.equal(state.previewItemCount, 1);
+  renderer.stopPreview();
+});
+
+test('a cached or in-flight zone shows immediately, with no dwell and no new request', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  api.setEarthHoveredIndex(0);
+  hold(220);
+  assert.equal(requests.length, 1);
+  // Moving on before it settles shares it again with no wait.
+  api.setEarthHoveredIndex(1);
+  hold(60);
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1, 'in-flight request is shared at once');
+  assert.equal(api.getEarthState().previewStatus, 'loading');
+  requests[0].resolve([{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }]);
+  await flushPromises();
+  assert.equal(api.getEarthState().previewItemCount, 2);
+  // Sweep away across uncached zones, then come back inside the TTL.
+  for (let i = 1; i < 5; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(100);
+  }
+  api.setEarthHoveredIndex(0);
+  const state = api.getEarthState();
+  assert.equal(state.previewStatus, 'ready', 'applied synchronously on landing');
+  assert.equal(state.previewItemCount, 2);
+  assert.equal(requests.length, 1, 'cache hit: no request, no dwell');
+  renderer.stopPreview();
+});
+
+test('a held failure shows at once and a ray that leaves mid-dwell cancels the fetch', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  api.setEarthHoveredIndex(2);
+  hold(220);
+  requests[0].reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+  await flushPromises();
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(2);
+  assert.equal(api.getEarthState().previewStatus, 'error', 'failure hold applies without a dwell');
+  assert.equal(requests.length, 1);
+  api.setEarthHoveredIndex(3);
+  hold(180);
+  api.setEarthHoveredIndex(-1);
+  hold(600);
+  assert.equal(requests.length, 1, 'leaving inside the dwell never fetches');
   renderer.stopPreview();
 });
 
@@ -3469,7 +3585,8 @@ test('hover choke point resolves zones and fires previews on any ray', async () 
   // paths now share updateEarthHoverFromRay.
   const gl = makeMockGl({ deleted: 0 });
   let requestedLocation = null;
-  const renderer = loadRenderer({ gl });
+  let clock = 1000;
+  const renderer = loadRenderer({ gl, now: () => clock });
   renderer.init(null, {
     onPreviewLocation: async (location) => {
       requestedLocation = location.slug;
@@ -3495,6 +3612,11 @@ test('hover choke point resolves zones and fires previews on any ray', async () 
   const surf = { x: st.liveCenter.x + n.x * R, y: st.liveCenter.y + n.y * R, z: st.liveCenter.z + n.z * R };
   const origin = { x: surf.x + n.x * 2, y: surf.y + n.y * 2, z: surf.z + n.z * 2 };
   const ray = { x: -n.x, y: -n.y, z: -n.z };
+  assert.equal(api.updateEarthHoverFromRay(origin, ray), 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requestedLocation, null, 'the first fetch waits out the dwell');
+  // The same per-frame hover call fires it once the ray has rested.
+  clock += 250;
   assert.equal(api.updateEarthHoverFromRay(origin, ray), 0);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(requestedLocation, 'zone-a');
@@ -4561,10 +4683,12 @@ test('hovering a heat zone autoplays the first reel muted once the hover settles
   const { renderer, api, videos, setClock } = previewAutoplayHarness();
   setClock(0);
   api.setEarthHoveredIndex(0);
-  await new Promise((r) => setTimeout(r, 10)); // preview items resolve
   setClock(100);
   renderer.__runScheduledFrame(1000);
   assert.equal(videos.length, 0, 'a sweeping laser never spins up a decoder (350 ms settle)');
+  setClock(250);
+  renderer.__runScheduledFrame(1500); // dwell passed: the frame sends the fetch
+  await new Promise((r) => setTimeout(r, 10)); // preview items resolve
   setClock(500);
   renderer.__runScheduledFrame(2000);
   assert.equal(videos.length, 1, 'settled hover starts exactly one video');
@@ -4593,6 +4717,8 @@ test('autoplay respects reduced motion and falls back to the poster when a clip 
   calm.renderer.setReducedMotion(true);
   calm.setClock(0);
   calm.api.setEarthHoveredIndex(0);
+  calm.setClock(250);
+  calm.renderer.__runScheduledFrame(1500);
   await new Promise((r) => setTimeout(r, 10));
   calm.setClock(900);
   calm.renderer.__runScheduledFrame(2000);
@@ -4602,6 +4728,8 @@ test('autoplay respects reduced motion and falls back to the poster when a clip 
   const flaky = previewAutoplayHarness();
   flaky.setClock(0);
   flaky.api.setEarthHoveredIndex(0);
+  flaky.setClock(250);
+  flaky.renderer.__runScheduledFrame(1500);
   await new Promise((r) => setTimeout(r, 10));
   flaky.setClock(900);
   flaky.renderer.__runScheduledFrame(2000);
@@ -5125,8 +5253,9 @@ test('a ray resting on the location panel re-hovers the zone it left once, not e
   api.setLocationActivity([{ slug: 'mumbai-india', name: 'Mumbai, India', lat: 19.07, lon: 72.88, heat: 0.9 }]);
   api.setEarthZoom(64, { lat: 19.0, lon: 72.7 });
   api.setEarthHoveredIndex(0);
-  await flushPromises();
+  clock += 250; // dwell passes; the frame sends the one fetch
   for (let t = 1000; t < 1600; t += 200) renderer.__runScheduledFrame(t);
+  await flushPromises();
   assert.equal(calls, 1);
   const T = renderer.getThree();
   const label = api.earthLabelMeshForTest();

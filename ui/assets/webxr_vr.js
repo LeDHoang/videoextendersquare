@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.21-20261016-earth-preview-cache';
+  const VR_VERSION = 'v8.22-20261016-earth-preview-dwell';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -3078,6 +3078,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     updateEarthTiles(time);
     ensureEarthBezel();
     updateEarthBezel();
+    tickEarthPreviewDwell(); // desktop pointer rests send no hover updates
     updateEarthPreviewBillboard(time);
   }
 
@@ -7891,6 +7892,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function updateEarthHoverFromRay(origin, direction) {
+    const result = updateEarthHoverFromRayNow(origin, direction);
+    tickEarthPreviewDwell(); // after this frame's hover is settled
+    return result;
+  }
+
+  function updateEarthHoverFromRayNow(origin, direction) {
     if (sceneMode !== 'earth' || !origin || !direction) return -1;
     // Pointing at a panel keeps its location: the ray leaving the zone to
     // reach a button must not close the card or blank the WORLD › title. A
@@ -7945,6 +7952,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthHoveredIndex = index;
     earthPreviewLocationIndex = index;
     if (changed) {
+      earthPreviewPending = null; // any hover change abandons a dwell in progress
       earthPreviewHoverSince = index >= 0 ? earthNowMs() : -1;
       earthPreviewVideoFailed = '';
       if (earthPreviewVideo) disposeEarthPreviewVideo();
@@ -7960,10 +7968,18 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthPreviewItems = [];
       resetEarthPreviewYaw(null);
     } else if (changed && sceneMode === 'earth') {
-      // Hovering a new zone fetches its reels for the 3D billboard
-      // (upstream scheduleEarthPreview; change-guarded, no per-move spam).
+      // Hovering a new zone shows its reels on the 3D billboard (upstream
+      // scheduleEarthPreview; change-guarded, no per-move spam). A cached or
+      // already-loading zone applies/shares at once; an uncached one waits
+      // out the dwell first, so sweeping across N zones sends no request
+      // (the server cannot cancel a sync handler once it has started).
       earthPreviewGeneration += 1;
-      loadEarthPreviewForIndex(index, earthPreviewGeneration);
+      if (earthPreviewWouldFetch(index)) {
+        earthPreviewPending = { index, generation: earthPreviewGeneration };
+        earthPreviewStatus = 'loading';
+      } else {
+        loadEarthPreviewForIndex(index, earthPreviewGeneration);
+      }
     }
   }
 
@@ -7976,6 +7992,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const EARTH_PREVIEW_CACHE_TTL_MS = 30000;
   const EARTH_PREVIEW_ERROR_TTL_MS = 5000;
   const EARTH_PREVIEW_CACHE_MAX = 32;
+  // Rest time on an uncached zone before its first request; the per-frame
+  // hover path (tickEarthPreviewDwell) checks it against earthPreviewHoverSince.
+  const EARTH_PREVIEW_FETCH_DWELL_MS = 200;
+  let earthPreviewPending = null;      // { index, generation } waiting out the dwell
   const earthPreviewCache = new Map(); // key → { items, error, at, promise }
   let earthPreviewInflight = null;     // { key, entry, controller }
   function earthPreviewKey(loc) {
@@ -7987,6 +8007,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthPreviewCache.delete(key); // re-insert = most recently used
     earthPreviewCache.set(key, entry);
     if (earthPreviewCache.size > EARTH_PREVIEW_CACHE_MAX) earthPreviewCache.delete(earthPreviewCache.keys().next().value);
+  }
+  // True when loading this zone would send a new request: no fresh cache
+  // entry (result or held failure) and nothing in flight to share.
+  function earthPreviewWouldFetch(index) {
+    if (index < 0 || index >= earthLocations.length || !callbacks.onPreviewLocation) return false;
+    const entry = earthPreviewCache.get(earthPreviewKey(earthLocations[index]));
+    if (!entry) return true;
+    if (entry.promise) return false;
+    return earthNowMs() - entry.at >= (entry.error ? EARTH_PREVIEW_ERROR_TTL_MS : EARTH_PREVIEW_CACHE_TTL_MS);
+  }
+  function tickEarthPreviewDwell() {
+    const pending = earthPreviewPending;
+    if (!pending) return;
+    if (sceneMode !== 'earth' || earthHoveredIndex !== pending.index || earthPreviewGeneration !== pending.generation) {
+      earthPreviewPending = null;
+      return;
+    }
+    if (earthPreviewHoverSince < 0 || earthNowMs() - earthPreviewHoverSince < EARTH_PREVIEW_FETCH_DWELL_MS) return;
+    earthPreviewPending = null;
+    loadEarthPreviewForIndex(pending.index, pending.generation);
   }
   function isEarthPreviewAbort(error, signal) {
     return !!((error && error.name === 'AbortError') || (signal && signal.aborted));
@@ -9445,6 +9485,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     disposeEarthPreviewVideo();
     earthPreviewVideoFailed = '';
     earthPreviewHoverSince = -1;
+    earthPreviewPending = null;
     reticleMesh = null;
     laserLine = null;
     controlsCanvas = null;
@@ -10368,6 +10409,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       updateEarthHoverFromRay,
       setLocationActivity,
       setEarthHoveredIndex,
+      tickEarthPreviewDwell,
       selectEarthLocation,
       beginEarthDrag,
       updateEarthDrag,
