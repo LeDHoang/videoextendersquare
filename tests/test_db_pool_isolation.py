@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
@@ -166,6 +167,8 @@ AUTHENTICATED_CASES = [
     ("comments", lambda seed: ("/api/reels/comments", {"video_path": seed["media_path"]})),
     ("feed-post-author", lambda seed: ("/api/reels/feed", {"post": seed["post_id"], "author": "pooluser"})),
     ("feed-post-following", lambda seed: ("/api/reels/feed", {"post": seed["post_id"], "feed": "following"})),
+    ("search-suggestions", lambda seed: ("/api/search/suggestions", {"q": "night"})),
+    ("search-suggestions-empty-query", lambda seed: ("/api/search/suggestions", {})),
 ]
 
 
@@ -286,3 +289,81 @@ def test_payload_fallbacks_do_not_requery_after_a_failed_batch_lookup(tmp_path, 
     # One batched lookup; a failure must not fan out into per-item retries
     # that each wait out another pool timeout.
     assert calls == {"reel_records": 1, "metadata_for_paths": 0}
+
+
+def test_search_suggestions_reuse_the_request_session_for_tags(tmp_path, monkeypatch):
+    # The route queried its request db, then called the reels tag helpers
+    # without it: each opened a second SessionLocal() while the first
+    # connection was still checked out (peak 2 -> deadlock under load).
+    app = build_app(tmp_path, monkeypatch, pool_size=1, max_overflow=0, pool_timeout=1)
+    probe = app.state.probe
+    with TestClient(app) as client:
+        register_and_seed(app, client)
+        probe.reset()
+        response = client.get("/api/search/suggestions", params={"q": "night"})
+        assert response.status_code == 200, response.text
+        assert probe.peak <= 1, f"{probe.peak} connections checked out by one request"
+        assert [tag["slug"] for tag in response.json()["tags"]] == ["night-city"]
+        assert probe.current == 0
+
+        # Anonymous callers take the same path.
+        client.cookies.clear()
+        probe.reset()
+        response = client.get("/api/search/suggestions", params={"q": "night"})
+        assert response.status_code == 200, response.text
+        assert probe.peak <= 1
+        assert [tag["slug"] for tag in response.json()["tags"]] == ["night-city"]
+    app.state.engine.dispose()
+
+
+def test_concurrent_search_suggestions_share_a_single_connection_pool(tmp_path, monkeypatch):
+    app = build_app(tmp_path, monkeypatch, pool_size=1, max_overflow=0, pool_timeout=1)
+    with TestClient(app) as client:
+        register_and_seed(app, client)
+        cookies = dict(client.cookies)
+    workers = 6
+    barrier = threading.Barrier(workers)
+    statuses: list[int] = []
+    errors: list[BaseException] = []
+
+    def worker():
+        try:
+            worker_client = TestClient(app, cookies=cookies)
+            barrier.wait(timeout=10)
+            statuses.append(worker_client.get("/api/search/suggestions", params={"q": "night"}).status_code)
+        except BaseException as exc:  # noqa: BLE001 - surface any pool timeout to the test thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors, errors
+    assert statuses == [200] * workers
+    assert app.state.probe.current == 0
+    app.state.engine.dispose()
+
+
+def _failing_lookup(*_args, **_kwargs):
+    raise OperationalError("SELECT posts", {}, Exception("server closed the connection unexpectedly"))
+
+
+@pytest.mark.parametrize("lookup", ["metadata_for_paths", "slide_media_paths"])
+def test_search_suggestions_surface_a_failed_reels_lookup_as_503(tmp_path, monkeypatch, lookup):
+    # A failed reels lookup must stay a retryable 503 (never an empty tag
+    # list that looks like "no matches") and must still release its connection.
+    app = build_app(tmp_path, monkeypatch, pool_size=1, max_overflow=0, pool_timeout=1)
+    probe = app.state.probe
+    with TestClient(app) as client:
+        register_and_seed(app, client)
+        monkeypatch.setattr(reels, lookup, _failing_lookup)
+        probe.reset()
+        response = client.get("/api/search/suggestions", params={"q": "night"})
+        assert response.status_code == 503, response.text
+        assert response.headers["retry-after"] == str(reels.REEL_DATA_RETRY_AFTER_SECONDS)
+        assert set(response.json()) == {"detail"}
+        assert probe.peak <= 1
+        assert probe.current == 0
+    app.state.engine.dispose()

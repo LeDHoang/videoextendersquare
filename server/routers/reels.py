@@ -2000,17 +2000,30 @@ def reels_feed(
     )
 
 
-@router.get("/tags")
-def list_reel_tags(q: str = "", limit: int = 8):
-    """Return ranked tag suggestions for header search and discovery UI."""
+def tag_suggestions(q: str = "", limit: int = 8, db: Session | None = None) -> dict:
+    """Ranked tag suggestions; callers holding a request ``db`` pass it.
+
+    Without ``db`` each helper opens its own session (safe: sequential). A
+    caller that already has a pooled connection checked out must pass its
+    session, or the helpers wait for a second connection while holding the
+    first (the nested pool-hold of tests/test_db_pool_isolation.py).
+    """
     bounded_limit = max(1, min(int(limit), 20))
-    hidden_paths = unavailable_media_paths_for_viewer(None)
-    catalog, contexts = _tag_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
+    hidden_paths = unavailable_media_paths_for_viewer(None, db=db)
+    catalog, contexts = _tag_catalog(
+        [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths], db
+    )
     return {
         "query": q,
         "strategy": "metadata-v1",
         "tags": _rank_tag_catalog(catalog, contexts, q, bounded_limit),
     }
+
+
+@router.get("/tags")
+def list_reel_tags(q: str = "", limit: int = 8):
+    """Return ranked tag suggestions for header search and discovery UI."""
+    return tag_suggestions(q, limit)
 
 
 @router.get("/tags/{tag_name}")

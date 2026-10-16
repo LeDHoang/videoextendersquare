@@ -1482,7 +1482,7 @@ def search_suggestions(
             for user in candidates
         ]
 
-    tag_rows = reels_router.list_reel_tags(q=query, limit=bounded).get("tags", [])
+    tag_rows = reels_router.tag_suggestions(q=query, limit=bounded, db=db).get("tags", [])
 
     posts = []
     if key:
