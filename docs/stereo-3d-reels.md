@@ -1,6 +1,6 @@
 # 3D Reels — stereoscopic SBS + top-bottom posts
 
-Branch: `3dreels` (cut from `origin/main` @ `dcaa4e4`). Status: **implemented; on-device Quest check pending**.
+Branch: `3dreels` (cut from `origin/main` @ `dcaa4e4`). Status: **implemented; verified on a Quest 3S (per-eye output, swap, pacing, TB decode); perceived depth still needs a hands-on check**.
 This file is the full plan **and** the living checklist. Tick items and record deviations as work lands.
 
 ## Goal
@@ -113,7 +113,7 @@ Per-eye meshes already give true stereo.
 - [x] **Upload Studio:** the 3D toggle (auto-on when detected), the skip path, the stage preview, the slideshow rule, the batch warning, the `mediaFormat` helpers, the 3D badges, and a rebuild of the prod bundle.
 - [x] **Tests:** `tests/test_stereo_posts.py`, `tests/test_stereo_detect.py`, `web/tests/reels-stereo.test.js`, the `webxr-earth.test.js` cases, and the `UploadPage.test.jsx` cases.
 - [x] **Docs:** this file, the partial ticks in the `docs/todolist.md` Phase 1 items, and the schema revision mentions.
-- [~] **Verification:** `make test`; browser checks for upload, 2D, grids and the split-stereo preview; the IWER emulator flows; on-device Quest checks for depth, swap, frame pacing and the TB proxy decode.
+- [~] **Verification:** `make test`; browser checks for upload, 2D, grids and the split-stereo preview; the IWER emulator flows; on-device Quest checks for depth, swap, frame pacing and the TB proxy decode. Everything is done except a person checking perceived depth in the headset.
 
 ## Notes / deviations
 
@@ -299,3 +299,86 @@ The seed above was extended with 10 real-footage posts made from local SBS sampl
 - perceived depth;
 - frame pacing at 2048/eye;
 - TB 2048×4096 H.264 decode on the device.
+
+Frame pacing and the TB decode are now covered by the on-device check below. Perceived depth still needs a person in the headset.
+
+### On-device Quest check (Quest 3S, Quest Browser 152 / Chrome 152, 2026-10-16)
+
+**Setup.**
+- The Quest 3S was on USB (adb) and held awake with the `vrpowermanager.prox_close` broadcast.
+- Quest Browser was driven from the Mac over CDP (`adb forward tcp:9222 localabstract:chrome_devtools_remote`).
+- `adb reverse` for 5183/8010 let the headset load `http://localhost:5183`, which is a secure origin for WebXR.
+- It ran on the same isolated stack: backend :8010 and Vite :5183, with a DB snapshot and an APFS clone of `output/`.
+- The seed above was extended with two tinted samples:
+  - a TB clip at 2160×4320, top red and bottom blue, which forces the 2048×4096 proxy;
+  - a 2-slide tinted SBS still post.
+
+**Entering VR.**
+- CDP `Runtime.evaluate` with `userGesture: true` clicks `#vrBtn`.
+- The first entry shows Quest Browser's "Allow localhost:5183 to open immersive experiences?" prompt. `Browser.grantPermissions(['vr'])` does not cover it, so Allow was tapped on the native button through `adb shell input tap`.
+- Later entries need no prompt.
+
+**Eye-buffer captures.** Captures come from `adb exec-out screencap`, which records both eye buffers. Each one used as proof differs from the previous capture or shows content not seen before (see the stale-capture note).
+
+**Passed.**
+- **True per-eye stereo on the device.** The tinted SBS video, the tinted SBS stills and the tinted TB clip (on its 2048×4096 proxy) all show red in the left eye and blue in the right. For example, TB read left (75, 27, 27) and right (10, 27, 97). So the SBS left half reaches the left eye, and the TB top half reaches the left eye.
+- **Engine state on all six 3D posts.**
+  - `sourceStereo` / `textureStereo` follow each layout.
+  - Canvas is 4096×2048 for SBS and 2048×4096 for TB.
+  - Offsets are L(0,0) R(0.5,0) for SBS and L(0,0.5) R(0,0) for TB.
+  - The mono material is hidden while presenting, and `getLastRenderError` stayed empty.
+- **2D on the Quest.** The deep link `/reels?post=<id>` plays the `-mono` rendition (1920², or 2160² for the big TB clip), and both eyes see only the red left eye.
+- **Enter/exit swap.**
+  - Exiting while paused at 3.2 s returns to `-mono` 1920² at 3.2 s, still paused.
+  - Re-entering keeps the playhead (4.1 s) but resumes playback. `enterVR` deliberately unmutes and plays every reel on entry (`webxr_vr.js` "Entered immersive session"), so this is not 3D-specific.
+- **Frame pacing.** Measured over 4 s windows with the display at 90 Hz.
+  - Every 3D post ran at 86–90 fps, with p95 frame times of 12.3–14.4 ms.
+  - Videos upload every decoded frame (29–33/s) with 0 dropped frames. Stills upload nothing.
+  - Pacing was unchanged with screencaps running.
+- **`stereoEye` 1536 vs 2048.** 3072×1536 gave 86.3 fps (p95 13.4 ms); 4096×2048 gave 86.5–87 fps (p95 ~14 ms). There is no measurable difference, so 2048 stays the default.
+- **TB 2048×4096 H.264 proxy decode.** It decodes on the Quest 3S: 120 frames per 4 s, 0 dropped, at 86 fps. The planned fallback cap at 1920×3840 is not needed.
+- **Video↔image switch.**
+  - Video→image takes 46 ms once the image is cached; image→video takes 173 ms to the first upload.
+  - A first, uncached 3840×1920 JPEG over USB takes longer. The previous frame holds meanwhile (the existing first-frame hold).
+- **Earth.**
+  - Opening Earth hides the screen and both eye meshes.
+  - Selecting Hanoi returns to reels on its location feed with the stereo source, and stepping the feed switches between `sbs` and `tb` per item.
+  - `ALL LOCATIONS` restores the feed and stays in stereo.
+- **Comments.**
+  - The comments panel opens over the stereo screen, and the eye meshes stay visible.
+  - The pop-up overlay shows 1 → 2 → 3 popups at 1.0 s, 2.0 s and 3.5 s over the SBS video.
+- **Pack in VR.** 1/5 SBS video (stereo, 86 fps) → 2/5 TB → 3/5 3D stills → 4/5 and 5/5 mono images → end static card.
+  - The mono items and the card switch to the 2048² mono map with the eye meshes hidden.
+  - Stepping back switches mono → stereo again.
+
+**Parallax check (objective depth geometry).** This checks that the headset renders the parallax the author put in the file. It does not judge felt depth.
+- **Method.**
+  - Take a `screencap` of the eye buffers (3664×1920, left and right halves) while a natural-footage 3D post plays, and find the source frame it shows.
+  - Fit a SIFT + CLAHE homography per eye from the source half to the eye buffer.
+  - Match features between the two eyes, map them back into source space, and compare the rendered left-to-right disparity with the authored one.
+- **Samples.**
+  - SBS video, 4 captures of one frame.
+  - TB clip (made from the same footage), 13 captures of two frames.
+  - The screencap freezes on one frame per session, so this is 3 distinct frames in all.
+- **Result: all three pass.**
+  - Rendered disparity equals authored disparity. Slope is 0.97–1.01 for TB frame f050, and about 1.0 for SBS and for TB frame f103.
+  - The median error is under 1 px of source resolution, and the vertical misalignment is under 1.5 px (0.5–0.7 px on f050).
+  - Eye order is correct. With the right eye sampled as the left, agreement drops to about 3–7% for TB f050 (correct order: 78–90%) and about 4% for SBS (correct order: 43–65%). The chance baseline is about 25%. A swapped-eye check on TB f103 sat between 0% and 35%, against 82–95% correct.
+- **Comfort geometry** (screen scale 4, so about 4 m wide at about 2.24 m, about 2.08 mm per source pixel, IPD assumed 63 mm).
+  - All authored parallax is crossed, so content sits in front of the screen and nothing diverges.
+  - Median parallax is about 12–15 px (about 26 mm), which puts content at about 1.6 m.
+  - The 95th percentile is about 50 px (about 104 mm), about 2.6% of the image width, at about 0.85 m.
+  - These extremes come from the lightbike footage, not from the renderer. A close pop-out like this is where a person is most likely to feel eye strain.
+
+**Not verified on the device.**
+- **Perceived depth and comfort.** The parallax geometry is verified above, but felt depth, fusion and eye strain need a person in the headset.
+- **Earth hover preview card.** With nobody holding it, a tracked controller's ray still resets the hover every frame, so the card cannot be driven over CDP. It uses mono assets only and passed in the emulated XR run.
+
+**Observations.**
+- **One transient slowdown, not reproduced.**
+  - Early in the session, right after a burst of CDP canvas readbacks and screencaps, XR ran at 11–19 fps for about a minute, with about 9 uploads/s.
+  - It did not recur in 14 later runs, including the same Earth → location-feed sequence.
+  - The battery was at about 8% and charging at the time. Watch for stutter during the hands-on check.
+- **Quest `screencap` can return a stale frame for minutes during WebXR.** It returned identical pixels while the app showed other content, and an in-page read of the stereo canvas confirmed the app was correct. Only trust a capture that differs from the previous one or shows new content.
+- **Detection.** The tinted TB sample scored 0.69, below the 0.72 threshold, which is expected with a different tint per eye. It was published with an explicit `tb`.
+- **Pack mode stays on AUTO.** The mode toggle does not apply there; this is existing behaviour.
