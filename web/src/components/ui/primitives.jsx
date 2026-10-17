@@ -72,7 +72,8 @@ export function SpecRow({ cells = [] }) {
 }
 
 export function AccentBlock({ title, lines = [], tone = 'accent', code = [] }) {
-  const toneClass = tone === 'warn' ? 'sx-warn' : tone === 'danger' ? 'sx-danger' : '';
+  const toneClass =
+    tone === 'warn' ? 'sx-warn' : tone === 'danger' ? 'sx-danger' : tone === 'muted' ? 'sx-muted' : '';
   return (
     <div className={`sx-accent-block ${toneClass}`} role="note">
       <div className="sx-accent-block-title">{title}</div>
@@ -145,6 +146,9 @@ export function HealthDot({ ok, severity, label, detail }) {
       <span className="sx-health-label">{label}</span>
       <span className="sx-health-detail" title={detail}>
         {detail}
+      </span>
+      <span className="sx-sr-only">
+        {ok ? 'OK' : severity === 'block' ? 'Blocking' : 'Degraded'}
       </span>
     </div>
   );

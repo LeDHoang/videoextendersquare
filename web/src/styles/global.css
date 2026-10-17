@@ -1960,6 +1960,16 @@ button:hover .sx-sidebar-hero-logo,
   background: var(--sx-warn-dim);
 }
 
+.sx-accent-block.sx-danger {
+  border-left-color: var(--sx-danger);
+  background: var(--sx-danger-dim);
+}
+
+.sx-accent-block.sx-muted {
+  border-left-color: var(--sx-rule-strong);
+  background: var(--sx-surface-2);
+}
+
 .sx-accent-block-title {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: var(--sx-t-eyebrow);
@@ -1972,6 +1982,14 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-accent-block.sx-warn .sx-accent-block-title {
   color: var(--sx-warn);
+}
+
+.sx-accent-block.sx-danger .sx-accent-block-title {
+  color: var(--sx-danger-hi);
+}
+
+.sx-accent-block.sx-muted .sx-accent-block-title {
+  color: var(--sx-ink-3);
 }
 
 .sx-accent-block-body p {
@@ -2167,8 +2185,30 @@ button:hover .sx-sidebar-hero-logo,
   box-shadow: var(--sx-glow-accent-strong);
 }
 
+.sx-btn.sx-danger {
+  border-color: var(--sx-danger-border);
+  color: var(--sx-danger-hi);
+}
+
+.sx-btn.sx-danger:hover:not(:disabled) {
+  border-color: var(--sx-danger-hi);
+  background: var(--sx-danger-dim);
+}
+
+.sx-btn--icon {
+  width: var(--sx-control-h, 38px);
+  padding: 0;
+}
+
+@media (pointer: coarse) {
+  .sx-btn--icon {
+    width: var(--sx-control-h-lg, 44px);
+    height: var(--sx-control-h-lg, 44px);
+  }
+}
+
 .sx-btn:disabled {
-  opacity: 0.4;
+  opacity: var(--sx-opacity-disabled, 0.4);
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
@@ -2219,6 +2259,11 @@ button:hover .sx-sidebar-hero-logo,
 .sx-seg button.sx-selected {
   background: var(--sx-ink);
   color: var(--sx-bg);
+}
+
+.sx-seg button:disabled {
+  opacity: var(--sx-opacity-disabled, 0.4);
+  cursor: not-allowed;
 }
 
 /* Pills */
@@ -2368,6 +2413,11 @@ input[type='range'] {
   margin: var(--sx-2) 0;
 }
 
+input[type='range']:focus-visible {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 2px;
+}
+
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -2480,9 +2530,15 @@ input[type='range']::-moz-range-thumb {
 }
 
 .sx-dropdown-item:hover,
+.sx-dropdown-item.sx-focused,
 .sx-dropdown-item:focus-visible {
   background: var(--sx-accent-dim);
   color: var(--sx-ink);
+}
+
+.sx-dropdown-item:focus-visible {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: -2px;
 }
 
 .sx-dropdown-item.sx-selected {
