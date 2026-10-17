@@ -2034,10 +2034,9 @@ button:hover .sx-sidebar-hero-logo,
 /* Blocking banner */
 .sx-blocking-banner {
   background: var(--sx-danger);
-  color: #ffffff;
+  color: var(--sx-on-accent);
   padding: var(--sx-4) var(--sx-5);
   margin: var(--sx-4) 0;
-  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.3);
 }
 
 .sx-blocking-banner-title {
@@ -5325,7 +5324,7 @@ button.sx-explore-loc-link:hover {
   height: clamp(88px, 12vw, 116px);
   border: 2px solid var(--sx-accent);
   box-shadow: 0 0 0 1px var(--sx-accent), 0 0 24px -4px var(--sx-accent-glow);
-  font-family: Orbitron, 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: clamp(1.4rem, 4vw, 2rem);
   letter-spacing: -0.04em;
 }
@@ -5630,7 +5629,7 @@ button.sx-explore-loc-link:hover {
 .sx-mx-title h1 {
   margin: 0;
   color: var(--sx-ink);
-  font: 900 clamp(1.7rem, 4vw, 2.5rem)/1 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 400 clamp(1.7rem, 4vw, 2.5rem)/1 var(--sx-font-display);
   letter-spacing: -0.02em;
 }
 
@@ -5887,7 +5886,7 @@ button.sx-explore-loc-link:hover {
 .sx-conversation-top strong {
   overflow: hidden;
   color: var(--sx-ink-2);
-  font: 800 0.86rem/1.2 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 0.86rem/1.2 var(--sx-font-sans);
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5961,7 +5960,7 @@ button.sx-explore-loc-link:hover {
 .sx-message-thread-id strong {
   overflow: hidden;
   color: var(--sx-ink);
-  font: 900 1rem/1.2 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 1rem/1.2 var(--sx-font-sans);
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6840,11 +6839,11 @@ button.sx-explore-loc-link:hover {
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
-  border: 1px solid var(--sx-rule);
-  border-radius: 2px;
+  border: 1px solid var(--sx-rule-strong);
+  border-radius: 0;
   background: var(--sx-surface);
   color: var(--sx-ink);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--sx-font-mono);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -6862,16 +6861,17 @@ button.sx-explore-loc-link:hover {
   border-color: var(--sx-accent);
   background: var(--sx-accent);
   color: var(--sx-on-accent);
-  box-shadow: 0 6px 20px -6px var(--sx-accent-glow);
+  box-shadow: var(--sx-glow-accent);
 }
 
 .sx-xh-btn--primary:hover:not(:disabled) {
   border-color: var(--sx-accent-hi);
-  background: #e03016;
+  background: var(--sx-accent-hi);
+  box-shadow: var(--sx-glow-accent-strong);
 }
 
 .sx-xh-btn:disabled {
-  opacity: 0.45;
+  opacity: var(--sx-opacity-disabled, 0.4);
   cursor: not-allowed;
 }
 
@@ -6918,7 +6918,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-xh-stat-value {
   margin-top: 2px;
-  font-family: Orbitron, 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--sx-ink);
@@ -7297,7 +7297,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-pf-name {
   margin: 0;
-  font-family: Orbitron, 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: clamp(1.3rem, 3vw, 1.9rem);
   font-weight: 900;
   letter-spacing: -0.01em;
@@ -7419,7 +7419,7 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-pf-stat-value {
-  font-family: Orbitron, 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: clamp(1.15rem, 2.4vw, 1.5rem);
   font-weight: 900;
   color: var(--sx-ink);
@@ -7817,7 +7817,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-ps-title {
   margin: 0;
-  font: 900 clamp(1.7rem, 4vw, 2.5rem)/1 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 400 clamp(1.7rem, 4vw, 2.5rem)/1 var(--sx-font-display);
   letter-spacing: -0.02em;
   text-transform: uppercase;
   color: var(--sx-ink);
@@ -7872,7 +7872,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-ps-panel-head h2 {
   margin: 0;
-  font: 800 1rem/1.2 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 1rem/1.2 var(--sx-font-sans);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--sx-ink);
@@ -7935,7 +7935,7 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-ps-avatar-name {
-  font: 800 0.9rem/1.2 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 0.9rem/1.2 var(--sx-font-sans);
   color: var(--sx-ink);
   overflow-wrap: anywhere;
 }
@@ -8065,11 +8065,11 @@ button.sx-explore-loc-link:hover {
   gap: var(--sx-2);
   min-height: 38px;
   padding: 8px 16px;
-  border: 1px solid var(--sx-rule);
+  border: 1px solid var(--sx-rule-strong);
   border-radius: 0;
   background: var(--sx-surface-2);
   color: var(--sx-ink);
-  font: 700 0.68rem/1 'JetBrains Mono', monospace;
+  font: 700 0.68rem/1 var(--sx-font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
@@ -8082,14 +8082,14 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-ps-btn:disabled {
-  opacity: 0.45;
+  opacity: var(--sx-opacity-disabled, 0.4);
   cursor: not-allowed;
 }
 
 .sx-ps-btn:focus-visible,
 .sx-ps-link:focus-visible {
-  outline: 2px solid var(--sx-accent);
-  outline-offset: 2px;
+  outline: var(--sx-focus-ring);
+  outline-offset: var(--sx-focus-offset);
 }
 
 .sx-ps-btn--primary {
@@ -8097,7 +8097,7 @@ button.sx-explore-loc-link:hover {
   border-color: var(--sx-accent);
   color: var(--sx-on-accent);
   letter-spacing: 0.14em;
-  box-shadow: 0 6px 18px -8px var(--sx-accent-glow);
+  box-shadow: var(--sx-glow-accent);
 }
 
 .sx-ps-btn--primary:hover:not(:disabled) {
@@ -8127,14 +8127,14 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-ps-btn--danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.22);
+  background: color-mix(in srgb, var(--sx-danger) 22%, transparent);
   border-color: var(--sx-danger);
 }
 
 .sx-ps-feedback {
   padding: 8px 10px;
   border: 1px solid;
-  font: 600 0.72rem/1.5 'JetBrains Mono', monospace;
+  font: 600 0.72rem/1.5 var(--sx-font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -8347,7 +8347,7 @@ a.sx-xh-btn { text-decoration: none; }
   align-items: baseline;
   gap: var(--sx-2);
   color: var(--sx-ink);
-  font: 900 var(--sx-t-stat)/1.05 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 400 var(--sx-t-stat)/1.05 var(--sx-font-display);
   letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
@@ -8441,7 +8441,7 @@ a.sx-xh-btn { text-decoration: none; }
   flex-wrap: wrap;
   gap: var(--sx-2);
   color: var(--sx-ink);
-  font: 900 var(--sx-t-stat)/1.05 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 400 var(--sx-t-stat)/1.05 var(--sx-font-display);
 }
 
 .sx-cr-pack-price span {
@@ -8453,8 +8453,8 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-cr-bonus {
   padding: 3px 6px;
   background: var(--sx-warn);
-  color: #1a1400;
-  font: 800 0.58rem/1 'JetBrains Mono', monospace;
+  color: var(--sx-on-accent);
+  font: 800 0.58rem/1 var(--sx-font-mono);
   font-style: normal;
   letter-spacing: 0.08em;
 }
@@ -8528,12 +8528,12 @@ a.sx-xh-btn { text-decoration: none; }
 
 /* ─── Reel Pack detail page (sx-pk-*) ──────────────────────────────────── */
 .sx-pk {
-  /* Warm neutrals with faint red hairlines; solid red is kept for active/hover states and a few rules. */
-  --pk-red-wash: rgba(255, 59, 31, 0.03);
-  --pk-red-line: rgba(255, 59, 31, 0.12);
-  --pk-red-line-strong: rgba(255, 59, 31, 0.3);
-  --pk-panel: #0b0a0a;
-  --pk-panel-2: #111010;
+  /* Surface tokens with faint accent hairlines; solid red is kept for active/hover states and a few rules. */
+  --pk-red-wash: color-mix(in srgb, var(--sx-accent) 3%, transparent);
+  --pk-red-line: var(--sx-accent-dim);
+  --pk-red-line-strong: color-mix(in srgb, var(--sx-accent) 30%, transparent);
+  --pk-panel: var(--sx-surface);
+  --pk-panel-2: var(--sx-surface-2);
   width: 100%;
   max-width: none;
   margin: 0 auto;
@@ -8644,13 +8644,13 @@ a.sx-xh-btn { text-decoration: none; }
   transform: translate(-50%, -50%);
   padding: 10px 18px;
   border: 2px solid var(--sx-accent);
-  background: rgba(10, 4, 3, 0.9);
-  color: #fff;
-  font: 800 0.75rem/1 'JetBrains Mono', monospace;
+  background: var(--sx-surface-glass);
+  color: var(--sx-ink);
+  font: 800 0.75rem/1 var(--sx-font-mono);
   letter-spacing: 0.12em;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+  box-shadow: var(--sx-shadow-popover);
   transition: background var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
@@ -8782,7 +8782,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-stats dd {
   margin: 0;
   color: var(--sx-ink);
-  font: 700 1.125rem/1 'Orbitron', 'JetBrains Mono', sans-serif;
+  font: 700 1.125rem/1 var(--sx-font-mono);
 }
 
 .sx-pk-stats dt {
@@ -8878,7 +8878,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-owner h2 {
   margin: 0;
   color: var(--sx-ink);
-  font: 800 0.8125rem/1 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 0.8125rem/1 var(--sx-font-sans);
   letter-spacing: 0.08em;
 }
 
@@ -8995,7 +8995,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-pk-row-num {
   color: var(--sx-ink-3);
-  font: 700 clamp(1.25rem, 1.1667rem + 0.37cqi, 1.375rem)/1 'Orbitron', 'JetBrains Mono', sans-serif;
+  font: 700 clamp(1.25rem, 1.1667rem + 0.37cqi, 1.375rem)/1 var(--sx-font-mono);
   transition: color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
@@ -9030,7 +9030,7 @@ a.sx-xh-btn { text-decoration: none; }
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(20, 4, 2, 0.55);
+  background: var(--sx-surface-overlay);
   color: var(--sx-accent-hi);
   font-size: 0.875rem;
   opacity: 0;
@@ -9187,7 +9187,7 @@ a.sx-xh-btn { text-decoration: none; }
   border: 1px solid var(--sx-rule-strong);
   border-top: 2px solid var(--sx-accent);
   background: var(--pk-panel);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--sx-shadow-popover);
 }
 
 .sx-pk-dialog:focus {
@@ -9207,7 +9207,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-dialog h2 {
   margin: 0;
   color: var(--sx-ink);
-  font: 800 0.9375rem/1.2 'Chakra Petch', 'JetBrains Mono', sans-serif;
+  font: 800 0.9375rem/1.2 var(--sx-font-sans);
   letter-spacing: 0.06em;
 }
 
@@ -9225,6 +9225,11 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-dialog > header button:hover:not(:disabled) {
   color: var(--sx-accent);
   border-color: var(--sx-accent);
+}
+
+.sx-pk-dialog > header button:focus-visible {
+  outline: var(--sx-focus-ring);
+  outline-offset: var(--sx-focus-offset);
 }
 
 .sx-pk-dialog p {
@@ -9390,7 +9395,7 @@ a.sx-xh-btn { text-decoration: none; }
   gap: var(--sx-3);
   align-self: flex-start;
   color: var(--sx-accent);
-  font: 900 1.35rem/1 Orbitron, 'Archivo Black', sans-serif;
+  font: 900 1.35rem/1 var(--sx-font-brand);
   letter-spacing: 0.04em;
   text-decoration: none;
 }
@@ -9444,7 +9449,7 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 .sx-au-step-no {
-  font: 800 0.95rem/1.2 Orbitron, 'JetBrains Mono', monospace;
+  font: 700 0.95rem/1.2 var(--sx-font-mono);
   color: var(--sx-ink-3);
 }
 
@@ -9701,13 +9706,13 @@ a.sx-xh-btn { text-decoration: none; }
   border-left-width: 3px;
   background: var(--sx-surface-2);
   color: var(--sx-ink-2);
-  font: 600 0.7rem/1.55 'JetBrains Mono', monospace;
+  font: 600 0.7rem/1.55 var(--sx-font-mono);
   letter-spacing: 0.03em;
   overflow-wrap: anywhere;
 }
 
 .sx-au-notice--info { border-color: var(--sx-accent); background: var(--sx-accent-dim); color: var(--sx-ink); }
-.sx-au-notice--err { border-color: var(--sx-danger-border); border-left-color: var(--sx-danger); background: var(--sx-danger-dim); color: #fca5a5; }
+.sx-au-notice--err { border-color: var(--sx-danger-border); border-left-color: var(--sx-danger); background: var(--sx-danger-dim); color: var(--sx-danger-hi); }
 .sx-au-notice--ok { border-color: var(--sx-success-border); border-left-color: var(--sx-success); background: var(--sx-success-dim); color: var(--sx-success-hi); }
 .sx-au-notice--warn { border-color: var(--sx-warn-border); border-left-color: var(--sx-warn); background: var(--sx-warn-dim); color: var(--sx-warn-hi); }
 
@@ -9724,16 +9729,16 @@ a.sx-xh-btn { text-decoration: none; }
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   cursor: pointer;
-  font: 900 0.74rem/1 'JetBrains Mono', monospace;
+  font: 800 0.74rem/1 var(--sx-font-mono);
   letter-spacing: 0.14em;
   text-decoration: none;
-  box-shadow: 0 8px 22px -10px var(--sx-accent-glow);
+  box-shadow: var(--sx-glow-accent);
   transition: background var(--sx-duration-fast) ease, transform var(--sx-duration-fast) ease;
 }
 
-.sx-au-submit:hover:not(:disabled) { background: var(--sx-accent-hi); border-color: var(--sx-accent-hi); }
+.sx-au-submit:hover:not(:disabled) { background: var(--sx-accent-hi); border-color: var(--sx-accent-hi); box-shadow: var(--sx-glow-accent-strong); }
 .sx-au-submit:active:not(:disabled) { transform: translateY(1px); }
-.sx-au-submit:disabled { cursor: progress; opacity: 0.7; }
+.sx-au-submit:disabled { cursor: progress; opacity: var(--sx-opacity-disabled, 0.4); box-shadow: none; }
 
 .sx-au-spin {
   width: 12px;
@@ -9753,19 +9758,19 @@ a.sx-xh-btn { text-decoration: none; }
   background: var(--sx-surface-2);
   color: var(--sx-ink);
   cursor: pointer;
-  font: 800 0.64rem/1 'JetBrains Mono', monospace;
+  font: 800 0.64rem/1 var(--sx-font-mono);
   letter-spacing: 0.12em;
 }
 
 .sx-au-secondary:hover:not(:disabled) { background: var(--sx-surface-3); border-color: var(--sx-ink-3); }
-.sx-au-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+.sx-au-secondary:disabled { opacity: var(--sx-opacity-disabled, 0.4); cursor: not-allowed; }
 .sx-au-secondary--quiet { background: transparent; color: var(--sx-ink-2); }
 
 .sx-au-link {
   display: inline-block;
   padding: 4px 0;
   color: var(--sx-accent-hi);
-  font: 800 0.66rem/1.5 'JetBrains Mono', monospace;
+  font: 800 0.66rem/1.5 var(--sx-font-mono);
   letter-spacing: 0.08em;
   text-decoration: none;
 }
