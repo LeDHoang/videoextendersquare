@@ -3813,7 +3813,7 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-top-brand {
-  font-family: 'Archivo Black', Archivo, sans-serif;
+  font-family: var(--sx-font-brand);
   font-size: 2.04rem;
   font-weight: 900;
   color: var(--sx-accent);

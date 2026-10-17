@@ -14,7 +14,7 @@ Scope was UI only: tokens, CSS, class names, presentational wrappers, copy and i
 | Check | Base | Branch |
 |---|---|---|
 | Undefined `--sx-*` variables | 8 on every route | 0 on every route |
-| Orbitron usage | 8 elements | 1 (wordmark only) |
+| Orbitron usage | 8 elements | wordmark only (header, sidebar hero, auth mark) |
 | Chakra Petch | messages 2, settings 5, wallet 5 | 0 |
 | Low-contrast text, 2D routes | present | 0 on every route |
 | Low-contrast text, reels player | 10 | 8 (see exceptions) |
@@ -48,6 +48,8 @@ Fixed from this run (commit `style(ui): move header action and auth submit glow 
 
 Not covered on the headset: the browser was not signed in (authed routes redirect to `/login`; no credentials were entered), no immersive XR session was entered (it needs a user gesture in the headset), and this was HTTP over `adb reverse`, not the Quest HTTPS gate.
 
+Wordmark (commit `style(ui): set header wordmark in Orbitron`): the header wordmark (`.sx-top-brand`) was Archivo Black while the sidebar hero and auth mark used Orbitron. It now uses `--sx-font-brand`, so all three wordmarks match. Fit checked in the browser pane at 1440, 1100, 1099, 768, 701, 700, 641, 640, 375, 341 and 320 px: no horizontal overflow, no clipping and no overlap with header controls. The tightest gap to the next control is 20 px (641-701 px). Below 341 px the wordmark text is hidden by design and only the logo shows.
+
 ## Accepted exceptions (pinned by tests or owner decision)
 
 - Reels `#vrBtn` purple `#A855F7` (4.15:1) and `#modeBtn.active` `#FF3B1F`.
@@ -67,7 +69,6 @@ Not covered on the headset: the browser was not signed in (authed routes redirec
 - Pack editor overflows by 324 px at 768 px on both base and branch (pre-existing).
 - Every route's document title is "ECHO"; pack editor @1440 has no `h1`.
 - Explore tiles on a coarse pointer: about 600 nested creator / location chips (30 px and 22 px tall) and 44 × 30 tile buttons stay under 44 px. They sit inside `role=button` tiles (see discovery-2); enlarging them changes the tile layout and needs an owner decision.
-- The header wordmark (`.sx-top-brand`) is Archivo Black, while the sidebar hero and auth mark use Orbitron. Unchanged from `3dreels`; decide which face the wordmark uses before the ECHO artifact sync.
 - Not run: IWER emulator, an immersive XR session on the headset, `make streamlit`, `make build` (so `server/static` still holds the stale Oct 5 bundle).
 
 ## Functional bugs found (report only, not fixed)
