@@ -46,6 +46,8 @@ Run 2026-10-18 on a Quest 3S over USB debugging: OculusBrowser 152.1 (Chrome 152
 
 Fixed from this run (commit `style(ui): move header action and auth submit glow to hover/focus`): the header UPLOAD button (`.sx-top-action-btn`) and the auth SIGN IN submit (`.sx-au-submit`) glowed at rest. Both predate the branch. Re-checked on the headset: no resting glow.
 
+Wordmark re-check on the headset (2026-10-18, 1280 px, `/explore`, `/reels`, `/wallet`): Orbitron 900 loads, the wordmark is 133 px wide with no clipping, no horizontal overflow and no overlap with header controls. The backend was not running for this check, so `/api/*` calls returned 500 through the Vite proxy; those errors are not UI regressions.
+
 Not covered on the headset: the browser was not signed in (authed routes redirect to `/login`; no credentials were entered), no immersive XR session was entered (it needs a user gesture in the headset), and this was HTTP over `adb reverse`, not the Quest HTTPS gate.
 
 Wordmark (commit `style(ui): set header wordmark in Orbitron`): the header wordmark (`.sx-top-brand`) was Archivo Black while the sidebar hero and auth mark used Orbitron. It now uses `--sx-font-brand`, so all three wordmarks match. Fit checked in the browser pane at 1440, 1100, 1099, 768, 701, 700, 641, 640, 375, 341 and 320 px: no horizontal overflow, no clipping and no overlap with header controls. The tightest gap to the next control is 20 px (641-701 px). Below 341 px the wordmark text is hidden by design and only the logo shows.
