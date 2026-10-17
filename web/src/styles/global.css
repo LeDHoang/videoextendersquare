@@ -4013,7 +4013,7 @@ body.sx-vr-active .sx-reels-mount,
   height: 36px;
   max-height: 36px;
   background: var(--sx-accent);
-  color: #000000;
+  color: var(--sx-on-accent);
   font-family: 'Archivo Black', Archivo, sans-serif;
   font-size: 0.8125rem;
   font-weight: 900;
@@ -4022,8 +4022,7 @@ body.sx-vr-active .sx-reels-mount,
   border: none;
   padding: 0 14px;
   cursor: pointer;
-  box-shadow: 0 0 12px var(--sx-accent-glow);
-  transition: opacity 150ms ease;
+  transition: opacity 150ms ease, box-shadow 150ms ease;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
@@ -4036,6 +4035,12 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-top-action-btn:hover {
   opacity: 0.85;
+}
+
+/* ECHO: accent glow only on hover/focus, never at rest. */
+.sx-top-action-btn:hover,
+.sx-top-action-btn:focus-visible {
+  box-shadow: 0 0 12px var(--sx-accent-glow);
 }
 
 .sx-top-action-btn.sx-message-nav-btn {
@@ -9737,11 +9742,12 @@ a.sx-xh-btn { text-decoration: none; }
   font: 800 0.74rem/1 var(--sx-font-mono);
   letter-spacing: 0.14em;
   text-decoration: none;
-  box-shadow: var(--sx-glow-accent);
-  transition: background var(--sx-duration-fast) ease, transform var(--sx-duration-fast) ease;
+  transition: background var(--sx-duration-fast) ease, box-shadow var(--sx-duration-fast) ease, transform var(--sx-duration-fast) ease;
 }
 
 .sx-au-submit:hover:not(:disabled) { background: var(--sx-accent-hi); border-color: var(--sx-accent-hi); box-shadow: var(--sx-glow-accent-strong); }
+/* ECHO: accent glow only on hover/focus, never at rest. */
+.sx-au-submit:focus-visible:not(:disabled) { box-shadow: var(--sx-glow-accent); }
 .sx-au-submit:active:not(:disabled) { transform: translateY(1px); }
 .sx-au-submit:disabled { cursor: progress; opacity: var(--sx-opacity-disabled, 0.4); box-shadow: none; }
 
