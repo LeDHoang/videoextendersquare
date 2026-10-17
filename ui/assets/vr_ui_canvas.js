@@ -231,12 +231,12 @@
     // Header
     ctx.fillStyle = accent;
     ctx.fillRect(24, 14, 4, 20);
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('EARTH ATLAS', 36, 24);
     ctx.fillStyle = '#9FB6CE';
-    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 168, 24);
 
     // Mode toggle (active) + exit
@@ -248,17 +248,17 @@
     ctx.strokeStyle = '#55E7FF';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText('EARTH MAP', eb.x + eb.w / 2, eb.y + eb.h / 2);
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
     previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, 6);
-    ctx.fillStyle = '#101214';
+    ctx.fillStyle = TOKENS.hex.surface;
     ctx.fill();
-    ctx.strokeStyle = '#FF3B1F';
+    ctx.strokeStyle = TOKENS.hex.accent;
     ctx.stroke();
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('✕', xb.x + xb.w / 2, xb.y + xb.h / 2);
 
@@ -278,17 +278,17 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.fillStyle = '#7F93AD';
-      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      ctx.font = `bold 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(tiles[i].k, tx + 20, ty + 24);
       ctx.fillStyle = tiles[i].c;
-      ctx.font = '800 30px Archivo, sans-serif';
+      ctx.font = `800 30px ${TOKENS.font.sans}`;
       ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 20, ty + 62);
     }
     // Zoom meter
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
     ctx.fillStyle = '#7F93AD';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.fillText('ZOOM', 24, 190);
     ctx.textAlign = 'right';
@@ -326,10 +326,10 @@
       ctx.strokeStyle = live ? tone : 'rgba(110,140,170,0.4)';
       ctx.lineWidth = hover || lit ? 2.5 : 1.5;
       ctx.stroke();
-      const ink = live ? (hover ? '#FFFFFF' : tone) : '#6F8BA6';
+      const ink = live ? (hover ? TOKENS.hex.ink : tone) : '#6F8BA6';
       EARTH_ICON[btn.action](ctx, btn.x + 26, btn.y + btn.h / 2, ink);
       ctx.fillStyle = ink;
-      ctx.font = 'bold 13px "JetBrains Mono", monospace';
+      ctx.font = `bold 13px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2);
@@ -388,7 +388,7 @@
     ctx.fill();
 
     // 2. Vermilion Glow Outer Border
-    ctx.strokeStyle = '#FF3B1F';
+    ctx.strokeStyle = TOKENS.hex.accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
@@ -396,10 +396,10 @@
     ctx.stroke();
 
     // 3. Top Telemetry Header
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.fillRect(24, 14, 4, 20);
 
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(packMode ? 'REEL PACK' : '4K VR REELS', 36, 24);
@@ -408,35 +408,35 @@
       ? (packContext.title || 'UNTITLED PACK')
       : dockItemTitle(item);
     if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
-    ctx.fillStyle = '#E3E2E3';
-    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
 
     // Comment pill
     const commentBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'comments');
     const isCommentHover = (hoveredButton === commentBtnIdx);
-    ctx.fillStyle = isCommentHover ? '#1D2126' : '#101214';
-    ctx.strokeStyle = isCommentHover ? '#FF3B1F' : '#3A4047';
+    ctx.fillStyle = isCommentHover ? TOKENS.hex.surface3 : TOKENS.hex.surface;
+    ctx.strokeStyle = isCommentHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
     ctx.lineWidth = 1;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(476, 13, 64, 22, 3);
     else ctx.rect(476, 13, 64, 22);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = isCommentHover ? '#FFFFFF' : '#E7BDB5';
-    ctx.font = '11px "JetBrains Mono", monospace';
+    ctx.fillStyle = isCommentHover ? TOKENS.hex.ink : TOKENS.hex.ink2;
+    ctx.font = `11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(`💬 ${comments.length || 0}`, 508, 24);
 
     // Index pill
-    ctx.fillStyle = '#101214';
-    ctx.strokeStyle = '#3A4047';
+    ctx.fillStyle = TOKENS.hex.surface;
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(548, 13, 72, 22, 3);
     else ctx.rect(548, 13, 72, 22);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#E7BDB5';
+    ctx.fillStyle = TOKENS.hex.ink2;
     ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, 584, 24);
 
     // Earth button
@@ -444,15 +444,15 @@
     const earthButton = CTRL_BUTTONS[earthBtnIdx];
     const isEarthHover = (hoveredButton === earthBtnIdx);
     const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
-    ctx.fillStyle = earthActive ? '#093D5B' : '#0B202D';
-    ctx.strokeStyle = earthActive ? '#55E7FF' : '#2B8DA4';
+    ctx.fillStyle = earthActive ? TOKENS.hex.surface3 : TOKENS.hex.surface;
+    ctx.strokeStyle = earthActive ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, 5);
     else ctx.rect(earthButton.x, earthButton.y, earthButton.w, earthButton.h);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = earthActive ? '#FFFFFF' : '#55E7FF';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.fillStyle = earthActive ? TOKENS.hex.ink : TOKENS.hex.ink2;
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(
       packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
@@ -463,14 +463,14 @@
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
     const exitBtn = CTRL_BUTTONS[exitBtnIdx];
-    ctx.fillStyle = '#101214';
-    ctx.strokeStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.surface;
+    ctx.strokeStyle = TOKENS.hex.accent;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h, 3);
     else ctx.rect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('✕', exitBtn.x + exitBtn.w / 2, exitBtn.y + exitBtn.h / 2);
 
@@ -487,8 +487,8 @@
 
       // Left column pills (AUTO / DOME)
       if (btn.action === 'mode' || btn.action === 'curve') {
-        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
-        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.fillStyle = isPressed ? TOKENS.hex.bg : (isHover ? TOKENS.hex.surface3 : TOKENS.hex.surface);
+        ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
@@ -496,8 +496,8 @@
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = isHover ? '#FFFFFF' : '#E7BDB5';
+        ctx.font = `bold 11px ${TOKENS.font.mono}`;
+        ctx.fillStyle = isHover ? TOKENS.hex.ink : TOKENS.hex.ink2;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const label = btn.action === 'mode'
@@ -507,7 +507,7 @@
 
         ctx.font = '15px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillStyle = isHover ? '#FF3B1F' : '#C5C6C8';
+        ctx.fillStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ink2;
         const icon = btn.action === 'mode' ? (packMode ? '≡' : '⟳') : '🌐';
         ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
         continue;
@@ -516,8 +516,8 @@
       // Right column pills (LOCK / AUDIO)
       if (btn.action === 'lock' || btn.action === 'mute') {
         const isLockActive = (btn.action === 'lock' && lockToViewer);
-        ctx.fillStyle = isPressed ? '#07090C' : ((isLockActive || isHover) ? '#1D2126' : '#101214');
-        ctx.strokeStyle = (isLockActive || isHover) ? '#FF3B1F' : '#3A4047';
+        ctx.fillStyle = isPressed ? TOKENS.hex.bg : ((isLockActive || isHover) ? TOKENS.hex.surface3 : TOKENS.hex.surface);
+        ctx.strokeStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
@@ -525,8 +525,8 @@
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = (isLockActive || isHover) ? '#FFFFFF' : '#E7BDB5';
+        ctx.font = `bold 11px ${TOKENS.font.mono}`;
+        ctx.fillStyle = (isLockActive || isHover) ? TOKENS.hex.ink : TOKENS.hex.ink2;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const label = btn.action === 'lock'
@@ -536,7 +536,7 @@
 
         ctx.font = '15px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillStyle = (isLockActive || isHover) ? '#FF3B1F' : '#C5C6C8';
+        ctx.fillStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ink2;
         const icon = btn.action === 'lock'
           ? (lockToViewer ? '🔒' : '🔓')
           : (isMuted ? '🔇' : '🔊');
@@ -546,8 +546,8 @@
 
       // Center secondary buttons (rew, prev, next, fwd)
       if (btn.action !== 'play') {
-        ctx.fillStyle = isPressed ? '#07090C' : (isHover ? '#1D2126' : '#101214');
-        ctx.strokeStyle = isHover ? '#FF3B1F' : '#3A4047';
+        ctx.fillStyle = isPressed ? TOKENS.hex.bg : (isHover ? TOKENS.hex.surface3 : TOKENS.hex.surface);
+        ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
@@ -555,7 +555,7 @@
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = isHover ? '#FFFFFF' : '#E3E2E3';
+        ctx.fillStyle = isHover ? TOKENS.hex.ink : TOKENS.hex.ink;
         ctx.font = (btn.action === 'prev' || btn.action === 'next') ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -569,7 +569,7 @@
       }
 
       // Center primary play/pause glow button
-      ctx.fillStyle = isPressed ? '#C93420' : '#FF3B1F';
+      ctx.fillStyle = isPressed ? '#C93420' : TOKENS.hex.accent;
       ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
       ctx.shadowBlur = isHover ? 28 : 20;
       ctx.beginPath();
@@ -578,7 +578,7 @@
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      ctx.fillStyle = '#0A0A0A';
+      ctx.fillStyle = TOKENS.hex.onAccent;
       ctx.font = 'bold 30px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -588,28 +588,28 @@
     // Scrubber track
     const trackBtn = CTRL_BUTTONS.find((b) => b.action === 'seek');
     if (trackBtn) {
-      ctx.fillStyle = '#1A1D24';
+      ctx.fillStyle = TOKENS.hex.surface2;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8, 4);
       else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8);
       ctx.fill();
 
       // Filled progress
-      ctx.fillStyle = '#FF3B1F';
+      ctx.fillStyle = TOKENS.hex.accent;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8, 4);
       else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8);
       ctx.fill();
 
       // Scrubber thumb
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = TOKENS.hex.ink;
       ctx.beginPath();
       ctx.arc(trackBtn.x + trackBtn.w * progress, trackBtn.y + 16, 8, 0, Math.PI * 2);
       ctx.fill();
 
       // Time texts
-      ctx.fillStyle = '#9BA1A8';
-      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.fillStyle = TOKENS.hex.ink3;
+      ctx.font = `11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(formatTime(currentTime), trackBtn.x, trackBtn.y + 32);
       ctx.textAlign = 'right';
@@ -697,7 +697,7 @@
 
     const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
     const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
-    const accent = '#FF3B1F';
+    const accent = TOKENS.hex.accent;
 
     ctx.clearRect(0, 0, CPANEL_W, CPANEL_H);
 
@@ -707,7 +707,7 @@
     if (ctx.roundRect) ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
     else ctx.rect(0, 0, CPANEL_W, CPANEL_H);
     ctx.fill();
-    ctx.strokeStyle = '#343536';
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
@@ -722,7 +722,7 @@
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
     ctx.fillText('💬', 18, 33);
-    ctx.font = '700 11px "JetBrains Mono", monospace';
+    ctx.font = `700 11px ${TOKENS.font.mono}`;
     ctx.fillText('COMMENTS', 40, 33);
     ctx.fillStyle = 'rgba(255,85,58,0.7)';
     const titleW = ctx.measureText('COMMENTS').width;
@@ -736,29 +736,29 @@
     tabs.forEach((tab) => {
       const active = cPanelTab === tab.key;
       const hover = cPanelHover === ('tab:' + tab.key);
-      ctx.fillStyle = active ? accent : (hover ? '#1D2126' : '#1f2021');
-      ctx.strokeStyle = active ? accent : (hover ? accent : '#343536');
+      ctx.fillStyle = active ? accent : (hover ? TOKENS.hex.surface3 : TOKENS.hex.surface2);
+      ctx.strokeStyle = active ? accent : (hover ? accent : TOKENS.hex.ruleStrong);
       ctx.lineWidth = 1;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(tab.x, 16, tab.w, 30, 3);
       else ctx.rect(tab.x, 16, tab.w, 30);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = active ? '#5a0600' : (hover ? '#FFFFFF' : '#ff553a');
-      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.fillStyle = active ? '#5a0600' : (hover ? TOKENS.hex.ink : TOKENS.hex.accent);
+      ctx.font = `bold 9px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.x + tab.w / 2, 31);
     });
 
     // Close button
-    ctx.fillStyle = cPanelHover === 'close' ? '#292a2b' : '#1f2021';
-    ctx.strokeStyle = cPanelHover === 'close' ? accent : '#343536';
+    ctx.fillStyle = cPanelHover === 'close' ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
+    ctx.strokeStyle = cPanelHover === 'close' ? accent : TOKENS.hex.ruleStrong;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(522, 16, 26, 30, 3);
     else ctx.rect(522, 16, 26, 30);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = cPanelHover === 'close' ? '#FFFFFF' : accent;
+    ctx.fillStyle = cPanelHover === 'close' ? TOKENS.hex.ink : accent;
     ctx.font = 'bold 14px sans-serif';
     ctx.fillText('✕', 535, 31);
 
@@ -770,7 +770,7 @@
 
     if (filtered.length === 0) {
       ctx.fillStyle = accent;
-      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.font = `700 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, CP_LIST_TOP + 40);
@@ -789,7 +789,7 @@
         if (ctx.roundRect) ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
         else ctx.rect(itemX, y, itemW, CP_ITEM_H);
         ctx.fill();
-        ctx.strokeStyle = highlighted ? accent : '#343536';
+        ctx.strokeStyle = highlighted ? accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = highlighted ? 2.5 : 1;
         ctx.stroke();
 
@@ -797,7 +797,7 @@
         ctx.fillRect(itemX, y, 3, CP_ITEM_H);
 
         // Avatar
-        ctx.fillStyle = '#1f2021';
+        ctx.fillStyle = TOKENS.hex.surface2;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(itemX + 8, y + 12, 40, 40, 4);
         else ctx.rect(itemX + 8, y + 12, 40, 40);
@@ -805,14 +805,14 @@
         ctx.strokeStyle = border;
         ctx.stroke();
         ctx.fillStyle = border;
-        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.font = `700 11px ${TOKENS.font.mono}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(getInitials(c.author_name), itemX + 28, y + 33);
 
         // Author name
         ctx.fillStyle = border;
-        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.font = `700 11px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         let name = c.author_name || 'Anonymous';
@@ -822,7 +822,7 @@
         // Time pill
         const hasTime = c.timestamp !== null && c.timestamp !== undefined;
         const pillX = itemX + 180;
-        ctx.fillStyle = '#292a2b';
+        ctx.fillStyle = TOKENS.hex.surface3;
         ctx.strokeStyle = accent;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(pillX, y + 10, 100, 24, 3);
@@ -830,13 +830,13 @@
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = accent;
-        ctx.font = '700 10px "JetBrains Mono", monospace';
+        ctx.font = `700 10px ${TOKENS.font.mono}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(hasTime ? ('⏱ ' + formatTime(c.timestamp)) : 'GENERAL', pillX + 50, y + 23);
 
         // Text
-        ctx.fillStyle = '#e3e2e3';
+        ctx.fillStyle = TOKENS.hex.ink;
         ctx.font = '500 13px sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
@@ -862,7 +862,7 @@
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = '#5a0600';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('+ ADD COMMENT', CPANEL_W / 2, footerY + 77);
@@ -926,7 +926,7 @@
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 2;
 
-      const authorColor = c.avatar_color || '#FF3B1F';
+      const authorColor = c.avatar_color || TOKENS.hex.accent;
       const authorName = c.author_name || 'Anonymous';
       const hasTime = c.timestamp !== null && c.timestamp !== undefined;
       const timeStr = hasTime ? '⏱️ ' + formatTime(c.timestamp) : '';
@@ -951,7 +951,7 @@
       // Hover / click affordance background — drawn behind all pill content
       if (isHovered) {
         ctx.fillStyle = 'rgba(18, 19, 21, 0.78)';
-        ctx.strokeStyle = '#FF3B1F';
+        ctx.strokeStyle = TOKENS.hex.accent;
         ctx.lineWidth = 2;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(regionX, regionY, regionW, regionH, 4);
@@ -986,14 +986,14 @@
 
       // Timestamp tag — muted monospace like .twitch-tag
       if (hasTime) {
-        ctx.font = '700 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#A4ABB3';
+        ctx.font = `700 11px ${TOKENS.font.mono}`;
+        ctx.fillStyle = TOKENS.hex.ink2;
         ctx.fillText(timeStr, nameX + nameW + 8, timeY);
       }
 
       // Comment Text — light Archivo like .twitch-text
       ctx.font = '500 14px "Archivo", sans-serif';
-      ctx.fillStyle = '#F2F3F5';
+      ctx.fillStyle = TOKENS.hex.ink;
       ctx.textBaseline = 'top';
       ctx.fillText(dispText, textX, textY);
 
@@ -1120,40 +1120,40 @@
     ctx.beginPath();
     ctx.arc(-14, -12, 7, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.beginPath();
     ctx.arc(-14, -12, 2, 0, Math.PI * 2);
     ctx.fill();
 
     // ── A Button (lower right) ──
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.shadowColor = 'rgba(255, 59, 31, 0.5)';
     ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.arc(14, -2, 9, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = TOKENS.hex.ink;
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('A', 14, -2);
 
     // ── B Button (upper right) ──
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.shadowColor = 'rgba(255, 59, 31, 0.35)';
     ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.arc(20, -22, 9, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = TOKENS.hex.ink;
     ctx.font = 'bold 10px sans-serif';
     ctx.fillText('B', 20, -22);
 
     // ── Index Trigger (front curved) ──
     ctx.fillStyle = '#2A2C32';
-    ctx.strokeStyle = '#FF3B1F';
+    ctx.strokeStyle = TOKENS.hex.accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(-12, 18);
@@ -1198,13 +1198,13 @@
     ctx.stroke();
 
     // Header Badge
-    ctx.fillStyle = '#FF3B1F';
+    ctx.fillStyle = TOKENS.hex.accent;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(16, 14, 140, 24, 4);
     else ctx.rect(16, 14, 140, 24);
     ctx.fill();
 
-    ctx.fillStyle = '#0A0A0A';
+    ctx.fillStyle = TOKENS.hex.onAccent;
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1241,7 +1241,7 @@
     ctx.stroke();
 
     // ── BOTTOM SECTION: 2-Column Cards Grid ──
-    const accentColor = '#FF3B1F';
+    const accentColor = TOKENS.hex.accent;
     const dimText = 'rgba(242, 243, 245, 0.85)';
     const cards = [
       { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Reels: Left/Right → Seek ±5s|Images: Left/Right → Prev/Next' },
@@ -1384,7 +1384,7 @@
     ctx.restore();
     if (label) {
       ctx.fillStyle = '#6F8BA6';
-      ctx.font = '700 15px "JetBrains Mono", monospace';
+      ctx.font = `700 15px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, x + w / 2, y + h / 2);
@@ -1442,22 +1442,22 @@
     ctx.fillStyle = 'rgba(255,90,70,' + pulse.toFixed(3) + ')';
     ctx.beginPath(); ctx.arc(46, 40, 5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#FFD9D2';
-    ctx.font = '800 14px "JetBrains Mono", monospace';
+    ctx.font = `800 14px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('LIVE', 58, 41);
     ctx.fillStyle = '#7FA2BA';
-    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.font = `700 13px ${TOKENS.font.mono}`;
     ctx.textAlign = 'right';
     ctx.fillText('TRENDING · 7 DAYS', W - 30, 41);
 
     // Location name + heat meter
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '800 34px Archivo, sans-serif';
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = `800 34px ${TOKENS.font.sans}`;
     ctx.textAlign = 'left';
     ctx.fillText(truncatePreviewText(location.name || location.slug, 22), 28, 84);
     ctx.fillStyle = '#9FD8E6';
-    ctx.font = '700 14px "JetBrains Mono", monospace';
+    ctx.font = `700 14px ${TOKENS.font.mono}`;
     ctx.fillText(Math.round(heat * 100) + '% HEAT  ·  ' + (Number(location.active_reel_count) || 0) + ' ACTIVE', 28, 118);
     previewRoundRect(ctx, 300, 112, 184, 10, 5);
     ctx.fillStyle = 'rgba(160,190,220,0.16)';
@@ -1532,15 +1532,15 @@
       }
       // Item caption + counter
       const cur = items[active] || {};
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '800 22px Archivo, sans-serif';
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `800 22px ${TOKENS.font.sans}`;
       ctx.textAlign = 'left';
       ctx.fillText(truncatePreviewText(cur.title || cur.filename || 'Untitled reel', 30), hx + 20, hy + hh - 32);
       previewRoundRect(ctx, hx + hw - 78, hy + 28, 62, 28, 14);
       ctx.fillStyle = 'rgba(4,14,28,0.72)';
       ctx.fill();
       ctx.fillStyle = '#BFF5FF';
-      ctx.font = '800 14px "JetBrains Mono", monospace';
+      ctx.font = `800 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 43);
     }
@@ -1557,7 +1557,7 @@
       ctx.lineWidth = hot ? 2.5 : 1.5;
       ctx.stroke();
       ctx.fillStyle = !live ? '#6F8BA6' : (b.action === 'feed' ? (hot ? '#FFF1D6' : '#FFD58A') : (hot ? '#F2FDFF' : '#A9F0FF'));
-      ctx.font = '800 14px "JetBrains Mono", monospace';
+      ctx.font = `800 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(b.label, b.x + b.w / 2, b.y + 21);
     }
