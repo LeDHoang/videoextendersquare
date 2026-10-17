@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { GatedReason, Mono } from '../ui/primitives.jsx';
 import { Button } from '../ui/controls.jsx';
 import LocationField from '../ui/LocationField.jsx';
+import { LocationIcon } from '../icons/index.jsx';
 import { DeckSection, DeckLabel } from './ExtendDeck.jsx';
 
 export const TITLE_MAX = 100;
@@ -75,9 +76,9 @@ export function DetailsSection({ num, title, setTitle, caption, setCaption, tags
         <DeckLabel>LOCATION (FREE TEXT · MATCHED TO MAP)</DeckLabel>
         <LocationField value={location} onChange={setLocation} />
         {location?.display_name ? (
-          <Mono>📍 {location.display_name}</Mono>
+          <Mono><LocationIcon className="sx-location-inline" /> {location.display_name}</Mono>
         ) : location?.city ? (
-          <Mono>📍 {location.city}{location.country ? `, ${location.country}` : ''} (CUSTOM)</Mono>
+          <Mono><LocationIcon className="sx-location-inline" /> {location.city}{location.country ? `, ${location.country}` : ''} (CUSTOM)</Mono>
         ) : null}
       </div>
     </DeckSection>

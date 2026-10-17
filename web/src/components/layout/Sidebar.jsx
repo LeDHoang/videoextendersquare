@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
 import { Field } from '../ui/controls.jsx';
+import { hideDevTools } from '../../utils/devTools.js';
 import {
   IndustrialImageIcon,
   IndustrialVideoIcon,
@@ -33,6 +34,7 @@ const MODEL_FIELDS = [
 ];
 
 export default function Sidebar({ health, config, setModels, isOpen, onClose }) {
+  const showDevTools = !hideDevTools();
   const { user } = useAuth();
   const { wallet, falKey } = useWallet();
   const [modelDraft, setModelDraft] = useState({});
@@ -266,6 +268,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       </div>
 
       {/* ─── System Probes Module ───────────────────────────── */}
+      {showDevTools ? (
       <div className="sx-sidebar-card">
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">LIVE STATUS / ENG PROBES</span>
@@ -345,6 +348,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </details>
         ) : null}
       </div>
+      ) : null}
 
       {/* ─── Model Endpoints Customizer ─────────────────────── */}
       {user?.role === 'admin' ? (
@@ -410,6 +414,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       ) : null}
 
       {/* ─── Telemetry Bottom Bar ───────────────────────────── */}
+      {showDevTools ? (
       <div className="sx-sidebar-telemetry-bottom">
         <div className="sx-telemetry-col">
           <span className="sx-telemetry-key">PROBES_OK</span>
@@ -424,6 +429,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </span>
         </div>
       </div>
+      ) : null}
     </aside>
   );
 }

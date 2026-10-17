@@ -873,7 +873,7 @@ button {
 
 .sx-brand-tag {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
+  font-size: var(--sx-t-eyebrow);
   color: var(--sx-ink-3);
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1094,7 +1094,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-status-text {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.625rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--sx-ink-2);
@@ -1160,7 +1160,7 @@ button:hover .sx-sidebar-hero-logo,
   padding: 1px 4px;
   border-radius: 2px;
   font-weight: 700;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 .sx-sidebar-key-val {
@@ -1314,7 +1314,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-credits-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--sx-ink-3);
@@ -1324,7 +1324,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-credits-sub {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.55rem;
+  font-size: 0.625rem;
   color: var(--sx-ink-3);
   letter-spacing: 0.05em;
   white-space: nowrap;
@@ -1354,7 +1354,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-credits-unit {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.55rem;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
@@ -1375,7 +1375,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-key-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
@@ -1387,7 +1387,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-key-badge {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.06em;
   padding: 2px 7px;
@@ -1501,7 +1501,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-probe-sub {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
+  font-size: var(--sx-t-eyebrow);
   color: var(--sx-ink-3);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1555,7 +1555,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-telemetry-key {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   color: var(--sx-ink-3);
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -2510,7 +2510,7 @@ input[type='range']::-moz-range-thumb {
   overflow-y: auto;
   background: var(--sx-surface);
   border: 1px solid var(--sx-rule-strong);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 59, 31, 0.4);
+  box-shadow: var(--sx-shadow-popover);
 }
 
 .sx-dropdown-item {
@@ -2560,7 +2560,7 @@ input[type='range']::-moz-range-thumb {
   color: var(--sx-ink-3);
   white-space: nowrap;
   flex-shrink: 0;
-  font-size: 0.68rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 /* ─── Upload Zone ────────────────────────────────────────── */
@@ -2895,7 +2895,7 @@ code {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.75rem;
   color: var(--sx-ink-2);
-  box-shadow: 0 4px 20px rgba(255, 59, 31, 0.08);
+  box-shadow: var(--sx-shadow-card);
 }
 
 .sx-cost-head {
@@ -2978,7 +2978,7 @@ code {
   padding-bottom: var(--sx-2);
   margin-bottom: var(--sx-3);
   border-bottom: 2px solid var(--sx-accent);
-  box-shadow: 0 2px 10px rgba(255, 59, 31, 0.15);
+  box-shadow: var(--sx-shadow-sm);
   flex-wrap: wrap;
 }
 
@@ -3042,7 +3042,7 @@ code {
   justify-content: center;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 59, 31, 0.3);
+  box-shadow: var(--sx-shadow-popover);
 }
 
 .sx-reels-mount {
@@ -3057,7 +3057,7 @@ code {
   background: #000000;
   position: relative;
   overflow: visible;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 59, 31, 0.3);
+  box-shadow: var(--sx-shadow-popover);
 }
 
 /* Wide screens: the player docks a details column beside the square (see applyDock()
@@ -3331,7 +3331,7 @@ code {
 
 .sx-stream-tag {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.1em;
   padding: 2px 8px;
@@ -3398,7 +3398,7 @@ code {
 }
 
 .sx-link-danger {
-  color: var(--sx-warn-hi);
+  color: var(--sx-danger-hi);
 }
 
 .sx-toggle-row {
@@ -3454,7 +3454,7 @@ code {
   border-bottom: 2px solid var(--sx-accent);
   padding-bottom: var(--sx-5);
   margin-bottom: var(--sx-6);
-  box-shadow: 0 4px 20px rgba(255, 59, 31, 0.12);
+  box-shadow: var(--sx-shadow-card);
 }
 
 .sx-compare-title {
@@ -3558,16 +3558,15 @@ code {
 .sx-control-rail-stacked .sx-seg button.sx-selected,
 .sx-control-rail-stacked .sx-pills .sx-pill.sx-selected {
   background: var(--sx-accent);
-  color: #000000;
+  color: var(--sx-on-accent);
   border-color: var(--sx-accent);
   font-weight: 800;
-  box-shadow: 0 0 12px var(--sx-accent-glow);
 }
 
 .sx-control-rail .sx-btn.sx-primary,
 .sx-control-rail-stacked .sx-btn.sx-primary {
   background: var(--sx-accent);
-  color: #000000;
+  color: var(--sx-on-accent);
   border-color: var(--sx-accent);
   font-weight: 800;
 }
@@ -3582,7 +3581,6 @@ code {
   border: 1px solid var(--sx-rule-strong);
   background: #000000;
   overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 59, 31, 0.35);
 }
 
 /* Side-by-side masters — stacks below 600px where ~160px panes would
@@ -3598,7 +3596,7 @@ code {
   }
   .sx-badge-fast,
   .sx-badge-studio {
-    font-size: 0.65rem;
+    font-size: var(--sx-t-eyebrow);
     padding: 2px 8px;
     top: 8px;
   }
@@ -3615,14 +3613,13 @@ code {
   top: 16px;
   left: 16px;
   background: var(--sx-accent);
-  color: #000000;
+  color: var(--sx-on-accent);
   padding: 4px 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--sx-font-mono);
   font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  box-shadow: 0 0 12px rgba(255, 59, 31, 0.4);
   z-index: 20;
   pointer-events: none;
 }
@@ -3631,15 +3628,14 @@ code {
   position: absolute;
   top: 16px;
   right: 16px;
-  background: #3b82f6;
-  color: #000000;
+  background: var(--sx-ink);
+  color: var(--sx-on-accent);
   padding: 4px 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--sx-font-mono);
   font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
   z-index: 20;
   pointer-events: none;
 }
@@ -3683,7 +3679,7 @@ code {
   left: 0;
   right: 0;
   height: 4px;
-  background: #3b82f6;
+  background: var(--sx-ink);
 }
 
 .sx-telemetry-title {
@@ -4059,7 +4055,7 @@ body.sx-vr-active .sx-reels-mount,
   background: #000000;
   color: var(--sx-accent);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.65rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0;
@@ -4163,7 +4159,7 @@ body.sx-vr-active .sx-reels-mount,
   background: var(--sx-accent);
   color: #000000;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   font-weight: 800;
   line-height: 16px;
   text-align: center;
@@ -4672,14 +4668,14 @@ body.sx-vr-active .sx-reels-mount,
     gap: 7px;
   }
   .sx-explore-loc {
-    font-size: 0.65rem;
+    font-size: var(--sx-t-eyebrow);
   }
   .sx-explore-title {
     font-size: 0.72rem;
     bottom: 38px;
   }
   .sx-explore-kind {
-    font-size: 0.62rem;
+    font-size: var(--sx-t-eyebrow);
   }
 }
 
@@ -4691,6 +4687,14 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 /* Comment glyph matching the reels player action-bar icon. */
+.sx-location-inline {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+
 .sx-explore-stat-icon {
   width: 16px;
   height: 16px;
@@ -4926,7 +4930,7 @@ button.sx-explore-loc-link:hover {
   border-bottom: 1px solid var(--sx-rule);
   color: var(--sx-ink-3);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.12em;
 }
@@ -4992,7 +4996,7 @@ button.sx-explore-loc-link:hover {
   overflow: hidden;
   color: var(--sx-ink-3);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   font-style: normal;
   letter-spacing: 0.04em;
   text-overflow: ellipsis;
@@ -5014,7 +5018,7 @@ button.sx-explore-loc-link:hover {
   border-bottom: 0;
   color: var(--sx-accent-hi);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 800;
   letter-spacing: 0.08em;
 }
@@ -5024,7 +5028,7 @@ button.sx-explore-loc-link:hover {
   color: var(--sx-ink-3);
   border-bottom: 1px solid var(--sx-rule);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
+  font-size: var(--sx-t-eyebrow);
   letter-spacing: 0.08em;
 }
 
@@ -5069,7 +5073,7 @@ button.sx-explore-loc-link:hover {
 .sx-tag-grid-heading > span {
   color: var(--sx-ink-3);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
   letter-spacing: 0.08em;
 }
 
@@ -5098,7 +5102,7 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-accent-dim);
   color: var(--sx-ink-2);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
+  font-size: var(--sx-t-eyebrow);
   letter-spacing: 0.08em;
 }
 
@@ -5136,7 +5140,7 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-surface);
   color: var(--sx-accent-hi);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   font-weight: 800;
   letter-spacing: 0.14em;
 }
@@ -5470,7 +5474,7 @@ button.sx-explore-loc-link:hover {
   object-fit: cover;
   border-radius: 50%;
   color: #08090a;
-  font-size: 0.58rem;
+  font-size: 0.625rem;
 }
 
 .sx-explore-creator strong {
@@ -5552,7 +5556,7 @@ button.sx-explore-loc-link:hover {
   .sx-account-signin {
     min-width: 34px;
     padding: 0 7px;
-    font-size: 0.58rem;
+    font-size: 0.625rem;
   }
 
   .sx-account-trigger {
@@ -5574,7 +5578,7 @@ button.sx-explore-loc-link:hover {
 
 
   .sx-explore-creator {
-    font-size: 0.58rem;
+    font-size: 0.625rem;
   }
 }
 /* ─── Direct messaging (page + compact dock) ─────────────────────────
@@ -5823,7 +5827,7 @@ button.sx-explore-loc-link:hover {
   border-bottom: 1px solid var(--sx-rule);
 }
 
-.sx-message-filter input { text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.06em; }
+.sx-message-filter input { text-transform: uppercase; font-size: var(--sx-t-eyebrow); letter-spacing: 0.06em; }
 
 .sx-message-user-search button span:last-child,
 .sx-conversation-copy,
@@ -6817,7 +6821,7 @@ button.sx-explore-loc-link:hover {
 .sx-xh-kicker {
   margin-top: var(--sx-3);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.65rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -6906,7 +6910,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-xh-stat-label {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--sx-ink-3);
@@ -6939,7 +6943,7 @@ button.sx-explore-loc-link:hover {
 .sx-xh-chips-label {
   flex: 0 0 auto;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -6999,7 +7003,7 @@ button.sx-explore-loc-link:hover {
   border-radius: 2px;
   background: var(--sx-surface-3);
   color: var(--sx-ink-2);
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 /* Toolbar */
@@ -7070,7 +7074,7 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-xh-ctl-label {
-  font-size: 0.62rem;
+  font-size: var(--sx-t-eyebrow);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--sx-ink-3);
@@ -8109,7 +8113,7 @@ button.sx-explore-loc-link:hover {
 .sx-ps-btn--small {
   min-height: 28px;
   padding: 5px 10px;
-  font-size: 0.6rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 .sx-ps-btn--block {
@@ -8493,12 +8497,12 @@ a.sx-xh-btn { text-decoration: none; }
   padding: 2px 6px;
   border: 1px solid var(--sx-rule-strong);
   color: var(--sx-ink-2);
-  font-size: 0.58rem;
+  font-size: 0.625rem;
   letter-spacing: 0.1em;
 }
 
 .sx-cr-row-delta { display: flex; flex-direction: column; gap: 2px; font-weight: 800; letter-spacing: 0.04em; }
-.sx-cr-row-delta small { color: var(--sx-ink-3); font-size: 0.6rem; font-weight: 600; }
+.sx-cr-row-delta small { color: var(--sx-ink-3); font-size: var(--sx-t-eyebrow); font-weight: 600; }
 .sx-cr-row-delta--up { color: var(--sx-success-hi); }
 .sx-cr-row-delta--down { color: var(--sx-danger-hi); }
 .sx-cr-row-delta--flat { color: var(--sx-ink-2); }
@@ -10104,6 +10108,16 @@ a.sx-xh-btn { text-decoration: none; }
   height: 30px;
 }
 
+/* Coarse pointers get 44px targets on the dense studio rails. */
+@media (pointer: coarse) {
+  .sx-studio-tbtn,
+  .sx-studio-view button,
+  .sx-tag-chip {
+    min-width: var(--sx-control-h-lg, 44px);
+    min-height: var(--sx-control-h-lg, 44px);
+  }
+}
+
 .sx-studio-pills {
   display: flex;
   flex-wrap: wrap;
@@ -10134,7 +10148,7 @@ a.sx-xh-btn { text-decoration: none; }
   overflow: hidden;
   background: #030405;
   border: 2px solid var(--sx-rule-strong);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 0 0 1px rgba(255, 59, 31, 0.35);
+  box-shadow: var(--sx-shadow-popover);
 }
 
 .sx-studio-reticle {
@@ -10425,11 +10439,11 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-studio-tbtn:hover,
 .sx-studio-tbtn:focus-visible {
   border-color: var(--sx-accent);
-  color: #fff;
+  color: var(--sx-ink);
 }
 
 .sx-studio-tbtn.sx-primary {
-  color: #fff;
+  color: var(--sx-on-accent);
 }
 
 .sx-studio-clock {
@@ -10637,7 +10651,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-studio-card.sx-studio-execute,
 .sx-studio-card.sx-studio-share {
   border: 2px solid rgba(255, 59, 31, 0.4);
-  box-shadow: 0 10px 30px rgba(255, 59, 31, 0.08);
+  box-shadow: var(--sx-shadow-card);
 }
 
 .sx-studio-card-head {

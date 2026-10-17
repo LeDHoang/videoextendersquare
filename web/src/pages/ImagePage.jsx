@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -359,10 +359,7 @@ export default function ImagePage() {
           ))}
           {hasJobs ? (
             <>
-              <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
-              <Mono>
-                {jobs.map((j) => `/api/image/jobs/${j.jobId}/result`).join('\n')}
-              </Mono>
+              <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
             </>
           ) : null}
         </Section>

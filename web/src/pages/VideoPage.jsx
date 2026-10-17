@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono, AccentBlock } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, AccentBlock } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -647,10 +647,7 @@ export default function VideoPage() {
           {jobs.map((j) => (
             <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={() => refreshWallet({ silent: true })} />
           ))}
-          <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
-          <Mono>
-            {jobs.map((j) => `/api/video/jobs/${j.jobId}/result`).join('\n')}
-          </Mono>
+          <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
         </Section>
       ) : null}
     </div>
