@@ -739,8 +739,8 @@ button {
 /* ─── Layout Shell ───────────────────────────────────────── */
 
 .sx-shell {
-  min-height: calc(100vh - 64px);
-  min-height: calc(100dvh - 64px);
+  min-height: calc(100vh - var(--sx-header-h));
+  min-height: calc(100dvh - var(--sx-header-h));
   background: var(--sx-bg);
   width: 100%;
   position: relative;
@@ -759,12 +759,12 @@ button {
   background: var(--sx-surface);
   border-right: 1px solid var(--sx-rule-strong);
   position: fixed;
-  top: 64px;
+  top: var(--sx-header-h);
   left: 0;
   bottom: 0;
   width: 320px;
-  height: calc(100vh - 64px);
-  height: calc(100dvh - 64px);
+  height: calc(100vh - var(--sx-header-h));
+  height: calc(100dvh - var(--sx-header-h));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -773,12 +773,16 @@ button {
   box-sizing: border-box;
   z-index: 900;
   transform: translateX(-100%);
-  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 280ms ease;
+  /* Closed sidebar leaves the tab order only after the slide-out finishes. */
+  visibility: hidden;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 280ms ease, visibility 0s linear 280ms;
 }
 
 .sx-sidebar.sx-open,
 .sx-shell.sx-sidebar-open .sx-sidebar {
   transform: translateX(0);
+  visibility: visible;
+  transition-delay: 0s;
   box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
 }
 
@@ -858,7 +862,7 @@ button {
 }
 
 .sx-brand-title {
-  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-brand);
   font-size: 1.65rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -916,7 +920,7 @@ button {
 }
 
 .sx-sidebar-hero-title {
-  font-family: 'Archivo Black', 'Orbitron', sans-serif;
+  font-family: var(--sx-font-brand);
   font-size: 3.2rem;
   font-weight: 900;
   letter-spacing: -0.05em;
@@ -973,7 +977,7 @@ button:hover .sx-sidebar-hero-logo,
   justify-content: center;
   gap: 6px;
   text-decoration: none;
-  border-radius: 4px;
+  border-radius: 0;
   transition: all 180ms ease;
   cursor: pointer;
 }
@@ -986,8 +990,8 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-nav-card.sx-active {
   background: var(--sx-surface-3);
-  border: 2px solid var(--sx-accent);
-  box-shadow: 0 0 15px rgba(255, 59, 31, 0.25);
+  border-color: var(--sx-accent);
+  box-shadow: inset 0 -2px 0 var(--sx-accent);
 }
 
 .sx-sidebar-nav-icon,
@@ -1008,11 +1012,10 @@ button:hover .sx-sidebar-hero-logo,
 .sx-sidebar-nav-card.sx-active .sx-sidebar-icon-svg,
 .sx-sidebar-nav-card.sx-active .sx-sidebar-nav-icon {
   color: var(--sx-ink);
-  filter: drop-shadow(0 0 6px rgba(255, 59, 31, 0.45));
 }
 
 .sx-sidebar-nav-label {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: 0.6875rem;
   font-weight: 800;
   letter-spacing: 0.1em;
@@ -1566,7 +1569,7 @@ button:hover .sx-sidebar-hero-logo,
 }
 
 .sx-echo-text {
-  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-brand);
   font-weight: 800;
   letter-spacing: 0.1em;
   color: var(--sx-accent);
@@ -1687,7 +1690,7 @@ button:hover .sx-sidebar-hero-logo,
   padding: var(--sx-3) var(--sx-4);
   color: var(--sx-ink-2);
   text-decoration: none;
-  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-size: 0.8125rem;
   font-weight: 800;
   letter-spacing: 0.1em;
@@ -1756,7 +1759,7 @@ button:hover .sx-sidebar-hero-logo,
 @media (max-width: 900px) {
   .sx-sidebar {
     position: fixed;
-    top: 64px;
+    top: var(--sx-header-h);
     left: 0;
     bottom: 0;
     width: 320px;
@@ -1853,7 +1856,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-display {
   font-size: var(--sx-t-display);
-  font-family: 'Orbitron', 'Archivo Black', sans-serif;
+  font-family: var(--sx-font-display);
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.01em;
@@ -3751,7 +3754,7 @@ code {
   right: 0;
   width: 100%;
   max-width: 100vw;
-  height: 64px;
+  height: var(--sx-header-h);
   background: rgba(18, 19, 21, 0.92);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -4318,7 +4321,7 @@ body.sx-vr-active .sx-reels-mount,
 
 @media (max-width: 640px) {
   .sx-top-bar {
-    height: 58px;
+    height: var(--sx-header-h);
     padding: 0 10px;
   }
   .sx-top-left {
@@ -4384,12 +4387,12 @@ body.sx-vr-active .sx-reels-mount,
 
   .sx-command-results {
     position: fixed !important;
-    top: 58px !important;
+    top: var(--sx-header-h) !important;
     left: 0 !important;
     right: 0 !important;
     width: 100vw !important;
     max-width: 100vw !important;
-    max-height: calc(100dvh - 58px) !important;
+    max-height: calc(100dvh - var(--sx-header-h)) !important;
     border-left: none !important;
     border-right: none !important;
     border-top: 2px solid var(--sx-accent) !important;
@@ -5564,7 +5567,7 @@ button.sx-explore-loc-link:hover {
 
   .sx-account-popover {
     position: fixed;
-    top: 58px;
+    top: var(--sx-header-h);
     right: 8px;
   }
 
@@ -5583,7 +5586,7 @@ button.sx-explore-loc-link:hover {
   flex-direction: column;
   min-width: 0;
   /* Fill the window: 64px top bar + main's 24px top padding + 16px bottom (below). */
-  height: calc(100dvh - 64px - var(--sx-5) - var(--sx-4));
+  height: calc(100dvh - var(--sx-header-h) - var(--sx-5) - var(--sx-4));
   min-height: 520px;
 }
 
@@ -6643,7 +6646,7 @@ button.sx-explore-loc-link:hover {
 
 @media (max-width: 900px) {
   /* .sx-main drops to 16px top padding at this width. */
-  .sx-messages-page { height: calc(100dvh - 64px - var(--sx-4) - var(--sx-4)); }
+  .sx-messages-page { height: calc(100dvh - var(--sx-header-h) - var(--sx-4) - var(--sx-4)); }
 }
 
 @media (max-width: 760px) {
@@ -6662,16 +6665,16 @@ button.sx-explore-loc-link:hover {
   .sx-message-sidebar { border-right: 0; }
 
   .sx-message-dock {
-    inset: 64px 0 0;
+    inset: var(--sx-header-h) 0 0;
     width: 100vw;
-    height: calc(100dvh - 64px);
+    height: calc(100dvh - var(--sx-header-h));
   }
 
   .sx-message-dock .sx-messaging-panel { margin: 0; height: calc(100% - var(--sx-dock-head)); }
   .sx-message-dock.sx-minimized { inset: auto 0 0 auto; width: 340px; height: var(--sx-dock-head); }
 
   /* main uses 16px (not 24px) top padding at this width */
-  .sx-messages-page { height: calc(100dvh - 64px - var(--sx-4) - var(--sx-4)); }
+  .sx-messages-page { height: calc(100dvh - var(--sx-header-h) - var(--sx-4) - var(--sx-4)); }
   .sx-mx-head { padding: var(--sx-3); }
   .sx-message-history { padding: var(--sx-3); }
   .sx-message-bubble { max-width: 90%; }

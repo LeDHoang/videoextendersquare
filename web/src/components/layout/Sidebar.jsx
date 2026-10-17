@@ -180,7 +180,10 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       <div className="sx-sidebar-card sx-sidebar-billing-card">
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">
-            <span style={{ color: 'var(--sx-accent)' }}>⚡</span> ECHO CREDITS & KEY
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: 'var(--sx-accent)', verticalAlign: '-2px', marginRight: 6 }}>
+              <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+            </svg>
+            ECHO CREDITS & KEY
           </span>
           <div className="sx-sidebar-status-pill">
             <span

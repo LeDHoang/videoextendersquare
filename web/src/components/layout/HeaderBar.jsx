@@ -349,7 +349,9 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
         <>
           <div className="sx-top-left">
             <button type="button" className="sx-icon-btn" onClick={onToggleSidebar} title="Open/Close Sidebar" aria-label="Toggle Sidebar">
-              <span style={{ fontSize: '1.14rem', lineHeight: 1 }}>☰</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
             </button>
             <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
               <img src="/logo.svg" alt="ECHO Logo" className="sx-top-logo" />
@@ -406,7 +408,10 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
               title="Search"
               aria-label="Open Search"
             >
-              <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>⌕</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6" />
+                <path d="M15 15l5 5" />
+              </svg>
             </button>
 
             {/* Credits: full text on desktop, compact pill on tablet/mobile */}
