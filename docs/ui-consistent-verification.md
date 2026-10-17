@@ -1,6 +1,6 @@
 # UI-consistent branch: verification report
 
-Branch `UI-consistent` (cut from `3dreels`), verified 2026-10-17 against the ECHO design system artifact.
+Branch `UI-consistent` (cut from `3dreels`), verified 2026-10-17 (Quest headset 2026-10-18) against the ECHO design system artifact.
 Scope was UI only: tokens, CSS, class names, presentational wrappers, copy and icons. No routes, API calls, state, handlers, shortcuts or XR session logic changed.
 
 ## Method
@@ -30,6 +30,24 @@ Fixes made during verification (commit `style(ui): square explore chrome and res
 - `sx-xh-*` chrome (stats, chips, toolbar, tabs, segmented control, icon buttons) on Explore, Tag and Location was still 2–3 px rounded; now square.
 - `.sx-icon-btn` glowed at rest and used `#000000`; glow now only on hover / focus-visible, text uses `--sx-on-accent`.
 
+## Quest 3S headset (USB, Chrome DevTools Protocol)
+
+Run 2026-10-18 on a Quest 3S over USB debugging: OculusBrowser 152.1 (Chrome 152), 1280 × 670 viewport, dpr 1, `pointer: coarse` and `hover: hover` both match. The branch Vite server (:5173) and backend (:8000) were bridged with `adb reverse`; DevTools was reached with `adb forward tcp:9222 localabstract:chrome_devtools_remote`. Each route was opened in a fresh tab, probed with `Runtime.evaluate` and captured with `Page.captureScreenshot` (`reports/ui-consistent/verify/quest/`, gitignored).
+
+| Check | Result |
+|---|---|
+| Console errors and exceptions (`/reels`, `/`, `/explore`, `/login`, `/immersive`, `/wallet`) | 0 on every route |
+| Fonts | Archivo, Archivo Black, JetBrains Mono and Orbitron 900 load |
+| Tokens | `--sx-bg #08090a`, `--sx-accent #ff3b1f`, `--sx-ink #f2f3f5`, `--sx-on-accent #0a0a0a`; body background matches |
+| Chakra Petch, horizontal overflow | 0 on every route |
+| Reels pinned values | `.action-btn` 8 px, `.reels-cluster` 12 px, `#vrBtn` purple, `#modeBtn` intact; 4K video plays (3840 wide) |
+| `VRUICanvas.TOKENS` | present (`hex`, `font`, `space`, `radius`) |
+| Reels player low contrast / rounded | 12 / 12, the known reels gaps below |
+
+Fixed from this run (commit `style(ui): move header action and auth submit glow to hover/focus`): the header UPLOAD button (`.sx-top-action-btn`) and the auth SIGN IN submit (`.sx-au-submit`) glowed at rest. Both predate the branch. Re-checked on the headset: no resting glow.
+
+Not covered on the headset: the browser was not signed in (authed routes redirect to `/login`; no credentials were entered), no immersive XR session was entered (it needs a user gesture in the headset), and this was HTTP over `adb reverse`, not the Quest HTTPS gate.
+
 ## Accepted exceptions (pinned by tests or owner decision)
 
 - Reels `#vrBtn` purple `#A855F7` (4.15:1) and `#modeBtn.active` `#FF3B1F`.
@@ -48,7 +66,9 @@ Fixes made during verification (commit `style(ui): square explore chrome and res
 - StudioStage transport glyphs, JobRunner / StudioLoading progress, and Tag / Location `.sx-error-box` were not adopted.
 - Pack editor overflows by 324 px at 768 px on both base and branch (pre-existing).
 - Every route's document title is "ECHO"; pack editor @1440 has no `h1`.
-- Not run: IWER / Quest emulator, `make streamlit`, `make build` (so `server/static` still holds the stale Oct 5 bundle).
+- Explore tiles on a coarse pointer: about 600 nested creator / location chips (30 px and 22 px tall) and 44 × 30 tile buttons stay under 44 px. They sit inside `role=button` tiles (see discovery-2); enlarging them changes the tile layout and needs an owner decision.
+- The header wordmark (`.sx-top-brand`) is Archivo Black, while the sidebar hero and auth mark use Orbitron. Unchanged from `3dreels`; decide which face the wordmark uses before the ECHO artifact sync.
+- Not run: IWER emulator, an immersive XR session on the headset, `make streamlit`, `make build` (so `server/static` still holds the stale Oct 5 bundle).
 
 ## Functional bugs found (report only, not fixed)
 
