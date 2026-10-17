@@ -30,6 +30,7 @@
   --sx-accent-hi: #ff5c42;
   --sx-accent-dim: rgba(255, 59, 31, 0.12);
   --sx-accent-glow: rgba(255, 59, 31, 0.35);
+  --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #0a0a0a;
 
   /* Semantic Status Colors */
@@ -52,6 +53,13 @@
   --sx-info-hi: #60a5fa;
   --sx-info-dim: rgba(59, 130, 246, 0.12);
   --sx-info-border: rgba(59, 130, 246, 0.35);
+
+  /* ─── Font Stacks ────────────────────────────────────────── */
+  /* Orbitron is the wordmark only: reach it through --sx-font-brand, never by name. */
+  --sx-font-display: 'Archivo Black', Archivo, sans-serif;
+  --sx-font-sans: Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --sx-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sx-font-brand: Orbitron, 'Archivo Black', sans-serif;
 
   /* ─── Type Scale ─────────────────────────────────────────── */
   --sx-t-hero: clamp(2.5rem, 6.5vw, 5rem);
@@ -78,6 +86,8 @@
   /* ─── Control Dimensions ─────────────────────────────────── */
   --sx-control-h: 38px;
   --sx-control-h-lg: 44px;
+  --sx-header-h: 64px;
+  --sx-opacity-disabled: 0.4;
 
   /* ─── Rule Weights ───────────────────────────────────────── */
   --sx-rule-hairline: 1px solid var(--sx-rule);
@@ -104,10 +114,21 @@
   --sx-z-drawer-backdrop: 40;
   --sx-z-drawer: 45;
   --sx-z-dropdown: 50;
+  --sx-z-header: 30;
+  --sx-z-tabbar: 35;
+  --sx-z-dock: 80;
+  --sx-z-fullscreen: 90;
   --sx-z-modal: 100;
+  --sx-z-xr-overlay: 200;
   --sx-z-skip-link: 999;
 
   /* ─── Focus System ───────────────────────────────────────── */
   --sx-focus-ring: 2px solid var(--sx-accent);
   --sx-focus-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --sx-header-h: 58px;
+  }
 }

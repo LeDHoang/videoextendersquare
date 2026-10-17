@@ -382,7 +382,7 @@ export default function VideoPage() {
                   <details className="sx-expander" open>
                     <summary>▸ CUSTOM LoRA STACK (MAX 3)</summary>
                     <div className="sx-expander-body sx-cols sx-cols-2">
-                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-muted)', marginBottom: 'var(--sx-2)' }}>
+                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-ink-3)', marginBottom: 'var(--sx-2)' }}>
                         Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot. Civitai: paste the plain https://civitai.com/api/download/models/&lt;versionId&gt; link (optionally with ?fileId=&lt;id&gt;) — the server auto-appends your CIVITAI_KEY, so never include your token yourself.
                       </div>
                       {ltxLoras.map((lora, i) => (
