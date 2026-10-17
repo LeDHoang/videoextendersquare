@@ -2,9 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>ECHO Reels</title>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
 <style>
+  /* ECHO tokens for the standalone player. _scope_css drops bare html/body rules, so
+     when embedded in the SPA the app's own tokens.css supplies these same names.
+     Keep in sync with web/src/styles/tokens.css (web/tests/echo-token-parity.test.js). */
+  html {
+    color-scheme: dark;
+    --sx-bg: #08090a;
+    --sx-surface: #101214;
+    --sx-surface-2: #16191c;
+    --sx-surface-3: #1d2126;
+    --sx-surface-glass: rgba(16, 18, 20, 0.82);
+    --sx-rule: #24282d;
+    --sx-rule-strong: #3a4047;
+    --sx-ink: #f2f3f5;
+    --sx-ink-2: #a4abb3;
+    --sx-ink-3: #8e959e;
+    --sx-ink-muted: #646b74;
+    --sx-accent: #ff3b1f;
+    --sx-accent-hi: #ff5c42;
+    --sx-accent-dim: rgba(255, 59, 31, 0.12);
+    --sx-accent-glow: rgba(255, 59, 31, 0.35);
+    --sx-accent-border: rgba(255, 59, 31, 0.45);
+    --sx-on-accent: #0a0a0a;
+    --sx-success: #22c55e;
+    --sx-success-hi: #4ade80;
+    --sx-warn: #f2c744;
+    --sx-warn-hi: #fde047;
+    --sx-danger: #ef4444;
+    --sx-danger-hi: #f87171;
+    --sx-info: #3b82f6;
+    --sx-info-hi: #60a5fa;
+    --sx-font-display: 'Archivo Black', Archivo, sans-serif;
+    --sx-font-sans: Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --sx-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sx-font-brand: Orbitron, 'Archivo Black', sans-serif;
+  }
   * {
     box-sizing: border-box;
     margin: 0;

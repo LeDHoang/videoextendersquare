@@ -1571,6 +1571,44 @@
     return '';
   }
 
+  // ─── ECHO design tokens ─────────────────────────────────────────────
+  // Mirror of web/src/styles/tokens.css (colour, font, spacing). The parity test
+  // web/tests/echo-token-parity.test.js fails when the two drift apart. Frozen and
+  // side-effect free so the module still loads in a bare VM.
+  const TOKENS = Object.freeze({
+    hex: Object.freeze({
+      bg: '#08090a',
+      surface: '#101214',
+      surface2: '#16191c',
+      surface3: '#1d2126',
+      rule: '#24282d',
+      ruleStrong: '#3a4047',
+      ink: '#f2f3f5',
+      ink2: '#a4abb3',
+      ink3: '#8e959e',
+      inkMuted: '#646b74',
+      accent: '#ff3b1f',
+      accentHi: '#ff5c42',
+      onAccent: '#0a0a0a',
+      success: '#22c55e',
+      successHi: '#4ade80',
+      warn: '#f2c744',
+      warnHi: '#fde047',
+      danger: '#ef4444',
+      dangerHi: '#f87171',
+      info: '#3b82f6',
+      infoHi: '#60a5fa',
+    }),
+    font: Object.freeze({
+      display: "'Archivo Black', Archivo, sans-serif",
+      sans: 'Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif',
+      mono: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      brand: "Orbitron, 'Archivo Black', sans-serif",
+    }),
+    space: Object.freeze({ s1: 4, s2: 8, s3: 12, s4: 16, s5: 24 }),
+    radius: 0,
+  });
+
   // ─── Public Module API ──────────────────────────────────────────────
   return {
     CONTROLS_W,
@@ -1606,5 +1644,6 @@
     renderEarthPreviewCanvas,
     resolveEarthPreviewHit,
     EARTH_PREVIEW_BUTTONS,
+    TOKENS,
   };
 });

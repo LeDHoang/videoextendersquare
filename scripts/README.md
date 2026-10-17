@@ -51,3 +51,12 @@
 #                            (run after `make migrate`; --dry-run previews)
 #
 # Regression tests live in ../tests/ (run with `make test`).
+
+## ECHO design tokens outside the Vite app
+
+`web/src/styles/tokens.css` is the source of truth. Two other surfaces carry a copy because they cannot import it:
+
+- `ui/assets/reels.html`: an `html { --sx-* }` block at the top of the FIRST bare `<style>`. `server/routers/reels.py` extracts only that first block and `_scope_css` drops bare `html`/`body` rules, so the embedded player inherits the SPA's own tokens while the standalone page uses the copy.
+- `ui/assets/vr_ui_canvas.js`: frozen `VRUICanvas.TOKENS` (`hex`, `font`, `space`, `radius`).
+
+`web/tests/echo-token-parity.test.js` (run by `make test`) fails when either copy drifts from `tokens.css`. Change a token in `tokens.css` first, then update both copies.
