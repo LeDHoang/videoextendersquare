@@ -4086,14 +4086,13 @@ body.sx-vr-active .sx-reels-mount,
   background: var(--sx-accent);
   border: none;
   border-radius: 0;
-  color: #000000;
+  color: var(--sx-on-accent);
   cursor: pointer;
   font-family: 'Archivo Black', Archivo, sans-serif;
   font-size: 0.95rem;
   font-weight: 900;
   line-height: 1;
-  box-shadow: 0 0 12px var(--sx-accent-glow);
-  transition: opacity 150ms ease;
+  transition: opacity 150ms ease, box-shadow 150ms ease;
   flex-shrink: 0;
   box-sizing: border-box;
   align-self: center;
@@ -4101,6 +4100,12 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-icon-btn:hover {
   opacity: 0.85;
+}
+
+/* ECHO: accent glow only on hover/focus, never at rest. */
+.sx-icon-btn:hover,
+.sx-icon-btn:focus-visible {
+  box-shadow: 0 0 12px var(--sx-accent-glow);
 }
 
 /* Responsive visibility utilities */
@@ -6904,7 +6909,7 @@ button.sx-explore-loc-link:hover {
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--sx-rule);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-surface);
 }
 
@@ -6971,7 +6976,7 @@ button.sx-explore-loc-link:hover {
   flex: 0 0 auto;
   padding: 4px 12px;
   border: 1px solid var(--sx-surface-glass-border);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-surface-glass);
   backdrop-filter: blur(8px);
   color: var(--sx-ink-2);
@@ -7000,7 +7005,7 @@ button.sx-explore-loc-link:hover {
 
 .sx-xh-chip-count {
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-surface-3);
   color: var(--sx-ink-2);
   font-size: var(--sx-t-eyebrow);
@@ -7016,7 +7021,7 @@ button.sx-explore-loc-link:hover {
   margin-bottom: var(--sx-4);
   padding: var(--sx-3);
   border: 1px solid var(--sx-rule);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-surface);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.75rem;
@@ -7046,7 +7051,7 @@ button.sx-explore-loc-link:hover {
 .sx-xh-tab {
   padding: 7px 14px;
   border: 1px solid var(--sx-rule);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-surface-2);
   color: var(--sx-ink-2);
   font: inherit;
@@ -7085,7 +7090,7 @@ button.sx-explore-loc-link:hover {
   align-items: center;
   padding: 4px;
   border: 1px solid var(--sx-rule);
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--sx-bg);
   letter-spacing: 0.06em;
 }
@@ -7093,7 +7098,7 @@ button.sx-explore-loc-link:hover {
 .sx-xh-seg-btn {
   padding: 5px 12px;
   border: 0;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
   color: var(--sx-ink-2);
   font: inherit;
@@ -7131,7 +7136,7 @@ button.sx-explore-loc-link:hover {
   justify-content: center;
   padding: 6px;
   border: 1px solid var(--sx-rule);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--sx-bg);
   color: var(--sx-ink-3);
   cursor: pointer;
