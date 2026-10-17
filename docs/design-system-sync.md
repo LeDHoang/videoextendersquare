@@ -41,3 +41,10 @@ Contrast ratios computed against ECHO surfaces (`bg #08090a` ... `surface-3 #1d2
 - Add the tokens above to the Tokens page.
 - State that `--sx-ink-muted` is for non-text only; use `--sx-ink-3` for muted text.
 - BlockingBanner README: dark `--sx-on-accent` text on `--sx-danger`, no tinted shadow (WS6).
+
+## Scales documented, not changed (WS9)
+
+- Breakpoints in use: 640px (phone), 700px (reels dock, paired CSS and JS in `AppShell.jsx` and `reels.html`; do not change one side), 900px and 1100px (layout). ECHO defines none; the artifact should document this scale rather than adopt a new one.
+- z-index: tokenised slots are base 1, sticky 10, header 30, tabbar 35, drawer-backdrop 40, drawer 45, dropdown 50, dock 80, fullscreen 90, modal 100, xr-overlay 200, skip-link 999. `.reels-collect-dialog` stays at 91 (test-pinned). Many legacy literals in `global.css` (25, 26, 900, 1000-1300, 99999, 100000) were left alone: remapping changes stacking order and needs a visual pass per surface.
+- Runtime custom properties (`--sx-fs-safe-bottom`, `--sx-bottom-nav`, `--sx-dock-head`, `--sx-studio-top`) are set from JS or component CSS, so they are intentionally absent from `tokens.css`.
+- Forced-colors, coarse-pointer 44px targets, 16px mobile inputs and reduced-motion rules added at the end of `global.css`.

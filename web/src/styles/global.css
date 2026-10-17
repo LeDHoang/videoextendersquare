@@ -11056,3 +11056,52 @@ a.sx-xh-btn { text-decoration: none; }
     transform: none;
   }
 }
+
+/* ── Accessibility baseline (WS9) ─────────────────────────────────────
+   Presentational only. Square ECHO controls keep a visible boundary in
+   forced-colors mode, touch devices get 44px targets, iOS Safari does
+   not zoom on focus, and motion is neutralised when requested. */
+@media (forced-colors: active) {
+  .sx-btn,
+  .sx-seg button,
+  .sx-select,
+  .sx-tag-chip {
+    border: 1px solid ButtonText;
+  }
+
+  .sx-btn.sx-primary {
+    border-color: Highlight;
+  }
+
+  .sx-btn:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+}
+
+@media (pointer: coarse) {
+  .sx-btn,
+  .sx-seg button,
+  .sx-select {
+    min-height: var(--sx-control-h-lg, 44px);
+  }
+}
+
+@media (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-btn,
+  .sx-seg button {
+    transition: none;
+  }
+
+  .sx-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
