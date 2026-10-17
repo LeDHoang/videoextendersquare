@@ -48,3 +48,4 @@ Contrast ratios computed against ECHO surfaces (`bg #08090a` ... `surface-3 #1d2
 - z-index: tokenised slots are base 1, sticky 10, header 30, tabbar 35, drawer-backdrop 40, drawer 45, dropdown 50, dock 80, fullscreen 90, modal 100, xr-overlay 200, skip-link 999. `.reels-collect-dialog` stays at 91 (test-pinned). Many legacy literals in `global.css` (25, 26, 900, 1000-1300, 99999, 100000) were left alone: remapping changes stacking order and needs a visual pass per surface.
 - Runtime custom properties (`--sx-fs-safe-bottom`, `--sx-bottom-nav`, `--sx-dock-head`, `--sx-studio-top`) are set from JS or component CSS, so they are intentionally absent from `tokens.css`.
 - Forced-colors, coarse-pointer 44px targets, 16px mobile inputs and reduced-motion rules added at the end of `global.css`.
+- Legacy Streamlit tokens (`ui/assets/app.css`, `ui/tokens.py`): `--sx-ink-2` `#9BA1A8` to `#A4ABB3`, `--sx-ink-3` `#5F666D` to `#8E959E`, matching ECHO and AA on `--sx-bg`.
