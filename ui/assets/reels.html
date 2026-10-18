@@ -17,6 +17,7 @@
     --sx-surface: #101214;
     --sx-surface-2: #16191c;
     --sx-surface-3: #1d2126;
+    --sx-surface-hover: #1b1e22;
     --sx-surface-glass: rgba(16, 18, 20, 0.82);
     --sx-rule: #24282d;
     --sx-rule-strong: #3a4047;
@@ -989,7 +990,7 @@
     right: 0;
     height: 68%;
     max-height: 560px;
-    background: #1b1c1d;
+    background: var(--sx-surface-hover);
     border-top: 2px solid var(--sx-accent);
     border-radius: 0;
     z-index: 50;
@@ -1083,7 +1084,7 @@
   .drawer-tab:hover { background: #292a2b; border-color: var(--sx-accent); }
   .drawer-tab.active {
     background: var(--sx-accent);
-    color: #5a0600;
+    color: var(--sx-on-accent);
     border-color: var(--sx-accent);
     box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 28%, transparent);
   }
@@ -1176,7 +1177,7 @@
   .comment-time-btn {
     background: #292a2b;
     border: 1px solid var(--sx-accent);
-    color: var(--sx-accent);
+    color: var(--sx-accent-hi);
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -1184,11 +1185,11 @@
   .comment-time-btn svg { width: 12px; height: 12px; display: block; }
   .sync-time-toggle svg { width: 13px; height: 13px; display: block; }
   .sync-time-icon { display: inline-flex; line-height: 1; }
-  .comment-time-btn:hover { background: var(--sx-accent); border-color: var(--sx-accent); color: #5a0600; }
+  .comment-time-btn:hover { background: var(--sx-accent); border-color: var(--sx-accent); color: var(--sx-on-accent); }
   .comment-time-gen {
     background: #292a2b;
     border: 1px solid var(--sx-accent);
-    color: var(--sx-accent);
+    color: var(--sx-accent-hi);
   }
   .comment-msg {
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
@@ -1357,7 +1358,7 @@
   .comment-input::placeholder { color: var(--sx-accent); opacity: 0.55; }
   .comment-submit-btn {
     background: var(--sx-accent);
-    color: #5a0600;
+    color: var(--sx-on-accent);
     border: 1px solid var(--sx-accent);
     padding: 0 24px;
     font-family: 'JetBrains Mono', monospace;
@@ -2004,7 +2005,7 @@
     min-height: 0;
     border-top: 0;
     box-shadow: none;
-    background: #0D0E10;
+    background: var(--sx-bg);
   }
   #sxReelsHost.sx-reels-docked .drawer-close-btn,
   #sxReelsHost.sx-reels-docked .drawer-telemetry {
