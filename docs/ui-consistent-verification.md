@@ -60,18 +60,33 @@ Wordmark (commit `style(ui): set header wordmark in Orbitron`): the header wordm
 - Earth map colours (data-viz exception), map attribution kept legible.
 - Emoji reactions.
 
+## Gap closure (2026-10-18)
+
+One commit per workstream on `UI-consistent`; `make test` green after each (pytest 347, vitest 355, reels node tests).
+
+| Gap | Result |
+|---|---|
+| Reels drawer contrast and surface | `.drawer-tab.active`, comment submit and time buttons now on-accent or accent-hi (>= 4.5:1); drawer uses `--sx-surface-hover`, docked column uses `--sx-bg` |
+| Reels side-panel radii | `.reels-side`, avatar, chips, stats and edge chevron are square |
+| PREV / NEXT at 701-820 px | Not clipped; they overlapped the action bar. They move to the left edge in that range. 1100 px docked layout unchanged |
+| Avatar initials | Text colour picked by luminance (on-accent or ink), background colour unchanged |
+| Reels raw hex | Mapped to ECHO tokens (new `sxTok` / `readableOnDark` helpers for the canvas cards); pinned `#A855F7`, `#FF3B1F` (`#modeBtn.active`) and bottom-nav `#f2f3f5` stay |
+| VR canvas | HUD reads `VRUICanvas.TOKENS`: square radii, flat accent play button, no glow, drawn glyphs (chat, globe, lock, audio) instead of emoji, notification strip now drawn, long words hard-break in `wrapTextLines`, comment colours AA. Laser, pointer and reticle use the accent token. DOM comment input restyled; `📍` dropped from the location notice |
+| IMMERSIVE PREVIEW / Spatialize emoji | New `VrIcon` (`svg/vr-headset.svg`, `currentColor`) |
+| Studio | Connecting state has `role="progressbar"`; `StudioLoading` moved to `.sx-studio-loading*` classes; transport glyphs are SVG; Tag and Location feed errors use `.sx-error-box` |
+| Pack editor @768 | Overflow 324 px to 0. Cause: long unbroken reel titles in the library grid (`overflow-wrap: anywhere`). The "no `h1` @1440" finding was a sweep timing artefact (skeleton still showing); the loaded page has `CREATE REEL PACK` |
+| Document titles | `useDocumentTitle` + `routeTitle`, called once in `App`: "Explore · ECHO", "#viral · ECHO", "@name · ECHO", and so on |
+| Explore chip touch targets | Under `pointer: coarse` an invisible `::before` grows creator, owner and share chips to 44 px (measured: 30 px chip, hit at 5 px above and below, not at 9 px). The sweep still counts them: it measures visible boxes only |
+| `make build` / `make streamlit` | `server/static` rebuilt (gitignored, serves the branch bundle on :8000); Streamlit starts and answers 200 on :8501 |
+| Quest headset | HUD canvases rendered on OculusBrowser through CDP and captured (`reports/ui-consistent/verify/quest/`): square chrome, glyphs, notification strip, wrapped long word |
+
 ## Known gaps (not fixed on this branch)
 
-- Reels drawer: accent text on the drawer is about 4.04:1 (`.drawer-tab.active`, comment time buttons, "SIGN IN" submit). The drawer background `#1b1c1d` is not an exact token. PREV / NEXT are partly clipped at 760 px.
-- Reels side panel radii: `edge-chevron` 8 px, `reels-side` 8 px, `side-chip` 4 px, `side-stats` 6 px. Avatar initials below AA.
-- About 121 raw hex values remain in `ui/assets/reels.html`, plus canvas card colours.
-- `webxr_vr.js` does not yet read `VRUICanvas.TOKENS` everywhere.
-- The "IMMERSIVE PREVIEW" label still carries a 🥽 emoji.
-- StudioStage transport glyphs, JobRunner / StudioLoading progress, and Tag / Location `.sx-error-box` were not adopted.
-- Pack editor overflows by 324 px at 768 px on both base and branch (pre-existing).
-- Every route's document title is "ECHO"; pack editor @1440 has no `h1`.
-- Explore tiles on a coarse pointer: about 600 nested creator / location chips (30 px and 22 px tall) and 44 × 30 tile buttons stay under 44 px. They sit inside `role=button` tiles (see discovery-2); enlarging them changes the tile layout and needs an owner decision.
-- Not run: IWER emulator, an immersive XR session on the headset, `make streamlit`, `make build` (so `server/static` still holds the stale Oct 5 bundle).
+- `.sx-explore-loc-link` chips (22 px) sit inside an `overflow: hidden` container, so the coarse-pointer hit-area expansion is clipped there. Left as is.
+- Reels: `#vrBtn` purple (4.15:1) and the pinned radii stay by test. A few raw hex values with no matching token remain in `reels.html` (listed by `grep -nE '#[0-9a-fA-F]{6}' ui/assets/reels.html`).
+- The pack editor `EmptyState` and loading skeleton have no `h1`.
+- Not run: IWER emulator, an immersive XR session on the headset (needs a hand gesture in the headset; the HUD was verified by rendering its canvases), HTTPS Quest gate.
+- `server/static 2` (empty directory) left alone.
 
 ## Functional bugs found (report only, not fixed)
 
