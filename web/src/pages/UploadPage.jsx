@@ -57,7 +57,9 @@ function StereoChoice({ choice, meta, on, onToggle, disabled, slideshow }) {
     ? 'Detected from the file\'s stereo metadata.'
     : choice.method === 'content'
       ? 'Detected: the two halves show the same scene from two eyes.'
-      : null;
+      : choice.method === 'no_parallax'
+        ? 'The two halves are the same picture with no depth offset (a split-screen copy), so 3D is off.'
+        : null;
   return (
     <div className="sx-studio-stereo">
       <div className={`sx-accent-block ${on ? '' : 'sx-muted'}`} role="note">

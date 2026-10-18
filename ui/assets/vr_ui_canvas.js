@@ -92,6 +92,9 @@
     { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
   ];
 
+  // Dock header chip shown while a stereo reel is drawn per eye.
+  const STEREO_CHIP = { x: 404, y: 13, w: 64, h: 22 };
+
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
     const m = Math.floor(s / 60);
@@ -425,6 +428,7 @@
       locationFeedActive = false,
       notificationText = '',
       notificationUntil = 0,
+      stereo = 'mono',
       callbacks = {},
     } = options;
 
@@ -472,6 +476,20 @@
     ctx.fillStyle = TOKENS.hex.ink;
     ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
+
+    // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
+    if (stereo === 'sbs' || stereo === 'tb') {
+      ctx.fillStyle = TOKENS.hex.accent;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
+      else ctx.rect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h);
+      ctx.fill();
+      ctx.fillStyle = TOKENS.hex.onAccent;
+      ctx.font = `bold 11px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', STEREO_CHIP.x + STEREO_CHIP.w / 2, 24);
+      ctx.textAlign = 'left';
+    }
 
     // Comment pill
     const commentBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'comments');

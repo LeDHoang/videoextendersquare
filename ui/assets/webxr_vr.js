@@ -6397,6 +6397,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
+        stereo: textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono',
         callbacks,
       });
       if (controlsTexture) {

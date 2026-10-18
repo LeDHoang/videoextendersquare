@@ -301,3 +301,12 @@ test('entering VR keeps a paused reel paused', () => {
   assert.ok(entry.includes('videoElement.muted = false'));
   assert.ok(!/videoElement\.play\(/.test(entry), 'no play() on entry');
 });
+
+test('reels page 3D testing filter sends media=stereo to the list and the player', () => {
+  const page = readFileSync(join(here, '..', 'src', 'pages', 'ReelsPage.jsx'), 'utf-8');
+  assert.match(page, /useState\(searchParams\.get\('media'\) === 'stereo'\)/);
+  assert.match(page, /media: only3d \? 'stereo' : undefined/);
+  assert.match(page, /\.\.\.\(only3d \? \{ media: 'stereo' \} : \{\}\)/);
+  assert.match(page, /nextParams\.set\('media', 'stereo'\)/);
+  assert.match(page, /primary=\{only3d\}[\s\S]{0,120}aria-pressed=\{only3d\}/);
+});

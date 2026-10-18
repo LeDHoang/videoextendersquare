@@ -51,6 +51,8 @@ export default function ReelsPage() {
   const [deepPlay, setDeepPlay] = useState(() => searchParams.get('play'));
   const [feedScope, setFeedScope] = useState(searchParams.get('feed') === 'following' ? 'following' : 'discover');
   const activeAuthor = searchParams.get('author') || '';
+  // Testing aid: `media=stereo` keeps only 3D (SBS/TB) reels.
+  const [only3d, setOnly3d] = useState(searchParams.get('media') === 'stereo');
 
   // Re-sync when navigating Explore → Reels while already mounted (same
   // route, new query string — state initializers above don't re-run).
@@ -65,6 +67,7 @@ export default function ReelsPage() {
       setActiveTag(searchParams.get('tag') || '');
       setActiveLocation(searchParams.get('location') || '');
       setFeedScope(searchParams.get('feed') === 'following' ? 'following' : 'discover');
+      setOnly3d(searchParams.get('media') === 'stereo');
       const s = searchParams.get('sort');
       if (VALID_SORTS.includes(s)) setSort(s);
       setDeepPlay(play);
@@ -105,6 +108,7 @@ export default function ReelsPage() {
         feed: feedScope === 'following' ? 'following' : undefined,
         author: activeAuthor || undefined,
         post: deepPost || undefined,
+        media: only3d ? 'stereo' : undefined,
         sort,
         refresh: refreshKey > 0,
       })
@@ -123,7 +127,7 @@ export default function ReelsPage() {
         }
         setData({ total: 0, count: 0, folders: [], videos: [] });
       });
-  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, only3d, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
 
   const clearDeepLink = () => {
     setDeepPlay(null);
@@ -144,6 +148,18 @@ export default function ReelsPage() {
     clearDeepLink();
     setActiveTag('');
     setActiveLocation('');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const toggle3d = () => {
+    const next = !only3d;
+    const nextParams = new URLSearchParams(searchParams);
+    if (next) nextParams.set('media', 'stereo');
+    else nextParams.delete('media');
+    nextParams.delete('play');
+    nextParams.delete('post');
+    setDeepPlay(null);
+    setOnly3d(next);
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -176,6 +192,7 @@ export default function ReelsPage() {
     ...(activeLocation ? { location: activeLocation } : {}),
     ...(feedScope === 'following' ? { feed: 'following' } : {}),
     ...(activeAuthor ? { author: activeAuthor } : {}),
+    ...(only3d ? { media: 'stereo' } : {}),
     ...(deepPostId ? { post: deepPostId } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
@@ -322,6 +339,14 @@ export default function ReelsPage() {
               />
             </div>
             <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} />
+            <Button
+              primary={only3d}
+              onClick={toggle3d}
+              aria-pressed={only3d}
+              title="Show only 3D (SBS/TB) reels. Testing filter."
+            >
+              3D
+            </Button>
             <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
               <input
                 ref={searchRef}
@@ -424,7 +449,7 @@ export default function ReelsPage() {
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
-          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"'}
+          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"' + (only3d ? ' media="stereo"' : '')}
         />
       ) : (
         <div>

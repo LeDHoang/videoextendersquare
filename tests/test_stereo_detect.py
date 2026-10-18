@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from pipeline import stereo_detect as sd
 
@@ -91,6 +91,25 @@ def test_ordinary_wide_or_tall_frame_is_not_stereo(tmp_path, layout):
     assert result["candidate"] == layout
     assert result["detected"] is False
     assert result["score"] is not None and result["score"] < sd.CONTENT_THRESHOLD
+
+
+@pytest.mark.parametrize("layout", ["sbs", "tb"])
+@pytest.mark.parametrize("variant", ["duplicate", "regraded"])
+def test_split_screen_copy_is_not_stereo(tmp_path, layout, variant):
+    # One picture twice (a duplicated or before/after split screen) matches
+    # like stereo but never with parallax.
+    left = scene(480, 480, seed=5)
+    right = left.copy()
+    if variant == "regraded":
+        right = ImageEnhance.Contrast(ImageEnhance.Color(right).enhance(0.2)).enhance(1.3)
+    path = tmp_path / f"{variant}.{layout}.png"
+    pack(layout, left, right).save(path)
+    w, h = Image.open(path).size
+    result = sd.detect_stereo(str(path), w, h, kind="image")
+    assert result["candidate"] == layout
+    assert result["score"] >= sd.CONTENT_THRESHOLD
+    assert result["detected"] is False
+    assert result["method"] == "no_parallax"
 
 
 def test_unrelated_halves_score_low():

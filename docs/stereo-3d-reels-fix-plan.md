@@ -57,7 +57,7 @@ Status, 2026-10-18: all done except 1.6, which needs no change. Tests are in `te
 
 ## Phase 2 — frontend and VR polish
 
-Status, 2026-10-18: all done except 2.8 (needs a spec first). 2.9 was not a bug. Node tests are in `web/tests/reels-stereo.test.js`; vitest in `UploadPage.test.jsx`, `PackTile.test.jsx` and `ExploreTile.test.jsx`.
+Status, 2026-10-18: all done. 2.8 landed later the same day (spec updated first; see below). 2.9 was not a bug. Node tests are in `web/tests/reels-stereo.test.js`; vitest in `UploadPage.test.jsx`, `PackTile.test.jsx` and `ExploreTile.test.jsx`.
 
 | Item | Change | Test |
 |---|---|---|
@@ -69,7 +69,7 @@ Status, 2026-10-18: all done except 2.8 (needs a spec first). 2.9 was not a bug.
 | 2.6 a11y | Add "3D" to the explore and profile tile `aria-label`. | Vitest. |
 | 2.7 Resume on VR entry | Respect the paused state on VR entry, as the spec already notes (`webxr_vr.js:9315`). | Node test plus a Quest check. |
 | 2.9 Deep links miss the target | **Not a bug.** The API returns the requested post first, and both `?post=` and `?play=` land on it on desktop and on the Quest (Tron `-mono.mp4` held for 12 s). The earlier mismatch was the 15 s Tron clip auto-advancing before the probe read the src. | Quest check passed. |
-| 2.8 In-headset 3D indicator | Add a small "3D" chip on the VR HUD (`vr_ui_canvas.js`) for stereo posts. This is not in the spec yet, so add it to the spec first. | Quest screenshot. |
+| 2.8 In-headset 3D indicator | Done. The dock draws an accent "3D SBS" / "3D TB" chip after the title (`vr_ui_canvas.js`, `STEREO_CHIP`). It follows what is on screen (`textureStereo` with live eye textures), not the post field. Spec: "3D chip" in `stereo-3d-reels.md`. | Dock canvas captured on the Quest for the TB seed and Tron: "3D TB" / "3D SBS". |
 
 ## Results, 2026-10-18
 
@@ -107,18 +107,18 @@ Status, 2026-10-18:
 - The rendition-size drift is not real: the spec table already says "at most 2160²". The 1920² figures in the log are measured from 3840×1920 sources, whose eyes are 1920².
 - The batch warning is already documented in the spec.
 - The new behaviour (async publish, retry, paused entry, proxy cap on read) is recorded in the spec's Notes section.
-- Still open: seed a TB post.
+- TB seed done. "Tron lightbike (3D TB)" (post `7c57853a-1be0-4ebd-9122-8b62de895a95`, 1920×3840, built from the Tron SBS clip) was published by the local test account `seed3d_tb` (credentials in the gitignored `logs/test-account-seed3d.txt`). Upload detection: tb, content, 0.872. On the Quest it enters VR with `textureStereo` tb, eye repeat [1, 0.5], top half to the left eye, and the "3D TB" chip.
 
 - Wire `node --test web/tests/*.test.js` into `npm test`, or confirm it already is. The review found vitest `include` only covers `src/**`.
 - Add the missing regression tests from the review that the earlier phases don't already cover: a swipe during the swap, a 404 falling back to 2D, and an eye texture version advancing per frame.
 - Fix the spec drift: the 2D rendition is 2160², not 1920². Document that batch upload warns about 3D files but has no stereo path.
 - Seed at least one TB post. There are 0 today, so TB can't be checked live.
 
-## Phase 4 — open product questions (decide, don't build yet)
+## Phase 4 — product questions (decided 2026-10-18)
 
-- Support for SBS with non-square eyes (3840×1080, 1920×540). This covers most real-world samples, so it's a large scope change.
-- Calibrating the detection threshold: run it against non-stereo 2:1 split-screen edits to measure false positives before trusting auto-detect.
-- Feed discoverability: 6 of 194 posts are stereo, and none were in the first 24 feed items. Consider a "3D" filter or folder chip.
+- Non-square SBS eyes (3840×1080, 1920×540): not supported. Product decision: square eyes only.
+- Detection threshold: calibrated with `scripts/dev/experiment_stereo_threshold.py` against split-screen edits. Different clips, mirrored, zoomed and time-offset halves all scored below 0.72. Identical and colour-graded copies scored 0.83–0.98 and were detected. A no-parallax guard now rejects them (best shift 0 in every frame, method `no_parallax`). Real SBS still scores 0.81–0.93 and is detected. The threshold stays at 0.72; numbers are in the spec's Detection section.
+- Feed discoverability: the in-headset 3D chip is the 2.8 label. A "3D" button on the Reels filter rail (`media=stereo`) is added for testing only; it keeps stereo posts and legacy `testpipeline-3d` 2:1 files.
 
 ## Phase 5 — final on-device QA (Quest 3S)
 

@@ -49,6 +49,10 @@
 #                          dev/experiment_seed_image_slideshow_posts.py — turn loose images
 #                            in output/ into DB image posts, 1–4 same-city images each
 #                            (run after `make migrate`; --dry-run previews)
+#                          dev/experiment_stereo_threshold.py — local, $0: scores 2:1 / 1:2
+#                            split-screen negatives built from output/testpipeline/ and the
+#                            real SBS clips in output/testpipeline-3d/ with the stereo
+#                            detector → reports/stereo-threshold/ (--keep keeps the clips)
 #
 # Regression tests live in ../tests/ (run with `make test`).
 

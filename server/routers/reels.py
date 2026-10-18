@@ -1272,6 +1272,8 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
         videos = [v for v in videos if not _is_image_item(v)]
     elif media in ("image", "images"):
         videos = [v for v in videos if _is_image_item(v)]
+    elif media == "stereo":
+        videos = _stereo_items(videos, db)
     if folder and folder != "ALL FOLDERS":
         videos = [v for v in videos if v["folder"] == folder]
     if tag and _tag_slug(tag):
@@ -1903,7 +1905,8 @@ def list_reels(
 ):
     """Scan output dir and return the filtered, codec-aware reels list.
 
-    media: all (default) | video | image — lets callers filter to one kind.
+    media: all (default) | video | image — lets callers filter to one kind;
+    stereo keeps only 3D (SBS/TB) reels, a testing filter for now.
     """
     if refresh:
         _scan_cache["at"] = 0.0
@@ -2243,6 +2246,26 @@ def _stereo_layouts(db: Session, rels: list[str]) -> dict[str, str]:
         .filter(PostSlide.media_path.in_(rels), Post.stereo_layout != "mono")
     )
     return layouts
+
+
+def _stereo_items(videos: list[dict], db: Session | None) -> list[dict]:
+    """Keep stereo items only (the `media=stereo` testing filter): items whose
+    post is stereo, and loose legacy-folder files that are exactly 2:1."""
+    rels = [video["rel_path"] for video in videos]
+    if db is None or not rels:
+        layouts, with_post = {}, set()
+    else:
+        layouts = _stereo_layouts(db, rels)
+        with_post = {path for (path,) in db.query(Post.media_path).filter(Post.media_path.in_(rels))}
+    return [
+        video
+        for video in videos
+        if video["rel_path"] in layouts
+        or (
+            video["rel_path"] not in with_post
+            and SM.legacy_stereo_layout(video["rel_path"], root=str(OUTPUT_DIR)) != "mono"
+        )
+    ]
 
 
 def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None, str | None, str | None]:

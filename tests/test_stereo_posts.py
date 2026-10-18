@@ -536,3 +536,29 @@ def test_stereo_layouts_cover_slides(client, tmp_path):
     assert len(paths) == 2
     with client.testing_session() as db:
         assert reels._stereo_layouts(db, [*paths, "uploads/other.png"]) == {path: "sbs" for path in paths}
+
+
+def test_stereo_media_filter_keeps_only_3d_reels(client, tmp_path):
+    """`media=stereo` (Reels page 3D testing filter): stereo posts plus loose
+    2:1 files in the legacy 3D folder; mono posts and 2:1 mono posts drop out."""
+    user = _register(client, "stereo_filter")
+    sbs = _stage_image(tmp_path, user, "filter-sbs", _stereo_still("sbs"))
+    flat = _stage_image(tmp_path, user, "filter-flat", Image.new("RGB", (64, 64), LEFT))
+    wide = _stage_image(tmp_path, user, "filter-wide", _stereo_still("sbs"))
+    stereo_meta = _publish(client, {"kind": "image", "title": "3D", "stage_id": sbs, "stereo_layout": "sbs"}).json()["meta"]
+    _publish(client, {"kind": "image", "title": "Flat", "stage_id": flat})
+    # Exactly 2:1 but published as mono: stays out.
+    wide_meta = _publish(client, {"kind": "image", "title": "Wide", "stage_id": wide}).json()["meta"]
+    legacy = Path("output") / "testpipeline-3d"
+    legacy.mkdir()
+    _stereo_still("sbs").save(legacy / "loose.png")
+    Image.new("RGB", (64, 64), LEFT).save(legacy / "square.png")
+
+    raw = media.scan_output_media("output")
+    with client.testing_session() as db:
+        kept = reels._apply_filters(raw, "ALL FOLDERS", "", "newest", "stereo", db=db)
+        everything = reels._apply_filters(raw, "ALL FOLDERS", "", "newest", None, db=db)
+    kept_paths = {item["rel_path"] for item in kept}
+    assert kept_paths == {stereo_meta["path"], "testpipeline-3d/loose.png"}
+    assert wide_meta["path"] in {item["rel_path"] for item in everything}
+    assert len(everything) > len(kept)

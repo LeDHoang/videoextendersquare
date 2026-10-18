@@ -48,7 +48,22 @@ API fields on every post, card and feed item:
    - Split the frame into the two eye halves, grayscale, 128×128 each, band-passed (minus a radius-4 blur, then a radius-1.2 blur so sub-pixel disparity still matches).
    - Score = `1 − min_s mean|A − shift_x(B, s)| / (1.128·stddev)` for `s ∈ [−12, 12]`. Disparity is horizontal for both layouts.
    - Videos use the median over 3 frames (15/50/85%); images use 1. A score of at least **0.72** means detected (`method: "content"`).
+   - **No-parallax guard.** If the score passes but every judged frame aligns best at shift 0, the halves are one picture twice (a duplicated or re-graded split screen), not two eyes. That gives `detected: false`, `method: "no_parallax"`, and Upload Studio says why 3D is off. Real eyes differ by parallax somewhere: every real clip had at least 2 of 3 frames best at a 1–3 px shift. A real stereo file with almost no depth can be caught too, and the user can still switch 3D on by hand.
    - Calibration: six real 7680×3840 SBS reels in `output/testpipeline-3d` scored 0.81–0.98. Ordinary 2:1 and 1:2 crops and stretches scored 0.00–0.33, and a synthetic test pattern scored 0.64.
+   - Split-screen run (2026-10-18, `scripts/dev/experiment_stereo_threshold.py`, 4 square clips × 10 edits):
+
+     | Edit | Score | Detected |
+     |---|---|---|
+     | Two different clips | 0.01–0.17 | 0/4 |
+     | Mirrored copy | 0.27–0.36 | 0/4 |
+     | Zoomed copy | 0.18–0.33 | 0/4 |
+     | Same clip 0.2 s apart | 0.62–0.71 | 0/3 |
+     | Same clip 0.5 s / 2 s apart (SBS and TB) | 0.00–0.45 | 0/12 |
+     | Duplicate (SBS and TB) | 0.97–0.98 | 0/8 (8/8 before the guard) |
+     | Before/after colour grade | 0.83–0.89 | 0/4 (4/4 before the guard) |
+     | Real SBS | 0.81–0.93 | 6/6 |
+
+     The 0.72 threshold stays. A copy offset by about 0.2 s (0.71) is the closest miss, but it never aligns with a stable non-zero shift.
    - Flat or black frames are inconclusive.
 
 The stage response carries `stereo: {candidate, detected, method, score}`.
@@ -71,6 +86,9 @@ The stage response carries `stereo: {candidate, detected, method, score}`.
   - The `stereo_url` is loaded only while XR is presenting.
   - Entering or exiting VR reloads the current item at the same playhead.
   - The blob cache is keyed by URL, so the mono and stereo variants never mix.
+
+- **In-headset 3D chip** (`ui/assets/vr_ui_canvas.js`, dock header). While the screen is drawn per eye, the dock header shows an accent chip reading `3D SBS` or `3D TB`, between the reel title and the comment pill. It follows `textureStereo` (the layout really on screen), not the post's stored layout. A stereo post that fell back to 2D, for example after a failed stereo load, shows no chip. The desktop immersive preview shows the same chip.
+- **3D filter (testing).** The Reels page filter rail has a `3D` toggle. It sets `media=stereo`, which `/api/reels`, `/api/reels/feed` and both player routes accept: only items whose post is stereo (cover or slide), or loose legacy-folder files that are exactly 2:1, are listed. It is a testing aid for now, not a product feature.
 
 ### Why not WebXR quad layers?
 
@@ -97,6 +115,7 @@ Per-eye meshes already give true stereo.
   - It must use the as-is path (`stage_id`). Extended (`job_id`) outputs are always mono.
   - Every slide in a stereo slideshow must share the same layout geometry.
 - **The layout cannot be edited after publish.**
+- **Square eyes only (product decision, 2026-10-18).** 3D stays limited to full SBS/TB with square eyes (an exact 2:1 or 1:2 frame). Non-square SBS such as 3840×1080 (16:9 per eye) stays mono and gets no 3D toggle.
 
 ## Checklist
 

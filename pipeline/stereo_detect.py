@@ -16,7 +16,9 @@ Detection runs in two passes:
 2. Content: the two eye halves of a stereo pair show the same scene with a
    small horizontal disparity, while the halves of an ordinary 2:1 / 1:2 frame
    show different parts of it. Each half is reduced to a small high-passed
-   grayscale patch and compared under a few horizontal shifts.
+   grayscale patch and compared under a few horizontal shifts. A match that
+   is only ever best at shift 0 has no parallax: the halves are one picture
+   twice (a duplicated or re-graded split screen), not two eyes.
 
 Only Pillow + ffmpeg/ffprobe are needed.
 """
@@ -39,7 +41,11 @@ PATCH = 128
 MAX_SHIFT = 12
 # Content score at or above which a candidate counts as stereo. Calibrated
 # on real 7680x3840 SBS reels (0.81-0.98) against ordinary 2:1 / 1:2 crops
-# and stretches (0.00-0.33) and a synthetic test pattern (0.64).
+# and stretches (0.00-0.33) and a synthetic test pattern (0.64). Split-screen
+# edits (scripts/dev/experiment_stereo_threshold.py, 2026-10-18): two clips
+# 0.01-0.17, mirrored 0.27-0.36, zoomed 0.18-0.33, the same clip 0.2-2 s
+# apart 0.00-0.71; a duplicate (0.97-0.98) or re-graded copy (0.83-0.89)
+# scores like stereo but always aligns at shift 0, which the guard catches.
 CONTENT_THRESHOLD = 0.72
 # A high-passed patch flatter than this (stddev) carries no usable detail.
 MIN_DETAIL = 2.0
@@ -218,26 +224,37 @@ def _shift_diff(a: Image.Image, b: Image.Image, shift: int) -> float:
     return ImageStat.Stat(diff).mean[0]
 
 
-def pair_score(left: Image.Image, right: Image.Image) -> float | None:
-    """Similarity of two eye images in [0, 1]; None when too flat to judge.
+def pair_match(left: Image.Image, right: Image.Image) -> tuple[float, int] | None:
+    """(similarity in [0, 1], best shift) of two eye images; None when too flat.
 
     1.0 means the right eye is the left eye shifted horizontally; ~0 means
-    the two halves are unrelated.
+    the two halves are unrelated. The shift is in patch pixels.
     """
     a = _detail_patch(left)
     b = _detail_patch(right)
     spread = min(ImageStat.Stat(a).stddev[0], ImageStat.Stat(b).stddev[0])
     if spread < MIN_DETAIL:
         return None
-    best = min(_shift_diff(a, b, s) for s in range(-MAX_SHIFT, MAX_SHIFT + 1))
+    diffs = {s: _shift_diff(a, b, s) for s in range(-MAX_SHIFT, MAX_SHIFT + 1)}
+    shift = min(diffs, key=diffs.get)
     # E|X - Y| of two independent equal-spread signals is ~1.13 * stddev.
     unrelated = 1.128 * spread
-    return max(0.0, min(1.0, 1.0 - best / unrelated))
+    return max(0.0, min(1.0, 1.0 - diffs[shift] / unrelated)), shift
+
+
+def pair_score(left: Image.Image, right: Image.Image) -> float | None:
+    match = pair_match(left, right)
+    return None if match is None else match[0]
+
+
+def image_match(image: Image.Image, layout: str) -> tuple[float, int] | None:
+    left, right = eye_halves(image.convert("RGB"), layout)
+    return pair_match(left, right)
 
 
 def image_score(image: Image.Image, layout: str) -> float | None:
-    left, right = eye_halves(image.convert("RGB"), layout)
-    return pair_score(left, right)
+    match = image_match(image, layout)
+    return None if match is None else match[0]
 
 
 def _video_frames(src: str, duration: float | None, layout: str) -> list[Image.Image]:
@@ -280,7 +297,9 @@ def detect_stereo(
     * candidate — "sbs" / "tb" when the frame is exactly 2:1 / 1:2, else None.
     * detected  — True when metadata or content says the file is stereo.
     * method    — "metadata" / "content" when detected; "spherical" or
-      "inverted" when metadata rules stereo out (no content pass); else None.
+      "inverted" when metadata rules stereo out (no content pass);
+      "no_parallax" when the halves match but never with a horizontal
+      offset (one picture twice); else None.
     * score     — content similarity (median over frames), or None.
     """
     candidate = candidate_layout(width, height)
@@ -304,6 +323,7 @@ def detect_stereo(
         return result
 
     scores: list[float] = []
+    shifts: list[int] = []
     try:
         if kind == "video":
             frames = _video_frames(src, duration, candidate)
@@ -313,15 +333,21 @@ def detect_stereo(
                 # Split the still as shown, like the left-eye crop does.
                 frames = [ImageOps.exif_transpose(img).convert("RGB")]
         for frame in frames:
-            score = image_score(frame, candidate)
-            if score is not None:
-                scores.append(score)
+            match = image_match(frame, candidate)
+            if match is not None:
+                scores.append(match[0])
+                shifts.append(match[1])
     except (OSError, ValueError):
-        scores = []
+        scores, shifts = [], []
 
     if scores:
         score = round(median(scores), 3)
         result["score"] = score
         if score >= CONTENT_THRESHOLD:
-            result.update(detected=True, method="content")
+            # Real eyes differ by parallax somewhere; identical alignment in
+            # every frame is a duplicated (or re-graded) split screen.
+            if any(shifts):
+                result.update(detected=True, method="content")
+            else:
+                result["method"] = "no_parallax"
     return result
