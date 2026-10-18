@@ -2928,6 +2928,15 @@
     function safeColor(value, fallback) {
       return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : (fallback || '#ff553a');
     }
+    // Avatar colours are data driven. Keep the hue for borders and dots, but fall back to the
+    // ink token for text when the colour is under 4.5:1 on the dark avatar chip (#1f2021).
+    function readableOnDark(value, fallback) {
+      const c = safeColor(value, fallback);
+      const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const n = parseInt(c.slice(1), 16);
+      const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+      return (L + 0.05) / (0.0137 + 0.05) >= 4.5 ? c : 'var(--sx-ink)';
+    }
 
     function eventId() {
       try {
@@ -4857,7 +4866,7 @@
       const initials = document.createElement('span');
       initials.className = 'comment-avatar-initials';
       initials.textContent = comment.author_avatar || getInitials(comment.author_name || 'Anonymous');
-      initials.style.color = safeColor(comment.avatar_color, '#ff553a');
+      initials.style.color = readableOnDark(comment.avatar_color, '#ff553a');
       container.appendChild(initials);
     }
 
