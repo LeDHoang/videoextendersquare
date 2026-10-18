@@ -499,6 +499,11 @@
   grid-row: 1 / span 2;
 }
 
+.sx-pack-library-grid button strong,
+.sx-pack-library-grid button small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .sx-pack-library-grid button small {
   color: var(--sx-accent);
   font: 700 9px/1 var(--sx-font-mono);
