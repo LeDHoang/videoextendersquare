@@ -1928,6 +1928,18 @@
   .side-specs:empty {
     display: none;
   }
+  .side-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .side-chips:empty {
+    display: none;
+  }
+  .side-chips > .side-tags,
+  .side-chips > .side-specs {
+    display: contents;
+  }
   .side-chip {
     display: inline-flex;
     align-items: center;
@@ -2390,8 +2402,10 @@
       <h2 class="side-title" id="sideTitle">Loading video…</h2>
       <p class="side-caption" id="sideCaption" hidden></p>
       <button type="button" class="side-more" id="sideCaptionToggle" hidden aria-expanded="false" aria-controls="sideCaption">MORE</button>
-      <div class="side-tags" id="sideTags"></div>
-      <div class="side-specs" id="sideSpecs"></div>
+      <div class="side-chips">
+        <div class="side-tags" id="sideTags"></div>
+        <div class="side-specs" id="sideSpecs"></div>
+      </div>
       <dl class="side-stats">
         <div><dt>LIKES</dt><dd id="sideLikes">0</dd></div>
         <div><dt>COMMENTS</dt><dd id="sideComms">0</dd></div>
