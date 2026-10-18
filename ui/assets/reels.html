@@ -2925,6 +2925,17 @@
       return row ? decodeURIComponent(row.slice(prefix.length)) : '';
     }
 
+    // Canvas cards cannot use var(). Read the ECHO token once from the page and keep the
+    // original hex as the fallback for hosts that do not define it.
+    const sxTokCache = {};
+    function sxTok(name, fallback) {
+      if (!(name in sxTokCache)) {
+        let v = '';
+        try { v = getComputedStyle(document.documentElement).getPropertyValue('--sx-' + name).trim(); } catch (_) {}
+        sxTokCache[name] = v || fallback;
+      }
+      return sxTokCache[name];
+    }
     function safeColor(value, fallback) {
       return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : (fallback || '#ff553a');
     }
@@ -3107,7 +3118,7 @@
     // Shared obsidian frame for the pack / collect canvases: grid, vermilion glow, corner brackets, status label.
     function drawPackCanvasFrame(ctx, label, accent, chip) {
       ctx.clearRect(0, 0, 1024, 1024);
-      ctx.fillStyle = '#0d0e10';
+      ctx.fillStyle = sxTok('bg', '#0d0e10');
       ctx.fillRect(0, 0, 1024, 1024);
       const glow = ctx.createRadialGradient(100, 1000, 0, 100, 1000, 760);
       glow.addColorStop(0, accent === '#ffb224' ? 'rgba(255,178,36,.20)' : 'rgba(255,59,31,.24)');
@@ -3122,7 +3133,7 @@
         ctx.moveTo(0, g + 0.5); ctx.lineTo(1024, g + 0.5);
       }
       ctx.stroke();
-      ctx.strokeStyle = '#24282e';
+      ctx.strokeStyle = sxTok('rule', '#24282e');
       ctx.lineWidth = 2;
       ctx.strokeRect(34, 34, 956, 956);
       ctx.fillStyle = accent;
@@ -3147,12 +3158,12 @@
         ctx.font = '800 22px "JetBrains Mono", monospace';
         setPackCanvasSpacing(ctx, 1);
         const chipW = ctx.measureText(chip).width + 32;
-        ctx.fillStyle = '#16191c';
+        ctx.fillStyle = sxTok('surface-2', '#16191c');
         ctx.fillRect(932 - chipW, 78, chipW, 42);
         ctx.strokeStyle = '#2f353c';
         ctx.lineWidth = 2;
         ctx.strokeRect(932 - chipW, 78, chipW, 42);
-        ctx.fillStyle = '#a4abb3';
+        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
         ctx.fillText(chip, 916, 99);
       }
       setPackCanvasSpacing(ctx, 0);
@@ -3160,14 +3171,14 @@
     }
 
     function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra) {
-      ctx.fillStyle = primary ? '#ff3b1f' : '#16191c';
-      ctx.strokeStyle = primary ? '#ff3b1f' : '#2f353c';
+      ctx.fillStyle = primary ? sxTok('accent', '#ff3b1f') : sxTok('surface-2', '#16191c');
+      ctx.strokeStyle = primary ? sxTok('accent', '#ff3b1f') : '#2f353c';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = primary ? '#0a0a0a' : '#f2f3f5';
+      ctx.fillStyle = primary ? sxTok('on-accent', '#0a0a0a') : sxTok('ink', '#f2f3f5');
       ctx.font = '800 23px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -3200,10 +3211,10 @@
       ctx.textBaseline = 'alphabetic';
 
       if (mode === 'queue') {
-        ctx.fillStyle = '#f2f3f5';
+        ctx.fillStyle = sxTok('ink', '#f2f3f5');
         ctx.font = '400 44px "Archivo Black", "Archivo", sans-serif';
         ctx.fillText(String(pack.title || 'Untitled Pack').toUpperCase().slice(0, 30), 92, 164);
-        ctx.fillStyle = '#8a919a';
+        ctx.fillStyle = sxTok('ink-3', '#8a919a');
         ctx.font = '700 20px "JetBrains Mono", monospace';
         ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 92, 198);
         const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
@@ -3216,34 +3227,34 @@
           const current = index === idx;
           const available = item && item.available !== false;
           ctx.fillStyle = current ? 'rgba(255,59,31,.16)' : '#12151a';
-          ctx.strokeStyle = current ? '#ff3b1f' : '#24282e';
+          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('rule', '#24282e');
           ctx.lineWidth = current ? 3 : 1;
           ctx.fillRect(rowX, y, rowW, rowH);
           ctx.strokeRect(rowX, y, rowW, rowH);
-          if (current) { ctx.fillStyle = '#ff3b1f'; ctx.fillRect(rowX, y, 7, rowH); }
+          if (current) { ctx.fillStyle = sxTok('accent', '#ff3b1f'); ctx.fillRect(rowX, y, 7, rowH); }
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#16191c';
+          ctx.fillStyle = sxTok('surface-2', '#16191c');
           ctx.fillRect(rowX + 20, y + 9, 40, 30);
-          ctx.strokeStyle = current ? '#ff3b1f' : '#2f353c';
+          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : '#2f353c';
           ctx.lineWidth = 1;
           ctx.strokeRect(rowX + 20, y + 9, 40, 30);
-          ctx.fillStyle = current ? '#ff3b1f' : '#a4abb3';
+          ctx.fillStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3');
           ctx.font = '800 17px "JetBrains Mono", monospace';
           ctx.fillText(pad(index + 1), rowX + 40, y + rowH / 2 + 1);
           ctx.textAlign = 'left';
-          ctx.fillStyle = available ? '#f2f3f5' : '#6b727a';
+          ctx.fillStyle = available ? sxTok('ink', '#f2f3f5') : sxTok('ink-muted', '#6b727a');
           ctx.font = '700 21px "Archivo", sans-serif';
           const name = available ? (item.title || item.filename || 'Untitled reel') : 'Reel unavailable';
           ctx.fillText(String(name).slice(0, 46), rowX + 80, y + rowH / 2);
           ctx.textAlign = 'right';
           ctx.font = '800 15px "JetBrains Mono", monospace';
-          ctx.fillStyle = !available ? '#ffb224' : (current ? '#ff3b1f' : '#a4abb3');
+          ctx.fillStyle = !available ? sxTok('warn', '#ffb224') : (current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3'));
           ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
           if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
         });
         if (videoData.length > maxRows) {
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'center';
           ctx.textBaseline = 'alphabetic';
           ctx.font = '700 18px "JetBrains Mono", monospace';
@@ -3254,7 +3265,7 @@
           if (queuePlayable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 796, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#6b727a';
+            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -3265,11 +3276,11 @@
         drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
         drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
       } else {
-        ctx.fillStyle = '#f2f3f5';
+        ctx.fillStyle = sxTok('ink', '#f2f3f5');
         ctx.font = '400 64px "Archivo Black", "Archivo", sans-serif';
         const title = unavailable ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack').toUpperCase();
         wrapPackCanvasText(ctx, title, 92, 250, 840, 72, 2);
-        ctx.fillStyle = '#a4abb3';
+        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
         ctx.font = '400 26px "Archivo", sans-serif';
         const description = mode === 'complete'
           ? 'You reached the end of this authored collection.'
@@ -3283,7 +3294,7 @@
           ctx.setLineDash([8, 6]);
           ctx.beginPath(); ctx.moveTo(92, 590); ctx.lineTo(932, 590); ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'left';
           ctx.font = '700 18px "JetBrains Mono", monospace';
           setPackCanvasSpacing(ctx, 1.5);
@@ -3293,7 +3304,7 @@
           drawPackCanvasButton(ctx, 'RETURN TO PACK', 387, 720, 250, 76, false, 'return');
           drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
         } else if (unavailable) {
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'left';
           ctx.font = '700 18px "JetBrains Mono", monospace';
           ctx.fillText('SKIPPING WITHOUT EXPOSING PROTECTED MEDIA.', 92, 636);
@@ -3305,7 +3316,7 @@
           if (playable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 822, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#6b727a';
+            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -3897,9 +3908,9 @@
       packVisualRegions = [];
       const ctx = packVisualCanvas.getContext('2d');
       ctx.clearRect(0, 0, 1024, 1024);
-      drawPackCanvasFrame(ctx, 'SAVE TO COLLECTION', '#ff3b1f', '');
+      drawPackCanvasFrame(ctx, 'SAVE TO COLLECTION', sxTok('accent', '#ff3b1f'), '');
       const item = videoData[idx];
-      ctx.fillStyle = '#f2f3f5';
+      ctx.fillStyle = sxTok('ink', '#f2f3f5');
       ctx.font = '400 40px "Archivo Black", "Archivo", sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(String((item && (item.title || item.filename)) || 'This reel').toUpperCase().slice(0, 32), 92, 168);
@@ -3908,7 +3919,7 @@
       shown.forEach((row, index) => {
         const y = rowStart + index * (rowH + rowGap);
         ctx.fillStyle = row.added ? '#14251c' : '#11161d';
-        ctx.strokeStyle = row.added ? '#4ade80' : '#303945';
+        ctx.strokeStyle = row.added ? sxTok('success-hi', '#4ade80') : '#303945';
         ctx.lineWidth = row.added ? 3 : 1;
         ctx.beginPath();
         ctx.roundRect(rowX, y, rowW, rowH, 6);
@@ -3916,11 +3927,11 @@
         ctx.stroke();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = sxTok('ink', '#ffffff');
         ctx.font = '700 22px "Archivo", sans-serif';
         ctx.fillText(String(row.title).slice(0, 42), rowX + 22, y + rowH / 2);
         ctx.textAlign = 'right';
-        ctx.fillStyle = row.added ? '#4ade80' : '#aeb7c3';
+        ctx.fillStyle = row.added ? sxTok('success-hi', '#4ade80') : '#aeb7c3';
         ctx.font = '800 17px "JetBrains Mono", monospace';
         ctx.fillText(row.added ? 'ADDED' : 'ADD', rowX + rowW - 22, y + rowH / 2);
         if (!row.added) addPackVisualRegion('collect-pack', rowX, y, rowW, rowH, { packId: row.id, row });
