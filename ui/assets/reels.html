@@ -78,6 +78,7 @@
     /* clip never makes a scroll container so focus or hit-testing cannot shift the
        picture inside the frame (the ambient glow overflows it by 20px) */
     overflow: clip;
+    overflow-clip-margin: 10px;
     display: flex;
     flex-direction: column;
     margin: auto;
@@ -349,10 +350,10 @@
     pointer-events: none;
     border: 0 solid var(--sx-accent);
   }
-  .reels-reticle.tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
-  .reels-reticle.tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
-  .reels-reticle.bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
-  .reels-reticle.br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+  .reels-reticle.tl { top: -7px; left: -7px; border-top-width: 2px; border-left-width: 2px; }
+  .reels-reticle.tr { top: -7px; right: -7px; border-top-width: 2px; border-right-width: 2px; }
+  .reels-reticle.bl { bottom: -7px; left: -7px; border-bottom-width: 2px; border-left-width: 2px; }
+  .reels-reticle.br { bottom: -7px; right: -7px; border-bottom-width: 2px; border-right-width: 2px; }
   .reels-phone-frame.sx-fs-active .reels-reticle,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-reticle {
     display: none;
@@ -2120,6 +2121,7 @@
 <body>
 
 <div class="reels-phone-frame" id="reelsFrame" tabindex="0">
+  <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
   <div class="reels-ambient-glow" id="reelsAmbientGlow"></div>
   <div class="reels-top-bar">
     <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:var(--sx-success-hi); background:var(--sx-surface-2); padding:3px 8px; border-radius:0px; border:1px solid var(--sx-success-hi);">⚡ 0/0</div>
@@ -2132,7 +2134,6 @@
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
-    <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
     <div class="reels-slide-bar" id="slideBar" role="progressbar" aria-label="Image post progress" hidden></div>
