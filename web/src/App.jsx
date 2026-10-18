@@ -1,8 +1,9 @@
 import { Suspense, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import { SectionSkeleton } from './components/ui/Skeleton.jsx';
 import RequireAuth from './components/auth/RequireAuth.jsx';
+import { useDocumentTitle, routeTitle } from './hooks/useDocumentTitle.js';
 
 const ImagePage = lazy(() => import('./pages/ImagePage.jsx'));
 const VideoPage = lazy(() => import('./pages/VideoPage.jsx'));
@@ -24,6 +25,8 @@ const WalletPage = lazy(() => import('./pages/WalletPage.jsx'));
 const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
 const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
 export default function App() {
+  const { pathname } = useLocation();
+  useDocumentTitle(routeTitle(pathname));
   return (
     <Suspense fallback={<SectionSkeleton label="Loading page" />}>
       <Routes>
