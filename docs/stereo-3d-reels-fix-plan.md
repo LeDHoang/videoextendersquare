@@ -108,6 +108,7 @@ Status, 2026-10-18:
 - The batch warning is already documented in the spec.
 - The new behaviour (async publish, retry, paused entry, proxy cap on read) is recorded in the spec's Notes section.
 - TB seed done. "Tron lightbike (3D TB)" (post `7c57853a-1be0-4ebd-9122-8b62de895a95`, 1920×3840, built from the Tron SBS clip) was published by the local test account `seed3d_tb` (credentials in the gitignored `logs/test-account-seed3d.txt`). Upload detection: tb, content, 0.872. On the Quest it enters VR with `textureStereo` tb, eye repeat [1, 0.5], top half to the left eye, and the "3D TB" chip.
+- TB fixture check done. `scripts/dev/experiment_stereo_tb.py` builds marked TB fixtures in four formats: H.264, HEVC, WebM with `stereo_mode`, and a PNG still. It also builds three negatives. All seven are detected correctly. The four positives were published, and their 2D renditions show the left eye. On the Quest, the left eye samples the top-eye marker and the right eye samples the bottom-eye marker. Results are in the spec's "Top-bottom fixture check" section.
 
 - Wire `node --test web/tests/*.test.js` into `npm test`, or confirm it already is. The review found vitest `include` only covers `src/**`.
 - Add the missing regression tests from the review that the earlier phases don't already cover: a swipe during the swap, a 404 falling back to 2D, and an eye texture version advancing per frame.

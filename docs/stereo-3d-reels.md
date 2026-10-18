@@ -421,3 +421,43 @@ Emulator check of the dwell (isolated backend :8011 with a copied DB, Vite :5184
 **Emulator quirk, for anyone repeating this.** The emulator delivers two XR frame callbacks per device frame (`onDeviceFrame` and a second one). The engine's laser reads the right controller in the first and the left controller in the second, so both controllers must be aimed at the same zone, each from its own origin. With only one controller aimed, the hover flips between two zones every frame and the dwell never completes. The `window.fetch` wrapper from the earlier QA missed the host's preview requests here, so use the server log.
 
 `make test` passed on `3dreels` after this change was merged (with the `exitVR` fix, engine `v8.23-20261016-exit-vr-awaits-end`): pytest 347, node 337, vitest 353.
+
+### Top-bottom fixture check (2026-10-18)
+
+`scripts/dev/experiment_stereo_tb.py` restacks the real SBS clips in `output/testpipeline-3d` as top-bottom (left eye on top) and runs the detector. Each eye has a corner marker: red on the left eye, blue on the right eye. That makes it possible to check which eye a 2D rendition or a VR eye shows. Fixtures and `results.md` go to `reports/stereo-tb/`.
+
+| Fixture | Size | Codec | Detected | Method | Score |
+|---|---|---|---|---|---|
+| tb-weeknd-1920-h264.mp4 | 1920×3840 | H.264 | tb | content | 0.853 |
+| tb-tron-2160-hevc.mp4 | 2160×4320 | HEVC | tb | content | 0.921 |
+| tb-projectx-1024-meta.webm | 1024×2048 | VP9 | tb | metadata (`stereo_mode=top_bottom`) | — |
+| tb-tron-2048-still.png | 2048×4096 | PNG | tb | content | 0.833 |
+| neg-tb-duplicate.mp4 | 1920×3840 | H.264 | no | no_parallax | 0.989 |
+| neg-tb-two-clips.mp4 | 1920×3840 | H.264 | no | — | 0.000 |
+| neg-tb-inverted-meta.webm | 1024×2048 | VP9 | no | inverted (`bottom_top`) | — |
+
+Upload API (`/api/video/upload`, `/api/image/upload`) returns the same `stereo` results. The four positives were published as `tb` posts by the local test account `seed3d_tb`. The background build then produced:
+- **2D renditions:** 1920², 2160², 1024² MP4 and a 2048² PNG. The `-mono-explore` clips are 720², and the posters 720² JPG. Every rendition and poster has the red marker, so the 2D view is always the left (top) eye.
+- **Stereo proxies:** the HEVC original gets a 2048×4096 H.264 `-preview.mp4` (long side capped at `STEREO_PROXY_LONG_SIDE` = 4096), and the WebM gets a 1024×2048 H.264 proxy. The 1920×3840 H.264 original is under the cap and is served as-is.
+- **Feed:** `media=stereo` lists all five TB posts (with the Tron seed), each with `stereo_crop` false. In the browser each one plays as a 1:1 left-eye rendition with the "3D · TOP-BOTTOM" badge.
+
+Found during the check: the backend had been started before the no-parallax guard landed, so the duplicate negative was still marked detected at upload until uvicorn was restarted. After a backend edit, restart uvicorn (it runs without `--reload`).
+
+**Quest 3S (Browser, CDP).** Each TB post was opened from `/reels?post=<id>&folder=ALL+FOLDERS&codec=all&media=stereo` and entered in VR. A probe then read `WebXRVR.__test.getStereoState()`. It also sampled the stereo canvas at the marker position of each eye, mapped through that eye texture's `repeat`/`offset`. The probe finds the canvas by hooking `drawImage` on a 1:2 canvas.
+
+| Post | Plays from | `textureStereo` | Canvas | Left eye (offset → marker) | Right eye (offset → marker) | Chip |
+|---|---|---|---|---|---|---|
+| H.264 1920/eye | original | tb | 2048×4096 | [0, 0.5] → red | [0, 0] → blue | 3D TB |
+| HEVC 2160/eye | `-preview.mp4` | tb | 2048×4096 | [0, 0.5] → red | [0, 0] → blue | 3D TB |
+| WebM `stereo_mode` | `-preview.mp4` | tb | 2048×4096 | [0, 0.5] → red | [0, 0] → blue | 3D TB |
+| PNG still | original | tb | 2048×4096 | [0, 0.5] → red | [0, 0] → blue | 3D TB |
+
+On every post:
+- Both eyes have `repeat` [1, 0.5], their own eye texture (`mapIsEye`), and are visible on layers 1 and 2.
+- `screenShowsLeftEye` is true.
+
+So the left eye sees the top half and the right eye sees the bottom half, for video and still alike. The probe output and the chip captures are in `reports/stereo-tb/quest-*`.
+
+Probe notes:
+- A 5 s clip ends and advances to the next reel before a slow probe can set `loop`. Arm the loop as soon as `#reelsVideo` shows the target file.
+- After the headset reconnects, re-run `adb reverse tcp:5173 tcp:5173` and `adb reverse tcp:8000 tcp:8000`. Otherwise the page shows `ERR_CONNECTION_REFUSED`.

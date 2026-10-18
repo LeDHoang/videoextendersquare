@@ -53,6 +53,10 @@
 #                            split-screen negatives built from output/testpipeline/ and the
 #                            real SBS clips in output/testpipeline-3d/ with the stereo
 #                            detector → reports/stereo-threshold/ (--keep keeps the clips)
+#                          dev/experiment_stereo_tb.py — local, $0: builds top-bottom 3D fixtures
+#                            (H.264, HEVC, WebM with stereo_mode, PNG still, plus negatives) from the
+#                            SBS clips in output/testpipeline-3d/, eye-marked red (left) / blue (right),
+#                            and scores them → reports/stereo-tb/ (--rebuild re-encodes)
 #
 # Regression tests live in ../tests/ (run with `make test`).
 
