@@ -35,7 +35,14 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
           <span className="sx-job-name">{name}</span>
           <span className="sx-job-status sx-queued">CONNECTING TO PIPELINE…</span>
         </div>
-        <div className="sx-progress-track">
+        <div
+          className="sx-progress-track"
+          role="progressbar"
+          aria-valuenow={10}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuetext="Connecting to pipeline · 10%"
+        >
           <div className="sx-progress-fill" style={{ width: '10%' }} />
         </div>
       </div>

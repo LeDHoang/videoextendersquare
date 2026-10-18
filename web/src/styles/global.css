@@ -4438,6 +4438,65 @@ body.sx-vr-active .sx-reels-mount,
   animation: sx-loading-pulse 1.8s infinite ease-in-out;
 }
 
+.sx-studio-loading {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.sx-studio-loading-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.25;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.sx-studio-loading-title {
+  font-family: var(--sx-font-display);
+  font-size: clamp(4rem, 12vw, 6.5rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--sx-ink);
+  opacity: 0.08;
+  text-transform: uppercase;
+  user-select: none;
+  margin-bottom: var(--sx-3);
+}
+
+.sx-studio-loading-title.sx-compact {
+  font-size: clamp(2.5rem, 7vw, 4rem);
+}
+
+.sx-studio-loading-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-2);
+  font-family: var(--sx-font-mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sx-ink-2);
+  background: var(--sx-surface);
+  padding: 6px 16px;
+  border: 1px solid var(--sx-rule-strong);
+  z-index: 2;
+}
+
+.sx-studio-loading-sub .sx-loading-dot-pulse {
+  width: 8px;
+  height: 8px;
+  background: var(--sx-accent);
+  display: inline-block;
+}
+
 /* ─── Skeleton Loading (shimmer = the app is working) ───
    Subtle surface-2 → surface-3 highlight travelling left to right.
    Idle "awaiting input" states keep the StudioLoading watermark instead. */

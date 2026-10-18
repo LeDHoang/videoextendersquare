@@ -8,6 +8,21 @@ import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 // source sits inside the square, which bands the outpaint model will
 // generate, and — once a render finishes — the extended result.
 
+// Square transport glyphs in currentColor; the Unicode media symbols render as emoji on some platforms.
+function TransportGlyph({ name }) {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" fill="currentColor" aria-hidden="true" focusable="false">
+      {name === 'pause' ? (
+        <path d="M3 2h4v12H3zM9 2h4v12H9z" />
+      ) : name === 'restart' ? (
+        <path d="M2 2h2v12H2zM14 2v12L5 8z" />
+      ) : (
+        <path d="M4 2l10 6-10 6z" />
+      )}
+    </svg>
+  );
+}
+
 function StageVideo({ src, label, onElement, className, style }) {
   const ref = useCallback((node) => onElement(node), [onElement]);
   return (
@@ -120,8 +135,8 @@ export function StageTransport({ video, trim, status }) {
       </div>
       <div className="sx-studio-transport-row">
         <div className="sx-studio-transport-buttons">
-          <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary">{playing ? '❚❚' : '▶'}</button>
-          <button type="button" onClick={() => seek(trimWindow ? trimWindow.start : 0)} aria-label="Restart" className="sx-studio-tbtn">⏮</button>
+          <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary"><TransportGlyph name={playing ? 'pause' : 'play'} /></button>
+          <button type="button" onClick={() => seek(trimWindow ? trimWindow.start : 0)} aria-label="Restart" className="sx-studio-tbtn"><TransportGlyph name="restart" /></button>
           <button type="button" onClick={() => seek(time - 1)} aria-label="Back 1 second" className="sx-studio-tbtn">−1s</button>
           <button type="button" onClick={() => seek(time + 1)} aria-label="Forward 1 second" className="sx-studio-tbtn">+1s</button>
           <span className="sx-studio-clock">{formatClock(time)} <span>/ {formatClock(duration)}</span></span>
@@ -371,7 +386,7 @@ export default function StudioStage({
                 <li key={entry.key} className={`sx-studio-queue-row ${entry.key === selected?.key ? 'sx-selected' : ''}`}>
                   <button type="button" className="sx-studio-queue-main" onClick={() => onSelect(entry.key)} aria-pressed={entry.key === selected?.key} aria-label={`View ${entry.name}`}>
                     <span className="sx-studio-queue-idx">{String(index + 1).padStart(2, '0')}</span>
-                    {entry.kind === 'image' ? <img src={entry.url} alt="" /> : <span className="sx-studio-queue-thumb" aria-hidden="true">▶</span>}
+                    {entry.kind === 'image' ? <img src={entry.url} alt="" /> : <span className="sx-studio-queue-thumb" aria-hidden="true"><TransportGlyph name="play" /></span>}
                     <span className="sx-studio-queue-name">{entry.name}</span>
                     <span className="sx-studio-queue-dims">{entry.meta?.width}×{entry.meta?.height}{entry.kind === 'video' ? ` · ${entry.meta?.duration}s` : ''}</span>
                   </button>
