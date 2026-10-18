@@ -884,6 +884,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     return (typeof window !== 'undefined' && window.VRUICanvas) || null;
   }
 
+  // ECHO colour from VRUICanvas.TOKENS; the literal is the fallback if the canvas module is absent.
+  function echoHex(name, fallback) {
+    const ui = getUICanvas();
+    const v = ui && ui.TOKENS && ui.TOKENS.hex && ui.TOKENS.hex[name];
+    return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+  }
+
   function ensureThree() {
     if (!THREE && typeof window !== 'undefined' && window.THREE) {
       THREE = window.THREE;
@@ -5482,7 +5489,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const laserGeo = new THREE.BufferGeometry();
       laserGeo.setAttribute('position', new THREE.BufferAttribute(laserPositions, 3));
       const laserMat = new THREE.LineBasicMaterial({
-        color: 0xff2a1a,
+        color: parseInt(echoHex('accent', '#ff3b1f').slice(1), 16),
         transparent: true,
         opacity: 0.8,
         // Legacy parity: the beam always paints over the scene (v5.2 drew
@@ -5505,12 +5512,14 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (rx) {
           const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
           rg.addColorStop(0, '#ffffff');
-          rg.addColorStop(0.25, '#ff2a1a');
-          rg.addColorStop(0.6, 'rgba(255,42,26,0.55)');
-          rg.addColorStop(1, 'rgba(255,42,26,0)');
+          const reticleHex = echoHex('accent', '#ff3b1f');
+          const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
+          rg.addColorStop(0.25, reticleHex);
+          rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
+          rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
           rx.fillStyle = rg;
           rx.fillRect(0, 0, 64, 64);
-          rx.strokeStyle = '#ff2a1a';
+          rx.strokeStyle = reticleHex;
           rx.lineWidth = 3;
           rx.beginPath();
           rx.arc(32, 32, 20, 0, Math.PI * 2);
@@ -8140,7 +8149,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           showNotification('NO RECENT REELS IN THIS LOCATION');
           return false;
         }
-        showNotification('📍 ' + String(location.name || location.slug || '').toUpperCase().slice(0, 30));
+        showNotification(String(location.name || location.slug || '').toUpperCase().slice(0, 30));
         // The new location feed takes over playback; never resume the old reel.
         earthResumePlayback = false;
         setSceneMode('reels');
@@ -9875,7 +9884,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.autocomplete = 'off';
       domOverlayInput.setAttribute('enterkeyhint', 'send');
       domOverlayInput.placeholder = 'Type a VR comment…';
-      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#e3e2e3;background:rgba(13,14,15,0.97);border:2px solid #ff553a;border-radius:8px;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#f2f3f5;background:#101214;border:2px solid #ff5c42;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
       domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
       domOverlayInput.addEventListener('blur', onCommentInputBlur);
       domOverlayRoot.appendChild(domOverlayInput);

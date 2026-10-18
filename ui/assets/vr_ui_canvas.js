@@ -106,28 +106,89 @@
     return name.slice(0, 2).toUpperCase();
   }
 
+  // Square stroke glyphs for the HUD. Emoji render with the system colour font on the
+  // headset and ignore the ECHO palette, so draw the few icons we need as plain paths.
+  function drawGlyph(ctx, name, cx, cy, size, color) {
+    const h = size / 2;
+    const prevW = ctx.lineWidth;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(1.5, size / 9);
+    ctx.beginPath();
+    if (name === 'chat') {
+      ctx.moveTo(cx - h, cy - h * 0.8); ctx.lineTo(cx + h, cy - h * 0.8);
+      ctx.lineTo(cx + h, cy + h * 0.45); ctx.lineTo(cx - h * 0.1, cy + h * 0.45);
+      ctx.lineTo(cx - h * 0.6, cy + h * 0.95); ctx.lineTo(cx - h * 0.6, cy + h * 0.45);
+      ctx.lineTo(cx - h, cy + h * 0.45); ctx.closePath();
+      ctx.stroke();
+    } else if (name === 'globe') {
+      ctx.arc(cx, cy, h, 0, Math.PI * 2);
+      ctx.moveTo(cx - h, cy); ctx.lineTo(cx + h, cy);
+      ctx.moveTo(cx, cy - h); ctx.lineTo(cx, cy + h);
+      ctx.stroke();
+    } else if (name === 'lock' || name === 'unlock') {
+      ctx.fillRect(cx - h * 0.8, cy - h * 0.1, size * 0.8, h * 1.1);
+      ctx.beginPath();
+      ctx.moveTo(cx - h * 0.5, cy - h * 0.1); ctx.lineTo(cx - h * 0.5, cy - h * 0.75);
+      ctx.lineTo(cx + h * 0.5, cy - h * 0.75);
+      ctx.lineTo(cx + h * 0.5, name === 'lock' ? cy - h * 0.1 : cy - h * 0.35);
+      ctx.stroke();
+    } else if (name === 'audio' || name === 'mute') {
+      ctx.moveTo(cx - h, cy - h * 0.35); ctx.lineTo(cx - h * 0.45, cy - h * 0.35);
+      ctx.lineTo(cx + h * 0.1, cy - h * 0.85); ctx.lineTo(cx + h * 0.1, cy + h * 0.85);
+      ctx.lineTo(cx - h * 0.45, cy + h * 0.35); ctx.lineTo(cx - h, cy + h * 0.35);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      if (name === 'audio') {
+        ctx.moveTo(cx + h * 0.45, cy - h * 0.45); ctx.lineTo(cx + h * 0.45, cy + h * 0.45);
+        ctx.moveTo(cx + h * 0.9, cy - h * 0.8); ctx.lineTo(cx + h * 0.9, cy + h * 0.8);
+      } else {
+        ctx.moveTo(cx + h * 0.4, cy - h * 0.45); ctx.lineTo(cx + h, cy + h * 0.45);
+        ctx.moveTo(cx + h, cy - h * 0.45); ctx.lineTo(cx + h * 0.4, cy + h * 0.45);
+      }
+      ctx.stroke();
+    }
+    ctx.lineWidth = prevW;
+  }
+
   function wrapTextLines(ctx, text, maxW, maxLines) {
-    const words = String(text || '').split(/\s+/);
+    const words = String(text || '').split(/\s+/).filter(Boolean);
     const lines = [];
     let cur = '';
-    for (let i = 0; i < words.length; i++) {
+    let truncated = false;
+    const fitWord = (word) => {
+      // Hard-break a word wider than the line so it never runs off the panel.
+      while (word.length > 1 && ctx.measureText(word).width > maxW) {
+        let n = word.length - 1;
+        while (n > 1 && ctx.measureText(word.slice(0, n)).width > maxW) n--;
+        lines.push(word.slice(0, n));
+        word = word.slice(n);
+        if (lines.length >= maxLines) { truncated = true; return ''; }
+      }
+      return word;
+    };
+    for (let i = 0; i < words.length && !truncated; i++) {
       const test = cur ? cur + ' ' + words[i] : words[i];
       if (ctx.measureText(test).width <= maxW) {
         cur = test;
-      } else {
-        if (cur) lines.push(cur);
-        cur = words[i];
-        if (lines.length >= maxLines - 1) break;
+        continue;
       }
+      if (cur) lines.push(cur);
+      cur = '';
+      if (lines.length >= maxLines) { truncated = true; break; }
+      cur = fitWord(words[i]);
     }
-    if (cur && lines.length < maxLines) lines.push(cur);
-    if (lines.length === maxLines && words.length > 0) {
-      const last = lines[lines.length - 1];
-      if (ctx.measureText(last + '…').width <= maxW) {
-        lines[lines.length - 1] = last + '…';
-      }
+    if (!truncated && cur) {
+      if (lines.length < maxLines) lines.push(cur);
+      else truncated = true;
     }
-    return lines;
+    if (truncated && lines.length) {
+      let last = lines[lines.length - 1];
+      while (last.length > 1 && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1);
+      lines[lines.length - 1] = last + '…';
+    }
+    return lines.slice(0, maxLines);
   }
 
   function isReelAction(action) {
@@ -381,9 +442,9 @@
     }
 
     // 1. Dark Glass Container Background
-    ctx.fillStyle = 'rgba(12, 14, 17, 0.96)';
+    ctx.fillStyle = TOKENS.hex.surface;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
+    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, TOKENS.radius);
     else ctx.rect(0, 0, CONTROLS_W, CONTROLS_H);
     ctx.fill();
 
@@ -391,7 +452,7 @@
     ctx.strokeStyle = TOKENS.hex.accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, 4);
+    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, TOKENS.radius);
     else ctx.rect(0, 0, CONTROLS_W, CONTROLS_H);
     ctx.stroke();
 
@@ -419,20 +480,21 @@
     ctx.strokeStyle = isCommentHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(476, 13, 64, 22, 3);
+    if (ctx.roundRect) ctx.roundRect(476, 13, 64, 22, TOKENS.radius);
     else ctx.rect(476, 13, 64, 22);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = isCommentHover ? TOKENS.hex.ink : TOKENS.hex.ink2;
     ctx.font = `11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
-    ctx.fillText(`💬 ${comments.length || 0}`, 508, 24);
+    drawGlyph(ctx, 'chat', 494, 24, 11, ctx.fillStyle);
+    ctx.fillText(String(comments.length || 0), 516, 24);
 
     // Index pill
     ctx.fillStyle = TOKENS.hex.surface;
     ctx.strokeStyle = TOKENS.hex.ruleStrong;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(548, 13, 72, 22, 3);
+    if (ctx.roundRect) ctx.roundRect(548, 13, 72, 22, TOKENS.radius);
     else ctx.rect(548, 13, 72, 22);
     ctx.fill();
     ctx.stroke();
@@ -447,7 +509,7 @@
     ctx.fillStyle = earthActive ? TOKENS.hex.surface3 : TOKENS.hex.surface;
     ctx.strokeStyle = earthActive ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, 5);
+    if (ctx.roundRect) ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, TOKENS.radius);
     else ctx.rect(earthButton.x, earthButton.y, earthButton.w, earthButton.h);
     ctx.fill();
     ctx.stroke();
@@ -466,7 +528,7 @@
     ctx.fillStyle = TOKENS.hex.surface;
     ctx.strokeStyle = TOKENS.hex.accent;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h, 3);
+    if (ctx.roundRect) ctx.roundRect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h, TOKENS.radius);
     else ctx.rect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h);
     ctx.fill();
     ctx.stroke();
@@ -491,7 +553,7 @@
         ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
         else ctx.rect(btn.x, btn.y, btn.w, btn.h);
         ctx.fill();
         ctx.stroke();
@@ -508,8 +570,11 @@
         ctx.font = '15px sans-serif';
         ctx.textAlign = 'right';
         ctx.fillStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ink2;
-        const icon = btn.action === 'mode' ? (packMode ? '≡' : '⟳') : '🌐';
-        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+        if (btn.action === 'mode') {
+          ctx.fillText(packMode ? '≡' : '⟳', btn.x + btn.w - 14, btn.y + btn.h / 2);
+        } else {
+          drawGlyph(ctx, 'globe', btn.x + btn.w - 22, btn.y + btn.h / 2, 14, ctx.fillStyle);
+        }
         continue;
       }
 
@@ -520,7 +585,7 @@
         ctx.strokeStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
         else ctx.rect(btn.x, btn.y, btn.w, btn.h);
         ctx.fill();
         ctx.stroke();
@@ -537,10 +602,10 @@
         ctx.font = '15px sans-serif';
         ctx.textAlign = 'right';
         ctx.fillStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ink2;
-        const icon = btn.action === 'lock'
-          ? (lockToViewer ? '🔒' : '🔓')
-          : (isMuted ? '🔇' : '🔊');
-        ctx.fillText(icon, btn.x + btn.w - 14, btn.y + btn.h / 2);
+        const glyph = btn.action === 'lock'
+          ? (lockToViewer ? 'lock' : 'unlock')
+          : (isMuted ? 'mute' : 'audio');
+        drawGlyph(ctx, glyph, btn.x + btn.w - 22, btn.y + btn.h / 2, 14, ctx.fillStyle);
         continue;
       }
 
@@ -550,7 +615,7 @@
         ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
         else ctx.rect(btn.x, btn.y, btn.w, btn.h);
         ctx.fill();
         ctx.stroke();
@@ -569,14 +634,11 @@
       }
 
       // Center primary play/pause glow button
-      ctx.fillStyle = isPressed ? '#C93420' : TOKENS.hex.accent;
-      ctx.shadowColor = 'rgba(255, 59, 31, 0.55)';
-      ctx.shadowBlur = isHover ? 28 : 20;
+      ctx.fillStyle = isPressed ? TOKENS.hex.accentHi : TOKENS.hex.accent;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 4);
+      if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
       else ctx.rect(btn.x, btn.y, btn.w, btn.h);
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       ctx.fillStyle = TOKENS.hex.onAccent;
       ctx.font = 'bold 30px sans-serif';
@@ -590,14 +652,14 @@
     if (trackBtn) {
       ctx.fillStyle = TOKENS.hex.surface2;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8, 4);
+      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8, TOKENS.radius);
       else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8);
       ctx.fill();
 
       // Filled progress
       ctx.fillStyle = TOKENS.hex.accent;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8, 4);
+      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8, TOKENS.radius);
       else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8);
       ctx.fill();
 
@@ -614,6 +676,26 @@
       ctx.fillText(formatTime(currentTime), trackBtn.x, trackBtn.y + 32);
       ctx.textAlign = 'right';
       ctx.fillText(formatTime(duration), trackBtn.x + trackBtn.w, trackBtn.y + 32);
+    }
+
+    // Transient notice (set by showNotification); drawn last so it sits over the controls.
+    const nowMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    if (notificationText && notificationUntil > nowMs) {
+      const stripW = Math.min(CONTROLS_W - 48, 560);
+      const stripX = (CONTROLS_W - stripW) / 2;
+      const stripH = 36;
+      const stripY = CONTROLS_H - stripH - 12;
+      ctx.fillStyle = TOKENS.hex.surface2;
+      ctx.fillRect(stripX, stripY, stripW, stripH);
+      ctx.fillStyle = TOKENS.hex.accent;
+      ctx.fillRect(stripX, stripY, stripW, 2);
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `bold 14px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let label = String(notificationText);
+      while (label.length > 1 && ctx.measureText(label).width > stripW - 24) label = label.slice(0, -2) + '…';
+      ctx.fillText(label, stripX + stripW / 2, stripY + stripH / 2 + 1);
     }
   }
 
@@ -704,7 +786,7 @@
     // Container
     ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, 6);
+    if (ctx.roundRect) ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, TOKENS.radius);
     else ctx.rect(0, 0, CPANEL_W, CPANEL_H);
     ctx.fill();
     ctx.strokeStyle = TOKENS.hex.ruleStrong;
@@ -721,10 +803,10 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
-    ctx.fillText('💬', 18, 33);
+    drawGlyph(ctx, 'chat', 24, 33, 12, accent);
     ctx.font = `700 11px ${TOKENS.font.mono}`;
     ctx.fillText('COMMENTS', 40, 33);
-    ctx.fillStyle = 'rgba(255,85,58,0.7)';
+    ctx.fillStyle = TOKENS.hex.accentHi;
     const titleW = ctx.measureText('COMMENTS').width;
     ctx.fillText('(' + comments.length + ')', 40 + titleW + 10, 33);
 
@@ -740,11 +822,11 @@
       ctx.strokeStyle = active ? accent : (hover ? accent : TOKENS.hex.ruleStrong);
       ctx.lineWidth = 1;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(tab.x, 16, tab.w, 30, 3);
+      if (ctx.roundRect) ctx.roundRect(tab.x, 16, tab.w, 30, TOKENS.radius);
       else ctx.rect(tab.x, 16, tab.w, 30);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = active ? '#5a0600' : (hover ? TOKENS.hex.ink : TOKENS.hex.accent);
+      ctx.fillStyle = active ? TOKENS.hex.onAccent : (hover ? TOKENS.hex.ink : TOKENS.hex.accent);
       ctx.font = `bold 9px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(tab.label, tab.x + tab.w / 2, 31);
@@ -754,7 +836,7 @@
     ctx.fillStyle = cPanelHover === 'close' ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
     ctx.strokeStyle = cPanelHover === 'close' ? accent : TOKENS.hex.ruleStrong;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(522, 16, 26, 30, 3);
+    if (ctx.roundRect) ctx.roundRect(522, 16, 26, 30, TOKENS.radius);
     else ctx.rect(522, 16, 26, 30);
     ctx.fill();
     ctx.stroke();
@@ -786,7 +868,7 @@
 
         ctx.fillStyle = highlighted ? '#1c1d1f' : '#121315';
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(itemX, y, itemW, CP_ITEM_H, 4);
+        if (ctx.roundRect) ctx.roundRect(itemX, y, itemW, CP_ITEM_H, TOKENS.radius);
         else ctx.rect(itemX, y, itemW, CP_ITEM_H);
         ctx.fill();
         ctx.strokeStyle = highlighted ? accent : TOKENS.hex.ruleStrong;
@@ -799,7 +881,7 @@
         // Avatar
         ctx.fillStyle = TOKENS.hex.surface2;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(itemX + 8, y + 12, 40, 40, 4);
+        if (ctx.roundRect) ctx.roundRect(itemX + 8, y + 12, 40, 40, TOKENS.radius);
         else ctx.rect(itemX + 8, y + 12, 40, 40);
         ctx.fill();
         ctx.strokeStyle = border;
@@ -825,7 +907,7 @@
         ctx.fillStyle = TOKENS.hex.surface3;
         ctx.strokeStyle = accent;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(pillX, y + 10, 100, 24, 3);
+        if (ctx.roundRect) ctx.roundRect(pillX, y + 10, 100, 24, TOKENS.radius);
         else ctx.rect(pillX, y + 10, 100, 24);
         ctx.fill();
         ctx.stroke();
@@ -833,7 +915,7 @@
         ctx.font = `700 10px ${TOKENS.font.mono}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(hasTime ? ('⏱ ' + formatTime(c.timestamp)) : 'GENERAL', pillX + 50, y + 23);
+        ctx.fillText(hasTime ? formatTime(c.timestamp) : 'GENERAL', pillX + 50, y + 23);
 
         // Text
         ctx.fillStyle = TOKENS.hex.ink;
@@ -857,11 +939,11 @@
     ctx.fillStyle = addHover ? '#ff6a52' : accent;
     ctx.strokeStyle = accent;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(16, footerY + 54, CPANEL_W - 32, 44, 4);
+    if (ctx.roundRect) ctx.roundRect(16, footerY + 54, CPANEL_W - 32, 44, TOKENS.radius);
     else ctx.rect(16, footerY + 54, CPANEL_W - 32, 44);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#5a0600';
+    ctx.fillStyle = TOKENS.hex.onAccent;
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -929,7 +1011,7 @@
       const authorColor = c.avatar_color || TOKENS.hex.accent;
       const authorName = c.author_name || 'Anonymous';
       const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-      const timeStr = hasTime ? '⏱️ ' + formatTime(c.timestamp) : '';
+      const timeStr = hasTime ? formatTime(c.timestamp) : '';
 
       // Vertical accent line (mirrors the 3px border-left of .twitch-comment-pill)
       const barW = 3;
@@ -954,7 +1036,7 @@
         ctx.strokeStyle = TOKENS.hex.accent;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(regionX, regionY, regionW, regionH, 4);
+        if (ctx.roundRect) ctx.roundRect(regionX, regionY, regionW, regionH, TOKENS.radius);
         else ctx.rect(regionX, regionY, regionW, regionH);
         ctx.fill();
         ctx.stroke();
@@ -974,7 +1056,7 @@
       ctx.font = '22px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(c.author_avatar || '👤', avatarX, y + itemHeight / 2);
+      ctx.fillText(c.author_avatar || getInitials(c.author_name || 'Anonymous'), avatarX, y + itemHeight / 2);
 
       // Author Name — bold colored like .twitch-author
       ctx.font = '800 13px "Archivo", sans-serif';
@@ -1168,7 +1250,7 @@
     ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(-24, 55, 8, 30, 3);
+    if (ctx.roundRect) ctx.roundRect(-24, 55, 8, 30, TOKENS.radius);
     else ctx.rect(-24, 55, 8, 30);
     ctx.fill();
     ctx.stroke();
@@ -1185,7 +1267,7 @@
     // Dark Glass Container Background
     ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, TOKENS.radius);
     else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
     ctx.fill();
 
@@ -1193,14 +1275,14 @@
     ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, 18);
+    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, TOKENS.radius);
     else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
     ctx.stroke();
 
     // Header Badge
     ctx.fillStyle = TOKENS.hex.accent;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(16, 14, 140, 24, 4);
+    if (ctx.roundRect) ctx.roundRect(16, 14, 140, 24, TOKENS.radius);
     else ctx.rect(16, 14, 140, 24);
     ctx.fill();
 
@@ -1248,7 +1330,7 @@
       { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
       { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
       { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
-      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED (🎯)' },
+      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED' },
       { title: 'GRIP + STICK', desc: '↕ Zoom Screen In / Out|↔ Screen Closer / Further' },
     ];
     const colW = 198;
@@ -1267,14 +1349,14 @@
       // Card background
       ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, 8);
+      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, TOKENS.radius);
       else ctx.rect(cx, cy, colW, cardH);
       ctx.fill();
 
       // Left accent bar
       ctx.fillStyle = accentColor;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, 3, cardH, 2);
+      if (ctx.roundRect) ctx.roundRect(cx, cy, 3, cardH, TOKENS.radius);
       else ctx.rect(cx, cy, 3, cardH);
       ctx.fill();
 
@@ -1282,7 +1364,7 @@
       ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, 8);
+      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, TOKENS.radius);
       else ctx.rect(cx, cy, colW, cardH);
       ctx.stroke();
 
@@ -1303,7 +1385,7 @@
     });
 
     // Footer hint
-    ctx.fillStyle = 'rgba(155, 161, 168, 0.6)';
+    ctx.fillStyle = TOKENS.hex.ink3;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
