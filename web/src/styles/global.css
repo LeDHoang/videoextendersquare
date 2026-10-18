@@ -11116,3 +11116,12 @@ a.sx-xh-btn { text-decoration: none; }
     transform: none;
   }
 }
+
+/* Inline icon inside a text button (VrIcon); sits on the text baseline in the button colour. */
+.sx-btn-icon {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+  margin-right: 0.35em;
+  flex-shrink: 0;
+}

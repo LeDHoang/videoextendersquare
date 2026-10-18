@@ -22,3 +22,4 @@ export { LocationIcon } from './LocationIcon.jsx';
 export { LikeIcon } from './LikeIcon.jsx';
 export { ViewIcon } from './ViewIcon.jsx';
 export { CommentIcon } from './CommentIcon.jsx';
+export { VrIcon } from './VrIcon.jsx';

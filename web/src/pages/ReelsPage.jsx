@@ -6,6 +6,7 @@ import { Pills, Button, Dropdown, Field } from '../components/ui/controls.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
+import { VrIcon } from '../components/icons/index.jsx';
 
 const SORTS = [
   { label: 'FOR YOU', value: 'for_you' },
@@ -365,7 +366,7 @@ export default function ReelsPage() {
               {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
             </Button>
             <Button onClick={() => navigate('/reels/immersive-preview')}>
-              🥽 IMMERSIVE PREVIEW
+              <VrIcon /> IMMERSIVE PREVIEW
             </Button>
             {needsProxy ? (
               <Button
@@ -379,7 +380,7 @@ export default function ReelsPage() {
             ) : null}
             {folder === 'testpipeline' && !has3d ? (
               <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
-                🥽 Spatialize (2D→3D)
+                <VrIcon /> Spatialize (2D→3D)
               </Button>
             ) : null}
           </div>
