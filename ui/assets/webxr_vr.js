@@ -9330,7 +9330,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (videoElement) {
           videoElement.muted = false;
           if (callbacks.onUnmute) callbacks.onUnmute();
-          if (videoElement.paused) videoElement.play().catch(() => {});
+          // Entering VR keeps the play/pause state: a reel paused in 2D
+          // stays paused in the headset.
         }
       }
 

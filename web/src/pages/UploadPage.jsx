@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { BlockingBanner, Mono } from '../components/ui/primitives.jsx';
 import { Segmented, Button, ToggleRow } from '../components/ui/controls.jsx';
@@ -160,6 +160,11 @@ export default function UploadPage() {
     };
   }, [isBatch, staged, isSlideshow, gallery]);
   const stereo = stereoOn && stereoChoice ? stereoChoice.candidate : null;
+  // A set with no shared layout has no 3D switch; drop the old choice so it
+  // can't come back on silently when the set changes again.
+  useEffect(() => {
+    if (!stereoChoice) setStereoOn(false);
+  }, [stereoChoice]);
 
   const renderItems = useMemo(() => {
     if (isBatch) return batch.map((entry) => entry.meta);
@@ -221,7 +226,12 @@ export default function UploadPage() {
     setFile(only ? only.file : null);
     setStaged(only ? only.meta : null);
     setKind(only ? 'image' : null);
-    if (only) setPath(isSquareMeta(only.meta) || (stereoOn && metaStereoCandidate(only.meta)) ? 'skip' : 'extend');
+    if (!only) return;
+    // The 3D switch carries over when it already covered this file;
+    // otherwise the remaining file starts from its own detection.
+    const on = stereoChoice ? stereoOn : metaStereoDetected(only.meta);
+    setStereoOn(on);
+    setPath(isSquareMeta(only.meta) || (on && metaStereoCandidate(only.meta)) ? 'skip' : 'extend');
   };
 
   const moveGalleryItem = (index, delta) => {

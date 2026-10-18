@@ -652,4 +652,26 @@ describe('UploadPage studio — 3D stereo posts', () => {
     await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
     expect(screen.queryByLabelText(/STEREOSCOPIC 3D/)).toBeNull();
   });
+
+  it('does not carry a 3D choice across slideshow edits', async () => {
+    renderPage();
+    // Mixed set: no 3D switch. Removing the mono image leaves one detected
+    // SBS file, which starts from its own detection.
+    await pick(['eyes1.png', 'a.png']);
+    await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
+    cleanup();
+    vi.clearAllMocks();
+    mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
+    // The user turned 3D off for the set: it stays off after a removal.
+    renderPage();
+    await pick(['eyes1.png', 'eyes2.png']);
+    fireEvent.click(await screen.findByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove eyes2.png' }));
+    await waitFor(() => expect(screen.queryByAltText('eyes2.png')).toBeNull());
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
+  });
 });

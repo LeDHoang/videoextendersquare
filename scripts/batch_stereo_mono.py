@@ -14,8 +14,10 @@ Run from the repo root (media is read from ./output), after `make migrate`:
     .venv/bin/python scripts/batch_stereo_mono.py            # build what is missing
     .venv/bin/python scripts/batch_stereo_mono.py --dry-run  # list only
 
-Local ffmpeg only, no paid APIs. Safe to repeat: assets that already exist are
-kept.
+Local ffmpeg only, no paid APIs. Safe to repeat: each asset is checked on its
+own and only the missing ones are made; fresh assets are kept. A VR proxy over
+STEREO_PROXY_LONG_SIDE (built before the cap) counts as missing and is
+rebuilt. Soft-deleted posts (status != "published") are skipped.
 """
 import argparse
 import sys
@@ -29,7 +31,28 @@ from server.social.database import SessionLocal  # noqa: E402
 from server.social.models import Post  # noqa: E402
 
 
+def missing_assets(path: Path, layout: str, kind: str) -> list[str]:
+    """Names of the derived 2D/VR assets this stereo file still lacks."""
+    mono = SM.mono_sibling_path(str(path))
+    wanted = {"2D view": mono}
+    if kind == "video":
+        wanted["grid preview"] = SM.explore_preview_path(str(mono))
+        wanted["grid poster"] = SM.explore_poster_path(str(mono))
+    else:
+        wanted["grid poster"] = SM.explore_poster_path(str(mono))
+    missing = [name for name, asset in wanted.items() if not (asset.is_file() and asset.stat().st_size > 0)]
+    if kind == "video":
+        _mono, stereo = SM.stereo_paths(str(path))
+        proxy = path.with_name(path.stem + "-preview.mp4")
+        # stereo_paths skips a proxy over the cap; a missing proxy is fine
+        # when the original already plays as is (make_web_preview decides).
+        if proxy.is_file() and stereo != proxy:
+            missing.append("VR proxy (over the cap)")
+    return missing
+
+
 def build(path: Path, layout: str, kind: str) -> bool:
+    """Make every missing asset; each make_* call keeps a fresh cached file."""
     mono = SM.make_left_eye_rendition(str(path), layout)
     if not mono:
         return False
@@ -63,18 +86,18 @@ def main() -> None:
 
     built = failed = 0
     for path, layout, kind in jobs:
-        mono, _stereo = SM.stereo_paths(str(path))
-        state = "has 2D view" if mono else "missing 2D view"
+        missing = missing_assets(path, layout, kind)
+        state = "complete" if not missing else "missing " + ", ".join(missing)
         print(f"[{layout}] {path} — {state}")
-        if args.dry_run or mono:
+        if args.dry_run or not missing:
             continue
         started = time.time()
-        if build(path, layout, kind):
+        if build(path, layout, kind) and not missing_assets(path, layout, kind):
             built += 1
             print(f"    built in {time.time() - started:.1f}s")
         else:
             failed += 1
-            print("    FAILED")
+            print(f"    FAILED — still missing: {', '.join(missing_assets(path, layout, kind)) or 'nothing'}")
     print(f"{len(jobs)} stereo file(s); built {built}, failed {failed}.")
 
 

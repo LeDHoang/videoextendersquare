@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -169,6 +170,34 @@ def _derived_files(stored: Path) -> list[Path]:
     ]
 
 
+# Stereo video encodes (left-eye rendition, VR proxy, grid assets) can take
+# minutes, so publish hands them to one background worker. Until the 2D
+# rendition lands the post serves stereo_crop (CSS crop of the raw file).
+_stereo_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stereo-assets")
+
+
+def _submit_stereo_assets(fn) -> Future:
+    return _stereo_pool.submit(fn)
+
+
+def _build_stereo_video_assets(dest: Path, layout: str) -> None:
+    """Background: every derived asset of a published stereo video."""
+    from server.routers import reels as reels_router
+
+    mono = SM.make_left_eye_rendition(str(dest), layout)
+    try:
+        SM.make_web_preview(str(dest), stereo=layout)
+    except Exception:
+        pass
+    if mono:
+        for make in (SM.make_explore_preview, SM.make_explore_poster):
+            try:
+                make(mono)
+            except Exception:
+                pass
+    reels_router.invalidate_scan_cache()
+
+
 def _slugify(text: str, fallback: str = "upload") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
     return (slug[:60] or fallback)
@@ -270,9 +299,10 @@ def publish_upload(
             target.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Could not store upload: {ex}") from ex
 
-    # Stereo: every 2D surface plays the left-eye rendition, so the post is
-    # only created once each stored file has one.
-    if stereo:
+    # Stereo stills: every 2D surface shows the left-eye rendition, so the
+    # post is only created once each stored image has one (a fast PIL crop).
+    # Stereo videos encode theirs in the background after the post exists.
+    if stereo and req.kind == "image":
         for target in (dest, *extra_dests):
             if not SM.make_left_eye_rendition(str(target), stereo):
                 for stored in (dest, *extra_dests):
@@ -282,6 +312,8 @@ def publish_upload(
     # 2D posters/previews come from the left eye of a stereo upload.
     def grid_source(stored: Path) -> str:
         return str(SM.mono_sibling_path(str(stored))) if stereo else str(stored)
+
+    stereo_video = bool(stereo) and req.kind == "video"
 
     for extra_dest in extra_dests:
         try:
@@ -293,7 +325,16 @@ def publish_upload(
     poster_url: str | None = None
     root = OUTPUT_DIR.resolve()
     try:
-        if req.kind == "video":
+        if stereo_video:
+            # Only the poster now (one frame, cropped to the left eye); the
+            # background job builds the rendition and its grid assets.
+            try:
+                poster = SM.make_explore_poster(str(dest), crop=SM.left_eye_crop(stereo))
+                if poster:
+                    poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
+            except Exception:
+                pass
+        elif req.kind == "video":
             try:
                 SM.make_web_preview(str(dest), stereo=stereo)
             except Exception:
@@ -368,6 +409,8 @@ def publish_upload(
             raise HTTPException(status_code=400, detail=str(ex)) from ex
         raise
 
+    if stereo_video:
+        _submit_stereo_assets(lambda: _build_stereo_video_assets(dest, stereo))
     reels_router.invalidate_scan_cache()
     entry = post_card(post, db, context.user.id)
     return {

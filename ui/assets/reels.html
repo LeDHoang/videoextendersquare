@@ -3073,11 +3073,16 @@
     // Entering or leaving VR swaps a 3D post between its 2D rendition and its
     // stereo file in place: same reel, same playhead, same play/pause state.
     // Unlike loadVideo it records no new view and touches no feed state.
-    function syncStereoSource() {
+    // Playhead of the last swap: a stereo file that fails to load reports
+    // currentTime 0, so its fallback resumes from here instead.
+    let stereoSwapResumeAt = 0;
+    function syncStereoSource(resumeOverride) {
       const item = videoData[idx];
       if (!item || item.available === false || item.media_type === 'static') return;
       if (isImageItem(item)) {
         if (imagePostSlides.length) showImageSlide(imageSlideIndex);
+        // The warmed next item was the variant for the old VR state.
+        preloadNext(idx);
         notifyVisualSourceChange();
         return;
       }
@@ -3088,7 +3093,8 @@
         applyEntryStereo(playback);
         return;
       }
-      const resumeAt = video.currentTime || 0;
+      const resumeAt = typeof resumeOverride === 'number' ? resumeOverride : (video.currentTime || 0);
+      stereoSwapResumeAt = resumeAt;
       const wasPlaying = !video.paused;
       applyEntryStereo(playback);
       video.src = nextUrl;
@@ -3115,6 +3121,34 @@
       }
       preloadNext(idx);
       notifyVisualSourceChange();
+    }
+
+    // A stereo file that fails in VR falls back to the 2D rendition (mono-flat)
+    // instead of an error card. The first failure retries the stereo file once
+    // after STEREO_RETRY_MS (a transient 404 or network drop); a second one
+    // stays on 2D until the user leaves the post. Returns true when handled.
+    const STEREO_RETRY_MS = 5000;
+    function handleStereoFailure(failedItem) {
+      if (activeVisualLayout === 'mono' || !failedItem || failedItem.stereoFailed || !wantsStereoSource()) return false;
+      failedItem.stereoFailed = true;
+      failedItem.stereoFailures = (failedItem.stereoFailures || 0) + 1;
+      syncStereoSource(video.currentTime || stereoSwapResumeAt);
+      if (failedItem.stereoFailures === 1) {
+        setTimeout(function () {
+          if (videoData[idx] !== failedItem || !failedItem.stereoFailed || !wantsStereoSource()) return;
+          failedItem.stereoFailed = false;
+          syncStereoSource();
+        }, STEREO_RETRY_MS);
+      } else {
+        showFlash('3D UNAVAILABLE — SHOWING 2D');
+      }
+      return true;
+    }
+
+    function clearStereoFailure(item) {
+      if (!item) return;
+      item.stereoFailed = false;
+      item.stereoFailures = 0;
     }
     // </reels-stereo-sync>
 
@@ -5442,6 +5476,8 @@
       }
       if (index < 0) index = 0;
       if (index >= videoData.length) index = videoData.length - 1;
+      // A post that failed in 3D gets a fresh try when the user leaves it.
+      if (videoData[idx] && idx !== index) clearStereoFailure(videoData[idx]);
       idx = index;
       pruneBlobCache(idx);
 
@@ -5620,13 +5656,10 @@
       const err = video.error;
       console.error('[ReelsPlayer] Video load error:', err, 'src:', video.src);
       if (!video.src) return;
-      // A stereo file that fails in VR falls back to the 2D rendition
-      // (mono-flat) instead of an error card.
-      const failedItem = videoData[idx];
-      if (activeVisualLayout !== 'mono' && failedItem && !failedItem.stereoFailed && wantsStereoSource()) {
-        console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', video.src);
-        failedItem.stereoFailed = true;
-        syncStereoSource();
+      // A stereo file that fails in VR falls back to the 2D rendition.
+      const stereoSrc = video.src;
+      if (handleStereoFailure(videoData[idx])) {
+        console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', stereoSrc);
         return;
       }
       
@@ -6819,9 +6852,9 @@
         onToggleMute: toggleSound,
         getVisualSource: currentVisualSource,
         // 3D posts switch between their 2D rendition and stereo file.
-        onEnterVR: syncStereoSource,
-        onExitVR: syncStereoSource,
-        onPreviewStereo: syncStereoSource,
+        onEnterVR: () => syncStereoSource(),
+        onExitVR: () => syncStereoSource(),
+        onPreviewStereo: () => syncStereoSource(),
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {
           if (!isPackMode || !packState.pack) return null;
@@ -6998,8 +7031,8 @@
             if (!session) {
               showFlash('VR SESSION FAILED — CHECK CONSOLE');
             } else {
+              // The onEnterVR callback already swapped 3D posts to stereo.
               showFlash('ENTERING IMMERSIVE VR');
-              syncStereoSource();
             }
           } catch (err) {
             console.error('[WebXRVR] enterVR error:', err);

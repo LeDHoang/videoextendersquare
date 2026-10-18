@@ -56,7 +56,7 @@ function loadStereo(items, { presenting = false } = {}) {
     getPreviewState() { return { running: this.previewSplit, stereo: this.previewSplit }; },
     setSourceStereo(layout) { this.layouts.push(layout); },
   };
-  const calls = { preload: 0, notify: 0, slides: [], viewTracking: 0 };
+  const calls = { preload: 0, notify: 0, slides: [], viewTracking: 0, flashes: [], timers: [] };
   const context = {
     console,
     WebXRVR: engine,
@@ -77,11 +77,14 @@ function loadStereo(items, { presenting = false } = {}) {
     updateSoundBtnUI: () => {},
     updatePlayBtnUI: () => {},
     startViewTracking: () => { calls.viewTracking += 1; },
+    showFlash: (text) => calls.flashes.push(text),
+    setTimeout: (fn, ms) => { calls.timers.push({ fn, ms }); return calls.timers.length; },
   };
   vm.createContext(context);
   vm.runInContext(`${block('reels-stereo')}\n${block('reels-stereo-sync')}
     this.api = {
       playbackFor, playbackUrlFor, blobFor, applyEntryStereo, syncStereoSource,
+      handleStereoFailure, clearStereoFailure,
       layout: () => activeVisualLayout,
       crop: () => activeCropLayout,
     };`, context);
@@ -226,4 +229,75 @@ test('image posts re-show the current slide on a VR switch', () => {
 test('the filename/folder SBS heuristic is gone from the player', () => {
   assert.ok(!/\(sbs\|3d\)/.test(html), 'no filename regex');
   assert.ok(!html.includes('WebXRVR.setStereo(isSbs)'));
+});
+
+test('an image-post VR switch re-warms the next item for the new state', () => {
+  const post = { media_type: 'image', url: '/m/a-mono.png', stereo_url: '/m/a.png', stereo_layout: 'sbs' };
+  const { syncStereoSource, calls } = loadStereo([post, sbsPost]);
+  syncStereoSource();
+  assert.equal(calls.preload, 1);
+});
+
+test('VR entry swaps the source once, from the onEnterVR callback only', () => {
+  const entry = html.slice(html.indexOf("showFlash('ENTERING IMMERSIVE VR')") - 400, html.indexOf("showFlash('ENTERING IMMERSIVE VR')") + 200);
+  assert.ok(!entry.includes('syncStereoSource()'), 'no second swap after enterVR resolves');
+  assert.match(html, /onEnterVR: \(\) => syncStereoSource\(\),/);
+});
+
+test('a stereo failure retries once, then stays on 2D with a notice', () => {
+  const item = { ...sbsPost };
+  const { syncStereoSource, handleStereoFailure, layout, context, calls } = loadStereo([item], { presenting: true });
+  context.video.currentTime = 7;
+  syncStereoSource();
+  assert.equal(context.video.getAttribute('src'), '/media/uploads/clip.mp4');
+  assert.equal(layout(), 'sbs');
+
+  // First failure (say a transient 404): 2D now, stereo again after 5 s.
+  // The failed element reports currentTime 0; the fallback keeps the playhead.
+  context.video.currentTime = 0;
+  assert.equal(handleStereoFailure(item), true);
+  assert.equal(context.video.getAttribute('src'), '/media/uploads/clip-mono.mp4');
+  context.video.duration = 30;
+  context.video.fire('loadedmetadata');
+  assert.equal(context.video.currentTime, 7);
+  assert.equal(calls.timers.length, 1);
+  assert.equal(calls.timers[0].ms, 5000);
+  assert.deepEqual(calls.flashes, []);
+  calls.timers[0].fn();
+  assert.equal(context.video.getAttribute('src'), '/media/uploads/clip.mp4', 'retry loads stereo');
+
+  // Second failure: stays 2D, no further retry, user is told.
+  assert.equal(handleStereoFailure(item), true);
+  assert.equal(context.video.getAttribute('src'), '/media/uploads/clip-mono.mp4');
+  assert.equal(calls.timers.length, 1);
+  assert.equal(calls.flashes.length, 1);
+  assert.match(calls.flashes[0], /3D UNAVAILABLE/);
+  // A 2D error is a real error, not another stereo fallback.
+  assert.equal(handleStereoFailure(item), false);
+});
+
+test('the stereo retry is dropped once the user has left the post', () => {
+  const item = { ...sbsPost };
+  const other = { ...sbsPost, url: '/m/b-mono.mp4', stereo_url: '/m/b.mp4' };
+  const { syncStereoSource, handleStereoFailure, clearStereoFailure, context, calls } = loadStereo([item, other], { presenting: true });
+  syncStereoSource();
+  handleStereoFailure(item);
+  vm.runInContext('idx = 1;', context);
+  clearStereoFailure(item);
+  calls.timers[0].fn();
+  assert.equal(item.stereoFailed, false);
+  assert.equal(item.stereoFailures, 0);
+  assert.notEqual(context.video.getAttribute('src'), '/media/uploads/clip.mp4');
+});
+
+test('leaving a post clears its 3D failure in loadVideo', () => {
+  const load = html.slice(html.indexOf('function loadVideo('), html.indexOf('pruneBlobCache(idx);', html.indexOf('function loadVideo(')));
+  assert.match(load, /clearStereoFailure\(videoData\[idx\]\)/);
+});
+
+test('entering VR keeps a paused reel paused', () => {
+  const xr = readFileSync(join(here, '..', '..', 'ui', 'assets', 'webxr_vr.js'), 'utf-8');
+  const entry = xr.slice(xr.indexOf("if (sceneMode === 'reels') {", xr.indexOf('Entered immersive session')), xr.indexOf('callbacks.onEnterVR()'));
+  assert.ok(entry.includes('videoElement.muted = false'));
+  assert.ok(!/videoElement\.play\(/.test(entry), 'no play() on entry');
 });

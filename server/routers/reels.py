@@ -23,7 +23,7 @@ from server.jobs import job_manager
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
-from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
+from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, PostSlide, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import (
     IMAGE_POST_DWELL_MS,
@@ -1431,7 +1431,7 @@ def _build_payload(
         layout = (
             social_row.get("stereo_layout")
             if social_row is not None
-            else SM.legacy_stereo_layout(item["rel_path"])
+            else SM.legacy_stereo_layout(item["rel_path"], meta.get("width"), meta.get("height"), root=str(OUTPUT_DIR))
         ) or "mono"
         stereo = stereo_fields(item["rel_path"], layout)
         base["stereo_layout"] = stereo["stereo_layout"]
@@ -2227,7 +2227,25 @@ MAX_EXPLORE_PATHS = 24
 EXPLORE_GEN_WORKERS = 4
 
 
-def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | None]:
+def _stereo_layouts(db: Session, rels: list[str]) -> dict[str, str]:
+    """Stored stereo layout of each rel that belongs to a stereo post (cover or slide)."""
+    if not rels:
+        return {}
+    layouts = {
+        path: layout
+        for path, layout in db.query(Post.media_path, Post.stereo_layout)
+        .filter(Post.media_path.in_(rels), Post.stereo_layout != "mono")
+    }
+    layouts.update(
+        (path, layout)
+        for path, layout in db.query(PostSlide.media_path, Post.stereo_layout)
+        .join(Post, Post.id == PostSlide.post_id)
+        .filter(PostSlide.media_path.in_(rels), Post.stereo_layout != "mono")
+    )
+    return layouts
+
+
+def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None, str | None, str | None]:
     """Generate one item's Explore assets. Returns
     (rel, preview_url, poster_url, error). Posters are cheap single frames;
     previews are full re-encodes — both run in parallel across videos.
@@ -2238,9 +2256,19 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
         return rel, None, None, "not found"
     # A 3D original's grid assets come from its left-eye 2D rendition, so
     # tiles stay square (the rendition only exists for stereo posts).
+    # Before that rendition exists, crop the left eye of the original.
     mono, _stereo = SM.stereo_paths(str(p))
+    crop = None
     if mono is not None:
         p = mono.resolve()
+    elif layout in SM.STEREO_LAYOUTS and layout != "mono":
+        if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+            # A still's left eye is a cheap PIL crop: build the rendition now.
+            built = SM.make_left_eye_rendition(str(p), layout)
+            if built:
+                p = Path(built).resolve()
+        else:
+            crop = SM.left_eye_crop(layout)
     if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
         try:
             poster = SM.make_image_poster(str(p))
@@ -2259,11 +2287,11 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
         # The tile uses the full image (or its left eye) as its own preview.
         return rel, _img_url(str(p)), poster_url, None
     try:
-        prev = SM.make_explore_preview(str(p))
+        prev = SM.make_explore_preview(str(p), crop=crop)
     except Exception as ex:  # noqa: BLE001
         return rel, None, None, str(ex)
     try:
-        poster = SM.make_explore_poster(str(p))
+        poster = SM.make_explore_poster(str(p), crop=crop)
     except Exception:  # noqa: BLE001
         poster = None  # poster is best-effort; the tile still works
 
@@ -2282,7 +2310,7 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
 
 
 @router.post("/explore-preview")
-def generate_explore_previews(paths: list[str]):
+def generate_explore_previews(paths: list[str], db: Session = Depends(get_db)):
     """Generate tiny muted H.264 previews + JPEG posters for Explore tiles.
 
     Capped per request and fanned out over worker threads so a fresh grid
@@ -2301,8 +2329,19 @@ def generate_explore_previews(paths: list[str]):
     generated: dict[str, str] = {}
     posters: dict[str, str] = {}
     failed = []
+    rels = list(paths)
+    layouts = _stereo_layouts(db, rels)
+    # Loose files without a post follow the legacy folder rule.
+    layouts.update(
+        (rel, SM.legacy_stereo_layout(rel, root=str(OUTPUT_DIR)))
+        for rel in rels
+        if rel not in layouts and Path(rel).parts[:1] and Path(rel).parts[0] in SM.LEGACY_SBS_FOLDERS
+        and db.query(Post.id).filter(Post.media_path == rel).first() is None
+    )
     with ThreadPoolExecutor(max_workers=EXPLORE_GEN_WORKERS) as ex:
-        for rel, preview_url, poster_url, err in ex.map(_gen_explore_assets, list(paths)):
+        for rel, preview_url, poster_url, err in ex.map(
+            lambda rel: _gen_explore_assets(rel, layouts.get(rel, "mono")), rels
+        ):
             if preview_url:
                 generated[rel] = preview_url
             if poster_url:

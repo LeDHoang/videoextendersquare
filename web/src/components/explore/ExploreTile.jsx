@@ -125,7 +125,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
         }
       }}
       title={[label, place ? 'Location: ' + place : '', tagHint].filter(Boolean).join(' — ')}
-      aria-label={'Open ' + label + ' in Reels player'}
+      aria-label={'Open ' + label + (stereoLayout(video) !== 'mono' ? ' (3D)' : '') + ' in Reels player'}
     >
       {isImage ? (
         <img

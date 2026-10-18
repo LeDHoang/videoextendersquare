@@ -243,6 +243,9 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
         target_h = min(height or 2160, 2160)
         vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
 
+    # Hidden temp file + rename: stereo_paths serves any non-empty proxy, and
+    # stereo proxies are built in the background after publish.
+    part = dest.with_name(f".{dest.name}.part")
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -250,14 +253,21 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
-        str(dest),
+        "-f", "mp4", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=300,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    try:
+        os.replace(part, dest)
+    except OSError:
+        part.unlink(missing_ok=True)
         return None
     return str(dest)
 
@@ -290,10 +300,25 @@ def mono_sibling_path(src: str) -> Path:
 LEGACY_SBS_FOLDERS = ("testpipeline-3d",)
 
 
-def legacy_stereo_layout(rel_path: str) -> str:
-    """Stereo layout implied by where a loose output/ file lives."""
+def legacy_stereo_layout(
+    rel_path: str,
+    width: int | None = None,
+    height: int | None = None,
+    root: str = "output",
+) -> str:
+    """Stereo layout implied by where a loose output/ file lives.
+
+    Same rule as migration 20261015_0013: the file must sit in a legacy SBS
+    folder *and* be exactly 2:1. The size is probed under *root* when the
+    caller does not know it; an unknown size stays mono.
+    """
     first = Path(rel_path).parts[0] if Path(rel_path).parts else ""
-    return "sbs" if first in LEGACY_SBS_FOLDERS else "mono"
+    if first not in LEGACY_SBS_FOLDERS:
+        return "mono"
+    if not width or not height:
+        info = probe_media_info(str(Path(root) / rel_path)) or {}
+        width, height = info.get("width"), info.get("height")
+    return "sbs" if width and height and width == 2 * height else "mono"
 
 
 def is_derived_media(name: str) -> bool:
@@ -315,14 +340,34 @@ def stereo_paths(src: str) -> tuple[Path | None, Path]:
     if path.suffix.lstrip(".").lower() in VIDEO_EXTS:
         proxy = path.with_name(path.stem + "-preview.mp4")
         try:
-            if proxy.is_file() and proxy.stat().st_size > 0:
+            if proxy.is_file() and proxy.stat().st_size > 0 and _proxy_within_cap(proxy):
                 stereo = proxy
         except OSError:
             pass
     return (mono if has_mono else None), stereo
 
 
-def _left_eye_crop(layout: str) -> str:
+_proxy_side_cache: dict[tuple[str, int, int], int | None] = {}
+
+
+def _proxy_within_cap(proxy: Path) -> bool:
+    """True unless the proxy is known to exceed STEREO_PROXY_LONG_SIDE.
+
+    Proxies built before the cap existed can be 8K, which the Quest cannot
+    decode; those are skipped until `scripts/batch_stereo_mono.py` rebuilds
+    them. The probe is cached per (path, mtime, size).
+    """
+    st = proxy.stat()
+    key = (str(proxy), st.st_mtime_ns, st.st_size)
+    if key not in _proxy_side_cache:
+        info = probe_media_info(str(proxy)) or {}
+        sides = [v for v in (info.get("width"), info.get("height")) if v]
+        _proxy_side_cache[key] = max(sides) if sides else None
+    side = _proxy_side_cache[key]
+    return side is None or side <= STEREO_PROXY_LONG_SIDE
+
+
+def left_eye_crop(layout: str) -> str:
     if layout == "sbs":
         return "crop=iw/2:ih:0:0"
     if layout == "tb":
@@ -337,7 +382,7 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
     Image: same format as the source, at most MONO_IMAGE_MAX_SIDE square.
     Returns the rendition path, or None when it could not be produced.
     """
-    crop = _left_eye_crop(layout)
+    crop = left_eye_crop(layout)
     dest = mono_sibling_path(src)
     try:
         if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
@@ -350,6 +395,9 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
 
     side = MONO_VIDEO_MAX_SIDE
     vf = f"{crop},scale='2*trunc(min(iw,{side})/2)':'2*trunc(min(iw,{side})/2)'"
+    # Encode to a hidden temp file and rename: the feed treats any non-empty
+    # -mono file as ready, and this runs in the background after publish.
+    part = dest.with_name(f".{dest.name}.part")
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -357,16 +405,21 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
-        str(dest),
+        "-f", "mp4", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=600,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
-        dest.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
-        dest.unlink(missing_ok=True)
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    try:
+        os.replace(part, dest)
+    except OSError:
+        part.unlink(missing_ok=True)
         return None
     return str(dest)
 
@@ -423,25 +476,45 @@ def _sibling_matches_height(sibling: Path, height: int) -> bool:
         return True  # unreadable — let the normal flow decide
 
 
-def make_explore_preview(src: str, height: int = 720) -> str | None:
+def _sibling_is_square(sibling: Path) -> bool:
+    info = probe_media_info(str(sibling)) or {}
+    width, height = info.get("width"), info.get("height")
+    return not (width and height) or width == height
+
+
+def _cached_grid_asset(dest: Path, src: str, height: int, crop: str | None) -> bool:
+    """True when a cached grid asset can be reused as is.
+
+    A *crop* (the left eye of a stereo original without its 2D rendition)
+    also requires a square cached file, so an older full 2:1 asset rebuilds.
+    """
+    if not (dest.exists() and dest.stat().st_size > 0):
+        return False
+    if not (_sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height)):
+        return False
+    return crop is None or _sibling_is_square(dest)
+
+
+def make_explore_preview(src: str, height: int = 720, crop: str | None = None) -> str | None:
     """Transcode a tiny muted H.264 preview for the Explore gallery grid.
 
     720p, no audio, faststart — cheap enough to autoplay several tiles at
     once. Cached on disk next to the source; regenerates when the source is
-    newer than the cached preview or the height setting changed.
+    newer than the cached preview or the height setting changed. *crop* is an
+    ffmpeg crop filter applied first (see left_eye_crop).
     """
     try:
         dest = explore_preview_path(src)
-        if dest.exists() and dest.stat().st_size > 0:
-            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
-                return str(dest)
+        if _cached_grid_asset(dest, src, height, crop):
+            return str(dest)
     except OSError:
         return None
 
+    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
-        "-vf", f"scale=-2:{height}",
+        "-vf", vf,
         "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-an",
@@ -457,7 +530,7 @@ def make_explore_preview(src: str, height: int = 720) -> str | None:
     return str(dest)
 
 
-def make_explore_poster(src: str, height: int = 720) -> str | None:
+def make_explore_poster(src: str, height: int = 720, crop: str | None = None) -> str | None:
     """Extract a single-frame JPEG poster for the Explore gallery grid.
 
     Tens of KB and ~10x faster to produce than a preview transcode (one
@@ -468,13 +541,12 @@ def make_explore_poster(src: str, height: int = 720) -> str | None:
     """
     try:
         dest = explore_poster_path(src)
-        if dest.exists() and dest.stat().st_size > 0:
-            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
-                return str(dest)
+        if _cached_grid_asset(dest, src, height, crop):
+            return str(dest)
     except OSError:
         return None
 
-    vf = f"scale=-2:{height}"
+    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
     # Keyframe-only fast path first (input seek + nokey ≈ 1 core, so parallel
     # batches don't oversubscribe the CPU), then accurate seeks as fallback
     # for very short clips where the seek point lands past EOF.

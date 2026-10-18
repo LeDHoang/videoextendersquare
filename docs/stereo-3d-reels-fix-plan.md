@@ -2,9 +2,9 @@
 
 Follow-up to the 2026-10-18 review of branch `3dreels`. Spec: [stereo-3d-reels.md](stereo-3d-reels.md).
 
-## Already in flight
+## Fixed first (`c3ebf8a`)
 
-These are being fixed in the session "Fix 3D reels review bugs" (its own worktree, branched from `3dreels`). Do not start them again here.
+These were fixed on the `fix/stereo-review` branch and merged into `3dreels` in `c3ebf8a`.
 
 | # | Bug | Where |
 |---|---|---|
@@ -14,7 +14,6 @@ These are being fixed in the session "Fix 3D reels review bugs" (its own worktre
 | 4 | Inverted (right-eye-first) metadata falls through to the content pass | `pipeline/stereo_detect.py` |
 | 5 | Rotation and EXIF orientation are ignored when classifying and cropping | `server/media.py`, `pipeline/utils.py`, `server/routers/uploads.py` |
 
-Phase 0 starts after that branch merges into `3dreels`.
 
 ## Phase 0 — confirm bug 1 on the Quest (gate)
 
@@ -44,6 +43,8 @@ Add a `__test.getStereoState()` field that reports `L.version`, `R.version` and 
 
 ## Phase 1 — backend robustness
 
+Status, 2026-10-18: all done except 1.6, which needs no change. Tests are in `tests/test_stereo_posts.py` and `tests/test_migration_stereo_layout.py`.
+
 | Item | Change | Test |
 |---|---|---|
 | 1.1 Synchronous stereo work in the publish request | Move `make_left_eye_rendition` and the video `detect_stereo` pass onto the existing background job path. Until the 2D rendition exists, the post serves `stereo_crop=True`, which already falls back to CSS crop. | Publishing a stereo video returns before the encode. The feed shows `stereo_crop` and then switches to the rendition. |
@@ -51,10 +52,12 @@ Add a `__test.getStereoState()` field that reports `L.version`, `R.version` and 
 | 1.3 Batch is not idempotent | `batch_stereo_mono.py` checks each derived asset (`-mono`, `-mono-explore`, `-mono-poster`, `-preview`) separately and makes only the missing ones. Confirm soft-deleted posts are excluded. | Delete one asset, rerun, and only that asset is rebuilt. |
 | 1.4 Legacy import uses the folder rule only | `legacy_stereo_layout` and the loose-file path in `_build_payload` also require an exact 2:1 / 1:2 ratio, the same rule as migration 0013. | A non-2:1 file under `testpipeline-3d/` stays mono. |
 | 1.5 Grid assets when there is no 2D rendition | When `stereo_crop` is True, `_gen_explore_assets` builds the poster and explore clip from the left eye (reusing `_left_eye_crop`) and not the full SBS frame. | Grid tiles stay square before the backfill runs. |
-| 1.6 Orphaned files after delete | When a post's media is purged, delete the `-mono*` and `-preview.mp4` siblings too, using the existing purge path, not soft delete. | Purge removes all siblings. |
+| 1.6 Orphaned files after delete | **N/A.** There is no purge path: `delete_post` only soft-deletes and keeps the media, so no sibling is orphaned. Revisit if a hard delete is added. | — |
 | 1.7 Migration downgrade | Add a downgrade test for `20261015_0013`. | upgrade, downgrade, upgrade on SQLite, and on PostgreSQL when `SX_TEST_POSTGRES_URL` is set. |
 
 ## Phase 2 — frontend and VR polish
+
+Status, 2026-10-18: all done except 2.8 (needs a spec first). 2.9 was not a bug. Node tests are in `web/tests/reels-stereo.test.js`; vitest in `UploadPage.test.jsx`, `PackTile.test.jsx` and `ExploreTile.test.jsx`.
 
 | Item | Change | Test |
 |---|---|---|
@@ -65,10 +68,46 @@ Add a `__test.getStereoState()` field that reports `L.version`, `R.version` and 
 | 2.5 Pack tile crop | `posterClass` uses the format of the member the cover actually comes from. | Vitest with a mixed pack. |
 | 2.6 a11y | Add "3D" to the explore and profile tile `aria-label`. | Vitest. |
 | 2.7 Resume on VR entry | Respect the paused state on VR entry, as the spec already notes (`webxr_vr.js:9315`). | Node test plus a Quest check. |
-| 2.9 Deep links miss the target | `/reels?post=<id>` and `?play=<path>` open a different reel (seen on desktop and on the Quest). Fix the feed lookup so the requested item is fetched and shown first. | Node test, plus a Quest check that `?post=` for Tron lands on Tron. |
+| 2.9 Deep links miss the target | **Not a bug.** The API returns the requested post first, and both `?post=` and `?play=` land on it on desktop and on the Quest (Tron `-mono.mp4` held for 12 s). The earlier mismatch was the 15 s Tron clip auto-advancing before the probe read the src. | Quest check passed. |
 | 2.8 In-headset 3D indicator | Add a small "3D" chip on the VR HUD (`vr_ui_canvas.js`) for stereo posts. This is not in the spec yet, so add it to the spec first. | Quest screenshot. |
 
+## Results, 2026-10-18
+
+Backend:
+- 1.1: a stereo video publish returns after the poster. The rendition, the proxy and the mono grid assets are built on one background worker, with atomic `.part` writes.
+- 1.2: an oversized cached proxy is skipped on read.
+- 1.3: the batch script rebuilds only missing assets.
+- 1.4: the legacy folder rule needs exact 2:1.
+- 1.5: grid assets crop the left eye before the rendition exists.
+- 1.7: the migration round trip runs on SQLite. On PostgreSQL it runs when `SX_TEST_POSTGRES_URL` is set.
+
+Frontend:
+- 2.1: one swap per VR entry.
+- 2.2: the stereo retry, then the 2D fallback.
+- 2.3: an image-post VR switch re-warms the preloader.
+- 2.4: the 3D switch no longer carries across slideshow edits.
+- 2.5: the pack cover is cropped by its real source member.
+- 2.6: the "(3D)" aria-label.
+- 2.7: VR entry keeps the paused state.
+- The VR callbacks are now wrapped (`() => syncStereoSource()`), so an engine argument can never reach the swap.
+
+`make test`: 366 pytest passed (1 PostgreSQL skip), 348 node passed, 360 vitest passed.
+
+Quest 3S checks over CDP (Tron, `?post=`):
+- **2.7.** Paused at 9.99 s and entered VR. The video stayed paused on `-preview.mp4` at 9.99 s for 6 s. After exit it was back on `-mono.mp4` at 9.99 s, still paused.
+- **2.2, transient.** The CDP `Fetch` domain 404'd the first `-preview.mp4` request. The view fell back to 2D at the same playhead (3.5 to 4.3 s) and switched back to stereo at about 5 s (8.8 s). No notice was shown.
+- **2.2, permanent.** Every `-preview.mp4` request 404'd: 2 tries, then it stayed on 2D at the same playhead and flashed "3D UNAVAILABLE — SHOWING 2D". The first build of this fix restarted the 2D fallback at 0, because a failed load reports `currentTime` 0. The fallback now resumes from the last swap's playhead.
+- **Bug 2 (swipe during the swap).** Tron was playing at 6 s. ArrowDown was sent while the stereo swap was still at `readyState` 0, and the next reel started at 0.00.
+
 ## Phase 3 — tests and docs
+
+Status, 2026-10-18:
+- `npm test` already runs `node --test tests/*.test.js && vitest run`, and `make test` calls it, so the node suites are wired.
+- The swipe-during-swap and 404-fallback regression tests are in `web/tests/reels-stereo.test.js`. The eye texture version check is in `webxr-earth.test.js` from `c3ebf8a`.
+- The rendition-size drift is not real: the spec table already says "at most 2160²". The 1920² figures in the log are measured from 3840×1920 sources, whose eyes are 1920².
+- The batch warning is already documented in the spec.
+- The new behaviour (async publish, retry, paused entry, proxy cap on read) is recorded in the spec's Notes section.
+- Still open: seed a TB post.
 
 - Wire `node --test web/tests/*.test.js` into `npm test`, or confirm it already is. The review found vitest `include` only covers `src/**`.
 - Add the missing regression tests from the review that the earlier phases don't already cover: a swipe during the swap, a 404 falling back to 2D, and an eye texture version advancing per frame.

@@ -207,4 +207,12 @@ describe('ExploreTile 3D posts', () => {
     const { container } = renderTile({ video: video({ stereo_layout: 'mono' }) });
     expect(container.querySelector('.sx-explore-kind')).toBeNull();
   });
+
+  it('names 3D posts as 3D for screen readers', () => {
+    const { getByRole } = renderTile({ video: video({ stereo_layout: 'sbs' }) });
+    expect(getByRole('button', { name: 'Open Reel A (3D) in Reels player' })).toBeInTheDocument();
+    cleanup();
+    const mono = renderTile({ video: video({ stereo_layout: 'mono' }) });
+    expect(mono.getByRole('button', { name: 'Open Reel A in Reels player' })).toBeInTheDocument();
+  });
 });

@@ -34,7 +34,10 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
 
   const members = packCoverMembers(pack);
   const clips = members.map(clipFor).filter(Boolean);
-  const poster = posterFor(members[0]) || pack?.cover_url || '';
+  // The cover image comes from the first member that has one; the pack's own
+  // cover_url (no member) is never cropped.
+  const coverMember = members.find((member) => posterFor(member));
+  const poster = posterFor(coverMember) || pack?.cover_url || '';
   const reducedMotion = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -93,7 +96,7 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
 
   const activeClip = clips.length ? clips[clipIndex % clips.length] : '';
   const activeMember = members.find((member) => clipFor(member) === activeClip);
-  const posterClass = ['sx-explore-poster', stereoCropClass(members[0])].filter(Boolean).join(' ');
+  const posterClass = ['sx-explore-poster', stereoCropClass(coverMember)].filter(Boolean).join(' ');
   const clipClass = ['sx-explore-video', stereoCropClass(activeMember)].filter(Boolean).join(' ');
   useEffect(() => {
     const vid = videoRef.current;

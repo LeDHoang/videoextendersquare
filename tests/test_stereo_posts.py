@@ -43,6 +43,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     monkeypatch.setattr(uploads, "OUTPUT_DIR", Path("output"))
     monkeypatch.setattr(uploads, "UPLOAD_DIR", Path("output") / "uploads")
+    # Stereo video assets build in the background; run that job inline here.
+    monkeypatch.setattr(uploads, "_submit_stereo_assets", lambda fn: fn())
     engine = create_engine("sqlite:///" + str(tmp_path / "stereo.db"), connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -179,10 +181,21 @@ def test_mono_renditions_never_surface_as_tiles(tmp_path):
     assert names == ["clip.mp4", "still.png"]
 
 
-def test_legacy_folder_rule():
-    assert media.legacy_stereo_layout("testpipeline-3d/clip.mp4") == "sbs"
-    assert media.legacy_stereo_layout("testpipeline/clip.mp4") == "mono"
-    assert media.legacy_stereo_layout("uploads/my-3d-trip-1.mp4") == "mono"
+def test_legacy_folder_rule(tmp_path):
+    assert media.legacy_stereo_layout("testpipeline-3d/clip.mp4", 3840, 1920) == "sbs"
+    assert media.legacy_stereo_layout("testpipeline/clip.mp4", 3840, 1920) == "mono"
+    assert media.legacy_stereo_layout("uploads/my-3d-trip-1.mp4", 3840, 1920) == "mono"
+    # Same rule as migration 0013: the folder alone is not enough.
+    assert media.legacy_stereo_layout("testpipeline-3d/clip.mp4", 1920, 1080) == "mono"
+    assert media.legacy_stereo_layout("testpipeline-3d/clip.mp4", 3840, 1080) == "mono"
+    # Unknown size: probe under root; unreadable stays mono.
+    folder = tmp_path / "testpipeline-3d"
+    folder.mkdir()
+    _stereo_still("sbs").save(folder / "still.png")
+    Image.new("RGB", (160, 90)).save(folder / "wide.png")
+    assert media.legacy_stereo_layout("testpipeline-3d/still.png", root=str(tmp_path)) == "sbs"
+    assert media.legacy_stereo_layout("testpipeline-3d/wide.png", root=str(tmp_path)) == "mono"
+    assert media.legacy_stereo_layout("testpipeline-3d/missing.mp4", root=str(tmp_path)) == "mono"
 
 
 def test_stereo_post_without_rendition_falls_back_to_crop(client, tmp_path):
@@ -229,8 +242,13 @@ def test_stereo_video_post_and_feed_payload(client, tmp_path, layout):
     assert meta["url"].endswith("-mono.mp4")
     # H.264 within the proxy cap plays as-is in VR.
     assert meta["stereo_url"] == f"/media/{meta['path']}"
-    assert body["poster_url"].endswith("-mono-poster.jpg")
-    assert body["preview_url"].endswith("-mono-explore.mp4")
+    # The response poster is the left eye of the original, made before the
+    # background job; the feed then serves the rendition's grid assets.
+    poster = Path("output") / body["poster_url"].removeprefix("/media/")
+    poster_info = media.probe_media_info(str(poster))
+    assert poster_info["width"] == poster_info["height"]
+    assert media.explore_poster_path(str(Path("output") / meta["url"].removeprefix("/media/"))).is_file()
+    assert media.explore_preview_path(str(Path("output") / meta["url"].removeprefix("/media/"))).is_file()
 
     mono = Path("output") / meta["url"].removeprefix("/media/")
     info = media.probe_media_info(str(mono))
@@ -400,3 +418,121 @@ def test_exif_rotated_still_probes_detects_and_crops_as_shown(tmp_path):
 
     mono = media.make_left_eye_rendition(str(still), "sbs")
     assert mono and Image.open(mono).size == (240, 240)
+
+
+@needs_ffmpeg
+def test_stereo_video_publish_returns_before_the_encode(client, tmp_path, monkeypatch):
+    """Publishing does not wait for ffmpeg: 2D crops until the job lands."""
+    queued = []
+    monkeypatch.setattr(uploads, "_submit_stereo_assets", queued.append)
+    user = _register(client, "stereo_async")
+    source = tmp_path / "async-sbs.mp4"
+    _stereo_video(source, "sbs")
+    video_router.STAGED_UPLOADS["async"] = (str(source), time.time(), f"user:{user['id']}")
+
+    response = _publish(client, {"kind": "video", "title": "Async", "stage_id": "async", "stereo_layout": "sbs"})
+    assert response.status_code == 200, response.text
+    meta = response.json()["meta"]
+    stored = Path("output") / meta["path"]
+    assert len(queued) == 1
+    assert not media.mono_sibling_path(str(stored)).exists()
+    assert meta["stereo_crop"] is True
+    assert meta["url"] == meta["stereo_url"] == f"/media/{meta['path']}"
+    poster = media.probe_media_info(str(Path("output") / response.json()["poster_url"].removeprefix("/media/")))
+    assert poster["width"] == poster["height"]
+
+    queued[0]()
+    with client.testing_session() as db:
+        card = post_card(db.query(Post).one(), db)
+    assert card["stereo_crop"] is False
+    assert card["url"].endswith("-mono.mp4")
+    assert card["poster_url"].endswith("-mono-poster.jpg")
+
+
+@needs_ffmpeg
+def test_oversized_cached_proxy_is_not_served_and_batch_rebuilds_it(tmp_path, monkeypatch):
+    source = tmp_path / "old.mp4"
+    _stereo_video(source, "sbs", eye=128)  # 256x128
+    # A proxy built before the cap existed: same size as the source.
+    shutil.copy(source, tmp_path / "old-preview.mp4")
+    monkeypatch.setattr(media, "STEREO_PROXY_LONG_SIDE", 128)
+    _mono, stereo_path = media.stereo_paths(str(source))
+    assert stereo_path == source
+
+    batch = _batch_module()
+    assert "VR proxy (over the cap)" in batch.missing_assets(source, "sbs", "video")
+    assert batch.build(source, "sbs", "video")
+    assert batch.missing_assets(source, "sbs", "video") == []
+    _mono, stereo_path = media.stereo_paths(str(source))
+    assert stereo_path == tmp_path / "old-preview.mp4"
+    assert media.probe_media_info(str(stereo_path))["width"] == 128
+
+
+def _batch_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "batch_stereo_mono", Path(__file__).resolve().parents[1] / "scripts" / "batch_stereo_mono.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@needs_ffmpeg
+def test_batch_rebuilds_only_the_missing_asset(tmp_path):
+    source = tmp_path / "clip.mp4"
+    _stereo_video(source, "sbs")
+    batch = _batch_module()
+    assert set(batch.missing_assets(source, "sbs", "video")) == {"2D view", "grid preview", "grid poster"}
+    assert batch.build(source, "sbs", "video")
+    assert batch.missing_assets(source, "sbs", "video") == []
+
+    mono = media.mono_sibling_path(str(source))
+    preview = media.explore_preview_path(str(mono))
+    poster = media.explore_poster_path(str(mono))
+    before = {path: path.stat().st_mtime_ns for path in (mono, preview)}
+    poster.unlink()
+    assert batch.missing_assets(source, "sbs", "video") == ["grid poster"]
+    time.sleep(0.01)
+    assert batch.build(source, "sbs", "video")
+    assert poster.is_file()
+    assert {path: path.stat().st_mtime_ns for path in (mono, preview)} == before
+
+
+@needs_ffmpeg
+def test_grid_assets_crop_the_left_eye_before_the_rendition_exists(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(reels, "OUTPUT_DIR", Path("output"))
+    folder = Path("output") / "uploads"
+    folder.mkdir(parents=True, exist_ok=True)
+    _stereo_video(folder / "raw-sbs.mp4", "sbs")
+    rel, preview_url, poster_url, err = reels._gen_explore_assets("uploads/raw-sbs.mp4", "sbs")
+    assert err is None
+    for url in (preview_url, poster_url):
+        info = media.probe_media_info(str(Path("output") / url.removeprefix("/media/")))
+        assert info["width"] == info["height"]
+    # Video renditions are left to the publish job / batch (a full encode).
+    assert not media.mono_sibling_path(str(folder / "raw-sbs.mp4")).exists()
+
+    # Stills: the left eye is a cheap crop, so the rendition is made now.
+    _stereo_still("tb").save(folder / "raw-tb.png")
+    rel, preview_url, poster_url, err = reels._gen_explore_assets("uploads/raw-tb.png", "tb")
+    assert err is None and preview_url.endswith("raw-tb-mono.png")
+
+    # Mono tiles keep the full frame.
+    rel, preview_url, poster_url, err = reels._gen_explore_assets("uploads/raw-sbs.mp4")
+    assert err is None
+
+
+def test_stereo_layouts_cover_slides(client, tmp_path):
+    user = _register(client, "stereo_lookup")
+    stage = _stage_image(tmp_path, user, "cover", _stereo_still("sbs"))
+    extra = _stage_image(tmp_path, user, "slide", _stereo_still("sbs"))
+    meta = _publish(
+        client,
+        {"kind": "image", "title": "S", "stage_id": stage, "extra_stage_ids": [extra], "stereo_layout": "sbs"},
+    ).json()["meta"]
+    paths = [image["path"] for image in meta["images"]]
+    assert len(paths) == 2
+    with client.testing_session() as db:
+        assert reels._stereo_layouts(db, [*paths, "uploads/other.png"]) == {path: "sbs" for path in paths}
