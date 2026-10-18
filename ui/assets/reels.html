@@ -2064,6 +2064,14 @@
   .edge-chevron:hover {
     background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
   }
+  /* On narrow tablets the square frame fills the width and the action bar reaches the
+     right edge, so the page-edge keys overlap it. Same fix as phones: use the left edge. */
+  @media (min-width: 701px) and (max-width: 820px) {
+    .reels-edge-nav {
+      right: auto;
+      left: max(10px, env(safe-area-inset-left));
+    }
+  }
   /* On phones the right edge belongs to the action bar. The page-edge PREV and NEXT
      keys used to sit behind it so they now move to the left edge. */
   @media (max-width: 700px) {
