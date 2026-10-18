@@ -11189,3 +11189,25 @@ a.sx-xh-btn { text-decoration: none; }
   margin-right: 0.35em;
   flex-shrink: 0;
 }
+
+/* Touch: grow the hit area of the small chips on Explore tiles to 44px without changing how
+   they look or where they sit. The invisible ::before extends past the chip. */
+@media (pointer: coarse) {
+  .sx-explore-creator,
+  .sx-explore-owner-actions button,
+  .sx-explore-share button {
+    position: relative;
+  }
+
+  .sx-explore-creator {
+    position: absolute;
+  }
+
+  .sx-explore-creator::before,
+  .sx-explore-owner-actions button::before,
+  .sx-explore-share button::before {
+    content: '';
+    position: absolute;
+    inset: -7px -3px;
+  }
+}
