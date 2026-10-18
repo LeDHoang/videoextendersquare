@@ -194,6 +194,24 @@ test('entering and leaving VR swaps the source in place and keeps the playhead',
   assert.equal(calls.preload, before);
 });
 
+test('a swipe during the swap does not seek the next reel to the old playhead', () => {
+  const post = { ...sbsPost, tunnel_url: '' };
+  const { syncStereoSource, context, engine } = loadStereo([post]);
+  const { video } = context;
+  video.src = post.url;
+  video.currentTime = 12.5;
+  video.paused = false;
+
+  engine.presenting = true;
+  syncStereoSource();
+  assert.equal(video.src, post.stereo_url);
+  // The user swipes before the stereo file's metadata arrives.
+  video.src = '/media/uploads/next-reel.mp4';
+  video.currentTime = 0;
+  video.fire('loadedmetadata');
+  assert.equal(video.currentTime, 0, 'the next reel starts at its own beginning');
+});
+
 test('image posts re-show the current slide on a VR switch', () => {
   const post = { media_type: 'image', url: '/m/a-mono.png', stereo_url: '/m/a.png', stereo_layout: 'sbs' };
   const { syncStereoSource, context, calls } = loadStereo([post]);

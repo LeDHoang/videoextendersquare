@@ -155,6 +155,9 @@ def upload_video(
     STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
 
     w, h, dur = get_video_dimensions_and_duration(dest_path)
+    # Stereo layout follows the frame as shown (rotation applied): ffmpeg
+    # decodes rotated, so the left-eye crop sees display orientation too.
+    shown_w, shown_h, _ = get_video_dimensions_and_duration(dest_path, display=True)
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
 
@@ -169,7 +172,7 @@ def upload_video(
         "padding": {"top": top, "bottom": bottom, "left": left, "right": right},
         # Exact 2:1 / 1:2 frames may be full SBS / top-bottom stereo; the
         # Upload Studio pre-selects 3D when this says detected.
-        "stereo": detect_stereo(dest_path, w, h, kind="video", duration=dur),
+        "stereo": detect_stereo(dest_path, shown_w, shown_h, kind="video", duration=dur),
     }
 
 

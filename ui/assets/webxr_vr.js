@@ -5869,6 +5869,19 @@ window.WebXRVR = window.WebXRVR || (function () {
     return eyeTextures;
   }
 
+  // The renderer re-uploads a texture only when that texture's own version
+  // moves; bumping the shared base leaves the clones (the maps the screen and
+  // eye meshes actually sample) on their first frame. Mirror every upload.
+  function markEyeTexturesUploaded(base) {
+    if (!eyeTextures || eyeTextures.base !== base) return;
+    if (videoUploadMode === 'respec') {
+      try { eyeTextures.L.dispose(); } catch (e) {}
+      try { eyeTextures.R.dispose(); } catch (e) {}
+    }
+    eyeTextures.L.needsUpdate = true;
+    eyeTextures.R.needsUpdate = true;
+  }
+
   function stereoProxySize(layout) {
     const eye = debugFlags.stereoEye || VR_STEREO_EYE_CAP;
     return layout === 'tb' ? [eye, eye * 2] : [eye * 2, eye];
@@ -6125,6 +6138,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           try { uploaded.dispose(); } catch (e) {}
         }
         uploaded.needsUpdate = true;
+        markEyeTexturesUploaded(uploaded);
         // ?vrtex=video keeps the direct texture bound for videos (it tracks
         // its own layout in updateDirectVideoBinding).
         if (!(debugFlags.vrtex && source.kind === 'video')) commitTextureStereo(uploaded, layout);
@@ -10164,6 +10178,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           sharesGeometry: !!(screenMesh && mesh.geometry === screenMesh.geometry),
           repeat: tex ? [tex.repeat.x, tex.repeat.y] : null,
           offset: tex ? [tex.offset.x, tex.offset.y] : null,
+          version: tex ? tex.version : null,
           mapIsEye: !!(tex && mesh.material.map === tex),
         } : null;
         return {
@@ -10176,6 +10191,13 @@ window.WebXRVR = window.WebXRVR || (function () {
           left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
           right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
         };
+      },
+      // Run the renderer's real upload check on both eye maps (what a draw
+      // that samples them does): a texture re-uploads only when its version moved.
+      initEyeTexturesForTest() {
+        if (!renderer || !eyeTextures) return;
+        renderer.initTexture(eyeTextures.L);
+        renderer.initTexture(eyeTextures.R);
       },
       // Pretend an XR session presents (stereo visibility keys off it).
       setXrSessionForTest(session) { xrSession = session || null; applyStereoVisibility(); },

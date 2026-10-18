@@ -139,13 +139,18 @@ def probe_media_info(src: str) -> dict | None:
     """Read duration and pixel size of a media file with one ffprobe call.
 
     Returns {"duration_ms", "width", "height"} (each None when unknown), or
-    None when the file cannot be probed at all (missing file, no ffprobe,
+    None when the file cannot be probed at all. Width/height are the size as
+    shown: a video's display-matrix rotation and a still's EXIF orientation
+    are applied, matching the frames ffmpeg decodes and the stereo layout
+    a viewer sees (missing file, no ffprobe,
     unreadable media). Duration is only meaningful for video; the caller
     decides whether to keep it.
     """
+    from pipeline.utils import display_size, exif_quarter_turn, stream_rotation
+
     cmd = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,duration:format=duration",
+        "-show_streams", "-show_entries", "format=duration",
         "-of", "json", src,
     ]
     try:
@@ -178,10 +183,23 @@ def probe_media_info(src: str) -> dict | None:
             break
     if not streams and duration_ms is None:
         return None
+    width, height = positive_int(stream.get("width")), positive_int(stream.get("height"))
+    if Path(src).suffix.lstrip(".").lower() in IMAGE_EXTS:
+        try:
+            from PIL import Image
+
+            with Image.open(src) as img:
+                turned = exif_quarter_turn(img)
+        except (OSError, ValueError):
+            turned = False
+        if turned:
+            width, height = height, width
+    else:
+        width, height = display_size(width, height, stream_rotation(stream))
     return {
         "duration_ms": duration_ms,
-        "width": positive_int(stream.get("width")),
-        "height": positive_int(stream.get("height")),
+        "width": width,
+        "height": height,
     }
 
 

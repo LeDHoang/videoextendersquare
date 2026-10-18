@@ -310,3 +310,93 @@ def test_profile_card_of_stereo_still_keeps_left_eye_poster(client, tmp_path):
     assert card["poster_url"].endswith("-mono-poster.jpg")
     rel, preview_url, poster_url, err = reels._gen_explore_assets(meta["path"])
     assert err is None and preview_url.endswith("-mono.png") and poster_url.endswith("-mono-poster.jpg")
+
+
+# ─── Rotated sources: stereo layout follows the frame as shown ──────────────
+
+
+def rotated_video(path: Path, coded: str, rotation: int) -> Path:
+    """A clip stored at `coded` size whose display matrix turns it `rotation` degrees."""
+    raw = path.with_name(path.stem + "-coded.mp4")
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"testsrc=s={coded}:d=0.4:r=10",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(raw)],
+        check=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-display_rotation", str(rotation), "-i", str(raw),
+         "-c", "copy", str(path)],
+        check=True,
+    )
+    return path
+
+
+def exif_rotated_still(path: Path, shown: Image.Image) -> Path:
+    """Store `shown` turned a quarter, tagged EXIF orientation 6 (shown upright)."""
+    stored = shown.rotate(90, expand=True)
+    exif = stored.getexif()
+    exif[0x0112] = 6
+    stored.save(path, exif=exif)
+    return path
+
+
+def test_stream_rotation_reads_display_matrix_and_rotate_tag():
+    from pipeline.utils import display_size, stream_rotation
+
+    assert stream_rotation({"side_data_list": [{"side_data_type": "Display Matrix", "rotation": 90}]}) == 90
+    assert stream_rotation({"side_data_list": [{"rotation": -90}]}) == 270
+    assert stream_rotation({"tags": {"rotate": "180"}}) == 180
+    assert stream_rotation({}) == 0
+    assert display_size(1920, 3840, 90) == (3840, 1920)
+    assert display_size(1920, 3840, 270) == (3840, 1920)
+    assert display_size(1920, 3840, 180) == (1920, 3840)
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("rotation", [90, -90])
+def test_rotated_video_probes_and_validates_as_shown(tmp_path, rotation):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from pipeline.utils import get_video_dimensions_and_duration
+
+    # Coded 128x256 (1:2), shown 256x128 (2:1): a side-by-side pair on screen.
+    video = rotated_video(tmp_path / "turned.mp4", "128x256", rotation)
+    info = media.probe_media_info(str(video))
+    assert (info["width"], info["height"]) == (256, 128)
+    assert get_video_dimensions_and_duration(str(video))[:2] == (128, 256)
+    assert get_video_dimensions_and_duration(str(video), display=True)[:2] == (256, 128)
+
+    uploads._check_stereo_sources(SimpleNamespace(stereo_layout="sbs"), [str(video)])
+    with pytest.raises(HTTPException) as err:
+        uploads._check_stereo_sources(SimpleNamespace(stereo_layout="tb"), [str(video)])
+    assert err.value.status_code == 422
+
+    # ffmpeg decodes rotated, so the left-eye crop of the shown frame is square.
+    mono = media.make_left_eye_rendition(str(video), "sbs")
+    assert mono
+    mono_info = media.probe_media_info(mono)
+    assert (mono_info["width"], mono_info["height"]) == (128, 128)
+
+
+@needs_ffmpeg
+def test_exif_rotated_still_probes_detects_and_crops_as_shown(tmp_path):
+    from pipeline import stereo_detect as sd
+    from pipeline.utils import get_image_dimensions, shown_image_size
+
+    from tests.test_stereo_detect import pack, stereo_pair
+
+    left, right = stereo_pair(240, 12)
+    still = exif_rotated_still(tmp_path / "turned.jpg", pack("sbs", left, right))
+    assert get_image_dimensions(str(still)) == (240, 480)
+    assert shown_image_size(str(still), 240, 480) == (480, 240)
+    info = media.probe_media_info(str(still))
+    assert (info["width"], info["height"]) == (480, 240)
+
+    result = sd.detect_stereo(str(still), 480, 240, kind="image")
+    assert result["candidate"] == "sbs"
+    assert result["detected"] is True and result["method"] == "content"
+
+    mono = media.make_left_eye_rendition(str(still), "sbs")
+    assert mono and Image.open(mono).size == (240, 240)

@@ -14,7 +14,7 @@ from core import models as _models
 from server.billing.parameters import image_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
-from pipeline.utils import calculate_square_padding, get_image_dimensions
+from pipeline.utils import calculate_square_padding, get_image_dimensions, shown_image_size
 from server import media as SM
 from server import output
 from server.jobs import JobStatus, job_manager
@@ -81,6 +81,8 @@ def upload_image(
         raise HTTPException(status_code=413, detail=f"Image dimensions are too large: {ex}") from ex
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
+    # Stereo layout follows the still as shown (EXIF orientation applied).
+    shown_w, shown_h = shown_image_size(dest_path, w, h)
 
     return {
         "stage_id": stage_id,
@@ -91,7 +93,7 @@ def upload_image(
         "orientation": orientation,
         "padding": {"top": top, "bottom": bottom, "left": left, "right": right},
         # See video.py: exact 2:1 / 1:2 stills may be SBS / top-bottom stereo.
-        "stereo": detect_stereo(dest_path, w, h, kind="image"),
+        "stereo": detect_stereo(dest_path, shown_w, shown_h, kind="image"),
     }
 
 

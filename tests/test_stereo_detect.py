@@ -159,7 +159,70 @@ def test_metadata_side_data_parsing(monkeypatch):
         assert sd.metadata_layout("x.mp4") == expected
 
 
+def fake_ffprobe(monkeypatch, payload):
+    import json
+
+    class Done:
+        returncode = 0
+        stdout = json.dumps(payload)
+
+    monkeypatch.setattr(sd.subprocess, "run", lambda cmd, **kwargs: Done())
+
+
+def meta(layout=None, inverted=False, spherical=False):
+    return {"layout": layout, "inverted": inverted, "spherical": spherical}
+
+
 def test_metadata_wins_for_matching_candidate(monkeypatch):
-    monkeypatch.setattr(sd, "metadata_layout", lambda src: "sbs")
+    monkeypatch.setattr(sd, "probe_metadata", lambda src: meta("sbs"))
     result = sd.detect_stereo("x.mp4", 200, 100, kind="video", duration=1.0)
     assert result == {"candidate": "sbs", "detected": True, "method": "metadata", "score": None}
+
+
+@pytest.mark.parametrize("payload", [
+    {"streams": [{"side_data_list": [{"side_data_type": "Spherical Mapping", "projection": "equirectangular"}]}]},
+    # VR180: stereo side data plus a spherical mapping still is not flat 3D.
+    {"streams": [{"side_data_list": [
+        {"side_data_type": "Stereo 3D", "type": "side by side", "inverted": 0},
+        {"side_data_type": "Spherical Mapping", "projection": "equirectangular"},
+    ]}]},
+    {"streams": [{"tags": {"projection": "equirectangular"}}]},
+    {"streams": [{}], "format": {"tags": {"spherical-video": "true"}}},
+])
+def test_spherical_metadata_is_never_stereo(monkeypatch, payload):
+    fake_ffprobe(monkeypatch, payload)
+    assert sd.probe_metadata("x.mp4")["spherical"] is True
+    monkeypatch.setattr(sd, "_video_frames", lambda *a, **k: pytest.fail("content pass ran"))
+    result = sd.detect_stereo("x.mp4", 200, 100, kind="video", duration=1.0)
+    assert result == {"candidate": "sbs", "detected": False, "method": "spherical", "score": None}
+
+
+def test_flat_projection_tag_is_not_spherical(monkeypatch):
+    fake_ffprobe(monkeypatch, {"streams": [{"tags": {"projection": "rectangular"}}]})
+    assert sd.probe_metadata("x.mp4")["spherical"] is False
+
+
+@pytest.mark.parametrize("payload", [
+    {"streams": [{"side_data_list": [{"side_data_type": "Stereo 3D", "type": "side by side", "inverted": 1}]}]},
+    {"streams": [{"tags": {"stereo_mode": "right_left"}}]},
+    {"streams": [{"tags": {"STEREO_MODE": "bottom_top"}}]},
+])
+def test_inverted_layout_skips_the_content_pass(monkeypatch, payload):
+    fake_ffprobe(monkeypatch, payload)
+    assert sd.probe_metadata("x.mp4") == meta(inverted=True)
+    assert sd.metadata_layout("x.mp4") is None
+    monkeypatch.setattr(sd, "_video_frames", lambda *a, **k: pytest.fail("content pass ran"))
+    result = sd.detect_stereo("x.mp4", 200, 100, kind="video", duration=1.0)
+    assert result == {"candidate": "sbs", "detected": False, "method": "inverted", "score": None}
+
+
+def test_photo_sphere_still_is_rejected(tmp_path):
+    left, right = stereo_pair(240, 12)
+    path = tmp_path / "pano.jpg"
+    xmp = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+           b'<rdf:Description xmlns:GPano="http://ns.google.com/photos/1.0/panorama/" '
+           b'GPano:ProjectionType="equirectangular"/></rdf:RDF></x:xmpmeta>')
+    pack("sbs", left, right).save(path, xmp=xmp)
+    assert sd.image_is_spherical(str(path)) is True
+    result = sd.detect_stereo(str(path), 480, 240, kind="image")
+    assert result == {"candidate": "sbs", "detected": False, "method": "spherical", "score": None}

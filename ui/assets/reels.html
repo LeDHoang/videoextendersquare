@@ -3099,6 +3099,9 @@
       if (!wasPlaying) video.pause();
       if (resumeAt > 0) {
         video.addEventListener('loadedmetadata', function () {
+          // A swipe during the swap loads another reel; its metadata must
+          // not inherit this reel's playhead.
+          if (video.getAttribute('src') !== nextUrl) return;
           try { video.currentTime = Math.min(resumeAt, video.duration || resumeAt); } catch (e) {}
         }, { once: true });
       }

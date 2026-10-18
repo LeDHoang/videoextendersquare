@@ -9,7 +9,10 @@ Detection runs in two passes:
 
 1. Container metadata: the ffprobe "Stereo 3D" stream side data (MP4 ``st3d``)
    or the Matroska/WebM ``stereo_mode`` tag. Inverted layouts (right eye
-   first) are not supported and never count as detected.
+   first) are not supported: they never count as detected and skip the
+   content pass. Spherical files (360 / VR180: "Spherical Mapping" side
+   data, a projection tag, or GPano XMP on stills) are rejected outright,
+   since their 2:1 frames are panoramas, not a pair of flat eyes.
 2. Content: the two eye halves of a stereo pair show the same scene with a
    small horizontal disparity, while the halves of an ordinary 2:1 / 1:2 frame
    show different parts of it. Each half is reduced to a small high-passed
@@ -56,6 +59,8 @@ _MKV_STEREO_MODES = {
     "top_bottom": "tb",
     "3": "tb",
 }
+# Matroska right-eye-first modes (by name and StereoMode number).
+_MKV_INVERTED_MODES = {"right_left", "11", "bottom_top", "2"}
 
 
 def candidate_layout(width: int | None, height: int | None) -> str | None:
@@ -89,40 +94,86 @@ def eye_size(layout: str, width: int, height: int) -> tuple[int, int]:
     return width, height
 
 
+def probe_metadata(src: str) -> dict:
+    """Stereo/projection facts the container declares for its first video stream.
+
+    Returns ``{"layout", "inverted", "spherical"}``: layout is "sbs" / "tb"
+    (or None), inverted is True when a right-eye-first layout is declared,
+    spherical is True for 360 / VR180 projection metadata. Unreadable files
+    report nothing.
+    """
+    found = {"layout": None, "inverted": False, "spherical": False}
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_streams", "-show_format", "-of", "json", src,
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                           creationflags=_NO_WINDOW)
+        if p.returncode != 0:
+            return found
+        data = json.loads(p.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return found
+    streams = data.get("streams") or []
+    if not streams:
+        return found
+    stream = streams[0]
+
+    for side in stream.get("side_data_list") or []:
+        side_type = str(side.get("side_data_type", "")).strip().lower()
+        if side_type == "spherical mapping":
+            found["spherical"] = True
+            continue
+        if side_type != "stereo 3d":
+            continue
+        layout = _METADATA_TYPES.get(str(side.get("type", "")).strip().lower())
+        if _truthy(side.get("inverted")):
+            found["inverted"] = True
+        elif layout and not found["layout"]:
+            found["layout"] = layout
+
+    tags = {}
+    for source in ((data.get("format") or {}).get("tags") or {}, stream.get("tags") or {}):
+        tags.update({str(k).strip().lower(): str(v).strip().lower() for k, v in source.items()})
+    if any(_is_projection_tag(k, v) for k, v in tags.items()):
+        found["spherical"] = True
+    mode = tags.get("stereo_mode", "")
+    if mode in _MKV_INVERTED_MODES:
+        found["inverted"] = True
+    elif not found["layout"]:
+        found["layout"] = _MKV_STEREO_MODES.get(mode)
+    if found["inverted"]:
+        found["layout"] = None
+    return found
+
+
+def _is_projection_tag(key: str, value: str) -> bool:
+    """True for container tags declaring a 360 / VR180 projection."""
+    if not value or value in {"0", "false", "no", "none", "flat", "rectangular"}:
+        return False
+    return "projection" in key or "spherical" in key
+
+
 def metadata_layout(src: str) -> str | None:
     """Read the stereo layout declared by the container, if any.
 
     Returns "sbs" / "tb", or None when nothing (or an inverted layout) is
     declared or ffprobe cannot read the file.
     """
-    cmd = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_streams", "-of", "json", src,
-    ]
+    return probe_metadata(src)["layout"]
+
+
+def image_is_spherical(src: str) -> bool:
+    """True when a still carries photo-sphere / VR180 (GPano) XMP."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
-                           creationflags=_NO_WINDOW)
-        if p.returncode != 0:
-            return None
-        data = json.loads(p.stdout or "{}")
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    streams = data.get("streams") or []
-    if not streams:
-        return None
-    stream = streams[0]
-
-    for side in stream.get("side_data_list") or []:
-        if str(side.get("side_data_type", "")).lower() != "stereo 3d":
-            continue
-        if _truthy(side.get("inverted")):
-            return None
-        layout = _METADATA_TYPES.get(str(side.get("type", "")).strip().lower())
-        if layout:
-            return layout
-
-    tags = {str(k).lower(): str(v).strip().lower() for k, v in (stream.get("tags") or {}).items()}
-    return _MKV_STEREO_MODES.get(tags.get("stereo_mode", ""))
+        with Image.open(src) as img:
+            xmp = img.info.get("xmp") or img.info.get("XML:com.adobe.xmp") or b""
+    except (OSError, ValueError):
+        return False
+    if isinstance(xmp, str):
+        xmp = xmp.encode("utf-8", "ignore")
+    return b"GPano:ProjectionType" in xmp or b"GPano:UsePanoramaViewer" in xmp
 
 
 def _truthy(value) -> bool:
@@ -228,7 +279,8 @@ def detect_stereo(
 
     * candidate — "sbs" / "tb" when the frame is exactly 2:1 / 1:2, else None.
     * detected  — True when metadata or content says the file is stereo.
-    * method    — "metadata", "content", or None.
+    * method    — "metadata" / "content" when detected; "spherical" or
+      "inverted" when metadata rules stereo out (no content pass); else None.
     * score     — content similarity (median over frames), or None.
     """
     candidate = candidate_layout(width, height)
@@ -237,10 +289,19 @@ def detect_stereo(
         return result
 
     if kind == "video":
-        declared = metadata_layout(src)
-        if declared == candidate:
+        meta = probe_metadata(src)
+        if meta["spherical"]:
+            result["method"] = "spherical"
+            return result
+        if meta["inverted"]:
+            result["method"] = "inverted"
+            return result
+        if meta["layout"] == candidate:
             result.update(detected=True, method="metadata")
             return result
+    elif image_is_spherical(src):
+        result["method"] = "spherical"
+        return result
 
     scores: list[float] = []
     try:
@@ -249,7 +310,8 @@ def detect_stereo(
         else:
             with Image.open(src) as img:
                 img.draft("RGB", (PATCH * 4, PATCH * 4))
-                frames = [img.convert("RGB")]
+                # Split the still as shown, like the left-eye crop does.
+                frames = [ImageOps.exif_transpose(img).convert("RGB")]
         for frame in frames:
             score = image_score(frame, candidate)
             if score is not None:

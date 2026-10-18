@@ -82,6 +82,12 @@ function makeMockGl(counters = {}) {
           counters.textureSources.push(args.at(-1));
         };
       }
+      if (prop === 'texSubImage2D') {
+        return (...args) => {
+          counters.subImageSources ||= [];
+          counters.subImageSources.push(args.at(-1));
+        };
+      }
       if (prop === 'deleteBuffer' || prop === 'deleteTexture' || prop === 'deleteProgram') {
         return () => { counters.deleted = (counters.deleted || 0) + 1; };
       }
@@ -5485,7 +5491,8 @@ test('RESET ROTATION on the EARTH ACTIVITY globe stands it upright, keeping the 
 // ─── Stereoscopic 3D sources (docs/stereo-3d-reels.md) ──────────────────
 
 function stereoHarness(initialSource) {
-  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
   let source = initialSource;
   const renderer = loadRenderer({ gl });
   renderer.init(initialSource.element, {
@@ -5497,7 +5504,7 @@ function stereoHarness(initialSource) {
   let t = 16;
   const frame = () => { renderer.__runScheduledFrame(t); t += 16; };
   const setSource = (next) => { source = next; renderer.onVideoChange(); };
-  return { renderer, api: renderer.__test, frame, setSource };
+  return { renderer, api: renderer.__test, frame, setSource, counters };
 }
 
 function stereoVideo(version, stereo, w = 3840, h = 1920) {
@@ -5541,6 +5548,38 @@ test('an SBS source fills a 4096x2048 proxy; each XR eye samples its own half', 
   assert.deepEqual([...state.left.offset], [0, 0]);
   assert.deepEqual([...state.right.offset], [0.5, 0]);
   assert.equal(api.getSceneInfo().screen.eyeMeshes, true);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('each eye texture re-uploads on every stereo video frame (no first-frame freeze)', () => {
+  const source = stereoVideo('sbs-play', 'sbs');
+  const { renderer, api, frame, counters } = stereoHarness(source);
+  // Counts GPU uploads of the 4096x2048 stereo canvas, like the Quest probe.
+  // L and R share one Source, so three uploads it once per frame for both.
+  const stereoUploads = () => [...counters.textureSources, ...(counters.subImageSources || [])]
+    .filter((src) => src && src.width === 4096 && src.height === 2048).length;
+  api.setXrSessionForTest({});
+  frame();
+  api.initEyeTexturesForTest();
+  let prev = api.getStereoState();
+  let prevUploads = stereoUploads();
+  assert.ok(prevUploads >= 1, 'the stereo canvas uploads on the first frame');
+  assert.equal(prev.left.mapIsEye && prev.right.mapIsEye, true);
+  for (let i = 0; i < 3; i++) {
+    // A seek-sized clock jump bypasses the ~30/s upload throttle.
+    source.currentTime += 1;
+    source.element.currentTime += 1;
+    frame();
+    api.initEyeTexturesForTest();
+    const next = api.getStereoState();
+    assert.ok(next.left.version > prev.left.version, `left eye version advances (frame ${i})`);
+    assert.ok(next.right.version > prev.right.version, `right eye version advances (frame ${i})`);
+    const uploads = stereoUploads();
+    assert.ok(uploads > prevUploads, `the eyes re-upload the stereo canvas (frame ${i}): ${prevUploads} -> ${uploads}`);
+    prev = next;
+    prevUploads = uploads;
+  }
   api.setXrSessionForTest(null);
   renderer.stopPreview();
 });
