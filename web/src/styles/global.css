@@ -4540,7 +4540,7 @@ body.sx-vr-active .sx-reels-mount,
 
   .sx-skel-player-side {
     display: block;
-    border-radius: 8px;
+    border-radius: 0;
   }
 }
 
