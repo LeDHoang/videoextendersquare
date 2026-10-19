@@ -942,7 +942,7 @@ button {
 
 .sx-sidebar-hero-logo {
   height: 2.9rem;
-  width: auto;
+  width: 2.9rem;
   object-fit: contain;
   flex-shrink: 0;
   transition: transform 180ms ease, filter 180ms ease;
@@ -1653,6 +1653,12 @@ button:hover .sx-sidebar-hero-logo,
 .sx-footer-logo {
   width: 22px;
   height: 22px;
+}
+
+.sx-au-logo {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
 }
 
 .sx-footer-brand {
@@ -3846,6 +3852,29 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-top-brand:hover .sx-top-logo {
   transform: scale(1.1);
+}
+
+/* Animated hourglass mark (AnimatedEchoLogo): idle eye and falling sand. */
+.sx-echo-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.sx-echo-pupil {
+  transition: transform 140ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.sx-echo-stream {
+  animation: sx-echo-stream 300ms linear infinite;
+}
+
+@keyframes sx-echo-blink {
+  0%, 100% { transform: scaleY(1); }
+  45%, 60% { transform: scaleY(0.1); }
+}
+
+@keyframes sx-echo-stream {
+  to { stroke-dashoffset: -0.8; }
 }
 
 .sx-top-nav {
