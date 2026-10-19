@@ -63,6 +63,7 @@ def video_parameters(raw: Mapping[str, Any]) -> dict[str, Any]:
         "ltx_negative_prompt": _text(raw.get("ltx_negative_prompt")),
         "ltx_loras": list(loras) if isinstance(loras, list) else [],
         "wan_resolution": _text(raw.get("wan_resolution"), "720p"),
+        "luma_resolution": _text(raw.get("luma_resolution"), "720p"),
         "seedvr_factor": _float(raw.get("seedvr_factor"), 2.0),
         "seedvr_target": _text(raw.get("seedvr_target"), "1080p"),
         "bytedance_target_res": _text(raw.get("bytedance_target_res"), "4k"),

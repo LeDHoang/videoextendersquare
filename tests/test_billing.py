@@ -70,7 +70,7 @@ def test_reserve_capture_release_and_idempotency(sessions):
             "upscale_only": False,
             "upscale_engine": "fal",
             "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p",
             "ltx_audio": True,
@@ -78,7 +78,7 @@ def test_reserve_capture_release_and_idempotency(sessions):
             "ltx_prompt_expansion": False,
             "ltx_negative_prompt": "",
             "ltx_loras": [],
-            "wan_resolution": "720p",
+            "wan_resolution": "720p", "luma_resolution": "540p",
             "seedvr_factor": 2.0,
             "seedvr_target": "1080p",
             "bytedance_target_res": "4k",
@@ -140,11 +140,11 @@ def test_concurrent_failure_paths_release_exactly_once(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -184,11 +184,11 @@ def test_repeated_success_finalizes_capture_exactly_once(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -231,11 +231,11 @@ def test_success_after_stage_release_defers_to_reconciliation(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -263,11 +263,11 @@ def test_mark_stage_submitted_keeps_first_request_id(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -296,11 +296,11 @@ def test_insufficient_balance_restores_quote_for_retry(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -618,11 +618,11 @@ def test_timeout_keeps_submitted_stage_reserved_until_reconciled(sessions):
         db.commit()
         params = {
             "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -665,11 +665,11 @@ def test_reaper_releases_stale_never_submitted_reservations(sessions, monkeypatc
         db.commit()
         params = {
             "prompt": "", "upscale_only": True, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "1080p", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,
@@ -709,11 +709,11 @@ def test_reaper_only_releases_submitted_stages_without_request_id(sessions, monk
         db.commit()
         params = {
             "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-            "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+            "outpaint_model": "luma/agent/ray/v3.2/reframe",
             "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
             "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
             "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-            "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+            "wan_resolution": "720p", "luma_resolution": "540p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
             "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
             "bytedance_tier": "fast", "bytedance_preset": "general",
             "bytedance_fidelity": "medium", "trim_enabled": False,

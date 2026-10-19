@@ -21,7 +21,7 @@ const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 const CREDIT_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
-  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'luma/agent/ray/v3.2/reframe',
   'fal-ai/wan-vace-14b/outpainting',
 ]);
 const CREDIT_UPSCALE_MODELS = new Set([
@@ -130,6 +130,9 @@ export default function VideoPage() {
     // never understate the charge (backend bills 480p/580p/720p at
     // $0.04/$0.06/$0.08 per second).
     wanResolution: '720p',
+    // No Ray 3.2 resolution selector either: 720p ($0.12/s) keeps the
+    // output size of the retired Ray-2 Flash entry.
+    lumaResolution: '720p',
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,

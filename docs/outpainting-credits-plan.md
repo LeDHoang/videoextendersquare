@@ -21,7 +21,7 @@ Add an account-based ECHO Credits economy for every supported Fal-powered outpai
 Fal public model documentation verified on 2026-09-13:
 
 - `fal-ai/ltx-2.3-quality/outpaint` and `/lora`: $0.0024075 per generated megapixel-frame, rounded up.
-- `fal-ai/luma-dream-machine/ray-2-flash/reframe`: $0.06 per video second.
+- `fal-ai/luma-dream-machine/ray-2-flash/reframe`: $0.06 per video second. Deprecated by fal on 2026-10-25; replaced on 2026-10-20 by `luma/agent/ray/v3.2/reframe`: $0.06/$0.12/$0.36 per started source second at 540p/720p/1080p, source 10 s or less.
 - `fal-ai/wan-vace-14b/outpainting`: $0.04/$0.06/$0.08 per video second at 480p/580p/720p, calculated at 16fps.
 - `fal-ai/image-apps-v2/outpaint`: $0.035 per output megapixel.
 - `fal-ai/bytedance-upscaler/upscale/video`: $0.0072/$0.0144/$0.0288 per second at 1080p/2K/4K and 30fps; 60fps doubles cost and Pro is 10x.
@@ -51,7 +51,7 @@ The mandatory Meta documentation query for external web payments could not run b
 - Replace image outpaint with `fal-ai/image-apps-v2/outpaint` and its `expand_*` fields.
 - Replace Wan with `fal-ai/wan-vace-14b/outpainting`, pin resolution, 16fps, and explicit frame count.
 - Remove dead Kling and ESRGAN video entries.
-- Keep LTX, LTX LoRA, Luma Ray-2 Flash, Wan VACE, Bytedance, SeedVR, and Clarity credit-enabled.
+- Keep LTX, LTX LoRA, Luma Ray 3.2 Reframe (was Ray-2 Flash), Wan VACE, Bytedance, SeedVR, and Clarity credit-enabled.
 - Keep CCSR, AuraSR, image ESRGAN, and arbitrary custom models BYOK-only.
 - Store prices as `Decimal`/integer micro-USD with a pricing version, verification date, source URL, rounding rule, and constraints.
 - Produce authoritative ten-minute quotes from staged-file metadata. The quote locks model, parameters, derived dimensions/frames, provider-cost estimate, credit charge, and a canonical parameter hash.

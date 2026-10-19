@@ -46,11 +46,13 @@ def test_ltx_price_per_megapixel_matches_docs(doc, model_id):
     assert _prices(section)[0] == Decimal(_entry(models.VIDEO_OUTPAINT, model_id)["unit_price_usd"])
 
 
-def test_luma_reframe_price_per_second_matches_docs():
-    section = _pricing_section("luma-dream-machine/ray-2-flash/reframe")
-    assert "per second" in section
-    entry = _entry(models.VIDEO_OUTPAINT, "fal-ai/luma-dream-machine/ray-2-flash/reframe")
-    assert _prices(section)[0] == Decimal(entry["unit_price_usd"])
+def test_luma_reframe_resolution_rates_match_docs():
+    section = _pricing_section("luma/agent/ray/v3.2/reframe.md")
+    assert "per started source second" in section
+    entry = _entry(models.VIDEO_OUTPAINT, "luma/agent/ray/v3.2/reframe")
+    rates = entry["resolution_rates"]
+    assert _prices(section) == [Decimal(rates["540p"]), Decimal(rates["720p"]), Decimal(rates["1080p"])]
+    assert Decimal(entry["unit_price_usd"]) == Decimal(rates[entry["default_resolution"]])
 
 
 def test_seedvr_price_per_megapixel_matches_docs():

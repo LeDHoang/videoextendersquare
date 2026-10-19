@@ -15,6 +15,7 @@ from pipeline.utils import (
     log_pipeline_execution,
 )
 from core import models as _models
+from core.pricing import PricingError, validate_outpaint_source
 from server.billing.parameters import video_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
@@ -193,6 +194,7 @@ def start_video_process(
     ltx_negative_prompt: str = Form("yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"),
     ltx_loras: str = Form(""),
     wan_resolution: str = Form("720p"),
+    luma_resolution: str = Form("720p"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
     bytedance_target_res: str = Form("4k"),
@@ -218,6 +220,8 @@ def start_video_process(
     )
     if wan_resolution not in {"480p", "580p", "720p"}:
         raise HTTPException(status_code=400, detail="Invalid wan_resolution")
+    if luma_resolution not in {"540p", "720p", "1080p"}:
+        raise HTTPException(status_code=400, detail="Invalid luma_resolution")
     parsed_loras = _parse_ltx_loras(ltx_loras)
     try:
         custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
@@ -249,6 +253,7 @@ def start_video_process(
         "ltx_negative_prompt": ltx_negative_prompt,
         "ltx_loras": parsed_loras,
         "wan_resolution": wan_resolution,
+        "luma_resolution": luma_resolution,
         "seedvr_factor": seedvr_factor,
         "seedvr_target": seedvr_target,
         "bytedance_target_res": bytedance_target_res,
@@ -277,6 +282,13 @@ def start_video_process(
         owner_id = context.user.id
         if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
             raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
+        if not params["upscale_only"] and width != height:
+            # Ray 3.2 reframe rejects sources over 10 s; refuse before the
+            # reservation or any fal call (BYOK jobs never pass a quote).
+            try:
+                validate_outpaint_source(_duration, params)
+            except PricingError as ex:
+                raise HTTPException(status_code=400, detail={"code": "SOURCE_TOO_LONG", "message": str(ex)}) from ex
         try:
             require_billing_secrets()
             fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
@@ -332,6 +344,7 @@ def start_video_process(
         "ltx_negative_prompt": params["ltx_negative_prompt"],
         "ltx_loras": params["ltx_loras"],
         "wan_resolution": params["wan_resolution"],
+        "luma_resolution": params["luma_resolution"],
         "seedvr_factor": params["seedvr_factor"],
         "seedvr_target": params["seedvr_target"],
         "bytedance_target_res": params["bytedance_target_res"],

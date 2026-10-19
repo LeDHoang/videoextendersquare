@@ -313,7 +313,7 @@ def test_civitai_host_edge_cases():
 
 _VIDEO_PARAMS = {
     "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-    "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+    "outpaint_model": "luma/agent/ray/v3.2/reframe",
     "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
     "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
     "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],

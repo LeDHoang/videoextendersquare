@@ -56,7 +56,7 @@ const MODELS = {
   video_outpaint_catalog: [
     { label: 'LTX 2.3 Quality', model: 'fal-ai/ltx-2.3-quality/outpaint', is_custom: false, credit_enabled: true },
     { label: 'LTX 2.3 Quality + LoRA', model: 'fal-ai/ltx-2.3-quality/outpaint/lora', is_custom: false, credit_enabled: true },
-    { label: 'Luma Ray-2 Reframe', model: 'fal-ai/luma-dream-machine/ray-2-flash/reframe', is_custom: false, credit_enabled: true },
+    { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true },
     { label: 'Wan VACE 14B', model: 'fal-ai/wan-vace-14b/outpainting', is_custom: false, credit_enabled: true },
   ],
   video_upscale_catalog: [

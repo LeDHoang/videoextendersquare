@@ -27,7 +27,7 @@ export const MAX_LORAS = 3;
 const CREDIT_VIDEO_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
-  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'luma/agent/ray/v3.2/reframe',
   'fal-ai/wan-vace-14b/outpainting',
 ]);
 const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
@@ -193,6 +193,9 @@ export function useVideoExtendConfig(models) {
     // No WAN resolution selector in the UI yet: pin the top tier so quotes
     // never understate the charge (same as VideoPage).
     wanResolution: '720p',
+    // No Ray 3.2 resolution selector either: 720p ($0.12/s) keeps the
+    // output size of the retired Ray-2 Flash entry.
+    lumaResolution: '720p',
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
