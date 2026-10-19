@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
 import { Field } from '../ui/controls.jsx';
+import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import {
   IndustrialImageIcon,
   IndustrialVideoIcon,
@@ -150,7 +151,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
         ) : null}
         <Link to="/reels" className="sx-sidebar-brand-block" onClick={() => onClose?.()} title="ECHO Home" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <div className="sx-sidebar-hero-row">
-            <img src="/logo.svg" alt="ECHO Logo" className="sx-sidebar-hero-logo" />
+            <AnimatedEchoLogo className="sx-sidebar-hero-logo" title="ECHO Logo" />
             <h2 className="sx-sidebar-hero-title">ECHO</h2>
           </div>
           <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div>

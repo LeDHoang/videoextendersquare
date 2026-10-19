@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
+import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import {
   IndustrialUploadIcon,
   IndustrialMessageIcon,
@@ -352,7 +353,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
               <span style={{ fontSize: '1.14rem', lineHeight: 1 }}>☰</span>
             </button>
             <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
-              <img src="/logo.svg" alt="ECHO Logo" className="sx-top-logo" />
+              <AnimatedEchoLogo className="sx-top-logo" title="ECHO Logo" />
               <span>ECHO</span>
             </NavLink>
             <nav className="sx-top-nav" aria-label="Global Routes">
