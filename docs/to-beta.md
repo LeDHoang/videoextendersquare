@@ -1,44 +1,160 @@
 # Beta Launch Checklist
 
-Last updated: 2026-10-20 (stale-entry pass; latest engineering entries 2026-10-16; audit round 2 + planned-feature scope inventory 2026-09-19)
+Last updated: 2026-10-20 (infrastructure verdicts revised: R2 media at launch, PostgreSQL day one, SEA/Asia + US region design, Ray-2 deprecation; stale-entry pass; latest engineering entries 2026-10-16; audit round 2 + planned-feature scope inventory 2026-09-19)
 
 Status: **Blocked for public beta.** Complete every item in "Public beta release blockers" before opening registration or exposing the deployment publicly. An invite-only beta must still protect paid processing endpoints and private user media.
 
-## Infrastructure design verdicts (decided 2026-09-19)
+## Infrastructure design verdicts (decided 2026-09-19, revised 2026-10-20)
 
-These are the settled architecture decisions for beta and the reasoning behind each. Checklist items below that reference topology, database, media storage, payments, or GPU inference should be implemented to match these verdicts. Each was reached by adversarial review (separate for/against agents arguing from the actual codebase) and both sides converged on the same phasing.
+These are the settled architecture decisions for beta and the reasoning behind each. Checklist items below that reference topology, region, database, media storage, payments, or GPU inference should be implemented to match these verdicts. Each was reached by adversarial review (separate for/against agents arguing from the actual codebase).
 
-**One-line version:** *VPS + PostgreSQL + Stripe + fal.ai today; Cloudflare R2 when egress measurably hurts; one L40S when fal spend crosses ~$500/mo; Fly.io multi-machine when one box isn't enough.*
+**Revision 2026-10-20:** a second for/against review, with 2026 pricing and terms checked on the web, changed four verdicts:
+- Media moves to Cloudflare R2 at launch. Cloudflare's CDN terms, updated 2026-09-28, rule out proxying video hosted on our own server.
+- The host budget is corrected for Hetzner's 2026 repricing.
+- PostgreSQL is used from day one.
+- The origin region now targets SEA/Asia + US users.
+
+The review also found that fal is retiring the Ray-2 reframe endpoint on 2026-10-25.
+
+**One-line version:** *One VPS (Singapore by default) + co-located PostgreSQL + Cloudflare R2 media + Stripe (gated) + fal.ai at launch. Add a second region when the minority region measurably hurts. Add one L40S when fal spend crosses ~$500/mo. Move to Fly.io multi-machine when one box isn't enough.*
+
+**Beta fixed cost (estimate):**
+- Hetzner SIN CPX32: €48.99/mo.
+- R2: ~$0–2/mo; the free tier covers early beta.
+- Database dumps in R2: cents per month.
+- Total: ≈ €50–55/mo plus metered fal usage.
 
 ### Hosting — single VPS first, managed platform later
-- **Launch (invite beta, ~$10/mo):** the existing multi-stage `Dockerfile` on one VPS (e.g. Hetzner CX32: 4 vCPU / 8 GB / 80 GB / 20 TB egress included at ~€7.51/mo). One machine is *correct* here: jobs and staged-upload registries are process-local, so one instance satisfies that constraint instead of forcing a premature shared queue.
-- **Why not Fly.io/Render/Neon now:** scale-to-zero contradicts this codebase — SSE job streams either hold the machine awake (paying always-on anyway) or get severed mid-job, and Stripe webhooks hit a cold-booting machine. A VPS is 6–8× cheaper at $0 revenue and every failure mode is one we understand.
-- **Growth trigger → Fly.io multi-machine:** only when one box genuinely can't keep up; the app is already stateless-shaped (Docker, env config), so it's a lift, not a rewrite.
-- **Rejected:** Kubernetes/microservices (resume-driven at this scale), AWS/GCP (idle cost ~$150/mo before a single user), scale-to-zero platforms (incompatible with SSE + webhooks).
+- **Launch:** run the existing multi-stage `Dockerfile` via `compose.yaml` (app + `postgres:16`) on one VPS. One machine is *correct* here: jobs and staged-upload registries are process-local (`server/jobs.py` `_jobs`, the `STAGED_UPLOADS` dicts in `server/routers/image.py`/`video.py`, `/tmp` staging). One instance satisfies that constraint without a premature shared queue.
+- **Box and price (verified 2026-10-20 on Hetzner's price-adjustment page):** Hetzner repriced twice in 2026. The 1 Apr change applied to all customers. The 15 Jun change applies to new orders and rescales.
+  - The old "CX32 ~€7.51" line is stale.
+  - The cost-optimized CX line (CX33 now €8.49 in DE/FI) shows "Currently not available" on hetzner.com/cloud, and is EU-only anyway.
+  - **Pick: CPX32 in Singapore (€48.99/mo).** The dedicated-vCPU alternative is CCX13 (SIN €53.99, US €43.49).
+  - Confirm specs and availability in the Hetzner Console before ordering.
+- **Traffic:** included traffic outside the EU is small. A third party reports 0.5–1 TB; this is not confirmed on official pages. That is acceptable only because media egress goes to R2, not the VPS (see Media storage).
+- **CPU contention (must fix before beta, <1 day):** this box shares web, SSE, Postgres and ffmpeg.
+  - Linux has no hardware HEVC encoder, so encodes fall back to `libx265 -preset medium` (`core/tooling.py:36`).
+  - Default pools are 4 image + 2 video workers on 4 vCPU (`core/phases.py:71-74`).
+  - No `-threads` or `nice` cap exists in `core/` or `pipeline/`.
+  - Two 4K encodes will pin every core.
+  - **Fix:** set the video pool to 1. Run ffmpeg with `-threads 2` under `nice`. Put a `cpus` limit on the Postgres container. Require auth on the free 4K path (Processing API item below).
+- **Why not Fly.io/Render/Railway/Neon now (reasoning corrected 2026-10-20):** scale-to-zero is not the blocker. Neon and Fly (`min_machines_running`) can both keep an instance always on. The real reasons are:
+  1. The single-process constraint means paying for one always-on instance anyway.
+  2. PaaS per-GB egress pricing is the wrong cost shape for a video app.
+  3. A VPS is several times cheaper at $0 revenue, and every failure mode is one we understand.
+- **Growth trigger → Fly.io multi-machine:** only when one box genuinely can't keep up and a shared job queue exists. The app is already stateless-shaped (Docker, env config), so it's a lift, not a rewrite.
+- **Rejected:** Kubernetes/microservices (resume-driven at this scale), AWS/GCP (idle cost ~$150/mo before a single user), scale-to-zero platforms.
 
-### Database — PostgreSQL, before the first Stripe charge
-- **Verdict:** migrate SQLite → PostgreSQL *before* accepting payment, not after. Non-negotiable because the 962-line credits ledger (`server/billing/service.py`) does reservation/capture/reversal with real money; one concurrent write during a purchase webhook on single-disk SQLite risks financial-record corruption with no point-in-time recovery.
-- **Why it's cheap:** the codebase is pre-migrated — `DATABASE_URL` is env-driven (`server/social/database.py`), `psycopg` is already in requirements, and the Alembic tree is already dual-dialect (`sqlite_where`/`postgresql_where` partial indexes). It's a connection-string change plus `alembic upgrade head`.
-- **Where it runs:** co-located on the same VPS at launch (free, no network latency, no Neon cold-start in the billing path); move to a managed Postgres only when backup/HA burden actually exceeds the cost.
+### Region — one origin, global edge, SEA/Asia + US users
+- **Shape:** one write origin (one app process, one Postgres primary), because jobs are process-local. Global reach comes from Cloudflare's edge, not from multiple origins:
+  - **Media** (the heavy bytes): served from R2 through the Cloudflare cache at the nearest PoP in SEA, Asia and the US, wherever the origin is.
+  - **SPA assets** (hashed Vite bundles): cached at the edge.
+  - **Origin traffic:** only API calls and SSE streams reach it.
+- **Origin: Hetzner Singapore (`sin`, network zone `ap-southeast`) by default.**
+  - SEA/Asia users get low API latency.
+  - US users pay roughly 170 ms (West) to 230 ms (East) per API round trip. These are estimates; measure them on the beta.
+  - Pick Hillsboro (`hil`, US West) instead if the invite list is majority US. US West is the Pacific compromise: about 160–190 ms to SEA, low latency across the US.
+  - Decide from the actual invite list before provisioning. Moving later means backing up the old box and restoring onto a new one, which the restore drill rehearses.
+- **R2 bucket location hint matches the origin:** `apac` for SIN, `wnam` for HIL. Cache misses and server-side media writes then stay close.
+- **Latency-tolerant client:** the feed already preloads the next page. Avoid adding blocking API calls to the playback path. SSE keep-alive (15 s) is unaffected by RTT.
+- **Region-independent pieces:** fal.ai jobs are asynchronous, and Stripe Checkout is global.
+- **Growth trigger → second region:** when the minority region exceeds ~30% of DAU **and** its p95 API latency exceeds ~400 ms. The path is a Postgres read replica plus read-only API instances in the second region, or Fly multi-region. Both need the shared job queue from the multi-machine trigger first.
 
-### Media storage — local disk now, Cloudflare R2 when egress hurts
-- **Launch:** media stays on local disk (`output/`, served via `/media/*` with Range requests). Cheapest possible and playback paths are already validated.
-- **Growth trigger → R2:** when egress billing or disk I/O measurably hurts, move media to **Cloudflare R2** (S3-compatible, **$0 egress**) behind Cloudflare CDN. The math is decisive for a video product: ~3.2 TB/mo at 10k MAU costs ~$270/mo on S3+CloudFront vs ~$45/mo storage-only on R2 — egress is the one cost that scales superlinearly with success.
-- **Why not R2 before launch:** the rewrite (`server/media.py`, reels player, avatars, presigned URLs, re-validating Range/seek behavior — which our own VR playback docs flag as fragile) is launch-blocking surgery at zero revenue. Ship first; the interim step is Cloudflare's free CDN in front as a pull cache.
+### Database — PostgreSQL from day one
+- **Verdict (revised 2026-10-20):** launch on PostgreSQL, not SQLite. The old rule was "migrate before the first Stripe charge". Stripe is gated off for beta, so that wording allowed a SQLite launch followed by a live-data migration through a script that was never written (`scripts/sqlite_to_pg.py`). Starting on Postgres removes that migration entirely.
+  - The 1025-line credits ledger (`server/billing/service.py`) still needs Postgres before real money moves.
+  - `DEFAULT_DATABASE_URL` is still SQLite (`server/social/database.py:12`), so production must set `DATABASE_URL`.
+- **Why it's cheap:** the codebase is pre-migrated.
+  - `DATABASE_URL` is env-driven and honoured by both the app and `migrations/env.py`.
+  - `psycopg` is already in requirements.
+  - The Alembic tree is dual-dialect (`sqlite_where`/`postgresql_where` partial indexes).
+  - It's a connection string plus `alembic upgrade head`, run by the container entrypoint.
+- **Where it runs:** `postgres:16` co-located in `compose.yaml` on the same VPS (free, no network hop).
+- **Backups:** a nightly `pg_dump` (or WAL-G) to a private R2 bucket.
+- **Key escrow:** escrow `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY` and `SX_FAL_KEY_ENCRYPTION_KEY` off the box. A restore is useless without them.
+- **Restore drill:** run one before launch.
+- **Managed alternative (if restores won't be rehearsed):** Neon Launch with scale-to-zero disabled, in its Singapore region next to the origin.
+  - Price: $0.106/CU-hour + $0.35/GB-month, with a 7-day history window. 0.25 CU always-on ≈ $19/mo.
+  - Switch when backup/HA burden exceeds that cost.
+
+### Media storage — Cloudflare R2 at launch
+- **Verdict (revised 2026-10-20):** serve published media from an R2 public bucket on a custom domain (`media.<domain>`) behind the Cloudflare cache, starting at launch. The old verdict was "local disk now, R2 when egress hurts".
+- **Why the change:**
+  - Cloudflare's CDN terms, updated 2026-09-28, say non-Enterprise plans "must use" a Cloudflare paid service (Developer Platform, Images, Stream) to serve video and other large files via the CDN.
+  - Cloudflare's video-delivery policy says it may redirect such traffic. The fixes it lists are a DNS-only subdomain or a paid service.
+  - Video hosted on R2 is allowed on Free/Pro/Business (Cloudflare "updated ToS" blog).
+  - So "local disk + free CDN pull cache" was never an allowed option. The checklist's own `/media/*` cache bypass meant it would not have cached anyway.
+- **It overlaps open blockers:**
+  - Separating private from public media (Job, upload, and media ownership section) needs the same media-path work.
+  - Public routes must return only database-backed published posts, and legacy `rglob` discovery must be disabled.
+  - Published posts are written through to R2.
+  - Private/unpublished job artifacts stay on local disk behind an owner-checked route.
+  - The `/media` mount of the whole `output/` tree (`server/app.py`) is removed.
+  - Avatars (`data/avatars`, mounted at `/avatars`) move to R2 or are included in backups.
+- **Cost (verified 2026-10-20):** $0.015/GB-month, 10 GB-month free, **$0 egress**. Class A operations cost $4.50/M and Class B $0.36/M.
+- **Cache:** a custom domain caches only default file types. Add a Cache Everything rule for the media host. `r2.dev` is rate-limited and not for production.
+- **Uploads:** Cloudflare's request-body limit is 100 MB on Free/Pro (200 MB Business), and larger requests get a 413.
+  - For beta, lower `MAX_VIDEO_UPLOAD_BYTES` (`server/media.py:19`, now 500 MB) below 100 MB.
+  - Post-beta target: presigned multipart PUT straight to a private R2 bucket. That also takes upload bytes off the origin.
+- **Must re-verify before beta:** Range/seek playback from R2 on Quest, desktop and mobile. Our VR playback docs flag seek behaviour as fragile.
+- **Effort:** ~3–5 days, much of it shared with the ownership blockers.
 
 ### Payments — keep Stripe, gated until retention is proven
-- **Verdict:** keep **Stripe** (already integrated: 358-line idempotent webhook layer with `StripeEvent` dedup, signature verification, server-side price re-validation + the PSP-agnostic 962-line ledger).
-- **Why not a merchant-of-record (Paddle/Lemon Squeezy) yet:** their 5% + $0.50 is confiscatory on the $5 credit pack (~15% vs Stripe's ~8.9%; ~2–3.3× penalty across the $5/$10/$25 tiers), and Stripe→MoR is a well-trodden migration while the reverse is painful. Tax exposure is small while US-centric with 3 SKUs (Stripe Tax calculates; register only on nexus).
-- **Two adopted caveats:** (1) fix the **$5 pack economics** — at 8.9% effective fee it eats ~33% of gross margin against the `credits_for_cost` markup, so raise the minimum or make entry packs web-only/larger; (2) **gate payments behind the existing launch flag** (`SX_STRIPE_ENABLED=0`, enforced in `server/billing/stripe_service.py`) until retention is proven — free tiers cost only fal fees, not complexity.
+- **Verdict:** keep **Stripe**. It is already integrated:
+  - a 358-line idempotent webhook layer with `StripeEvent` dedup, signature verification, and server-side price re-validation;
+  - the PSP-agnostic credits ledger.
+- **Why not a merchant-of-record (Paddle/Lemon Squeezy) yet:**
+  - Their 5% + $0.50 is confiscatory on the $5 credit pack (~15% vs Stripe's ~8.9%; a ~2–3.3× penalty across the $5/$10/$25 tiers).
+  - Moving from Stripe to an MoR is a well-trodden migration; the reverse is painful.
+  - Tax exposure is small while US-centric with 3 SKUs (Stripe Tax calculates; register only on nexus). SEA/Asia buyers do not change that until volume creates registration obligations there; review before enabling payments.
+- **Two adopted caveats:**
+  1. Fix the **$5 pack economics**. At an 8.9% effective fee it eats ~33% of gross margin against the `credits_for_cost` markup. Raise the minimum or make entry packs web-only/larger.
+  2. **Gate payments behind the existing launch flag** (`SX_STRIPE_ENABLED=0`, enforced in `server/billing/stripe_service.py`) until retention is proven. Free tiers cost only fal fees, not complexity.
 
 ### AI inference — fal.ai now, hybrid self-host at a measured trigger
-- **Verdict:** stay on **fal.ai** metered inference. Per-second COGS ($0.04–0.08/s outpaints, $0.03/MP upscales) scales to $0 at $0 revenue — and the credits system requires per-job metered costs to keep margin auditable per job. An always-on GPU is a $430–800/mo fixed liability against revenue that doesn't exist yet.
-- **Why not self-host everything:** 8+ models in the catalog = 8+ weight pipelines, CUDA matrices, and license reviews ≈ a $150k/yr MLOps hire to save $1–2k/mo. Frontier outpaints (Luma Ray-2 reframe, LTX-2) have no open-weight equivalent at all.
-- **Hybrid trigger (adopted):** when fal spend crosses **~$500/mo** or **~20–50 upscale jobs/day**, self-host the open-weight, high-volume upscalers (Real-ESRGAN class) on one L40S (~$15–26/day); keep Ray-2/LTX-2 hero outpaints on fal permanently, using fal as burst/overflow. The repo already has the escape hatches: free FFmpeg `fast` engine is the default, `pipeline/spatial_worker.py` already runs Video-Depth-Anything locally (cuda/mps/cpu), and the VapourSynth Studio engine is one dependency fix from shipping.
-- **Known margin pressure (watch it):** a 60s hero outpaint ≈ $3.60 fal COGS vs ~$4.56 net on a $5 pack after Stripe — ~$0.96 margin, one retry from underwater. fal's documented price instability (`core/models.py`: "Estimate only — pull live pricing") means credit pricing must track fal pricing.
+- **Verdict:** stay on **fal.ai** metered inference.
+  - Per-second COGS scales to $0 at $0 revenue.
+  - The credits system needs per-job metered costs to keep margin auditable per job.
+  - An always-on GPU is a $430–800/mo fixed liability against revenue that doesn't exist yet.
+- **Deprecation (verified 2026-10-20, deadline 2026-10-25):** fal marks both `fal-ai/luma-dream-machine/ray-2-flash/reframe` and `ray-2/reframe` as "deprecated on October 25, 2026", with migration to Ray v3.2. The flash endpoint is the catalog entry at `core/models.py:61`, also referenced in `web/src/components/upload/useExtendConfig.js` and `web/src/pages/VideoPage.jsx`.
+  - Replacement: `luma/agent/ray/v3.2/reframe`.
+  - Price: $0.06/s at 540p, $0.12/s at 720p, $0.36/s at 1080p, billed per started source second.
+  - Its API docs require a **source of 10 s or less** and produce 5 s/10 s output.
+  - Migrate the catalog, request builder and quote path, and enforce the source-length limit server-side.
+- **Why not self-host everything:** 8+ models in the catalog means 8+ weight pipelines, CUDA matrices and license reviews. That is ≈ a $150k/yr MLOps hire to save $1–2k/mo. Frontier outpaints (Luma Ray 3.2 reframe, LTX-2) have no open-weight equivalent at all.
+- **Hybrid trigger (adopted):** self-host when fal spend crosses **~$500/mo** or **~20–50 upscale jobs/day**.
+  - Move the open-weight, high-volume upscalers (Real-ESRGAN class) onto one L40S (~$15–26/day; re-quote, see repricing note below).
+  - Keep the Ray/LTX-2 hero outpaints on fal permanently, with fal as burst/overflow.
+  - The repo already has the escape hatches:
+    - the free FFmpeg `fast` engine is the default;
+    - `pipeline/spatial_worker.py` already runs Video-Depth-Anything locally (cuda/mps/cpu);
+    - the VapourSynth Studio engine is one dependency fix from shipping.
+- **fal repricing (2026-10-04):** hourly GPU rental prices rose. That affects only the L40S/self-host comparison. No change to per-second model API prices was reported. The source is a single third-party capture.
+- **Known margin pressure (recompute):** the earlier example, "60s hero outpaint ≈ $3.60 fal COGS vs ~$4.56 net on a $5 pack", is **obsolete**. Ray-2 is retired, and Ray 3.2 reframe caps the source at 10 s. Recompute per-clip margin for every outpaint model in the catalog against the $5/$10/$25 packs before enabling credits. fal's documented price instability (`core/models.py`: "Estimate only — pull live pricing") means credit pricing must track fal pricing.
 
 ### What these verdicts do NOT remove from this checklist
-The blockers below are unchanged and still gate public beta. The verdicts pick *where* things run; they do not implement the security/ownership/anti-abuse controls (auth on processing endpoints, FAL spend limits, per-user quotas, ownership checks, retention/deletion, backups + restore drill, monitoring/alerting) that remain required regardless of host.
+The blockers below are unchanged and still gate public beta. The verdicts pick *where* things run. They do not implement the controls that remain required regardless of host:
+- auth on processing endpoints, FAL spend limits, per-user quotas and ownership checks;
+- ffmpeg CPU caps;
+- retention/deletion;
+- backups + restore drill;
+- monitoring/alerting.
+
+**Sources (checked 2026-10-20):**
+- [Cloudflare service-specific terms](https://www.cloudflare.com/service-specific-terms-application-services/)
+- [Cloudflare updated-ToS blog](https://blog.cloudflare.com/updated-tos/)
+- [Delivering videos with Cloudflare](https://developers.cloudflare.com/fundamentals/reference/policies-compliances/delivering-videos-with-cloudflare/)
+- [Cloudflare request limits](https://developers.cloudflare.com/workers/platform/limits/)
+- [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+- [R2 data location](https://developers.cloudflare.com/r2/reference/data-location/)
+- [R2 public buckets](https://developers.cloudflare.com/r2/buckets/public-buckets/)
+- [Hetzner price adjustment](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/)
+- [Hetzner Cloud](https://www.hetzner.com/cloud/)
+- [Neon pricing](https://neon.com/pricing)
+- [fal Ray-2 flash reframe](https://fal.ai/models/fal-ai/luma-dream-machine/ray-2-flash/reframe)
+- [fal Ray 3.2 reframe](https://fal.ai/models/luma/agent/ray/v3.2/reframe)
+- [fal Ray 3.2 reframe API](https://fal.ai/models/luma/agent/ray/v3.2/reframe/api)
+- [fal GPU repricing capture](https://www.usagepricing.com/blueprint/activity/fal-ai-2026-10-04-gpu-fleet-repricing)
 
 ## Beta feature scope — planned but missing features (2026-09-19)
 
@@ -88,8 +204,10 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [~] Protect CPU/GPU-intensive Reels and comparison endpoints — **sharpened by audit (2026-09-19):** `POST /api/reels/proxy` runs up to **50 synchronous ffmpeg transcodes per call with zero auth** (`reels.py:2073–2098`); `POST /api/reels/spatialize` creates owner-less jobs that can download model weights, with an unvalidated `strength` float (`reels.py:2113–2171`). Admin-gate or remove both from the public router; also covers Explore preview generation, comparison preparation, and forced health refreshes. **Partially done (2026-09-20):** proxy + spatialize (+ status) now require admin session with CSRF + per-admin rate limit; `strength` clamped 0–2 via pydantic; anon/non-admin denied with regression tests. **Remaining:** Explore preview generation, comparison preparation, forced health refreshes.
 - [ ] Add per-user and per-IP upload, processing, event, and storage quotas. **Uploads:** anonymous staging accepts 50 MB image / 500 MB video per file (caps exist and are enforced mid-stream — `media.py:15–19`) but with **no per-identity rate limit and no global staged-bytes ceiling**; a bot can fill the disk. Add staged-bytes ceiling + 429/507 on overflow.
 - [ ] Add bounded job queues, global and per-user concurrency limits, and overload responses — **confirmed still open:** `JobManager._jobs` has no global cap; `cleanup_old` only evicts *terminal* jobs, so queued-job count is unbounded (`server/jobs.py`).
+- [ ] **New (2026-10-20, deadline 2026-10-25):** Migrate the Luma reframe catalog entry off `fal-ai/luma-dream-machine/ray-2-flash/reframe` (`core/models.py:61`, `web/src/components/upload/useExtendConfig.js`, `web/src/pages/VideoPage.jsx`, `web/src/pages/UploadPage.test.jsx`) to `luma/agent/ray/v3.2/reframe` — fal deprecates Ray-2 reframe on 2026-10-25. Update pricing ($0.06/$0.12/$0.36 per source second at 540p/720p/1080p), the request builder and quote path, and enforce the ≤10 s source limit server-side (see verdicts → AI inference).
+- [ ] **New (2026-10-20):** Cap ffmpeg CPU on the shared VPS — video pool size 1 in production (`core/phases.py:71-74`), `-threads 2` and `nice` on libx265 encodes (`core/tooling.py:36`), and a `cpus` limit on the Postgres container, so two 4K encodes cannot starve web/SSE/DB (see verdicts → Hosting).
 - [ ] Add hard FAL spending limits and alerts — **confirmed still open; sharpened:** `normalize_model_id` (`core/models.py:235–254`) accepts *any* fal model ID (BYOK-only for credits, but no per-job cost cap/confirmation), and the `ltx_loras` validator only checks the string starts with `http(s)://` while `attach_civitai_token` (`pipeline/utils.py:12–34`) splices the server-held `CIVITAI_KEY` onto any URL **containing the substring** `civitai.com/api/download/models` — a crafted URL exfiltrates the token. Parse hostnames + allowlist; cap custom-model BYOK spend. **Partially done (2026-09-20):** `attach_civitai_token` now parses `urlsplit` against an exact hostname allowlist (`civitai.com`, `www.civitai.com`) + https-only (substring exfil closed, unit-tested); per-job spend cap `SX_FAL_MAX_QUOTE_USD` (default $10, `0` disables) enforced in `create_quote`. **Remaining:** global spend alerts.
-- [ ] Configure reverse-proxy request-body limits and timeouts that match the application upload limits. **Note (2026-09-19):** Cloudflare's free-plan body limit is 100 MB vs the app's 500 MB video cap — lower the app cap or document the plan requirement.
+- [ ] Configure reverse-proxy request-body limits and timeouts that match the application upload limits. **Note (2026-09-19):** Cloudflare's free-plan body limit is 100 MB vs the app's 500 MB video cap — lower the app cap or document the plan requirement. **Decided 2026-10-20 (verdicts → Media storage):** lower `MAX_VIDEO_UPLOAD_BYTES` below 100 MB for beta; presigned multipart direct-to-R2 uploads post-beta.
 - [~] Add regression tests proving logged-out users and ordinary users cannot access administrator or cost-bearing operations. **Partially covered (2026-09-20):** admin-gate tests for proxy/spatialize (anon/non-admin denied) + cross-user publish tests green (`test_security_money.py`). **Remaining:** systematic coverage of the remaining cost-bearing ops.
 - [x] **New (2026-09-19 audit):** Cap the Stripe webhook body (currently `await request.body()` with no size limit — `billing.py:178–189`) and IP-rate-limit the path with 429. **Done (2026-09-20):** `SX_STRIPE_WEBHOOK_MAX_BYTES` (default 1 MB, floor 1 KB → 413) + per-IP `SX_STRIPE_WEBHOOK_RPM` (default 120/min → 429); generic 400 preserved.
 - [x] **New:** `packs.py` has **no rate limits at all** — pack creation, items, save, like, and a DB write on every watch-tick progress update are unthrottled. Add per-user limits mirroring like/comment limits; debounce/coalesce progress writes. **Done (2026-09-20):** create 10/hr, writes 100/hr, save/like 120/hr, progress 12/min per viewer+pack (all rate-limited, regression-tested).
@@ -172,13 +290,13 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 
 ### Database, storage, and workers
 
-- [ ] Choose and document the supported production topology. **Decided 2026-09-19 — see "Infrastructure design verdicts" above:** single VPS + co-located PostgreSQL for beta; Fly.io and managed Postgres are later growth triggers, not launch choices. **Remaining work for that topology (2026-09-19 audit):** ship a `compose.yaml` (app + `postgres:16`, `pgdata` named volume, health-gated `depends_on`); document the full `docker run`/compose command including `-v data:/app/data` (the current RUNNING.md command mounts only `output/` — `docker rm` would destroy the DB and avatars); add a container entrypoint that runs `alembic upgrade head` before uvicorn (today first boot against an empty Postgres crash-loops: `init_database()` raises from lifespan).
-- [ ] **New:** Write and rehearse the SQLite→PostgreSQL **data** migration procedure — Alembic manages schema only; existing users/posts/credits rows need `scripts/sqlite_to_pg.py` or a pgloader recipe, run before the first Stripe charge.
-- [ ] SQLite is acceptable only pre-payments on the single VPS; migrate to PostgreSQL before the first Stripe charge (verdicts above). If SQLite is retained temporarily, run exactly one application instance/worker and pass realistic concurrent-write and lock-contention tests.
+- [ ] Choose and document the supported production topology. **Decided 2026-09-19 — see "Infrastructure design verdicts" above:** single VPS (Hetzner Singapore by default, Hillsboro if the invite list is majority US — see verdicts → Region) + co-located PostgreSQL + Cloudflare R2 for published media; Fly.io, a second region and managed Postgres are later growth triggers, not launch choices. **Remaining work for that topology (2026-09-19 audit):** ship a `compose.yaml` (app + `postgres:16`, `pgdata` named volume, health-gated `depends_on`); document the full `docker run`/compose command including `-v data:/app/data` (the current RUNNING.md command mounts only `output/` — `docker rm` would destroy the DB and avatars); add a container entrypoint that runs `alembic upgrade head` before uvicorn (today first boot against an empty Postgres crash-loops: `init_database()` raises from lifespan).
+- [x] ~~**New:** Write and rehearse the SQLite→PostgreSQL **data** migration procedure~~ — **Obsolete 2026-10-20:** production launches on PostgreSQL from day one (verdicts → Database), so there is no live SQLite data to migrate. Only needed if a SQLite deployment ever holds real users.
+- [ ] Run production on PostgreSQL from day one (verdicts above, revised 2026-10-20) — set `DATABASE_URL` explicitly, since `DEFAULT_DATABASE_URL` in `server/social/database.py` is still SQLite. SQLite remains for local dev and tests only.
 - [ ] Because jobs and staged-upload registries are currently process-local, deploy exactly one application worker/replica (matches the single-VPS verdict); only replace them with a durable shared job queue and state store if/when moving to multi-machine later.
-- [ ] Persist or externally store the production database, `data/avatars`, published media, and any paid job result that must survive a restart. The documented Docker command currently persists only `output/`. Media stays on the VPS's local disk per the verdicts; Cloudflare R2 is a later egress trigger, not a launch blocker. **Note:** staged uploads live in the container's `/tmp/square_extender_api/uploads` — lost on restart mid-job; document this as accepted behavior.
+- [ ] Persist or externally store the production database, `data/avatars`, published media, and any paid job result that must survive a restart. The documented Docker command currently persists only `output/`. **Revised 2026-10-20:** published media and avatars go to Cloudflare R2 at launch (verdicts → Media storage); only private/unpublished job artifacts stay on the VPS disk, behind an owner-checked route, and need the `output/` volume. **Note:** staged uploads live in the container's `/tmp/square_extender_api/uploads` — lost on restart mid-job; document this as accepted behavior.
 - [ ] Define storage lifecycle cleanup for abandoned uploads, failed jobs, expired drafts, proxies, previews, and deleted posts.
-- [ ] Run automated database and media backups on a documented schedule — **specify:** cron'd `pg_dump` with off-box copy (or Hetzner volume snapshots) + documented retention.
+- [ ] Run automated database and media backups on a documented schedule — **specify:** cron'd nightly `pg_dump` (or WAL-G) to a private R2 bucket + documented retention; escrow `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY` and `SX_FAL_KEY_ENCRYPTION_KEY` off the box; one restore drill onto a fresh box before launch (also rehearses a region move). Published media in R2 needs no separate backup beyond its own durability; local private artifacts are covered by the retention policy.
 - [ ] Perform and record a full restore drill, including message decryption and media availability.
 - [ ] Document deployment rollback, schema rollback limitations, and recovery from an interrupted migration.
 - [x] **New (2026-10-16):** Fix the request-path DB pool deadlock (pre-existing on `main`, found in WebXR Earth QA). `get_optional_auth` kept the request session's connection checked out (it only committed when `last_used_at` was ≥300 s stale) while reels helpers opened a second `SessionLocal()` per call; ~15 concurrent signed-in requests held all 5+10 QueuePool connections waiting for another, starved every AnyIO worker (even `/api/health`), and in QA one request pinned a connection for 17+ minutes until restart. **Fix:** `get_optional_auth` commits on every path that queried (so `require_auth` endpoints — including the 30-minute `GET /api/messages/events` SSE stream — start with no connection held); `unavailable_media_paths_for_viewer`, `reel_records`, `metadata_for_paths`, and `scoped_media_paths` take an optional `db` that every `reels.py` route threads through (one request, one connection); the per-item `_get_comments_for_video` / `_get_meta_for_video` fallbacks no longer re-query after the batched lookup. **Tests:** `tests/test_db_pool_isolation.py` (peak checkouts per request ≤ 1 across the affected endpoints, concurrent signed-in requests on a `pool_size=1` pool, auth releases its connection, no per-item retries) — fail on `main`, pass with the fix, on SQLite **and PostgreSQL 15** (local throwaway cluster via `SX_TEST_POSTGRES_URL`). `tests/conftest.py` now points the global `SessionLocal` fallback at a throwaway DB so tests never read the developer's `data/echo.db`. **Still open:** `/api/reels/tags` and `/api/reels/locations` (no auth, no request session) open helper sessions sequentially — safe, but not yet single-session (`GET /api/search/suggestions` was the unsafe caller — see the last item below). ~~`_metadata_snapshot` / `_get_meta_for_video` still fall back to fabricated `_seed_meta` engagement when the database lookup fails~~ — fixed, see next item.
@@ -193,7 +311,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Terminate HTTPS at a trusted proxy and configure HSTS after HTTPS behavior is verified. **Note:** Quest Browser requires a secure context for WebXR — the physical-Quest gate below depends on HTTPS being live (or the `adb reverse` localhost workflow from `docs/threejs-vr-implementation-plan.md` §6).
 - [ ] Configure trusted-host validation and production security headers, including CSP, `X-Content-Type-Options`, and a suitable referrer policy. **Add `script-src 'self'`:** the reels player mount injects server-rendered HTML/scripts into the SPA DOM unsandboxed (`ReelsPlayer.jsx:95–110`) — currently safe (feed JSON escaped, user text via `textContent`), but CSP makes a future template regression non-exploitable.
 - [ ] Restrict production CORS origins — **override `SX_DEV_ORIGINS` explicitly** (it defaults to `http://localhost:5173,http://127.0.0.1:5173` in `app.py:95`).
-- [ ] **New (2026-09-19):** Cloudflare-specific edge config — Cache Rule bypass for `/api/*` and `/media/*` (CF caches/compresses by extension), Rocket Loader + minify off for the SPA, and note the 15s SSE keep-alive sits safely under CF's ~100s idle timeout. `X-Accel-Buffering: no` covers nginx, not Cloudflare.
+- [ ] **New (2026-09-19):** Cloudflare-specific edge config — Cache Rule bypass for `/api/*` (CF caches/compresses by extension); **revised 2026-10-20:** published media is served from R2 on `media.<domain>` with a Cache Everything rule (not `r2.dev`), and the origin's `/media/*` route serves only private owner-checked artifacts (bypass cache) — never proxy self-hosted video through the CF CDN (2026-09-28 terms); Rocket Loader + minify off for the SPA, and note the 15s SSE keep-alive sits safely under CF's ~100s idle timeout. `X-Accel-Buffering: no` covers nginx, not Cloudflare.
 - [ ] Disable buffering for `/api/messages/events` and keep SSE connections open beyond the 15-second keep-alive interval.
 - [ ] Protect or disable production diagnostic endpoints. Do not let anonymous users overwrite or read global headset telemetry.
 - [ ] Rate-limit outbound model-information lookups and other endpoints that can force network or transcoding work.
