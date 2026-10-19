@@ -1,10 +1,10 @@
-import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { SceneProps } from '../EchoIntro';
 import { Backdrop, Grain, Vignette } from '../components/Backdrop';
 import { KineticText } from '../components/KineticText';
 import { HudLabel } from '../components/HudLabel';
 import { ScanLine } from '../components/ScanLine';
-import { MEDIA } from '../media';
+import { EchoGlassMark } from '../components/EchoGlass';
 import { C, CONTACT, F } from '../theme';
 
 const CREDIT = '"Cyborg Ninja" Kevin MacLeod (incompetech.com) · Licensed under CC BY 4.0';
@@ -16,14 +16,13 @@ export const EndCard = ({ dur }: SceneProps) => {
   const line = interpolate(frame, [0, 8, 14], [0, 1, 0], { extrapolateRight: 'clamp' });
   const lineW = interpolate(frame, [0, 8], [0, 1920], { extrapolateRight: 'clamp' });
   const logo = spring({ frame: frame - 6, fps, config: { damping: 14, stiffness: 150 } });
-  const glow = 0.5 + 0.5 * Math.sin(frame / 8);
   return (
     <AbsoluteFill style={{ backgroundColor: C.bg }}>
       <Backdrop />
       <ScanLine vertical={false} y={420} length={lineW} opacity={line} />
       <AbsoluteFill style={{ alignItems: 'center', paddingTop: 210 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 36, opacity: logo, transform: `scaleY(${0.1 + 0.9 * logo})` }}>
-          <Img src={MEDIA.logo} style={{ width: 150, height: 150, filter: `drop-shadow(0 0 ${20 + 20 * glow}px ${C.accentGlow})` }} />
+          <EchoGlassMark t={frame - 6} size={160} />
           <div style={{ fontFamily: F.brand, fontWeight: 900, fontSize: 168, letterSpacing: '0.12em', color: C.ink }}>ECHO</div>
         </div>
         <div style={{ marginTop: 70 }}>
