@@ -13,6 +13,7 @@ Single source of truth for where generated files belong. Follow this on every ta
 | Batch pipeline utilities (upscale/spatialize/playground) | `scripts/` | `batch_*.py`, `*_playground.py` |
 | One-off generated artifacts, captures, logs | `reports/` or `logs/` (both gitignored) | — |
 | Documentation you write | `docs/` | kebab-case |
+| Marketing / promo videos (Remotion) | `video/` (own `package.json`); renders → `reports/video/` | scenes in `video/src/scenes/`, capture scripts in `video/scripts/` |
 
 **Never create scripts or tests in the repository root.** The only root-level Python file is `app.py` (legacy Streamlit entrypoint, wired to `make streamlit`).
 
