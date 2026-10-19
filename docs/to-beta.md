@@ -1,6 +1,6 @@
 # Beta Launch Checklist
 
-Last updated: 2026-09-19 (audit round 2 + planned-feature scope inventory)
+Last updated: 2026-10-20 (stale-entry pass; latest engineering entries 2026-10-16; audit round 2 + planned-feature scope inventory 2026-09-19)
 
 Status: **Blocked for public beta.** Complete every item in "Public beta release blockers" before opening registration or exposing the deployment publicly. An invite-only beta must still protect paid processing endpoints and private user media.
 
@@ -62,7 +62,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 ### VR roadmap phases — out of beta scope by design (source: `docs/todolist.md`)
 
 - **Phase 0 — playback foundation:** remove normal-path decoded-frame skipping (today the VR uploader intentionally drops the 30fps source to 10–15fps via stride — the choppy-motion workaround documented in `vr-reels-playback-investigation.md:94–157`); standardize one Quest-appropriate rendition with auto-selection (today: single `-preview.mp4` proxy, `reels.py:1194`); texture-upload contention control (video/controls/comments/earth/glow `needsUpdate` calls + hidden preload competing per frame — `webxr_vr.js`); bounded cache/memory/thermal on-device validation.
-- **Phase 1 — immersive-media contract:** stored projection/stereo-layout/orientation/comfort metadata; per-rendition codec/bitrate/fps records; caption + AI-provenance metadata; replace filename-based SBS detection (`reels.html:4255–4262` regexes `sbs|3d` against filename/folder — renaming a file silently breaks stereo) with metadata + legacy inference fallback; guaranteed mono-flat fallback for invalid/missing metadata.
+- **Phase 1 — immersive-media contract:** stored projection/stereo-layout/orientation/comfort metadata; per-rendition codec/bitrate/fps records; caption + AI-provenance metadata; guaranteed mono-flat fallback for invalid/missing metadata (partial: VR falls back to the 2D left-eye rendition when a stereo file fails to load). ~~Replace filename-based SBS detection~~ — **done (3D Reels, migration `20261015_0013`):** the player reads `posts.stereo_layout` (`mono`/`sbs`/`tb`); the filename regex is gone (re-verified 2026-10-20).
 - **Phase 2 tail:** open city/event Packs directly from Earth (with location privacy + preview safety filtering).
 - **Phase 3:** world/body-lock default, recenter + `COMFORT`/`CINEMA`/`IMMERSIVE` presets, timed captions + transcription/translation.
 - **Phase 4:** World Shell PoC (keyframe → panorama/depth shell at upload, `ENTER WORLD`/`EXIT WORLD`, provenance labels).
@@ -74,7 +74,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 
 ### Known unfinished engineering (tracked in `docs/todolist.md` — verified still open 2026-09-19)
 
-- `MessagingContext.jsx:248–256`: send-reconcile builds `reconciled` but discards it (possible duplicate bubbles on key migration); optimistic GIF sends render empty until server echo.
+- `web/src/hooks/MessagingContext.jsx:305–313`: send-reconcile checks `alreadyPresent` against the optimistic-key list instead of the target conversation list (duplicate bubble on key migration until the next reload); optimistic GIF sends render empty until server echo. Re-verified still open 2026-10-20.
 - Reporting an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
 - Staged uploads are process-memory (consistent with the single-worker verdict; documented in RUNNING.md).
 - Reward threshold trusts client-reported duration (documented accepted risk: server-elapsed gate + foreground telemetry + caps bound farming).
@@ -145,7 +145,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 ### Registration and anti-abuse
 
 - [ ] For a public beta, add email verification and bot protection to registration. **Confirmed absent (2026-09-19):** zero email-verification machinery in the codebase.
-- [ ] Until those controls exist, operate as invite-only/allowlisted or set `SX_REGISTRATION_ENABLED=0`. **Update (2026-09-20):** invite path implemented — `SX_REGISTRATION_ALLOWLIST` (comma-separated emails, case-insensitive) is honored while registration is closed (`social.py:80–121`, tested in `test_registration_allowlist.py`).
+- [~] Until those controls exist, operate as invite-only/allowlisted or set `SX_REGISTRATION_ENABLED=0`. **Mechanism done; remaining: set `SX_REGISTRATION_ENABLED=0` + `SX_REGISTRATION_ALLOWLIST` in the production environment.** **Update (2026-09-20):** invite path implemented — `SX_REGISTRATION_ALLOWLIST` (comma-separated emails, case-insensitive) is honored while registration is closed (`social.py:80–121`, tested in `test_registration_allowlist.py`).
 - [ ] Verify account, messaging, reporting, following, upload, and recommendation-event rate limits under coordinated abuse. **Note:** comments/likes/follows/blocks/message-send/reports already carry limiters (verified); **packs and publish do not** (see cost-controls items above). **Update (2026-09-20):** packs and publish now carry limiters (those items checked off above); coordinated-abuse verification still open.
 - [~] **New:** Gate reel-reward claims on verified email + minimum account age; the per-IP cap has a `max(10, …)` floor that silently overrides lower config (`billing/service.py:894`) — remove the floor. Record a rewards-economics cost ceiling and go/no-go before enabling `SX_REEL_REWARDS_ENABLED`. **Partially done (2026-09-20):** floor removed (`reel_reward_ip_cap()`, min 1, tested). **Remaining:** email/age gating + economics ceiling + go/no-go.
 - [ ] Add moderator alerts and dashboards for report spikes, spam registrations, abusive messaging, unusual generation spend, and storage growth.
@@ -231,7 +231,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Test process restart during queued/running/completed jobs and confirm the documented recovery behavior.
 - [ ] Test current Chrome, Safari, Firefox, mobile browsers, and the supported Quest Browser/device matrix.
 - [ ] Validate Reels autoplay/manual navigation, audio, next-page preloading, negative feedback, creator suggestions, canonical links, and profile navigation on a physical Quest device. **Extend (2026-09-22, Earth Zoom Map):** on-device pass for the zoomable globe — tap-to-zoom vs tap-to-select feel at the city band, grip+stickY zoom comfort (object-motion only, ≤500 ms eases), `OPEN FEED`/`ZOOM OUT`/`GLOBE RESET` dock reachability, tile sharpness to street level, heat-blob legibility over tiles, and the `MAP OFFLINE — CITY VIEW` fallback with Wi-Fi dropped.
-- [ ] **Update (2026-10-04):** OSM's tile servers blocked the dev machine's proxy (TLS reset + "Access blocked" placeholder). Default stays OSM (owner decision: Esri looked worse and needs a commercial plan); the decision below is now a choice of *paid* provider before launch.
+- **Note (2026-10-04):** OSM's tile servers blocked the dev machine's proxy (TLS reset + "Access blocked" placeholder). Default stays OSM (owner decision: Esri looked worse and needs a commercial plan); the decision below is now a choice of *paid* provider before launch.
 - [ ] **New (2026-09-22, Earth Zoom Map tile provider):** pre-launch decision — stay on OSM tile-policy limits (compliant UA + disk cache already in place) or swap `SX_MAP_TILES_URL` to a paid MapTiler/Mapbox endpoint (no code change). Either way, carve `/api/reels/map-tiles/*` out of the Cloudflare `/api/*` cache-bypass above (tiles are immutable with a 7-day `Cache-Control`; bypassing forces every zoom through origin and risks tripping OSM limits).
 - [ ] Verify keyboard navigation, focus visibility, reduced-motion behavior, readable contrast, captions/accessible alternatives where applicable, and responsive layouts. **Decision needed:** no caption/WebVTT capability exists anywhere (`ReelsPlayer.jsx`, VR modules) — declare captions out-of-scope for beta or build VTT support.
 - [x] **New:** Gate `/reels/immersive-preview` — it is currently unauthenticated (`App.jsx:36`, no `RequireAuth` wrapper) despite being a creator desktop tool; wrap it or tie it to `SX_REEL_PACK_IMMERSIVE_ENABLED`. **Done (2026-09-20):** wrapped in the existing `RequireAuth` (logged-out redirects to login); `vite build` clean.

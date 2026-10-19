@@ -1,6 +1,6 @@
 # To-do List
 
-Last verified: 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
+Last verified: 2026-10-16 (DB pool deadlock fix: 289 backend pytest, 341 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier record, 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
 
 VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md). Reel Packs implementation record: [Reel Packs implementation investigation](reel-packs-implementation-investigation.md).
 
@@ -116,7 +116,7 @@ people.
 
 ## Known gaps found during verification (not yet fixed)
 
-- `MessagingContext.jsx:248-256`: send-reconcile builds `reconciled` but discards it (possible duplicate bubbles on key migration); optimistic GIF sends render empty until server echo.
+- `web/src/hooks/MessagingContext.jsx:305-313`: send-reconcile checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20.
 - Report on an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
 - Staged uploads are process-memory: multi-worker deployments need sticky sessions (or a single worker) or quote/submit pairs may miss; a restart drops staged files (documented in `RUNNING.md`).
 - Reward threshold uses client-reported duration (accepted risk: server-elapsed gate + foreground telemetry + 5/day + IP caps bound farming; documented in `RUNNING.md`).
