@@ -40,4 +40,4 @@ export const F = {
 } as const;
 
 // Placeholder contact line. Replace before public use.
-export const CONTACT = 'echo.example  ·  hello@echo.example';
+export const CONTACT = 'echo.example  ·  leduchoang011@gmail.com';
