@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ECHO Mark Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=JetBrains+Mono:wght@400;600&family=Archivo:wght@400;600;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #08090a; --surface: #101214; --line: #24282d; --ink: #f2f3f5; --ink2: #9aa1a9;
+    --red: #ff3b1f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: Archivo, system-ui, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-family: Orbitron, sans-serif; font-weight: 900; letter-spacing: -0.02em; margin: 0 0 6px; font-size: 34px; }
+  .lede { color: var(--ink2); max-width: 760px; line-height: 1.55; margin: 0 0 28px; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink2); }
+  .card { --surface-local: var(--surface); background: var(--surface); border: 1px solid var(--line); margin: 0 0 22px; padding: 22px; }
+  .card-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .card-head h2 { margin: 0; font-size: 22px; font-weight: 800; }
+  .card-head .tag { color: var(--red); }
+  .grid { display: grid; grid-template-columns: 220px 1fr; gap: 22px; }
+  .hero { --surface-local: var(--bg); background: var(--bg); border: 1px solid var(--line); display: grid; place-items: center; aspect-ratio: 1; cursor: crosshair; position: relative; }
+  .hero .hint { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; }
+  .right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .ladder { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; padding: 14px; background: var(--bg); border: 1px solid var(--line); --surface-local: var(--bg); }
+  .ladder figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .bar { --surface-local: #0b0c0e; background: #0b0c0e; border: 1px solid var(--line); height: 64px; display: flex; align-items: center; gap: 22px; padding: 0 18px; overflow: hidden; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: Orbitron, sans-serif; font-weight: 900; font-size: 2.04rem; color: var(--red); letter-spacing: -0.04em; text-decoration: none; white-space: nowrap; }
+  .brand .ech { display: inline-flex; align-items: center; gap: 0.06em; }
+  .brand .ech svg { margin-top: 1.5px; }
+  .nav { display: flex; gap: 22px; }
+  .nav span { font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.12em; color: #c9ced4; }
+  .nav span:first-child { color: var(--red); }
+  .swatches { display: flex; gap: 12px; flex-wrap: wrap; }
+  .sw { display: grid; place-items: center; width: 92px; height: 92px; border: 1px solid var(--line); }
+  .sw.light { --surface-local: #f2f3f5; background: #f2f3f5; }
+  .sw.dark { --surface-local: var(--bg); background: var(--bg); }
+  .sw.red { --surface-local: var(--red); background: var(--red); }
+  ul.notes { margin: 16px 0 0; padding-left: 18px; color: var(--ink2); line-height: 1.6; }
+  ul.notes b { color: var(--ink); font-weight: 600; }
+  svg { display: block; }
+
+  /* Shared eye motion */
+  .lid { transform-box: fill-box; transform-origin: center; }
+  .lid.blink { animation: blink 170ms ease-in-out; }
+  .lid.blink2 { animation: blink 170ms ease-in-out 2; }
+  @keyframes blink { 0%, 100% { transform: scaleY(1); } 45%, 60% { transform: scaleY(0.08); } }
+  .gaze { transition: transform 150ms cubic-bezier(0.65, 0, 0.35, 1); }
+
+  /* A: echo portal. A new frame grows out of the eye while the outer one leaves. */
+  .A .echo { transform-origin: 24px 24px; }
+  .A.play .echo { animation: tunnel 900ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+  .A.play .echo2 { animation: tunnel 900ms cubic-bezier(0.2, 0.7, 0.3, 1) 260ms both; }
+  @keyframes tunnel { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); } }
+
+  /* A2: echo glass. The hourglass turns over, then new echoes grow out of the eye. */
+  .E .body { transform-origin: 24px 24px; }
+  .E.play .body { animation: flip 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  @keyframes flip { from { transform: rotate(180deg); } to { transform: rotate(0deg); } }
+  .E .echo { transform-origin: 24px 24px; }
+  .E.play .echo { animation: tunnel 900ms cubic-bezier(0.2, 0.7, 0.3, 1) 380ms both; }
+  .E.play .echo2 { animation-delay: 620ms; }
+  /* The echoes are alive: they breathe, lean after the gaze (inner one more, for depth),
+     ripple outward when the eye glances and squeeze inward when it blinks. */
+  .E .drift { transition: transform 420ms cubic-bezier(0.3, 0.7, 0.3, 1); }
+  .E .kick, .E .breath { transform-origin: 24px 24px; }
+  .E .breath { animation: breathe 3.4s ease-in-out infinite; }
+  .E .echo2 .breath { animation-delay: -0.5s; }
+  @keyframes breathe { 0%, 100% { transform: scale(0.94); } 50% { transform: scale(1.05); } }
+  .E.ping .kick { animation: ping 640ms cubic-bezier(0.2, 0.7, 0.3, 1); }
+  .E.ping .echo2 .kick { animation-delay: 90ms; }
+  @keyframes ping { 0%, 100% { transform: scale(1); } 35% { transform: scale(1.14); } }
+  .E.squeeze .kick { animation: squeeze 360ms ease-in-out; }
+  .E.squeeze .echo2 .kick { animation-delay: 40ms; }
+  @keyframes squeeze { 0%, 100% { transform: scale(1); } 45% { transform: scale(0.8); } }
+
+  /* B: mirror world. The top world folds down and lands as its echo. */
+  .B .fold { transform-origin: 24px 24px; opacity: 0; }
+  .B.play .fold { animation: fold 900ms cubic-bezier(0.65, 0, 0.35, 1) both; }
+  @keyframes fold { 0% { transform: scaleY(1); opacity: 0.95; } 70% { transform: scaleY(-1); opacity: 0.95; } 100% { transform: scaleY(-1); opacity: 0; } }
+  .B.play .scanl { animation: ripple 420ms steps(3) both; }
+  @keyframes ripple { 0%, 100% { transform: translateX(0); } 33% { transform: translateX(2.2px); } 66% { transform: translateX(-1.6px); } }
+
+  /* C and D: echoes ripple out from the mark. */
+  .ghost { transform-origin: 24px 24px; opacity: 0; }
+  .play .ghost { animation: echo 950ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+  .play .ghost.g2 { animation-delay: 230ms; }
+  @keyframes echo { from { opacity: 0.85; transform: scale(1); } to { opacity: 0; transform: scale(1.65); } }
+  .D .arc { transform-origin: 24px 24px; }
+  .D.play .a1 { animation: pulse 520ms ease-out both; }
+  .D.play .a2 { animation: pulse 520ms ease-out 110ms both; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.12); stroke: var(--red); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .play * { animation: none !important; }
+    .gaze, .E .drift { transition: none; }
+    .E .breath, .E .kick { animation: none !important; }
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+    .hero { max-width: 260px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>ECHO mark: concepts</h1>
+  <p class="lede">
+    Today's mark has ten parts in a 24-unit box, so at the 30&nbsp;px header size the eye is about 1.5&nbsp;px across.
+    C and D are the rounded directions you kept. A and B are new: they keep the old mark's sharp, chamfered, brutalist geometry and build on the name, an eye looking at echoes of worlds.
+    <b>Hover</b> any big mark (or header bar) to play its hover animation, and move the pointer around it: the eye follows you.
+    When idle, every eye still glances and blinks on random timers.
+  </p>
+  <div id="cards"></div>
+</main>
+
+<script>
+const PAL = { ink: '#f2f3f5', red: '#ff3b1f', dark: '#08090a', sand: '#ffb35c', bg: 'var(--surface-local)' };
+let uid = 0;
+
+// Each eye: iris + pupil + highlight inside a .gaze group, all inside a .lid group.
+const eye = (p, r, pupil, hl) => `
+  <g class="lid"><g class="gaze">
+    <circle cx="24" cy="24" r="${r}" fill="${p.red}"/>
+    <circle cx="24" cy="24" r="${pupil}" fill="${p.dark}"/>
+    <circle cx="${24 - pupil * 0.55}" cy="${24 - pupil * 0.55}" r="${hl}" fill="${p.hl ?? p.ink}"/>
+  </g></g>`;
+
+// Chamfered rectangle: the old mark's 45-degree corners.
+const cham = (x, y, w, h, c) =>
+  `M${x + c} ${y} H${x + w - c} L${x + w} ${y + c} V${y + h - c} L${x + w - c} ${y + h} H${x + c} L${x} ${y + h - c} V${y + c} Z`;
+
+const arc = (r, deg, side) => {
+  const a = (deg * Math.PI) / 180;
+  const x = 24 + side * r * Math.cos(a);
+  const y = r * Math.sin(a);
+  return `M${x.toFixed(2)} ${(24 - y).toFixed(2)} A${r} ${r} 0 0 ${side > 0 ? 1 : 0} ${x.toFixed(2)} ${(24 + y).toFixed(2)}`;
+};
+
+const CONCEPTS = [
+  {
+    key: 'A',
+    name: 'Echo Portal',
+    tag: 'looking through echoes of worlds',
+    amp: [3.5, 1.5],
+    dur: 1200,
+    overflow: 'visible',
+    notes: [
+      '<b>The idea:</b> you look through a corridor of frames, and each one is an echo of the world before it. The angular eye at the centre is you, looking in.',
+      '<b>Keeps the old DNA:</b> chamfered 45° corners, bevel joins, a diamond core and the vermilion accent. There are no curves.',
+      '<b>Hover:</b> a new frame grows out of the eye while the outer frame leaves, like an endless tunnel of worlds.',
+      '<b>Size system:</b> below 24&nbsp;px the inner echo frames drop out, leaving a frame and an eye.',
+    ],
+    svg: (p, small) => {
+      const id = 'e' + uid++;
+      const lens = '12,24 18,17.5 30,17.5 36,24 30,30.5 18,30.5';
+      const echoes = small
+        ? ''
+        : `<path class="echo" d="${cham(9, 9, 30, 30, 7)}" fill="none" stroke="${p.ink}" stroke-width="1.8" opacity="0.5" stroke-linejoin="bevel"/>
+           <path class="echo echo2" d="${cham(14.5, 14.5, 19, 19, 4.5)}" fill="none" stroke="${p.ink}" stroke-width="1.3" opacity="0.28" stroke-linejoin="bevel"/>`;
+      return `
+      <defs><clipPath id="${id}"><polygon points="${lens}"/></clipPath></defs>
+      <path class="ghost" d="${cham(3, 3, 42, 42, 10)}" fill="none" stroke="${p.red}" stroke-width="2" stroke-linejoin="bevel"/>
+      <path d="${cham(3, 3, 42, 42, 10)}" fill="none" stroke="${p.ink}" stroke-width="${small ? 4.6 : 3.4}" stroke-linejoin="bevel"/>
+      ${echoes}
+      <g class="lid">
+        <polygon points="${lens}" fill="${p.ink}"/>
+        <g clip-path="url(#${id})"><g class="gaze">
+          <polygon points="24,17.5 30.5,24 24,30.5 17.5,24" fill="${p.red}"/>
+          <polygon points="24,21 27,24 24,27 21,24" fill="${p.dark}"/>
+          ${small ? '' : `<rect x="25.4" y="20.4" width="1.6" height="1.6" fill="${p.ink}"/>`}
+        </g></g>
+      </g>`;
+    },
+    mono: (fg, bg) => ({ ink: fg, red: bg, dark: fg, sand: fg, bg }),
+  },
+  {
+    key: 'E',
+    label: 'A2',
+    name: 'Echo Glass',
+    tag: 'concept A inside a two-triangle hourglass',
+    amp: [3.5, 1.5],
+    dur: 1600,
+    overflow: 'visible',
+    notes: [
+      '<b>The idea:</b> concept A\u2019s corridor of echoes, inside the simplest hourglass there is: two triangles meeting at the eye. Every echo triangle narrows toward the eye, so your gaze is pulled into the worlds.',
+      '<b>Keeps the old DNA:</b> the hourglass, chamfered corners, bevel joins, the diamond core and the vermilion accent.',
+      '<b>Alive:</b> the echo triangles breathe in and out, lean after the eye as it looks around (the inner one more, for depth), ripple outward on each glance and squeeze in on each blink.',
+      '<b>Hover:</b> the hourglass turns over, as on the end card, then new echoes grow out of the eye.',
+      '<b>Size system:</b> below 24&nbsp;px the echo triangles drop out, leaving the hourglass and its eye.',
+    ],
+    svg: (p, small) => {
+      const id = 'g' + uid++;
+      const top = '9,4 39,4 43,8 24,25 5,8';
+      const bot = '9,44 39,44 43,40 24,23 5,40';
+      const lens = '12,24 18,17.5 30,17.5 36,24 30,30.5 18,30.5';
+      const echo = (k, w, o, cls) =>
+        `<g class="${cls}" opacity="${o}"><g class="drift"><g class="kick"><g class="breath"><g transform="translate(24 24) scale(${k}) translate(-24 -24)">
+          <polygon points="${top}" fill="none" stroke="${p.ink}" stroke-width="${w / k}" stroke-linejoin="bevel"/>
+          <polygon points="${bot}" fill="none" stroke="${p.ink}" stroke-width="${w / k}" stroke-linejoin="bevel"/>
+        </g></g></g></g></g>`;
+      return `
+      <defs><clipPath id="${id}"><polygon points="${lens}"/></clipPath></defs>
+      <g class="body">
+        <g class="ghost"><polygon points="${top}" fill="none" stroke="${p.red}" stroke-width="2" stroke-linejoin="bevel"/><polygon points="${bot}" fill="none" stroke="${p.red}" stroke-width="2" stroke-linejoin="bevel"/></g>
+        <polygon points="${top}" fill="none" stroke="${p.ink}" stroke-width="${small ? 4.6 : 3.4}" stroke-linejoin="bevel"/>
+        <polygon points="${bot}" fill="none" stroke="${p.ink}" stroke-width="${small ? 4.6 : 3.4}" stroke-linejoin="bevel"/>
+        ${small ? '' : echo(0.68, 1.8, 0.5, 'echo') + echo(0.44, 1.3, 0.28, 'echo echo2')}
+        <polygon points="${lens}" fill="${p.bg}" stroke="${p.bg}" stroke-width="3.2" stroke-linejoin="bevel"/>
+        <g class="lid">
+          <polygon points="${lens}" fill="${p.ink}"/>
+          <g clip-path="url(#${id})"><g class="gaze">
+            <polygon points="24,17.5 30.5,24 24,30.5 17.5,24" fill="${p.red}"/>
+            <polygon points="24,21 27,24 24,27 21,24" fill="${p.dark}"/>
+            ${small ? '' : `<rect x="25.4" y="20.4" width="1.6" height="1.6" fill="${p.ink}"/>`}
+          </g></g>
+        </g>
+      </g>`;
+    },
+    mono: (fg, bg) => ({ ink: fg, red: bg, dark: fg, sand: fg, bg }),
+  },
+  {
+    key: 'B',
+    name: 'Mirror World',
+    tag: 'a world above, its echo below',
+    amp: [6, 1],
+    dur: 950,
+    overflow: 'visible',
+    notes: [
+      '<b>The idea:</b> the old hourglass becomes a world and its echo. The top chamber is solid: the world. The bottom one is its reflection, fading in scan lines. The eye at the waist looks at both.',
+      '<b>Closest to today’s mark:</b> the same chamfered hex chambers and bevel corners, with the chevron slit turned into one sharp eye. It is the easiest switch for people who know the current logo.',
+      '<b>Hover:</b> the world folds down over the eye and lands as its echo, and the scan lines glitch.',
+      '<b>Size system:</b> below 24&nbsp;px the scan lines merge into a heavier outline.',
+    ],
+    svg: (p, small) => {
+      const id = 'm' + uid++;
+      const top = '13,4 35,4 42,11 29,18 19,18 6,11';
+      const bot = '13,44 35,44 42,37 29,30 19,30 6,37';
+      const lens = '9,24 17,20 31,20 39,24 31,28 17,28';
+      const scan = small
+        ? ''
+        : [[32.8, 0.85], [36.6, 0.55], [40.4, 0.3]]
+            .map(([y, o], i) => `<line class="scanl" style="animation-delay:${550 + i * 70}ms" x1="0" y1="${y}" x2="48" y2="${y}" stroke="${p.ink}" stroke-width="1.6" opacity="${o}"/>`)
+            .join('');
+      return `
+      <defs><clipPath id="${id}"><polygon points="${bot}"/></clipPath></defs>
+      <polygon points="${top}" fill="${p.ink}"/>
+      <polygon points="${bot}" fill="none" stroke="${p.ink}" stroke-width="${small ? 3.4 : 2.2}" stroke-linejoin="bevel"/>
+      <g clip-path="url(#${id})">${scan}</g>
+      <polygon class="fold" points="${top}" fill="none" stroke="${p.red}" stroke-width="2" stroke-linejoin="bevel"/>
+      <g class="lid">
+        <polygon points="${lens}" fill="${p.red}"/>
+        <g clip-path="url(#${id}l)"><g class="gaze">
+          <polygon points="24,20 28,24 24,28 20,24" fill="${p.dark}"/>
+          ${small ? '' : `<rect x="24.5" y="21.4" width="1.3" height="1.3" fill="${p.ink}"/>`}
+        </g></g>
+      </g>
+      <defs><clipPath id="${id}l"><polygon points="${lens}"/></clipPath></defs>`;
+    },
+    mono: (fg, bg) => ({ ink: fg, red: fg, dark: bg, sand: fg, bg }),
+  },
+  {
+    key: 'C',
+    name: 'O-Eye',
+    tag: 'the O in ECHO is the eye',
+    amp: [5, 4],
+    dur: 1300,
+    overflow: 'visible',
+    lockup: true,
+    notes: [
+      '<b>Wordmark first.</b> The O of ECHO becomes the eye, drawn to match Orbitron’s rounded-square O. The header then needs no separate icon, and the eye sits at full cap height (about 24&nbsp;px), not 1.5&nbsp;px.',
+      '<b>Symbol alone:</b> the O-eye on its own works as the avatar and favicon.',
+      '<b>Hover:</b> the O sends out two echo rings. The iris has the most room to look around of any concept.',
+      '<b>Corporate reference:</b> wordmarks with one active letter, where the brand and the symbol are the same thing.',
+    ],
+    svg: (p, small, heavy) => {
+      const sw = heavy ? 9.5 : small ? 7 : 5.6;
+      const ring = `x="5" y="5" width="38" height="38" rx="13"`;
+      return `
+      <rect class="ghost" ${ring} fill="none" stroke="${p.red}" stroke-width="${sw * 0.6}"/>
+      <rect class="ghost g2" ${ring} fill="none" stroke="${p.red}" stroke-width="${sw * 0.6}"/>
+      <rect ${ring} fill="none" stroke="${p.ink}" stroke-width="${sw}"/>
+      ${eye(p, small ? 9.5 : 8.6, small ? 4.4 : 4, small ? 0 : 1.5)}`;
+    },
+    mono: (fg, bg) => ({ ink: fg, red: fg, dark: bg, sand: fg, bg }),
+  },
+  {
+    key: 'D',
+    name: 'Echo Rings',
+    tag: 'eye + spatial echo, symmetric glyph',
+    amp: [3.2, 3.2],
+    dur: 1100,
+    overflow: 'visible',
+    notes: [
+      '<b>Says the name.</b> An eye with echo waves on both sides: seeing and hearing in space. It is a nod to VR’s field of view.',
+      '<b>Size system:</b> below 24&nbsp;px the outer waves drop out, leaving a simple <code>( ◉ )</code> that still reads.',
+      '<b>Hover:</b> the waves pulse outward one after another, like a sonar ping. The stroke weight is the same everywhere, so it sits well beside the app’s line icons.',
+    ],
+    svg: (p, small) => {
+      const sw = small ? 4.6 : 3.8;
+      const waves = (r, cls) =>
+        `<path class="${cls}" d="${arc(r, 48, 1)} ${arc(r, 48, -1)}" fill="none" stroke="${p.ink}" stroke-width="${sw}" stroke-linecap="round"/>`;
+      return `
+      ${small ? '' : `<path class="ghost" d="${arc(20, 48, 1)} ${arc(20, 48, -1)}" fill="none" stroke="${p.red}" stroke-width="${sw * 0.6}" stroke-linecap="round"/>`}
+      ${waves(small ? 15 : 13.5, 'arc a1')}
+      ${small ? '' : waves(20.5, 'arc a2')}
+      ${eye(p, small ? 8.4 : 7, small ? 3.8 : 3.1, small ? 0 : 1.2)}`;
+    },
+    mono: (fg, bg) => ({ ink: fg, red: fg, dark: bg, sand: fg, bg }),
+  },
+];
+
+const CURRENT = `<svg viewBox="0 0 24 24" fill="none"><path d="M7 2.5 H17 L21 7 L14.5 11.4 L16.8 12 L14.5 12.6 L21 17 L17 21.5 H7 L3 17 L9.5 12.6 L7.2 12 L9.5 11.4 L3 7 Z" stroke="#fff" stroke-width="1.5" stroke-linejoin="bevel" fill="#101214"/><polygon points="8,4.5 16,4.5 12,10.4" stroke="#f2f3f5" stroke-width="1.4" stroke-linejoin="bevel"/><polygon points="8,19.5 16,19.5 12,13.6" stroke="#f2f3f5" stroke-width="1.4" stroke-linejoin="bevel"/><line x1="12" y1="2.5" x2="12" y2="21.5" stroke="#ff3b1f" stroke-width="1.6" stroke-linecap="square"/><path d="M8.5 12 L11 10.4 M8.5 12 L11 13.6" stroke="#ff3b1f" stroke-width="1.4" stroke-linejoin="bevel"/><path d="M15.5 12 L13 10.4 M15.5 12 L13 13.6" stroke="#ff3b1f" stroke-width="1.4" stroke-linejoin="bevel"/><polygon points="12,10.5 13.5,12 12,13.5 10.5,12" fill="#ff3b1f"/><circle cx="12" cy="12" r="0.6" fill="#f2f3f5"/><line x1="4.5" y1="12" x2="7" y2="12" stroke="#ff3b1f" stroke-width="1.3"/><line x1="17" y1="12" x2="19.5" y2="12" stroke="#ff3b1f" stroke-width="1.3"/></svg>`;
+
+const SIZES = [16, 20, 24, 32, 40, 48, 64];
+
+function mark(c, size, pal = PAL, opts = {}) {
+  const small = size <= 20;
+  const live = opts.live !== false;
+  return `<svg class="mk ${c.key}${live ? ' live' : ''}" data-k="${c.key}" width="${size}" height="${size}" viewBox="0 0 48 48" style="overflow:${c.overflow}" aria-hidden="true">${c.svg(pal, small, opts.heavy)}</svg>`;
+}
+
+function headerBar(c) {
+  const brand = c.lockup
+    ? `<span class="brand"><span class="ech">ECH${mark(c, 24, { ...PAL, ink: PAL.red, red: PAL.ink, hl: PAL.ink }, { heavy: true })}</span></span>`
+    : `<span class="brand">${mark(c, 36)}<span>ECHO</span></span>`;
+  return `<div class="bar hov">${brand}<div class="nav"><span>REELS/VR</span><span>EXPLORE</span><span>UPLOAD</span></div></div>`;
+}
+
+function card(c) {
+  const ladder = SIZES.map((s) => `<figure>${mark(c, s)}<figcaption class="mono">${s}px</figcaption></figure>`).join('');
+  const sw = (cls, fg, bg) => `<div class="sw ${cls}">${mark(c, 48, c.mono(fg, bg), { live: false })}</div>`;
+  return `
+  <section class="card">
+    <div class="card-head"><span class="mono">Concept ${c.label ?? c.key}</span><h2>${c.name}</h2><span class="mono tag">${c.tag}</span></div>
+    <div class="grid">
+      <div class="hero hov">${mark(c, 150)}<span class="hint mono">hover me</span></div>
+      <div class="right">
+        <div class="ladder">${ladder}</div>
+        ${headerBar(c)}
+        <div class="swatches">
+          ${sw('dark', '#f2f3f5', '#08090a')}
+          ${sw('light', '#08090a', '#f2f3f5')}
+          ${sw('red', '#ffffff', '#ff3b1f')}
+          <div class="sw dark">${mark(c, 48)}</div>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">${c.notes.map((n) => `<li>${n}</li>`).join('')}</ul>
+  </section>`;
+}
+
+function currentCard() {
+  const ladder = SIZES.map((s) => `<figure><div style="width:${s}px;height:${s}px">${CURRENT}</div><figcaption class="mono">${s}px</figcaption></figure>`).join('');
+  return `
+  <section class="card">
+    <div class="card-head"><span class="mono">Today</span><h2>Current mark</h2><span class="mono tag">for comparison</span></div>
+    <div class="right">
+      <div class="ladder">${ladder}</div>
+      <div class="bar"><span class="brand"><span style="width:30px;height:30px">${CURRENT}</span><span>ECHO</span></span><div class="nav"><span>REELS/VR</span><span>EXPLORE</span><span>UPLOAD</span></div></div>
+    </div>
+    <ul class="notes"><li>At 30&nbsp;px the eye is about 1.5&nbsp;px across, and the chevrons, flank lines and inner triangles blur into one texture.</li></ul>
+  </section>`;
+}
+
+document.getElementById('cards').innerHTML = currentCard() + CONCEPTS.map(card).join('');
+document.querySelectorAll('.sw svg').forEach((s) => s.classList.remove('live'));
+
+const byKey = Object.fromEntries(CONCEPTS.map((c) => [c.key, c]));
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const rand = (a, b) => a + Math.random() * (b - a);
+
+function look(svg, x, y) {
+  const [ax, ay] = byKey[svg.dataset.k].amp;
+  svg.querySelector('.gaze').style.transform = `translate(${x * ax}px, ${y * ay}px)`;
+  // Echo layers lean after the gaze; the deeper (smaller) echo moves further.
+  svg.querySelectorAll('.drift').forEach((g, i) => {
+    const f = i ? 0.55 : 0.3;
+    g.style.transform = `translate(${x * ax * f}px, ${y * ay * f * 1.6}px)`;
+  });
+}
+
+// Restart a one-shot class animation on the mark.
+function kick(svg, cls) {
+  svg.classList.remove('ping', 'squeeze');
+  void svg.getBoundingClientRect();
+  svg.classList.add(cls);
+}
+
+// Idle eye: glance, look back, or blink at random intervals.
+document.querySelectorAll('svg.live').forEach((svg) => {
+  if (reduce) return;
+  let away = false;
+  const next = () =>
+    setTimeout(() => {
+      if (!svg.dataset.tracking) {
+        const r = Math.random();
+        if (r < 0.3) {
+          const lid = svg.querySelector('.lid');
+          lid.classList.remove('blink', 'blink2');
+          void lid.getBoundingClientRect();
+          lid.classList.add(Math.random() < 0.25 ? 'blink2' : 'blink');
+          kick(svg, 'squeeze');
+        } else if (away && r < 0.6) {
+          away = false;
+          look(svg, 0, 0);
+        } else {
+          const a = rand(0, Math.PI * 2);
+          const d = rand(0.55, 1);
+          away = true;
+          look(svg, Math.cos(a) * d, Math.sin(a) * d);
+          kick(svg, 'ping');
+        }
+      }
+      next();
+    }, rand(900, 3800));
+  next();
+});
+
+// Hover: play the concept's animation once, and the eye follows the pointer.
+document.querySelectorAll('.hov').forEach((host) => {
+  const svgs = [...host.querySelectorAll('svg.live')];
+  host.addEventListener('pointerenter', () => {
+    if (reduce) return;
+    svgs.forEach((svg) => {
+      if (svg.classList.contains('play')) return;
+      svg.classList.add('play');
+      setTimeout(() => svg.classList.remove('play'), byKey[svg.dataset.k].dur);
+    });
+  });
+  host.addEventListener('pointermove', (e) => {
+    svgs.forEach((svg) => {
+      const b = svg.getBoundingClientRect();
+      const dx = e.clientX - (b.left + b.width / 2);
+      const dy = e.clientY - (b.top + b.height / 2);
+      const d = Math.hypot(dx, dy) || 1;
+      const k = Math.min(1, d / 120);
+      svg.dataset.tracking = '1';
+      look(svg, (dx / d) * k, (dy / d) * k);
+    });
+  });
+  host.addEventListener('pointerleave', () => {
+    svgs.forEach((svg) => {
+      delete svg.dataset.tracking;
+      look(svg, 0, 0);
+    });
+  });
+});
+</script>
+</body>
+</html>

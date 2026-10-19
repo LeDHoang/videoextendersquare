@@ -3842,8 +3842,8 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-top-logo {
-  height: 30px;
-  width: 30px;
+  height: 36px;
+  width: 36px;
   object-fit: contain;
   flex-shrink: 0;
   transition: transform 180ms ease, filter 180ms ease;
@@ -3854,27 +3854,123 @@ body.sx-vr-active .sx-reels-mount,
   transform: scale(1.1);
 }
 
-/* Animated hourglass mark (AnimatedEchoLogo): idle eye and falling sand. */
-.sx-echo-eye {
+/* Echo Glass mark (AnimatedEchoLogo). Idle: the eye glances and blinks, the
+   echoes breathe, lean after the gaze, ripple out on a glance and squeeze in on
+   a blink. Hover (.is-play): the hourglass turns over, then new echoes grow out
+   of the eye. Origins are in viewBox units (48 x 48). */
+.sx-echo-body,
+.sx-echo-ghost,
+.sx-echo-echo,
+.sx-echo-breath,
+.sx-echo-kick {
+  transform-origin: 24px 24px;
+}
+
+.sx-echo-lid {
   transform-box: fill-box;
   transform-origin: center;
 }
 
-.sx-echo-pupil {
-  transition: transform 140ms cubic-bezier(0.65, 0, 0.35, 1);
+.sx-echo-gaze {
+  transition: transform 150ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-.sx-echo-stream {
-  animation: sx-echo-stream 300ms linear infinite;
+.sx-echo-drift {
+  transition: transform 420ms cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+
+.sx-echo-ghost {
+  opacity: 0;
+}
+
+.sx-echo-breath {
+  animation: sx-echo-breathe 3.4s ease-in-out infinite;
+}
+
+.sx-echo-echo2 .sx-echo-breath {
+  animation-delay: -0.5s;
+}
+
+/* SVG transforms repaint on the main thread every frame, so the breath stops
+   while the mark is offscreen, the tab is hidden or the visitor is idle. Not
+   animation-play-state: Chrome still recalculates style every frame for a
+   paused animation. */
+.sx-echo-mark.is-asleep .sx-echo-breath {
+  animation: none;
+}
+
+.sx-echo-kick.is-ping {
+  animation: sx-echo-ping 640ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.sx-echo-echo2 .sx-echo-kick.is-ping {
+  animation-delay: 90ms;
+}
+
+.sx-echo-kick.is-squeeze {
+  animation: sx-echo-squeeze 360ms ease-in-out;
+}
+
+.sx-echo-echo2 .sx-echo-kick.is-squeeze {
+  animation-delay: 40ms;
+}
+
+.sx-echo-mark.is-play .sx-echo-body {
+  animation: sx-echo-flip 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.sx-echo-mark.is-play .sx-echo-ghost {
+  animation: sx-echo-ghost 950ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.sx-echo-mark.is-play .sx-echo-echo {
+  animation: sx-echo-tunnel 900ms cubic-bezier(0.2, 0.7, 0.3, 1) 380ms both;
+}
+
+.sx-echo-mark.is-play .sx-echo-echo2 {
+  animation-delay: 620ms;
 }
 
 @keyframes sx-echo-blink {
   0%, 100% { transform: scaleY(1); }
-  45%, 60% { transform: scaleY(0.1); }
+  45%, 60% { transform: scaleY(0.08); }
 }
 
-@keyframes sx-echo-stream {
-  to { stroke-dashoffset: -0.8; }
+@keyframes sx-echo-breathe {
+  0%, 100% { transform: scale(0.94); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes sx-echo-ping {
+  0%, 100% { transform: scale(1); }
+  35% { transform: scale(1.14); }
+}
+
+@keyframes sx-echo-squeeze {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(0.8); }
+}
+
+@keyframes sx-echo-flip {
+  from { transform: rotate(180deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes sx-echo-ghost {
+  from { opacity: 0.85; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.65); }
+}
+
+@keyframes sx-echo-tunnel {
+  from { transform: scale(0.3); opacity: 0; }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-echo-mark * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .sx-top-nav {
@@ -4372,6 +4468,10 @@ body.sx-vr-active .sx-reels-mount,
   .sx-top-brand {
     font-size: 1.35rem;
     margin-right: 0;
+  }
+  .sx-top-logo {
+    height: 28px;
+    width: 28px;
   }
   .sx-top-center {
     display: none !important;

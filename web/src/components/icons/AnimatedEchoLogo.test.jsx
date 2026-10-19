@@ -1,22 +1,11 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AnimatedEchoLogo } from './AnimatedEchoLogo.jsx';
-import { BOTTOM_BULB, SAND_AREA, TOP_BULB, areaBelow, sandLevels } from './echoHourglass.js';
-
-describe('echoHourglass sand levels', () => {
-  it('conserves sand between the bulbs while it pours', () => {
-    for (const p of [0, 0.25, 0.5, 0.75, 1]) {
-      const lv = sandLevels(p);
-      const top = p < 1 ? areaBelow(TOP_BULB, lv.top) : 0;
-      const bottom = p > 0 ? areaBelow(BOTTOM_BULB, lv.bottom) : 0;
-      expect(top + bottom).toBeCloseTo(SAND_AREA, 3);
-    }
-  });
-});
 
 describe('AnimatedEchoLogo', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('labels the mark when given a title and hides it otherwise', () => {
@@ -26,31 +15,69 @@ describe('AnimatedEchoLogo', () => {
     expect(container.querySelector('svg').getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('turns the hourglass over when its link is hovered', () => {
-    const frames = [];
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+  it('turns the hourglass over once when its link is hovered', () => {
+    vi.useFakeTimers();
     const { container } = render(
       <a href="/reels">
-        <AnimatedEchoLogo />
+        <AnimatedEchoLogo className="x" />
       </a>,
     );
-    const body = () => container.querySelector('svg > g');
-    expect(body().getAttribute('transform')).toBe('rotate(0 12 12)');
+    const svg = () => container.querySelector('svg');
+    expect(svg().classList.contains('is-play')).toBe(false);
     fireEvent.pointerEnter(container.querySelector('a'));
-    const start = performance.now();
-    act(() => frames.shift()(start + 100));
-    expect(body().getAttribute('transform')).not.toBe('rotate(0 12 12)');
-    vi.restoreAllMocks();
+    expect(svg().classList.contains('is-play')).toBe(true);
+    expect(svg().classList.contains('x')).toBe(true);
+    act(() => vi.advanceTimersByTime(1600));
+    expect(svg().classList.contains('is-play')).toBe(false);
   });
 
-  it('moves the pupil on its own over time', () => {
+  it('glances on its own and the echoes lean after the eye', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0.9);
     const { container } = render(<AnimatedEchoLogo />);
-    const pupil = () => container.querySelector('.sx-echo-pupil').style.transform;
-    expect(pupil()).toBe('translate(0px, 0px)');
+    const gaze = () => container.querySelector('.sx-echo-gaze').style.transform;
+    const drift = () => [...container.querySelectorAll('.sx-echo-drift')].map((g) => g.style.transform);
+    expect(gaze()).toBe('translate(0px, 0px)');
     act(() => vi.advanceTimersByTime(4000));
-    expect(pupil()).not.toBe('translate(0px, 0px)');
-    vi.restoreAllMocks();
+    expect(gaze()).not.toBe('translate(0px, 0px)');
+    const [outer, inner] = drift();
+    expect(outer).not.toBe('translate(0px, 0px)');
+    // The deeper echo travels further than the outer one.
+    const x = (t) => Math.abs(parseFloat(t.match(/translate\((-?[\d.e-]+)px/)[1]));
+    expect(x(inner)).toBeGreaterThan(x(outer));
+    expect(container.querySelector('.sx-echo-kick.is-ping')).toBeTruthy();
+  });
+
+  it('falls asleep after a minute without input and wakes on the next one', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    const { container } = render(<AnimatedEchoLogo />);
+    const svg = () => container.querySelector('svg');
+    fireEvent.pointerMove(window);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(svg().classList.contains('is-asleep')).toBe(false);
+    act(() => vi.advanceTimersByTime(40000));
+    expect(svg().classList.contains('is-asleep')).toBe(true);
+    // Asleep, the eye stops glancing.
+    const gaze = container.querySelector('.sx-echo-gaze').style.transform;
+    act(() => vi.advanceTimersByTime(8000));
+    expect(container.querySelector('.sx-echo-gaze').style.transform).toBe(gaze);
+    act(() => {
+      fireEvent.keyDown(window, { key: 'a' });
+    });
+    expect(svg().classList.contains('is-asleep')).toBe(false);
+  });
+
+  it('drops the echoes at small sizes', () => {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(20);
+    const { container } = render(<AnimatedEchoLogo />);
+    expect(container.querySelector('.sx-echo-echo')).toBeNull();
+    expect(container.querySelector('.sx-echo-gaze')).toBeTruthy();
+  });
+
+  it('keeps the echoes at header sizes', () => {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(36);
+    const { container } = render(<AnimatedEchoLogo />);
+    expect(container.querySelectorAll('.sx-echo-echo')).toHaveLength(2);
   });
 });
