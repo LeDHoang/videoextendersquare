@@ -160,6 +160,7 @@ export function StageTransport({ video, trim, status }) {
 function statusChip(entry) {
   if (entry.status === 'done') return ['✓ DONE', 'ok'];
   if (entry.status === 'failed') return ['FAILED', 'danger'];
+  if (entry.status === 'cancelled') return ['CANCELLED', 'muted'];
   if (entry.status === 'rendering') return ['RENDERING', 'accent'];
   return ['STAGED', 'muted'];
 }

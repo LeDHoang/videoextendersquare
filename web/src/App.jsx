@@ -26,6 +26,7 @@ const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
 const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
 const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage.jsx'));
+const RulesPage = lazy(() => import('./pages/RulesPage.jsx'));
 export default function App() {
   const { pathname } = useLocation();
   useDocumentTitle(routeTitle(pathname));
@@ -34,9 +35,9 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/reels" replace />} />
-          <Route path="/image" element={<ImagePage />} />
-          <Route path="/video" element={<VideoPage />} />
-          <Route path="/compare" element={<ComparePage />} />
+          <Route path="/image" element={<RequireAuth><ImagePage /></RequireAuth>} />
+          <Route path="/video" element={<RequireAuth><VideoPage /></RequireAuth>} />
+          <Route path="/compare" element={<RequireAuth><ComparePage /></RequireAuth>} />
           <Route path="/reels" element={<ReelsPage />} />
           <Route path="/reels/immersive-preview" element={<RequireAuth><ImmersivePreviewPage /></RequireAuth>} />
           <Route path="/explore" element={<ExplorePage />} />
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/upload" element={<RequireAuth><UploadPage /></RequireAuth>} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/rules" element={<RulesPage />} />
           <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>

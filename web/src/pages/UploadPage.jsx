@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { assertUploadSize } from '../utils/uploadLimits.js';
 import { STEREO_LABELS, stereoCandidate, stereoEyeSize } from '../utils/mediaFormat.js';
 import StudioStage from '../components/upload/StudioStage.jsx';
 import { useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
@@ -257,6 +258,7 @@ export default function UploadPage() {
     setStaging(true);
     setPath('skip');
     try {
+      images.forEach((image) => assertUploadSize(image, 'image', cfgCtx?.config));
       const metas = await Promise.all(images.map((image) => api.upload('/api/image/upload', image)));
       const layouts = new Set(metas.map(metaStereoCandidate));
       setStereoOn(layouts.size === 1 && metas.every(metaStereoDetected));
@@ -268,7 +270,7 @@ export default function UploadPage() {
       })));
       suggestTitle(images[0].name);
     } catch (e) {
-      setPickError(`Could not stage the images: ${e.message}`);
+      setPickError(`Could not stage the images: ${billingErrorMessage(e)}`);
       setKind(null);
     } finally {
       setStaging(false);
@@ -312,6 +314,7 @@ export default function UploadPage() {
     setStaged(null);
     setStaging(true);
     try {
+      assertUploadSize(picked, k, cfgCtx?.config);
       const meta = await api.upload(k === 'image' ? '/api/image/upload' : '/api/video/upload', picked);
       const detected = metaStereoDetected(meta);
       setStaged(meta);
@@ -319,7 +322,7 @@ export default function UploadPage() {
       setPath(isSquareMeta(meta) || detected ? 'skip' : 'extend');
       suggestTitle(picked.name);
     } catch (e) {
-      setPickError(`Could not stage ${picked.name}: ${e.message}`);
+      setPickError(`Could not stage ${picked.name}: ${billingErrorMessage(e)}`);
       setFile(null);
       setKind(null);
     } finally {
@@ -358,10 +361,11 @@ export default function UploadPage() {
     const stagedEntries = [];
     for (const entry of list) {
       try {
+        assertUploadSize(entry, k, cfgCtx?.config);
         const meta = await api.upload(k === 'image' ? '/api/image/upload' : '/api/video/upload', entry);
         stagedEntries.push({ key: meta.stage_id, name: entry.name, file: entry, kind: k, meta, url: URL.createObjectURL(entry), status: null, result: null });
       } catch (e) {
-        setBatchError(`Could not read ${k} ${entry.name}: ${e.message}`);
+        setBatchError(`Could not read ${k} ${entry.name}: ${billingErrorMessage(e)}`);
       }
     }
     setBatch(stagedEntries);
@@ -613,7 +617,7 @@ export default function UploadPage() {
         }}
         onJobSettled={(settledJob, state) => {
           if (settledJob.key) {
-            if (state?.status === 'failed') patchBatchItem(settledJob.key, { status: 'failed' });
+            if (state?.status === 'failed' || state?.status === 'cancelled') patchBatchItem(settledJob.key, { status: state.status });
           } else {
             setJobSettled(true);
           }

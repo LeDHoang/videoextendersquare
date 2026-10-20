@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { assertUploadSize } from '../utils/uploadLimits.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
@@ -198,10 +199,11 @@ export default function VideoPage() {
     const staged = [];
     for (const f of files) {
       try {
+        assertUploadSize(f, 'video', cfg?.config);
         const meta = await api.upload('/api/video/upload', f);
         staged.push({ name: f.name, file: f, ...meta });
       } catch (e) {
-        setError(`Could not read video ${f.name}: ${e.message}`);
+        setError(`Could not read video ${f.name}: ${billingErrorMessage(e)}`);
       }
     }
     setItems(staged);

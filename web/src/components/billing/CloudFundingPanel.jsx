@@ -1,10 +1,21 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button, Segmented } from '../ui/controls.jsx';
 import { Eyebrow, GatedReason } from '../ui/primitives.jsx';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 
 const OPTIONS = ['ECHO CREDITS', 'MY FAL KEY'];
+
+// Third-party processing disclosure. Shown with every cloud-mode panel, which each page renders
+// directly above its render/submit button (ImagePage, VideoPage, ExtendDeck's ExecuteSection).
+export function FalDisclosure() {
+  return (
+    <p className="sx-cost-disclosure" data-testid="fal-disclosure">
+      Cloud processing sends the photos or videos you upload, and your job settings, to fal.ai, a
+      third-party AI provider, to produce the result. See the <Link to="/privacy">Privacy Policy</Link>.
+    </p>
+  );
+}
 
 export default function CloudFundingPanel({ required, paymentSource, onChange, quoteState, byokOnly = false }) {
   const navigate = useNavigate();
@@ -63,6 +74,7 @@ export default function CloudFundingPanel({ required, paymentSource, onChange, q
           {!falKey?.configured ? <Button onClick={() => navigate('/wallet')}>ADD PERSONAL FAL KEY</Button> : null}
         </div>
       ) : null}
+      <FalDisclosure />
     </div>
   );
 }

@@ -38,7 +38,7 @@ export default function ReelsPage() {
   const paramCodec = (searchParams.get('codec') || '').toLowerCase();
   const deepPost = searchParams.get('post');
   const [data, setData] = useState(null);
-  const [folder, setFolder] = useState(searchParams.get('folder') || 'testpipeline');
+  const [folder, setFolder] = useState(searchParams.get('folder') || 'ALL FOLDERS');
   const [codec, setCodec] = useState(
     paramCodec === 'h264' ? 'H264 (Browser/VR)' : paramCodec === 'all' ? 'ALL CODECS' : CODEC_DEFAULT,
   );
@@ -115,7 +115,7 @@ export default function ReelsPage() {
       .then((r) => {
         setData(r);
         if (folder !== 'ALL FOLDERS' && !r.folders.includes(folder)) {
-          setFolder(r.folders.includes('testpipeline') ? 'testpipeline' : r.folders[0] || 'ALL FOLDERS');
+          setFolder('ALL FOLDERS');
         }
       })
       .catch((error) => {
