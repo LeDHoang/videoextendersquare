@@ -78,39 +78,46 @@ def csrf_headers(client):
     return {"x-csrf-token": client.cookies.get("echo_csrf")}
 
 
-def test_cloud_requires_auth_while_square_local_processing_remains_anonymous(app, tmp_path, monkeypatch):
-    source = tmp_path / "source.png"
-    source.write_bytes(b"staged")
+def test_upload_and_processing_require_sign_in(app, tmp_path, monkeypatch):
     monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 1000))
-    with TestClient(app) as client:
-        cloud = client.post("/api/image/upload", files={"file": ("cloud.png", b"staged", "image/png")})
-        assert cloud.status_code == 200, cloud.text
-        local = client.post("/api/image/upload", files={"file": ("local.png", b"staged", "image/png")})
-        assert local.status_code == 200, local.text
-        cloud_id = cloud.json()["stage_id"]
-        local_id = local.json()["stage_id"]
-        app.state.staged_ids.extend([cloud_id, local_id])
-        cloud_path = image.STAGED_UPLOADS[cloud_id][0]
-        monkeypatch.setattr(
-            image, "get_image_dimensions",
-            lambda path: (1000, 500) if path == cloud_path else (1000, 1000),
+    with TestClient(app) as anonymous, TestClient(app) as client:
+        denied_upload = anonymous.post("/api/image/upload", files={"file": ("anon.png", b"staged", "image/png")})
+        assert denied_upload.status_code == 401
+        assert denied_upload.json()["detail"]["code"] == "AUTH_REQUIRED"
+
+        user = register(client, "local_square")
+        uploaded = client.post(
+            "/api/image/upload",
+            files={"file": ("local.png", b"staged", "image/png")},
+            headers=csrf_headers(client),
         )
-        denied = client.post(
+        assert uploaded.status_code == 200, uploaded.text
+        local_id = uploaded.json()["stage_id"]
+        app.state.staged_ids.append(local_id)
+
+        denied = anonymous.post(
             "/api/image/process",
-            data={"stage_id": cloud_id, "upscale_only": "false", "upscale_engine": "fast"},
+            data={"stage_id": local_id, "upscale_only": "false", "upscale_engine": "fast"},
         )
         assert denied.status_code == 401
         assert denied.json()["detail"]["code"] == "AUTH_REQUIRED"
+        no_csrf = client.post(
+            "/api/image/process",
+            data={"stage_id": local_id, "upscale_only": "false", "upscale_engine": "fast"},
+        )
+        assert no_csrf.status_code == 403
 
+        # Square local work stays free, but is owned like every other job.
         accepted = client.post(
             "/api/image/process",
             data={"stage_id": local_id, "upscale_only": "false", "upscale_engine": "fast"},
+            headers=csrf_headers(client),
         )
         assert accepted.status_code == 200, accepted.text
         body = accepted.json()
         app.state.created_jobs.append(body["job_id"])
         assert body["payment_source"] == "local"
-        assert job_manager.get_job(body["job_id"]).owner_id is None
+        assert job_manager.get_job(body["job_id"]).owner_id == user["id"]
 
 
 def test_owned_cloud_job_status_and_download_are_private(app, tmp_path):
@@ -152,7 +159,7 @@ def test_staged_uploads_are_owner_private(app, tmp_path, monkeypatch):
     with TestClient(app) as owner_client, TestClient(app) as other_client:
         register(owner_client, "stage_owner")
         register(other_client, "stage_other")
-        uploaded = owner_client.post("/api/image/upload", files={"file": ("owned.png", b"staged", "image/png")})
+        uploaded = owner_client.post("/api/image/upload", files={"file": ("owned.png", b"staged", "image/png")}, headers=csrf_headers(owner_client))
         assert uploaded.status_code == 200, uploaded.text
         stage_id = uploaded.json()["stage_id"]
         app.state.staged_ids.append(stage_id)
@@ -180,34 +187,6 @@ def test_staged_uploads_are_owner_private(app, tmp_path, monkeypatch):
         assert own_quote.status_code == 200, own_quote.text
 
 
-def test_anonymous_upload_survives_sign_in_on_same_browser(app, tmp_path, monkeypatch):
-    monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
-    monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 500))
-    monkeypatch.setattr(billing, "get_image_dimensions", lambda _path: (1000, 500))
-    params = {
-        "prompt": "",
-        "upscale_only": False,
-        "sharpening": 0.0,
-        "upscale_engine": "fast",
-        "upscale_model": "fal-ai/clarity-upscaler",
-        "outpaint_model": "fal-ai/image-apps-v2/outpaint",
-        "custom_outpaint_args": {},
-        "custom_upscale_args": {},
-    }
-    with TestClient(app) as client:
-        uploaded = client.post("/api/image/upload", files={"file": ("prelogin.png", b"staged", "image/png")})
-        assert uploaded.status_code == 200, uploaded.text
-        stage_id = uploaded.json()["stage_id"]
-        app.state.staged_ids.append(stage_id)
-        register(client, "prelogin_user")
-        quoted = client.post(
-            "/api/billing/quote",
-            json={"kind": "image", "stage_id": stage_id, "parameters": params},
-            headers=csrf_headers(client),
-        )
-        assert quoted.status_code == 200, quoted.text
-
-
 def test_estimate_prices_without_credits_and_matches_the_quote(app, monkeypatch):
     monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 500))
     monkeypatch.setattr(billing, "get_image_dimensions", lambda _path: (1000, 500))
@@ -224,7 +203,7 @@ def test_estimate_prices_without_credits_and_matches_the_quote(app, monkeypatch)
     with TestClient(app) as owner_client, TestClient(app) as other_client, TestClient(app) as anonymous:
         register(owner_client, "estimate_owner")
         register(other_client, "estimate_other")
-        uploaded = owner_client.post("/api/image/upload", files={"file": ("wide.png", b"staged", "image/png")})
+        uploaded = owner_client.post("/api/image/upload", files={"file": ("wide.png", b"staged", "image/png")}, headers=csrf_headers(owner_client))
         assert uploaded.status_code == 200, uploaded.text
         stage_id = uploaded.json()["stage_id"]
         app.state.staged_ids.append(stage_id)
@@ -304,7 +283,7 @@ def test_enqueue_failure_releases_reserved_credits(app, tmp_path, monkeypatch):
 
     with TestClient(app) as client:
         user = register(client, "enqueue_failure")
-        uploaded = client.post("/api/image/upload", files={"file": ("enqueue.png", b"staged", "image/png")})
+        uploaded = client.post("/api/image/upload", files={"file": ("enqueue.png", b"staged", "image/png")}, headers=csrf_headers(client))
         assert uploaded.status_code == 200, uploaded.text
         stage_id = uploaded.json()["stage_id"]
         app.state.staged_ids.append(stage_id)

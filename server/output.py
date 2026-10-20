@@ -11,8 +11,13 @@ import tempfile
 from pathlib import Path
 
 
+def jobs_root() -> Path:
+    """Parent of every job dir (and of the staged-upload dir, ``uploads/``)."""
+    return Path(tempfile.gettempdir()) / "square_extender_api"
+
+
 def job_dir(job_id: str) -> Path:
-    d = Path(tempfile.gettempdir()) / "square_extender_api" / job_id
+    d = jobs_root() / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 

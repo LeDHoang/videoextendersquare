@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from core import models as _models
+from server import media as SM
 from server.features import reel_pack_features
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 
@@ -38,6 +39,10 @@ def get_config():
     return {
         "models": _models.config_payload(_model_config),
         "features": {"reel_packs": reel_pack_features()},
+        "upload_limits": {
+            "image_mb": SM.max_image_upload_bytes() // SM._MB,
+            "video_mb": SM.max_video_upload_bytes() // SM._MB,
+        },
     }
 
 

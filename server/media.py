@@ -11,13 +11,22 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from server.settings import env_int
+
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp"}
 VIDEO_EXTS = {"mp4", "mov", "avi", "webm"}
 
-MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
+_MB = 1024 * 1024
+# Defaults; the routers read SX_MAX_{IMAGE,VIDEO}_UPLOAD_MB through these
+# helpers. Production sets the video cap to 95 MB (Cloudflare free-plan
+# request bodies stop at 100 MB).
+MAX_IMAGE_UPLOAD_BYTES = 50 * _MB
+MAX_VIDEO_UPLOAD_BYTES = 500 * _MB
+# Ceiling on all staged uploads together (SX_STAGED_BYTES_MAX), so a burst of
+# uploads cannot fill the disk the jobs write to.
+STAGED_BYTES_MAX = 4 * 1024 * _MB
 
 # Stereoscopic posts (see docs/stereo-3d-reels.md). The original stereo file
 # is the VR source; <stem>-mono.<ext> holds the left eye for 2D surfaces.
@@ -34,6 +43,34 @@ MONO_IMAGE_MAX_SIDE = 3840
 
 class UploadRejected(Exception):
     """Raised when a staged upload fails an extension or size check."""
+
+
+class StagingFull(Exception):
+    """Raised when staging would exceed the shared staged-bytes ceiling."""
+
+
+def max_image_upload_bytes() -> int:
+    return env_int("SX_MAX_IMAGE_UPLOAD_MB", MAX_IMAGE_UPLOAD_BYTES // _MB, minimum=1) * _MB
+
+
+def max_video_upload_bytes() -> int:
+    return env_int("SX_MAX_VIDEO_UPLOAD_MB", MAX_VIDEO_UPLOAD_BYTES // _MB, minimum=1) * _MB
+
+
+def staged_bytes_max() -> int:
+    return env_int("SX_STAGED_BYTES_MAX", STAGED_BYTES_MAX, minimum=1)
+
+
+def staged_bytes(directory: Path | None = None) -> int:
+    """Bytes currently held in the staging dir."""
+    total = 0
+    for entry in (directory or staging_dir()).iterdir():
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def staging_dir() -> Path:
@@ -64,9 +101,16 @@ def stage_upload_stream(
     Never buffers the whole upload in memory, enforces an extension
     allowlist up front, and aborts (deleting the partial file) as soon as
     *max_bytes* is exceeded rather than after the whole body has arrived.
+    Raises StagingFull when this file would push the staging dir past the
+    shared ceiling.
     """
     ext = _safe_ext(filename, allowed_exts)
-    dest = staging_dir() / f"{uuid.uuid4().hex[:10]}.{ext}"
+    directory = staging_dir()
+    ceiling = staged_bytes_max()
+    already = staged_bytes(directory)
+    if already >= ceiling:
+        raise StagingFull("Upload storage is full. Try again later.")
+    dest = directory / f"{uuid.uuid4().hex[:10]}.{ext}"
     total = 0
     try:
         with open(dest, "wb") as out:
@@ -77,8 +121,10 @@ def stage_upload_stream(
                 total += len(chunk)
                 if total > max_bytes:
                     raise UploadRejected(
-                        f"File exceeds the {max_bytes // (1024 * 1024)}MB upload limit"
+                        f"File exceeds the {max_bytes // _MB}MB upload limit"
                     )
+                if already + total > ceiling:
+                    raise StagingFull("Upload storage is full. Try again later.")
                 out.write(chunk)
     except Exception:
         dest.unlink(missing_ok=True)

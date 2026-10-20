@@ -66,9 +66,18 @@ def format_error(ex: Exception) -> tuple[str, str]:
     return (f"{name.upper()}", msg)
 
 
+def _env_workers(name: str) -> int | None:
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError:
+        return None
+    return value if value >= 1 else None
+
+
 def default_pool_sizes() -> tuple[int, int]:
-    """CPU-aware (image, video) worker counts."""
+    """(image, video) worker counts: SX_IMAGE_WORKERS / SX_VIDEO_WORKERS,
+    else CPU-aware defaults."""
     cpus = os.cpu_count() or 2
-    max_video = max(1, min(2, cpus // 2))
-    max_image = max(1, min(4, cpus))
+    max_video = _env_workers("SX_VIDEO_WORKERS") or max(1, min(2, cpus // 2))
+    max_image = _env_workers("SX_IMAGE_WORKERS") or max(1, min(4, cpus))
     return max_image, max_video

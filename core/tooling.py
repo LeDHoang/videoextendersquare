@@ -133,15 +133,34 @@ _ENCODER_CACHE: tuple[str, list[str]] | None = None
 _ENCODER_LOCK = threading.Lock()
 
 
+def _thread_opts(name: str) -> list[str]:
+    """Encoder thread cap from SX_FFMPEG_THREADS (unset: ffmpeg's default).
+
+    libx265 sizes its own thread pools, so it also needs ``pools=N``.
+    """
+    try:
+        threads = int(os.environ.get("SX_FFMPEG_THREADS", ""))
+    except ValueError:
+        return []
+    if threads < 1:
+        return []
+    opts = ["-threads", str(threads)]
+    if name == "libx265":
+        opts += ["-x265-params", f"pools={threads}"]
+    return opts
+
+
 def pick_encoder() -> tuple[str, list[str]]:
     """Return (name, opts) for a working HEVC encoder, cached per process."""
     global _ENCODER_CACHE
     if _ENCODER_CACHE:
-        return _ENCODER_CACHE
+        name, opts = _ENCODER_CACHE
+        return name, opts + _thread_opts(name)
 
     with _ENCODER_LOCK:
         if _ENCODER_CACHE:
-            return _ENCODER_CACHE
+            name, opts = _ENCODER_CACHE
+            return name, opts + _thread_opts(name)
 
         listed = run(["ffmpeg", "-hide_banner", "-encoders"]).stdout or ""
 
@@ -150,7 +169,7 @@ def pick_encoder() -> tuple[str, list[str]]:
                 continue
             if smoke_encode(name, opts):
                 _ENCODER_CACHE = (name, opts)
-                return _ENCODER_CACHE
+                return name, opts + _thread_opts(name)
 
         raise RuntimeError(
             "No working HEVC encoder found (tried: "

@@ -23,9 +23,10 @@ from pipeline.video_worker import process_video
 from pipeline.stereo_detect import detect_stereo
 from server import media as SM
 from server import output
-from server.jobs import JobStatus, job_manager
+from server import quotas
+from server.jobs import JobStatus, QueueFull, job_manager, public_result
 from server.sse import job_progress_stream
-from server.social.auth import AuthContext, get_optional_auth, stage_owner_identity, stage_owner_matches, validate_csrf, validate_origin
+from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf, stage_owner_identity, stage_owner_matches, validate_origin
 from server.social.database import get_db
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -134,24 +135,29 @@ def upload_video(
     request: Request,
     response: Response,
     file: UploadFile = File(...),
-    context: AuthContext | None = Depends(get_optional_auth),
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
 ):
     """Stage an uploaded video file and return its metadata.
 
-    Plain `def`, not `async def` — this streams the upload to disk in chunks
+    Signed-in only and counted against the hourly upload budget. Plain `def`, not `async def` — this streams the upload to disk in chunks
     and calls a blocking, un-awaitable ffprobe subprocess
     (get_video_dimensions_and_duration). FastAPI runs sync route handlers in
     a worker thread, so the event loop (and every other request, including
     live SSE progress streams) no longer stalls while it runs.
     """
+    validate_origin(request)
+    quotas.check_upload_rate(db, context)
     stage_id = uuid.uuid4().hex[:10]
     try:
         dest_path, size_bytes = SM.stage_upload_stream(
             file.filename or "upload.mp4", file.file,
-            SM.VIDEO_EXTS, SM.MAX_VIDEO_UPLOAD_BYTES,
+            SM.VIDEO_EXTS, SM.max_video_upload_bytes(),
         )
     except SM.UploadRejected as ex:
         raise HTTPException(status_code=400, detail=str(ex)) from ex
+    except SM.StagingFull as ex:
+        raise quotas.storage_full_error(str(ex)) from ex
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
 
@@ -209,10 +215,15 @@ def start_video_process(
     custom_upscale_args: str = Form("{}"),
     payment_source: str = Form("credits"),
     quote_id: str | None = Form(None),
-    context: AuthContext | None = Depends(get_optional_auth),
+    context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
-    """Start a video job; Fal-backed work requires sign-in and credits or BYOK."""
+    """Start a video job for a signed-in user.
+
+    Every job takes a slot under the queue caps (429 QUEUE_FULL) before any
+    billing; Fal-backed work additionally needs credits or BYOK.
+    """
+    validate_origin(request)
     _validate_video_form(
         upscale_engine, sharpening, ltx_resolution, seedvr_factor, seedvr_target,
         bytedance_target_res, bytedance_target_fps, bytedance_tier,
@@ -235,6 +246,9 @@ def start_video_process(
     staged = STAGED_UPLOADS.get(stage_id)
     src_path = staged[0] if staged else None
     if not src_path or not os.path.exists(src_path):
+        raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
+    # A foreign stage gets the same error as a missing one (no oracle).
+    if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
     width, height, _duration = get_video_dimensions_and_duration(src_path)
     submit_fingerprint = stage_fingerprint(src_path, width=width, height=height, duration=_duration)
@@ -268,65 +282,63 @@ def start_video_process(
         "custom_upscale_args": custom_upscale,
     })
 
-    owner_id = None
+    if cloud_required and not params["upscale_only"] and width != height:
+        # Ray 3.2 reframe rejects sources over 10 s; refuse before the
+        # reservation or any fal call (BYOK jobs never pass a quote).
+        try:
+            validate_outpaint_source(_duration, params)
+        except PricingError as ex:
+            raise HTTPException(status_code=400, detail={"code": "SOURCE_TOO_LONG", "message": str(ex)}) from ex
+
+    owner_id = context.user.id
     fal_key = None
-    job_id = uuid.uuid4().hex[:12]
     lifecycle = None
     on_success = None
     on_failure = None
-    if cloud_required:
-        if context is None:
-            raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in for cloud processing."})
-        validate_origin(request)
-        validate_csrf(request, context)
-        owner_id = context.user.id
-        if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
-            raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
-        if not params["upscale_only"] and width != height:
-            # Ray 3.2 reframe rejects sources over 10 s; refuse before the
-            # reservation or any fal call (BYOK jobs never pass a quote).
+    # Take a queue slot before any billing; every exit below that does not
+    # hand the job to the executor gives the slot back.
+    try:
+        job_id = job_manager.reserve_job(kind="video", owner_id=owner_id)
+    except QueueFull as ex:
+        raise quotas.queue_full_error(ex) from ex
+    try:
+        if cloud_required:
             try:
-                validate_outpaint_source(_duration, params)
-            except PricingError as ex:
-                raise HTTPException(status_code=400, detail={"code": "SOURCE_TOO_LONG", "message": str(ex)}) from ex
-        try:
-            require_billing_secrets()
-            fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
-            stage_specs = []
-            if not upscale_only and width != height:
-                stage_specs.append(("outpaint", params["outpaint_model"]))
-            if params["upscale_engine"] == "fal":
-                stage_specs.append(("upscale", params["upscale_model"]))
-            create_billing_job(
-                db,
-                user_id=owner_id,
-                job_id=job_id,
-                kind="video",
-                payment_source=payment_source,
-                stage_id=stage_id,
-                params=params,
-                quote_id=quote_id,
-                stage_specs=stage_specs,
-                fingerprint=submit_fingerprint,
-            )
-        except BillingError as ex:
-            db.rollback()
-            code = getattr(ex, "code", "")
-            status = 402 if code == "INSUFFICIENT_CREDITS" else 503 if code == "BILLING_MISCONFIGURED" else 409
-            raise HTTPException(status_code=status, detail={"code": code or "BILLING_ERROR", "message": str(ex)}) from ex
-        except IntegrityError as ex:
-            # Same-job retry raced the first submit: the winner owns the
-            # reservation — report a conflict, not a 500.
-            db.rollback()
-            raise HTTPException(status_code=409, detail={"code": "BILLING_CONFLICT", "message": "This job was already submitted."}) from ex
-        lifecycle = lifecycle_callback(job_id)
-        on_success = success_callback(job_id)
-        on_failure = failure_callback(job_id)
-
-    # Ownership is checked after the cloud/auth gate above so anonymous cloud
-    # attempts still 401; the error matches a missing stage (no oracle).
-    if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
-        raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
+                require_billing_secrets()
+                fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
+                stage_specs = []
+                if not upscale_only and width != height:
+                    stage_specs.append(("outpaint", params["outpaint_model"]))
+                if params["upscale_engine"] == "fal":
+                    stage_specs.append(("upscale", params["upscale_model"]))
+                create_billing_job(
+                    db,
+                    user_id=owner_id,
+                    job_id=job_id,
+                    kind="video",
+                    payment_source=payment_source,
+                    stage_id=stage_id,
+                    params=params,
+                    quote_id=quote_id,
+                    stage_specs=stage_specs,
+                    fingerprint=submit_fingerprint,
+                )
+            except BillingError as ex:
+                db.rollback()
+                code = getattr(ex, "code", "")
+                status = 402 if code == "INSUFFICIENT_CREDITS" else 503 if code == "BILLING_MISCONFIGURED" else 409
+                raise HTTPException(status_code=status, detail={"code": code or "BILLING_ERROR", "message": str(ex)}) from ex
+            except IntegrityError as ex:
+                # Same-job retry raced the first submit: the winner owns the
+                # reservation — report a conflict, not a 500.
+                db.rollback()
+                raise HTTPException(status_code=409, detail={"code": "BILLING_CONFLICT", "message": "This job was already submitted."}) from ex
+            lifecycle = lifecycle_callback(job_id)
+            on_success = success_callback(job_id)
+            on_failure = failure_callback(job_id)
+    except BaseException:
+        job_manager.discard_job(job_id)
+        raise
 
     kwargs = {
         "video_path": src_path,
@@ -392,7 +404,6 @@ def start_video_process(
         return rec
 
     try:
-        job_manager.create_job(kind="video", owner_id=owner_id, job_id=job_id)
         job_manager.submit(
             job_id,
             process_video,
@@ -443,9 +454,21 @@ def get_job_status(job_id: str, context: AuthContext | None = Depends(get_option
         "progress": rec.progress,
         "elapsed": rec.elapsed,
         "messages": list(rec.messages),
-        "result": rec.result,
+        "result": public_result(rec.result),
         "error": rec.error,
     }
+
+
+@router.post("/jobs/{job_id}/cancel", status_code=202)
+def cancel_video_job(job_id: str, request: Request, context: AuthContext = Depends(require_auth_csrf)):
+    """Cancel the caller's job: at once while queued, else before its next stage."""
+    validate_origin(request)
+    rec = job_manager.get_job(job_id)
+    if not rec or rec.kind != "video" or rec.owner_id != context.user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job_manager.cancel(job_id):
+        raise HTTPException(status_code=409, detail={"code": "JOB_FINISHED", "message": "This job has already finished."})
+    return {"job_id": job_id, "status": rec.status.value}
 
 
 @router.get("/jobs/{job_id}/stream")
@@ -468,7 +491,7 @@ def get_job_result(job_id: str, context: AuthContext | None = Depends(get_option
         "status": rec.status.value,
         "phase": rec.phase,
         "elapsed": rec.elapsed,
-        "result": rec.result,
+        "result": public_result(rec.result),
         "error": rec.error,
     }
 

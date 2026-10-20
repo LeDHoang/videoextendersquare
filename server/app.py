@@ -91,6 +91,7 @@ async def _cleanup_loop():
         # are logged (and reach Sentry) but never crash the loop.
         for step in (
             job_manager.cleanup_old,
+            job_manager.sweep_orphan_dirs,
             image.cleanup_stale_uploads,
             video.cleanup_stale_uploads,
             messages.cleanup_message_events,
