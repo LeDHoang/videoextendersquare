@@ -1,13 +1,25 @@
 // Fetch wrapper shared by development (Vite proxy) and production.
 
 export class ApiError extends Error {
-  constructor(message, status, code, detail) {
+  constructor(message, status, code, detail, retryAfter = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code || 'REQUEST_FAILED';
     this.detail = detail;
+    // Seconds from the Retry-After header (429 QUEUE_FULL, rate limits); null when absent.
+    this.retryAfter = retryAfter;
   }
+}
+
+// Retry-After is either delta-seconds or an HTTP date; normalise both to whole seconds.
+export function parseRetryAfter(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return Number(text);
+  const at = Date.parse(text);
+  if (Number.isNaN(at)) return null;
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000));
 }
 
 function cookie(name) {
@@ -33,7 +45,10 @@ async function handle(res) {
       res.statusText ||
       'Request failed';
     const code = detail && typeof detail === 'object' ? detail.code : null;
-    throw new ApiError(message, res.status, code, detail);
+    const retryAfter =
+      parseRetryAfter(res.headers?.get?.('Retry-After')) ??
+      (detail && typeof detail === 'object' ? parseRetryAfter(detail.retry_after) : null);
+    throw new ApiError(message, res.status, code, detail, retryAfter);
   }
   return body;
 }

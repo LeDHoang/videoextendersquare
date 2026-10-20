@@ -31,6 +31,24 @@ describe('PrivacyPage', () => {
     expect(screen.getByText(/this metadata can be visible to people who download it/)).toBeInTheDocument();
   });
 
+  it('lists every third-party processor in the providers section', () => {
+    renderPrivacy();
+    const providers = screen.getByRole('heading', { level: 2, name: /^4\./ }).closest('section');
+    const names = Array.from(providers.querySelectorAll('li > strong')).map((n) => n.textContent);
+    for (const name of ['fal.ai', 'Cloudflare', 'Hetzner', 'Sentry']) {
+      expect(names.some((n) => n.includes(name))).toBe(true);
+    }
+    expect(providers).toHaveTextContent(/Cloudflare Tunnel carries all traffic/);
+    expect(providers).toHaveTextContent(/Cloudflare R2 stores published photos and videos/);
+    expect(providers).toHaveTextContent(/Local processing does not send your media to fal\.ai/);
+  });
+
+  it('keeps the statement that VR pose data never leaves the device', () => {
+    renderPrivacy();
+    expect(screen.getByText(/uses your headset and hand position only on your device/)).toBeInTheDocument();
+    expect(screen.getByText(/We do not send or store this data/)).toBeInTheDocument();
+  });
+
   it('links to the Terms and highlights unfilled legal values', () => {
     renderPrivacy();
     expect(screen.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', '/terms');

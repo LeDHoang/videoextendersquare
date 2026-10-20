@@ -2836,6 +2836,26 @@ input[type='range']::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.sx-job-status.sx-cancelled {
+  color: var(--sx-warn-hi);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--sx-rule-strong);
+}
+
+.sx-job-cancel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sx-2) var(--sx-3);
+  margin: calc(-1 * var(--sx-2)) 0 var(--sx-4);
+}
+
+.sx-job-cancel-note {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: var(--sx-ink-3);
+}
+
 .sx-progress-track {
   height: 6px;
   background: var(--sx-surface-2);
@@ -3006,6 +3026,18 @@ code {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--sx-2) var(--sx-4);
+}
+
+.sx-cost-disclosure {
+  margin: var(--sx-3) 0 0;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--sx-ink-3);
+}
+
+.sx-cost-disclosure a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 @media (max-width: 600px) {

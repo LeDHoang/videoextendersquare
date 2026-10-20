@@ -1699,6 +1699,7 @@
   .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
   .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
   .reels-collect-dialog[hidden], .reels-collect-backdrop[hidden] { display:none !important; }
+  .reels-vr-notice-text { margin:0; padding:16px 14px; color:var(--sx-ink-2); font:500 13px/1.55 "JetBrains Mono",monospace; }
   .reels-phone-frame.sx-fs-active .reels-pack-bar, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-bar { top:max(14px, calc(env(safe-area-inset-top) + 8px)); left:max(14px, env(safe-area-inset-left)); right:76px; }
   .reels-phone-frame.sx-fs-active .reels-pack-card, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-card { padding:max(62px, calc(env(safe-area-inset-top) + 56px)) var(--pk-r,76px) var(--pk-b,40px) var(--pk-l,max(14px, env(safe-area-inset-left))); }
   .reels-phone-frame.sx-pack-stage .reels-meta, .reels-phone-frame.sx-pack-stage .reels-twitch-ticker { visibility:hidden; }
@@ -2207,6 +2208,19 @@
     <div class="reels-pack-queue-actions">
       <button type="button" id="collectMenuNew">+ NEW COLLECTION</button>
       <button type="button" id="collectMenuJustSave">ALL SAVED</button>
+    </div>
+  </section>
+
+  <!-- One-time notice shown before the first immersive VR session. -->
+  <div class="reels-collect-backdrop" id="vrNoticeBackdrop" hidden></div>
+  <section class="reels-collect-dialog" id="vrNoticePanel" role="dialog" aria-modal="true" aria-labelledby="vrNoticeTitle" aria-describedby="vrNoticeText" hidden>
+    <div class="reels-pack-queue-head">
+      <div><strong id="vrNoticeTitle">BEFORE YOU ENTER VR</strong><small>Shown once on this device</small></div>
+    </div>
+    <p class="reels-vr-notice-text" id="vrNoticeText">VR uses your head and hand position to draw the scene. This pose data is processed on your device only. ECHO never sends it to a server or stores it.</p>
+    <div class="reels-pack-queue-actions">
+      <button type="button" id="vrNoticeCancel">CANCEL</button>
+      <button type="button" id="vrNoticeContinue">CONTINUE TO VR</button>
     </div>
   </section>
 
@@ -6971,6 +6985,68 @@
         navigator.xr.addEventListener('devicechange', refreshVrButton);
       }
 
+      // Calls enterVR before any await so it runs inside the caller's click
+      // (WebXR requestSession needs that user activation).
+      async function startImmersiveSession() {
+        try {
+          const session = await WebXRVR.enterVR();
+          if (!session) {
+            showFlash('VR SESSION FAILED — CHECK CONSOLE');
+          } else {
+            // The onEnterVR callback already swapped 3D posts to stereo.
+            showFlash('ENTERING IMMERSIVE VR');
+          }
+        } catch (err) {
+          console.error('[WebXRVR] enterVR error:', err);
+          showFlash('VR ERROR: ' + (err.message || 'SESSION FAILED'));
+        }
+      }
+
+      // <vr-pose-notice>
+      // One-time notice before the first immersive session: head/hand pose is
+      // processed on-device only. Continue's own click handler calls
+      // onContinue (enterVR) synchronously — window.confirm or an await here
+      // would spend the user activation WebXR requires.
+      const VR_POSE_NOTICE_KEY = 'echo_vr_pose_notice_v1';
+      function vrPoseNoticeSeen() {
+        try { return window.localStorage.getItem(VR_POSE_NOTICE_KEY) === '1'; } catch (e) { return false; }
+      }
+      function rememberVrPoseNotice() {
+        try { window.localStorage.setItem(VR_POSE_NOTICE_KEY, '1'); } catch (e) {}
+      }
+      function showVrPoseNotice(onContinue) {
+        const panel = document.getElementById('vrNoticePanel');
+        const backdrop = document.getElementById('vrNoticeBackdrop');
+        const continueBtn = document.getElementById('vrNoticeContinue');
+        const cancelBtn = document.getElementById('vrNoticeCancel');
+        if (!panel || !continueBtn) { onContinue(); return; }
+        const close = () => {
+          panel.hidden = true;
+          if (backdrop) backdrop.hidden = true;
+          continueBtn.onclick = null;
+          if (cancelBtn) cancelBtn.onclick = null;
+          if (backdrop) backdrop.onclick = null;
+          panel.onkeydown = null;
+        };
+        continueBtn.onclick = () => {
+          close();
+          rememberVrPoseNotice();
+          onContinue();
+        };
+        if (cancelBtn) cancelBtn.onclick = close;
+        if (backdrop) backdrop.onclick = close;
+        // Keep player shortcuts (arrows, Esc → drawer) from acting behind the notice.
+        panel.onkeydown = (ev) => {
+          if (ev.key === 'Tab') return;
+          if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+          ev.stopPropagation();
+        };
+        panel.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        try { continueBtn.focus(); } catch (e) {}
+      }
+      // </vr-pose-notice>
+
       if (vrBtn) {
         vrBtn.addEventListener('click', async function() {
           if (!window.__sxReelsReady) {
@@ -7026,18 +7102,12 @@
             return;
           }
 
-          try {
-            const session = await WebXRVR.enterVR();
-            if (!session) {
-              showFlash('VR SESSION FAILED — CHECK CONSOLE');
-            } else {
-              // The onEnterVR callback already swapped 3D posts to stereo.
-              showFlash('ENTERING IMMERSIVE VR');
-            }
-          } catch (err) {
-            console.error('[WebXRVR] enterVR error:', err);
-            showFlash('VR ERROR: ' + (err.message || 'SESSION FAILED'));
+          // First time only: the notice's Continue click starts the session.
+          if (!vrPoseNoticeSeen()) {
+            showVrPoseNotice(startImmersiveSession);
+            return;
           }
+          startImmersiveSession();
         });
       }
     }

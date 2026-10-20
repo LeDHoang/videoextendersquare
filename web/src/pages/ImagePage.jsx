@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { assertUploadSize } from '../utils/uploadLimits.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -140,10 +141,11 @@ export default function ImagePage() {
     const staged = [];
     for (const f of files) {
       try {
+        assertUploadSize(f, 'image', cfg?.config);
         const meta = await api.upload('/api/image/upload', f);
         staged.push({ name: f.name, file: f, ...meta });
       } catch (e) {
-        setError(`Could not read image ${f.name}: ${e.message}`);
+        setError(`Could not read image ${f.name}: ${billingErrorMessage(e)}`);
       }
     }
     setItems(staged);

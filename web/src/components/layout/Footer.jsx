@@ -10,7 +10,7 @@ export default function Footer() {
           <span>ECHO</span>
         </NavLink>
         <p className="sx-footer-legal">
-          © {new Date().getFullYear()} ECHO Inc. · <NavLink to="/terms" className="sx-footer-link">TERMS</NavLink> · <NavLink to="/privacy" className="sx-footer-link">PRIVACY</NavLink>
+          © {new Date().getFullYear()} ECHO Inc. · <NavLink to="/terms" className="sx-footer-link">TERMS</NavLink> · <NavLink to="/privacy" className="sx-footer-link">PRIVACY</NavLink> · <NavLink to="/rules" className="sx-footer-link">RULES</NavLink>
         </p>
       </div>
     </footer>

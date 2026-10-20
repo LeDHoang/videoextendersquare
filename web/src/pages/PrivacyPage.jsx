@@ -88,12 +88,14 @@ export default function PrivacyPage() {
       <Section id="privacy-share" title="4. Who receives your data">
         <ul>
           <li><strong>Other users:</strong> your public profile, public posts (including location tags), comments, and Reel Packs you share. Messages go only to the people in the conversation.</li>
-          <li><strong>fal.ai and the AI models it hosts</strong> (for example Luma Ray): the media and settings for cloud AI jobs you start, so they can produce the result. The media is uploaded to fal.ai’s storage for the job.</li>
+          <li><strong>fal.ai and the AI models it hosts</strong> (for example Luma Ray): when you choose cloud processing, the photos or videos you upload and your job settings are sent to fal.ai so it can produce the result. The media is uploaded to fal.ai’s storage for the job. Local processing does not send your media to fal.ai.</li>
           <li><strong>Stripe:</strong> checkout and payments. Stripe receives your payment details directly, plus your ECHO account ID and the pack you chose.</li>
           <li><strong>Tenor (Google):</strong> GIF search terms, which our server sends for you. GIF images then load directly from Tenor’s servers, so Tenor receives your IP address and browser details when you search for or view a GIF.</li>
           <li><strong>OpenStreetMap:</strong> map tile requests. Our server fetches and caches the tiles, so OpenStreetMap does not receive your IP address from us.</li>
           <li><strong>Our email provider:</strong> your email address and the content of service emails.</li>
-          <li><strong>Hosting and content-delivery providers</strong> (including Cloudflare): they store and deliver the Service and its media for us.</li>
+          <li><strong>Cloudflare:</strong> Cloudflare Tunnel carries all traffic between your browser and our server, Cloudflare’s CDN caches and delivers media, and Cloudflare R2 stores published photos and videos. Cloudflare therefore receives your IP address and the requests you make.</li>
+          <li><strong>Hetzner:</strong> hosts the server that runs ECHO, including our database and the files you upload.</li>
+          <li><strong>Sentry:</strong> receives error reports from our server when something goes wrong, which can include technical details of the request that failed. Sentry is not used in the web app or the VR player.</li>
           <li><strong>Authorities:</strong> when the law requires it, or to protect people from serious harm, for example reports of child sexual abuse material.</li>
           <li><strong>A buyer or successor</strong> if ECHO is sold or merged. We will tell you before your data is covered by a different policy.</li>
         </ul>
@@ -166,8 +168,8 @@ export default function PrivacyPage() {
 
       <Section id="privacy-transfers" title="11. International transfers">
         <p>
-          We store data in <V k="hostingRegion" />. Some providers listed in section 4, such as fal.ai, Stripe,
-          and Google, process data in other countries, including the United States. Where the law requires it,
+          We store data in <V k="hostingRegion" />. Some providers listed in section 4, such as fal.ai, Cloudflare,
+          Sentry, Stripe, and Google, process data in other countries, including the United States. Where the law requires it,
           we use contracts or other approved safeguards for these transfers.
         </p>
       </Section>

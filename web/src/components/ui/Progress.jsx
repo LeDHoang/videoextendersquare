@@ -12,7 +12,15 @@ export default function Progress({ job, name }) {
   if (!job) return null;
   const { status, phase, progress, elapsed, messages } = job;
   const cls =
-    status === 'complete' ? 'sx-done' : status === 'failed' ? 'sx-fail' : status === 'running' ? 'sx-run' : 'sx-queued';
+    status === 'complete'
+      ? 'sx-done'
+      : status === 'failed'
+      ? 'sx-fail'
+      : status === 'cancelled'
+      ? 'sx-cancelled'
+      : status === 'running'
+      ? 'sx-run'
+      : 'sx-queued';
   const pct = Math.min(100, Math.max(0, Math.round((progress || 0) * 100)));
 
   return (

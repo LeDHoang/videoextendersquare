@@ -125,6 +125,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
+    xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -149,6 +150,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
       if (has('horizonhud', '1')) debugFlags.horizonhud = true;
+      if (has('xrdiag', '1')) debugFlags.xrdiag = true;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
       if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
     } catch (e) {}
@@ -7051,6 +7053,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function postXRDiag(time) {
+    // Debug-only: never sends anything unless ?xrdiag=1 opted in.
+    if (!debugFlags.xrdiag) return;
     try {
       if (xrDiagLastT >= 0) {
         const dt = time - xrDiagLastT;
@@ -10034,6 +10038,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     getSourceStereo() { return sourceStereo; },
 
     __test: {
+      postXRDiag,
       locationToUnit,
       earthZoneAngularRadius,
       earthZoneUV,
@@ -10082,7 +10087,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
