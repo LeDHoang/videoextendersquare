@@ -50,16 +50,72 @@ make streamlit        # streamlit run app.py on :8501
 
 Kept working indefinitely — `app.py` is untouched by the new stack.
 
-## Docker
+## Docker / production (compose)
+
+Production is `compose.yaml` on one VPS: `app` + `postgres:16` + `cloudflared`
+(Cloudflare Tunnel, no inbound ports). Full procedure, Cloudflare/R2 dashboard
+checklist and operations: [`docs/deploy-runbook.md`](docs/deploy-runbook.md).
+Backups and the restore drill: [`docs/backup-restore-runbook.md`](docs/backup-restore-runbook.md).
 
 ```bash
-docker build -t square-extender .
-docker run -p 8000:8000 -v "$(pwd)/output:/app/output" -e FAL_KEY=... square-extender
+cp deploy/env.example .env && chmod 600 .env     # fill in every <...>
+docker compose build --build-arg GIT_SHA="$(git rev-parse HEAD)"
+docker compose up -d                             # app + postgres on 127.0.0.1:8000
+docker compose --profile tunnel up -d            # + cloudflared
 ```
 
-Single container serves the API, the static React app, and `/media/*` on port
-8000. No VapourSynth/znedi3 inside the container, so the STUDIO engine is
-auto-disabled (FAST and FAL AI work). Mount `output/` to keep renders.
+- The image (`Dockerfile`) copies only the runtime trees (`server core pipeline
+  migrations ui` + the built React app), runs as non-root uid 10001, and wraps
+  `ffmpeg` in `nice` (`SX_FFMPEG_NICE`, default 10). No VapourSynth/znedi3 inside
+  the container, so the STUDIO engine is auto-disabled (FAST and FAL AI work).
+- `deploy/entrypoint.sh` runs `alembic upgrade head`, then **one** uvicorn worker
+  (`--proxy-headers`, 20 s graceful shutdown). Never add workers: JobManager and
+  staged uploads are in-process.
+- Volumes: `data` (`/app/data`: avatars, map-tile cache), `output`
+  (`/app/output`), `pgdata`. Staged uploads and job temp files live in container
+  `/tmp` and are lost on restart.
+- Caps: app `cpus: 3`, `mem_limit: 6g`; postgres `cpus: 1.5`; json-file logs
+  rotate at 10 MB × 5.
+- `compose.yaml` builds `DATABASE_URL` from `POSTGRES_USER/PASSWORD/DB`.
+- CI (`.github/workflows/ci.yml`) runs `make test`, migrations + the pool test on
+  PostgreSQL 16, and a Docker build with image-content assertions.
+
+Plain single-container smoke test (SQLite, dev mode):
+
+```bash
+docker build -t echo-app .
+docker run --rm -p 8000:8000 -v echo-data:/app/data -v echo-output:/app/output -e FAL_KEY=... echo-app
+```
+
+### Production environment
+
+`deploy/env.example` is the complete template. With `SX_ENV=production` the app
+refuses to boot until every check in `server/settings.py` passes.
+
+| Variable | Production value | Notes |
+|---|---|---|
+| `SX_ENV` | `production` | Fail-fast config checks; no `/media` mount, no legacy discovery, diagnostics off |
+| `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY`, `SX_FAL_KEY_ENCRYPTION_KEY` | 3 independent secrets, ≥ 32 chars | Never the dev default. **Escrow all three** — backups are unreadable without them |
+| `DATABASE_URL` | `postgresql+psycopg://…@postgres:5432/echo` | Built by `compose.yaml` from `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
+| `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` | `https://<domain>` | Must be `https://` |
+| `SX_MEDIA_BASE_URL` | `https://media.<domain>` | R2 public bucket custom domain; must be `https://` |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BUCKET` | set | Token scoped to the public bucket only |
+| `SX_TRUST_PROXY_HEADERS` | `1` | Correct behind Cloudflare Tunnel (only cloudflared reaches the app) |
+| `SX_COOKIE_SECURE` | `1` | HTTPS-only cookies |
+| `SX_DEV_ORIGINS` | _(empty)_ | Localhost origins are rejected at boot |
+| `TUNNEL_TOKEN` | set | Read by the `cloudflared` service |
+| `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
+| `SX_REGISTRATION_ENABLED` / `SX_REGISTRATION_ALLOWLIST` | `0` / invited emails | Invite-only beta |
+| `SX_MAX_VIDEO_UPLOAD_MB` / `SX_MAX_IMAGE_UPLOAD_MB` | `95` / `50` | Upload size caps (95 MB stays under Cloudflare's 100 MB request limit) |
+| `SX_UPLOAD_HOURLY_MAX` | `30` | Uploads per user per hour |
+| `SX_VIDEO_WORKERS` / `SX_IMAGE_WORKERS` | `1` / `2` | Job concurrency |
+| `SX_MAX_PENDING_JOBS` / `SX_MAX_JOBS_PER_USER` | `6` / `2` | Queue caps (429 when full) |
+| `SX_STAGED_BYTES_MAX` | e.g. `2147483648` | Total bytes held in staged uploads |
+| `SX_DISK_MIN_FREE_GB` | `5` | Refuse new work below this free space |
+| `SX_JOB_RETENTION_S` | `21600` | Finished-job retention (6 h) |
+| `SX_FFMPEG_THREADS` / `SX_FFMPEG_NICE` | `2` / `10` | Per-encode threads / nice level |
+| `SX_REEL_PACK_CREATION_ENABLED`, `SX_REEL_PACK_DISCOVERY_ENABLED`, `SX_REEL_PACK_IMMERSIVE_ENABLED` | `1` | Explicit beta launch decision: Reel Packs ON |
+| `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, `SX_REEL_REWARDS_ENABLED` | `0` | Off for the beta |
 
 ## Environment variables
 
@@ -111,7 +167,7 @@ VR globe debugging: append `?earthmap=0` to disable the slippy-map tile layer on
 
 ## Credits, Stripe, and reel-reward deployment notes
 
-Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migration `20260913_0008`, back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
+Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migrations through head (`20261020_0014`), back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
 
 When any billing flag is on, `SX_SECURITY_SECRET` must be a real secret (not the development default) and `SX_FAL_KEY_ENCRYPTION_KEY` must be at least 16 characters and not a placeholder — otherwise paid endpoints (`/api/billing/*`, credit-funded `/process`, reward claims) return 503 `BILLING_MISCONFIGURED` while free local processing and reels keep working. The misconfiguration is also logged loudly at startup.
 
@@ -133,7 +189,7 @@ Reward anti-gaming posture (accepted, documented): the watch threshold uses the 
 
 ## Messaging deployment notes
 
-Run `make migrate` before startup so the database is at revision `20260913_0008`. Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
+Run `make migrate` before startup so the database is at revision `20261020_0014` (head). Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
 
 Set `SX_PUBLIC_URL` to the externally reachable origin, without a trailing slash. This is the base for copied reel links and QR codes. Tenor is optional; if enabled, the backend needs outbound HTTPS access to `tenor.googleapis.com`, while stored GIF URLs must match `SX_TENOR_ALLOWED_HOSTS`.
 

@@ -37,6 +37,14 @@
 #                             stereo SBS/top-bottom posts; see docs/stereo-3d-reels.md)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
+#   ../deploy/         — production deploy files (NOT dev tooling; see
+#                        docs/deploy-runbook.md):
+#                          entrypoint.sh  — container entrypoint (alembic upgrade head,
+#                                           then one uvicorn worker)
+#                          ffmpeg-nice.sh — installed as /usr/local/bin/ffmpeg in the image
+#                          backup.sh      — host cron: pg_dump + avatars to private R2
+#                                           (docs/backup-restore-runbook.md)
+#                          env.example    — production .env template for compose.yaml
 #   dev/               — one-off paid-API / hardware experiment scripts, NOT
 #                        collected by pytest (deliberately not named test_*):
 #                          dev/ltx_lora_debug_job.py    — real fal.ai LoRA job (~$0.01)

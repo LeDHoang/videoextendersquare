@@ -11,6 +11,7 @@ Single source of truth for where generated files belong. Follow this on every ta
 | CDP / browser debug probes (Quest, reels player) | `scripts/` | `debug-*.cjs` |
 | Live-endpoint verification probes | `scripts/` | `verify_*.cjs` |
 | Batch pipeline utilities (upscale/spatialize/playground) | `scripts/` | `batch_*.py`, `*_playground.py` |
+| Production deploy files (container entrypoint, ffmpeg wrapper, host backup cron, prod env template) | `deploy/` | `*.sh`, `env.example`; wired from `Dockerfile` / `compose.yaml` (see `docs/deploy-runbook.md`) |
 | One-off generated artifacts, captures, logs | `reports/` or `logs/` (both gitignored) | — |
 | Documentation you write | `docs/` | kebab-case |
 

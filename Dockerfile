@@ -1,13 +1,19 @@
 # Multi-stage build: Node compiles the React app, Python serves it.
+# Production topology (one VPS, compose.yaml, Cloudflare Tunnel): docs/deploy-runbook.md
 
 FROM node:22-slim AS web-build
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY web/ .
 RUN npm run build
 
 FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -15,20 +21,54 @@ WORKDIR /app
 # Note: this image has no VapourSynth/znedi3, so the "Studio" upscale engine is
 # unavailable inside the container. The app detects this and disables it with an
 # explanation; the "Fast" and "FAL AI" engines work normally.
+# procps provides `ps` for checking ffmpeg niceness in production.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Every call site runs bare `ffmpeg` via PATH; /usr/local/bin wins over
+# /usr/bin, so all encodes run under nice (SX_FFMPEG_NICE, default 10) and
+# web/SSE/Postgres keep CPU priority on the shared box.
+COPY deploy/ffmpeg-nice.sh /usr/local/bin/ffmpeg
+RUN chmod 0755 /usr/local/bin/ffmpeg
 
-COPY . .
+COPY requirements.txt .
+RUN pip install -r requirements.txt && rm requirements.txt
+
+# Non-root runtime user. /app/data and /app/output are pre-created and owned
+# by it so fresh named volumes mounted there inherit the ownership.
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home-dir /home/app --create-home app \
+    && mkdir -p /app/data /app/output \
+    && chown app:app /app/data /app/output
+
+# Allowlist: only the runtime trees. Tests, docs, scripts, video/, local
+# state and secrets never enter the image.
+COPY server/ server/
+COPY core/ core/
+COPY pipeline/ pipeline/
+COPY migrations/ migrations/
+COPY alembic.ini .
+COPY ui/ ui/
+# Read at runtime by server/routers/reels.py: player icon SVGs and the Earth
+# texture directory (web/public/assets).
+COPY web/src/components/icons/svg/ web/src/components/icons/svg/
+COPY web/public/assets/ web/public/assets/
 # Stage the built React app where server/app.py expects it (server/static).
-COPY --from=web-build /src/dist /app/server/static
+COPY --from=web-build /src/dist server/static
+COPY deploy/entrypoint.sh /usr/local/bin/sx-entrypoint
+RUN chmod 0755 /usr/local/bin/sx-entrypoint
+
+# Sentry release tag; pass --build-arg GIT_SHA=$(git rev-parse HEAD).
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
+USER app
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=4)"
 
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/usr/local/bin/sx-entrypoint"]
