@@ -18,3 +18,5 @@ email-validator>=2.1
 psycopg[binary]>=3.1
 cryptography>=42,<49
 stripe>=11,<13
+boto3>=1.35,<2
+sentry-sdk[fastapi]>=2.0,<3
