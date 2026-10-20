@@ -9,7 +9,9 @@ export default function Footer() {
           <AnimatedEchoLogo className="sx-footer-logo" />
           <span>ECHO</span>
         </NavLink>
-        <p className="sx-footer-legal">© {new Date().getFullYear()} ECHO Inc.</p>
+        <p className="sx-footer-legal">
+          © {new Date().getFullYear()} ECHO Inc. · <NavLink to="/terms" className="sx-footer-link">TERMS</NavLink> · <NavLink to="/privacy" className="sx-footer-link">PRIVACY</NavLink>
+        </p>
       </div>
     </footer>
   );

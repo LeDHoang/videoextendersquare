@@ -63,6 +63,7 @@ def register(client: TestClient, username: str, email: str) -> dict:
             "email": email,
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username.title(),
         },
     )

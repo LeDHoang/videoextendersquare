@@ -45,7 +45,7 @@ def app(tmp_path, monkeypatch):
 def _register(client, email, username):
     return client.post(
         "/api/auth/register",
-        json={"email": email, "username": username, "password": PASSWORD, "display_name": username},
+        json={"email": email, "username": username, "password": PASSWORD, "accept_terms": True, "display_name": username},
     )
 
 

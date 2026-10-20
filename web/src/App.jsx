@@ -24,6 +24,8 @@ const WalletPage = lazy(() => import('./pages/WalletPage.jsx'));
 
 const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
 const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
+const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage.jsx'));
 export default function App() {
   const { pathname } = useLocation();
   useDocumentTitle(routeTitle(pathname));
@@ -53,6 +55,8 @@ export default function App() {
           <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
           <Route path="/messages/:conversationId" element={<RequireAuth><MessagesPage /></RequireAuth>} />
           <Route path="/upload" element={<RequireAuth><UploadPage /></RequireAuth>} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>

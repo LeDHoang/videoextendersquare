@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, SubmitButton } from '../components/auth/AuthKit.jsx';
+import { AuthCheckbox, AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, SubmitButton } from '../components/auth/AuthKit.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import {
   DISPLAY_NAME_MAX,
@@ -63,7 +63,7 @@ const RAIL = {
   },
 };
 
-const EMPTY_FORM = { email: '', username: '', display_name: '', identifier: '', password: '' };
+const EMPTY_FORM = { email: '', username: '', display_name: '', identifier: '', password: '', accept_terms: false };
 
 function validate(mode, form) {
   const errors = {};
@@ -74,6 +74,7 @@ function validate(mode, form) {
     if (email) errors.email = email;
     if (username) errors.username = username;
     if (password) errors.password = password;
+    if (!form.accept_terms) errors.accept_terms = 'Agree to the Terms of Service and Privacy Policy to create an account.';
   } else {
     if (!form.identifier.trim()) errors.identifier = 'Enter your email or username.';
     if (!form.password) errors.password = 'Enter your password.';
@@ -134,7 +135,7 @@ export default function AuthPage({ mode = 'login' }) {
   const submit = async (event) => {
     event.preventDefault();
     if (busy) return;
-    const names = isRegister ? ['email', 'username', 'password'] : ['identifier', 'password'];
+    const names = isRegister ? ['email', 'username', 'password', 'accept_terms'] : ['identifier', 'password'];
     setTouched((current) => ({ ...current, ...Object.fromEntries(names.map((name) => [name, true])) }));
     const firstInvalid = names.find((name) => errors[name]);
     if (firstInvalid) {
@@ -150,6 +151,7 @@ export default function AuthPage({ mode = 'login' }) {
           username: form.username,
           display_name: form.display_name.trim(),
           password: form.password,
+          accept_terms: form.accept_terms,
         });
       } else {
         await login({ identifier: form.identifier.trim(), password: form.password });
@@ -163,7 +165,7 @@ export default function AuthPage({ mode = 'login' }) {
     } catch (requestError) {
       const field = requestError?.detail?.field;
       const message = requestError?.message || 'Unable to continue.';
-      if (isRegister && ['email', 'username', 'password'].includes(field)) {
+      if (isRegister && ['email', 'username', 'password', 'accept_terms'].includes(field)) {
         setServerErrors((current) => ({ ...current, [field]: message }));
         focusField(field);
       } else {
@@ -236,6 +238,22 @@ export default function AuthPage({ mode = 'login' }) {
             />
             <PasswordField label="PASSWORD" autoComplete="new-password" {...bind('password')} />
             <PasswordRules password={form.password} />
+            <AuthCheckbox
+              checked={form.accept_terms}
+              onChange={(event) => {
+                const { checked } = event.target;
+                setForm((current) => ({ ...current, accept_terms: checked }));
+                setTouched((current) => ({ ...current, accept_terms: true }));
+                setServerErrors((current) => (current.accept_terms ? { ...current, accept_terms: '' } : current));
+              }}
+              error={shownError('accept_terms')}
+              inputRef={(node) => { fields.current.accept_terms = node; }}
+            >
+              I agree to the{' '}
+              <Link className="sx-au-link" to="/terms" target="_blank" rel="noopener">Terms of Service</Link>
+              {' '}and{' '}
+              <Link className="sx-au-link" to="/privacy" target="_blank" rel="noopener">Privacy Policy</Link>.
+            </AuthCheckbox>
           </>
         ) : (
           <>

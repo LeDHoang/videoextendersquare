@@ -56,6 +56,10 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    # Terms of Service version agreed to at signup (server.routers.social.TERMS_VERSION); NULL for
+    # accounts created before acceptance was recorded, or not through /api/auth/register.
+    terms_version = Column(String(32), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AuthSession(Base):

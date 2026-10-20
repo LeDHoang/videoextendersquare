@@ -121,6 +121,27 @@ export function AuthField({ label, hint, error, aside, prefix, suffix, inputRef,
   );
 }
 
+// Checkbox row for consent-style fields; children are the label (may contain links).
+export function AuthCheckbox({ checked, onChange, error, inputRef, children }) {
+  const id = useId();
+  const messageId = id + '-msg';
+  return (
+    <div className="sx-au-consent">
+      <input
+        id={id}
+        ref={inputRef}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? messageId : undefined}
+      />
+      <label htmlFor={id}>{children}</label>
+      {error ? <p id={messageId} className="sx-au-msg sx-au-msg--err">{error}</p> : null}
+    </div>
+  );
+}
+
 // Password input with a show/hide toggle and a caps-lock warning (the usual cause of "wrong password").
 export function PasswordField({ onKeyUp, onKeyDown, onBlur, hint, ...props }) {
   const [shown, setShown] = useState(false);

@@ -59,6 +59,7 @@ def register(client: TestClient, username: str, email: str, password: str = PASS
             "email": email,
             "username": username,
             "password": password,
+            "accept_terms": True,
             "display_name": username.title(),
         },
     )

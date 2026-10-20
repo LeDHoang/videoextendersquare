@@ -134,6 +134,7 @@ def register_and_seed(app: FastAPI, client: TestClient) -> dict:
             "email": "pool@example.com",
             "username": "pooluser",
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": "Pool",
         },
     )

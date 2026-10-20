@@ -103,6 +103,7 @@ def register(client, username, email=None):
             "email": email or f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )

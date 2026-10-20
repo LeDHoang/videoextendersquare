@@ -95,6 +95,7 @@ def register(client, username, email=None):
             "email": email or f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )
@@ -125,7 +126,7 @@ def test_registration_closed_flag_variants(app, monkeypatch, flag):
         response = client.post(
             "/api/auth/register",
             json={"email": "v@example.com", "username": "edge_variant",
-                  "password": PASSWORD, "display_name": "v"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "v"},
         )
         assert response.status_code == 403
         assert response.json()["detail"]["code"] == "REGISTRATION_DISABLED"
@@ -138,7 +139,7 @@ def test_registration_open_ignores_allowlist(app, monkeypatch):
         response = client.post(
             "/api/auth/register",
             json={"email": "anyone@example.com", "username": "edge_open",
-                  "password": PASSWORD, "display_name": "a"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "a"},
         )
         assert response.status_code == 200, response.text
 
@@ -156,7 +157,7 @@ def test_import_time_constant_and_env_both_close(app, monkeypatch):
         response = client.post(
             "/api/auth/register",
             json={"email": "c@example.com", "username": "edge_and",
-                  "password": PASSWORD, "display_name": "c"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "c"},
         )
         assert response.status_code == 403
 

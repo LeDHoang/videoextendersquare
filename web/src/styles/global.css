@@ -1679,6 +1679,74 @@ button:hover .sx-sidebar-hero-logo,
   letter-spacing: 0.06em;
 }
 
+.sx-footer-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sx-footer-link:hover {
+  color: var(--sx-ink);
+}
+
+.sx-footer-link:focus-visible {
+  outline: var(--sx-focus-ring);
+  outline-offset: var(--sx-focus-offset);
+}
+
+/* Legal pages (Terms): a readable single column, not the full-width browsing layout */
+.sx-legal {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-bottom: var(--sx-7);
+  color: var(--sx-ink-2);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.sx-legal-section {
+  padding-top: var(--sx-5);
+}
+
+.sx-legal-section h2 {
+  margin: 0 0 var(--sx-3);
+  color: var(--sx-ink);
+  font: 700 0.8rem/1.4 var(--sx-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sx-legal-section p,
+.sx-legal-section ul {
+  margin: 0 0 var(--sx-3);
+}
+
+.sx-legal-section ul {
+  padding-left: var(--sx-5);
+}
+
+.sx-legal-section li + li {
+  margin-top: var(--sx-2);
+}
+
+.sx-legal-section strong {
+  color: var(--sx-ink);
+}
+
+.sx-legal-section a {
+  color: var(--sx-accent);
+}
+
+/* Unfilled legal values: loud on purpose so a placeholder can't ship unnoticed */
+.sx-legal-todo {
+  padding: 0 4px;
+  background: var(--sx-warn-dim);
+  color: var(--sx-warn-hi);
+  border: 1px dashed var(--sx-warn-border);
+  font-family: var(--sx-font-mono);
+  font-size: 0.85em;
+}
+
 
 /* Browsing pages (Reels, Explore, tag and location feeds, Compare, profiles, packs) use the whole
    screen: grids add columns and the player grows instead of sitting in a 1440px strip.
@@ -9837,6 +9905,38 @@ a.sx-xh-btn { text-decoration: none; }
 }
 
 .sx-au-msg--err { color: var(--sx-danger-hi); }
+
+/* Consent checkbox (signup Terms acceptance) */
+.sx-au-consent {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--sx-3);
+  row-gap: var(--sx-2);
+  align-items: start;
+}
+.sx-au-consent > input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--sx-accent);
+  cursor: pointer;
+}
+.sx-au-consent > input:focus-visible { outline: var(--sx-focus-ring); outline-offset: var(--sx-focus-offset); }
+.sx-au-consent > input[aria-invalid='true'] { outline: 1px solid var(--sx-danger); outline-offset: 2px; }
+.sx-au-consent > label {
+  color: var(--sx-ink-2);
+  font: 500 0.78rem/1.55 'JetBrains Mono', monospace;
+  cursor: pointer;
+}
+.sx-au-consent > .sx-au-msg { grid-column: 2; }
+.sx-au-consent .sx-au-link {
+  display: inline;
+  padding: 0;
+  font: inherit;
+  letter-spacing: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .sx-au-msg--warn { color: var(--sx-warn-hi); letter-spacing: 0.08em; margin-top: -8px; }
 
 .sx-au-hint {

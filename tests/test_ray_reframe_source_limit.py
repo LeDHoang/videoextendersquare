@@ -57,6 +57,7 @@ def _register(client, username):
             "email": f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )

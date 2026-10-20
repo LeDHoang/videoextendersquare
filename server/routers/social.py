@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, StrictBool
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -77,6 +77,9 @@ AVATAR_DIR = Path("data/avatars")
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 PACK_VIEW_WINDOW_MINUTES = 10
 REGISTRATION_ENABLED = os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
+# Version of the Terms of Service / Privacy Policy a new account agrees to. Bump it together with the
+# effective date on web/src/pages/TermsPage.jsx and PrivacyPage.jsx so each user row shows what they accepted.
+TERMS_VERSION = "2026-10-20"
 
 
 def registration_enabled() -> bool:
@@ -324,6 +327,8 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     display_name: str = ""
+    # Strict so only a real JSON true counts as consent ("yes"/1 are rejected).
+    accept_terms: StrictBool = False
 
 
 class LoginRequest(BaseModel):
@@ -406,6 +411,8 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
     if not is_open and not is_registration_allowlisted(email_for_gate):
         error(403, "REGISTRATION_DISABLED", "New account registration is disabled.")
     rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
+    if req.accept_terms is not True:
+        error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
@@ -424,6 +431,8 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
         account_type="real",
         role=configured_role(email, username),
         status="active",
+        terms_version=TERMS_VERSION,
+        terms_accepted_at=utcnow(),
     )
     db.add(user)
     try:

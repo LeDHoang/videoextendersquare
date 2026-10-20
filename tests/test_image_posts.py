@@ -155,7 +155,7 @@ def client(tmp_path, monkeypatch):
 def _register(client, username):
     response = client.post("/api/auth/register", json={
         "email": f"{username}@example.com", "username": username,
-        "password": PASSWORD, "display_name": username,
+        "password": PASSWORD, "accept_terms": True, "display_name": username,
     })
     assert response.status_code == 200, response.text
     return response.json()["user"]

@@ -297,7 +297,9 @@ describe('AuthPage — create account', () => {
     type('EMAIL', ' New@Example.com ');
     type('USERNAME', 'new_maker');
     type('PASSWORD', 'a-long-password-1');
+    fireEvent.click(terms());
   };
+  const terms = () => screen.getByRole('checkbox', { name: /I agree to the Terms of Service and Privacy Policy/ });
 
   it('renders every field with the right autofill hints', () => {
     renderAt('/signup');
@@ -375,7 +377,34 @@ describe('AuthPage — create account', () => {
       username: 'new_maker',
       display_name: 'New Maker',
       password: 'a-long-password-1',
+      accept_terms: true,
     });
+  });
+
+  it('requires the Terms checkbox, links both policies, and focuses it when it is the only problem', () => {
+    renderAt('/signup');
+    expect(terms()).not.toBeChecked();
+    expect(screen.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', '/terms');
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
+    fillValid();
+    fireEvent.click(terms()); // untick again
+    submit();
+    expect(mocks.auth.register).not.toHaveBeenCalled();
+    expect(screen.getByText(/Agree to the Terms of Service and Privacy Policy/)).toBeInTheDocument();
+    expect(terms()).toHaveAttribute('aria-invalid', 'true');
+    expect(terms()).toHaveFocus();
+    fireEvent.click(terms());
+    expect(screen.queryByText(/Agree to the Terms of Service and Privacy Policy/)).not.toBeInTheDocument();
+  });
+
+  it('puts a server TERMS_NOT_ACCEPTED error on the checkbox', async () => {
+    mocks.auth.register.mockRejectedValue(new FakeApiError('You must agree to the Terms of Service and Privacy Policy.', { code: 'TERMS_NOT_ACCEPTED', field: 'accept_terms', status: 400 }));
+    renderAt('/signup');
+    fillValid();
+    submit();
+    expect(await screen.findByText('You must agree to the Terms of Service and Privacy Policy.')).toBeInTheDocument();
+    expect(terms()).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('sends an empty display name through (the server defaults it to the username)', async () => {

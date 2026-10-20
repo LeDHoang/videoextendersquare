@@ -19,6 +19,8 @@ const STATIC_TITLES = {
   '/wallet': 'Wallet',
   '/upload': 'Upload',
   '/moderation': 'Moderation',
+  '/terms': 'Terms of Service',
+  '/privacy': 'Privacy Policy',
 };
 
 function decode(part) {
