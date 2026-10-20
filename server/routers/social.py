@@ -19,6 +19,8 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from server import media_store
+from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
     AuthContext,
@@ -61,6 +63,7 @@ from server.social.models import (
 )
 from server.social.safety import blocked_user_ids, users_blocked
 from server.social.services import (
+    post_media_files,
     apply_cursor,
     create_or_update_post,
     encode_cursor,
@@ -299,7 +302,7 @@ def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         try:
             if path.exists() and path.stat().st_size > 0:
                 rel = path.resolve().relative_to(Path("output").resolve()).as_posix()
-                return f"/media/{rel}"
+                return public_url(rel)
         except (OSError, ValueError):
             return None
         return None
@@ -928,11 +931,13 @@ def delete_post(
     post = get_target_post(db, post_id)
     if post.owner_id != context.user.id:
         error(403, "FORBIDDEN", "Only the post owner can delete this post.")
+    media_files = post_media_files([post])
     post.status = "deleted"
     post.deleted_at = utcnow()
     context.user.post_count = max(0, int(context.user.post_count or 0) - 1)
     record_event(db, event_type="delete_post", post_id=post.id, user_id=context.user.id, source="profile")
     db.commit()
+    media_store.delete_paths(media_files)
     return {"ok": True}
 
 

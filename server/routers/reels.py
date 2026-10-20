@@ -18,14 +18,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from server.media_store import public_url
 from server import media as SM
 from server.jobs import job_manager
+from server.settings import is_production
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, PostSlide, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import (
+    published_media_paths,
     IMAGE_POST_DWELL_MS,
     _image_entry,
     get_post_by_reference,
@@ -1234,6 +1237,10 @@ class CommentCreate(BaseModel):
 def _scan_cached(db: Session | None = None) -> list[dict]:
     """Scan output/ (cached for _SCAN_TTL) minus the extra slides of posts.
 
+    In production only files with a Post row surface: loose folders under
+    output/ (pipeline tests, captures) are never discoverable there, which
+    closes the feed, tags, locations, packs and recommendations at once.
+
     A failed slide lookup raises a 503 (see _reel_data_unavailable) and
     leaves the cache stale, so the next request retries the lookup.
     """
@@ -1245,13 +1252,17 @@ def _scan_cached(db: Session | None = None) -> list[dict]:
         # never surface as tiles of their own.
         try:
             slides = slide_media_paths(db)
+            published = published_media_paths(db) if is_production() else None
         except SQLAlchemyError as exc:
             # Never cache or serve a scan without the slide filter: a slide
             # is not any post's media_path, so _build_payload would seed it
             # with fabricated metadata until the cache expired.
             invalidate_scan_cache()
             raise _reel_data_unavailable() from exc
-        _scan_cache["data"] = [item for item in scanned if item["rel_path"] not in slides]
+        _scan_cache["data"] = [
+            item for item in scanned
+            if item["rel_path"] not in slides and (published is None or item["rel_path"] in published)
+        ]
     return _scan_cache["data"]
 
 
@@ -1355,7 +1366,7 @@ def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
                 fresh = True
             if fresh:
                 prel = sibling.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
-                return f"/media/{prel}"
+                return public_url(prel)
     except (OSError, ValueError):
         pass
     return None
@@ -1454,7 +1465,7 @@ def _build_payload(
                 url, poster_url = cover["url"], cover["poster_url"]
                 images = (social_row or {}).get("images") or [cover]
             else:
-                url = f"/media/{rel}"
+                url = public_url(rel)
                 poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path)) or url
                 # Every image of the post in order (a loose file is a 1-image post).
                 images = (social_row or {}).get("images") or [{
@@ -1521,7 +1532,7 @@ def _build_payload(
         payload.append({
             **base,
             "media_type": "video",
-            "url": f"/media/{rel}",
+            "url": public_url(rel),
             "preview_url": preview_url,
             "poster_url": poster_url,
             "codec": play_codec.upper(),
@@ -1589,7 +1600,7 @@ def _pack_feed_data(
             "folder": "REEL PACK",
             "size": "",
             "path": post.media_path,
-            "url": card.get("url") or f"/media/{post.media_path}",
+            "url": card.get("url") or public_url(post.media_path),
             "preview_url": card.get("preview_url"),
             "poster_url": card.get("poster_url"),
             "codec": "IMG" if is_image else "MASTER",
@@ -2302,7 +2313,7 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
             if not local:
                 return None
             try:
-                return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+                return public_url(Path(local).resolve().relative_to(root).as_posix())
             except ValueError:
                 return None
 
@@ -2322,7 +2333,7 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
         if not local:
             return None
         try:
-            return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+            return public_url(Path(local).resolve().relative_to(root).as_posix())
         except ValueError:
             return None
 
@@ -2332,8 +2343,16 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
     return rel, preview_url, poster_url, None
 
 
+EXPLORE_PREVIEW_PER_MINUTE = 30
+
+
 @router.post("/explore-preview")
-def generate_explore_previews(paths: list[str], db: Session = Depends(get_db)):
+def generate_explore_previews(
+    paths: list[str],
+    request: Request,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
     """Generate tiny muted H.264 previews + JPEG posters for Explore tiles.
 
     Capped per request and fanned out over worker threads so a fresh grid
@@ -2341,7 +2360,12 @@ def generate_explore_previews(paths: list[str], db: Session = Depends(get_db)):
     than previews, so tiles paint instantly and upgrade to video as each
     transcode lands. Returns {generated: {rel: preview_url},
     posters: {rel: poster_url}, failed: [...]}.
+
+    Signed-in callers only, rate limited, and in production restricted to
+    live published posts so it is not a free transcoder for arbitrary files.
     """
+    validate_origin(request)
+    rate_limiter.check(db, f"explore-preview:{context.user.id}", EXPLORE_PREVIEW_PER_MINUTE, 60)
     if len(paths) > MAX_EXPLORE_PATHS:
         raise HTTPException(
             status_code=400,
@@ -2353,6 +2377,11 @@ def generate_explore_previews(paths: list[str], db: Session = Depends(get_db)):
     posters: dict[str, str] = {}
     failed = []
     rels = list(paths)
+    if is_production():
+        hidden = unavailable_media_paths_for_viewer(context.user.id, db)
+        live = published_media_paths(db) - hidden
+        failed.extend({"path": rel, "error": "not found"} for rel in rels if rel not in live)
+        rels = [rel for rel in rels if rel in live]
     layouts = _stereo_layouts(db, rels)
     # Loose files without a post follow the legacy folder rule.
     layouts.update(
@@ -2376,9 +2405,16 @@ def generate_explore_previews(paths: list[str], db: Session = Depends(get_db)):
 
 # ─── VR TELEMETRY (in-headset diagnostics) ──────────────────────────────
 
+def _dev_only() -> None:
+    """Debug endpoints exist only outside production."""
+    if is_production():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 @router.post("/diag")
 def post_diag(payload: dict):
     """Receive a live VR telemetry snapshot from the WebXR render loop."""
+    _dev_only()
     _diag.clear()
     _diag.update(payload)
     _diag["server_ts"] = time.time()
@@ -2388,6 +2424,7 @@ def post_diag(payload: dict):
 @router.get("/diag")
 def get_diag():
     """Return the most recent VR telemetry snapshot (empty until first POST)."""
+    _dev_only()
     if not _diag:
         return {"empty": True}
     return _diag
@@ -2623,7 +2660,7 @@ def spatialize(
         _scan_cache["at"] = 0.0
         return {"generated": [d["path"] for d in done], "failed": failed}
 
-    job_id = job_manager.create_job("video")
+    job_id = job_manager.create_job("video", owner_id=context.user.id)
     job_manager.submit(job_id, _run, {})
     return {
         "job_id": job_id,
@@ -2857,6 +2894,7 @@ def vr_video_path_ab(
     sites use — with no canvas proxy, no UI meshes, no readbacks.
     `master` picks a path under the media root; defaults to the largest
     master. The page's own `?src=` overrides the video URL client-side."""
+    _dev_only()
     try:
         html = (ASSETS_DIR / "vr_video_path_ab.html").read_text(encoding="utf-8")
     except OSError as ex:
@@ -2873,7 +2911,7 @@ def vr_video_path_ab(
                 default_rel = biggest.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
         except (OSError, ValueError):
             default_rel = None
-    default_src = f"/media/{default_rel}" if default_rel else ""
+    default_src = public_url(default_rel) if default_rel else ""
     three_js = ASSETS_DIR / "three.min.js"
     if three_js.exists():
         html = html.replace("__THREE_JS__", three_js.read_text(encoding="utf-8"))

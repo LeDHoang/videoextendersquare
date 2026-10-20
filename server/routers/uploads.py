@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
+from server import media_store
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -156,18 +157,15 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
             raise HTTPException(status_code=422, detail="3D stereo frames need at least 64x64 per eye.")
 
 
-def _derived_files(stored: Path) -> list[Path]:
-    """Every generated sibling a stored upload can own (cleanup on failure)."""
-    mono = SM.mono_sibling_path(str(stored))
-    return [
-        stored,
-        SM.explore_preview_path(str(stored)),
-        SM.explore_poster_path(str(stored)),
-        stored.with_name(stored.stem + "-preview.mp4"),
-        mono,
-        SM.explore_preview_path(str(mono)),
-        SM.explore_poster_path(str(mono)),
-    ]
+def _discard_stored(stored_files) -> None:
+    """Remove every local file and R2 object a failed publish created."""
+    candidates = [candidate for stored in stored_files for candidate in SM.derived_files(stored)]
+    media_store.delete_paths(candidates)
+    for candidate in candidates:
+        try:
+            Path(candidate).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # Stereo video encodes (left-eye rendition, VR proxy, grid assets) can take
@@ -292,11 +290,23 @@ def publish_upload(
     copied: list[Path] = []
     try:
         for source, target in [(src_path, dest), *zip(extra_sources, extra_dests)]:
-            shutil.copy2(source, target)
+            # Copy to a hidden part file; commit uploads it to R2 (when on)
+            # before it appears under its real name.
+            part = target.with_name(f".{target.name}.part")
+            try:
+                shutil.copy2(source, part)
+                media_store.commit(part, target)
+            finally:
+                part.unlink(missing_ok=True)
             copied.append(target)
+    except media_store.MediaStoreError as ex:
+        _discard_stored(copied)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "STORAGE_UNAVAILABLE", "message": "Media storage is unavailable. Try again shortly."},
+        ) from ex
     except OSError as ex:
-        for target in copied:
-            target.unlink(missing_ok=True)
+        _discard_stored(copied)
         raise HTTPException(status_code=500, detail=f"Could not store upload: {ex}") from ex
 
     # Stereo stills: every 2D surface shows the left-eye rendition, so the
@@ -305,9 +315,7 @@ def publish_upload(
     if stereo and req.kind == "image":
         for target in (dest, *extra_dests):
             if not SM.make_left_eye_rendition(str(target), stereo):
-                for stored in (dest, *extra_dests):
-                    for candidate in _derived_files(stored):
-                        Path(candidate).unlink(missing_ok=True)
+                _discard_stored((dest, *extra_dests))
                 raise HTTPException(status_code=500, detail="Could not build the 2D view of this 3D upload.")
     # 2D posters/previews come from the left eye of a stereo upload.
     def grid_source(stored: Path) -> str:
@@ -331,7 +339,7 @@ def publish_upload(
             try:
                 poster = SM.make_explore_poster(str(dest), crop=SM.left_eye_crop(stereo))
                 if poster:
-                    poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
+                    poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
         elif req.kind == "video":
@@ -342,20 +350,20 @@ def publish_upload(
             try:
                 preview = SM.make_explore_preview(grid_source(dest))
                 if preview:
-                    preview_url = f"/media/{Path(preview).resolve().relative_to(root).as_posix()}"
+                    preview_url = media_store.public_url(Path(preview).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
             try:
                 poster = SM.make_explore_poster(grid_source(dest))
                 if poster:
-                    poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
+                    poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
         else:
             try:
                 poster = SM.make_image_poster(grid_source(dest))
                 if poster:
-                    poster_url = f"/media/{Path(poster).resolve().relative_to(root).as_posix()}"
+                    poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
     except ValueError:
@@ -399,12 +407,7 @@ def publish_upload(
         db.refresh(post)
     except Exception as ex:
         db.rollback()
-        for stored in (dest, *extra_dests):
-            for candidate in _derived_files(stored):
-                try:
-                    Path(candidate).unlink(missing_ok=True)
-                except OSError:
-                    pass
+        _discard_stored((dest, *extra_dests))
         if isinstance(ex, ValueError):
             raise HTTPException(status_code=400, detail=str(ex)) from ex
         raise
@@ -416,7 +419,7 @@ def publish_upload(
     return {
         "post_id": post.id,
         "rel_path": rel,
-        "media_url": f"/media/{rel}",
+        "media_url": media_store.public_url(rel),
         "media_type": req.kind,
         "preview_url": preview_url,
         "poster_url": poster_url,

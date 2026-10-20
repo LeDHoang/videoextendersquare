@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from server import media_store
 from server.settings import env_int
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -291,7 +292,7 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
 
     # Hidden temp file + rename: stereo_paths serves any non-empty proxy, and
     # stereo proxies are built in the background after publish.
-    part = dest.with_name(f".{dest.name}.part")
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -310,12 +311,37 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
     if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
         part.unlink(missing_ok=True)
         return None
+    return _commit_part(part, dest)
+
+
+def _part_path(dest: Path) -> Path:
+    """Hidden temp sibling a generator writes before committing *dest*."""
+    return dest.with_name(f".{dest.name}.part")
+
+
+def _commit_part(part: Path, dest: Path) -> str | None:
+    """Publish a finished part file as *dest* (R2 first when published)."""
     try:
-        os.replace(part, dest)
-    except OSError:
+        media_store.commit(part, dest)
+    except (OSError, media_store.MediaStoreError):
         part.unlink(missing_ok=True)
         return None
     return str(dest)
+
+
+def derived_files(stored: Path) -> list[Path]:
+    """Every generated sibling a stored upload can own (cleanup and unpublish)."""
+    stored = Path(stored)
+    mono = mono_sibling_path(str(stored))
+    return [
+        stored,
+        explore_preview_path(str(stored)),
+        explore_poster_path(str(stored)),
+        stored.with_name(stored.stem + "-preview.mp4"),
+        mono,
+        explore_preview_path(str(mono)),
+        explore_poster_path(str(mono)),
+    ]
 
 
 def explore_preview_path(src: str) -> Path:
@@ -443,7 +469,7 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
     vf = f"{crop},scale='2*trunc(min(iw,{side})/2)':'2*trunc(min(iw,{side})/2)'"
     # Encode to a hidden temp file and rename: the feed treats any non-empty
     # -mono file as ready, and this runs in the background after publish.
-    part = dest.with_name(f".{dest.name}.part")
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -462,17 +488,13 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
     if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
         part.unlink(missing_ok=True)
         return None
-    try:
-        os.replace(part, dest)
-    except OSError:
-        part.unlink(missing_ok=True)
-        return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
 def _make_left_eye_still(src: str, layout: str, dest: Path) -> str | None:
     from PIL import Image, ImageOps
 
+    part = _part_path(dest)
     try:
         with Image.open(src) as img:
             img = ImageOps.exif_transpose(img)
@@ -484,17 +506,18 @@ def _make_left_eye_still(src: str, layout: str, dest: Path) -> str | None:
             fmt = (img.format or "").upper()
             ext = dest.suffix.lower()
             if ext in (".jpg", ".jpeg"):
-                eye.convert("RGB").save(dest, "JPEG", quality=92)
+                eye.convert("RGB").save(part, "JPEG", quality=92)
             elif ext == ".webp":
-                eye.save(dest, "WEBP", quality=92)
+                eye.save(part, "WEBP", quality=92)
             else:
-                eye.save(dest, fmt or "PNG")
+                eye.save(part, fmt or "PNG")
     except (OSError, ValueError):
-        dest.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         return None
-    if not dest.exists() or dest.stat().st_size == 0:
+    if not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
         return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
 def _sibling_is_fresh(sibling: Path, src: str) -> bool:
@@ -557,6 +580,7 @@ def make_explore_preview(src: str, height: int = 720, crop: str | None = None) -
         return None
 
     vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -564,16 +588,18 @@ def make_explore_preview(src: str, height: int = 720, crop: str | None = None) -
         "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-an",
-        str(dest),
+        "-f", "mp4", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=300,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
         return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
 def make_explore_poster(src: str, height: int = 720, crop: str | None = None) -> str | None:
@@ -593,28 +619,33 @@ def make_explore_poster(src: str, height: int = 720, crop: str | None = None) ->
         return None
 
     vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
+    part = _part_path(dest)
+    # One MJPEG frame is a plain JPEG file; -f is needed for the .part name.
+    jpeg_out = ["-q:v", "5", "-f", "mjpeg", str(part)]
     # Keyframe-only fast path first (input seek + nokey ≈ 1 core, so parallel
     # batches don't oversubscribe the CPU), then accurate seeks as fallback
     # for very short clips where the seek point lands past EOF.
     variants = [
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-ss", "1", "-skip_frame", "nokey", "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-ss", "1", "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
     ]
     for cmd in variants:
         try:
             p = subprocess.run(cmd, capture_output=True, timeout=120,
                                creationflags=_NO_WINDOW)
         except (OSError, subprocess.SubprocessError):
+            part.unlink(missing_ok=True)
             return None
-        if p.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
-            return str(dest)
+        if p.returncode == 0 and part.exists() and part.stat().st_size > 0:
+            return _commit_part(part, dest)
+    part.unlink(missing_ok=True)
     return None
 
 
@@ -717,21 +748,24 @@ def make_image_poster(src: str, height: int = 720) -> str | None:
     except OSError:
         return None
 
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
         "-vf", f"scale=-2:{height}",
         "-q:v", "5",
-        str(dest),
+        "-f", "mjpeg", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=120,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
         return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
 def scan_pairs(root: str = "output/pairs") -> list[dict]:

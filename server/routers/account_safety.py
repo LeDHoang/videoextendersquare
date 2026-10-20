@@ -32,6 +32,7 @@ from server.social.auth import (
     validate_password,
     verify_password,
 )
+from server import media_store
 from server.social.database import get_db
 from server.social.email import send_password_reset_email
 from server.social.message_crypto import (
@@ -64,6 +65,7 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import recompute_follow_counts, remove_relationships
+from server.social.services import post_media_files
 
 router = APIRouter(tags=["account-safety"])
 logger = logging.getLogger(__name__)
@@ -431,12 +433,14 @@ def moderate_report(
         fail(422, "INVALID_MODERATION_ACTION", "User reports do not have removable content.")
 
     target_user = None
+    media_files = []
     if report.target_type == "user":
         target_user = db.get(User, report.target_id)
     elif report.target_type == "post":
         post = db.get(Post, report.target_id)
         target_user = db.get(User, post.owner_id) if post else None
         if req.action == "remove_content" and post and post.deleted_at is None:
+            media_files = post_media_files([post])
             post.status = "deleted"
             post.deleted_at = utcnow()
             if target_user:
@@ -494,6 +498,7 @@ def moderate_report(
     report.moderator_id = context.user.id
     report.reviewed_at = utcnow()
     db.commit()
+    media_store.delete_paths(media_files)
     return {"report": serialize_report(db, report)}
 
 
@@ -537,6 +542,9 @@ def delete_account(
     for comment in authored_comments:
         comment.deleted_at = now
 
+    media_files = post_media_files(
+        db.query(Post).filter(Post.owner_id == user.id, Post.deleted_at.is_(None)).all()
+    )
     db.query(Post).filter(Post.owner_id == user.id, Post.deleted_at.is_(None)).update(
         {Post.status: "deleted", Post.deleted_at: now}, synchronize_session=False
     )
@@ -603,6 +611,7 @@ def delete_account(
     user.follower_count = 0
     user.following_count = 0
     db.commit()
+    media_store.delete_paths(media_files)
 
     if old_avatar:
         from pathlib import Path

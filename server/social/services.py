@@ -15,6 +15,7 @@ from pathlib import Path
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from server.media_store import public_url
 from .auth import avatar_url, public_user
 from .models import (
     Comment,
@@ -331,9 +332,26 @@ def metadata_for_paths(paths: list[str], db: Session | None = None) -> dict[str,
     }
 
 
+def post_media_files(posts) -> list[Path]:
+    """Every local file (originals and generated siblings) of *posts*.
+
+    Collect before the commit that deletes the posts, then pass the list to
+    ``media_store.delete_paths`` once it has landed: unpublishing removes the
+    public R2 copies and keeps local files as unserved moderation evidence.
+    """
+    from server import media as media_service
+
+    files: list[Path] = []
+    for post in posts:
+        for rel in [post.media_path, *(slide.media_path for slide in post.slides)]:
+            if rel:
+                files.extend(media_service.derived_files(Path("output") / rel))
+    return files
+
+
 def _output_url(path: Path) -> str | None:
     try:
-        return f"/media/{path.resolve().relative_to(Path('output').resolve()).as_posix()}"
+        return public_url(path.resolve().relative_to(Path('output').resolve()).as_posix())
     except (OSError, ValueError):
         return None
 
@@ -354,7 +372,7 @@ def stereo_fields(media_path: str, layout: str | None) -> dict:
         return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False}
     source = Path("output") / media_path
     mono, stereo = media_service.stereo_paths(str(source))
-    raw_url = f"/media/{media_path}"
+    raw_url = public_url(media_path)
     mono_url = _output_url(mono) if mono else None
     return {
         "stereo_layout": layout,
@@ -373,7 +391,7 @@ def _image_entry(media_path: str, width: int | None, height: int | None, layout:
     from server import media as media_service
 
     stereo = stereo_fields(media_path, layout)
-    url = stereo.get("url") or f"/media/{media_path}"
+    url = stereo.get("url") or public_url(media_path)
     poster_url = url
     try:
         source = Path("output") / media_path
@@ -418,6 +436,16 @@ def slide_media_paths(db: Session | None = None) -> set[str]:
 
     with SessionLocal() as session:
         return {row[0] for row in session.query(PostSlide.media_path).all()}
+
+
+def published_media_paths(db: Session | None = None) -> set[str]:
+    """Primary media paths of every post row (status filtering is per viewer)."""
+    if db is not None:
+        return {row[0] for row in db.query(Post.media_path).all()}
+    from .database import SessionLocal
+
+    with SessionLocal() as session:
+        return {row[0] for row in session.query(Post.media_path).all()}
 
 
 def _probe_size(media_path: str) -> tuple[int | None, int | None]:
@@ -604,7 +632,7 @@ def shared_preview_urls(post: Post) -> dict:
     """
     from server import media as media_service
 
-    url = f"/media/{post.media_path}"
+    url = public_url(post.media_path)
     stereo = stereo_fields(post.media_path, post.stereo_layout)
     if post.media_type == "image":
         if stereo["stereo_layout"] != "mono":
@@ -622,7 +650,7 @@ def shared_preview_urls(post: Post) -> dict:
         def sibling_url(path: Path) -> str | None:
             try:
                 if path.exists() and path.stat().st_size > 0:
-                    return f"/media/{path.resolve().relative_to(root).as_posix()}"
+                    return public_url(path.resolve().relative_to(root).as_posix())
             except (OSError, ValueError):
                 return None
             return None
@@ -649,7 +677,7 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         "post_id": post.id,
         "path": post.media_path,
         "media_type": post.media_type,
-        "url": f"/media/{post.media_path}",
+        "url": public_url(post.media_path),
         "title": post.title,
         "caption": post.caption,
         "tags": post_tags(post),
