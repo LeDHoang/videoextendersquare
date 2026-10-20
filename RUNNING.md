@@ -80,6 +80,15 @@ docker compose --profile tunnel up -d            # + cloudflared
 - CI (`.github/workflows/ci.yml`) runs `make test`, migrations + the pool test on
   PostgreSQL 16, and a Docker build with image-content assertions.
 
+Free production rehearsal on a laptop (SeaweedFS for R2, Caddy for the
+Cloudflare edge, Mailpit for SMTP): [`docs/local-staging.md`](docs/local-staging.md).
+
+```bash
+cp deploy/env.staging.example .env.staging && chmod 600 .env.staging   # fill in every <...>
+docker compose --env-file .env.staging up -d --build
+node scripts/verify_staging.cjs
+```
+
 Plain single-container smoke test (SQLite, dev mode):
 
 ```bash
@@ -104,6 +113,8 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_COOKIE_SECURE` | `1` | HTTPS-only cookies |
 | `SX_DEV_ORIGINS` | _(empty)_ | Localhost origins are rejected at boot |
 | `TUNNEL_TOKEN` | set | Read by the `cloudflared` service |
+| `R2_ENDPOINT_URL` | _(unset)_ | S3 endpoint override; local staging points it at SeaweedFS. Unset means `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
+| `SX_ENV_FILE`, `SX_APP_PORT` | _(unset)_ | Compose only: env file for the app (default `.env`) and its loopback port (default `8000`). Local staging uses `.env.staging` and `8001` |
 | `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
 | `SX_REGISTRATION_ENABLED` / `SX_REGISTRATION_ALLOWLIST` | `0` / invited emails | Invite-only beta |
 | `SX_MAX_VIDEO_UPLOAD_MB` / `SX_MAX_IMAGE_UPLOAD_MB` | `95` / `50` | Upload size caps (95 MB stays under Cloudflare's 100 MB request limit) |

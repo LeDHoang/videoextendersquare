@@ -37,6 +37,10 @@
 #                             stereo SBS/top-bottom posts; see docs/stereo-3d-reels.md)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
+#                          verify_staging.cjs — production-mode checks, backup/restore
+#                            drill (--drill seed|check) and publish timing
+#                            (--time-publish <file>); see docs/local-staging.md:
+#                              node scripts/verify_staging.cjs
 #   ../deploy/         — production deploy files (NOT dev tooling; see
 #                        docs/deploy-runbook.md):
 #                          entrypoint.sh  — container entrypoint (alembic upgrade head,
@@ -45,6 +49,9 @@
 #                          backup.sh      — host cron: pg_dump + avatars to private R2
 #                                           (docs/backup-restore-runbook.md)
 #                          env.example    — production .env template for compose.yaml
+#                          compose.staging.yaml, Caddyfile.staging, env.staging.example
+#                                         — free local staging overlay (SeaweedFS, Caddy,
+#                                           Mailpit); docs/local-staging.md
 #   dev/               — one-off paid-API / hardware experiment scripts, NOT
 #                        collected by pytest (deliberately not named test_*):
 #                          dev/ltx_lora_debug_job.py    — real fal.ai LoRA job (~$0.01)

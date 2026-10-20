@@ -79,6 +79,18 @@ def test_urls_point_at_media_domain_with_r2(r2):
     assert media_store.public_url("/uploads/a.mp4") == "https://media.example.com/uploads/a.mp4"
 
 
+def test_endpoint_defaults_to_r2_account(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "abc123")
+    monkeypatch.delenv("R2_ENDPOINT_URL", raising=False)
+    assert media_store.endpoint_url() == "https://abc123.r2.cloudflarestorage.com"
+
+
+def test_endpoint_override_points_at_stand_in(monkeypatch):
+    monkeypatch.setenv("R2_ACCOUNT_ID", "abc123")
+    monkeypatch.setenv("R2_ENDPOINT_URL", " http://minio:9000 ")
+    assert media_store.endpoint_url() == "http://minio:9000"
+
+
 def test_commit_uploads_published_files_before_renaming(r2):
     part = Path("output/uploads/.clip.mp4.part")
     part.write_bytes(b"video")

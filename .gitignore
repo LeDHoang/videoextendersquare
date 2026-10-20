@@ -64,3 +64,4 @@ ui/assets/quest_controller.png
 
 # Remotion promo video lives only on the `video` branch
 /video/
+.env.staging

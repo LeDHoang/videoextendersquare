@@ -23,7 +23,9 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
     image: echo-app:latest
     restart: unless-stopped
-    env_file: .env
+    # .env in production; local staging points this at .env.staging
+    # (docs/local-staging.md).
+    env_file: ${SX_ENV_FILE:-.env}
     environment:
       # Built from the POSTGRES_* values in .env so the two can never drift.
       # Overrides any DATABASE_URL line in .env.
@@ -31,7 +33,7 @@ services:
     ports:
       # Loopback only: public traffic arrives through cloudflared on the
       # compose network, never on a host port.
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${SX_APP_PORT:-8000}:8000"
     volumes:
       - data:/app/data
       - output:/app/output

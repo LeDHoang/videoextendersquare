@@ -88,6 +88,15 @@ def set_client(client) -> None:
         _client = client
 
 
+def endpoint_url() -> str:
+    """R2's S3 endpoint; ``R2_ENDPOINT_URL`` points at a stand-in (SeaweedFS in local staging)."""
+    override = os.environ.get("R2_ENDPOINT_URL", "").strip()
+    if override:
+        return override
+    account = os.environ.get("R2_ACCOUNT_ID", "").strip()
+    return f"https://{account}.r2.cloudflarestorage.com"
+
+
 def client():
     global _client
     with _client_lock:
@@ -95,10 +104,9 @@ def client():
             import boto3
             from botocore.config import Config
 
-            account = os.environ.get("R2_ACCOUNT_ID", "").strip()
             _client = boto3.client(
                 "s3",
-                endpoint_url=f"https://{account}.r2.cloudflarestorage.com",
+                endpoint_url=endpoint_url(),
                 aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID", "").strip(),
                 aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY", "").strip(),
                 region_name="auto",

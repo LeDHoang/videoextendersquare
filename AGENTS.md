@@ -12,6 +12,7 @@ Single source of truth for where generated files belong. Follow this on every ta
 | Live-endpoint verification probes | `scripts/` | `verify_*.cjs` |
 | Batch pipeline utilities (upscale/spatialize/playground) | `scripts/` | `batch_*.py`, `*_playground.py` |
 | Production deploy files (container entrypoint, ffmpeg wrapper, host backup cron, prod env template) | `deploy/` | `*.sh`, `env.example`; wired from `Dockerfile` / `compose.yaml` (see `docs/deploy-runbook.md`) |
+| Local staging overlay (free stand-ins for R2, the CF edge and SMTP) | `deploy/` | `compose.staging.yaml`, `Caddyfile.staging`, `env.staging.example`; the filled `.env.staging` stays gitignored (see `docs/local-staging.md`) |
 | One-off generated artifacts, captures, logs | `reports/` or `logs/` (both gitignored) | — |
 | Documentation you write | `docs/` | kebab-case |
 
