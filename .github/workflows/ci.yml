@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 3dreels]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: make test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install Python deps into .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: Install web deps
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: make test
+        run: make test
+
+  postgres:
+    name: migrations + pool test on PostgreSQL 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: echo
+          POSTGRES_PASSWORD: echo
+          POSTGRES_DB: echo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U echo -d echo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: echo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install Python deps into .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg://echo:echo@localhost:5432/echo
+        run: .venv/bin/python -m alembic upgrade head
+      - name: Create throwaway database for the pool test
+        run: psql -h localhost -U echo -d echo -c "CREATE DATABASE pool_test"
+      - name: Pool isolation test on PostgreSQL
+        env:
+          SX_TEST_POSTGRES_URL: postgresql+psycopg://echo:echo@localhost:5432/pool_test
+        run: .venv/bin/python -m pytest -q tests/test_db_pool_isolation.py
+
+  docker:
+    name: image build + contents check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t echo-app:ci .
+      - name: Assert image contents
+        run: |
+          set -euo pipefail
+          run() { docker run --rm --entrypoint sh echo-app:ci -c "$1"; }
+          # Nothing from tests/, video/ or a local .env may be baked in.
+          run 'for p in /app/tests /app/video /app/.env /app/web/node_modules; do
+                 if [ -e "$p" ]; then echo "unexpected in image: $p" >&2; exit 1; fi
+               done'
+          # data/ and output/ exist (volume mount points owned by the app
+          # user) but must ship empty.
+          run 'for d in /app/data /app/output; do
+                 [ -d "$d" ] || { echo "missing $d" >&2; exit 1; }
+                 if [ -n "$(ls -A "$d")" ]; then echo "$d is not empty:" >&2; ls -A "$d" >&2; exit 1; fi
+               done'
+          run 'test -f /app/server/static/index.html'
+          run 'uid=$(id -u); [ "$uid" != 0 ] || { echo "image runs as root" >&2; exit 1; }'
+          run 'ffmpeg -version | head -1'
+          run 'test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg'
+          echo "image contents OK"

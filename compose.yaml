@@ -1,0 +1,81 @@
+# Production stack for the invite-only beta: one VPS, app + postgres:16, and
+# cloudflared (Cloudflare Tunnel, no inbound ports). See docs/deploy-runbook.md.
+#
+#   cp deploy/env.example .env        # fill in every <...> value
+#   docker compose build --build-arg GIT_SHA=$(git rev-parse HEAD)
+#   docker compose --profile tunnel up -d
+#
+# Without `--profile tunnel` the app is reachable only on 127.0.0.1:8000 (local
+# smoke tests). The app runs exactly one uvicorn worker: JobManager and the
+# staged-upload registries live in process memory.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: echo-app:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Built from the POSTGRES_* values in .env so the two can never drift.
+      # Overrides any DATABASE_URL line in .env.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-echo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-echo}
+    ports:
+      # Loopback only: public traffic arrives through cloudflared on the
+      # compose network, never on a host port.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - data:/app/data
+      - output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Cap the app (web + SSE + ffmpeg) so encodes can never starve Postgres
+    # on the 4 vCPU box; ffmpeg additionally runs under nice (SX_FFMPEG_NICE).
+    cpus: 3
+    mem_limit: 6g
+    # uvicorn's graceful shutdown is 20 s; leave headroom before SIGKILL.
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-echo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-echo}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    cpus: 1.5
+    logging: *default-logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - app
+    logging: *default-logging
+
+volumes:
+  data:
+  output:
+  pgdata:
