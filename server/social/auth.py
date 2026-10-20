@@ -402,8 +402,17 @@ rate_limiter = RateLimiter()
 
 
 def request_identity(request: Request) -> str:
+    """Client IP for rate limits.
+
+    Behind Cloudflare, CF-Connecting-IP is set by the edge and cannot be
+    forged by the client. The X-Forwarded-For fallback takes the rightmost
+    hop (the one our proxy appended); the leftmost is client-controlled.
+    """
     if TRUST_PROXY_HEADERS:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-        if forwarded:
-            return forwarded
+        cf_ip = request.headers.get("cf-connecting-ip", "").strip()
+        if cf_ip:
+            return cf_ip
+        hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if hops:
+            return hops[-1]
     return request.client.host if request.client else "unknown"
