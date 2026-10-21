@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server.media_store import public_url
+from server.security_headers import nonce_request_html
 from server import media as SM
 from server.jobs import job_manager
 from server.settings import is_production
@@ -2764,6 +2765,9 @@ def reels_player(
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
 
+    # CSP nonce on the template's own <script> tags, before vendored JS is
+    # substituted in (server/security_headers.py).
+    html = nonce_request_html(request, html)
     html = _inject_icons(html)
 
     img_js = ASSETS_DIR / "quest_controller_img.js"
@@ -2890,6 +2894,7 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
 
 @router.get("/vr-video-path-ab", response_class=HTMLResponse)
 def vr_video_path_ab(
+    request: Request,
     master: str | None = None,
 ):
     """Temporary diagnostic page (black-square investigation §3.6+): plays one
@@ -2902,6 +2907,7 @@ def vr_video_path_ab(
         html = (ASSETS_DIR / "vr_video_path_ab.html").read_text(encoding="utf-8")
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
+    html = nonce_request_html(request, html)
     default_rel = master
     if not default_rel:
         try:
