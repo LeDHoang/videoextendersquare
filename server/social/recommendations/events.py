@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import os
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -245,7 +247,57 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
             similarity.updated_at = utcnow()
 
 
+def _daily_contribution_cap() -> int:
+    try:
+        return max(1, int(os.environ.get("SX_EVENT_DAILY_CAP", "5")))
+    except ValueError:
+        return 5
+
+
+def contribution_allowed(db: Session, event: EngagementEvent) -> bool:
+    """Whether this event may still move affinity, co-watch and post stats.
+
+    An event type counts at most once per (actor, post, impression). Without
+    an impression it counts at most SX_EVENT_DAILY_CAP times per actor, post
+    (or target creator) and UTC day. The event row itself is always kept.
+    """
+    if event.user_id:
+        actor_filter = EngagementEvent.user_id == event.user_id
+    elif event.anonymous_id:
+        actor_filter = EngagementEvent.anonymous_id == event.anonymous_id
+    else:
+        return True
+    base = db.query(EngagementEvent).filter(
+        actor_filter,
+        EngagementEvent.id != event.id,
+        EngagementEvent.event_type == event.event_type,
+        EngagementEvent.post_id == event.post_id
+        if event.post_id
+        else EngagementEvent.post_id.is_(None),
+    )
+    if event.recommendation_impression_id:
+        return base.filter(
+            EngagementEvent.recommendation_impression_id == event.recommendation_impression_id
+        ).first() is None
+    now = event.created_at or utcnow()
+    day_start = datetime(now.year, now.month, now.day, tzinfo=now.tzinfo)
+    cap = _daily_contribution_cap()
+    base = base.filter(EngagementEvent.created_at >= day_start)
+    if event.post_id:
+        return base.count() < cap
+    # Post-less events (follow, profile_open...) are scoped to the target creator.
+    target = str((event.context or {}).get("target_user_id") or "")
+    same_target = sum(
+        1
+        for row in base.limit(cap * 50).all()
+        if str((row.context or {}).get("target_user_id") or "") == target
+    )
+    return same_target < cap
+
+
 def update_aggregates(db: Session, event: EngagementEvent) -> None:
+    if not contribution_allowed(db, event):
+        return
     _update_post_stats(db, event)
     actor_key, user_id, anonymous_id = _identity_values(event)
     value = _event_value(event)
