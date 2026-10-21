@@ -376,6 +376,10 @@ def test_migration_round_trip(tmp_path, monkeypatch, index):
     config.set_main_option("script_location", str(REPO / "migrations"))
     config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     engine = sa.create_engine(url)
+    if engine.dialect.name == "postgresql":
+        # Other Postgres tests create tables with create_all on the same database.
+        with engine.begin() as conn:
+            conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
     try:
         command.upgrade(config, "20261021_0015")
         assert "email_verification_tokens" not in sa.inspect(engine).get_table_names()
