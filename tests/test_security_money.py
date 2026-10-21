@@ -399,7 +399,7 @@ def test_pack_progress_coalesced(app):
 def test_sse_connection_cap(app):
     with TestClient(app) as client:
         user = register(client, "sec_sse_user")
-        messages_router._SSE_STREAMS[user["id"]] = 3
+        messages_router._SSE_STREAMS[user["id"]] = 8
         try:
             response = client.get("/api/messages/events")
             assert response.status_code == 429

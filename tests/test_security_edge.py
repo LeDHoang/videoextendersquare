@@ -500,15 +500,15 @@ def test_sse_concurrent_gate(app, monkeypatch):
 
         messages_router._SSE_STREAMS.pop(user_id, None)
         try:
-            results = await asyncio.gather(*[make_call() for _ in range(5)], return_exceptions=True)
+            results = await asyncio.gather(*[make_call() for _ in range(10)], return_exceptions=True)
             ok = sum(1 for r in results if not isinstance(r, Exception))
             limited = sum(
                 1 for r in results
                 if isinstance(r, Exception) and getattr(r, "status_code", None) == 429
             )
-            assert ok == 3
+            assert ok == 8
             assert limited == 2
-            assert messages_router._SSE_STREAMS.get(user_id) == 3
+            assert messages_router._SSE_STREAMS.get(user_id) == 8
             for r in results:
                 if not isinstance(r, Exception):
                     await r.body_iterator.aclose()

@@ -237,7 +237,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Cap repeated actor/item contributions so event replay cannot manipulate affinities, co-watch data, or global popularity statistics.
 - [ ] Preserve valid impression/session attribution checks and add tests for fabricated events without delivery provenance.
 - [x] **New (2026-09-19 audit):** The anonymous cookie is **unsigned** — `ensure_anonymous_cookie` (`auth.py:295–309`) accepts any client-supplied `echo_anon` value, so a bot rotates unlimited anonymous actors (view-count inflation, replay-cap evasion, recommendation poisoning). HMAC-sign it with `SX_SECURITY_SECRET`; reject unsigned/forged values. **Done (2026-09-20):** `echo_anon` is now `raw.signature` (HMAC via `keyed_hash`); forged/legacy values rotate-and-continue (never honored); `stage_owner_matches` verifies the signature. One-time invalidation of pre-existing anon cookies.
-- [x] **New:** SSE `/api/messages/events` connection exhaustion — each connection polls the DB every 1s with no per-user connection cap and no max stream lifetime (`messages.py:901–960`). Cap concurrent streams per user; force reconnect after N minutes. **Done (2026-09-20):** `SX_SSE_MAX_CONN` (3/user → 429) + `SX_SSE_MAX_MIN` (30-min lifetime with `reconnect` frame); slots released on close (concurrency + lifetime regression-tested).
+- [x] **New:** SSE `/api/messages/events` connection exhaustion — each connection polls the DB every 1s with no per-user connection cap and no max stream lifetime (`messages.py:901–960`). Cap concurrent streams per user; force reconnect after N minutes. **Done (2026-09-20):** `SX_SSE_MAX_CONN` (3/user → 429; default raised to 8 on 2026-10-21 because a few quick page reloads hit the cap before old streams were released) + `SX_SSE_MAX_MIN` (30-min lifetime with `reconnect` frame); slots released on close (concurrency + lifetime regression-tested).
 - [ ] Decide whether an already materialized page should refill after a post or creator becomes ineligible. Currently it safely removes the item but can return an underfilled page with stale `has_more`.
 - [ ] Refactor recommendation scope reads to use the request's dependency-injected database session rather than opening a second global session.
 
@@ -391,7 +391,7 @@ SX_PUBLISH_HOURLY_MAX=5
 SX_PUBLISH_DAILY_MAX=20
 SX_STRIPE_WEBHOOK_MAX_BYTES=1048576
 SX_STRIPE_WEBHOOK_RPM=120
-SX_SSE_MAX_CONN=3
+SX_SSE_MAX_CONN=8
 SX_SSE_MAX_MIN=30
 SX_REEL_REWARD_IP_DAILY_CLAIMS=50
 

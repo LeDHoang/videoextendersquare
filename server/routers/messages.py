@@ -949,9 +949,9 @@ async def message_events(
 ):
     require_messaging_user(context.user)
     try:
-        max_conn = max(1, int(os.environ.get("SX_SSE_MAX_CONN", "3")))
+        max_conn = max(1, int(os.environ.get("SX_SSE_MAX_CONN", "8")))
     except (TypeError, ValueError):
-        max_conn = 3
+        max_conn = 8
     try:
         max_minutes = max(1, int(os.environ.get("SX_SSE_MAX_MIN", "30")))
     except (TypeError, ValueError):

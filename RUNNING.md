@@ -155,7 +155,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_QUOTE_RPM` | Billing quotes per user per minute | `15` |
 | `SX_PACK_CREATE_HOURLY` | Reel Pack creations per user per hour | `10` |
 | `SX_PUBLISH_HOURLY_MAX` / `SX_PUBLISH_DAILY_MAX` | Upload publishes per user per hour / day | `5` / `20` |
-| `SX_SSE_MAX_CONN` / `SX_SSE_MAX_MIN` | Message SSE streams per user / max stream lifetime minutes | `3` / `30` |
+| `SX_SSE_MAX_CONN` / `SX_SSE_MAX_MIN` | Message SSE streams per user / max stream lifetime minutes | `8` / `30` |
 | `SX_REGISTRATION_ENABLED` | `0` closes public registration (invite-only); `SX_REGISTRATION_ALLOWLIST` emails can still register | `1` |
 | `SX_REGISTRATION_ALLOWLIST` | Comma-separated invite emails honored while registration is closed (case-insensitive) | empty (fully closed) |
 | `DATABASE_URL` | Shared social/messaging/billing database URL | `sqlite:///./data/echo.db` |
