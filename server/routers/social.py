@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -65,8 +66,10 @@ from server.social.safety import blocked_user_ids, users_blocked
 from server.social.services import (
     post_media_files,
     apply_cursor,
+    clamp_playback,
     create_or_update_post,
     encode_cursor,
+    event_dict_is_valid,
     get_post_by_reference,
     post_card,
     record_event,
@@ -363,11 +366,11 @@ class CommentRequest(BaseModel):
 
 
 class ViewRequest(BaseModel):
-    watch_ms: int = 0
-    foreground_ms: int | None = None
-    duration_ms: int | None = None
+    watch_ms: int = Field(default=0, ge=0)
+    foreground_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     watch_ratio: float | None = None
-    position_ms: int | None = None
+    position_ms: int | None = Field(default=None, ge=0)
     completed: bool = False
     navigation_reason: str | None = None
     playback_quality: dict = Field(default_factory=dict)
@@ -383,11 +386,11 @@ class EventRequest(BaseModel):
     event_type: str
     post_id: str | None = None
     pack_id: str | None = None
-    watch_ms: int | None = None
-    foreground_ms: int | None = None
-    duration_ms: int | None = None
+    watch_ms: int | None = Field(default=None, ge=0)
+    foreground_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     watch_ratio: float | None = None
-    position_ms: int | None = None
+    position_ms: int | None = Field(default=None, ge=0)
     completed: bool = False
     navigation_reason: str | None = None
     playback_quality: dict = Field(default_factory=dict)
@@ -1166,6 +1169,35 @@ def unlike_social_comment(comment_id: str, context: AuthContext = Depends(requir
     return set_comment_like(db, get_visible_comment(db, comment_id, context.user.id), context.user.id, False)
 
 
+def event_rpm() -> int:
+    try:
+        return max(1, int(os.environ.get("SX_EVENT_RPM", "120")))
+    except ValueError:
+        return 120
+
+
+def check_event_rate_limits(db: Session, request: Request, viewer_id: str | None, anonymous_hash: str) -> None:
+    """Per-actor (SX_EVENT_RPM/min) and per-IP (5x that) limits for view/event writes."""
+    rpm = event_rpm()
+    actor = f"u:{viewer_id}" if viewer_id else f"a:{anonymous_hash[:48]}"
+    rate_limiter.check(db, f"events-actor:{actor}", rpm, 60)
+    rate_limiter.check(db, f"events-ip:{request_identity(request)}", rpm * 5, 60)
+
+
+def validate_event_dicts(req) -> None:
+    # Checked here rather than with Field(ge=0): pydantic's NaN/inf error echoes the
+    # input back, which the JSON error response cannot encode (a 500).
+    if req.watch_ratio is not None and not (math.isfinite(req.watch_ratio) and req.watch_ratio >= 0):
+        error(422, "INVALID_EVENT", "watch_ratio must be a non-negative finite number.", "watch_ratio")
+    if not event_dict_is_valid(req.context) or not event_dict_is_valid(req.playback_quality):
+        error(
+            422,
+            "EVENT_CONTEXT_TOO_LARGE",
+            "Event context must be at most 2 KB and 16 keys with scalar values.",
+            "context",
+        )
+
+
 @router.post("/api/posts/{post_id}/view")
 def record_view(
     post_id: str,
@@ -1177,6 +1209,9 @@ def record_view(
 ):
     validate_origin(request)
     viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    check_event_rate_limits(db, request, viewer_id, anonymous_hash)
+    validate_event_dicts(req)
     post = get_visible_post(db, post_id, viewer_id)
     pack = None
     if req.pack_id:
@@ -1188,8 +1223,15 @@ def record_view(
             for item in pack.items
         ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
-    anonymous_hash = ensure_anonymous_cookie(request, response)
-    qualified = req.completed or req.watch_ms >= (2000 if post.media_type == "image" else 3000)
+    clamped = clamp_playback(
+        db,
+        post.id,
+        watch_ms=req.watch_ms,
+        foreground_ms=req.foreground_ms,
+        duration_ms=req.duration_ms,
+        position_ms=req.position_ms,
+    )
+    qualified = req.completed or clamped["watch_ms"] >= (2000 if post.media_type == "image" else 3000)
     counted = False
     if qualified:
         key = f"u:{viewer_id}" if viewer_id else f"a:{anonymous_hash[:48]}"
@@ -1211,11 +1253,11 @@ def record_view(
         user_id=viewer_id,
         anonymous_id=None if viewer_id else anonymous_hash,
         source=req.source,
-        watch_ms=req.watch_ms,
-        foreground_ms=req.foreground_ms,
-        duration_ms=req.duration_ms,
+        watch_ms=clamped["watch_ms"],
+        foreground_ms=clamped["foreground_ms"],
+        duration_ms=clamped["duration_ms"],
         watch_ratio=req.watch_ratio,
-        position_ms=req.position_ms,
+        position_ms=clamped["position_ms"],
         completed=req.completed,
         navigation_reason=req.navigation_reason,
         playback_quality=req.playback_quality,
@@ -1253,6 +1295,9 @@ def create_event(
     if event_type not in allowed:
         error(422, "INVALID_EVENT", "Unsupported event type.", "event_type")
     viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    check_event_rate_limits(db, request, viewer_id, anonymous_hash)
+    validate_event_dicts(req)
     post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
     pack = None
     if req.pack_id:
@@ -1264,7 +1309,6 @@ def create_event(
             for item in pack.items
         ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
-    anonymous_hash = ensure_anonymous_cookie(request, response)
     if pack and event_type == "pack_start":
         # A collection view is any member reel starting playback. Anonymous
         # and authenticated viewers both count, de-duplicated per viewer in a

@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import re
 import uuid
 from contextlib import nullcontext
@@ -740,6 +741,70 @@ def apply_cursor(query, cursor: str | None):
     )
 
 
+MAX_UNKNOWN_DURATION_MS = 30 * 60 * 1000
+PLAYBACK_LOOP_FACTOR = 4
+EVENT_DICT_MAX_BYTES = 2048
+EVENT_DICT_MAX_KEYS = 16
+
+
+def event_dict_is_valid(value: dict | None) -> bool:
+    """Context/playback_quality dicts: <=16 keys, scalar values, <=2 KB serialized."""
+    if not value:
+        return True
+    if len(value) > EVENT_DICT_MAX_KEYS:
+        return False
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return False
+        if item is not None and not isinstance(item, (str, int, float, bool)):
+            return False
+        if isinstance(item, float) and not math.isfinite(item):
+            return False
+    try:
+        return len(json.dumps(value, ensure_ascii=False).encode("utf-8")) <= EVENT_DICT_MAX_BYTES
+    except (TypeError, ValueError):
+        return False
+
+
+def clamp_playback(
+    db: Session,
+    post_id: str | None,
+    *,
+    watch_ms: int | None = None,
+    foreground_ms: int | None = None,
+    duration_ms: int | None = None,
+    position_ms: int | None = None,
+) -> dict:
+    """Bound client-reported playback numbers by the server's known duration.
+
+    The server duration wins over the client's; with none known, durations are
+    capped at 30 minutes. Watch/foreground/position may exceed one pass by up
+    to 4x to allow loops.
+    """
+    server_duration = None
+    if post_id:
+        row = db.query(Post.duration_ms).filter(Post.id == post_id).first()
+        if row and row[0] and int(row[0]) > 0:
+            server_duration = int(row[0])
+    if server_duration:
+        duration = server_duration
+        ceiling = server_duration * PLAYBACK_LOOP_FACTOR
+    else:
+        duration = min(max(0, int(duration_ms)), MAX_UNKNOWN_DURATION_MS) if duration_ms is not None else None
+        ceiling = MAX_UNKNOWN_DURATION_MS
+
+    def bound(value):
+        return None if value is None else max(0, min(int(value), ceiling))
+
+    return {
+        "watch_ms": bound(watch_ms),
+        "foreground_ms": bound(foreground_ms),
+        "duration_ms": duration,
+        "position_ms": bound(position_ms),
+        "server_duration": server_duration is not None,
+    }
+
+
 def record_event(
     db: Session,
     *,
@@ -801,9 +866,22 @@ def record_event(
             recommendation_impression_id = impression.id
             recommendation_request_id = impression.request_id
             recommendation_session_id = impression.session_id
-    bounded_duration = max(0, int(duration_ms)) if duration_ms is not None else None
-    bounded_watch = max(0, int(watch_ms)) if watch_ms is not None else None
-    if watch_ratio is None and bounded_duration and bounded_watch is not None:
+    clamped = clamp_playback(
+        db,
+        post_id,
+        watch_ms=watch_ms,
+        foreground_ms=foreground_ms,
+        duration_ms=duration_ms,
+        position_ms=position_ms,
+    )
+    bounded_duration = clamped["duration_ms"]
+    bounded_watch = clamped["watch_ms"]
+    foreground_ms = clamped["foreground_ms"]
+    position_ms = clamped["position_ms"]
+    if clamped["server_duration"] and bounded_duration and bounded_watch is not None:
+        # The client's ratio is untrusted when the server knows the duration.
+        watch_ratio = bounded_watch / bounded_duration
+    elif watch_ratio is None and bounded_duration and bounded_watch is not None:
         watch_ratio = bounded_watch / bounded_duration
     bounded_ratio = max(0.0, min(4.0, float(watch_ratio))) if watch_ratio is not None else None
     row = EngagementEvent(
@@ -818,10 +896,10 @@ def record_event(
         event_type=event_type[:40],
         source=str(source or "unknown")[:40],
         watch_ms=bounded_watch,
-        foreground_ms=max(0, int(foreground_ms)) if foreground_ms is not None else bounded_watch,
+        foreground_ms=foreground_ms if foreground_ms is not None else bounded_watch,
         duration_ms=bounded_duration,
         watch_ratio=bounded_ratio,
-        position_ms=max(0, int(position_ms)) if position_ms is not None else None,
+        position_ms=position_ms,
         completed=bool(completed),
         navigation_reason=str(navigation_reason or "")[:32] or None,
         playback_quality=dict(playback_quality or {}),
