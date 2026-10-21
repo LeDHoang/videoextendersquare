@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -175,6 +175,42 @@ async def lifespan(app: FastAPI):
         backfill_task.cancel()
 
 
+def mount_spa(app: FastAPI, static_dir: Path) -> None:
+    """Serve the built React app from *static_dir*, if it exists.
+
+    HTML documents are read once and get the request's CSP nonce stamped on
+    their <script> tags per request (server/security_headers.py).
+    """
+    if not static_dir.is_dir():
+        return
+    static_dir = static_dir.resolve()
+    from fastapi.responses import HTMLResponse
+
+    from server.security_headers import nonce_request_html
+
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="web-assets")
+    html_cache: dict[Path, str] = {}
+
+    def html_document(request: Request, file: Path) -> HTMLResponse:
+        if file not in html_cache:
+            html_cache[file] = file.read_text(encoding="utf-8")
+        # Per-request nonce: never let a shared cache replay a stale one.
+        return HTMLResponse(nonce_request_html(request, html_cache[file]), headers={"Cache-Control": "no-cache"})
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str, request: Request):
+        # Unknown API or media paths are real 404s, not the SPA shell
+        # (in production /media is unmounted and must not look like 200).
+        if full_path.startswith(("api/", "media/")):
+            raise HTTPException(status_code=404)
+        file = (static_dir / full_path).resolve()
+        if full_path and file.is_file() and file.is_relative_to(static_dir):
+            if file.suffix.casefold() == ".html":
+                return html_document(request, file)
+            return FileResponse(str(file))
+        return html_document(request, static_dir / "index.html")
+
+
 def create_app() -> FastAPI:
     _configure_logging()
     _init_sentry()
@@ -192,6 +228,11 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "X-CSRF-Token"],
         expose_headers=[],
     )
+    # Security headers + CSP (+ POST /api/csp-report). Wraps CORS; the
+    # request-ID middleware is added after this so it stays outermost.
+    from server.security_headers import install_security_headers
+
+    install_security_headers(app)
 
     from server.routers import account_safety, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, uploads, video
 
@@ -218,20 +259,7 @@ def create_app() -> FastAPI:
     app.mount("/avatars", StaticFiles(directory=avatar_dir), name="avatars")
 
     # Built React app (production). Mounted last so /api and /media win.
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="web-assets")
-
-        @app.get("/{full_path:path}", include_in_schema=False)
-        def spa(full_path: str):
-            # Unknown API or media paths are real 404s, not the SPA shell
-            # (in production /media is unmounted and must not look like 200).
-            if full_path.startswith(("api/", "media/")):
-                raise HTTPException(status_code=404)
-            file = (static_dir / full_path).resolve()
-            if full_path and file.is_file() and file.is_relative_to(static_dir):
-                return FileResponse(str(file))
-            return FileResponse(static_dir / "index.html")
+    mount_spa(app, Path(__file__).resolve().parent / "static")
 
     return app
 
