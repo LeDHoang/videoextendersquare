@@ -2,13 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Button, Pills } from '../components/ui/controls.jsx';
-import { EmptyState, Hero, Mono, Section } from '../components/ui/primitives.jsx';
+import { EmptyState, Hero, Mono, Section, SpecRow } from '../components/ui/primitives.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 
 const TABS = [
+  { value: 'overview', label: 'OVERVIEW' },
   { value: 'reports', label: 'REPORTS' },
   { value: 'support', label: 'SUPPORT' },
+];
+const WINDOW_OPTIONS = [
+  { value: '24h', label: 'LAST 24 H' },
+  { value: '7d', label: 'LAST 7 D' },
 ];
 const STATUS_FILTERS = {
   reports: [
@@ -43,11 +48,53 @@ function NoteField({ id, value, onChange, placeholder }) {
   );
 }
 
+// One cell per metric: current window, the window before it, and a loud flag on a spike.
+function statCell(label, metric, sub) {
+  const detail = 'PREVIOUS ' + metric.previous + (sub ? ' · ' + sub : '');
+  return [label + (metric.spike ? ' · SPIKE' : ''), metric.current, detail];
+}
+
+function OverviewPanel({ stats, windowKey }) {
+  const w = stats.windows[windowKey];
+  const topSenders = w.messages.top_senders.map((row) => '@' + row.username + ' ' + row.sent).join(', ') || 'none';
+  const reasons = Object.entries(w.reports.by_reason).map(([reason, count]) => reason + ' ' + count).join(', ') || 'none';
+  const spikes = [
+    w.reports.spike && 'REPORTS', w.registrations.active.spike && 'SIGN-UPS', w.registrations.pending.spike && 'UNVERIFIED SIGN-UPS',
+    w.messages.spike && 'MESSAGES', w.posts.spike && 'POSTS', w.credits_captured.spike && 'CREDITS', w.support_requests.spike && 'SUPPORT',
+  ].filter(Boolean);
+  const lowDisk = (stats.disk || []).filter((volume) => !volume.ok);
+  return (
+    <div>
+      {spikes.length ? <div className="sx-error-box" role="alert">SPIKE: {spikes.join(' · ')}. At least {stats.spike_floor} and 3x the period before.</div> : null}
+      {lowDisk.length ? <div className="sx-error-box" role="alert">LOW DISK: {lowDisk.map((volume) => volume.volume).join(', ')}</div> : null}
+      <SpecRow cells={[
+        ['OPEN REPORTS', stats.open_reports, 'ALL TIME'],
+        ['OPEN SUPPORT', stats.open_support_requests, 'ALL TIME'],
+        ...(stats.disk || []).map((volume) => ['DISK ' + volume.volume.toUpperCase(), volume.free_gb === null ? 'N/A' : volume.free_gb + ' GB', volume.ok ? 'OK' : 'LOW']),
+      ]} />
+      <SpecRow cells={[
+        statCell('REPORTS', w.reports, reasons),
+        statCell('SUPPORT REQUESTS', w.support_requests),
+        statCell('NEW POSTS', w.posts),
+        statCell('CREDITS CAPTURED', w.credits_captured),
+      ]} />
+      <SpecRow cells={[
+        statCell('SIGN-UPS', w.registrations.active),
+        statCell('UNVERIFIED', w.registrations.pending),
+        statCell('MESSAGES', w.messages, 'top: ' + topSenders),
+      ]} />
+    </div>
+  );
+}
+
 export default function ModerationPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') === 'support' ? 'support' : 'reports';
+  const tabParam = searchParams.get('tab');
+  const tab = tabParam === 'support' || tabParam === 'overview' ? tabParam : 'reports';
   const [status, setStatus] = useState('open');
+  const [statsWindow, setStatsWindow] = useState('24h');
+  const [stats, setStats] = useState(null);
   // Rows carry the tab and filter they were loaded for, so a tab switch never renders
   // report rows with the support renderer (or the reverse) before the reload lands.
   const [loaded, setLoaded] = useState({ key: '', rows: null });
@@ -60,6 +107,14 @@ export default function ModerationPage() {
 
   const load = useCallback(async () => {
     setError('');
+    if (tab === 'overview') {
+      try {
+        setStats(await api.get('/api/moderation/stats'));
+      } catch (requestError) {
+        setError(requestError.message || 'Could not load the overview.');
+      }
+      return;
+    }
     const key = tab + ':' + status;
     try {
       const rows = tab === 'support'
@@ -85,7 +140,7 @@ export default function ModerationPage() {
   const switchTab = (value) => {
     setStatus('open');
     setNotes({});
-    setSearchParams(value === 'support' ? { tab: 'support' } : {}, { replace: true });
+    setSearchParams(value === 'reports' ? {} : { tab: value }, { replace: true });
   };
   const replaceOrDrop = (updated) => {
     setItems((current) => (status === 'all' || updated.status === status
@@ -174,16 +229,21 @@ export default function ModerationPage() {
     </Section>
   );
 
+  const kickers = { support: 'SUPPORT INBOX · APPEALS AND REQUESTS', overview: 'OPERATIONS · TRENDS AND SPIKES', reports: 'USER REPORTS · BETA SAFETY QUEUE' };
   const emptyText = tab === 'support' ? 'There are no support requests here.' : 'There are no reports here.';
   return (
     <div>
-      <Hero title="MODERATION" kicker={tab === 'support' ? 'SUPPORT INBOX · APPEALS AND REQUESTS' : 'USER REPORTS · BETA SAFETY QUEUE'} />
+      <Hero title="MODERATION" kicker={kickers[tab]} />
       <div className="sx-moderation-tabs">
         <Pills options={TABS} value={tab} onChange={switchTab} ariaLabel="Moderation queue" />
-        <Pills options={STATUS_FILTERS[tab]} value={status} onChange={setStatus} ariaLabel="Status filter" />
+        {tab === 'overview'
+          ? <Pills options={WINDOW_OPTIONS} value={statsWindow} onChange={setStatsWindow} ariaLabel="Time window" />
+          : <Pills options={STATUS_FILTERS[tab]} value={status} onChange={setStatus} ariaLabel="Status filter" />}
       </div>
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
-      {items === null ? <SectionSkeleton label="Loading queue" /> : items.length
+      {tab === 'overview' ? (
+        stats ? <OverviewPanel stats={stats} windowKey={statsWindow} /> : error ? null : <SectionSkeleton label="Loading overview" />
+      ) : items === null ? <SectionSkeleton label="Loading queue" /> : items.length
         ? items.map(tab === 'support' ? renderRequest : renderReport)
         : <EmptyState title="QUEUE CLEAR" text={emptyText} />}
     </div>

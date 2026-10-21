@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from server.social.auth import (
@@ -33,6 +33,7 @@ from server.social.auth import (
     verify_password,
 )
 from server import media_store
+from server.settings import env_int
 from server.social.database import get_db
 from server.social.email import send_password_reset_email
 from server.social.message_crypto import (
@@ -46,6 +47,7 @@ from server.social.models import (
     AuthSession,
     Comment,
     CommentLike,
+    CreditLedgerEntry,
     Conversation,
     ConversationMember,
     DirectMessage,
@@ -60,6 +62,7 @@ from server.social.models import (
     ReelPack,
     ReelPackSave,
     Report,
+    SupportRequest,
     User,
     UserBlock,
     utcnow,
@@ -432,6 +435,95 @@ def list_reports(
         query = query.filter(Report.status == status)
     rows = query.order_by(Report.created_at.asc()).limit(max(1, min(limit, 100))).all()
     return {"reports": [serialize_report(db, row) for row in rows]}
+
+
+STATS_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
+SPIKE_FACTOR = 3
+
+
+def _spike(current: int, previous: int, floor: int) -> bool:
+    """A metric spikes when it is at least 3x the previous window and above the noise floor."""
+    return current >= floor and current >= SPIKE_FACTOR * previous
+
+
+def _windowed(count_query, now, delta, floor: int) -> dict:
+    """count_query(start, end) -> int. Returns the current and previous window and a spike flag."""
+    current = int(count_query(now - delta, now) or 0)
+    previous = int(count_query(now - 2 * delta, now - delta) or 0)
+    return {"current": current, "previous": previous, "spike": _spike(current, previous, floor)}
+
+
+@router.get("/api/moderation/stats")
+def moderation_stats(
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    """Operations overview: each metric for the last 24 h and 7 d against the period before it."""
+    del context
+    from server.routers.health import disk_status
+
+    now = utcnow()
+    floor = env_int("SX_MOD_SPIKE_MIN", 10, minimum=1)
+
+    def between(model_column, *filters):
+        def run(start, end):
+            return db.query(func.count()).select_from(model_column.class_).filter(
+                model_column > start, model_column <= end, *filters
+            ).scalar()
+        return run
+
+    def captured(start, end):
+        total = db.query(func.coalesce(func.sum(-CreditLedgerEntry.delta_reserved), 0)).filter(
+            CreditLedgerEntry.entry_type == "capture",
+            CreditLedgerEntry.created_at > start,
+            CreditLedgerEntry.created_at <= end,
+        ).scalar()
+        return total
+
+    windows = {}
+    for label, delta in STATS_WINDOWS.items():
+        start = now - delta
+        by_reason = dict(
+            db.query(Report.reason, func.count()).filter(Report.created_at > start).group_by(Report.reason).all()
+        )
+        by_status = dict(
+            db.query(Report.status, func.count()).filter(Report.created_at > start).group_by(Report.status).all()
+        )
+        top_senders = (
+            db.query(User.username, func.count(DirectMessage.id).label("sent"))
+            .join(User, User.id == DirectMessage.sender_id)
+            .filter(DirectMessage.created_at > start)
+            .group_by(User.username)
+            .order_by(func.count(DirectMessage.id).desc(), User.username.asc())
+            .limit(5)
+            .all()
+        )
+        windows[label] = {
+            "reports": {
+                **_windowed(between(Report.created_at), now, delta, floor),
+                "by_reason": by_reason,
+                "by_status": by_status,
+            },
+            "registrations": {
+                "active": _windowed(between(User.created_at, User.status == "active"), now, delta, floor),
+                "pending": _windowed(between(User.created_at, User.status == "pending"), now, delta, floor),
+            },
+            "messages": {
+                **_windowed(between(DirectMessage.created_at), now, delta, floor),
+                "top_senders": [{"username": name, "sent": int(sent)} for name, sent in top_senders],
+            },
+            "posts": _windowed(between(Post.created_at), now, delta, floor),
+            "credits_captured": _windowed(captured, now, delta, floor),
+            "support_requests": _windowed(between(SupportRequest.created_at), now, delta, floor),
+        }
+    return {
+        "generated_at": now.isoformat(),
+        "spike_floor": floor,
+        "open_reports": db.query(func.count(Report.id)).filter(Report.status == "open").scalar(),
+        "open_support_requests": db.query(func.count(SupportRequest.id)).filter(SupportRequest.status == "open").scalar(),
+        "windows": windows,
+        "disk": disk_status(),
+    }
 
 
 @router.patch("/api/moderation/reports/{report_id}")
