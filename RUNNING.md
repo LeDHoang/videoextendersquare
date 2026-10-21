@@ -116,6 +116,10 @@ refuses to boot until every check in `server/settings.py` passes.
 | `R2_ENDPOINT_URL` | _(unset)_ | S3 endpoint override; local staging points it at SeaweedFS. Unset means `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `SX_ENV_FILE`, `SX_APP_PORT` | _(unset)_ | Compose only: env file for the app (default `.env`) and its loopback port (default `8000`). Local staging uses `.env.staging` and `8001` |
 | `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
+| `SX_LOG_FORMAT` | `json` | `json` (default in production) or `text`; every line carries the `request_id` echoed in `X-Request-ID` |
+| `SX_CSP_MODE` | `report` | `off` (default outside production), `report` (default in production; reports go to `POST /api/csp-report` and the log) or `enforce` |
+| `SX_SHUTDOWN_DRAIN_S` | `15` | Shutdown drain: queued jobs are cancelled and refunded, running ones get this long |
+| `SX_SUPPORT_EMAIL` | operator inbox | Notified per `/support` request (no body). Unset: log line only |
 | `SX_REGISTRATION_ENABLED` / `SX_REGISTRATION_ALLOWLIST` | `0` / invited emails | Invite-only beta |
 | `SX_MAX_VIDEO_UPLOAD_MB` / `SX_MAX_IMAGE_UPLOAD_MB` | `95` / `50` | Upload size caps (95 MB stays under Cloudflare's 100 MB request limit) |
 | `SX_UPLOAD_HOURLY_MAX` | `30` | Uploads per user per hour |
@@ -178,7 +182,7 @@ VR globe debugging: append `?earthmap=0` to disable the slippy-map tile layer on
 
 ## Credits, Stripe, and reel-reward deployment notes
 
-Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migrations through head (`20261020_0014`), back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
+Keep `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, and `SX_REEL_REWARDS_ENABLED` off by default. Apply migrations through head (`20261021_0015`), back up the database, and configure a stable `SX_FAL_KEY_ENCRYPTION_KEY` before allowing users to save personal keys. Generate it independently from `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY`; rotating it requires re-encrypting all saved Fal credentials first.
 
 When any billing flag is on, `SX_SECURITY_SECRET` must be a real secret (not the development default) and `SX_FAL_KEY_ENCRYPTION_KEY` must be at least 16 characters and not a placeholder — otherwise paid endpoints (`/api/billing/*`, credit-funded `/process`, reward claims) return 503 `BILLING_MISCONFIGURED` while free local processing and reels keep working. The misconfiguration is also logged loudly at startup.
 
@@ -200,7 +204,7 @@ Reward anti-gaming posture (accepted, documented): the watch threshold uses the 
 
 ## Messaging deployment notes
 
-Run `make migrate` before startup so the database is at revision `20261020_0014` (head). Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
+Run `make migrate` before startup so the database is at revision `20261021_0015` (head). Generate `SX_SECURITY_SECRET` and `SX_MESSAGE_ENCRYPTION_KEY` independently (for example, `openssl rand -base64 48`) and store both in the deployment secret manager. Do not rotate the messaging key until stored messages and report evidence have been re-encrypted.
 
 Set `SX_PUBLIC_URL` to the externally reachable origin, without a trailing slash. This is the base for copied reel links and QR codes. Tenor is optional; if enabled, the backend needs outbound HTTPS access to `tenor.googleapis.com`, while stored GIF URLs must match `SX_TENOR_ALLOWED_HOSTS`.
 

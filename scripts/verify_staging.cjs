@@ -226,7 +226,24 @@ async function main() {
   console.log(`app ${APP}  media ${MEDIA}`);
 
   // ── Boot and gates ──
-  check('healthz 200', (await fetch(`${APP}/api/healthz`)).status === 200);
+  const health = await fetch(`${APP}/api/healthz`);
+  check('healthz 200', health.status === 200);
+  const shell = await fetch(`${APP}/`);
+  const shellHtml = await shell.text();
+  for (const [label, res] of [['healthz', health], ['SPA', shell]]) {
+    const h = res.headers;
+    check(`${label}: X-Request-ID`, /^[0-9a-f]{32}$/.test(h.get('x-request-id') || ''), h.get('x-request-id') || 'missing');
+    check(`${label}: security headers`,
+      h.get('x-content-type-options') === 'nosniff' && h.get('x-frame-options') === 'DENY'
+        && !!h.get('referrer-policy') && !!h.get('permissions-policy'));
+  }
+  // Production default is report-only (SX_CSP_MODE=report); the nonce in the
+  // header must match the one stamped on the shell's scripts.
+  const csp = shell.headers.get('content-security-policy-report-only') || '';
+  const nonce = (csp.match(/'nonce-([^']+)'/) || [])[1];
+  check('SPA: report-only CSP with matching nonce', !!nonce && shellHtml.includes(`nonce="${nonce}"`), csp ? '' : 'no CSP header');
+  const echoed = await fetch(`${APP}/api/healthz`, { headers: { 'X-Request-ID': 'verify-staging-0001' } });
+  check('incoming X-Request-ID echoed', echoed.headers.get('x-request-id') === 'verify-staging-0001');
   const ready = await fetch(`${APP}/api/readyz`);
   check('readyz 200', ready.status === 200, ready.status === 200 ? '' : await ready.text());
   check('/media mount gone (404)', (await fetch(`${APP}/media/uploads/x.mp4`)).status === 404);

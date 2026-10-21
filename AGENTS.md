@@ -35,7 +35,7 @@ Single source of truth for where generated files belong. Follow this on every ta
 ## Test conventions
 
 - Backend suite: `make test` → `pytest -q tests` + `cd web && npm test`. Never widen pytest collection scope (no repo-wide `pytest` — it hits the user-owned `ComfyUI/` tree and hardware deps).
-- Schema truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py` (currently `20261020_0014`).
+- Schema truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py` (currently `20261021_0015`).
 - Concurrency/billing tests must eventually run against PostgreSQL (launch verdict in `docs/to-beta.md`); SQLite-only green is not sufficient for billing paths.
 - `tests/conftest.py` (shared fixtures only) points the global `SessionLocal` fallback at a throwaway DB, so tests never touch `data/echo.db`.
 - One request, one pooled connection: helpers called from a route take the request `db` instead of opening `SessionLocal()` (guarded by `tests/test_db_pool_isolation.py`; set `SX_TEST_POSTGRES_URL` to run it on PostgreSQL).
