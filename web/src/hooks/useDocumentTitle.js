@@ -21,6 +21,7 @@ const STATIC_TITLES = {
   '/moderation': 'Moderation',
   '/terms': 'Terms of Service',
   '/privacy': 'Privacy Policy',
+  '/support': 'Support',
 };
 
 function decode(part) {

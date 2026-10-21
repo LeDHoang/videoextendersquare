@@ -285,10 +285,10 @@ def create_app() -> FastAPI:
     # errors get an ID too (security headers sit inside it).
     app.add_middleware(RequestIDMiddleware)
 
-    from server.routers import account_safety, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, uploads, video
+    from server.routers import account_safety, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, support, uploads, video
 
     production = is_production()
-    modules = [health, config, model_info, billing, image, video, account_safety, social, packs, messages, reels, map_tiles, rewards, uploads]
+    modules = [health, config, model_info, billing, image, video, account_safety, social, packs, messages, reels, map_tiles, rewards, uploads, support]
     if not production:
         # Compare reads output/pairs through /media; neither exists in production.
         modules.append(compare)

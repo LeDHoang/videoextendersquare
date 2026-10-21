@@ -103,7 +103,7 @@ class ReportCreateRequest(BaseModel):
 
 
 class ModerationRequest(BaseModel):
-    action: Literal["dismiss", "resolve", "remove_content", "suspend_user"]
+    action: Literal["dismiss", "resolve", "remove_content", "suspend_user", "reinstate_user"]
     resolution: str = ""
 
 
@@ -308,33 +308,39 @@ def list_blocked_users(
     }
 
 
-@router.post("/api/reports")
-def create_report(
-    req: ReportCreateRequest,
-    context: AuthContext = Depends(require_auth_csrf),
-    db: Session = Depends(get_db),
-):
-    rate_limiter.check(db, f"report:{context.user.id}", 20, 60 * 60)
-    reason = req.reason.strip().casefold()
+def file_report(
+    db: Session,
+    reporter: User,
+    target_type: str,
+    target_id: str,
+    reason: str,
+    details: str = "",
+) -> tuple[Report, bool]:
+    """Validate a report target and create an open Report (shared with the support inbox).
+
+    Returns ``(report, duplicate)``; an open report by the same reporter on the
+    same target is returned instead of a new row. Raises HTTP errors via fail().
+    """
+    reason = reason.strip().casefold()
     if reason not in REPORT_REASONS:
         fail(422, "INVALID_REPORT_REASON", "Choose a valid report reason.", "reason")
-    target_id = req.target_id.strip()
-    if req.target_type == "user":
+    target_id = target_id.strip()
+    if target_type == "user":
         target = db.get(User, target_id)
         if not target or target.status == "deleted":
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported profile no longer exists.")
         target_owner_id = target.id
-    elif req.target_type == "post":
+    elif target_type == "post":
         target = db.get(Post, target_id)
         if not target or target.deleted_at is not None:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported post no longer exists.")
         target_owner_id = target.owner_id
-    elif req.target_type == "pack":
+    elif target_type == "pack":
         target = db.get(ReelPack, target_id)
         if not target or target.deleted_at is not None or target.status == "deleted":
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported Reel Pack no longer exists.")
         target_owner_id = target.owner_id
-    elif req.target_type == "comment":
+    elif target_type == "comment":
         target = db.get(Comment, target_id)
         if not target or target.deleted_at is not None:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported comment no longer exists.")
@@ -346,25 +352,25 @@ def create_report(
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported message no longer exists.")
         member = db.query(ConversationMember).filter(
             ConversationMember.conversation_id == target.conversation_id,
-            ConversationMember.user_id == context.user.id,
+            ConversationMember.user_id == reporter.id,
         ).first()
         if not member:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported message no longer exists.")
         target_owner_id = target.sender_id
-    if target_owner_id == context.user.id:
+    if target_owner_id == reporter.id:
         fail(422, "SELF_REPORT", "You cannot report your own content.")
     existing = db.query(Report).filter(
-        Report.reporter_id == context.user.id,
-        Report.target_type == req.target_type,
+        Report.reporter_id == reporter.id,
+        Report.target_type == target_type,
         Report.target_id == target_id,
         Report.status == "open",
     ).first()
     if existing:
-        return {"report": serialize_report(db, existing), "duplicate": True}
+        return existing, True
 
     report_id = str(uuid.uuid4())
     evidence_ciphertext = None
-    if req.target_type == "message":
+    if target_type == "message":
         try:
             content = decrypt_payload(
                 target.payload_ciphertext,
@@ -389,17 +395,28 @@ def create_report(
             fail(409, "MESSAGE_EVIDENCE_UNAVAILABLE", "The message evidence could not be captured.")
     report = Report(
         id=report_id,
-        reporter_id=context.user.id,
-        target_type=req.target_type,
+        reporter_id=reporter.id,
+        target_type=target_type,
         target_id=target_id,
         reason=reason,
-        details=req.details.strip()[:500],
+        details=(details or "").strip()[:500],
         evidence_ciphertext=evidence_ciphertext,
     )
     db.add(report)
     db.commit()
     db.refresh(report)
-    return {"report": serialize_report(db, report), "duplicate": False}
+    return report, False
+
+
+@router.post("/api/reports")
+def create_report(
+    req: ReportCreateRequest,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
+    rate_limiter.check(db, f"report:{context.user.id}", 20, 60 * 60)
+    report, duplicate = file_report(db, context.user, req.target_type, req.target_id, req.reason, req.details)
+    return {"report": serialize_report(db, report), "duplicate": duplicate}
 
 
 @router.get("/api/moderation/reports")
@@ -427,6 +444,8 @@ def moderate_report(
     report = db.get(Report, report_id)
     if not report:
         fail(404, "REPORT_NOT_FOUND", "Report not found.")
+    if req.action == "reinstate_user":
+        return reinstate_reported_user(db, report, req, context)
     if report.status != "open":
         fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
     if req.action == "remove_content" and report.target_type == "user":
@@ -499,6 +518,47 @@ def moderate_report(
     report.reviewed_at = utcnow()
     db.commit()
     media_store.delete_paths(media_files)
+    return {"report": serialize_report(db, report)}
+
+
+def reinstate_reported_user(db: Session, report: Report, req: ModerationRequest, context: AuthContext) -> dict:
+    """Undo a suspension after an appeal. Admin-only; works on reviewed reports too.
+
+    Only ``suspended`` accounts go back to ``active``; deleted accounts are
+    anonymized and are never restored.
+    """
+    if context.user.role != "admin":
+        fail(403, "ADMIN_REQUIRED", "Only an administrator can reinstate an account.")
+    target_user = None
+    if report.target_type == "user":
+        target_user = db.get(User, report.target_id)
+    elif report.target_type == "post":
+        post = db.get(Post, report.target_id)
+        target_user = db.get(User, post.owner_id) if post else None
+    elif report.target_type == "pack":
+        pack = db.get(ReelPack, report.target_id)
+        target_user = db.get(User, pack.owner_id) if pack else None
+    elif report.target_type == "comment":
+        comment = db.get(Comment, report.target_id)
+        target_user = db.get(User, comment.author_id) if comment else None
+    elif report.target_type == "message":
+        message = db.get(DirectMessage, report.target_id)
+        target_user = db.get(User, message.sender_id) if message else None
+    if not target_user:
+        fail(404, "REPORT_TARGET_NOT_FOUND", "The reported user no longer exists.")
+    if target_user.status == "deleted":
+        fail(409, "ACCOUNT_DELETED", "Deleted accounts cannot be reinstated.")
+    if target_user.status != "suspended":
+        fail(409, "ACCOUNT_NOT_SUSPENDED", "This account is not suspended.")
+    target_user.status = "active"
+    note = (req.resolution.strip() or "reinstated user")[:500]
+    if report.status == "open":
+        report.status = "resolved"
+        report.reviewed_at = utcnow()
+        report.moderator_id = context.user.id
+    report.resolution = (f"{report.resolution} | {note}" if report.resolution else note)[:500]
+    db.commit()
+    logger.info("Admin %s reinstated user %s via report %s", context.user.id, target_user.id, report.id)
     return {"report": serialize_report(db, report)}
 
 
