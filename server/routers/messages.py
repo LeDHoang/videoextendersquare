@@ -973,6 +973,27 @@ async def message_events(
     user_id = context.user.id
     deadline = time.monotonic() + max_minutes * 60
 
+    def poll_events(cursor: int) -> list[dict]:
+        with SessionLocal() as event_db:
+            rows = event_db.query(MessageEvent).filter(
+                MessageEvent.recipient_id == user_id,
+                MessageEvent.id > cursor,
+                or_(
+                    MessageEvent.conversation_id.is_(None),
+                    ~deleted_counterpart_clause(MessageEvent.conversation_id, user_id),
+                ),
+            ).order_by(MessageEvent.id.asc()).limit(100).all()
+            return [
+                {
+                    "id": row.id,
+                    "type": row.event_type,
+                    "conversation_id": row.conversation_id,
+                    "message_id": row.message_id,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
+
     async def stream():
         cursor = max(0, int(after))
         idle_ticks = 0
@@ -981,25 +1002,10 @@ async def message_events(
                 if time.monotonic() >= deadline:
                     yield "event: reconnect\ndata: {\"reason\":\"max-stream-lifetime\"}\n\n"
                     break
-                with SessionLocal() as event_db:
-                    rows = event_db.query(MessageEvent).filter(
-                        MessageEvent.recipient_id == user_id,
-                        MessageEvent.id > cursor,
-                        or_(
-                            MessageEvent.conversation_id.is_(None),
-                            ~deleted_counterpart_clause(MessageEvent.conversation_id, user_id),
-                        ),
-                    ).order_by(MessageEvent.id.asc()).limit(100).all()
-                    payloads = [
-                        {
-                            "id": row.id,
-                            "type": row.event_type,
-                            "conversation_id": row.conversation_id,
-                            "message_id": row.message_id,
-                            "created_at": row.created_at.isoformat() if row.created_at else None,
-                        }
-                        for row in rows
-                    ]
+                # Off the event loop: a pool checkout that waits here would
+                # otherwise stall every request, including the ones holding
+                # the connections it waits for.
+                payloads = await asyncio.to_thread(poll_events, cursor)
                 if payloads:
                     idle_ticks = 0
                     for payload in payloads:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import threading
 import time
 from unittest.mock import patch
 
@@ -549,6 +551,49 @@ def test_sse_max_lifetime_frame(app, monkeypatch):
         finally:
             await response.body_iterator.aclose()
         assert messages_router._SSE_STREAMS.get(user_id, 0) == 0
+
+    asyncio.run(exercise())
+
+
+def test_sse_poll_runs_off_the_event_loop(app, monkeypatch):
+    # A pool checkout on the loop thread stalls every request once the pool is
+    # busy, including the ones holding the connections it waits for.
+    session_threads = []
+
+    def recording_session():
+        session_threads.append(threading.get_ident())
+        return app.state.testing_session()
+
+    monkeypatch.setattr(messages_router, "SessionLocal", recording_session)
+
+    async def exercise():
+        with app.state.testing_session() as db:
+            user = User(username="edge_sse_loop", username_norm="edge_sse_loop", display_name="p")
+            db.add(user)
+            db.commit()
+            user_id = user.id
+
+        async def _receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = StarletteRequest({"type": "http", "headers": []}, _receive)
+        context = AuthContext(
+            user=type("U", (), {"id": user_id, "status": "active", "account_type": "real"})(),
+            session=None,
+        )
+        messages_router._SSE_STREAMS.pop(user_id, None)
+        response = await messages_router.message_events(request, 0, context)
+        pending = asyncio.ensure_future(response.body_iterator.__anext__())
+        for _ in range(200):
+            if session_threads:
+                break
+            await asyncio.sleep(0.01)
+        pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await pending
+        await response.body_iterator.aclose()
+        assert session_threads
+        assert threading.get_ident() not in session_threads
 
     asyncio.run(exercise())
 
