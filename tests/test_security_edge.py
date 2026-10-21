@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
+from verified_signup import register_verified
 from pipeline import utils as pipeline_utils
 from pipeline.utils import attach_civitai_token, get_image_dimensions
 from server.billing.crypto import FalKeyConfigurationError, decrypt_fal_key, encrypt_fal_key
@@ -89,8 +90,7 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client, username, email=None):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email or f"{username}@example.com",
             "username": username,
@@ -123,8 +123,7 @@ def test_registration_closed_flag_variants(app, monkeypatch, flag):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", flag)
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "v@example.com", "username": "edge_variant",
                   "password": PASSWORD, "accept_terms": True, "display_name": "v"},
         )
@@ -136,8 +135,7 @@ def test_registration_open_ignores_allowlist(app, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.setenv("SX_REGISTRATION_ALLOWLIST", "nobody@example.com")
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "anyone@example.com", "username": "edge_open",
                   "password": PASSWORD, "accept_terms": True, "display_name": "a"},
         )
@@ -154,8 +152,7 @@ def test_import_time_constant_and_env_both_close(app, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "c@example.com", "username": "edge_and",
                   "password": PASSWORD, "accept_terms": True, "display_name": "c"},
         )

@@ -32,6 +32,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
+from verified_signup import register_verified
 from server.routers import reels, social
 from server.social import auth, database, safety
 from server.social.database import Base, get_db
@@ -128,8 +129,7 @@ def build_app(tmp_path, monkeypatch, **pool_options) -> FastAPI:
 
 
 def register_and_seed(app: FastAPI, client: TestClient) -> dict:
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": "pool@example.com",
             "username": "pooluser",

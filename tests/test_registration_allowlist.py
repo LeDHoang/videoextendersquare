@@ -54,7 +54,9 @@ def test_open_registration_allows_anyone(app, monkeypatch):
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     with TestClient(app) as client:
         response = _register(client, "anyone@example.com", "allow_anyone")
-        assert response.status_code == 200, response.text
+        assert response.status_code == 202, response.text
+        assert response.json()["verification_sent"] is True
+        assert "echo_session" not in client.cookies
 
 
 def test_closed_registration_blocks_non_listed(app, monkeypatch):
@@ -71,7 +73,11 @@ def test_closed_registration_allows_listed_case_insensitive(app, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ALLOWLIST", "  Invited@Example.com , other@example.com")
     with TestClient(app) as client:
         response = _register(client, "invited@example.com", "allow_invited")
-        assert response.status_code == 200, response.text
+        assert response.status_code == 202, response.text
+        # Invited sign-ups still have to prove the mailbox.
+        verified = client.post("/api/auth/verify-email", json={"token": response.json()["debug_token"]})
+        assert verified.status_code == 200, verified.text
+        assert verified.json()["user"]["username"] == "allow_invited"
 
 
 def test_closed_with_empty_allowlist_blocks_all(app, monkeypatch):

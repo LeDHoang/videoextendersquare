@@ -90,6 +90,19 @@ class PasswordResetToken(Base):
     used_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class EmailVerificationToken(Base):
+    """One-time link that turns a ``pending`` user into an ``active`` one."""
+
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class RateLimitEvent(Base):
     __tablename__ = "rate_limit_events"
 

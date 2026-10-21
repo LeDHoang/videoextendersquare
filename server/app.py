@@ -165,6 +165,8 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Production configuration is unsafe:\n- " + "\n- ".join(errors))
 
     init_database()
+    from server.social.turnstile import log_turnstile_status
+    log_turnstile_status()
     if not is_production():
         # Dev convenience only: turns loose files in output/ into posts.
         await asyncio.to_thread(import_legacy_social)

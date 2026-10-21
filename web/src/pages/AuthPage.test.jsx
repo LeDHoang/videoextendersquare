@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../api/client.js', () => ({ api: mocks.api }));
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => mocks.auth }));
+// The real widget loads Cloudflare's script; this stand-in just hands out a token on click.
+vi.mock('../components/auth/Turnstile.jsx', () => ({
+  default: ({ siteKey, onToken }) => (siteKey
+    ? <button type="button" onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
+    : null),
+}));
 
 function memoryStorage() {
   const data = new Map();
@@ -279,6 +285,48 @@ describe('AuthPage — sign in', () => {
   });
 });
 
+describe('AuthPage — unverified sign-in hint', () => {
+  beforeEach(() => {
+    vi.stubGlobal('sessionStorage', memoryStorage());
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.auth.user = null;
+    mocks.auth.loading = false;
+    mocks.auth.login.mockReset().mockRejectedValue(new FakeApiError('Incorrect email/username or password.', { code: 'INVALID_CREDENTIALS', status: 401 }));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('appears after a failed sign-in and resends to an email identifier', async () => {
+    mocks.api.post.mockResolvedValue({ verification_sent: true });
+    renderAt('/login');
+    type('EMAIL OR USERNAME', 'me@example.com');
+    type('PASSWORD', 'whatever-123');
+    submit();
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'me@example.com' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'CHECK YOUR EMAIL' })).toBeInTheDocument();
+  });
+
+  it('asks for the email when the identifier is a username', async () => {
+    renderAt('/login');
+    type('EMAIL OR USERNAME', 'someone');
+    type('PASSWORD', 'whatever-123');
+    submit();
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
+    expect(await screen.findByText(/Enter the email you signed up with/)).toBeInTheDocument();
+    expect(mocks.api.post).not.toHaveBeenCalled();
+  });
+
+  it('is not shown before any failed attempt', () => {
+    renderAt('/login');
+    expect(screen.queryByRole('button', { name: 'Resend the link' })).not.toBeInTheDocument();
+  });
+});
+
 describe('AuthPage — create account', () => {
   beforeEach(() => {
     vi.stubGlobal('sessionStorage', memoryStorage());
@@ -286,7 +334,7 @@ describe('AuthPage — create account', () => {
     mocks.auth.user = null;
     mocks.auth.loading = false;
     mocks.auth.login.mockReset().mockResolvedValue({ id: 'u1' });
-    mocks.auth.register.mockReset().mockResolvedValue({ id: 'u1' });
+    mocks.auth.register.mockReset().mockResolvedValue({ verification_sent: true });
   });
   afterEach(() => {
     cleanup();
@@ -366,18 +414,100 @@ describe('AuthPage — create account', () => {
     expect(rules.querySelectorAll('.is-pass')).toHaveLength(3);
   });
 
-  it('registers with trimmed values and lands on next', async () => {
+  it('registers with trimmed values and shows the check-your-email screen instead of signing in', async () => {
     renderAt('/signup?next=%2Fupload');
     fillValid();
     type('DISPLAY NAME', '  New Maker ');
     submit();
-    await waitFor(() => expect(where()).toBe('/upload'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'CHECK YOUR EMAIL' })).toBeInTheDocument();
     expect(mocks.auth.register).toHaveBeenCalledWith({
       email: 'New@Example.com',
       username: 'new_maker',
       display_name: 'New Maker',
       password: 'a-long-password-1',
       accept_terms: true,
+      website: '',
+    });
+    expect(screen.getByText('New@Example.com')).toBeInTheDocument();
+    expect(screen.queryByTestId('where')).not.toBeInTheDocument();
+  });
+
+  it('keeps a hidden honeypot field out of the tab order', () => {
+    renderAt('/signup');
+    const trap = document.querySelector('input[name="website"]');
+    expect(trap).toHaveAttribute('tabindex', '-1');
+    expect(trap.closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it('offers a resend with a cooldown and posts to resend-verification', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.api.post.mockResolvedValue({ verification_sent: true });
+      renderAt('/signup');
+      fillValid();
+      submit();
+      await screen.findByRole('heading', { name: 'CHECK YOUR EMAIL' });
+      const button = screen.getByRole('button', { name: /RESEND IN 30S/ });
+      expect(button).toBeDisabled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(31000); });
+      fireEvent.click(screen.getByRole('button', { name: 'RESEND EMAIL' }));
+      await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'New@Example.com' }));
+      expect(await screen.findByText(/new link was sent/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('links the development verification token when the server exposes it', async () => {
+    mocks.auth.register.mockResolvedValue({ verification_sent: true, debug_token: 'dev tok' });
+    renderAt('/signup');
+    fillValid();
+    submit();
+    const link = await screen.findByRole('link', { name: /OPEN THE VERIFICATION LINK/ });
+    expect(link).toHaveAttribute('href', '/verify-email?token=dev%20tok');
+  });
+
+  it('lets the user go back and fix the email', async () => {
+    renderAt('/signup');
+    fillValid();
+    submit();
+    fireEvent.click(await screen.findByRole('button', { name: 'USE A DIFFERENT EMAIL' }));
+    expect(screen.getByRole('heading', { level: 1, name: 'CREATE PROFILE' })).toBeInTheDocument();
+  });
+
+  describe('Turnstile', () => {
+    it('blocks submit until the bot check is solved, then sends its token', async () => {
+      mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+      renderAt('/signup');
+      fillValid();
+      const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+      submit();
+      expect(mocks.auth.register).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+      fireEvent.click(solve);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      submit();
+      await waitFor(() => expect(mocks.auth.register).toHaveBeenCalled());
+      expect(mocks.auth.register.mock.calls[0][0].turnstile_token).toBe('cf-token');
+    });
+
+    it('does not require or send a token when no site key is configured', async () => {
+      mocks.api.get.mockResolvedValue({ turnstile_site_key: '' });
+      renderAt('/signup');
+      fillValid();
+      submit();
+      await waitFor(() => expect(mocks.auth.register).toHaveBeenCalled());
+      expect(mocks.auth.register.mock.calls[0][0]).not.toHaveProperty('turnstile_token');
+    });
+
+    it('shows a server BOT_CHECK_FAILED as a form alert', async () => {
+      mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+      mocks.auth.register.mockRejectedValue(new FakeApiError('Bot check failed. Try again.', { code: 'BOT_CHECK_FAILED', field: 'turnstile_token' }));
+      renderAt('/signup');
+      fillValid();
+      fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+      submit();
+      expect(await screen.findByRole('alert')).toHaveTextContent('Bot check failed');
     });
   });
 

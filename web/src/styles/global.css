@@ -10145,6 +10145,23 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-au-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .sx-au-link--quiet { color: var(--sx-ink-2); }
 .sx-au-link--quiet:hover { color: var(--sx-ink); }
+button.sx-au-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
+/* Honeypot: off-screen rather than display:none, so naive bots still fill it. */
+.sx-au-hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.sx-au-turnstile { min-height: 65px; }
 
 .sx-au-foot {
   display: flex;

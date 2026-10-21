@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server import media as SM
 from server.jobs import JobCancelled, JobManager, JobStatus, ShuttingDown
 from server.routers import image, social, uploads
@@ -123,8 +124,7 @@ def test_submit_after_shutdown_is_503(app, manager, monkeypatch):
     monkeypatch.setattr(image, "get_image_dimensions", lambda _path: (1000, 1000))
     manager.shutdown(drain_s=0)
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={
                 "email": "late@example.com",
                 "username": "late_submitter",

@@ -5,13 +5,15 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, EmailStr, Field, StrictBool
@@ -24,6 +26,7 @@ from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
     AuthContext,
+    aware,
     clear_auth_cookies,
     create_auth_session,
     ensure_anonymous_cookie,
@@ -38,6 +41,7 @@ from server.social.auth import (
     require_auth,
     require_auth_csrf,
     set_auth_cookies,
+    token_hash,
     validate_origin,
     validate_csrf,
     validate_password,
@@ -45,10 +49,12 @@ from server.social.auth import (
     verify_password,
 )
 from server.social.database import get_db
+from server.social.email import send_verification_email, verification_ttl_minutes
 from server.social.models import (
     AuthSession,
     Comment,
     CommentLike,
+    EmailVerificationToken,
     Follow,
     Post,
     PostLike,
@@ -62,6 +68,7 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import blocked_user_ids, users_blocked
+from server.social.turnstile import verify_turnstile
 from server.social.services import (
     post_media_files,
     apply_cursor,
@@ -75,6 +82,7 @@ from server.social.services import (
     tag_slug,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["social"])
 AVATAR_DIR = Path("data/avatars")
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
@@ -332,6 +340,18 @@ class RegisterRequest(BaseModel):
     display_name: str = ""
     # Strict so only a real JSON true counts as consent ("yes"/1 are rejected).
     accept_terms: StrictBool = False
+    # Cloudflare Turnstile response; checked only when SX_TURNSTILE_SECRET is set.
+    turnstile_token: str | None = None
+    # Honeypot: hidden in the SPA, so a non-empty value means a bot.
+    website: str = ""
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class LoginRequest(BaseModel):
@@ -406,9 +426,74 @@ class RecommendationFeedbackRequest(BaseModel):
     client_event_id: str | None = None
 
 
-@router.post("/api/auth/register")
-def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+def _issue_verification_token(db: Session, user: User) -> str:
+    """Retire older links for ``user`` and store a fresh one; returns the raw token."""
+    now = utcnow()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    raw_token = secrets.token_urlsafe(40)
+    db.add(
+        EmailVerificationToken(
+            user_id=user.id,
+            token_hash=token_hash(raw_token),
+            expires_at=now + timedelta(minutes=verification_ttl_minutes()),
+        )
+    )
+    db.commit()
+    return raw_token
+
+
+def _deliver_verification_email(recipient: str, raw_token: str) -> None:
+    try:
+        send_verification_email(recipient, raw_token)
+    except Exception:
+        logger.exception("Verification email delivery failed")
+
+
+def _expose_verification_token() -> bool:
+    return os.environ.get("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0").lower() in {"1", "true", "yes"}
+
+
+def _verification_accepted(raw_token: str | None = None) -> JSONResponse:
+    payload = {"verification_sent": True}
+    if raw_token and _expose_verification_token():
+        payload["debug_token"] = raw_token
+    return JSONResponse(payload, status_code=202)
+
+
+def _clear_expired_pending(db: Session, email: str, username: str) -> None:
+    """Drop pending users holding this email/username whose verification lapsed."""
+    rows = db.query(User).filter(
+        User.status == "pending",
+        or_(User.email_norm == email, User.username_norm == username),
+    ).all()
+    now = utcnow()
+    for row in rows:
+        latest = db.query(func.max(EmailVerificationToken.expires_at)).filter(
+            EmailVerificationToken.user_id == row.id,
+        ).scalar()
+        if latest is not None and aware(latest) > now:
+            continue
+        db.query(EmailVerificationToken).filter(
+            EmailVerificationToken.user_id == row.id,
+        ).delete(synchronize_session=False)
+        db.delete(row)
+    db.commit()
+
+
+@router.post("/api/auth/register", status_code=202)
+def register(
+    req: RegisterRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     validate_origin(request)
+    if req.website.strip():
+        # Honeypot: only bots fill the hidden field. Look like success, create nothing.
+        return _verification_accepted()
     email_for_gate = normalize_email(str(req.email))
     is_open = REGISTRATION_ENABLED and registration_enabled()
     if not is_open and not is_registration_allowlisted(email_for_gate):
@@ -416,10 +501,12 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
     rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
     if req.accept_terms is not True:
         error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
+    verify_turnstile(req.turnstile_token, request_identity(request))
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
     rate_limiter.check(db, f"register-account:{email}:{username}", 3, 60 * 60)
+    _clear_expired_pending(db, email, username)
     if db.query(User.id).filter(User.email_norm == email).first():
         error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
     if db.query(User.id).filter(User.username_norm == username).first():
@@ -433,7 +520,7 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
         role=configured_role(email, username),
-        status="active",
+        status="pending",
         terms_version=TERMS_VERSION,
         terms_accepted_at=utcnow(),
     )
@@ -448,10 +535,59 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
             error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
         error(409, "ACCOUNT_CONFLICT", "The account details are already in use.")
     db.refresh(user)
+    raw_token = _issue_verification_token(db, user)
+    background_tasks.add_task(_deliver_verification_email, email, raw_token)
+    return _verification_accepted(raw_token)
+
+
+@router.post("/api/auth/verify-email")
+def verify_email(req: VerifyEmailRequest, request: Request, db: Session = Depends(get_db)):
+    validate_origin(request)
+    rate_limiter.check(db, f"verify-email:{request_identity(request)}", 12, 15 * 60)
+    row = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash(str(req.token or "").strip()),
+        EmailVerificationToken.used_at.is_(None),
+        EmailVerificationToken.expires_at > utcnow(),
+    ).first()
+    user = db.get(User, row.user_id) if row else None
+    if not row or not user or user.status != "pending" or user.account_type != "real":
+        error(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or expired.")
+    now = utcnow()
+    user.status = "active"
+    user.role = configured_role(user.email or "", user.username)
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    db.commit()
+    db.refresh(user)
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
     return response
+
+
+@router.post("/api/auth/resend-verification", status_code=202)
+def resend_verification(
+    req: ResendVerificationRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    validate_origin(request)
+    email = normalize_email(str(req.email))
+    rate_limiter.check(db, f"resend-verification-ip:{request_identity(request)}", 8, 60 * 60)
+    rate_limiter.check(db, f"resend-verification-account:{email}", 3, 60 * 60)
+    user = db.query(User).filter(
+        User.email_norm == email,
+        User.status == "pending",
+        User.account_type == "real",
+    ).first()
+    if not user:
+        return _verification_accepted()
+    raw_token = _issue_verification_token(db, user)
+    background_tasks.add_task(_deliver_verification_email, user.email or email, raw_token)
+    return _verification_accepted(raw_token)
 
 
 @router.post("/api/auth/login")

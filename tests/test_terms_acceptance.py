@@ -74,7 +74,7 @@ def test_register_without_explicit_acceptance_is_rejected(client_and_session, ex
 def test_register_records_terms_version_and_time(client_and_session):
     client, Session = client_and_session
     response = _register(client, "agreed_user", accept_terms=True)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     with Session() as db:
         user = db.query(User).filter(User.username_norm == "agreed_user").one()
         assert user.terms_version == social.TERMS_VERSION

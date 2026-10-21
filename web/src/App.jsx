@@ -23,6 +23,7 @@ const MessagesPage = lazy(() => import('./pages/MessagesPage.jsx'));
 const WalletPage = lazy(() => import('./pages/WalletPage.jsx'));
 
 const PasswordResetPage = lazy(() => import('./pages/PasswordResetPage.jsx'));
+const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage.jsx'));
 const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
 const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage.jsx'));
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/explore/location/:key" element={<LocationExplorePage />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/signup" element={<AuthPage mode="register" />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<PasswordResetPage requestOnly />} />
           <Route path="/reset-password" element={<PasswordResetPage />} />
           <Route path="/profile/:username" element={<ProfilePage />} />
