@@ -2288,6 +2288,9 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
     p = (root / rel).resolve()
     if not p.is_relative_to(root) or not p.is_file():
         return rel, None, None, "not found"
+    if SM.derived_pending(p):
+        # The publish job is building these; the tile keeps its fallback.
+        return rel, None, None, "pending"
     # A 3D original's grid assets come from its left-eye 2D rendition, so
     # tiles stay square (the rendition only exists for stereo posts).
     # Before that rendition exists, crop the left eye of the original.

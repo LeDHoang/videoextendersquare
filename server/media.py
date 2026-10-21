@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 
@@ -40,6 +41,8 @@ STEREO_PROXY_LONG_SIDE = 4096
 MONO_VIDEO_MAX_SIDE = 2160
 # Left-eye 2D stills keep up to the square master size.
 MONO_IMAGE_MAX_SIDE = 3840
+# Published uploads and their derived siblings live here (see media_store).
+OUTPUT_UPLOADS = Path("output") / "uploads"
 
 
 class UploadRejected(Exception):
@@ -342,6 +345,54 @@ def derived_files(stored: Path) -> list[Path]:
         explore_preview_path(str(mono)),
         explore_poster_path(str(mono)),
     ]
+
+
+def discard_part_files(stored: Path) -> None:
+    """Remove the hidden .part file of every derived sibling of *stored*."""
+    for sibling in derived_files(stored)[1:]:
+        _part_path(sibling).unlink(missing_ok=True)
+
+
+def sweep_part_files(root: str | Path = OUTPUT_UPLOADS) -> int:
+    """Remove .part files left by an encode the process died in; returns the count.
+
+    Run at startup only, before any generator can be writing one.
+    """
+    removed = 0
+    for part in Path(root).glob(".*.part"):
+        try:
+            part.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+# Uploads whose derived assets a background publish job is still building.
+# Request-time generators (POST /api/reels/explore-preview) skip them, so a
+# grid visit neither re-encodes a 4K original inline nor races the job on
+# the same .part file.
+_pending_lock = threading.Lock()
+_pending_derived: set[str] = set()
+
+
+def _pending_key(src: str | Path) -> str:
+    return str(Path(src).resolve())
+
+
+def mark_derived_pending(src: str | Path) -> None:
+    with _pending_lock:
+        _pending_derived.add(_pending_key(src))
+
+
+def clear_derived_pending(src: str | Path) -> None:
+    with _pending_lock:
+        _pending_derived.discard(_pending_key(src))
+
+
+def derived_pending(src: str | Path) -> bool:
+    with _pending_lock:
+        return _pending_key(src) in _pending_derived
 
 
 def explore_preview_path(src: str) -> Path:

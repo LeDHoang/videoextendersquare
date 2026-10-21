@@ -12,8 +12,9 @@
 //   node scripts/verify_staging.cjs --drill seed
 //   node scripts/verify_staging.cjs --drill check --marker <m> --media-url <url>
 //
-// Publish timing (P0 item 7): uploads a large video, publishes it inline and
-// times both steps against the 100 s Cloudflare origin timeout.
+// Publish timing (P0 item 7): uploads a large video, publishes it and times
+// both steps against the 100 s Cloudflare origin timeout, then times the
+// background encodes (poster, Explore preview, web proxy) landing.
 //
 //   node scripts/verify_staging.cjs --time-publish ~/clips/4k-hevc-95mb.mp4
 //
@@ -37,6 +38,8 @@ const TIME_PUBLISH = flag('--time-publish', '');
 // Inline publish must finish well inside Cloudflare's 100 s origin timeout;
 // above this, move the preview encode to a background job (docs/to-beta.md).
 const PUBLISH_BUDGET_S = 60;
+// Background encodes of a 95 MB 4K clip; generous, it only proves they land.
+const DERIVED_BUDGET_S = 900;
 
 // Caddy signs localhost with its own CA; accept it for these loopback origins only.
 if (/^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(APP)) {
@@ -195,6 +198,22 @@ async function timePublish(file) {
   const body = await published.json();
   const media = await fetch(body.media_url, { headers: { Range: 'bytes=0-1' } });
   check('published video served', media.status === 206, `HTTP ${media.status}`);
+  // Derived files encode in the background after publish; wait for each to
+  // land on the media origin (and so in the bucket) before deleting the post.
+  const stem = body.media_url.replace(/\.[^./]+$/, '');
+  const pending = new Map(['-poster.jpg', '-explore.mp4', '-preview.mp4'].map((suffix) => [suffix, `${stem}${suffix}`]));
+  while (pending.size && (Date.now() - t0) / 1000 < DERIVED_BUDGET_S) {
+    for (const [suffix, url] of pending) {
+      const res = await fetch(url, { headers: { Range: 'bytes=0-1' } });
+      if (res.status === 206 || res.status === 200) {
+        console.log(`  ${suffix} landed ${((Date.now() - t0) / 1000).toFixed(1)} s after publish started`);
+        pending.delete(suffix);
+      }
+    }
+    if (pending.size) await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  check(`derived files landed within ${DERIVED_BUDGET_S} s`, pending.size === 0,
+    pending.size ? `missing ${[...pending.keys()].join(', ')}` : `${((Date.now() - t0) / 1000).toFixed(1)} s`);
   const removed = await call(`/api/posts/${body.post_id}`, { method: 'DELETE' });
   check('timing post removed', removed.status === 200, `HTTP ${removed.status}`);
 }

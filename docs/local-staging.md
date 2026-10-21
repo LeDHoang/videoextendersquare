@@ -64,7 +64,7 @@ Free: it never calls fal.ai. It exits 1 when any check fails.
 | (default) | healthz/readyz; `/media` and `/api/reels/diag` 404; anonymous upload 401; uninvited sign-up refused; invited sign-in with a `Secure` cookie; publish to the bucket with `media_url` on the media origin; `Range` 206 + `Content-Range`; exactly one ACAO equal to the app origin, with and without `Origin`; `Cache-Control: max-age=86400`; owner delete makes the object 404 |
 | `--drill seed` | alice DMs bob a unique marker and publishes a post; prints the `--drill check` command |
 | `--drill check --marker <m> --media-url <url>` | readyz 200; bob signs in with the restored password; the DM decrypts; the post media is still served |
-| `--time-publish <file.mp4>` | upload + inline publish of a large video, timed against a 60 s budget (Cloudflare cuts origin requests at 100 s) |
+| `--time-publish <file.mp4>` | upload + publish of a large video, timed against a 60 s budget (Cloudflare cuts origin requests at 100 s); then waits for the background poster, Explore preview and web proxy to land on the media origin and prints when each did |
 
 Point it at another stack with `--app https://<domain> --media https://media.<domain>`.
 TLS checks are disabled only for `localhost` and `127.0.0.1`.

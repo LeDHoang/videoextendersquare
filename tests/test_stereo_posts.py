@@ -43,8 +43,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     monkeypatch.setattr(uploads, "OUTPUT_DIR", Path("output"))
     monkeypatch.setattr(uploads, "UPLOAD_DIR", Path("output") / "uploads")
-    # Stereo video assets build in the background; run that job inline here.
-    monkeypatch.setattr(uploads, "_submit_stereo_assets", lambda fn: fn())
+    # Video assets build in the background; run that job inline here.
+    monkeypatch.setattr(uploads, "_submit_derived_assets", lambda fn: fn())
     engine = create_engine("sqlite:///" + str(tmp_path / "stereo.db"), connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -424,7 +424,7 @@ def test_exif_rotated_still_probes_detects_and_crops_as_shown(tmp_path):
 def test_stereo_video_publish_returns_before_the_encode(client, tmp_path, monkeypatch):
     """Publishing does not wait for ffmpeg: 2D crops until the job lands."""
     queued = []
-    monkeypatch.setattr(uploads, "_submit_stereo_assets", queued.append)
+    monkeypatch.setattr(uploads, "_submit_derived_assets", queued.append)
     user = _register(client, "stereo_async")
     source = tmp_path / "async-sbs.mp4"
     _stereo_video(source, "sbs")

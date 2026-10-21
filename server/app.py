@@ -155,6 +155,16 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass  # health checks / job errors surface this properly later
 
+    # Single worker: no encode is running yet, so any .part file is a leftover
+    # of a background publish encode the last process died in.
+    from server.media import sweep_part_files
+    try:
+        swept = sweep_part_files()
+        if swept:
+            logger.info("Removed %d stale .part files from output/uploads", swept)
+    except OSError:
+        logger.exception("Could not sweep stale .part files")
+
     cleanup_task = asyncio.create_task(_cleanup_loop())
     # Off the startup path: probing a large library can take a while.
     backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))

@@ -9,6 +9,7 @@ reels.upsert_upload_meta so the item appears in Explore + Reels with
 zeroed engagement instead of fake seeded numbers.
 """
 
+import logging
 import os
 import re
 import shutil
@@ -29,6 +30,8 @@ from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
 from server.social.services import MAX_POST_IMAGES, create_or_update_post, post_card
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -168,32 +171,94 @@ def _discard_stored(stored_files) -> None:
             pass
 
 
-# Stereo video encodes (left-eye rendition, VR proxy, grid assets) can take
-# minutes, so publish hands them to one background worker. Until the 2D
-# rendition lands the post serves stereo_crop (CSS crop of the raw file).
-_stereo_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stereo-assets")
+# Derived video encodes (web proxy, Explore preview and poster; for stereo
+# also the left-eye rendition) take minutes on a 4K original, past
+# Cloudflare's 100 s origin timeout. Publish returns once the original is
+# committed and the post exists; one background worker builds the rest.
+# Readers probe for siblings per request, so until each file lands a post
+# serves its original with no poster (stereo: stereo_crop of the raw file).
+_derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
 
 
-def _submit_stereo_assets(fn) -> Future:
-    return _stereo_pool.submit(fn)
+def _submit_derived_assets(fn) -> Future:
+    return _derived_pool.submit(fn)
+
+
+def _derived_step(label: str, dest: Path, make, *args, **kwargs) -> str | None:
+    """Run one generator; a failure is logged and leaves the post on its original."""
+    try:
+        built = make(*args, **kwargs)
+    except Exception:
+        logger.exception("Building the %s of %s raised", label, dest.name)
+        return None
+    if not built:
+        logger.warning("Could not build the %s of %s", label, dest.name)
+    return built
+
+
+def _build_video_assets(dest: Path) -> None:
+    """Background: grid poster, grid preview and web proxy of a published 2D video.
+
+    Cheapest first, so tiles get a poster within seconds. Every generator
+    writes a .part file and commits it (R2 first), so a sibling exists
+    locally only once its object does.
+    """
+    _derived_step("poster", dest, SM.make_explore_poster, str(dest))
+    _derived_step("explore preview", dest, SM.make_explore_preview, str(dest))
+    _derived_step("web preview", dest, SM.make_web_preview, str(dest))
 
 
 def _build_stereo_video_assets(dest: Path, layout: str) -> None:
     """Background: every derived asset of a published stereo video."""
+    mono = _derived_step("left-eye rendition", dest, SM.make_left_eye_rendition, str(dest), layout)
+    _derived_step("stereo web preview", dest, SM.make_web_preview, str(dest), stereo=layout)
+    if mono:
+        _derived_step("left-eye explore preview", dest, SM.make_explore_preview, mono)
+        _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
+
+
+def _post_is_live(rel: str) -> bool:
+    from server.social.database import SessionLocal
+    from server.social.models import Post
+
+    with SessionLocal() as db:
+        return (
+            db.query(Post.id)
+            .filter(Post.media_path == rel, Post.status == "published", Post.deleted_at.is_(None))
+            .first()
+            is not None
+        )
+
+
+def _run_derived_job(dest: Path, rel: str, build) -> None:
+    """Run *build* for a published upload, then tidy up whatever happened."""
     from server.routers import reels as reels_router
 
-    mono = SM.make_left_eye_rendition(str(dest), layout)
     try:
-        SM.make_web_preview(str(dest), stereo=layout)
+        build()
     except Exception:
-        pass
-    if mono:
-        for make in (SM.make_explore_preview, SM.make_explore_poster):
-            try:
-                make(mono)
-            except Exception:
-                pass
-    reels_router.invalidate_scan_cache()
+        logger.exception("Derived assets of %s failed", dest.name)
+    finally:
+        SM.discard_part_files(dest)
+        SM.clear_derived_pending(dest)
+        try:
+            # Deleted while encoding: unpublish already ran, so drop the
+            # siblings this job uploaded after it (local files stay).
+            if not _post_is_live(rel):
+                media_store.delete_paths(SM.derived_files(dest)[1:])
+        except Exception:
+            logger.exception("Could not check the post of %s after its encode", dest.name)
+        reels_router.invalidate_scan_cache()
+
+
+def _queue_derived_assets(dest: Path, rel: str, build) -> None:
+    SM.mark_derived_pending(dest)
+    try:
+        _submit_derived_assets(lambda: _run_derived_job(dest, rel, build))
+    except RuntimeError:
+        # Interpreter shutdown; /explore-preview builds the grid assets on demand.
+        SM.clear_derived_pending(dest)
+        logger.warning("Could not queue derived assets of %s", dest.name)
 
 
 def _slugify(text: str, fallback: str = "upload") -> str:
@@ -329,6 +394,8 @@ def publish_upload(
         except Exception:
             pass
 
+    # A 2D video's proxy, preview and poster all encode in the background
+    # (_build_video_assets), so its response carries neither URL.
     preview_url: str | None = None
     poster_url: str | None = None
     root = OUTPUT_DIR.resolve()
@@ -342,24 +409,7 @@ def publish_upload(
                     poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
-        elif req.kind == "video":
-            try:
-                SM.make_web_preview(str(dest), stereo=stereo)
-            except Exception:
-                pass
-            try:
-                preview = SM.make_explore_preview(grid_source(dest))
-                if preview:
-                    preview_url = media_store.public_url(Path(preview).resolve().relative_to(root).as_posix())
-            except Exception:
-                pass
-            try:
-                poster = SM.make_explore_poster(grid_source(dest))
-                if poster:
-                    poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
-            except Exception:
-                pass
-        else:
+        elif req.kind == "image":
             try:
                 poster = SM.make_image_poster(grid_source(dest))
                 if poster:
@@ -413,7 +463,9 @@ def publish_upload(
         raise
 
     if stereo_video:
-        _submit_stereo_assets(lambda: _build_stereo_video_assets(dest, stereo))
+        _queue_derived_assets(dest, rel, lambda: _build_stereo_video_assets(dest, stereo))
+    elif req.kind == "video":
+        _queue_derived_assets(dest, rel, lambda: _build_video_assets(dest))
     reels_router.invalidate_scan_cache()
     entry = post_card(post, db, context.user.id)
     return {
