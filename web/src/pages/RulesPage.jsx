@@ -44,9 +44,11 @@ export default function RulesPage() {
 
       <Section id="rules-appeal" title="4. Appeals">
         <p>
-          If you think we removed your content or limited your account by mistake, email <V k="contactEmail" />{' '}
-          with your username and a link to the content or a description of the decision. We review every
-          appeal. For copyright complaints, email <V k="copyrightEmail" />.
+          If you think we removed your content or limited your account by mistake,{' '}
+          <Link to="/support?category=appeal">file an appeal</Link> (it works while signed out, including
+          for suspended accounts) or email <V k="contactEmail" />. Include your username and a link to the
+          content or a description of the decision. We review every appeal. For copyright complaints, email{' '}
+          <V k="copyrightEmail" />.
         </p>
         <p><Link to="/reels">Back to ECHO</Link></p>
       </Section>

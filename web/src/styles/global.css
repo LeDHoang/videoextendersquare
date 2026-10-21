@@ -1737,6 +1737,37 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-accent);
 }
 
+/* Support form (pages/SupportPage.jsx) */
+.sx-support-ref code {
+  padding: 4px 8px;
+  border: 1px solid var(--sx-rule-strong);
+  color: var(--sx-ink);
+  font-family: var(--sx-font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Honeypot: off-screen, not display:none (some bots skip hidden inputs) */
+.sx-support-trap {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.sx-moderation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sx-2);
+  align-items: center;
+  margin-bottom: var(--sx-4);
+}
+
+.sx-moderation-note {
+  width: 100%;
+  min-height: 64px;
+}
+
 /* Unfilled legal values: loud on purpose so a placeholder can't ship unnoticed */
 .sx-legal-todo {
   padding: 0 4px;

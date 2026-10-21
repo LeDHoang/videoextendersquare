@@ -27,6 +27,7 @@ const ModerationPage = lazy(() => import('./pages/ModerationPage.jsx'));
 const TermsPage = lazy(() => import('./pages/TermsPage.jsx'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage.jsx'));
 const RulesPage = lazy(() => import('./pages/RulesPage.jsx'));
+const SupportPage = lazy(() => import('./pages/SupportPage.jsx'));
 export default function App() {
   const { pathname } = useLocation();
   useDocumentTitle(routeTitle(pathname));
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/rules" element={<RulesPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/reels" replace />} />
         </Route>

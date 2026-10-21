@@ -123,7 +123,8 @@ export default function TermsPage() {
           You can report users, posts, Reel Packs, comments, and messages, and you can block other users.
           Our moderators review reports. We may remove content, limit features, or suspend or close
           accounts that break these Terms or the law, or that put others at risk. We may act without notice
-          when the risk is serious. To appeal a moderation decision, email <V k="contactEmail" />.
+          when the risk is serious. To appeal a moderation decision,{' '}
+          <Link to="/support?category=appeal">file an appeal</Link> or email <V k="contactEmail" />.
         </p>
       </Section>
 

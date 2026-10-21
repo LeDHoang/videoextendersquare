@@ -744,6 +744,30 @@ class Report(Base):
     __table_args__ = (Index("ix_reports_status_created", "status", "created_at"),)
 
 
+class SupportRequest(Base):
+    """A support inbox entry, fileable signed out (suspended users cannot sign in)."""
+
+    __tablename__ = "support_requests"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    category = Column(String(24), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="open", index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    email = Column(String(320), nullable=True)
+    subject = Column(String(120), nullable=False, default="")
+    body = Column(String(4000), nullable=False, default="")
+    link = Column(String(500), nullable=False, default="")
+    report_id = Column(String(36), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    # HMAC of the client IP with the security secret; the raw IP is never stored.
+    ip_hash = Column(String(64), nullable=True, index=True)
+    moderator_note = Column(String(1000), nullable=False, default="")
+    handled_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_support_requests_status_created", "status", "created_at"),)
+
+
 class DataMigration(Base):
     __tablename__ = "data_migrations"
 
