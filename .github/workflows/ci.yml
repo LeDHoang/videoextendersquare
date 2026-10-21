@@ -44,7 +44,7 @@ jobs:
         run: make test
 
   postgres:
-    name: migrations + pool test on PostgreSQL 16
+    name: migrations + pool + recommendation tests on PostgreSQL 16
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -80,12 +80,18 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg://echo:echo@localhost:5432/echo
         run: .venv/bin/python -m alembic upgrade head
-      - name: Create throwaway database for the pool test
+      - name: Create throwaway database for the PostgreSQL tests
         run: psql -h localhost -U echo -d echo -c "CREATE DATABASE pool_test"
       - name: Pool isolation test on PostgreSQL
         env:
           SX_TEST_POSTGRES_URL: postgresql+psycopg://echo:echo@localhost:5432/pool_test
         run: .venv/bin/python -m pytest -q tests/test_db_pool_isolation.py
+      - name: Recommendation concurrency tests on PostgreSQL
+        # Reuses pool_test (tables dropped and recreated per test); runs after
+        # the pool step, never in parallel with it.
+        env:
+          SX_TEST_POSTGRES_URL: postgresql+psycopg://echo:echo@localhost:5432/pool_test
+        run: .venv/bin/python -m pytest -q tests/test_recommendations.py -k concurrent
 
   docker:
     name: image build + contents check
