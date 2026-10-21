@@ -128,3 +128,81 @@ describe('MessagingProvider conversation paging', () => {
     expect(mocks.api.get).not.toHaveBeenCalledWith('/api/messages/bootstrap', expect.anything());
   });
 });
+
+describe('MessagingProvider send reconcile', () => {
+  afterEach(cleanup);
+
+  const mine = (id, extra = {}) => ({ id, conversation_id: 'c1', sender_id: 'me', kind: 'text', content: { text: id }, ...extra });
+  let history;
+
+  beforeEach(() => {
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.user = { id: 'me' };
+    history = [];
+    mocks.api.get.mockImplementation((path) => {
+      if (path === '/api/messages/capabilities') return Promise.resolve({ curated_emotes: [] });
+      if (path === '/api/messages/bootstrap') {
+        return Promise.resolve({ conversations: [], unread: { inbox: 0, requests: 0, total: 0 }, event_cursor: 1, next_cursor: null });
+      }
+      if (path === '/api/messages/conversations/c1/messages') return Promise.resolve({ messages: history, next_before: null });
+      return Promise.resolve({});
+    });
+  });
+
+  const deferredPost = () => {
+    let resolve;
+    mocks.api.post.mockImplementation((path) => {
+      if (path.endsWith('/read')) return Promise.resolve({});
+      return new Promise((done) => { resolve = done; });
+    });
+    return (value) => resolve(value);
+  };
+
+  it('keeps one bubble when the message is already in the conversation before the POST resolves', async () => {
+    mount();
+    await waitFor(() => expect(latest.capabilities).not.toBeNull());
+    const resolvePost = deferredPost();
+    act(() => latest.composeTo('alice'));
+    let sending;
+    await act(async () => { sending = latest.send({ text: 'hello', client_id: 'client-hello-1' }); });
+    history = [mine('m1', { content: { text: 'hello' } })];
+    await act(async () => { await latest.loadConversation('c1'); });
+    await act(async () => {
+      resolvePost({ conversation: { id: 'c1' }, message: mine('m1', { content: { text: 'hello' } }) });
+      await sending;
+    });
+    expect(latest.messages.c1.map((m) => m.id)).toEqual(['m1']);
+    expect(latest.messages['user:alice']).toBeUndefined();
+  });
+
+  it('migrates a new compose into an existing conversation without dropping its history', async () => {
+    history = [mine('old')];
+    mount();
+    await waitFor(() => expect(latest.capabilities).not.toBeNull());
+    await act(async () => { await latest.loadConversation('c1'); });
+    const resolvePost = deferredPost();
+    act(() => latest.composeTo('alice'));
+    let sending;
+    await act(async () => { sending = latest.send({ text: 'again', client_id: 'client-again-1' }); });
+    await act(async () => {
+      resolvePost({ conversation: { id: 'c1' }, message: mine('m2') });
+      await sending;
+    });
+    expect(latest.messages.c1.map((m) => m.id)).toEqual(['old', 'm2']);
+    expect(latest.messages['user:alice']).toBeUndefined();
+    expect(latest.selectedId).toBe('c1');
+  });
+
+  it('shows the GIF in the optimistic bubble before the server answers', async () => {
+    mount();
+    await waitFor(() => expect(latest.capabilities).not.toBeNull());
+    deferredPost();
+    act(() => latest.composeTo('alice'));
+    await act(async () => {
+      latest.send({ kind: 'gif', gif_url: 'https://media.tenor.com/a.gif', gif_preview_url: 'https://media.tenor.com/a-tiny.gif', gif_title: 'wave', client_id: 'client-gif-1' });
+    });
+    const [pending] = latest.messages['user:alice'];
+    expect(pending.pending).toBe(true);
+    expect(pending.content).toEqual({ url: 'https://media.tenor.com/a.gif', preview_url: 'https://media.tenor.com/a-tiny.gif', title: 'wave' });
+  });
+});
