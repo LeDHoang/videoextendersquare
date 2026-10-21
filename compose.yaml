@@ -44,8 +44,10 @@ services:
     # on the 4 vCPU box; ffmpeg additionally runs under nice (SX_FFMPEG_NICE).
     cpus: 3
     mem_limit: 6g
-    # uvicorn's graceful shutdown is 20 s; leave headroom before SIGKILL.
-    stop_grace_period: 30s
+    # Sequential on SIGTERM: uvicorn waits up to 20 s for open connections
+    # (SSE streams), then the lifespan drains workers for up to
+    # SX_SHUTDOWN_DRAIN_S (15 s). Leave headroom before SIGKILL.
+    stop_grace_period: 45s
     logging: *default-logging
 
   postgres:

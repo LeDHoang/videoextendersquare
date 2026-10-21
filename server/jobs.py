@@ -10,7 +10,7 @@ import shutil
 import threading
 import time
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -42,6 +42,13 @@ class QueueFull(Exception):
     def __init__(self, message: str, retry_after: int = 30):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class ShuttingDown(QueueFull):
+    """The server is draining for a restart and takes no new jobs (503)."""
+
+    def __init__(self, message: str = "The server is restarting. Try again in a minute.", retry_after: int = 60):
+        super().__init__(message, retry_after)
 
 
 class JobCancelled(BaseException):
@@ -99,8 +106,51 @@ class JobManager:
         default_image, default_video = default_pool_sizes()
         self._jobs: dict[str, JobRecord] = {}
         self._lock = threading.Lock()
-        self._image_pool = ThreadPoolExecutor(max_workers=max_image_workers or default_image)
-        self._video_pool = ThreadPoolExecutor(max_workers=max_video_workers or default_video)
+        self._image_workers = max_image_workers or default_image
+        self._video_workers = max_video_workers or default_video
+        self._image_pool = ThreadPoolExecutor(max_workers=self._image_workers)
+        self._video_pool = ThreadPoolExecutor(max_workers=self._video_workers)
+        self._accepting = True
+
+    def start(self) -> None:
+        """Accept jobs again after shutdown() (a new lifespan in the same process)."""
+        with self._lock:
+            if self._accepting:
+                return
+            self._image_pool = ThreadPoolExecutor(max_workers=self._image_workers)
+            self._video_pool = ThreadPoolExecutor(max_workers=self._video_workers)
+            self._accepting = True
+
+    def shutdown(self, drain_s: float = 15.0) -> dict:
+        """Stop for a restart: refuse new jobs, cancel queued ones, let running ones stop.
+
+        Queued jobs go through the same path as a user cancel, so their
+        failure callbacks release any billing reservation. Running jobs get
+        their cancel flag and stop at their next progress report; this waits
+        up to *drain_s* seconds for them. Returns counts for the log line.
+        """
+        with self._lock:
+            self._accepting = False
+            records = list(self._jobs.values())
+            pools = (self._image_pool, self._video_pool)
+        queued = running = 0
+        waiting: list[Future] = []
+        for record in records:
+            with record._lock:
+                if record.status in TERMINAL_STATUSES:
+                    continue
+                record.cancel_event.set()
+            future = record.future
+            if future is not None and future.cancel():
+                self._finish_cancelled(record, JobCancelled(), reason="Cancelled: the server restarted.")
+                queued += 1
+            elif future is not None:
+                running += 1
+                waiting.append(future)
+        for pool in pools:
+            pool.shutdown(wait=False, cancel_futures=True)
+        _done, not_done = wait(waiting, timeout=max(0.0, drain_s)) if waiting else (set(), set())
+        return {"cancelled": queued, "running": running, "unfinished": len(not_done)}
 
     def create_job(self, kind: str, owner_id: str | None = None, job_id: str | None = None) -> str:
         job_id = job_id or uuid.uuid4().hex[:12]
@@ -121,6 +171,8 @@ class JobManager:
         job_id = job_id or uuid.uuid4().hex[:12]
         record = JobRecord(job_id=job_id, kind=kind, owner_id=owner_id, counted=True)
         with self._lock:
+            if not self._accepting:
+                raise ShuttingDown()
             active = [
                 rec for rec in self._jobs.values()
                 if rec.counted and rec.status not in TERMINAL_STATUSES
@@ -179,7 +231,10 @@ class JobManager:
         if not record:
             raise ValueError(f"Unknown job_id: {job_id}")
 
-        pool = self._video_pool if record.kind == "video" else self._image_pool
+        with self._lock:
+            if not self._accepting:
+                raise ShuttingDown()
+            pool = self._video_pool if record.kind == "video" else self._image_pool
         record.on_failure = on_failure
 
         def _run():
@@ -270,7 +325,12 @@ class JobManager:
         return True
 
     @staticmethod
-    def _finish_cancelled(record: JobRecord, ex: BaseException, elapsed: str | None = None) -> None:
+    def _finish_cancelled(
+        record: JobRecord,
+        ex: BaseException,
+        elapsed: str | None = None,
+        reason: str = "Cancelled by user.",
+    ) -> None:
         if record.on_failure is not None:
             try:
                 record.on_failure(ex)
@@ -281,7 +341,7 @@ class JobManager:
             record.phase = "CANCELLED"
             if elapsed is not None:
                 record.elapsed = elapsed
-            record.error = ("CANCELLED", "Cancelled by user.")
+            record.error = ("CANCELLED", reason)
 
     def cleanup_old(self, max_age_seconds: float | None = None) -> int:
         """Remove finished jobs older than *max_age_seconds* and their job dirs."""

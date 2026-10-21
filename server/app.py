@@ -28,21 +28,24 @@ from fastapi.staticfiles import StaticFiles
 # production secrets passed via the environment (docker -e / secret manager).
 load_dotenv(override=False)
 
-from server.settings import is_production, production_config_errors  # noqa: E402
+from server.observability import RequestIDMiddleware, configure_logging, current_request_id  # noqa: E402
+from server.settings import env_int, is_production, production_config_errors  # noqa: E402
 
 logger = logging.getLogger("server.app")
 _CLEANUP_INTERVAL_S = 15 * 60
-
-
-def _configure_logging() -> None:
-    level = os.environ.get("SX_LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 _SCRUBBED_HEADERS = {"cookie", "authorization", "x-csrf-token", "set-cookie"}
 
 
 def _sentry_before_send(event, hint):
+    request_id = current_request_id()
+    if request_id:
+        tags = event.get("tags")
+        if isinstance(tags, dict):
+            tags["request_id"] = request_id
+        else:
+            event["tags"] = {"request_id": request_id}
     request = event.get("request") or {}
     request.pop("cookies", None)
     headers = request.get("headers")
@@ -117,6 +120,40 @@ def _backfill_media_info() -> None:
         logger.info("Backfilled duration/size for %d posts", count)
 
 
+def _requeue_derived_assets() -> None:
+    """Queue the derived encodes a restart lost (see uploads.requeue_missing_derived)."""
+    from server.routers.uploads import requeue_missing_derived
+
+    try:
+        count = requeue_missing_derived()
+    except Exception:
+        logger.exception("Could not re-queue missing derived assets")
+        return
+    logger.info("Re-queued derived assets for %d posts at boot", count)
+
+
+def _shutdown_drain_s() -> int:
+    return env_int("SX_SHUTDOWN_DRAIN_S", 15, minimum=0)
+
+
+async def _drain_workers() -> None:
+    """Shutdown: cancel queued jobs/encodes, give running ones SX_SHUTDOWN_DRAIN_S."""
+    from server.jobs import job_manager
+    from server.routers.uploads import shutdown_derived_pool
+
+    drain_s = _shutdown_drain_s()
+    jobs, derived = await asyncio.gather(
+        asyncio.to_thread(job_manager.shutdown, drain_s),
+        asyncio.to_thread(shutdown_derived_pool, drain_s),
+        return_exceptions=True,
+    )
+    for name, result in (("jobs", jobs), ("derived encodes", derived)):
+        if isinstance(result, BaseException):
+            logger.error("Draining %s failed", name, exc_info=result)
+        else:
+            logger.info("Drained %s: %s", name, result)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from core.tooling import ensure_ffmpeg_on_path, pick_encoder
@@ -165,14 +202,25 @@ async def lifespan(app: FastAPI):
     except OSError:
         logger.exception("Could not sweep stale .part files")
 
+    # A previous lifespan in this process (tests) may have drained the pools.
+    from server.jobs import job_manager
+    from server.routers.uploads import start_derived_pool
+    job_manager.start()
+    start_derived_pool()
+
     cleanup_task = asyncio.create_task(_cleanup_loop())
     # Off the startup path: probing a large library can take a while.
     backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))
+    # Also off the startup path (and readyz): only file checks, the encodes
+    # run on the derived-asset worker.
+    requeue_task = asyncio.create_task(asyncio.to_thread(_requeue_derived_assets))
     try:
         yield
     finally:
         cleanup_task.cancel()
         backfill_task.cancel()
+        requeue_task.cancel()
+        await _drain_workers()
 
 
 def mount_spa(app: FastAPI, static_dir: Path) -> None:
@@ -212,7 +260,7 @@ def mount_spa(app: FastAPI, static_dir: Path) -> None:
 
 
 def create_app() -> FastAPI:
-    _configure_logging()
+    configure_logging()
     _init_sentry()
     app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan)
 
@@ -226,13 +274,16 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-CSRF-Token"],
-        expose_headers=[],
+        expose_headers=["X-Request-ID"],
     )
     # Security headers + CSP (+ POST /api/csp-report). Wraps CORS; the
     # request-ID middleware is added after this so it stays outermost.
     from server.security_headers import install_security_headers
 
     install_security_headers(app)
+    # Added last, so it is the outermost middleware: CORS preflights and
+    # errors get an ID too (security headers sit inside it).
+    app.add_middleware(RequestIDMiddleware)
 
     from server.routers import account_safety, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, uploads, video
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from server.jobs import QueueFull
+from server.jobs import QueueFull, ShuttingDown
 from server.settings import env_int
 from server.social.auth import AuthContext, rate_limiter
 
@@ -29,6 +29,12 @@ def check_upload_rate(db: Session, context: AuthContext) -> None:
 
 
 def queue_full_error(ex: QueueFull) -> HTTPException:
+    if isinstance(ex, ShuttingDown):
+        return HTTPException(
+            status_code=503,
+            detail={"code": "SHUTTING_DOWN", "message": str(ex)},
+            headers={"Retry-After": str(ex.retry_after)},
+        )
     return HTTPException(
         status_code=429,
         detail={"code": "QUEUE_FULL", "message": str(ex)},

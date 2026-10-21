@@ -22,10 +22,13 @@ done
 # --proxy-headers + --forwarded-allow-ips='*': the only peer is cloudflared on
 # the compose network (host port 8000 is bound to 127.0.0.1), so trusting
 # X-Forwarded-* from any peer is safe here.
+# --no-access-log: server/observability.py writes one sx.access line per
+# request (with its request ID, without the client IP) instead.
 exec uvicorn server.app:app \
     --host 0.0.0.0 \
     --port 8000 \
     --workers 1 \
     --proxy-headers \
     --forwarded-allow-ips='*' \
+    --no-access-log \
     --timeout-graceful-shutdown 20
