@@ -49,6 +49,14 @@ Complete each item once per environment. Tick it in your own copy of this list.
   1. When the hostname is `<domain>`, the URI path starts with `/api/` and does **not** start with `/api/reels/map-tiles/`: **Bypass cache**. Without this rule, authenticated JSON and SSE could be cached at the edge.
   2. When the hostname is `media.<domain>`: **Eligible for cache** ("Cache Everything"), with edge TTL respecting origin or 1 day.
   - Map tiles (`/api/reels/map-tiles/*`) stay cacheable. They are public, and the app sends cache headers for them.
+- [ ] **Map tiles: keep OpenStreetMap for the beta.** The tile proxy (`server/routers/map_tiles.py`) defaults to the keyless OSM standard tiles. It meets the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) at invite-only scale:
+  - it sends an identifying `User-Agent`;
+  - it fetches each tile upstream at most once and caches it on disk;
+  - a per-IP guard stops clients from enumerating tiles through the proxy;
+  - the edge caches tiles too (the Cache Rule above).
+  - Attribution is a license requirement. Every tile response carries `X-Map-Attribution`, and the VR map shows "© OPENSTREETMAP" (from `/api/reels/map-tiles/attribution`) whenever tiles are visible. Keep it visible if the map UI changes.
+  - If OSM blocks or rate-limits the server, the Earth view still works: the globe uses the bundled texture, and city zoom falls back to "MAP OFFLINE — CITY VIEW".
+  - **Before the public launch**, switch to a provider with a commercial plan by setting `SX_MAP_TILES_URL` (and `SX_MAP_LABELS_URL` for split label layers, for example keyed CARTO or Esri), and update the attribution and the privacy page.
 - [ ] **SSL/TLS:**
   - Set the mode to Full.
   - Turn on **Always Use HTTPS**.
@@ -102,10 +110,14 @@ The entrypoint runs `alembic upgrade head` on every start. It then starts **one*
 
 ```bash
 cd /opt/echo && git pull
+git diff --stat HEAD@{1} HEAD -- migrations/      # non-empty: take a pre-deploy dump first
 docker compose build --build-arg GIT_SHA="$(git rev-parse HEAD)"
+docker tag echo-app:latest "echo-app:$(git rev-parse --short=12 HEAD)"   # kept for rollback
 docker compose --profile tunnel up -d
 docker compose ps                                  # app should turn "healthy"
 ```
+
+Rollback, the pre-deploy dump and migrations: `docs/incident-response.md`.
 
 A restart drops in-flight jobs and staged uploads, because both live in container `/tmp`. Deploy when the job queue is idle.
 
