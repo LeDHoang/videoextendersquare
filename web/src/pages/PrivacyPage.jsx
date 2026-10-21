@@ -130,7 +130,7 @@ export default function PrivacyPage() {
           <li>Your posts, Reel Packs, and comments are removed from the Service right away. The stored media files are deleted within <V k="mediaPurge" />.</li>
           <li>We delete your follows, likes, saves, blocks, password reset links, and saved fal.ai key, and we sign you out everywhere.</li>
           <li>Viewing activity and reports you made are kept without your account linked to them.</li>
-          <li>Messages you sent stay visible to the people who received them.</li>
+          <li>Messages you sent are hidden from the people you talked with. We keep them for moderation and safety.</li>
           <li>We keep purchase and credit records, because the law requires us to keep financial records.</li>
         </ul>
       </Section>
