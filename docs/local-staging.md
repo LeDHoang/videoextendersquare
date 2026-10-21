@@ -132,7 +132,7 @@ backup bucket. Run it from the repo root.
    day=$(date -u +%Y-%m-%d)
    rclone cat "staging:echo-backups/$day/<echo-...dump>" > logs/restore.dump
    C exec -T postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < logs/restore.dump
-   C up -d app && C exec app alembic current          # expect 20261021_0015 (head)
+   C up -d app && C exec app alembic current          # expect 20261022_0016 (head)
    rclone cat "staging:echo-backups/$day/<avatars-...tar.gz>" | C exec -T app tar -C /app/data -xzf -
    mkdir -p logs/restore-media
    C run --rm -T -v "$PWD/logs/restore-media:/out" rclone copy staging:echo-public/uploads /out/uploads

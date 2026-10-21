@@ -156,6 +156,11 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_PACK_CREATE_HOURLY` | Reel Pack creations per user per hour | `10` |
 | `SX_PUBLISH_HOURLY_MAX` / `SX_PUBLISH_DAILY_MAX` | Upload publishes per user per hour / day | `5` / `20` |
 | `SX_SSE_MAX_CONN` / `SX_SSE_MAX_MIN` | Message SSE streams per user / max stream lifetime minutes | `8` / `30` |
+| `SX_EVENT_RPM` | View and event writes per actor per minute; the per-IP limit is 5x | `120` |
+| `SX_EVENT_DAILY_CAP` | Contributions one actor can add to one post per UTC day when the event has no impression | `5` |
+| `SX_EMAIL_VERIFY_TTL_MIN` | Lifetime of the sign-up verification link in minutes; the account exists only after it is used | `1440` |
+| `SX_TURNSTILE_SITE_KEY` / `SX_TURNSTILE_SECRET` | Cloudflare Turnstile for sign-up. The site key goes to the SPA, the secret stays on the server. With the secret unset the check is skipped and a warning is logged at boot | empty |
+| `SX_MOD_SPIKE_MIN` | Smallest count the moderation Overview flags as a spike (at least 3x the previous window) | `10` |
 | `SX_REGISTRATION_ENABLED` | `0` closes public registration (invite-only); `SX_REGISTRATION_ALLOWLIST` emails can still register | `1` |
 | `SX_REGISTRATION_ALLOWLIST` | Comma-separated invite emails honored while registration is closed (case-insensitive) | empty (fully closed) |
 | `DATABASE_URL` | Shared social/messaging/billing database URL | `sqlite:///./data/echo.db` |

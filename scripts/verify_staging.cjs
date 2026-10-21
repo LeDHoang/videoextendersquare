@@ -117,10 +117,33 @@ async function signIn(email) {
   const login = await call('/api/auth/login', { method: 'POST', json: { identifier: email, password: PASSWORD } });
   if (login.status === 200) return login;
   jar.clear();
-  return call('/api/auth/register', {
+  const registered = await call('/api/auth/register', {
     method: 'POST',
     json: { email, username: handle(email), password: PASSWORD, accept_terms: true, display_name: handle(email) },
   });
+  if (registered.status !== 202) return registered;
+  // Sign-up only sends a link; the account exists once the mailed token is used.
+  const token = await mailpitToken(email);
+  if (!token) return registered;
+  return call('/api/auth/verify-email', { method: 'POST', json: { token } });
+}
+
+// Reads the newest verification mail for `email` from the staging Mailpit (MAILPIT, default http://localhost:8025).
+async function mailpitToken(email) {
+  const base = flag('--mailpit', 'http://localhost:8025').replace(/\/$/, '');
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const list = await (await fetch(`${base}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}&limit=1`)).json();
+      const id = list.messages && list.messages[0] && list.messages[0].ID;
+      if (id) {
+        const message = await (await fetch(`${base}/api/v1/message/${id}`)).json();
+        const found = /verify-email\?token=([A-Za-z0-9_%-]+)/.exec(`${message.Text || ''} ${message.HTML || ''}`);
+        if (found) return decodeURIComponent(found[1]);
+      }
+    } catch { /* Mailpit not reachable yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return '';
 }
 
 async function publishProbe(title) {

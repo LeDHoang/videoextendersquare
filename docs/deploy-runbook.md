@@ -129,7 +129,7 @@ A restart drops in-flight jobs and staged uploads, because both live in containe
 | Check CPU and memory | `docker stats` |
 | Check ffmpeg niceness | `docker compose exec app ps -o ni,comm -C ffmpeg` |
 | Open a psql shell | `docker compose exec postgres psql -U echo echo` |
-| Check the schema revision | `docker compose exec app alembic current`. Expect `20261021_0015`. |
+| Check the schema revision | `docker compose exec app alembic current`. Expect `20261022_0016`. |
 | Check disk | `df -h /` and `docker system df` |
 
 Logs rotate at 10 MB × 5 files per service (json-file driver).

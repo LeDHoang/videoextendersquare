@@ -28,9 +28,9 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 
 - [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
 - [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
-- [ ] Review the Explore page reels loading priority.
-- [ ] Review VR immersive-mode reel playback and loading. (Earth interaction reworked, but full playback/loading review still open.)
-- [ ] Reduce and spread out controls on the player action rail.
+- [x] Review the Explore page reels loading priority. Done 2026-10-21: preload margin 300 px, at most four concurrent video loads with visible tiles first, no video under reduced motion, first preview batch of eight.
+- [x] Review VR immersive-mode reel playback and loading. Done 2026-10-21 as a code review in `docs/vr-playback-review.md`; the device matrix and Phase 0 fixes stay open.
+- [x] Reduce and spread out controls on the player action rail. Done 2026-10-21: five primary buttons; mode, fullscreen and VR moved into More.
 - [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.
 - [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
@@ -116,7 +116,7 @@ people.
 
 ## Known gaps found during verification (not yet fixed)
 
-- `web/src/hooks/MessagingContext.jsx:305-313`: send-reconcile checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20.
+- `web/src/hooks/MessagingContext.jsx:305-313`: send-reconcile checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20. Fixed 2026-10-21 (reconcile checks the target conversation, the `user:` key is dropped, optimistic GIFs carry their preview).
 - Report on an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
 - Staged uploads are process-memory: multi-worker deployments need sticky sessions (or a single worker) or quote/submit pairs may miss; a restart drops staged files (documented in `RUNNING.md`).
 - Reward threshold uses client-reported duration (accepted risk: server-elapsed gate + foreground telemetry + 5/day + IP caps bound farming; documented in `RUNNING.md`).
