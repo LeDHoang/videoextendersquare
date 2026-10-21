@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
 import { DensityToggle, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
 import PackTile, { packCoverMembers } from '../components/packs/PackTile.jsx';
+import ReportDialog from '../components/ReportDialog.jsx';
 import { Button, Field } from '../components/ui/controls.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { profilePostUrl } from '../utils/profileLinks.js';
@@ -127,6 +128,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportNotice, setReportNotice] = useState('');
   const [dialog, setDialog] = useState('');
   const [followBusy, setFollowBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
@@ -339,20 +342,18 @@ export default function ProfilePage() {
     }
   };
 
-  const reportProfile = async () => {
+  const reportProfile = () => {
     if (!viewer) {
       navigate('/login?next=' + encodeURIComponent('/profile/' + username));
       return;
     }
-    const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
-    if (!reason) return;
-    const details = window.prompt('Optional details') || '';
-    try {
-      await api.post('/api/reports', { target_type: 'user', target_id: profile.id, reason, details });
-      window.alert('Report submitted. Thank you.');
-    } catch (requestError) {
-      setError(requestError.message || 'Could not submit report.');
-    }
+    setReportNotice('');
+    setReportOpen(true);
+  };
+
+  const submitProfileReport = async ({ reason, details }) => {
+    await api.post('/api/reports', { target_type: 'user', target_id: profile.id, reason, details });
+    setReportNotice('Report submitted. Thank you — our moderators will review it.');
   };
 
   const blockProfile = async () => {
@@ -525,6 +526,7 @@ export default function ProfilePage() {
 
           {previewMessage && !packGrid ? <Mono>{previewMessage}</Mono> : null}
           {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
+          {reportNotice ? <div className="sx-pk-notice" role="status">{reportNotice}</div> : null}
           {loading ? (
             <ExploreGridSkeleton label={packGrid ? 'Loading Reel Packs' : 'Loading profile posts'} />
           ) : items.length ? (
@@ -596,6 +598,10 @@ export default function ProfilePage() {
                 </div>
               </section>
             </div>
+          ) : null}
+
+          {reportOpen ? (
+            <ReportDialog title={'REPORT @' + profile.username.toUpperCase()} onSubmit={submitProfileReport} onClose={() => setReportOpen(false)} />
           ) : null}
 
           {dialog ? <PeopleDialog title={dialog.toUpperCase()} username={profile.username} kind={dialog} onClose={() => setDialog('')} /> : null}

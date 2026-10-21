@@ -1699,6 +1699,18 @@
   .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
   .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
   .reels-collect-dialog[hidden], .reels-collect-backdrop[hidden] { display:none !important; }
+  .reels-report-dialog { width:min(440px,94vw); max-height:calc(100vh - 48px); padding:0; overflow:auto; border:1px solid var(--sx-rule-strong); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
+  .reels-report-dialog::backdrop { background:rgba(3,5,9,.78); }
+  .reels-report-dialog form { display:flex; flex-direction:column; gap:14px; padding:16px; }
+  .reels-report-dialog h2 { margin:0; font:800 13px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
+  .reels-report-dialog label { display:flex; flex-direction:column; gap:6px; color:var(--sx-ink-3); font:700 10px/1 "JetBrains Mono",monospace; letter-spacing:.1em; }
+  .reels-report-dialog select, .reels-report-dialog textarea { width:100%; box-sizing:border-box; min-height:44px; padding:10px 12px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:600 13px/1.4 "JetBrains Mono",monospace; }
+  .reels-report-dialog textarea { resize:vertical; }
+  .reels-report-dialog select:focus-visible, .reels-report-dialog textarea:focus-visible, .reels-report-dialog button:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-report-dialog small { align-self:flex-end; font:600 10px/1 "JetBrains Mono",monospace; }
+  .reels-report-actions { display:flex; justify-content:flex-end; gap:8px; }
+  .reels-report-actions button { min-height:44px; padding:8px 14px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
+  .reels-report-actions button[type="submit"] { border-color:var(--sx-accent); background:var(--sx-accent); color:#090b0e; }
   .reels-vr-notice-text { margin:0; padding:16px 14px; color:var(--sx-ink-2); font:500 13px/1.55 "JetBrains Mono",monospace; }
   .reels-phone-frame.sx-fs-active .reels-pack-bar, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-bar { top:max(14px, calc(env(safe-area-inset-top) + 8px)); left:max(14px, env(safe-area-inset-left)); right:76px; }
   .reels-phone-frame.sx-fs-active .reels-pack-card, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-card { padding:max(62px, calc(env(safe-area-inset-top) + 56px)) var(--pk-r,76px) var(--pk-b,40px) var(--pk-l,max(14px, env(safe-area-inset-left))); }
@@ -2223,6 +2235,33 @@
       <button type="button" id="vrNoticeContinue">CONTINUE TO VR</button>
     </div>
   </section>
+
+  <!-- Report form: browser prompts are invisible in a headset, so reports use a native modal dialog. -->
+  <dialog class="reels-report-dialog" id="reportDialog" aria-labelledby="reportDialogTitle">
+    <form method="dialog" id="reportDialogForm">
+      <h2 id="reportDialogTitle">REPORT</h2>
+      <label>REASON
+        <select id="reportReason" aria-label="Report reason">
+          <option value="spam">SPAM</option>
+          <option value="harassment">HARASSMENT</option>
+          <option value="hate">HATE</option>
+          <option value="sexual">SEXUAL CONTENT</option>
+          <option value="violence">VIOLENCE</option>
+          <option value="impersonation">IMPERSONATION</option>
+          <option value="privacy">PRIVACY</option>
+          <option value="other">OTHER</option>
+        </select>
+      </label>
+      <label>DETAILS (OPTIONAL)
+        <textarea id="reportDetails" aria-label="Report details" rows="4" maxlength="500"></textarea>
+        <small id="reportDetailsCount">0/500</small>
+      </label>
+      <div class="reels-report-actions">
+        <button type="button" id="reportCancel">CANCEL</button>
+        <button type="submit" id="reportSubmit">SUBMIT REPORT</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Floating Command Grid (Right Side).
        Primary group is always visible; the "..." button swaps in the
@@ -4662,6 +4701,51 @@
       showFlash(action === 'hide_creator' ? 'CREATOR HIDDEN' : 'SHOWING FEWER');
       loadVideo(idx);
     }
+    // <reels-report-dialog> (stubbed by web/tests/reels-xr-dom-ui.test.js)
+    // Resolves { reason, details } on submit, or null when dismissed.
+    function askReportDetails(targetType) {
+      const dialog = document.getElementById('reportDialog');
+      const form = document.getElementById('reportDialogForm');
+      const reasonEl = document.getElementById('reportReason');
+      const detailsEl = document.getElementById('reportDetails');
+      const countEl = document.getElementById('reportDetailsCount');
+      const cancelBtn = document.getElementById('reportCancel');
+      const titleEl = document.getElementById('reportDialogTitle');
+      if (!dialog || !form || !reasonEl || !detailsEl) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        let result = null;
+        const syncCount = () => { if (countEl) countEl.textContent = detailsEl.value.length + '/500'; };
+        const onSubmit = (event) => {
+          event.preventDefault();
+          result = { reason: reasonEl.value, details: detailsEl.value.trim() };
+          dialog.close();
+        };
+        const onCancel = () => dialog.close();
+        // Keep player shortcuts (space, arrows) from firing while typing in the dialog.
+        const onKey = (event) => event.stopPropagation();
+        const onClose = () => {
+          form.removeEventListener('submit', onSubmit);
+          cancelBtn.removeEventListener('click', onCancel);
+          dialog.removeEventListener('close', onClose);
+          dialog.removeEventListener('keydown', onKey);
+          resolve(result);
+        };
+        form.addEventListener('submit', onSubmit);
+        cancelBtn.addEventListener('click', onCancel);
+        dialog.addEventListener('close', onClose);
+        dialog.addEventListener('keydown', onKey);
+        if (titleEl) titleEl.textContent = 'REPORT ' + String(targetType || '').toUpperCase();
+        reasonEl.value = 'spam';
+        detailsEl.value = '';
+        syncCount();
+        detailsEl.oninput = syncCount;
+        if (typeof dialog.showModal === 'function') dialog.showModal();
+        else dialog.setAttribute('open', '');
+        reasonEl.focus();
+      });
+    }
+    // </reels-report-dialog>
+
     // <reels-report> (extracted by web/tests/reels-xr-dom-ui.test.js)
     async function reportTarget(targetType, targetId) {
       if (!targetId) return;
@@ -4674,16 +4758,15 @@
         requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
         return;
       }
-      // window.prompt() is invisible in the headset and blocks the XR frame loop.
+      // The DOM report dialog is invisible in the headset: leave XR first.
       await exitXrForDomUi();
-      const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
-      if (!reason) return;
-      const details = window.prompt('Optional details') || '';
+      const answer = await askReportDetails(targetType);
+      if (!answer) return;
       try {
         await requestJson('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason: reason, details: details }),
+          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason: answer.reason, details: answer.details }),
         });
         showFlash('REPORT SUBMITTED');
       } catch (error) {
