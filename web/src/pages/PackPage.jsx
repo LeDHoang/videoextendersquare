@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
 import { DensityToggle, Segmented, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
 import { CommentIcon, LikeIcon, ViewIcon } from '../components/icons/index.jsx';
 import PackCover from '../components/packs/PackCover.jsx';
+import ReportDialog, { Dialog } from '../components/ReportDialog.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { Button, Dropdown } from '../components/ui/controls.jsx';
 import { EmptyState } from '../components/ui/primitives.jsx';
@@ -12,7 +13,6 @@ import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
 import { formatDuration, formatPostResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
-import { REPORT_REASONS } from '../utils/messageFormat.js';
 
 const VISIBILITY_OPTIONS = [
   { label: 'PUBLIC · DISCOVERABLE', value: 'public' },
@@ -24,7 +24,6 @@ const VIEW_OPTIONS = [
   { label: 'GALLERY', value: 'gallery' },
   { label: 'LIST', value: 'list' },
 ];
-const DETAILS_LIMIT = 500;
 const MIN_PUBLISH = 3;
 
 export function usePackView() {
@@ -44,42 +43,6 @@ export function usePackView() {
     }
   }, []);
   return [view, setView];
-}
-
-/** Small modal: Escape and backdrop close it, focus moves in and returns to the opener. */
-function Dialog({ title, onClose, busy = false, children }) {
-  const panelRef = useRef(null);
-  const titleId = useId();
-
-  useEffect(() => {
-    const opener = document.activeElement;
-    const panel = panelRef.current;
-    const first = panel?.querySelector('select, textarea, input, button:not([data-dialog-close])');
-    (first || panel)?.focus();
-    return () => {
-      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape' && !busy) onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
-
-  return (
-    <div className="sx-pk-modal" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <div className="sx-pk-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={panelRef} tabIndex={-1}>
-        <header>
-          <h2 id={titleId}>{title}</h2>
-          <button type="button" data-dialog-close onClick={onClose} disabled={busy} aria-label="Close dialog">×</button>
-        </header>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 function ReelThumb({ post }) {
@@ -156,8 +119,6 @@ export default function PackPage() {
   const [busy, setBusy] = useState('');
   const [dialog, setDialog] = useState('');
   const [dialogError, setDialogError] = useState('');
-  const [reportReason, setReportReason] = useState('spam');
-  const [reportDetails, setReportDetails] = useState('');
   const loadSeq = useRef(0);
   const playing = searchParams.get('play') === '1';
   const rawRequestedItem = Number(searchParams.get('item'));
@@ -265,31 +226,19 @@ export default function PackPage() {
 
   const openReport = () => {
     if (!requireAccount()) return;
-    setReportReason('spam');
-    setReportDetails('');
     setDialogError('');
     setDialog('report');
   };
 
-  const submitReport = async (event) => {
-    event.preventDefault();
-    setBusy('report');
-    setDialogError('');
-    try {
-      await api.post('/api/reports', {
-        target_type: 'pack',
-        target_id: pack.id,
-        reason: reportReason,
-        details: reportDetails.trim(),
-      });
-      setDialog('');
-      setError('');
-      setNotice('Report submitted. Thank you — our moderators will review it.');
-    } catch (requestError) {
-      setDialogError(requestError.message || 'Could not report this Reel Pack.');
-    } finally {
-      setBusy('');
-    }
+  const submitReport = async ({ reason, details }) => {
+    await api.post('/api/reports', {
+      target_type: 'pack',
+      target_id: pack.id,
+      reason,
+      details,
+    });
+    setError('');
+    setNotice('Report submitted. Thank you — our moderators will review it.');
   };
 
   const patchPack = async (action, body, failure) => {
@@ -590,32 +539,7 @@ export default function PackPage() {
       </div>
 
       {dialog === 'report' ? (
-        <Dialog title="REPORT REEL PACK" onClose={() => setDialog('')} busy={busy === 'report'}>
-          <form onSubmit={submitReport}>
-            <label>
-              <span>REASON</span>
-              <select aria-label="Report reason" value={reportReason} onChange={(event) => setReportReason(event.target.value)}>
-                {REPORT_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>DETAILS (OPTIONAL)</span>
-              <textarea
-                aria-label="Report details"
-                value={reportDetails}
-                maxLength={DETAILS_LIMIT}
-                rows={4}
-                onChange={(event) => setReportDetails(event.target.value)}
-              />
-              <small>{reportDetails.length}/{DETAILS_LIMIT}</small>
-            </label>
-            {dialogError ? <div className="sx-pk-dialog-error" role="alert">{dialogError}</div> : null}
-            <div className="sx-pk-dialog-actions">
-              <Button onClick={() => setDialog('')} disabled={busy === 'report'}>CANCEL</Button>
-              <Button primary type="submit" loading={busy === 'report'}>SUBMIT REPORT</Button>
-            </div>
-          </form>
-        </Dialog>
+        <ReportDialog title="REPORT REEL PACK" onSubmit={submitReport} onClose={() => setDialog('')} />
       ) : null}
 
       {dialog === 'delete' ? (
