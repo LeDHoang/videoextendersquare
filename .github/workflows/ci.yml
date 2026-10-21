@@ -112,6 +112,10 @@ jobs:
           run 'test -f /app/server/static/index.html'
           run 'uid=$(id -u); [ "$uid" != 0 ] || { echo "image runs as root" >&2; exit 1; }'
           run 'ffmpeg -version | head -1'
+          # The base image is pinned, so a different ffmpeg major means the
+          # pin was bumped without re-checking the encode settings.
+          run 'ffmpeg -version | head -1 | grep -E "^ffmpeg version (7:)?7\."'
+          run 'test "$(ls /app/ui)" = assets'
           run 'test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg'
           echo "image contents OK"
 

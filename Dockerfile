@@ -1,14 +1,16 @@
 # Multi-stage build: Node compiles the React app, Python serves it.
 # Production topology (one VPS, compose.yaml, Cloudflare Tunnel): docs/deploy-runbook.md
 
-FROM node:22-slim AS web-build
+# Base images are pinned by digest so a rebuild cannot silently pick up a new
+# OS or runtime. Dependabot's docker ecosystem proposes the bumps.
+FROM node:22-slim@sha256:a6385bc33f0f9d6a08482c87f52baee537a9184e2b47dea1ed97caac62f8960c AS web-build
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ .
 RUN npm run build
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -50,7 +52,9 @@ COPY core/ core/
 COPY pipeline/ pipeline/
 COPY migrations/ migrations/
 COPY alembic.ini .
-COPY ui/ ui/
+# The server reads only ui/assets (server/routers/reels.py, compare.py); the
+# old Streamlit modules next to it stay out of the image.
+COPY ui/assets/ ui/assets/
 # Read at runtime by server/routers/reels.py: player icon SVGs and the Earth
 # texture directory (web/public/assets).
 COPY web/src/components/icons/svg/ web/src/components/icons/svg/

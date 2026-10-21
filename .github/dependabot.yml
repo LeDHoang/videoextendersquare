@@ -28,3 +28,9 @@ updates:
     groups:
       actions:
         update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: 3dreels
