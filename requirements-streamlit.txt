@@ -1,0 +1,5 @@
+# Legacy Streamlit UI only (app.py, ui/*.py; `make streamlit`). Kept out of
+# requirements.txt: the FastAPI server never imports it, and streamlit still
+# pins pillow<13, which would hold the server on a vulnerable Pillow.
+# Install into a separate venv: it downgrades Pillow below 13.
+streamlit>=1.60,<2

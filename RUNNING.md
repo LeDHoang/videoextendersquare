@@ -45,7 +45,7 @@ Open http://localhost:8000.
 ## Streamlit fallback
 
 ```bash
-make streamlit        # streamlit run app.py on :8501
+make streamlit        # streamlit run app.py on :8501 (needs requirements-streamlit.txt, separate venv)
 ```
 
 Kept working indefinitely — `app.py` is untouched by the new stack.

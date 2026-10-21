@@ -15,18 +15,18 @@ permissions:
 jobs:
   test:
     name: make test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -45,7 +45,7 @@ jobs:
 
   postgres:
     name: migrations + pool test on PostgreSQL 16
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -64,8 +64,8 @@ jobs:
     env:
       PGPASSWORD: echo
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -89,10 +89,10 @@ jobs:
 
   docker:
     name: image build + contents check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build image
         run: docker build --build-arg GIT_SHA=${{ github.sha }} -t echo-app:ci .
       - name: Assert image contents
@@ -114,3 +114,41 @@ jobs:
           run 'ffmpeg -version | head -1'
           run 'test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg'
           echo "image contents OK"
+
+  scans:
+    name: dependency + secret scans
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # gitleaks scans the full history
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: pip-audit (runtime requirements)
+        # No ignores today. To accept a finding that has no fix yet, add
+        # `--ignore-vuln <ID>` here with a comment saying why and when to revisit.
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit -r requirements.txt
+      - name: npm audit (production deps, high and above)
+        run: npm audit --audit-level=high --omit=dev
+        working-directory: web
+      - name: gitleaks (full history)
+        # Release binary with its checksum checked; triaged false positives
+        # live in .gitleaks.toml and .gitleaksignore.
+        run: |
+          set -euo pipefail
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLO "$base/$f"
+          curl -fsSLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " $f\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar xzf "$f" gitleaks
+          ./gitleaks git . --no-banner --redact --config .gitleaks.toml

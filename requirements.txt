@@ -1,7 +1,9 @@
-streamlit>=1.60,<2
 fal-client>=1.0
-Pillow>=10
+# 13.0.0 fixes 8 CVEs that pip-audit reports against 12.x (2026-10-21).
+Pillow>=13,<14
 python-dotenv>=1.0
+# pipeline/spatial_worker.py; was only installed transitively via streamlit.
+numpy>=2,<3
 # vapoursynth has no manylinux wheels (R78 ships macOS/win/musllinux only), so it
 # would fail the Linux Docker build; it is only needed for the local macOS
 # "Studio" upscale engine. The container already runs without it (Dockerfile
@@ -16,7 +18,8 @@ alembic>=1.13,<2
 argon2-cffi>=23.1
 email-validator>=2.1
 psycopg[binary]>=3.1
-cryptography>=42,<49
+# 50.0.0 fixes PYSEC-2026-3552, -3553 and -3554 (pip-audit, 2026-10-21).
+cryptography>=50,<51
 stripe>=11,<13
 boto3>=1.35,<2
 sentry-sdk[fastapi]>=2.0,<3
