@@ -353,6 +353,7 @@ export default function ReelsPage() {
                 className="sx-input"
                 style={{ paddingRight: search ? '28px' : undefined }}
                 placeholder="Search…"
+                aria-label="Search reels"
                 value={search}
                 onChange={(e) => { clearDeepLink(); setSearch(e.target.value); }}
               />

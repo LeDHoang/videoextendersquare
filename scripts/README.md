@@ -41,6 +41,16 @@
 #                            drill (--drill seed|check) and publish timing
 #                            (--time-publish <file>); see docs/local-staging.md:
 #                              node scripts/verify_staging.cjs
+#                          verify_load.cjs — load probe (50 virtual users, p95 and 5xx
+#                            report) and --abuse bursts that must hit the documented
+#                            429s. --abuse spends staging rate-limit budgets (login IP,
+#                            register, report); run it last and against staging only:
+#                              node scripts/verify_load.cjs [--users 50 --duration 30]
+#                              node scripts/verify_load.cjs --abuse
+#                          verify_a11y.cjs — headless-Chrome accessibility pass over the
+#                            main pages (names, labels, contrast, Tab order); findings in
+#                            docs/accessibility-pass.md:
+#                              node scripts/verify_a11y.cjs
 #   ../deploy/         — production deploy files (NOT dev tooling; see
 #                        docs/deploy-runbook.md):
 #                          entrypoint.sh  — container entrypoint (alembic upgrade head,
