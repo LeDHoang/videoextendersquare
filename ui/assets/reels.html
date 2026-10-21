@@ -471,6 +471,11 @@
   .reels-cluster[hidden] {
     display: none !important;
   }
+  /* Only five keys live here now, so give them room. */
+  #railPrimary {
+    gap: 10px;
+    padding: 8px;
+  }
   .reels-cluster-divider {
     width: 100%;
     height: 1px;
@@ -2236,12 +2241,6 @@
         </span>
         <span class="action-btn-label">MUTE</span>
       </button>
-      <button class="action-btn active" id="modeBtn" type="button" title="Auto-Next / Loop" aria-label="Auto-advance to the next reel" aria-pressed="true">
-        <span class="btn-icon sx-flip-x">
-          __ICON_BACK__
-        </span>
-        <span class="action-btn-label" id="modeLabel">AUTO</span>
-      </button>
       <div class="reels-cluster-divider"></div>
       <button class="action-btn" id="likeBtn" type="button" title="Like / Unlike (F)" aria-label="Like reel" aria-pressed="false" aria-keyshortcuts="F">
         <span class="btn-icon">
@@ -2261,20 +2260,6 @@
         </span>
         <span class="action-btn-label">SHARE</span>
       </button>
-      <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
-        <span class="btn-icon">
-          __ICON_FULLSCREEN__
-        </span>
-        <span class="action-btn-label">FULL</span>
-      </button>
-      <div id="vrBtnWrap" style="display:none;">
-        <button class="action-btn" id="vrBtn" type="button" title="Enter VR Mode — requires WebXR device or Chrome emulator extension" aria-label="Enter VR mode">
-          <span class="btn-icon">
-            __ICON_VR__
-          </span>
-          <span class="action-btn-label" style="color: #A855F7;">VR</span>
-        </button>
-      </div>
       <button class="action-btn" id="moreBtn" type="button" title="More actions" aria-label="More actions" aria-expanded="false" aria-controls="railMore">
         <span class="btn-icon">
           __ICON_MORE__
@@ -2291,6 +2276,26 @@
         </span>
         <span class="action-btn-label">BACK</span>
       </button>
+      <button class="action-btn active" id="modeBtn" type="button" title="Auto-Next / Loop" aria-label="Auto-advance to the next reel" aria-pressed="true">
+        <span class="btn-icon sx-flip-x">
+          __ICON_BACK__
+        </span>
+        <span class="action-btn-label" id="modeLabel">AUTO</span>
+      </button>
+      <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
+        <span class="btn-icon">
+          __ICON_FULLSCREEN__
+        </span>
+        <span class="action-btn-label">FULL</span>
+      </button>
+      <div id="vrBtnWrap" style="display:none;">
+        <button class="action-btn" id="vrBtn" type="button" title="Enter VR Mode — requires WebXR device or Chrome emulator extension" aria-label="Enter VR mode">
+          <span class="btn-icon">
+            __ICON_VR__
+          </span>
+          <span class="action-btn-label" style="color: #A855F7;">VR</span>
+        </button>
+      </div>
       <div class="reels-cluster-divider"></div>
       <button class="action-btn" id="saveBtn" type="button" title="Save / Unsave" aria-label="Save reel" aria-pressed="false">
         <span class="btn-icon">

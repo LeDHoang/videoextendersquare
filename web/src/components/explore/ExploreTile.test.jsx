@@ -216,3 +216,76 @@ describe('ExploreTile 3D posts', () => {
     expect(mono.getByRole('button', { name: 'Open Reel A in Reels player' })).toBeInTheDocument();
   });
 });
+
+describe('ExploreTile video loading', () => {
+  let observers;
+
+  beforeEach(() => {
+    observers = [];
+    vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback, options) { this.callback = callback; this.options = options; observers.push(this); }
+      observe() {}
+      disconnect() {}
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const fire = (observer, isIntersecting = true) => act(() => { observer.callback([{ isIntersecting }]); });
+  const near = (index) => observers.filter((o) => o.options.rootMargin === '300px')[index];
+  const visible = (index) => observers.filter((o) => o.options.rootMargin === '0px')[index];
+
+  function renderTiles(count, extra = () => ({})) {
+    return render(
+      <MemoryRouter>
+        {Array.from({ length: count }, (_, i) => (
+          <ExploreTile key={i} video={video({ path: i + '.mp4', url: '/media/' + i + '.mp4', preview_url: '/media/' + i + '-explore.mp4', ...extra(i) })} onOpen={() => {}} />
+        ))}
+      </MemoryRouter>,
+    );
+  }
+
+  const sources = (container) => [...container.querySelectorAll('video')].map((el) => el.getAttribute('src'));
+
+  it('looks 300px ahead, not 800px', () => {
+    renderTiles(1);
+    expect(near(0)).toBeDefined();
+    expect(observers.some((o) => o.options.rootMargin === '800px')).toBe(false);
+  });
+
+  it('loads at most four nearby previews at once', () => {
+    const { container } = renderTiles(6);
+    for (let i = 0; i < 6; i += 1) fire(near(i));
+    expect(sources(container).filter(Boolean)).toHaveLength(4);
+  });
+
+  it('frees a slot when a preview has loaded', () => {
+    const { container } = renderTiles(6);
+    for (let i = 0; i < 6; i += 1) fire(near(i));
+    act(() => { fireEvent.loadedData(container.querySelectorAll('video')[0]); });
+    expect(sources(container).filter(Boolean)).toHaveLength(5);
+  });
+
+  it('lets a tile that scrolls into view jump the queue', () => {
+    const { container } = renderTiles(6);
+    for (let i = 0; i < 6; i += 1) fire(near(i));
+    expect(sources(container)[5]).toBeNull();
+    fire(visible(5));
+    act(() => { fireEvent.loadedData(container.querySelectorAll('video')[0]); });
+    expect(sources(container)[5]).toBe('/media/5-explore.mp4');
+    expect(sources(container)[4]).toBeNull();
+  });
+
+  it('shows only the poster under reduced motion', () => {
+    vi.stubGlobal('matchMedia', (query) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    const { container } = renderTiles(1, () => ({ poster_url: '/media/0.jpg' }));
+    fire(near(0));
+    fire(visible(0));
+    expect(sources(container)).toEqual([null]);
+  });
+});

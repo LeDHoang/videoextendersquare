@@ -18,6 +18,52 @@ export function locationKey(city, country) {
   return citySlug + (countrySlug ? '--' + countrySlug : '');
 }
 
+// Browsers throttle parallel media loads, so a screenful of tiles asking at once delays the ones in view.
+// Nearby tiles queue here; a tile that scrolls into view jumps to the front.
+const MAX_CONCURRENT_LOADS = 4;
+const LOAD_SLOT_TIMEOUT_MS = 8000;
+const waitingLoads = [];
+let runningLoads = 0;
+
+function pumpLoads() {
+  while (runningLoads < MAX_CONCURRENT_LOADS && waitingLoads.length) {
+    const job = waitingLoads.shift();
+    job.started = true;
+    runningLoads += 1;
+    job.timer = setTimeout(job.release, LOAD_SLOT_TIMEOUT_MS);
+    job.start();
+  }
+}
+
+function queueVideoLoad(start, urgent) {
+  const job = { start, started: false, done: false, timer: null };
+  const dequeue = () => {
+    const index = waitingLoads.indexOf(job);
+    if (index >= 0) waitingLoads.splice(index, 1);
+  };
+  job.release = () => {
+    if (job.done) return;
+    job.done = true;
+    clearTimeout(job.timer);
+    if (job.started) runningLoads -= 1;
+    else dequeue();
+    pumpLoads();
+  };
+  job.prioritize = () => {
+    if (job.started || job.done) return;
+    dequeue();
+    waitingLoads.unshift(job);
+    pumpLoads();
+  };
+  if (urgent) waitingLoads.unshift(job);
+  else waitingLoads.push(job);
+  pumpLoads();
+  return job;
+}
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 /* orderLabel (e.g. "01") adds a top-right badge with the reel's runtime, which counts down while it autoplays. */
 export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare, orderLabel = '' }) {
   const navigate = useNavigate();
@@ -30,12 +76,14 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const [ready, setReady] = useState(false);
   const [remaining, setRemaining] = useState(null);
   const visibleRef = useRef(false);
+  const loadJobRef = useRef(null);
 
   // Play only while the tile is on screen and the <video> actually has a source. The visibility callback can
   // fire before React has put `src` on the element (play() then rejects and nothing retries), and a
   // preview -> original fallback reloads the element, so this is also called once media is ready.
   const tryPlay = () => {
     const vid = videoRef.current;
+    if (prefersReducedMotion()) return;
     if (!vid || !visibleRef.current || !vid.paused || !vid.getAttribute('src')) return;
     vid.play().catch(() => {
       /* Still throttled by the browser: the next canplay / visibility event retries. */
@@ -48,26 +96,40 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     const vid = videoRef.current;
     if (!el || !vid) return undefined;
     let nearArmed = false;
+    // Under reduced motion a tile with a poster shows only that; one without loads metadata for its first frame.
+    const still = prefersReducedMotion();
+    const wantsLoad = !still || !video.poster_url;
+
+    const requestSource = (urgent) => {
+      if (!wantsLoad) return;
+      if (loadJobRef.current) {
+        if (urgent) loadJobRef.current.prioritize();
+        return;
+      }
+      loadJobRef.current = queueVideoLoad(() => setSrc((current) => current || video.preview_url || video.url), urgent);
+    };
 
     const nearIO = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && !nearArmed) {
           nearArmed = true;
-          setSrc(video.preview_url || video.url);
+          requestSource(false);
           nearIO.disconnect();
         }
       },
-      { rootMargin: '800px', threshold: 0 },
+      { rootMargin: '300px', threshold: 0 },
     );
 
     const visIO = new IntersectionObserver(
       (entries) => {
         const visible = entries[0]?.isIntersecting;
         visibleRef.current = !!visible;
-        if (visible) {
-          setSrc((current) => current || video.preview_url || video.url);
+        if (visible && !still) {
+          requestSource(true);
           setPreload('auto');
           tryPlay();
+        } else if (visible) {
+          requestSource(true);
         } else if (!vid.paused) {
           vid.pause();
         }
@@ -79,6 +141,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     visIO.observe(el);
     return () => {
       visibleRef.current = false;
+      if (loadJobRef.current) loadJobRef.current.release();
+      loadJobRef.current = null;
       nearIO.disconnect();
       visIO.disconnect();
       if (!vid.paused) vid.pause();
@@ -165,11 +229,18 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               playsInline
               preload={preload}
               disablePictureInPicture
-              onLoadedData={() => setReady(true)}
+              onLoadedData={() => {
+                setReady(true);
+                loadJobRef.current?.release();
+              }}
               onCanPlay={tryPlay}
-              onLoadedMetadata={syncRemaining}
+              onLoadedMetadata={(event) => {
+                syncRemaining(event);
+                loadJobRef.current?.release();
+              }}
               onTimeUpdate={syncRemaining}
               onError={() => {
+                loadJobRef.current?.release();
                 if (src !== video.url) setSrc(video.url);
                 else {
                   setFailed(true);

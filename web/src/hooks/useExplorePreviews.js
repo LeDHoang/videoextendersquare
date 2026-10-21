@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 
 const PREVIEW_BATCH = 24;
+// The first request covers roughly one screen, so the tiles in view get previews before the rest are generated.
+const FIRST_PREVIEW_BATCH = 8;
 
 export default function useExplorePreviews(videos) {
   const [items, setItems] = useState([]);
@@ -27,8 +29,10 @@ export default function useExplorePreviews(videos) {
 
     (async () => {
       let done = 0;
-      for (let index = 0; index < missing.length; index += PREVIEW_BATCH) {
-        const batch = missing.slice(index, index + PREVIEW_BATCH);
+      for (let index = 0; index < missing.length;) {
+        const size = index === 0 ? FIRST_PREVIEW_BATCH : PREVIEW_BATCH;
+        const batch = missing.slice(index, index + size);
+        index += size;
         try {
           const response = await api.post('/api/reels/explore-preview', batch);
           const previews = response.generated || {};
