@@ -24,6 +24,11 @@ describe('TermsPage', () => {
     expect(screen.getByText(new RegExp(`at least ${LEGAL.minimumAge} years old`))).toBeInTheDocument();
   });
 
+  it('says a deleted account\'s messages are hidden but kept for moderation', () => {
+    renderTerms();
+    expect(screen.getByText(/Messages you sent are hidden from the people you\s+talked with and kept for moderation and safety\./)).toBeInTheDocument();
+  });
+
   it('links to the Privacy Policy it incorporates', () => {
     renderTerms();
     expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');

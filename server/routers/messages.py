@@ -19,9 +19,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from server.social.auth import AuthContext, aware, public_user, rate_limiter, require_auth, require_auth_csrf
 from server.social.database import SessionLocal, get_db
@@ -130,6 +130,27 @@ def decode_cursor(value: str | None) -> tuple[datetime, str] | None:
         fail(422, "INVALID_CURSOR", "The message cursor is invalid.")
 
 
+def deleted_counterpart_clause(conversation_id_column, user_id: str):
+    """SQL predicate: the conversation's other participant deleted their account.
+
+    Deleted accounts keep their DM rows (moderation evidence), but the
+    remaining participant no longer sees the conversation, its unread count,
+    or its live events. Only direct conversations exist, so the whole
+    conversation is hidden.
+    """
+    counterpart = aliased(ConversationMember)
+    return (
+        select(counterpart.user_id)
+        .join(User, User.id == counterpart.user_id)
+        .where(
+            counterpart.conversation_id == conversation_id_column,
+            counterpart.user_id != user_id,
+            User.status == "deleted",
+        )
+        .exists()
+    )
+
+
 def member_context(
     db: Session,
     conversation_id: str,
@@ -147,7 +168,13 @@ def member_context(
         ConversationMember.user_id != user_id,
     ).first()
     other_user = db.get(User, other_member.user_id) if other_member else None
-    if not conversation or conversation.kind != "direct" or not other_member or not other_user:
+    if (
+        not conversation
+        or conversation.kind != "direct"
+        or not other_member
+        or not other_user
+        or other_user.status == "deleted"
+    ):
         fail(404, "CONVERSATION_NOT_FOUND", "Conversation not found.")
     return conversation, member, other_member, other_user
 
@@ -582,7 +609,10 @@ def conversation_rows(db: Session, user_id: str, box: str, cursor: str | None, l
     query = db.query(Conversation, ConversationMember).join(
         ConversationMember,
         ConversationMember.conversation_id == Conversation.id,
-    ).filter(ConversationMember.user_id == user_id)
+    ).filter(
+        ConversationMember.user_id == user_id,
+        ~deleted_counterpart_clause(Conversation.id, user_id),
+    )
     if box == "requests":
         query = query.filter(Conversation.state == "pending", Conversation.requester_id != user_id)
     else:
@@ -608,7 +638,12 @@ def serialize_conversation_rows(db: Session, rows, user_id: str) -> list[dict]:
             ConversationMember.user_id != user_id,
         ).first()
         other_user = db.get(User, other_member.user_id) if other_member else None
-        if other_member and other_user and not users_blocked(db, user_id, other_user.id):
+        if (
+            other_member
+            and other_user
+            and other_user.status != "deleted"
+            and not users_blocked(db, user_id, other_user.id)
+        ):
             conversations.append(serialize_conversation(db, conversation, member, other_member, other_user))
     return conversations
 
@@ -621,6 +656,7 @@ def unread_totals(db: Session, user_id: str) -> dict:
     ).filter(
         ConversationMember.user_id == user_id,
         Conversation.state.in_(["active", "pending"]),
+        ~deleted_counterpart_clause(Conversation.id, user_id),
     ).all()
     for conversation, member in rows:
         other_id = db.query(ConversationMember.user_id).filter(
@@ -949,6 +985,10 @@ async def message_events(
                     rows = event_db.query(MessageEvent).filter(
                         MessageEvent.recipient_id == user_id,
                         MessageEvent.id > cursor,
+                        or_(
+                            MessageEvent.conversation_id.is_(None),
+                            ~deleted_counterpart_clause(MessageEvent.conversation_id, user_id),
+                        ),
                     ).order_by(MessageEvent.id.asc()).limit(100).all()
                     payloads = [
                         {

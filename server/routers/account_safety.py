@@ -506,7 +506,10 @@ def moderate_report(
             fail(422, "SELF_SUSPENSION", "You cannot suspend your own account.")
         if context.user.role != "admin" and target_user.role == "moderator":
             fail(403, "MODERATOR_PROTECTED", "Only an administrator can suspend a moderator.")
-        target_user.status = "suspended"
+        # A deleted account stays deleted: "suspended" would make it appealable
+        # and show its hidden DMs again.
+        if target_user.status != "deleted":
+            target_user.status = "suspended"
         db.query(AuthSession).filter(
             AuthSession.user_id == target_user.id,
             AuthSession.revoked_at.is_(None),

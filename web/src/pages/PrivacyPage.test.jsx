@@ -26,6 +26,12 @@ describe('PrivacyPage', () => {
     expect(screen.getByText(/not end-to-end/)).toBeInTheDocument();
   });
 
+  it('says a deleted account\'s messages are hidden but kept for moderation', () => {
+    renderPrivacy();
+    expect(screen.getByText(/Messages you sent are hidden from the people you talked with\. We keep them for moderation and safety\./)).toBeInTheDocument();
+    expect(screen.queryByText(/stay visible/)).not.toBeInTheDocument();
+  });
+
   it('discloses that published originals keep their photo metadata', () => {
     renderPrivacy();
     expect(screen.getByText(/this metadata can be visible to people who download it/)).toBeInTheDocument();

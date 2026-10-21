@@ -217,7 +217,8 @@ export default function TermsPage() {
         <ul>
           <li>
             You can delete your account at any time in Profile settings. This removes your profile and your
-            content from the Service. Messages you sent stay visible to the people who received them.
+            content from the Service. Messages you sent are hidden from the people you
+            talked with and kept for moderation and safety.
           </li>
           <li>
             We keep purchase and credit records after deletion, because the law requires us to keep financial
