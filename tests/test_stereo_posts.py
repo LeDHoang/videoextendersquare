@@ -13,6 +13,7 @@ from PIL import Image
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server import media
 from server.routers import image as image_router
 from server.routers import reels, social, uploads
@@ -65,7 +66,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _register(client, username):
-    response = client.post("/api/auth/register", json={
+    response = register_verified(client, json={
         "email": f"{username}@example.com", "username": username,
         "password": PASSWORD, "accept_terms": True, "display_name": username,
     })

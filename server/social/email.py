@@ -1,4 +1,4 @@
-"""Minimal SMTP delivery for account recovery and support-inbox messages."""
+"""Minimal SMTP delivery for account recovery, verification and support-inbox messages."""
 
 from __future__ import annotations
 
@@ -11,9 +11,25 @@ from urllib.parse import urlencode
 logger = logging.getLogger(__name__)
 
 
+def _public_base() -> str:
+    return os.environ.get("SX_PUBLIC_URL", "http://localhost:5173").rstrip("/")
+
+
 def password_reset_link(token: str) -> str:
-    base = os.environ.get("SX_PUBLIC_URL", "http://localhost:5173").rstrip("/")
-    return base + "/reset-password?" + urlencode({"token": token})
+    return _public_base() + "/reset-password?" + urlencode({"token": token})
+
+
+def email_verification_link(token: str) -> str:
+    return _public_base() + "/verify-email?" + urlencode({"token": token})
+
+
+def verification_ttl_minutes() -> int:
+    """``SX_EMAIL_VERIFY_TTL_MIN`` (default 1440 = 24 h); bad values fall back."""
+    try:
+        value = int(os.environ.get("SX_EMAIL_VERIFY_TTL_MIN", "1440").strip())
+    except ValueError:
+        return 1440
+    return value if value > 0 else 1440
 
 
 def send_password_reset_email(recipient: str, token: str) -> bool:
@@ -24,6 +40,21 @@ def send_password_reset_email(recipient: str, token: str) -> bool:
         "A password reset was requested for your ECHO account.\n\n"
         + password_reset_link(token)
         + "\n\nThis link expires in 30 minutes. If you did not request it, ignore this email.\n"
+    )
+    return _deliver(message)
+
+
+def send_verification_email(recipient: str, token: str) -> bool:
+    minutes = verification_ttl_minutes()
+    window = f"{minutes // 60} hours" if minutes % 60 == 0 and minutes >= 120 else f"{minutes} minutes"
+    message = EmailMessage()
+    message["Subject"] = "Confirm your email to finish creating your ECHO account"
+    message["To"] = recipient
+    message.set_content(
+        "Confirm this email address to finish creating your ECHO account.\n\n"
+        + email_verification_link(token)
+        + f"\n\nThis link works once and expires in {window}. "
+        "If you did not sign up, ignore this email and no account will be created.\n"
     )
     return _deliver(message)
 

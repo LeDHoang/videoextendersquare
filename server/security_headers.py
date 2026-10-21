@@ -64,6 +64,7 @@ PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), xr-spatial-track
 GOOGLE_FONTS_CSS = "https://fonts.googleapis.com"
 GOOGLE_FONTS_FILES = "https://fonts.gstatic.com"
 NOMINATIM = "https://nominatim.openstreetmap.org"  # LocationField.jsx search
+TURNSTILE = "https://challenges.cloudflare.com"  # sign-up bot check widget + iframe
 
 
 def csp_mode() -> str:
@@ -98,12 +99,13 @@ def build_policy(nonce: str, mode: str | None = None) -> str:
     media = [origin] if (origin := media_origin()) else []
     directives = [
         ("default-src", ["'self'"]),
-        ("script-src", [f"'nonce-{nonce}'", "'strict-dynamic'"]),
+        ("script-src", [f"'nonce-{nonce}'", "'strict-dynamic'", TURNSTILE]),
         ("style-src", ["'self'", "'unsafe-inline'", GOOGLE_FONTS_CSS]),
         ("font-src", ["'self'", "data:", GOOGLE_FONTS_FILES]),
         ("img-src", ["'self'", "data:", "blob:", *media, *gif_origins()]),
         ("media-src", ["'self'", "blob:", *media]),
         ("connect-src", ["'self'", *media, NOMINATIM]),
+        ("frame-src", [TURNSTILE]),
         ("frame-ancestors", ["'none'"]),
         ("object-src", ["'none'"]),
         ("base-uri", ["'none'"]),

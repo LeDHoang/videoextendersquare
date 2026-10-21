@@ -31,3 +31,9 @@ def _fallback_session_factory(tmp_path_factory):
 def _isolate_global_session_local(monkeypatch, _fallback_session_factory):
     monkeypatch.setattr(database, "SessionLocal", _fallback_session_factory)
     monkeypatch.setattr(safety, "SessionLocal", _fallback_session_factory)
+
+
+@pytest.fixture(autouse=True)
+def _expose_email_tokens(monkeypatch):
+    """Let tests read verification/reset tokens from API responses (dev switch)."""
+    monkeypatch.setenv("SX_PASSWORD_RESET_EXPOSE_TOKEN", "1")

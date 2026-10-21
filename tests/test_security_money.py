@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
+from verified_signup import register_verified
 from pipeline import utils as pipeline_utils
 from pipeline.utils import attach_civitai_token, get_image_dimensions
 from server.billing.crypto import FalKeyConfigurationError, decrypt_fal_key, encrypt_fal_key
@@ -97,8 +98,7 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client, username, email=None):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email or f"{username}@example.com",
             "username": username,

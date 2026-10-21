@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server import media as SM
 from server import media_store
 from server.routers import social
@@ -211,8 +212,7 @@ def app(r2, workdir, monkeypatch):
 
 
 def register(client, username):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": f"{username}@example.com",
             "username": username,

@@ -17,6 +17,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server.routers import account_safety, social, support
 from server.social import auth, email as email_module
 from server.social.database import Base, get_db
@@ -61,8 +62,7 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client: TestClient, username: str) -> dict:
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": f"{username}@example.com",
             "username": username,
