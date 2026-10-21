@@ -395,6 +395,40 @@ def derived_pending(src: str | Path) -> bool:
         return _pending_key(src) in _pending_derived
 
 
+def missing_derived_assets(stored: str | Path, stereo: str | None = None) -> bool:
+    """True when a published video lacks a derived file its publish job builds.
+
+    2D: poster, Explore preview, and the web preview unless the original is
+    already H.264. Stereo: the left-eye rendition with its poster and
+    Explore preview, and the stereo web preview when one is needed.
+    Only file presence is checked, so a restart-lost encode is found
+    without re-encoding anything.
+    """
+    stored = Path(stored)
+
+    def present(path: Path) -> bool:
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
+
+    if stereo in ("sbs", "tb"):
+        mono = mono_sibling_path(str(stored))
+        grid = (mono, explore_poster_path(str(mono)), explore_preview_path(str(mono)))
+        if not all(present(path) for path in grid):
+            return True
+        if present(stored.with_name(stored.stem + "-preview.mp4")):
+            return False
+        if get_video_codec(str(stored)) not in {"h264", "avc1"}:
+            return True
+        info = probe_media_info(str(stored)) or {}
+        return max(info.get("width") or 0, info.get("height") or 0) > STEREO_PROXY_LONG_SIDE
+    grid = (explore_poster_path(str(stored)), explore_preview_path(str(stored)))
+    if not all(present(path) for path in grid):
+        return True
+    return not has_web_preview(str(stored))
+
+
 def explore_preview_path(src: str) -> Path:
     """Sibling path for the lightweight Explore-grid preview (<stem>-explore.mp4)."""
     return Path(src).with_name(Path(src).stem + "-explore.mp4")

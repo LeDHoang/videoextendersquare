@@ -14,7 +14,8 @@ import os
 import re
 import shutil
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -178,10 +179,99 @@ def _discard_stored(stored_files) -> None:
 # Readers probe for siblings per request, so until each file lands a post
 # serves its original with no poster (stereo: stereo_crop of the raw file).
 _derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
+_derived_lock = threading.Lock()
+_derived_futures: set[Future] = set()
+# Most posts queued per boot by requeue_missing_derived.
+REQUEUE_MAX_PER_BOOT = 50
 
 
 def _submit_derived_assets(fn) -> Future:
-    return _derived_pool.submit(fn)
+    with _derived_lock:
+        future = _derived_pool.submit(fn)
+        _derived_futures.add(future)
+    future.add_done_callback(_forget_derived_future)
+    return future
+
+
+def _forget_derived_future(future: Future) -> None:
+    with _derived_lock:
+        _derived_futures.discard(future)
+
+
+def start_derived_pool() -> None:
+    """Reopen the derived-asset worker after shutdown_derived_pool (new lifespan)."""
+    global _derived_pool
+    with _derived_lock:
+        if getattr(_derived_pool, "_shutdown", False):
+            _derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
+
+
+def shutdown_derived_pool(drain_s: float = 15.0) -> dict:
+    """Drop queued encodes and wait up to *drain_s* for the running one.
+
+    A dropped encode leaves its post on the original; the next boot finds
+    the missing files and queues it again (requeue_missing_derived). An
+    encode still running at the deadline is killed with the process and
+    its .part file is swept at the next boot.
+    """
+    with _derived_lock:
+        pool = _derived_pool
+        futures = list(_derived_futures)
+    pool.shutdown(wait=False, cancel_futures=True)
+    running = [future for future in futures if not future.done()]
+    _done, not_done = wait(running, timeout=max(0.0, drain_s)) if running else (set(), set())
+    return {
+        "dropped": sum(1 for future in futures if future.cancelled()),
+        "running": len(running),
+        "unfinished": len(not_done),
+    }
+
+
+def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
+    """Queue derived encodes a restart lost; returns how many posts were queued.
+
+    Looks at live video posts published into output/uploads whose web
+    preview, Explore preview or poster (stereo: left-eye rendition and its
+    grid assets) is missing locally. Runs in a background thread at boot.
+    """
+    from server.social.database import SessionLocal
+    from server.social.models import Post
+
+    root = UPLOAD_DIR.resolve()
+    queued = 0
+    with SessionLocal() as db:
+        rows = (
+            db.query(Post.media_path, Post.stereo_layout)
+            .filter(Post.media_type == "video", Post.status == "published", Post.deleted_at.is_(None))
+            .order_by(Post.created_at.desc())
+            .all()
+        )
+    for rel, layout in rows:
+        if queued >= limit:
+            break
+        dest = OUTPUT_DIR / rel
+        try:
+            if dest.resolve().parent != root or not dest.is_file():
+                continue
+        except OSError:
+            continue
+        if SM.derived_pending(dest):
+            continue
+        stereo = layout if layout in ("sbs", "tb") else None
+        try:
+            if not SM.missing_derived_assets(dest, stereo):
+                continue
+        except Exception:
+            logger.exception("Could not check the derived assets of %s", dest.name)
+            continue
+        if stereo:
+            build = (lambda d, s: lambda: _build_stereo_video_assets(d, s))(dest, stereo)
+        else:
+            build = (lambda d: lambda: _build_video_assets(d))(dest)
+        if not _queue_derived_assets(dest, rel, build):
+            break
+        queued += 1
+    return queued
 
 
 def _derived_step(label: str, dest: Path, make, *args, **kwargs) -> str | None:
@@ -251,14 +341,17 @@ def _run_derived_job(dest: Path, rel: str, build) -> None:
         reels_router.invalidate_scan_cache()
 
 
-def _queue_derived_assets(dest: Path, rel: str, build) -> None:
+def _queue_derived_assets(dest: Path, rel: str, build) -> bool:
     SM.mark_derived_pending(dest)
     try:
         _submit_derived_assets(lambda: _run_derived_job(dest, rel, build))
     except RuntimeError:
-        # Interpreter shutdown; /explore-preview builds the grid assets on demand.
+        # Shutting down; the next boot queues it again (requeue_missing_derived)
+        # and /explore-preview builds the grid assets on demand meanwhile.
         SM.clear_derived_pending(dest)
         logger.warning("Could not queue derived assets of %s", dest.name)
+        return False
+    return True
 
 
 def _slugify(text: str, fallback: str = "upload") -> str:

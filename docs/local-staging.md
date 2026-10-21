@@ -82,6 +82,15 @@ docker compose --env-file .env.staging start postgres
 docker top echo-staging-app-1 -o pid,ni,comm | grep ffmpeg
 # Backup bucket is private (expect 403):
 docker compose --env-file .env.staging exec objectstore wget -qO- http://127.0.0.1:8333/echo-backups/
+# Restart during a publish encode: publish a video, restart while ffmpeg runs,
+# then expect "Re-queued derived assets for N posts at boot" (N >= 1) and the
+# -poster.jpg / -explore.mp4 / -preview.mp4 siblings to land afterwards:
+docker compose --env-file .env.staging restart app
+docker compose --env-file .env.staging logs app | grep -E 'Drained|Re-queued'
+docker compose --env-file .env.staging exec app ls output/uploads
+# Every response carries X-Request-ID; access lines are JSON with request_id:
+curl -sk -D - -o /dev/null https://localhost:8443/api/readyz | grep -i x-request-id
+docker compose --env-file .env.staging logs app | grep sx.access | tail -n 3
 ```
 
 ## Backup and restore drill
