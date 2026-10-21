@@ -155,7 +155,10 @@ def configure_logging(stream=None) -> logging.Handler:
 
     SX_LOG_FORMAT selects ``json`` or ``text`` (default: json in production).
     uvicorn's own loggers are routed through the same handler, so a JSON
-    deployment has no plain-text lines.
+    deployment has no plain-text lines. ``uvicorn.access`` is silenced
+    instead: it logs the client IP, and uvicorn turns it back on whenever the
+    logger has a handler (``hasHandlers()``), even with ``--no-access-log``.
+    The sx.access line replaces it.
     """
     root = logging.getLogger()
     for handler in list(root.handlers):
@@ -170,8 +173,11 @@ def configure_logging(stream=None) -> logging.Handler:
         handler.setFormatter(_TextFormatter("%(asctime)s %(levelname)s %(name)s%(request_part)s: %(message)s"))
     root.addHandler(handler)
     root.setLevel(os.environ.get("SX_LOG_LEVEL", "INFO").upper())
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in ("uvicorn", "uvicorn.error"):
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers.clear()
+    access_logger.propagate = False
     return handler

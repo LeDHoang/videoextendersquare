@@ -124,6 +124,12 @@ def test_healthz_is_not_access_logged(app, json_logs):
     assert not [r for r in json_logs() if r["logger"] == "sx.access"]
 
 
+def test_uvicorn_access_log_stays_off(json_logs):
+    # uvicorn logs access lines (with the client IP) whenever this logger has
+    # a handler, regardless of --no-access-log.
+    assert not logging.getLogger("uvicorn.access").hasHandlers()
+
+
 def test_streaming_response_is_not_buffered_and_logged_once(app, json_logs):
     client = TestClient(app)
     with client.stream("GET", "/api/stream") as response:
