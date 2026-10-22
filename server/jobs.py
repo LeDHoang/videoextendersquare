@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from core.phases import MAX_LOG_LINES, classify, default_pool_sizes, fmt_elapsed, format_error
+from server import metrics
 from server.settings import env_int
 
 logger = logging.getLogger(__name__)
@@ -178,14 +179,27 @@ class JobManager:
                 if rec.counted and rec.status not in TERMINAL_STATUSES
             ]
             if sum(1 for rec in active if rec.owner_id == owner_id) >= max_per_user:
+                metrics.incr("queue_full_user")
                 raise QueueFull(
                     f"You already have {max_per_user} jobs running. Wait for one to finish or cancel it.",
                     retry_after=60,
                 )
             if len(active) >= max_pending:
+                metrics.incr("queue_full")
                 raise QueueFull("The processing queue is full. Try again in a few minutes.", retry_after=120)
             self._jobs[job_id] = record
         return job_id
+
+    def queue_depth(self) -> dict:
+        """Counted (capped) jobs by state, against the server-wide cap."""
+        with self._lock:
+            active = [rec.status for rec in self._jobs.values() if rec.counted and rec.status not in TERMINAL_STATUSES]
+        return {
+            "queued": sum(1 for status in active if status == JobStatus.QUEUED),
+            "running": sum(1 for status in active if status == JobStatus.RUNNING),
+            "active": len(active),
+            "capacity": env_int("SX_MAX_PENDING_JOBS", 6, minimum=1),
+        }
 
     def discard_job(self, job_id: str) -> bool:
         """Remove a job that could not be handed to its executor."""
@@ -292,6 +306,7 @@ class JobManager:
             except JobCancelled as ex:
                 self._finish_cancelled(record, ex, elapsed=fmt_elapsed(time.monotonic() - t0))
             except Exception as ex:
+                metrics.incr("job_failed")
                 if on_failure is not None:
                     try:
                         on_failure(ex)

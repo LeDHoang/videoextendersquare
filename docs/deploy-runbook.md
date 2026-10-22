@@ -72,6 +72,8 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [ ] **fal.ai.** On the dashboard, set a spend limit and an alert for the platform `FAL_KEY`.
 - [ ] **UptimeRobot.** Add an HTTPS monitor on `https://<domain>/api/readyz`. It returns 200 when the DB is reachable and 503 when it is not. Alert by email or push.
 - [ ] **Sentry.** Create a project and set `SENTRY_DSN`. Releases are tagged with `GIT_SHA`, which is passed as a build arg.
+  The in-app watchdog (`SX_ALERT_*`) and the low-disk check log errors, and Sentry turns those into events.
+  In Sentry, add an alert rule that notifies you on every new issue whose message starts with `ALERT ` or `Low disk space`.
 - [ ] **Backups.** Optionally add a healthchecks.io check, and set `BACKUP_PING_URL` for `deploy/backup.sh`.
 
 ### Secret escrow

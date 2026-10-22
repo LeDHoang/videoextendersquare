@@ -120,3 +120,35 @@ list for notices, needs a lawyer before the public launch **(confirm with lawyer
 For S1 and copyright removals, follow `docs/deploy-runbook.md` §5: remove in the
 app, purge every media URL of the post by URL in Cloudflare, then check that
 `curl -sI` returns `404` with no `cf-cache-status: HIT`.
+
+## Drill log
+
+### 2026-10-22 — local staging (`docs/local-staging.md`)
+
+Scope: Postgres, SeaweedFS media origin and Mailpit on the local staging stack. `bob` was
+the offender, and `alice` (admin) was both reporter and moderator. The API steps were
+scripted (36 checks, all passed, about 1.5 s end to end); the queue was then reviewed
+in the browser on `/moderation`. There was no Cloudflare, so CDN purge was not exercised.
+
+| Step | Result |
+|---|---|
+| Report a post, comment, pack, DM and user | All five in the open queue. A second report on the same user joined the earlier open report (dedupe) |
+| Block | `PUT /api/users/bob/block`; bob's next DM got 403 `MESSAGING_BLOCKED` |
+| DM evidence | Decrypted in the queue, and still decrypts after the message was removed |
+| `remove_content` post | Post API 404; media object 404 on the media origin |
+| `remove_content` comment / pack / DM | Comment marked deleted; pack API 404; DM gone from the conversation |
+| `suspend_user` | Existing session signed out (`/api/auth/me` returns no user); sign-in refused |
+| Signed-out appeal on `/support` | 202; Mailpit got the `[ECHO support] appeal` notification; the request showed in the Support tab, moved to `in_progress` |
+| `reinstate_user` on the reviewed user report | Account active; bob signed in again; appeal closed with a note |
+| Audit | Five resolved reports, each with its note and review time; `reports.moderator_id` is alice for all five |
+| Alerting | The reports from the drill runs fired `ALERT reports_spike` (16 in the last hour) from the in-app watchdog |
+
+Gaps found:
+
+- **Fixed:** a reported pack whose text was one long unbroken string widened `/moderation`
+  to about 3,700 px. The report card now wraps it (`.sx-moderation-report` in `global.css`).
+- **Open:** a suspended account that signs in with the right password sees "Email/username
+  or password is incorrect." It is not told it is suspended or that it can appeal on
+  `/support`. Only the footer Support link leads there.
+- **Open:** the queue and API do not show which moderator acted. It is stored in
+  `reports.moderator_id` and can be read with SQL only.

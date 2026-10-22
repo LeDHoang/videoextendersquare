@@ -9,6 +9,7 @@ The access log (logger ``sx.access``) has one line per request: method, path
 without the query string, status and ``duration_ms``. It never logs the
 client IP. The line is written when the response starts, so a long SSE
 stream is logged at once and ``duration_ms`` is the time to the first byte.
+Each line also feeds the request window in server/metrics.py.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from server import metrics
 from server.settings import is_production
 
 REQUEST_ID_HEADER = "x-request-id"
@@ -76,6 +78,8 @@ class RequestIDMiddleware:
                 duration_ms,
                 extra={"method": method, "path": path, "status": status, "duration_ms": duration_ms},
             )
+            # Route template (bounded cardinality), never the raw path.
+            metrics.record_request(getattr(scope.get("route"), "path", None) or "other", status, duration_ms)
 
         async def send_with_id(message):
             nonlocal response_started

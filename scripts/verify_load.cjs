@@ -4,6 +4,7 @@
 //   node scripts/verify_load.cjs                      # load: 50 virtual users, 30 s
 //   node scripts/verify_load.cjs --users 100 --duration 60 --p95 1500
 //   node scripts/verify_load.cjs --abuse              # bursts must hit the documented 429s
+//   node scripts/verify_load.cjs --queue --video square.mp4 [--queue-accounts a@x,b@x,c@x,d@x]
 //
 // Load mode signs in as alice@ and bob@example.com once each (the login limit is
 // 10 per account per 15 minutes) and shares the two sessions between the virtual
@@ -19,6 +20,18 @@
 // rate-limit budgets: the login burst uses a made-up account, but the register
 // burst, the login-IP window (20 per 15 minutes) and the report window (20 per
 // hour) stay spent until they expire. Run it last, and against staging only.
+// The register burst is skipped when registration is closed, and the post view
+// burst waits a minute first because it shares the events bucket.
+//
+// Queue mode fills the job queue with free jobs: a square video, upscale only,
+// `fast` engine, so nothing goes to fal and no credits are spent. Each account
+// stages the video once. The first account submits SX_MAX_JOBS_PER_USER + 1 jobs:
+// the last must get 429 QUEUE_FULL with Retry-After. When enough accounts sign in
+// to pass SX_MAX_PENDING_JOBS while each stays under its own cap, one more job
+// must get the server-wide 429; with fewer accounts that check is skipped. Every
+// job is then cancelled (202, or 409 when it already finished) and must end
+// within two minutes, and /api/readyz must answer 200 throughout. Use a short
+// clip so the running job ends quickly.
 //
 // Exits 1 when any check fails.
 'use strict';
@@ -37,6 +50,11 @@ const P95_TARGET_MS = Number(flag('--p95', '1500'));
 const STREAMS_PER_ACCOUNT = Number(flag('--streams', '4'));
 const EVENT_RPM = Number(flag('--event-rpm', '120'));
 const ABUSE = args.includes('--abuse');
+const QUEUE = args.includes('--queue');
+const VIDEO = flag('--video', '');
+const QUEUE_ACCOUNTS = flag('--queue-accounts', ACCOUNTS.join(',')).split(',');
+const MAX_PER_USER = Number(flag('--max-per-user', '2'));
+const MAX_PENDING = Number(flag('--max-pending', '6'));
 
 // Caddy signs localhost with its own CA; accept it for these loopback origins only.
 if (/^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(APP)) {
@@ -60,11 +78,11 @@ class Session {
       this.jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
     }
   }
-  async call(path, { method = 'GET', json, signal } = {}) {
+  async call(path, { method = 'GET', json, body, signal } = {}) {
     const headers = { Origin: APP };
     if (this.jar.size) headers.Cookie = [...this.jar].map(([k, v]) => `${k}=${v}`).join('; ');
     if (this.jar.has('echo_csrf') && method !== 'GET') headers['x-csrf-token'] = this.jar.get('echo_csrf');
-    const init = { method, headers, redirect: 'manual', signal };
+    const init = { method, headers, redirect: 'manual', signal, body };
     if (json !== undefined) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(json);
@@ -170,18 +188,20 @@ async function runLoad() {
   check('message streams open up to the per-account cap', streamsOpen > 0 && streamsRefused === 0, `${streamsOpen} open, ${streamsRefused} refused`);
 }
 
-// Send `count` requests one after another. Returns the 1-based attempt that first got a 429 (0 = never) and any 5xx.
+// Send `count` requests one after another. Returns the 1-based attempt that first got a 429 (0 = never), any 5xx and every status.
 async function burst(session, count, build) {
   let firstLimited = 0;
   let serverErrors = 0;
+  const statuses = [];
   for (let attempt = 1; attempt <= count; attempt++) {
     const { path, options } = build(attempt);
     const res = await session.call(path, options);
     await res.arrayBuffer();
+    statuses.push(res.status);
     if (res.status === 429 && !firstLimited) firstLimited = attempt;
     if (res.status >= 500) serverErrors++;
   }
-  return { firstLimited, serverErrors };
+  return { firstLimited, serverErrors, statuses };
 }
 
 async function runAbuse() {
@@ -198,15 +218,102 @@ async function runAbuse() {
     ['post view (SX_EVENT_RPM)', user, EVENT_RPM, EVENT_RPM + 6, () => ({ path: `/api/posts/${crypto.randomUUID()}/view`, options: { method: 'POST', json: { watch_ms: 100 } } })],
   ];
   for (const [name, session, limit, count, build] of bursts) {
-    const { firstLimited, serverErrors } = await burst(session, count, build);
+    // Views and events share one per-minute bucket; let the events burst expire first.
+    if (name.startsWith('post view')) await sleep(61_000);
+    const { firstLimited, serverErrors, statuses } = await burst(session, count, build);
+    // With registration closed (SX_REGISTRATION_ENABLED=0) the 403 comes before the limiter.
+    if (name.startsWith('register') && statuses.every((code) => code === 403)) {
+      console.log(`skip  ${name}: registration is closed, every request got 403`);
+      continue;
+    }
     check(`${name}: 429 by request ${limit + 1}`, firstLimited > 0 && firstLimited <= limit + 1, `first 429 at ${firstLimited || 'never'} of ${count}`);
     check(`${name}: no 5xx`, serverErrors === 0, `${serverErrors} seen`);
   }
 }
 
+async function runQueue() {
+  if (!VIDEO) throw new Error('--queue needs --video <square clip>');
+  const fs = require('fs');
+  const bytes = fs.readFileSync(VIDEO);
+  const ready = async () => (await fetch(`${APP}/api/readyz`)).status;
+  const readyCodes = [await ready()];
+  const users = [];
+  for (const email of QUEUE_ACCOUNTS) {
+    const session = await signIn(email);
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'video/mp4' }), 'square.mp4');
+    const res = await session.call('/api/video/upload', { method: 'POST', body: form });
+    const body = await res.json();
+    if (res.status !== 200 || !body.stage_id) throw new Error(`upload as ${email} returned ${res.status}: ${JSON.stringify(body)}`);
+    users.push({ email, session, stageId: body.stage_id, jobs: [] });
+  }
+  const submit = async (user) => {
+    const form = new FormData();
+    form.append('stage_id', user.stageId);
+    form.append('upscale_only', 'true');
+    form.append('upscale_engine', 'fast');
+    const res = await user.session.call('/api/video/process', { method: 'POST', body: form });
+    const body = await res.json().catch(() => ({}));
+    if (body.job_id) user.jobs.push(body.job_id);
+    return { status: res.status, code: body.detail && body.detail.code, retryAfter: res.headers.get('retry-after') };
+  };
+
+  const [first, ...others] = users;
+  const accepted = [];
+  for (let i = 0; i < MAX_PER_USER; i++) accepted.push((await submit(first)).status);
+  const overUser = await submit(first);
+  check(`first ${MAX_PER_USER} jobs per user accepted`, accepted.every((code) => code === 200), accepted.join(' '));
+  check('next job per user: 429 QUEUE_FULL with Retry-After', overUser.status === 429 && overUser.code === 'QUEUE_FULL' && Boolean(overUser.retryAfter), `${overUser.status} ${overUser.code} retry-after=${overUser.retryAfter}`);
+  readyCodes.push(await ready());
+
+  // Fill the rest of the server-wide cap from the other accounts, each under its own cap.
+  let active = MAX_PER_USER;
+  const fill = [];
+  for (const user of others) {
+    for (let i = 0; i < MAX_PER_USER && active < MAX_PENDING; i++, active++) fill.push((await submit(user)).status);
+  }
+  const spare = others.find((user) => user.jobs.length < MAX_PER_USER);
+  if (active >= MAX_PENDING && spare) {
+    const overAll = await submit(spare);
+    check(`server-wide cap (${MAX_PENDING}) reached, all accepted`, fill.every((code) => code === 200), fill.join(' '));
+    check('next job server-wide: 429 QUEUE_FULL with Retry-After', overAll.status === 429 && overAll.code === 'QUEUE_FULL' && Boolean(overAll.retryAfter), `${overAll.status} ${overAll.code} retry-after=${overAll.retryAfter}`);
+  } else {
+    console.log(`skip  server-wide cap: needs more than ${MAX_PENDING / MAX_PER_USER} accounts, ${users.length} signed in`);
+  }
+  readyCodes.push(await ready());
+
+  const cancels = [];
+  for (const user of users) {
+    for (const job of user.jobs) {
+      const res = await user.session.call(`/api/video/jobs/${job}/cancel`, { method: 'POST' });
+      await res.arrayBuffer();
+      cancels.push(res.status);
+    }
+  }
+  check('cancel answers 202, or 409 for a finished job', cancels.length > 0 && cancels.every((code) => code === 202 || code === 409), cancels.join(' '));
+  check('at least one queued job cancelled (202)', cancels.includes(202), cancels.join(' '));
+  // A running job stops before its next stage; wait so the slots are free for the next run.
+  const deadline = Date.now() + 120_000;
+  let open = [];
+  do {
+    open = [];
+    for (const user of users) {
+      for (const job of user.jobs) {
+        const res = await user.session.call(`/api/video/jobs/${job}`);
+        const { status } = await res.json();
+        if (!['complete', 'failed', 'cancelled'].includes(status)) open.push(job);
+      }
+    }
+    if (open.length) await sleep(1000);
+  } while (open.length && Date.now() < deadline);
+  check('every job ends after cancel', open.length === 0, `${open.length} still active`);
+  readyCodes.push(await ready());
+  check('readyz stays 200', readyCodes.every((code) => code === 200), readyCodes.join(' '));
+}
+
 (async () => {
   try {
-    if (ABUSE) await runAbuse(); else await runLoad();
+    if (ABUSE) await runAbuse(); else if (QUEUE) await runQueue(); else await runLoad();
   } catch (error) {
     check('probe ran', false, error.message);
   }

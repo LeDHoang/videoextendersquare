@@ -116,6 +116,9 @@ refuses to boot until every check in `server/settings.py` passes.
 | `R2_ENDPOINT_URL` | _(unset)_ | S3 endpoint override; local staging points it at SeaweedFS. Unset means `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `SX_ENV_FILE`, `SX_APP_PORT` | _(unset)_ | Compose only: env file for the app (default `.env`) and its loopback port (default `8000`). Local staging uses `.env.staging` and `8001` |
 | `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
+| `SX_ALERT_5XX_RATE` / `SX_ALERT_P95_MS` | `0.05` / `2000` | Watchdog thresholds over the last 5 min (need at least 20 requests). Crossings are error logs, so Sentry events |
+| `SX_ALERT_FAILURES` | `3` | Failed jobs plus failed derived encodes in 5 min before an alert |
+| `SX_ALERT_INTERVAL_S` / `SX_ALERT_COOLDOWN_S` | `60` / `900` | How often the watchdog checks, and how long one alert stays quiet after it fires |
 | `SX_LOG_FORMAT` | `json` | `json` (default in production) or `text`; every line carries the `request_id` echoed in `X-Request-ID` |
 | `SX_CSP_MODE` | `report` | `off` (default outside production), `report` (default in production; reports go to `POST /api/csp-report` and the log) or `enforce` |
 | `SX_SHUTDOWN_DRAIN_S` | `15` | Shutdown drain: queued jobs are cancelled and refunded, running ones get this long |

@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from core import probes as _probes
 from core import tooling as _tooling
 from server.settings import env_int, is_production
+from server.social.auth import AuthContext, require_admin
 from server.social.database import EXPECTED_SCHEMA_REVISION, get_db
 
 router = APIRouter(tags=["health"])
@@ -162,3 +163,13 @@ def readyz(db: Session = Depends(get_db)):
     checks["disk"] = {"ok": all(d["ok"] for d in disks), "volumes": disks}
     ok = all(c["ok"] for c in checks.values())
     return JSONResponse({"ok": ok, "checks": checks}, status_code=200 if ok else 503)
+
+
+@router.get("/api/ops/metrics")
+def ops_metrics(response: Response, context: AuthContext = Depends(require_admin)):
+    """Admin-only operations snapshot: request window, events, job queue, DB pool, SSE, disk."""
+    del context
+    from server import metrics
+
+    response.headers["Cache-Control"] = "no-store"
+    return metrics.snapshot()

@@ -109,6 +109,22 @@ async def _cleanup_loop():
                 logger.exception("Cleanup step %s failed", getattr(step, "__name__", step))
 
 
+def _alert_interval_s() -> int:
+    return env_int("SX_ALERT_INTERVAL_S", 60, minimum=5)
+
+
+async def _alert_loop():
+    """Check the alert thresholds in server/metrics.py; crossings are error logs (Sentry)."""
+    from server import metrics
+
+    while True:
+        await asyncio.sleep(_alert_interval_s())
+        try:
+            await asyncio.to_thread(metrics.check_alerts)
+        except Exception:
+            logger.exception("Alert check failed")
+
+
 def _backfill_media_info() -> None:
     """Fill reel duration/size for posts that predate the probe (see services.backfill_media_info)."""
     if os.environ.get("SX_MEDIA_BACKFILL", "1").strip().lower() in {"0", "false", "no", "off"}:
@@ -211,6 +227,7 @@ async def lifespan(app: FastAPI):
     start_derived_pool()
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
+    alert_task = asyncio.create_task(_alert_loop())
     # Off the startup path: probing a large library can take a while.
     backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))
     # Also off the startup path (and readyz): only file checks, the encodes
@@ -220,6 +237,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         cleanup_task.cancel()
+        alert_task.cancel()
         backfill_task.cancel()
         requeue_task.cancel()
         await _drain_workers()

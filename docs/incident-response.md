@@ -9,9 +9,15 @@ Commands run on the VPS in `/opt/echo` (`docs/deploy-runbook.md`).
 |---|---|---|
 | UptimeRobot | `/api/readyz` not 200 (app down, or DB unreachable: 503) | `docs/deploy-runbook.md` §Alerts |
 | Sentry | New or spiking server errors, tagged with `GIT_SHA` and the request ID | `SENTRY_DSN` |
+| Sentry (`ALERT …` from `sx.alerts`) | Watchdog thresholds, at most once per alert per 15 min: 5xx rate ≥ 5% or p95 ≥ 2 s over 5 min, job queue full, DB pool exhausted, ≥ 3 processing failures in 5 min, report or sign-up spike (hour vs previous hour) | `server/metrics.py`, `SX_ALERT_*` in `RUNNING.md` |
+| Sentry (`Low disk space …`) | Free space on the data or output volume below `SX_DISK_MIN_FREE_GB` (checked every 15 min) | `_check_disk` in `server/app.py` |
 | fal.ai | Spend limit or spend alert on the platform `FAL_KEY` | fal.ai dashboard |
 | healthchecks.io (optional) | Nightly backup failed or did not run | `BACKUP_PING_URL` |
 | Support inbox | A user writes in (`SX_SUPPORT_EMAIL`) | `docs/moderation-runbook.md` |
+
+For live numbers, an admin can open the Moderation ▸ Overview tab (Operations block) or
+`GET /api/ops/metrics`: requests, 5xx and p95 by route over the last 5 min, job queue, DB pool, open SSE streams,
+failure counters and disk. The numbers are per process and reset on restart.
 
 ## Severity
 

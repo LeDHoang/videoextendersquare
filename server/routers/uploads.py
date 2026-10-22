@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import media_store
+from server import media_store, metrics
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -280,9 +280,11 @@ def _derived_step(label: str, dest: Path, make, *args, **kwargs) -> str | None:
         built = make(*args, **kwargs)
     except Exception:
         logger.exception("Building the %s of %s raised", label, dest.name)
+        metrics.incr("derived_failed")
         return None
     if not built:
         logger.warning("Could not build the %s of %s", label, dest.name)
+        metrics.incr("derived_failed")
     return built
 
 
@@ -328,6 +330,7 @@ def _run_derived_job(dest: Path, rel: str, build) -> None:
         build()
     except Exception:
         logger.exception("Derived assets of %s failed", dest.name)
+        metrics.incr("derived_failed")
     finally:
         SM.discard_part_files(dest)
         SM.clear_derived_pending(dest)

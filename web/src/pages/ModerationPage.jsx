@@ -87,6 +87,32 @@ function OverviewPanel({ stats, windowKey }) {
   );
 }
 
+// Admin only: live numbers from GET /api/ops/metrics over its rolling window (5 min).
+function OpsPanel({ ops }) {
+  const r = ops.requests;
+  const ms = (value) => (value === null || value === undefined ? 'N/A' : value + ' ms');
+  const pool = ops.db_pool;
+  const failures = (ops.events.job_failed || 0) + (ops.events.derived_failed || 0);
+  const slow = r.routes.slice(0, 3).map((row) => row.route + ' ' + ms(row.p95_ms) + (row.errors_5xx ? ' · 5xx ' + row.errors_5xx : '')).join(', ') || 'none';
+  return (
+    <div>
+      <Mono>OPERATIONS · LAST {Math.round(ops.window_s / 60)} MIN</Mono>
+      <SpecRow cells={[
+        ['REQUESTS', r.count, '5XX ' + r.errors_5xx + ' (' + (r.error_rate * 100).toFixed(1) + '%)'],
+        ['P95 LATENCY', ms(r.p95_ms), 'P50 ' + ms(r.p50_ms)],
+        ['RATE LIMITED', r.status['429'] || 0, 'QUEUE FULL ' + ((ops.events.queue_full || 0) + (ops.events.queue_full_user || 0))],
+        ['FAILURES', failures, 'JOBS + DERIVED ENCODES'],
+      ]} />
+      <SpecRow cells={[
+        ['JOB QUEUE', ops.jobs.active + ' / ' + ops.jobs.capacity, 'QUEUED ' + ops.jobs.queued + ' · RUNNING ' + ops.jobs.running],
+        ['DB POOL', (pool.checkedout ?? 'N/A') + (pool.capacity ? ' / ' + pool.capacity : ''), pool.class],
+        ['SSE STREAMS', ops.sse.open_streams, 'OPEN NOW'],
+      ]} />
+      <Mono>SLOWEST ROUTES: {slow}</Mono>
+    </div>
+  );
+}
+
 export default function ModerationPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -95,6 +121,8 @@ export default function ModerationPage() {
   const [status, setStatus] = useState('open');
   const [statsWindow, setStatsWindow] = useState('24h');
   const [stats, setStats] = useState(null);
+  const [ops, setOps] = useState(null);
+  const loadOps = user?.role === 'admin';
   // Rows carry the tab and filter they were loaded for, so a tab switch never renders
   // report rows with the support renderer (or the reverse) before the reload lands.
   const [loaded, setLoaded] = useState({ key: '', rows: null });
@@ -109,7 +137,13 @@ export default function ModerationPage() {
     setError('');
     if (tab === 'overview') {
       try {
-        setStats(await api.get('/api/moderation/stats'));
+        // Operations numbers are extra: a failure there never hides the moderation overview.
+        const [nextStats, nextOps] = await Promise.all([
+          api.get('/api/moderation/stats'),
+          loadOps ? api.get('/api/ops/metrics').catch(() => null) : null,
+        ]);
+        setStats(nextStats);
+        setOps(nextOps);
       } catch (requestError) {
         setError(requestError.message || 'Could not load the overview.');
       }
@@ -125,7 +159,7 @@ export default function ModerationPage() {
       setError(requestError.message || 'Could not load the queue.');
       setLoaded({ key, rows: [] });
     }
-  }, [tab, status]);
+  }, [tab, status, loadOps]);
 
   useEffect(() => {
     if (user?.can_moderate) load();
@@ -242,7 +276,12 @@ export default function ModerationPage() {
       </div>
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
       {tab === 'overview' ? (
-        stats ? <OverviewPanel stats={stats} windowKey={statsWindow} /> : error ? null : <SectionSkeleton label="Loading overview" />
+        stats ? (
+          <>
+            <OverviewPanel stats={stats} windowKey={statsWindow} />
+            {ops ? <OpsPanel ops={ops} /> : null}
+          </>
+        ) : error ? null : <SectionSkeleton label="Loading overview" />
       ) : items === null ? <SectionSkeleton label="Loading queue" /> : items.length
         ? items.map(tab === 'support' ? renderRequest : renderReport)
         : <EmptyState title="QUEUE CLEAR" text={emptyText} />}

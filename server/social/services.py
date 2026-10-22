@@ -16,6 +16,7 @@ from pathlib import Path
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from server import metrics
 from server.media_store import public_url
 from .auth import avatar_url, public_user
 from .models import (
@@ -850,6 +851,7 @@ def record_event(
                 context=dict(context or {}),
             )
         except RecommendationAttributionError as exc:
+            metrics.incr("rec_attribution_failed")
             # Fail open: attribution is enrichment, never a reason to reject
             # the underlying action (like/follow/feedback). Record the event
             # unattributed so engagement is never lost to a stale client id.

@@ -170,7 +170,14 @@ AUTHENTICATED_CASES = [
     ("feed-post-following", lambda seed: ("/api/reels/feed", {"post": seed["post_id"], "feed": "following"})),
     ("search-suggestions", lambda seed: ("/api/search/suggestions", {"q": "night"})),
     ("search-suggestions-empty-query", lambda seed: ("/api/search/suggestions", {})),
+    ("feed-for-you", lambda seed: ("/api/reels/feed", FOR_YOU_PARAMS)),
+    ("feed-following", lambda seed: ("/api/reels/feed", {"feed": "following"})),
+    ("feed-author", lambda seed: ("/api/reels/feed", {"author": "pooluser"})),
+    ("recommended-creators", lambda seed: ("/api/recommendations/creators", {})),
+    ("posts-feed-discover", lambda seed: ("/api/feed", {})),
+    ("posts-feed-following", lambda seed: ("/api/feed", {"scope": "following"})),
 ]
+FOR_YOU_PARAMS = {"folder": "ALL FOLDERS", "sort": "for_you", "limit": 2}
 
 
 @pytest.mark.parametrize("case", [name for name, _ in AUTHENTICATED_CASES])
@@ -199,6 +206,80 @@ def test_anonymous_recent_trending_request_checks_out_at_most_one_connection(tmp
         assert response.status_code == 200, response.text
         assert len(response.json()["videos"]) == len(SCAN_ROWS)
         assert probe.peak <= 1
+    app.state.engine.dispose()
+
+
+def test_for_you_pages_and_feedback_check_out_at_most_one_connection(tmp_path, monkeypatch):
+    # The recommendation feed reads scope, blocks, dismissals and impressions;
+    # every helper must reuse the request session (page 1, cursor page 2,
+    # feedback, and the anonymous path alike).
+    app = build_app(tmp_path, monkeypatch, pool_size=1, max_overflow=0, pool_timeout=1)
+    probe = app.state.probe
+    with TestClient(app) as client:
+        register_and_seed(app, client)
+        probe.reset()
+        first = client.get("/api/reels/feed", params=FOR_YOU_PARAMS)
+        assert first.status_code == 200, first.text
+        assert probe.peak <= 1
+        page = first.json()
+        assert page["items"] and page["next_cursor"]
+
+        probe.reset()
+        second = client.get("/api/reels/feed", params={**FOR_YOU_PARAMS, "cursor": page["next_cursor"]})
+        assert second.status_code == 200, second.text
+        assert probe.peak <= 1
+
+        target = page["items"][0]
+        probe.reset()
+        feedback = client.post(
+            "/api/recommendations/feedback",
+            json={
+                "action": "not_interested",
+                "post_id": target["post_id"],
+                "recommendation_impression_id": target["recommendation"]["impression_id"],
+                "client_event_id": "pool-feedback-1",
+            },
+            headers={"x-csrf-token": client.cookies.get("echo_csrf")},
+        )
+        assert feedback.status_code == 200, feedback.text
+        assert probe.peak <= 1
+
+        client.cookies.clear()
+        probe.reset()
+        anonymous = client.get("/api/reels/feed", params=FOR_YOU_PARAMS)
+        assert anonymous.status_code == 200, anonymous.text
+        assert probe.peak <= 1
+        assert probe.current == 0
+    app.state.engine.dispose()
+
+
+def test_concurrent_signed_in_for_you_requests_share_a_single_connection_pool(tmp_path, monkeypatch):
+    app = build_app(tmp_path, monkeypatch, pool_size=1, max_overflow=0, pool_timeout=1)
+    with TestClient(app) as client:
+        register_and_seed(app, client)
+        cookies = dict(client.cookies)
+    workers = 6
+    barrier = threading.Barrier(workers)
+    statuses: list[int] = []
+    errors: list[BaseException] = []
+
+    def worker():
+        try:
+            worker_client = TestClient(app, cookies=cookies)
+            barrier.wait(timeout=10)
+            statuses.append(worker_client.get("/api/reels/feed", params=FOR_YOU_PARAMS).status_code)
+        except BaseException as exc:  # noqa: BLE001 - surface any pool timeout to the test thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors, errors
+    assert statuses == [200] * workers
+    assert app.state.probe.current == 0
     app.state.engine.dispose()
 
 

@@ -45,7 +45,7 @@ Follow the phases in order unless measured results change a dependency.
 - [ ] Remove normal-path decoded-frame skipping and select a validated Quest/browser rendition automatically.
 - [ ] Measure and control contention from hidden preload, glow sampling, comments, and other texture uploads.
 - [ ] Verify bounded cache, cancellation, memory stability, buffering, frame pacing, and thermal behavior on device.
-- [ ] Complete the applicable security, ownership, quota, queue, recommendation-concurrency, privacy, moderation, storage, and monitoring blockers in `docs/to-beta.md`. *(Partial, 2026-10-21: P1 invite-beta items done — security headers with report-only CSP, request IDs and JSON logs, graceful shutdown, `/support` inbox with appeals, deleted-account DMs hidden, CI scans, moderation and incident runbooks. Remaining items are tracked there.)*
+- [ ] Complete the applicable security, ownership, quota, queue, recommendation-concurrency, privacy, moderation, storage, and monitoring blockers in `docs/to-beta.md`. *(Partial, 2026-10-21: P1 invite-beta items done — security headers with report-only CSP, request IDs and JSON logs, graceful shutdown, `/support` inbox with appeals, deleted-account DMs hidden, CI scans, moderation and incident runbooks. Remaining items are tracked there. 2026-10-22: in-app ops metrics with watchdog alerts, moderation drill, load/abuse/queue runs and a browser matrix on Chrome, Firefox and emulated phones; results and gaps are in `docs/to-beta.md`.)*
 - [ ] Repeat Meta documentation verification on a supported host and record Quest Browser/Horizon OS versions.
 
 ### Phase 1 — Immersive-media contract
