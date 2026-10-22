@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, SubmitButton } from '../components/auth/AuthKit.jsx';
+import { AuthCheckbox, AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, SubmitButton } from '../components/auth/AuthKit.jsx';
+import CheckEmailView from '../components/auth/CheckEmailView.jsx';
+import Turnstile from '../components/auth/Turnstile.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import {
   DISPLAY_NAME_MAX,
-  PENDING_ACTION_KEY,
   USERNAME_MAX,
   describePending,
   normalizeUsername,
@@ -15,30 +16,7 @@ import {
   validateNewPassword,
   validateUsername,
 } from '../utils/authForm.js';
-
-async function replayPendingAction() {
-  const pending = readPendingAction();
-  try {
-    sessionStorage.removeItem(PENDING_ACTION_KEY);
-  } catch {
-    // Storage can be unavailable in privacy modes; authentication still succeeds.
-  }
-  if (!pending) return;
-  if (pending.kind === 'like' && pending.post_id) {
-    await api.put('/api/posts/' + encodeURIComponent(pending.post_id) + '/like');
-  } else if (pending.kind === 'save' && pending.post_id) {
-    await api.put('/api/posts/' + encodeURIComponent(pending.post_id) + '/save');
-  } else if (pending.kind === 'follow' && pending.username) {
-    await api.put('/api/users/' + encodeURIComponent(pending.username) + '/follow');
-  } else if (pending.kind === 'comment' && pending.post_id && pending.text) {
-    await api.post('/api/posts/' + encodeURIComponent(pending.post_id) + '/comments', {
-      text: pending.text,
-      timestamp: pending.timestamp ?? null,
-    });
-  } else if (pending.kind === 'comment-like' && pending.comment_id) {
-    await api.put('/api/comments/' + encodeURIComponent(pending.comment_id) + '/like');
-  }
-}
+import { replayPendingAction } from '../utils/replayPending.js';
 
 const RAIL = {
   login: {
@@ -63,7 +41,7 @@ const RAIL = {
   },
 };
 
-const EMPTY_FORM = { email: '', username: '', display_name: '', identifier: '', password: '' };
+const EMPTY_FORM = { email: '', username: '', display_name: '', identifier: '', password: '', accept_terms: false, website: '' };
 
 function validate(mode, form) {
   const errors = {};
@@ -74,6 +52,7 @@ function validate(mode, form) {
     if (email) errors.email = email;
     if (username) errors.username = username;
     if (password) errors.password = password;
+    if (!form.accept_terms) errors.accept_terms = 'Agree to the Terms of Service and Privacy Policy to create an account.';
   } else {
     if (!form.identifier.trim()) errors.identifier = 'Enter your email or username.';
     if (!form.password) errors.password = 'Enter your password.';
@@ -93,6 +72,13 @@ export default function AuthPage({ mode = 'login' }) {
   const [serverErrors, setServerErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sent, setSent] = useState(null);
+  const [siteKey, setSiteKey] = useState('');
+  const [botToken, setBotToken] = useState('');
+  const [botReset, setBotReset] = useState(0);
+  const [botUnavailable, setBotUnavailable] = useState(false);
+  const [unverifiedHint, setUnverifiedHint] = useState(false);
+  const [suspendedHint, setSuspendedHint] = useState(false);
   const fields = useRef({});
   const previousMode = useRef(mode);
 
@@ -105,6 +91,21 @@ export default function AuthPage({ mode = 'login' }) {
     if (!loading && user) navigate(next, { replace: true });
   }, [loading, user, navigate, next]);
 
+  // The Turnstile site key ships with /api/config; an empty key means the server skips the check.
+  useEffect(() => {
+    if (!isRegister) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const config = await api.get('/api/config');
+        if (!cancelled) setSiteKey(config?.turnstile_site_key || '');
+      } catch {
+        // Without config the form still works; the server decides whether a bot check is required.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isRegister]);
+
   // Switching between sign in and create account keeps this component mounted; start clean.
   useEffect(() => {
     if (previousMode.current === mode) return;
@@ -113,6 +114,8 @@ export default function AuthPage({ mode = 'login' }) {
     setTouched({});
     setServerErrors({});
     setError('');
+    setSent(null);
+    setUnverifiedHint(false);
     focusField(isRegister ? 'email' : 'identifier');
   }, [mode, isRegister]);
 
@@ -134,23 +137,36 @@ export default function AuthPage({ mode = 'login' }) {
   const submit = async (event) => {
     event.preventDefault();
     if (busy) return;
-    const names = isRegister ? ['email', 'username', 'password'] : ['identifier', 'password'];
+    const names = isRegister ? ['email', 'username', 'password', 'accept_terms'] : ['identifier', 'password'];
     setTouched((current) => ({ ...current, ...Object.fromEntries(names.map((name) => [name, true])) }));
     const firstInvalid = names.find((name) => errors[name]);
     if (firstInvalid) {
       focusField(firstInvalid);
       return;
     }
+    if (isRegister && siteKey && !botToken && !botUnavailable) {
+      setError('Complete the bot check before creating your account.');
+      return;
+    }
     setBusy(true);
     setError('');
+    setUnverifiedHint(false);
+    setSuspendedHint(false);
     try {
       if (isRegister) {
-        await register({
+        const payload = {
           email: form.email.trim(),
           username: form.username,
           display_name: form.display_name.trim(),
           password: form.password,
-        });
+          accept_terms: form.accept_terms,
+          website: form.website,
+        };
+        if (botToken) payload.turnstile_token = botToken;
+        const result = await register(payload);
+        // No session yet: the account is created when the emailed link is opened.
+        setSent({ email: payload.email, debugToken: result?.debug_token || '' });
+        return;
       } else {
         await login({ identifier: form.identifier.trim(), password: form.password });
       }
@@ -163,18 +179,44 @@ export default function AuthPage({ mode = 'login' }) {
     } catch (requestError) {
       const field = requestError?.detail?.field;
       const message = requestError?.message || 'Unable to continue.';
-      if (isRegister && ['email', 'username', 'password'].includes(field)) {
+      if (isRegister && ['email', 'username', 'password', 'accept_terms'].includes(field)) {
         setServerErrors((current) => ({ ...current, [field]: message }));
         focusField(field);
       } else {
         setError(message);
+        if (isRegister && requestError?.code === 'BOT_CHECK_FAILED') {
+          setBotToken('');
+          setBotReset((value) => value + 1);
+        }
+        if (requestError?.code === 'ACCOUNT_SUSPENDED') setSuspendedHint(true);
         if (requestError?.code === 'INVALID_CREDENTIALS') {
+          setUnverifiedHint(true);
           setForm((current) => ({ ...current, password: '' }));
           // The alert already explains it; don't also nag that the emptied field is required.
           setTouched((current) => ({ ...current, password: false }));
           focusField('password');
         }
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendVerification = async (email) => api.post('/api/auth/resend-verification', { email });
+
+  const resendFromLogin = async () => {
+    const identifier = form.identifier.trim();
+    if (!identifier.includes('@')) {
+      setError('Enter the email you signed up with, then ask for a new verification link.');
+      focusField('identifier');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await resendVerification(identifier);
+      setSent({ email: identifier, debugToken: result?.debug_token || '' });
+    } catch (requestError) {
+      setError(requestError?.message || 'Could not resend the email.');
     } finally {
       setBusy(false);
     }
@@ -190,11 +232,20 @@ export default function AuthPage({ mode = 'login' }) {
     <AuthLayout
       rail={RAIL[isRegister ? 'register' : 'login']}
       tabs={tabs}
-      title={isRegister ? 'CREATE PROFILE' : 'SIGN IN'}
-      intro={isRegister
+      title={sent ? 'CHECK YOUR EMAIL' : isRegister ? 'CREATE PROFILE' : 'SIGN IN'}
+      intro={sent ? null : isRegister
         ? 'Publish images and reels, follow creators, and keep your interactions attached to your profile.'
         : 'Continue to your profile, Following feed, and saved posts.'}
     >
+      {sent ? (
+        <CheckEmailView
+          email={sent.email}
+          debugToken={sent.debugToken}
+          onResend={() => resendVerification(sent.email)}
+          onChangeEmail={() => { setSent(null); setError(''); }}
+        />
+      ) : (
+      <>
       {pendingLabel ? (
         <AuthNotice tone="info">ONCE YOU&apos;RE {isRegister ? 'SET UP' : 'SIGNED IN'}, WE&apos;LL {pendingLabel}.</AuthNotice>
       ) : null}
@@ -236,6 +287,41 @@ export default function AuthPage({ mode = 'login' }) {
             />
             <PasswordField label="PASSWORD" autoComplete="new-password" {...bind('password')} />
             <PasswordRules password={form.password} />
+            <div className="sx-au-hp" aria-hidden="true">
+              <label>
+                Website
+                <input
+                  type="text"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={form.website}
+                  onChange={update('website')}
+                />
+              </label>
+            </div>
+            <AuthCheckbox
+              checked={form.accept_terms}
+              onChange={(event) => {
+                const { checked } = event.target;
+                setForm((current) => ({ ...current, accept_terms: checked }));
+                setTouched((current) => ({ ...current, accept_terms: true }));
+                setServerErrors((current) => (current.accept_terms ? { ...current, accept_terms: '' } : current));
+              }}
+              error={shownError('accept_terms')}
+              inputRef={(node) => { fields.current.accept_terms = node; }}
+            >
+              I agree to the{' '}
+              <Link className="sx-au-link" to="/terms" target="_blank" rel="noopener">Terms of Service</Link>
+              {' '}and{' '}
+              <Link className="sx-au-link" to="/privacy" target="_blank" rel="noopener">Privacy Policy</Link>.
+            </AuthCheckbox>
+            <Turnstile
+              siteKey={siteKey}
+              resetKey={botReset}
+              onToken={(token) => { setBotToken(token); if (token && error) setError(''); }}
+              onUnavailable={() => setBotUnavailable(true)}
+            />
           </>
         ) : (
           <>
@@ -256,6 +342,18 @@ export default function AuthPage({ mode = 'login' }) {
           </>
         )}
         {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
+        {!isRegister && unverifiedHint ? (
+          <p className="sx-au-hint">
+            Signed up but never opened the verification email?{' '}
+            <button type="button" className="sx-au-link sx-au-linkbtn" onClick={resendFromLogin} disabled={busy}>Resend the link</button>
+          </p>
+        ) : null}
+        {!isRegister && suspendedHint ? (
+          <p className="sx-au-hint">
+            Think this was a mistake?{' '}
+            <Link className="sx-au-link" to="/support?category=appeal">Appeal on the Support page</Link>
+          </p>
+        ) : null}
         <SubmitButton busy={busy}>{isRegister ? 'CREATE ACCOUNT' : 'SIGN IN'}</SubmitButton>
       </form>
 
@@ -268,6 +366,8 @@ export default function AuthPage({ mode = 'login' }) {
         </span>
         <Link className="sx-au-link sx-au-link--quiet" to={next}>← CONTINUE BROWSING</Link>
       </div>
+      </>
+      )}
     </AuthLayout>
   );
 }

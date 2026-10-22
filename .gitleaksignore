@@ -1,0 +1,3 @@
+# gitleaks fingerprints of triaged false positives (see .gitleaks.toml).
+# bdfda1e docs/to-beta.md: env template placeholder matched across two lines.
+bdfda1e19023cd77b1c671ae478cc9c2319696a9:docs/to-beta.md:generic-api-key:40

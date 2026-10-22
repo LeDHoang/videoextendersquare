@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server.routers import account_safety, social
 from server.social import auth
 from server.social.database import Base, get_db
@@ -53,12 +54,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client: TestClient, username: str, email: str, password: str = PASSWORD) -> dict:
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email,
             "username": username,
             "password": password,
+            "accept_terms": True,
             "display_name": username.title(),
         },
     )

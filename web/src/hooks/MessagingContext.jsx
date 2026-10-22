@@ -284,7 +284,11 @@ export function MessagingProvider({ children }) {
       conversation_id: selectedId,
       sender_id: user.id,
       kind: payload.kind || 'text',
-      content: payload.kind === 'emote' ? { emote: payload.emote } : { text: payload.text || '' },
+      content: payload.kind === 'emote'
+        ? { emote: payload.emote }
+        : payload.kind === 'gif'
+          ? { url: payload.gif_url, preview_url: payload.gif_preview_url || payload.gif_url, title: payload.gif_title || '' }
+          : { text: payload.text || '' },
       text: payload.emote || payload.text || '',
       created_at: new Date().toISOString(),
       pending: true,
@@ -303,14 +307,11 @@ export function MessagingProvider({ children }) {
         : await api.post('/api/messages/direct', { ...body, username: composeUsername });
       const conversationId = result.conversation?.id || selectedId;
       setMessages((current) => {
-        const source = current[optimisticKey] || [];
-        const reconciled = source.filter((item) => item.id !== optimistic.id);
-        const alreadyPresent = reconciled.some((item) => item.id === result.message.id);
-        return {
-          ...current,
-          [optimisticKey]: optimisticKey === conversationId ? reconciled : [],
-          [conversationId]: alreadyPresent ? reconciled : [...(current[conversationId] || []).filter((item) => item.id !== optimistic.id), result.message],
-        };
+        const target = (current[conversationId] || []).filter((item) => item.id !== optimistic.id);
+        const alreadyPresent = target.some((item) => item.id === result.message.id);
+        const next = { ...current, [conversationId]: alreadyPresent ? target : [...target, result.message] };
+        if (optimisticKey !== conversationId) delete next[optimisticKey];
+        return next;
       });
       setSelectedId(conversationId);
       setComposeUsername('');

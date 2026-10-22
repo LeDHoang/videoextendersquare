@@ -1,0 +1,101 @@
+# Local staging rehearsal: compose.yaml in production mode on a laptop, with
+# free stand-ins for the paid edges. Runbook: docs/local-staging.md.
+#
+#   SeaweedFS  stands in for R2 (S3 API; public media bucket readable
+#              anonymously, private backup bucket not)
+#   Caddy      stands in for the Cloudflare edge: HTTPS for the app on
+#              https://localhost:8443 and for media on https://localhost:9443,
+#              including the static Access-Control-Allow-Origin header that
+#              the media.<domain> Transform Rule adds in production
+#   Mailpit    catches password-reset mail (UI on http://127.0.0.1:8025)
+#
+#   cp deploy/env.staging.example .env.staging     # then fill the secrets
+#   docker compose --env-file .env.staging up -d --build
+#
+# .env.staging sets COMPOSE_FILE and COMPOSE_PROJECT_NAME, so the stack and its
+# volumes stay separate from the dev .env and from any production project.
+
+x-rclone-env: &rclone-env
+  # rclone remote "staging:" pointing at the object store (also used by the
+  # backup drill, docs/local-staging.md).
+  RCLONE_CONFIG_STAGING_TYPE: s3
+  RCLONE_CONFIG_STAGING_PROVIDER: SeaweedFS
+  RCLONE_CONFIG_STAGING_ENDPOINT: http://objectstore:8333
+  RCLONE_CONFIG_STAGING_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID in .env.staging}
+  RCLONE_CONFIG_STAGING_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY in .env.staging}
+
+services:
+  app:
+    depends_on:
+      objectstore-init:
+        condition: service_completed_successfully
+
+  objectstore:
+    image: chrislusf/seaweedfs:latest
+    environment:
+      ACCESS_KEY: ${R2_ACCESS_KEY_ID}
+      SECRET_KEY: ${R2_SECRET_ACCESS_KEY}
+      PUBLIC_BUCKET: ${R2_PUBLIC_BUCKET:?set R2_PUBLIC_BUCKET in .env.staging}
+    # Two identities: the app key (full access, like the R2 token) and
+    # anonymous read on the public bucket only (like an R2 custom domain).
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        printf '{"identities":[{"name":"app","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","List","Tagging","Write"]},{"name":"anonymous","actions":["Read:%s"]}]}'
+        "$$ACCESS_KEY" "$$SECRET_KEY" "$$PUBLIC_BUCKET" > /tmp/s3.json &&
+        exec weed server -dir=/data -ip.bind=0.0.0.0
+        -master.volumeSizeLimitMB=256 -volume.max=0
+        -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    volumes:
+      - objectstore:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  # Creates both buckets once the object store answers.
+  objectstore-init:
+    image: rclone/rclone:latest
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    environment:
+      <<: *rclone-env
+      PUBLIC_BUCKET: ${R2_PUBLIC_BUCKET}
+      BACKUP_BUCKET: ${STAGING_BACKUP_BUCKET:-echo-backups}
+    entrypoint:
+      - sh
+      - -c
+      - rclone mkdir "staging:$$PUBLIC_BUCKET" && rclone mkdir "staging:$$BACKUP_BUCKET"
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - app
+      - objectstore
+    environment:
+      PUBLIC_BUCKET: ${R2_PUBLIC_BUCKET}
+    ports:
+      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - ./deploy/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  # One-shot rclone with the staging remote, for the backup drill:
+  #   docker compose --env-file .env.staging run --rm -T rclone ls staging:echo-backups
+  rclone:
+    image: rclone/rclone:latest
+    profiles: [tools]
+    environment: *rclone-env
+
+volumes:
+  objectstore:
+  caddy:

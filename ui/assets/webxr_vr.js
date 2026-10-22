@@ -7,11 +7,14 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.18-20260922-earth-zoom-map';
+  const VR_VERSION = 'v8.23-20261016-exit-vr-awaits-end';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
   const VR_TEX_CAP = 2048;
+  // Per-eye edge of the stereo proxy (docs/stereo-3d-reels.md): SBS sources
+  // blit into a 2E x E canvas, top-bottom into E x 2E. ?vrstereoeye=1536 A/B.
+  const VR_STEREO_EYE_CAP = 2048;
   const EARTH_RADIUS = 0.676;
   const EARTH_MAP_W = 4096;
   const EARTH_MAP_H = 2048;
@@ -45,6 +48,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let videoElement = null;
   let callbacks = {};
   let xrSession = null;
+  // exitVR() in flight: { promise, settle }. Settled by the session 'end'
+  // handler (after engine teardown and onExitVR), or by the timeout.
+  let xrExit = null;
+  const XR_EXIT_TIMEOUT_MS = 1500;
   let xrRefSpace = null;
   let previewRunning = false;
   let previewAnimId = null;
@@ -117,6 +124,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
+    stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
+    xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -141,6 +150,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
       if (has('horizonhud', '1')) debugFlags.horizonhud = true;
+      if (has('xrdiag', '1')) debugFlags.xrdiag = true;
+      const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
+      if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -756,7 +768,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Earth async management
   let earthActivityGeneration = 0;
   let earthActivityAbort = null;
-  let earthPreviewAbortController = null;
 
   // 3D Objects & Meshes
   let screenMesh = null;
@@ -835,6 +846,21 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the screen material, bypassing the canvas blit + re-upload entirely.
   let directVideoTexture = null;
   let directVideoElement = null;
+  // Stereoscopic 3D sources (docs/stereo-3d-reels.md). sourceStereo is what
+  // the host says is loaded ('mono' | 'sbs' | 'tb'); textureStereo is the
+  // layout of the frame actually in the screen texture, so a switch only
+  // takes effect once the new frame is uploaded. In XR, eyeMeshL/R (layers
+  // 1/2, children of screenMesh) show each eye's half; screenMesh keeps the
+  // left eye for the desktop preview and stays the layer-0 raycast target.
+  let sourceStereo = 'mono';
+  let textureStereo = 'mono';
+  let stereoCanvas = null;
+  let stereoCtx = null;
+  let stereoTexture = null;
+  let stereoCanvasLayout = '';
+  let eyeTextures = null; // { base, layout, L, R }
+  let eyeMeshL = null;
+  let eyeMeshR = null;
   let screenMapBeforeDebug = null;
   let controlsCanvas = null;
   let controlsCtx = null;
@@ -858,6 +884,13 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function getUICanvas() {
     return (typeof window !== 'undefined' && window.VRUICanvas) || null;
+  }
+
+  // ECHO colour from VRUICanvas.TOKENS; the literal is the fallback if the canvas module is absent.
+  function echoHex(name, fallback) {
+    const ui = getUICanvas();
+    const v = ui && ui.TOKENS && ui.TOKENS.hex && ui.TOKENS.hex[name];
+    return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
   }
 
   function ensureThree() {
@@ -3058,6 +3091,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     updateEarthTiles(time);
     ensureEarthBezel();
     updateEarthBezel();
+    tickEarthPreviewDwell(); // desktop pointer rests send no hover updates
     updateEarthPreviewBillboard(time);
   }
 
@@ -5457,7 +5491,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const laserGeo = new THREE.BufferGeometry();
       laserGeo.setAttribute('position', new THREE.BufferAttribute(laserPositions, 3));
       const laserMat = new THREE.LineBasicMaterial({
-        color: 0xff2a1a,
+        color: parseInt(echoHex('accent', '#ff3b1f').slice(1), 16),
         transparent: true,
         opacity: 0.8,
         // Legacy parity: the beam always paints over the scene (v5.2 drew
@@ -5480,12 +5514,14 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (rx) {
           const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
           rg.addColorStop(0, '#ffffff');
-          rg.addColorStop(0.25, '#ff2a1a');
-          rg.addColorStop(0.6, 'rgba(255,42,26,0.55)');
-          rg.addColorStop(1, 'rgba(255,42,26,0)');
+          const reticleHex = echoHex('accent', '#ff3b1f');
+          const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
+          rg.addColorStop(0.25, reticleHex);
+          rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
+          rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
           rx.fillStyle = rg;
           rx.fillRect(0, 0, 64, 64);
-          rx.strokeStyle = '#ff2a1a';
+          rx.strokeStyle = reticleHex;
           rx.lineWidth = 3;
           rx.beginPath();
           rx.arc(32, 32, 20, 0, Math.PI * 2);
@@ -5791,6 +5827,155 @@ window.WebXRVR = window.WebXRVR || (function () {
     return String(source.kind || '') + '|' + String(source.version || '');
   }
 
+  function normalizeStereoLayout(layout) {
+    return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+  }
+
+  // Layout of a visual source: the per-source field wins (it follows the
+  // element), else the host's setSourceStereo value. Static cards are mono.
+  function sourceStereoLayout(source) {
+    if (!source || source.kind === 'static-card') return 'mono';
+    if (source.stereo !== undefined && source.stereo !== null) return normalizeStereoLayout(source.stereo);
+    return sourceStereo;
+  }
+
+  // UV window of each eye inside a stereo frame (CanvasTexture flipY: v=1 is
+  // the top row, so the top-bottom left eye sits at offset y = 0.5).
+  function stereoEyeUv(layout) {
+    if (layout === 'tb') return { repeat: [1, 0.5], L: [0, 0.5], R: [0, 0] };
+    return { repeat: [0.5, 1], L: [0, 0], R: [0.5, 0] };
+  }
+
+  function releaseEyeTextures() {
+    if (!eyeTextures) return;
+    try { eyeTextures.L.dispose(); } catch (e) {}
+    try { eyeTextures.R.dispose(); } catch (e) {}
+    eyeTextures = null;
+  }
+
+  // Two views of one texture: the clones share its Source, so a frame is
+  // uploaded once and each eye samples its own half.
+  function ensureEyeTextures(base, layout) {
+    if (!base || layout === 'mono') return null;
+    if (eyeTextures && eyeTextures.base === base && eyeTextures.layout === layout) return eyeTextures;
+    releaseEyeTextures();
+    const uv = stereoEyeUv(layout);
+    const make = (offset) => {
+      const tex = base.clone();
+      tex.repeat.set(uv.repeat[0], uv.repeat[1]);
+      tex.offset.set(offset[0], offset[1]);
+      tex.needsUpdate = true;
+      return tex;
+    };
+    eyeTextures = { base, layout, L: make(uv.L), R: make(uv.R) };
+    return eyeTextures;
+  }
+
+  // The renderer re-uploads a texture only when that texture's own version
+  // moves; bumping the shared base leaves the clones (the maps the screen and
+  // eye meshes actually sample) on their first frame. Mirror every upload.
+  function markEyeTexturesUploaded(base) {
+    if (!eyeTextures || eyeTextures.base !== base) return;
+    if (videoUploadMode === 'respec') {
+      try { eyeTextures.L.dispose(); } catch (e) {}
+      try { eyeTextures.R.dispose(); } catch (e) {}
+    }
+    eyeTextures.L.needsUpdate = true;
+    eyeTextures.R.needsUpdate = true;
+  }
+
+  function stereoProxySize(layout) {
+    const eye = debugFlags.stereoEye || VR_STEREO_EYE_CAP;
+    return layout === 'tb' ? [eye, eye * 2] : [eye * 2, eye];
+  }
+
+  // One stereo proxy canvas + texture, reshaped (and the GPU texture
+  // recreated) only when the layout flips between SBS and top-bottom.
+  function ensureStereoProxy(layout) {
+    if (layout === 'mono' || typeof document === 'undefined' || !THREE) return null;
+    if (stereoTexture && stereoCanvasLayout === layout) return stereoTexture;
+    const size = stereoProxySize(layout);
+    if (!stereoCanvas) {
+      stereoCanvas = document.createElement('canvas');
+      stereoCtx = stereoCanvas.getContext('2d', { alpha: false });
+    }
+    stereoCanvas.width = size[0];
+    stereoCanvas.height = size[1];
+    if (stereoTexture) {
+      if (eyeTextures && eyeTextures.base === stereoTexture) releaseEyeTextures();
+      try { stereoTexture.dispose(); } catch (e) {}
+    }
+    stereoTexture = applyLinearSampling(new THREE.CanvasTexture(stereoCanvas));
+    try { if (THREE.SRGBColorSpace !== undefined) stereoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    stereoCanvasLayout = layout;
+    return stereoTexture;
+  }
+
+  function releaseStereoTextures() {
+    releaseEyeTextures();
+    if (stereoTexture) { try { stereoTexture.dispose(); } catch (e) {} }
+    stereoTexture = null;
+    stereoCanvasLayout = '';
+    stereoCanvas = null;
+    stereoCtx = null;
+    textureStereo = 'mono';
+    eyeMeshL = null;
+    eyeMeshR = null;
+  }
+
+  function ensureEyeMeshes() {
+    if (!screenMesh || !THREE) return;
+    if (eyeMeshL && eyeMeshL.parent === screenMesh) return;
+    const make = (layer) => {
+      const mesh = new THREE.Mesh(screenMesh.geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+      mesh.layers.set(layer);
+      mesh.visible = false;
+      mesh.renderOrder = screenMesh.renderOrder || 0;
+      // Clicks hit the parent screen (layer 0); eye meshes never raycast.
+      mesh.raycast = function () {};
+      screenMesh.add(mesh);
+      return mesh;
+    };
+    eyeMeshL = make(1);
+    eyeMeshR = make(2);
+  }
+
+  // The screen's 2D map: the left eye of a stereo frame, else the frame.
+  function monoScreenMap(base) {
+    if (textureStereo !== 'mono' && eyeTextures && eyeTextures.base === base) return eyeTextures.L;
+    return base;
+  }
+
+  // Show per-eye meshes while an XR session presents a stereo frame; the
+  // desktop preview keeps the single left-eye screen. Earth mode hides the
+  // screen and with it both children.
+  function applyStereoVisibility() {
+    const split = !!(xrSession && textureStereo !== 'mono' && eyeTextures);
+    if (split) ensureEyeMeshes();
+    if (eyeMeshL && eyeMeshR) {
+      eyeMeshL.visible = split;
+      eyeMeshR.visible = split;
+      if (split) {
+        if (eyeMeshL.material.map !== eyeTextures.L) { eyeMeshL.material.map = eyeTextures.L; eyeMeshL.material.needsUpdate = true; }
+        if (eyeMeshR.material.map !== eyeTextures.R) { eyeMeshR.material.map = eyeTextures.R; eyeMeshR.material.needsUpdate = true; }
+      }
+    }
+    if (screenMesh && screenMesh.material) screenMesh.material.visible = !split;
+  }
+
+  // Record the layout of the frame now in `base` and rebind the screen.
+  function commitTextureStereo(base, layout) {
+    textureStereo = layout;
+    if (layout !== 'mono') ensureEyeTextures(base, layout);
+    bindScreenMap(monoScreenMap(base));
+    applyStereoVisibility();
+  }
+
+  function setSourceStereo(layout) {
+    sourceStereo = normalizeStereoLayout(layout);
+    emitPreviewState();
+  }
+
   function bindScreenMap(tex) {
     try {
       if (screenMesh && screenMesh.material && screenMesh.material.map !== tex) {
@@ -5815,8 +6000,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   function updateDirectVideoBinding(source, force) {
     if (!directVideoEligible(source)) return false;
     const el = source.element;
+    const layout = sourceStereoLayout(source);
     if (directVideoTexture && directVideoElement === el &&
-        screenMesh.material.map === directVideoTexture) {
+        screenMesh.material.map === monoScreenMap(directVideoTexture)) {
+      if (layout !== textureStereo) commitTextureStereo(directVideoTexture, layout);
       return true;
     }
     const rs = Number((el && el.readyState) || 0);
@@ -5832,7 +6019,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       return false;
     }
     directVideoElement = el;
-    bindScreenMap(directVideoTexture);
+    commitTextureStereo(directVideoTexture, layout);
     lastUploadedSource = el;
     lastVisualKind = source.kind;
     lastVisualVersion = visualSourceSignature(source);
@@ -5847,6 +6034,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function releaseDirectVideoBinding() {
+    if (eyeTextures && eyeTextures.base === directVideoTexture) releaseEyeTextures();
     if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
     directVideoTexture = null;
     directVideoElement = null;
@@ -5857,7 +6045,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const sig = visualSourceSignature(source);
     const visualChanged = source.kind !== lastVisualKind ||
       sig !== lastVisualVersion ||
-      source.element !== lastVisualElement;
+      source.element !== lastVisualElement ||
+      sourceStereoLayout(source) !== textureStereo;
     if (visualChanged) return true;
     if (source.kind === 'video') {
       // v8.11 upload throttle: steady-playback telemetry measured 41–73/s
@@ -5892,8 +6081,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!vrProxyCtx || !source.element) return false;
     // v8.13: sources that don't use the direct texture (static cards/images,
     // or the flag off) render through the canvas proxy — make sure it is bound.
-    if (!(debugFlags.vrtex && source.kind === 'video')) bindScreenMap(videoTexture);
+    if (!(debugFlags.vrtex && source.kind === 'video')) {
+      bindScreenMap(monoScreenMap(textureStereo !== 'mono' && stereoTexture ? stereoTexture : videoTexture));
+    }
     if (!force && !shouldUploadVisual(source)) return false;
+    // Stereo frames blit whole into the 2:1 / 1:2 stereo proxy; each eye
+    // then samples its half (see ensureEyeTextures).
+    const layout = sourceStereoLayout(source);
+    const stereoBase = layout !== 'mono' ? ensureStereoProxy(layout) : null;
+    const ctx = stereoBase ? stereoCtx : vrProxyCtx;
+    const texW = stereoBase ? stereoCanvas.width : VR_TEX_CAP;
+    const texH = stereoBase ? stereoCanvas.height : VR_TEX_CAP;
     try {
       if (source.kind === 'static-card' || source.kind === 'image') {
         // Trust the caller's ready flag: a genuinely incomplete image
@@ -5901,9 +6099,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         // frame). Refusing here would stall mock/test elements that carry
         // no complete/naturalWidth signals.
         if (source.ready === false && !force) return false;
-        vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        ctx.clearRect(0, 0, texW, texH);
         try {
-          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+          ctx.drawImage(source.element, 0, 0, texW, texH);
         } catch (drawErr) {
           return false;
         }
@@ -5925,22 +6123,27 @@ window.WebXRVR = window.WebXRVR || (function () {
           }
         }
         try {
-          vrProxyCtx.drawImage(source.element, 0, 0, VR_TEX_CAP, VR_TEX_CAP);
+          ctx.drawImage(source.element, 0, 0, texW, texH);
         } catch (drawErr) {
           return false;
         }
       } else {
         return false;
       }
-      if (videoTexture) {
+      const uploaded = stereoBase || videoTexture;
+      if (uploaded) {
         // v8.4 A/B: 'respec' forces a full texImage2D re-specification per
         // upload (legacy behavior) instead of three's same-size
         // texSubImage2D path — decisive test for the Quest sub-image driver
         // suspicion behind the black-square glitches. Default stays subimage.
         if (videoUploadMode === 'respec') {
-          try { videoTexture.dispose(); } catch (e) {}
+          try { uploaded.dispose(); } catch (e) {}
         }
-        videoTexture.needsUpdate = true;
+        uploaded.needsUpdate = true;
+        markEyeTexturesUploaded(uploaded);
+        // ?vrtex=video keeps the direct texture bound for videos (it tracks
+        // its own layout in updateDirectVideoBinding).
+        if (!(debugFlags.vrtex && source.kind === 'video')) commitTextureStereo(uploaded, layout);
       }
       lastUploadedSource = source.element;
       lastVisualKind = source.kind;
@@ -5996,7 +6199,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     const source = getVisualSource();
     if (!source.ready || source.kind !== 'video' || source.paused || !source.element) return;
     try {
-      glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
+      const layout = sourceStereoLayout(source);
+      const vw = Number(source.element.videoWidth) || 0;
+      const vh = Number(source.element.videoHeight) || 0;
+      if (layout !== 'mono' && vw > 0 && vh > 0) {
+        // Stereo: average the left eye only.
+        glowProbeCtx.drawImage(source.element, 0, 0,
+          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh, 0, 0, 8, 8);
+      } else {
+        glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
+      }
       const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
       let r = 0, g = 0, b = 0;
       for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
@@ -6183,9 +6395,11 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer,
         autoNext: getAutoNext(),
         sceneMode,
+        locationFeedActive: locationFeedActive(),
         earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
+        stereo: textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono',
         callbacks,
       });
       if (controlsTexture) {
@@ -6250,6 +6464,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       cameraMode: previewCameraMode,
       sceneMode,
       stereo: stereoMode,
+      sourceStereo,
+      textureStereo,
       reducedMotion,
       curvatureMode: getCurvatureMode(),
       lockToViewer,
@@ -6270,21 +6486,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     const cssW = (previewCanvas && previewCanvas.clientWidth) || 960;
     const cssH = (previewCanvas && previewCanvas.clientHeight) || 540;
     const halfW = cssW / 2;
+    // A stereo source shows each eye's half like the headset does: the eye
+    // meshes (layers 1/2) replace the left-eye screen for the pair.
+    const perEye = !!(textureStereo !== 'mono' && eyeTextures && screenMesh && screenMesh.visible);
+    if (perEye) {
+      ensureEyeMeshes();
+      eyeMeshL.material.map = eyeTextures.L;
+      eyeMeshR.material.map = eyeTextures.R;
+      eyeMeshL.visible = true;
+      eyeMeshR.visible = true;
+      screenMesh.material.visible = false;
+    }
+    const baseMask = camera.layers.mask;
     renderer.setScissorTest(true);
     camera.position.x -= 0.032;
     camera.updateMatrixWorld();
+    if (perEye) camera.layers.mask = baseMask | 0b010;
     renderer.setViewport(0, 0, halfW, cssH);
     renderer.setScissor(0, 0, halfW, cssH);
     renderer.render(scene, camera);
     camera.position.x += 0.064;
     camera.updateMatrixWorld();
+    if (perEye) camera.layers.mask = baseMask | 0b100;
     renderer.setViewport(halfW, 0, cssW - halfW, cssH);
     renderer.setScissor(halfW, 0, cssW - halfW, cssH);
     renderer.render(scene, camera);
+    camera.layers.mask = baseMask;
     camera.position.x -= 0.032;
     camera.updateMatrixWorld();
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, cssW, cssH);
+    if (perEye) applyStereoVisibility();
   }
 
   function onPreviewFrame(time) {
@@ -6821,6 +7053,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function postXRDiag(time) {
+    // Debug-only: never sends anything unless ?xrdiag=1 opted in.
+    if (!debugFlags.xrdiag) return;
     try {
       if (xrDiagLastT >= 0) {
         const dt = time - xrDiagLastT;
@@ -7312,6 +7546,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (screenMesh) {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
       screenMesh.geometry = createScreenGeometry(curvatureMode);
+      // Stereo eye meshes share the screen's geometry.
+      if (eyeMeshL) eyeMeshL.geometry = screenMesh.geometry;
+      if (eyeMeshR) eyeMeshR.geometry = screenMesh.geometry;
     }
     if (overlayMesh) {
       if (overlayMesh.geometry) overlayMesh.geometry.dispose();
@@ -7405,6 +7642,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHudLastT = -1;
     }
     if (screenMesh) screenMesh.visible = !isEarth;
+    applyStereoVisibility();
     if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
     if (overlayMesh) {
       const source = getVisualSource();
@@ -7423,6 +7661,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   function setPreviewStereo(enabled) {
     stereoMode = !!enabled;
     emitPreviewState();
+    // The host may swap a 3D post to its stereo file for the split preview.
+    if (callbacks.onPreviewStereo) {
+      try { callbacks.onPreviewStereo(stereoMode); } catch (e) {}
+    }
   }
 
   function setReducedMotion(enabled) {
@@ -7682,6 +7924,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function updateEarthHoverFromRay(origin, direction) {
+    const result = updateEarthHoverFromRayNow(origin, direction);
+    tickEarthPreviewDwell(); // after this frame's hover is settled
+    return result;
+  }
+
+  function updateEarthHoverFromRayNow(origin, direction) {
     if (sceneMode !== 'earth' || !origin || !direction) return -1;
     // Pointing at a panel keeps its location: the ray leaving the zone to
     // reach a button must not close the card or blank the WORLD › title. A
@@ -7690,10 +7938,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     const panelHit = earthHudPanelHit(origin, direction);
     setEarthPanelHover(panelHit);
     if (panelHit) {
-      if (earthHoveredIndex < 0 && earthRecentHover.index >= 0 &&
-          earthRecentHover.index < earthLocations.length &&
-          earthNowMs() - earthRecentHover.at < EARTH_PANEL_HOVER_GRACE_MS) {
-        setEarthHoveredIndex(earthRecentHover.index);
+      const recent = earthRecentHover;
+      if (earthHoveredIndex < 0 && !recent.used && recent.index >= 0 &&
+          recent.index < earthLocations.length &&
+          earthNowMs() - recent.at < EARTH_PANEL_HOVER_GRACE_MS) {
+        setEarthHoveredIndex(recent.index);
+        // One restore per departure, and it must not renew its own grace:
+        // the panels move with the hover state (pin keep-out, card
+        // separation), so a ray resting on a panel edge can flip panel ↔
+        // bare globe every frame, and a self-renewing grace re-hovered (and
+        // refetched) on every flip.
+        earthRecentHover = { index: recent.index, at: recent.at, used: true };
       }
       return panelHit.panel === 'card' ? 'preview' : 'label';
     }
@@ -7729,6 +7984,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     earthHoveredIndex = index;
     earthPreviewLocationIndex = index;
     if (changed) {
+      earthPreviewPending = null; // any hover change abandons a dwell in progress
       earthPreviewHoverSince = index >= 0 ? earthNowMs() : -1;
       earthPreviewVideoFailed = '';
       if (earthPreviewVideo) disposeEarthPreviewVideo();
@@ -7736,49 +7992,152 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (index >= 0 && sceneMode === 'earth' && xrSession) pulseInput(activeRayInputSource, 0.18, 35);
     }
     if (index < 0) {
-      if (earthPreviewAbortController) {
-        try { earthPreviewAbortController.abort(); } catch (e) {}
-        earthPreviewAbortController = null;
-      }
+      // Leaving does not abort: the server finishes a sync handler anyway,
+      // so the late result is kept in the cache for a re-hover. The
+      // generation bump keeps it off the closed card.
+      if (changed) earthPreviewGeneration += 1;
       earthPreviewStatus = 'idle';
       earthPreviewItems = [];
       resetEarthPreviewYaw(null);
     } else if (changed && sceneMode === 'earth') {
-      // Hovering a new zone fetches its reels for the 3D billboard
-      // (upstream scheduleEarthPreview; change-guarded, no per-move spam).
+      // Hovering a new zone shows its reels on the 3D billboard (upstream
+      // scheduleEarthPreview; change-guarded, no per-move spam). A cached or
+      // already-loading zone applies/shares at once; an uncached one waits
+      // out the dwell first, so sweeping across N zones sends no request
+      // (the server cannot cancel a sync handler once it has started).
       earthPreviewGeneration += 1;
-      loadEarthPreviewForIndex(index, earthPreviewGeneration);
+      if (earthPreviewWouldFetch(index)) {
+        earthPreviewPending = { index, generation: earthPreviewGeneration };
+        earthPreviewStatus = 'loading';
+      } else {
+        loadEarthPreviewForIndex(index, earthPreviewGeneration);
+      }
     }
+  }
+
+  // Hover previews are cached per location (TTL + LRU, like the poster
+  // cache) and an in-flight request is shared, so a hover flip-flop
+  // (A → -1 → A, zone-edge jitter, panel grace) never refetches. Client
+  // aborts do not stop the server's work, so only a different location
+  // starting abandons a request. Failures are held briefly too, so a
+  // struggling backend is not retried every frame.
+  const EARTH_PREVIEW_CACHE_TTL_MS = 30000;
+  const EARTH_PREVIEW_ERROR_TTL_MS = 5000;
+  const EARTH_PREVIEW_CACHE_MAX = 32;
+  // Rest time on an uncached zone before its first request; the per-frame
+  // hover path (tickEarthPreviewDwell) checks it against earthPreviewHoverSince.
+  const EARTH_PREVIEW_FETCH_DWELL_MS = 200;
+  let earthPreviewPending = null;      // { index, generation } waiting out the dwell
+  const earthPreviewCache = new Map(); // key → { items, error, at, promise }
+  let earthPreviewInflight = null;     // { key, entry, controller }
+  function earthPreviewKey(loc) {
+    if (!loc) return '';
+    if (loc.slug) return 'slug:' + loc.slug;
+    return 'loc:' + (loc.name || '') + '@' + loc.lat + ',' + loc.lon;
+  }
+  function earthPreviewCacheStore(key, entry) {
+    earthPreviewCache.delete(key); // re-insert = most recently used
+    earthPreviewCache.set(key, entry);
+    if (earthPreviewCache.size > EARTH_PREVIEW_CACHE_MAX) earthPreviewCache.delete(earthPreviewCache.keys().next().value);
+  }
+  // True when loading this zone would send a new request: no fresh cache
+  // entry (result or held failure) and nothing in flight to share.
+  function earthPreviewWouldFetch(index) {
+    if (index < 0 || index >= earthLocations.length || !callbacks.onPreviewLocation) return false;
+    const entry = earthPreviewCache.get(earthPreviewKey(earthLocations[index]));
+    if (!entry) return true;
+    if (entry.promise) return false;
+    return earthNowMs() - entry.at >= (entry.error ? EARTH_PREVIEW_ERROR_TTL_MS : EARTH_PREVIEW_CACHE_TTL_MS);
+  }
+  function tickEarthPreviewDwell() {
+    const pending = earthPreviewPending;
+    if (!pending) return;
+    if (sceneMode !== 'earth' || earthHoveredIndex !== pending.index || earthPreviewGeneration !== pending.generation) {
+      earthPreviewPending = null;
+      return;
+    }
+    if (earthPreviewHoverSince < 0 || earthNowMs() - earthPreviewHoverSince < EARTH_PREVIEW_FETCH_DWELL_MS) return;
+    earthPreviewPending = null;
+    loadEarthPreviewForIndex(pending.index, pending.generation);
+  }
+  function isEarthPreviewAbort(error, signal) {
+    return !!((error && error.name === 'AbortError') || (signal && signal.aborted));
+  }
+  function applyEarthPreviewItems(items) {
+    earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
+    earthPreviewIndex = 0;
+    earthPreviewCycleAt = -1;
+    earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
   }
 
   function loadEarthPreviewForIndex(index, generation) {
     if (index < 0 || index >= earthLocations.length) return Promise.resolve([]);
-    if (earthPreviewAbortController) {
-      try { earthPreviewAbortController.abort(); } catch (e) {}
-    }
-    earthPreviewAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const signal = earthPreviewAbortController ? earthPreviewAbortController.signal : null;
+    if (!callbacks.onPreviewLocation) return Promise.resolve([]);
     const loc = earthLocations[index];
-    earthPreviewStatus = 'loading';
-    if (callbacks.onPreviewLocation) {
-      return Promise.resolve(callbacks.onPreviewLocation(loc, { signal }))
-        .then((items) => {
-          if (earthPreviewGeneration === generation && (!signal || !signal.aborted)) {
-            earthPreviewItems = Array.isArray(items) ? items.slice(0, 3) : [];
-            earthPreviewIndex = 0;
-            earthPreviewCycleAt = -1;
-            earthPreviewStatus = earthPreviewItems.length ? 'ready' : 'idle';
-          }
-          return earthPreviewItems;
-        })
-        .catch(() => {
-          if (earthPreviewGeneration === generation) {
-            earthPreviewStatus = 'error';
-          }
-          return [];
-        });
+    const key = earthPreviewKey(loc);
+    const now = earthNowMs();
+    let entry = earthPreviewCache.get(key) || null;
+    if (entry && !entry.promise) {
+      const ttl = entry.error ? EARTH_PREVIEW_ERROR_TTL_MS : EARTH_PREVIEW_CACHE_TTL_MS;
+      if (now - entry.at < ttl) {
+        // Fresh hit: applied synchronously, no request.
+        earthPreviewCacheStore(key, entry);
+        if (earthPreviewGeneration === generation) {
+          if (entry.error) earthPreviewStatus = 'error';
+          else applyEarthPreviewItems(entry.items);
+        }
+        return Promise.resolve(entry.error ? [] : earthPreviewItems);
+      }
+      entry = null;
     }
-    return Promise.resolve([]);
+    if (!entry) {
+      const inflight = earthPreviewInflight;
+      if (inflight && inflight.key !== key) {
+        // A different location supersedes the one still loading.
+        earthPreviewInflight = null;
+        if (earthPreviewCache.get(inflight.key) === inflight.entry) earthPreviewCache.delete(inflight.key);
+        if (inflight.controller) { try { inflight.controller.abort(); } catch (e) {} }
+      }
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const signal = controller ? controller.signal : null;
+      const created = { items: null, error: false, at: now, promise: null };
+      let request;
+      try { request = Promise.resolve(callbacks.onPreviewLocation(loc, { signal })); }
+      catch (e) { request = Promise.reject(e); }
+      created.promise = request.then((items) => {
+        const list = Array.isArray(items) ? items.slice(0, 3) : [];
+        if (earthPreviewCache.get(key) === created) {
+          created.items = list;
+          created.at = earthNowMs();
+          created.promise = null;
+        }
+        return list;
+      }, (error) => {
+        if (earthPreviewCache.get(key) === created) {
+          if (isEarthPreviewAbort(error, signal)) {
+            earthPreviewCache.delete(key);
+          } else {
+            created.error = true;
+            created.at = earthNowMs();
+            created.promise = null;
+          }
+        }
+        throw error;
+      }).finally(() => {
+        if (earthPreviewInflight && earthPreviewInflight.entry === created) earthPreviewInflight = null;
+      });
+      earthPreviewInflight = { key, entry: created, controller };
+      earthPreviewCacheStore(key, created);
+      entry = created;
+    }
+    if (earthPreviewGeneration === generation) earthPreviewStatus = 'loading';
+    return entry.promise.then((list) => {
+      if (earthPreviewGeneration === generation) applyEarthPreviewItems(list);
+      return earthPreviewItems;
+    }, (error) => {
+      if (earthPreviewGeneration === generation) earthPreviewStatus = isEarthPreviewAbort(error) ? 'idle' : 'error';
+      return [];
+    });
   }
 
   // Zone tap → location reel playlist (upstream selectEarthLocation
@@ -7809,7 +8168,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           showNotification('NO RECENT REELS IN THIS LOCATION');
           return false;
         }
-        showNotification('📍 ' + String(location.name || location.slug || '').toUpperCase().slice(0, 30));
+        showNotification(String(location.name || location.slug || '').toUpperCase().slice(0, 30));
         // The new location feed takes over playback; never resume the old reel.
         earthResumePlayback = false;
         setSceneMode('reels');
@@ -8976,13 +9335,18 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (videoElement) {
           videoElement.muted = false;
           if (callbacks.onUnmute) callbacks.onUnmute();
-          if (videoElement.paused) videoElement.play().catch(() => {});
+          // Entering VR keeps the play/pause state: a reel paused in 2D
+          // stays paused in the headset.
         }
       }
 
       if (typeof document !== 'undefined') {
         document.documentElement.classList.add('sx-vr-active');
         if (document.body) document.body.classList.add('sx-vr-active');
+      }
+      // The host may now swap 3D posts to their stereo file.
+      if (callbacks.onEnterVR) {
+        try { callbacks.onEnterVR(); } catch (e) {}
       }
 
       // Single animation loop: clear any stale loop before installing the
@@ -9029,37 +9393,66 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
 
     session.addEventListener('end', () => {
-      xrSession = null;
-      if (renderer) {
-        try { renderer.setAnimationLoop(null); } catch (e) {}
+      try {
+        xrSession = null;
+        if (renderer) {
+          try { renderer.setAnimationLoop(null); } catch (e) {}
+        }
+        stopVideoFrameTracking();
+        if (xrCanvas) {
+          try {
+            if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
+          } catch (e) {}
+          xrCanvas = null;
+        }
+        if (typeof document !== 'undefined') {
+          document.documentElement.classList.remove('sx-vr-active');
+          if (document.body) document.body.classList.remove('sx-vr-active');
+        }
+        if (callbacks.onExitVR) {
+          try { callbacks.onExitVR(); } catch (e) {}
+        }
+        // Restore the desktop preview torn down on entry, if its canvas is
+        // still attached (SPA may have navigated away — then skip silently).
+        restorePreviewSnapshot();
+      } finally {
+        settleXrExit();
       }
-      stopVideoFrameTracking();
-      if (xrCanvas) {
-        try {
-          if (xrCanvas.parentNode) xrCanvas.parentNode.removeChild(xrCanvas);
-        } catch (e) {}
-        xrCanvas = null;
-      }
-      if (typeof document !== 'undefined') {
-        document.documentElement.classList.remove('sx-vr-active');
-        if (document.body) document.body.classList.remove('sx-vr-active');
-      }
-      if (callbacks.onExitVR) {
-        try { callbacks.onExitVR(); } catch (e) {}
-      }
-      // Restore the desktop preview torn down on entry, if its canvas is
-      // still attached (SPA may have navigated away — then skip silently).
-      restorePreviewSnapshot();
     });
 
     return session;
   }
 
+  function settleXrExit() {
+    const pending = xrExit;
+    xrExit = null;
+    if (pending) pending.settle();
+  }
+
+  // Resolves once the session has ended AND the 'end' handler has finished
+  // (canvas removed, sx-vr-active cleared, onExitVR run), so DOM UI that
+  // browsers block while immersive (prompt, dialogs) can open safely after
+  // `await exitVR()`. Resolves immediately without a session; never rejects.
   function exitVR() {
-    if (xrSession) {
-      try { xrSession.end(); } catch (e) {}
-      xrSession = null;
+    if (xrExit) return xrExit.promise;
+    const session = xrSession;
+    if (!session) return Promise.resolve();
+    const pending = {};
+    pending.promise = new Promise((resolve) => {
+      // Some runtimes never fire 'end' for a dead session: don't hang the UI.
+      const timer = setTimeout(settleXrExit, XR_EXIT_TIMEOUT_MS);
+      pending.settle = () => { clearTimeout(timer); resolve(); };
+    });
+    // Set before end(): a synchronous 'end' event must find it.
+    xrExit = pending;
+    try {
+      const ended = session.end();
+      if (ended && typeof ended.catch === 'function') ended.catch(settleXrExit);
+    } catch (e) {
+      settleXrExit();
     }
+    xrSession = null;
+    return pending.promise;
   }
 
   // ─── Resource Cleanup ───────────────────────────────────────────────
@@ -9112,6 +9505,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (videoTexture) { try { videoTexture.dispose(); } catch (e) {} videoTexture = null; }
     releaseDirectVideoBinding();
+    releaseStereoTextures();
     screenMapBeforeDebug = null;
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
@@ -9153,6 +9547,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     disposeEarthPreviewVideo();
     earthPreviewVideoFailed = '';
     earthPreviewHoverSince = -1;
+    earthPreviewPending = null;
     reticleMesh = null;
     laserLine = null;
     controlsCanvas = null;
@@ -9300,6 +9695,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
   }
 
+  // A location picked on the globe filters the feed; the dock's Earth button
+  // then reads ALL LOCATIONS and brings the full feed back (upstream parity).
+  function locationFeedActive() {
+    if (isPackExperience() || typeof callbacks.isLocationFeedActive !== 'function') return false;
+    try { return !!callbacks.isLocationFeedActive(); } catch (e) { return false; }
+  }
+
+  function restoreAllLocations() {
+    if (typeof callbacks.onRestoreAllLocations !== 'function') return;
+    Promise.resolve()
+      .then(() => callbacks.onRestoreAllLocations())
+      .catch((error) => console.error('[WebXRVR] All locations restore failed:', error));
+  }
+
   function executeControlButton(index) {
     const ui = getUICanvas();
     const btns = ui ? ui.CTRL_BUTTONS : [];
@@ -9334,6 +9743,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'comments': toggleCommentsPanel(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
+        else if (sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();
         else setSceneMode(sceneMode === 'earth' ? 'reels' : 'earth');
         break;
       // Earth zoom map dock actions (earth mode only, Z1).
@@ -9494,7 +9904,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.autocomplete = 'off';
       domOverlayInput.setAttribute('enterkeyhint', 'send');
       domOverlayInput.placeholder = 'Type a VR comment…';
-      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#e3e2e3;background:rgba(13,14,15,0.97);border:2px solid #ff553a;border-radius:8px;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#f2f3f5;background:#101214;border:2px solid #ff5c42;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
       domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
       domOverlayInput.addEventListener('blur', onCommentInputBlur);
       domOverlayRoot.appendChild(domOverlayInput);
@@ -9621,9 +10031,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     },
     showNotification,
+    // Desktop preview split-screen (two camera views), not the content layout.
     setStereo(enabled) { stereoMode = !!enabled; },
+    // Stereo layout of the loaded visual: 'mono' | 'sbs' | 'tb'.
+    setSourceStereo,
+    getSourceStereo() { return sourceStereo; },
 
     __test: {
+      postXRDiag,
       locationToUnit,
       earthZoneAngularRadius,
       earthZoneUV,
@@ -9672,10 +10087,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
+        if (p.stereoEye !== undefined) {
+          debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(p.stereoEye) || VR_STEREO_EYE_CAP));
+        }
         return { ...debugFlags };
       },
       processXRInput,
@@ -9758,6 +10176,38 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       getLastUploadedSource() { return lastUploadedSource; },
       getLastRenderError() { return lastRenderError; },
+      // Stereo seams: what each eye samples and which meshes draw.
+      getStereoState() {
+        const eye = (mesh, tex) => mesh ? {
+          layers: mesh.layers.mask,
+          visible: !!mesh.visible,
+          parentIsScreen: mesh.parent === screenMesh,
+          sharesGeometry: !!(screenMesh && mesh.geometry === screenMesh.geometry),
+          repeat: tex ? [tex.repeat.x, tex.repeat.y] : null,
+          offset: tex ? [tex.offset.x, tex.offset.y] : null,
+          version: tex ? tex.version : null,
+          mapIsEye: !!(tex && mesh.material.map === tex),
+        } : null;
+        return {
+          sourceStereo,
+          textureStereo,
+          canvas: stereoCanvas ? [stereoCanvas.width, stereoCanvas.height] : null,
+          screenShowsLeftEye: !!(eyeTextures && screenMesh && screenMesh.material.map === eyeTextures.L),
+          screenMaterialVisible: !!(screenMesh && screenMesh.material && screenMesh.material.visible),
+          screenVisible: !!(screenMesh && screenMesh.visible),
+          left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
+          right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
+        };
+      },
+      // Run the renderer's real upload check on both eye maps (what a draw
+      // that samples them does): a texture re-uploads only when its version moved.
+      initEyeTexturesForTest() {
+        if (!renderer || !eyeTextures) return;
+        renderer.initTexture(eyeTextures.L);
+        renderer.initTexture(eyeTextures.R);
+      },
+      // Pretend an XR session presents (stereo visibility keys off it).
+      setXrSessionForTest(session) { xrSession = session || null; applyStereoVisibility(); },
       // Downsampled mean/variance of the earth base canvas: photo re-style
       // has high variance (land/ocean/edges), flat fallback has low variance.
       // Proves an arrived photo survives subsequent zone repaints.
@@ -9860,6 +10310,8 @@ window.WebXRVR = window.WebXRVR || (function () {
               mapSize: (screenMesh.material && screenMesh.material.map && screenMesh.material.map.image)
                 ? [screenMesh.material.map.image.width, screenMesh.material.map.image.height]
                 : null,
+              stereo: textureStereo,
+              eyeMeshes: !!(eyeMeshL && eyeMeshL.visible && eyeMeshR && eyeMeshR.visible),
             };
           }
           // UI paint-order ladder (legacy painter's order): screen 0, overlay
@@ -10028,6 +10480,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       updateEarthHoverFromRay,
       setLocationActivity,
       setEarthHoveredIndex,
+      tickEarthPreviewDwell,
       selectEarthLocation,
       beginEarthDrag,
       updateEarthDrag,

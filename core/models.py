@@ -13,8 +13,10 @@ from __future__ import annotations
 import json
 import re
 
-PRICING_VERSION = "2026-09-13"
+# 2026-10-20: Ray-2 Flash reframe replaced by Ray 3.2 reframe (per-resolution rates).
+PRICING_VERSION = "2026-10-20"
 PRICING_VERIFIED_AT = "2026-09-13"
+RAY_3_2_PRICING_VERIFIED_AT = "2026-10-20"
 
 # ---------------------------------------------------------------------------
 # Video outpainting models
@@ -57,18 +59,28 @@ VIDEO_OUTPAINT = [
         "default_resolution": "720p",
     },
     {
-        "label": "Luma Ray-2 Reframe",
-        "model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+        # Replaces fal-ai/luma-dream-machine/ray-2-flash/reframe, which fal
+        # deprecates on 2026-10-25. Billed per started source second at the
+        # requested output resolution; the source must be 10 s or less.
+        "label": "Luma Ray 3.2 Reframe",
+        "model": "luma/agent/ray/v3.2/reframe",
         "pricing_kind": "per_second",
-        "price": 0.06,
-        "unit_price_usd": "0.06",
+        "price": 0.12,
+        "unit_price_usd": "0.12",
+        "resolution_rates": {"540p": "0.06", "720p": "0.12", "1080p": "0.36"},
+        "default_resolution": "720p",
         "credit_enabled": True,
         "pricing_version": PRICING_VERSION,
-        "pricing_verified_at": PRICING_VERIFIED_AT,
-        "pricing_source": "https://fal.ai/models/fal-ai/luma-dream-machine/ray-2-flash/reframe",
+        "pricing_verified_at": RAY_3_2_PRICING_VERIFIED_AT,
+        "pricing_source": "https://fal.ai/models/luma/agent/ray/v3.2/reframe",
         "rounding_rule": "ceil source duration to whole seconds",
-        "constraints": {"aspect_ratios": ["1:1", "16:9", "9:16"]},
-        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "constraints": {
+            "aspect_ratios": ["3:4", "4:3", "1:1", "9:16", "16:9", "21:9"],
+            "resolutions": ["540p", "720p", "1080p"],
+            "max_source_seconds": 10,
+        },
+        "aspect_ratios": ["3:4", "4:3", "1:1", "9:16", "16:9", "21:9"],
+        "max_source_seconds": 10,
     },
     {
         "label": "Wan VACE 14B",
@@ -395,7 +407,11 @@ def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | 
     for entry in VIDEO_OUTPAINT:
         if entry["model"].lower() in mid or mid in entry["model"].lower():
             if entry["pricing_kind"] == "per_second":
-                return entry["label"], (duration if duration > 0 else 5.0) * entry["price"]
+                rate = entry["price"]
+                rates = entry.get("resolution_rates")
+                if rates:
+                    rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
+                return entry["label"], (duration if duration > 0 else 5.0) * rate
             # per_mp
             w = entry["resolutions"].get(resolution or entry.get("default_resolution"), 720)
             frames = int(duration * 24) if duration > 0 else 121

@@ -32,8 +32,36 @@
 #                          .venv/bin/python scripts/batch_backfill_media_info.py
 #                            (fills reel duration/size for posts whose media is on disk;
 #                             the server also does this at startup and every 15 min)
+#                          .venv/bin/python scripts/batch_stereo_mono.py [--dry-run]
+#                            (builds missing left-eye 2D renditions + grid assets for
+#                             stereo SBS/top-bottom posts; see docs/stereo-3d-reels.md)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
+#                          verify_staging.cjs — production-mode checks, backup/restore
+#                            drill (--drill seed|check) and publish timing
+#                            (--time-publish <file>); see docs/local-staging.md:
+#                              node scripts/verify_staging.cjs
+#                          verify_load.cjs — load probe (50 virtual users, p95 and 5xx
+#                            report) and --abuse bursts that must hit the documented
+#                            429s. --abuse spends staging rate-limit budgets (login IP,
+#                            register, report); run it last and against staging only:
+#                              node scripts/verify_load.cjs [--users 50 --duration 30]
+#                              node scripts/verify_load.cjs --abuse
+#                          verify_a11y.cjs — headless-Chrome accessibility pass over the
+#                            main pages (names, labels, contrast, Tab order); findings in
+#                            docs/accessibility-pass.md:
+#                              node scripts/verify_a11y.cjs
+#   ../deploy/         — production deploy files (NOT dev tooling; see
+#                        docs/deploy-runbook.md):
+#                          entrypoint.sh  — container entrypoint (alembic upgrade head,
+#                                           then one uvicorn worker)
+#                          ffmpeg-nice.sh — installed as /usr/local/bin/ffmpeg in the image
+#                          backup.sh      — host cron: pg_dump + avatars to private R2
+#                                           (docs/backup-restore-runbook.md)
+#                          env.example    — production .env template for compose.yaml
+#                          compose.staging.yaml, Caddyfile.staging, env.staging.example
+#                                         — free local staging overlay (SeaweedFS, Caddy,
+#                                           Mailpit); docs/local-staging.md
 #   dev/               — one-off paid-API / hardware experiment scripts, NOT
 #                        collected by pytest (deliberately not named test_*):
 #                          dev/ltx_lora_debug_job.py    — real fal.ai LoRA job (~$0.01)
@@ -46,5 +74,22 @@
 #                          dev/experiment_seed_image_slideshow_posts.py — turn loose images
 #                            in output/ into DB image posts, 1–4 same-city images each
 #                            (run after `make migrate`; --dry-run previews)
+#                          dev/experiment_stereo_threshold.py — local, $0: scores 2:1 / 1:2
+#                            split-screen negatives built from output/testpipeline/ and the
+#                            real SBS clips in output/testpipeline-3d/ with the stereo
+#                            detector → reports/stereo-threshold/ (--keep keeps the clips)
+#                          dev/experiment_stereo_tb.py — local, $0: builds top-bottom 3D fixtures
+#                            (H.264, HEVC, WebM with stereo_mode, PNG still, plus negatives) from the
+#                            SBS clips in output/testpipeline-3d/, eye-marked red (left) / blue (right),
+#                            and scores them → reports/stereo-tb/ (--rebuild re-encodes)
 #
 # Regression tests live in ../tests/ (run with `make test`).
+
+## ECHO design tokens outside the Vite app
+
+`web/src/styles/tokens.css` is the source of truth. Two other surfaces carry a copy because they cannot import it:
+
+- `ui/assets/reels.html`: an `html { --sx-* }` block at the top of the FIRST bare `<style>`. `server/routers/reels.py` extracts only that first block and `_scope_css` drops bare `html`/`body` rules, so the embedded player inherits the SPA's own tokens while the standalone page uses the copy.
+- `ui/assets/vr_ui_canvas.js`: frozen `VRUICanvas.TOKENS` (`hex`, `font`, `space`, `radius`).
+
+`web/tests/echo-token-parity.test.js` (run by `make test`) fails when either copy drifts from `tokens.css`. Change a token in `tokens.css` first, then update both copies.

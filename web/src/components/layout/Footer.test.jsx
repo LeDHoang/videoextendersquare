@@ -11,14 +11,18 @@ describe('Footer', () => {
   it('is the page contentinfo landmark with the company line and current year', () => {
     renderFooter();
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
-    expect(screen.getByText(`© ${new Date().getFullYear()} ECHO Inc.`)).toBeInTheDocument();
+    expect(screen.getByText(`© ${new Date().getFullYear()} ECHO Inc.`, { exact: false })).toBeInTheDocument();
   });
 
-  it('only links home through the brand (the top bar already carries the navigation)', () => {
+  it('links home through the brand and to the Terms, Privacy Policy, Community rules and Support (the top bar already carries the navigation)', () => {
     renderFooter();
     expect(screen.queryByRole('navigation')).toBeNull();
     const links = screen.getAllByRole('link');
-    expect(links).toHaveLength(1);
+    expect(links).toHaveLength(5);
     expect(links[0]).toHaveAttribute('href', '/reels');
+    expect(screen.getByRole('link', { name: 'TERMS' })).toHaveAttribute('href', '/terms');
+    expect(screen.getByRole('link', { name: 'PRIVACY' })).toHaveAttribute('href', '/privacy');
+    expect(screen.getByRole('link', { name: 'RULES' })).toHaveAttribute('href', '/rules');
+    expect(screen.getByRole('link', { name: 'SUPPORT' })).toHaveAttribute('href', '/support');
   });
 });

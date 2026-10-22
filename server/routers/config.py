@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from core import models as _models
+from server import media as SM
 from server.features import reel_pack_features
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
+from server.social.turnstile import turnstile_site_key
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -38,6 +40,12 @@ def get_config():
     return {
         "models": _models.config_payload(_model_config),
         "features": {"reel_packs": reel_pack_features()},
+        # Public by design; the SPA renders the Turnstile widget with it. Empty = no challenge.
+        "turnstile_site_key": turnstile_site_key(),
+        "upload_limits": {
+            "image_mb": SM.max_image_upload_bytes() // SM._MB,
+            "video_mb": SM.max_video_upload_bytes() // SM._MB,
+        },
     }
 
 

@@ -160,7 +160,7 @@ export default function ComparePage() {
                       setShowDownload(false);
                     }}
                   >
-                    {m === 'SPLIT' ? '◐ SPLIT' : m === '2-UP' ? '▦ 2-UP' : '◩ HEATMAP'}
+                    {m}
                   </button>
                 ))}
               </div>
@@ -210,7 +210,7 @@ export default function ComparePage() {
                 <a className="sx-download" href={prep.fast_url} download>
                   ↓ DOWNLOAD FAST (LANCZOS4 + CAS)
                 </a>
-                <a className="sx-download" href={prep.studio_url} download style={{ background: '#3b82f6', color: '#000' }}>
+                <a className="sx-download" href={prep.studio_url} download style={{ background: 'var(--sx-ink)', color: 'var(--sx-on-accent)' }}>
                   ↓ DOWNLOAD STUDIO (ZNEDI3 NEURAL)
                 </a>
               </div>
@@ -344,28 +344,28 @@ export default function ComparePage() {
             {/* FAST Stats Card */}
             <div className="sx-telemetry-card sx-fast-card">
               <h3 className="sx-telemetry-title">
-                <span>LANCZOS4 + CAS</span>
+                <span>LANCZOS4 + CAS · ESTIMATED</span>
                 <span className="sx-telemetry-tag" style={{ color: 'var(--sx-accent)' }}>
                   FAST
                 </span>
               </h3>
               <div className="sx-telemetry-table">
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Render Speed</span>
+                  <span className="sx-telemetry-label">RENDER SPEED</span>
                   <span className="sx-telemetry-val">~0.8s / frame</span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Peak vRAM</span>
+                  <span className="sx-telemetry-label">PEAK VRAM</span>
                   <span className="sx-telemetry-val">4.2 GB</span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">SSIM Score</span>
+                  <span className="sx-telemetry-label">SSIM SCORE</span>
                   <span className="sx-telemetry-val" style={{ color: 'var(--sx-accent)' }}>
                     0.92
                   </span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Hardware Profile</span>
+                  <span className="sx-telemetry-label">HARDWARE</span>
                   <span className="sx-telemetry-val" style={{ fontSize: '0.75rem', color: 'var(--sx-ink-2)' }}>
                     GPU VideoToolbox
                   </span>
@@ -376,28 +376,28 @@ export default function ComparePage() {
             {/* STUDIO Stats Card */}
             <div className="sx-telemetry-card sx-studio-card">
               <h3 className="sx-telemetry-title">
-                <span>ZNEDI3 NEURAL</span>
-                <span className="sx-telemetry-tag" style={{ color: '#3b82f6' }}>
+                <span>ZNEDI3 NEURAL · ESTIMATED</span>
+                <span className="sx-telemetry-tag" style={{ color: 'var(--sx-ink)' }}>
                   STUDIO
                 </span>
               </h3>
               <div className="sx-telemetry-table">
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Render Speed</span>
+                  <span className="sx-telemetry-label">RENDER SPEED</span>
                   <span className="sx-telemetry-val">~14.2s / frame</span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Peak vRAM</span>
+                  <span className="sx-telemetry-label">PEAK VRAM</span>
                   <span className="sx-telemetry-val">18.5 GB</span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">SSIM Score</span>
-                  <span className="sx-telemetry-val" style={{ color: '#3b82f6' }}>
+                  <span className="sx-telemetry-label">SSIM SCORE</span>
+                  <span className="sx-telemetry-val" style={{ color: 'var(--sx-ink)' }}>
                     0.98
                   </span>
                 </div>
                 <div className="sx-telemetry-row">
-                  <span className="sx-telemetry-label">Neural Engine</span>
+                  <span className="sx-telemetry-label">NEURAL ENGINE</span>
                   <span className="sx-telemetry-val" style={{ fontSize: '0.75rem', color: 'var(--sx-ink-2)' }}>
                     VapourSynth Plugin
                   </span>

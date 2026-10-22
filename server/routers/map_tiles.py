@@ -36,6 +36,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
+from server.social.auth import request_identity
+
 router = APIRouter(prefix="/api/reels/map-tiles", tags=["reels"])
 
 MAX_ZOOM = 17
@@ -305,7 +307,7 @@ def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
             media_type = "image/png"
         return FileResponse(str(cache_file), media_type=media_type, headers=_tile_headers())
 
-    identity = request.client.host if request.client else "unknown"
+    identity = request_identity(request)
     if not _check_fetch_rate(identity):
         raise HTTPException(
             status_code=429,

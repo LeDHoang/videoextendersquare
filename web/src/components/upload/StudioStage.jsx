@@ -2,10 +2,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
 import { AccentBlock } from '../ui/primitives.jsx';
 import { MASTER_SIDE, formatClock, stageLayout } from './stageGeometry.js';
+import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 
 // Left half of the Upload Studio: the 1:1 master stage. Shows where the
 // source sits inside the square, which bands the outpaint model will
 // generate, and — once a render finishes — the extended result.
+
+// Square transport glyphs in currentColor; the Unicode media symbols render as emoji on some platforms.
+function TransportGlyph({ name }) {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" fill="currentColor" aria-hidden="true" focusable="false">
+      {name === 'pause' ? (
+        <path d="M3 2h4v12H3zM9 2h4v12H9z" />
+      ) : name === 'restart' ? (
+        <path d="M2 2h2v12H2zM14 2v12L5 8z" />
+      ) : (
+        <path d="M4 2l10 6-10 6z" />
+      )}
+    </svg>
+  );
+}
 
 function StageVideo({ src, label, onElement, className, style }) {
   const ref = useCallback((node) => onElement(node), [onElement]);
@@ -119,8 +135,8 @@ export function StageTransport({ video, trim, status }) {
       </div>
       <div className="sx-studio-transport-row">
         <div className="sx-studio-transport-buttons">
-          <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary">{playing ? '❚❚' : '▶'}</button>
-          <button type="button" onClick={() => seek(trimWindow ? trimWindow.start : 0)} aria-label="Restart" className="sx-studio-tbtn">⏮</button>
+          <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary"><TransportGlyph name={playing ? 'pause' : 'play'} /></button>
+          <button type="button" onClick={() => seek(trimWindow ? trimWindow.start : 0)} aria-label="Restart" className="sx-studio-tbtn"><TransportGlyph name="restart" /></button>
           <button type="button" onClick={() => seek(time - 1)} aria-label="Back 1 second" className="sx-studio-tbtn">−1s</button>
           <button type="button" onClick={() => seek(time + 1)} aria-label="Forward 1 second" className="sx-studio-tbtn">+1s</button>
           <span className="sx-studio-clock">{formatClock(time)} <span>/ {formatClock(duration)}</span></span>
@@ -144,6 +160,7 @@ export function StageTransport({ video, trim, status }) {
 function statusChip(entry) {
   if (entry.status === 'done') return ['✓ DONE', 'ok'];
   if (entry.status === 'failed') return ['FAILED', 'danger'];
+  if (entry.status === 'cancelled') return ['CANCELLED', 'muted'];
   if (entry.status === 'rendering') return ['RENDERING', 'accent'];
   return ['STAGED', 'muted'];
 }
@@ -159,6 +176,7 @@ export default function StudioStage({
   onFiles,
   dropCaption,
   extendPath,
+  stereo,
   upscaleOnly,
   trim,
   outpaintActive,
@@ -183,13 +201,17 @@ export default function StudioStage({
   }, [resultUrl, selected?.key]);
 
   const showExtended = view === 'extended' && resultUrl;
-  const showZones = !showExtended && !isSlideshow && geometry && !geometry.square && extendPath && !upscaleOnly;
+  // 3D stereo uploads show their left eye filling the square, as 2D views will.
+  const stereoEye = stereo && geometry ? stereoEyeSize(stereo, geometry.width, geometry.height) : null;
+  const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
     ? `EXTENDED MASTER (${MASTER_SIDE}×${MASTER_SIDE})`
-    : isSlideshow
-      ? 'PLAYER VIEW · 1:1 CROP'
-      : geometry ? `ORIGINAL ${kind === 'video' ? 'CLIP' : 'IMAGE'} (${geometry.width}×${geometry.height})` : '';
+    : stereoEye
+      ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
+      : isSlideshow
+        ? 'PLAYER VIEW · 1:1 CROP'
+        : geometry ? `ORIGINAL ${kind === 'video' ? 'CLIP' : 'IMAGE'} (${geometry.width}×${geometry.height})` : '';
 
   return (
     <div className="sx-studio-stage-col">
@@ -211,7 +233,12 @@ export default function StudioStage({
             ))}
           </div>
           <div className="sx-studio-pills">
-            {geometry && !isSlideshow ? (
+            {stereoEye ? (
+              <>
+                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />3D {STEREO_LABELS[stereo]} · {geometry.width}×{geometry.height}</span>
+                <span className="sx-studio-pill sx-accent">EYE: {stereoEye.width}×{stereoEye.height} ×2</span>
+              </>
+            ) : geometry && !isSlideshow ? (
               <>
                 <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{geometry.width}×{geometry.height} ➔ {MASTER_SIDE}×{MASTER_SIDE}</span>
                 <span className="sx-studio-pill sx-accent">PAD: {geometry.padLabel}</span>
@@ -239,7 +266,13 @@ export default function StudioStage({
           ) : null}
 
           {selected && !showExtended && selected.url ? (
-            isSlideshow ? (
+            stereo ? (
+              kind === 'video' ? (
+                <StageVideo src={selected.url} label="Left eye of the 3D source" onElement={setVideoEl} className={`sx-studio-fill sx-stereo-${stereo}`} />
+              ) : (
+                <img className={`sx-studio-fill sx-stereo-${stereo}`} src={selected.url} alt={`${selected.name} (left eye)`} />
+              )
+            ) : isSlideshow ? (
               <img className="sx-studio-fill sx-cover" src={selected.url} alt={selected.name} />
             ) : (
               <div
@@ -270,7 +303,7 @@ export default function StudioStage({
             <span className="sx-studio-flag sx-ok">ALREADY 1:1</span>
           ) : null}
           {selected && !showExtended && !extendPath && layout !== 'batch' ? (
-            <span className="sx-studio-flag">PUBLISHED AS-IS</span>
+            <span className={`sx-studio-flag ${stereo ? 'sx-ok' : ''}`}>{stereo ? '3D · PUBLISHED AS-IS' : 'PUBLISHED AS-IS'}</span>
           ) : null}
           {selected && !showExtended && extendPath && upscaleOnly && geometry && !geometry.square ? (
             <span className="sx-studio-flag sx-warn">UPSCALE ONLY · STRETCHED TO 1:1</span>
@@ -333,7 +366,7 @@ export default function StudioStage({
             {entries.map((entry, index) => (
               <li key={entry.key} className={`sx-upload-gallery-item ${entry.key === selected?.key ? 'sx-selected' : ''}`}>
                 <button type="button" className="sx-studio-strip-view" onClick={() => onSelect(entry.key)} aria-label={`View ${entry.name}`} aria-pressed={entry.key === selected?.key}>
-                  <img src={entry.url} alt={entry.name} />
+                  <img src={entry.url} alt={entry.name} className={stereo ? `sx-stereo-crop-${stereo}` : undefined} />
                 </button>
                 <span className="sx-upload-gallery-pos">{index === 0 ? 'COVER' : index + 1}</span>
                 <div className="sx-upload-gallery-actions">
@@ -354,7 +387,7 @@ export default function StudioStage({
                 <li key={entry.key} className={`sx-studio-queue-row ${entry.key === selected?.key ? 'sx-selected' : ''}`}>
                   <button type="button" className="sx-studio-queue-main" onClick={() => onSelect(entry.key)} aria-pressed={entry.key === selected?.key} aria-label={`View ${entry.name}`}>
                     <span className="sx-studio-queue-idx">{String(index + 1).padStart(2, '0')}</span>
-                    {entry.kind === 'image' ? <img src={entry.url} alt="" /> : <span className="sx-studio-queue-thumb" aria-hidden="true">▶</span>}
+                    {entry.kind === 'image' ? <img src={entry.url} alt="" /> : <span className="sx-studio-queue-thumb" aria-hidden="true"><TransportGlyph name="play" /></span>}
                     <span className="sx-studio-queue-name">{entry.name}</span>
                     <span className="sx-studio-queue-dims">{entry.meta?.width}×{entry.meta?.height}{entry.kind === 'video' ? ` · ${entry.meta?.duration}s` : ''}</span>
                   </button>

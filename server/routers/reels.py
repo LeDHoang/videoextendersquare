@@ -15,22 +15,30 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from server.media_store import public_url
+from server.security_headers import nonce_request_html
 from server import media as SM
+from server import metrics
 from server.jobs import job_manager
+from server.settings import is_production
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
-from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, ViewDedup
+from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, PostSlide, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import (
+    published_media_paths,
     IMAGE_POST_DWELL_MS,
+    _image_entry,
     get_post_by_reference,
     metadata_for_paths,
     reel_records,
     scoped_media_paths,
     slide_media_paths,
+    stereo_fields,
 )
 
 router = APIRouter(prefix="/api/reels", tags=["reels"])
@@ -208,15 +216,14 @@ def _generate_seed_comments(rel_path: str, filename: str) -> list[dict]:
 
 
 def _get_comments_for_video(rel_path: str, filename: str = "") -> list[dict]:
-    """Retrieve comments from the social database with read-only JSON fallback."""
-    key = rel_path.strip().replace(chr(92), "/")
-    try:
-        record = reel_records([key]).get(key)
-        if record is not None:
-            return record.get("comments", [])
-    except Exception:
-        pass
+    """Read-only legacy JSON comments for a path the batched reel_records
+    lookup in _build_payload did not return.
 
+    Deliberately no per-item database retry: the batch succeeded, so the path
+    simply has no published post (a failed batch raises a 503 in
+    _build_payload and never reaches this fallback).
+    """
+    key = rel_path.strip().replace(chr(92), "/")
     all_comments = _load_comments_raw()
     if key in all_comments and isinstance(all_comments[key], list):
         return all_comments[key]
@@ -313,14 +320,43 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _metadata_snapshot(raw: list[dict]) -> dict[str, dict]:
-    """Build metadata from the social database with legacy fallback."""
+REEL_DATA_RETRY_AFTER_SECONDS = 5
+
+
+def _reel_data_unavailable() -> HTTPException:
+    """503 for a failed batched social-database lookup.
+
+    The legacy JSON / ``_seed_meta`` fallbacks are only for paths the
+    database *answered* has no published post (local, unpublished
+    ``output/`` files). When the lookup itself fails we cannot tell a
+    published post from a local file, so serving either fallback would show
+    a real post with invented (or zeroed) likes/views, no ``post_id`` and
+    no viewer state — and could hide an outage behind plausible data.
+    """
+    metrics.incr("reel_data_unavailable")
+    return HTTPException(
+        status_code=503,
+        detail="Reel data is temporarily unavailable. Retry shortly.",
+        headers={"Retry-After": str(REEL_DATA_RETRY_AFTER_SECONDS)},
+    )
+
+
+def _metadata_snapshot(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
+    """Build metadata from the social database with legacy fallback.
+
+    Routes pass their request ``db`` (here and in every helper below that
+    takes one) so a request never holds one pooled connection while waiting
+    for a second.
+
+    The legacy fallback covers only paths without a published post; a
+    database failure raises a 503 instead (see _reel_data_unavailable).
+    """
     persisted = _load_meta_raw()
     keys = [str(item.get("rel_path", "")).strip().replace(chr(92), "/") for item in raw]
     try:
-        database_rows = metadata_for_paths(keys)
-    except Exception:
-        database_rows = {}
+        database_rows = metadata_for_paths(keys, db=db)
+    except SQLAlchemyError as exc:
+        raise _reel_data_unavailable() from exc
     snapshot: dict[str, dict] = {}
     for item in raw:
         key = str(item.get("rel_path", "")).strip().replace(chr(92), "/")
@@ -354,9 +390,11 @@ def _item_search_text(item: dict, meta: dict, include_tags: bool = True) -> str:
     return " ".join(str(value) for value in values if value).casefold()
 
 
-def _tag_catalog(raw: list[dict]) -> tuple[dict[str, dict], list[tuple[str, str, list[str]]]]:
+def _tag_catalog(
+    raw: list[dict], db: Session | None = None
+) -> tuple[dict[str, dict], list[tuple[str, str, list[str]]]]:
     """Aggregate tag stats, co-occurrence, and searchable reel context."""
-    snapshot = _metadata_snapshot(raw)
+    snapshot = _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     contexts: list[tuple[str, str, list[str]]] = []
 
@@ -502,9 +540,9 @@ def _haversine_km(first: tuple[float, float], second: tuple[float, float]) -> fl
     return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(inner)))
 
 
-def _location_catalog(raw: list[dict]) -> dict[str, dict]:
+def _location_catalog(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
     """Aggregate reel stats per city+country place."""
-    snapshot = _metadata_snapshot(raw)
+    snapshot = _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     for item in raw:
         meta = _item_meta(item, snapshot)
@@ -734,9 +772,10 @@ def _location_activity_rows(
     activity_by_path: dict[str, dict],
     metadata: dict[str, dict] | None = None,
     limit: int = 128,
+    db: Session | None = None,
 ) -> list[dict]:
     """Aggregate activity into privacy-safe city centroids and normalized heat."""
-    snapshot = metadata if metadata is not None else _metadata_snapshot(raw)
+    snapshot = metadata if metadata is not None else _metadata_snapshot(raw, db)
     catalog: dict[str, dict] = {}
     for item in raw:
         path = str(item.get("rel_path") or "").strip().replace("\\", "/")
@@ -1110,15 +1149,11 @@ def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
 
 
 def _get_meta_for_video(rel_path: str, filename: str = "") -> dict:
-    """Retrieve database metadata with read-only legacy JSON fallback."""
+    """Read-only legacy JSON metadata for a path the batched reel_records
+    lookup in _build_payload did not return (no per-item database retry;
+    see _get_comments_for_video). Seeded metadata is for local, unpublished
+    files only: callers must not reach this after a failed lookup."""
     key = rel_path.strip().replace(chr(92), "/")
-    try:
-        record = metadata_for_paths([key]).get(key)
-        if record is not None:
-            return record
-    except Exception:
-        pass
-
     all_meta = _load_meta_raw()
     if key in all_meta and isinstance(all_meta[key], dict):
         entry = dict(all_meta[key])
@@ -1202,7 +1237,16 @@ class CommentCreate(BaseModel):
 
 # ─── SCAN & FILTER ───────────────────────────────────────────────────────
 
-def _scan_cached() -> list[dict]:
+def _scan_cached(db: Session | None = None) -> list[dict]:
+    """Scan output/ (cached for _SCAN_TTL) minus the extra slides of posts.
+
+    In production only files with a Post row surface: loose folders under
+    output/ (pipeline tests, captures) are never discoverable there, which
+    closes the feed, tags, locations, packs and recommendations at once.
+
+    A failed slide lookup raises a 503 (see _reel_data_unavailable) and
+    leaves the cache stale, so the next request retries the lookup.
+    """
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
@@ -1210,10 +1254,18 @@ def _scan_cached() -> list[dict]:
         # Extra images of a multi-image post play inside that post, so they
         # never surface as tiles of their own.
         try:
-            slides = slide_media_paths()
-        except Exception:
-            slides = set()
-        _scan_cache["data"] = [item for item in scanned if item["rel_path"] not in slides]
+            slides = slide_media_paths(db)
+            published = published_media_paths(db) if is_production() else None
+        except SQLAlchemyError as exc:
+            # Never cache or serve a scan without the slide filter: a slide
+            # is not any post's media_path, so _build_payload would seed it
+            # with fabricated metadata until the cache expired.
+            invalidate_scan_cache()
+            raise _reel_data_unavailable() from exc
+        _scan_cache["data"] = [
+            item for item in scanned
+            if item["rel_path"] not in slides and (published is None or item["rel_path"] in published)
+        ]
     return _scan_cache["data"]
 
 
@@ -1226,18 +1278,21 @@ def _is_image_item(item: dict) -> bool:
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
                    sort: str, media: str | None = None,
                    tag: str | None = None, location: str | None = None,
-                   recent_activity: dict[str, dict] | None = None) -> list[dict]:
+                   recent_activity: dict[str, dict] | None = None,
+                   db: Session | None = None) -> list[dict]:
     videos = list(raw)
     metadata = None
     if media in ("video", "videos"):
         videos = [v for v in videos if not _is_image_item(v)]
     elif media in ("image", "images"):
         videos = [v for v in videos if _is_image_item(v)]
+    elif media == "stereo":
+        videos = _stereo_items(videos, db)
     if folder and folder != "ALL FOLDERS":
         videos = [v for v in videos if v["folder"] == folder]
     if tag and _tag_slug(tag):
         wanted = _tag_slug(tag)
-        metadata = _metadata_snapshot(videos)
+        metadata = _metadata_snapshot(videos, db)
         videos = [
             video
             for video in videos
@@ -1248,12 +1303,12 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
         ]
     if location and _location_key(*_split_location_key(location)):
         wanted_loc = _location_key(*_split_location_key(location))
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
         videos = [video for video in videos if _item_location_key(video, metadata) == wanted_loc]
     if search.strip():
         query_text = search.strip().casefold().lstrip("#")
         query_key = _search_key(query_text)
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
         videos = [
             video
             for video in videos
@@ -1279,7 +1334,7 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
 
         videos.sort(key=_recent_score, reverse=True)
     elif sort in ("views", "likes", "trending"):
-        metadata = metadata or _metadata_snapshot(videos)
+        metadata = metadata or _metadata_snapshot(videos, db)
 
         def _engagement(item: dict) -> tuple[int, float]:
             meta = _item_meta(item, metadata)
@@ -1314,7 +1369,7 @@ def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
                 fresh = True
             if fresh:
                 prel = sibling.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
-                return f"/media/{prel}"
+                return public_url(prel)
     except (OSError, ValueError):
         pass
     return None
@@ -1325,6 +1380,7 @@ def _build_payload(
     codec: str | None,
     tunnel: str = "",
     viewer_id: str | None = None,
+    db: Session | None = None,
 ) -> list[dict]:
     """Map scanned media to the reels player payload (relative /media/ URLs),
     including embedded time-synced and general comments.
@@ -1336,9 +1392,11 @@ def _build_payload(
     payload = []
     paths = [item["rel_path"] for item in videos]
     try:
-        social_rows = reel_records(paths, viewer_id=viewer_id)
-    except Exception:
-        social_rows = {}
+        social_rows = reel_records(paths, viewer_id=viewer_id, db=db)
+    except SQLAlchemyError as exc:
+        # Never fall through to the per-item legacy/seed fallbacks on a
+        # failed lookup: published posts would get fabricated engagement.
+        raise _reel_data_unavailable() from exc
     for item in videos:
         src_path = item["path"]
         social_row = social_rows.get(item["rel_path"])
@@ -1384,6 +1442,18 @@ def _build_payload(
             "tunnel_url": tunnel.strip(),
             "comments": comments,
         }
+        # Stereo layout: the post's stored value; loose files without a post
+        # fall back to the legacy folder rule (spatialize output is SBS).
+        layout = (
+            social_row.get("stereo_layout")
+            if social_row is not None
+            else SM.legacy_stereo_layout(item["rel_path"], meta.get("width"), meta.get("height"), root=str(OUTPUT_DIR))
+        ) or "mono"
+        stereo = stereo_fields(item["rel_path"], layout)
+        base["stereo_layout"] = stereo["stereo_layout"]
+        base["stereo_url"] = stereo["stereo_url"]
+        base["stereo_crop"] = stereo["stereo_crop"]
+        is_stereo = stereo["stereo_layout"] != "mono"
 
 
         if _is_image_item(item):
@@ -1392,26 +1462,53 @@ def _build_payload(
                 rel = Path(src_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
             except (OSError, ValueError):
                 continue
-            poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path))
-            # Every image of the post in order (a loose file is a 1-image post).
-            images = (social_row or {}).get("images") or [{
-                "path": rel,
-                "url": f"/media/{rel}",
-                "poster_url": poster_url or f"/media/{rel}",
-                "width": meta.get("width"),
-                "height": meta.get("height"),
-            }]
+            if is_stereo:
+                # 2D shows the left-eye rendition; stereo_url is the full still.
+                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout)
+                url, poster_url = cover["url"], cover["poster_url"]
+                images = (social_row or {}).get("images") or [cover]
+            else:
+                url = public_url(rel)
+                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path)) or url
+                # Every image of the post in order (a loose file is a 1-image post).
+                images = (social_row or {}).get("images") or [{
+                    "path": rel,
+                    "url": url,
+                    "poster_url": poster_url,
+                    "width": meta.get("width"),
+                    "height": meta.get("height"),
+                    "stereo_layout": "mono",
+                    "stereo_url": None,
+                    "stereo_crop": False,
+                }]
             payload.append({
                 **base,
                 "media_type": "image",
-                "url": f"/media/{rel}",
-                "preview_url": f"/media/{rel}",
-                "poster_url": poster_url or f"/media/{rel}",
+                "url": url,
+                "preview_url": url,
+                "poster_url": poster_url,
                 "images": images,
                 "dwell_ms": (social_row or {}).get("dwell_ms") or IMAGE_POST_DWELL_MS,
                 "codec": "IMG",
                 "is_proxy": False,
-                "stream_tag": "IMAGE",
+                "stream_tag": "IMAGE 3D" if is_stereo else "IMAGE",
+            })
+            continue
+
+        if is_stereo and not stereo["stereo_crop"]:
+            # 2D plays the H.264 left-eye rendition; grid assets derive from it.
+            mono_path = str(SM.mono_sibling_path(src_path))
+            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path))
+            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path))
+            payload.append({
+                **base,
+                "media_type": "video",
+                "url": stereo["url"],
+                "preview_url": preview_url,
+                "poster_url": poster_url,
+                "codec": "H264",
+                "is_proxy": True,
+                "stream_tag": f"H.264 2D · 3D {layout.upper()}",
             })
             continue
 
@@ -1438,7 +1535,7 @@ def _build_payload(
         payload.append({
             **base,
             "media_type": "video",
-            "url": f"/media/{rel}",
+            "url": public_url(rel),
             "preview_url": preview_url,
             "poster_url": poster_url,
             "codec": play_codec.upper(),
@@ -1468,14 +1565,14 @@ def _pack_feed_data(
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     pack = get_pack_for_viewer(db, pack_id, viewer_id)
-    scanned = {item["rel_path"]: item for item in _scan_cached()}
+    scanned = {item["rel_path"]: item for item in _scan_cached(db)}
     available_scan = [
         scanned[item.post.media_path]
         for item in sorted(pack.items, key=lambda row: row.position)
         if item.post and item.post.media_path in scanned
         and member_available_for_viewer(db, item, viewer_id)
     ]
-    hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id)
+    hydrated = _build_payload(available_scan, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
     by_path = {item.get("path"): item for item in hydrated}
     # DB fallback for active items whose media file is not (or not yet) in the
     # output/ scan — e.g. fresh uploads, test fixtures, cache TTL gaps. Without
@@ -1506,7 +1603,7 @@ def _pack_feed_data(
             "folder": "REEL PACK",
             "size": "",
             "path": post.media_path,
-            "url": card.get("url") or f"/media/{post.media_path}",
+            "url": card.get("url") or public_url(post.media_path),
             "preview_url": card.get("preview_url"),
             "poster_url": card.get("poster_url"),
             "codec": "IMG" if is_image else "MASTER",
@@ -1520,6 +1617,9 @@ def _pack_feed_data(
             "duration_ms": card.get("duration_ms"),
             "width": card.get("width"),
             "height": card.get("height"),
+            "stereo_layout": card.get("stereo_layout") or "mono",
+            "stereo_url": card.get("stereo_url"),
+            "stereo_crop": bool(card.get("stereo_crop")),
             "images": card.get("images") or [],
             "dwell_ms": card.get("dwell_ms"),
             "comments": [],
@@ -1665,8 +1765,8 @@ def _recommendation_feed_data(
             detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."},
         )
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity_days = _bounded_activity_window(window_days)
     recent_activity = _recent_activity_by_path(db, raw, activity_days) if sort == "recent_trending" else None
 
@@ -1677,7 +1777,7 @@ def _recommendation_feed_data(
             detail={"code": "POST_NOT_FOUND", "message": "Reel not found."},
         )
     if requested_surface == "related":
-        videos = _apply_filters(raw, folder, "", "newest", media)
+        videos = _apply_filters(raw, folder, "", "newest", media, db=db)
         if seed_post and seed_post.media_path not in {video["rel_path"] for video in videos}:
             seed_video = next((video for video in raw if video["rel_path"] == seed_post.media_path), None)
             if seed_video:
@@ -1692,9 +1792,10 @@ def _recommendation_feed_data(
             tag,
             location,
             recent_activity=recent_activity,
+            db=db,
         )
 
-    scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author)
+    scoped_paths = scoped_media_paths(viewer_id=viewer_id, feed=feed, author=author, db=db)
     if scoped_paths is not None and requested_surface != "related":
         positions = {value: index for index, value in enumerate(scoped_paths)}
         videos = [video for video in videos if video["rel_path"] in positions]
@@ -1757,7 +1858,7 @@ def _recommendation_feed_data(
         for item in page.items
         if item.target_id in post_id_to_video
     ]
-    hydrated = _build_payload(selected_videos, codec, tunnel=tunnel, viewer_id=viewer_id)
+    hydrated = _build_payload(selected_videos, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
     payload_by_post = {item.get("post_id"): item for item in hydrated if item.get("post_id")}
     items = []
     for recommendation in page.items:
@@ -1818,13 +1919,14 @@ def list_reels(
 ):
     """Scan output dir and return the filtered, codec-aware reels list.
 
-    media: all (default) | video | image — lets callers filter to one kind.
+    media: all (default) | video | image — lets callers filter to one kind;
+    stereo keeps only 3D (SBS/TB) reels, a testing filter for now.
     """
     if refresh:
         _scan_cache["at"] = 0.0
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
 
     if post:
@@ -1842,11 +1944,13 @@ def list_reels(
             tag,
             location,
             recent_activity=recent_activity,
+            db=db,
         )
     scoped_paths = scoped_media_paths(
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
         feed=feed,
         author=author,
+        db=db,
     )
     if feed == "following" and not isinstance(viewer, AuthContext):
         raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."})
@@ -1859,7 +1963,7 @@ def list_reels(
         "count": len(videos),
         "folders": sorted({v["folder"] for v in raw}),
         "active_tag": _tag_slug(tag) if tag else None,
-        "videos": _build_payload(videos, codec, viewer_id=viewer_id),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -1913,17 +2017,30 @@ def reels_feed(
     )
 
 
-@router.get("/tags")
-def list_reel_tags(q: str = "", limit: int = 8):
-    """Return ranked tag suggestions for header search and discovery UI."""
+def tag_suggestions(q: str = "", limit: int = 8, db: Session | None = None) -> dict:
+    """Ranked tag suggestions; callers holding a request ``db`` pass it.
+
+    Without ``db`` each helper opens its own session (safe: sequential). A
+    caller that already has a pooled connection checked out must pass its
+    session, or the helpers wait for a second connection while holding the
+    first (the nested pool-hold of tests/test_db_pool_isolation.py).
+    """
     bounded_limit = max(1, min(int(limit), 20))
-    hidden_paths = unavailable_media_paths_for_viewer(None)
-    catalog, contexts = _tag_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
+    hidden_paths = unavailable_media_paths_for_viewer(None, db=db)
+    catalog, contexts = _tag_catalog(
+        [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths], db
+    )
     return {
         "query": q,
         "strategy": "metadata-v1",
         "tags": _rank_tag_catalog(catalog, contexts, q, bounded_limit),
     }
+
+
+@router.get("/tags")
+def list_reel_tags(q: str = "", limit: int = 8):
+    """Return ranked tag suggestions for header search and discovery UI."""
+    return tag_suggestions(q, limit)
 
 
 @router.get("/tags/{tag_name}")
@@ -1944,11 +2061,12 @@ def get_reel_tag(
     if refresh:
         _scan_cache["at"] = 0.0
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    catalog, _ = _tag_catalog(raw)
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
+    catalog, _ = _tag_catalog(raw, db)
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
-    videos = _apply_filters(raw, folder, "", sort, tag=slug, recent_activity=recent_activity)
+    videos = _apply_filters(raw, folder, "", sort, tag=slug, recent_activity=recent_activity, db=db)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -1967,7 +2085,7 @@ def get_reel_tag(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_tags": _related_tag_rows(slug, catalog),
-        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -2036,10 +2154,10 @@ def list_reel_location_activity(
     days = _bounded_activity_window(window_days)
     bounded_limit = max(1, min(int(limit), 128))
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity = _recent_activity_by_path(db, raw, days)
-    locations = _location_activity_rows(raw, activity, limit=bounded_limit)
+    locations = _location_activity_rows(raw, activity, limit=bounded_limit, db=db)
     if zoom is None:
         return {
             "strategy": "recent-activity-v1",
@@ -2089,11 +2207,12 @@ def get_reel_location(
     if refresh:
         _scan_cache["at"] = 0.0
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer.user.id if isinstance(viewer, AuthContext) else None)
-    raw = [item for item in _scan_cached() if item["rel_path"] not in hidden_paths]
-    catalog = _location_catalog(raw)
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
+    catalog = _location_catalog(raw, db)
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
-    videos = _apply_filters(raw, folder, "", sort, location=slug, recent_activity=recent_activity)
+    videos = _apply_filters(raw, folder, "", sort, location=slug, recent_activity=recent_activity, db=db)
     row = catalog.get(slug, {
         "name": slug,
         "slug": slug,
@@ -2115,7 +2234,7 @@ def get_reel_location(
         "total": len(raw),
         "folders": sorted({video["folder"] for video in videos}),
         "related_locations": _related_location_rows(slug, catalog),
-        "videos": _build_payload(videos, codec, viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None),
+        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
     }
 
 
@@ -2125,7 +2244,45 @@ MAX_EXPLORE_PATHS = 24
 EXPLORE_GEN_WORKERS = 4
 
 
-def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | None]:
+def _stereo_layouts(db: Session, rels: list[str]) -> dict[str, str]:
+    """Stored stereo layout of each rel that belongs to a stereo post (cover or slide)."""
+    if not rels:
+        return {}
+    layouts = {
+        path: layout
+        for path, layout in db.query(Post.media_path, Post.stereo_layout)
+        .filter(Post.media_path.in_(rels), Post.stereo_layout != "mono")
+    }
+    layouts.update(
+        (path, layout)
+        for path, layout in db.query(PostSlide.media_path, Post.stereo_layout)
+        .join(Post, Post.id == PostSlide.post_id)
+        .filter(PostSlide.media_path.in_(rels), Post.stereo_layout != "mono")
+    )
+    return layouts
+
+
+def _stereo_items(videos: list[dict], db: Session | None) -> list[dict]:
+    """Keep stereo items only (the `media=stereo` testing filter): items whose
+    post is stereo, and loose legacy-folder files that are exactly 2:1."""
+    rels = [video["rel_path"] for video in videos]
+    if db is None or not rels:
+        layouts, with_post = {}, set()
+    else:
+        layouts = _stereo_layouts(db, rels)
+        with_post = {path for (path,) in db.query(Post.media_path).filter(Post.media_path.in_(rels))}
+    return [
+        video
+        for video in videos
+        if video["rel_path"] in layouts
+        or (
+            video["rel_path"] not in with_post
+            and SM.legacy_stereo_layout(video["rel_path"], root=str(OUTPUT_DIR)) != "mono"
+        )
+    ]
+
+
+def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None, str | None, str | None]:
     """Generate one item's Explore assets. Returns
     (rel, preview_url, poster_url, error). Posters are cheap single frames;
     previews are full re-encodes — both run in parallel across videos.
@@ -2134,6 +2291,24 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
     p = (root / rel).resolve()
     if not p.is_relative_to(root) or not p.is_file():
         return rel, None, None, "not found"
+    if SM.derived_pending(p):
+        # The publish job is building these; the tile keeps its fallback.
+        return rel, None, None, "pending"
+    # A 3D original's grid assets come from its left-eye 2D rendition, so
+    # tiles stay square (the rendition only exists for stereo posts).
+    # Before that rendition exists, crop the left eye of the original.
+    mono, _stereo = SM.stereo_paths(str(p))
+    crop = None
+    if mono is not None:
+        p = mono.resolve()
+    elif layout in SM.STEREO_LAYOUTS and layout != "mono":
+        if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+            # A still's left eye is a cheap PIL crop: build the rendition now.
+            built = SM.make_left_eye_rendition(str(p), layout)
+            if built:
+                p = Path(built).resolve()
+        else:
+            crop = SM.left_eye_crop(layout)
     if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
         try:
             poster = SM.make_image_poster(str(p))
@@ -2144,19 +2319,19 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
             if not local:
                 return None
             try:
-                return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+                return public_url(Path(local).resolve().relative_to(root).as_posix())
             except ValueError:
                 return None
 
         poster_url = _img_url(poster)
-        # The tile uses the full image as its own preview.
-        return rel, f"/media/{rel}", poster_url, None
+        # The tile uses the full image (or its left eye) as its own preview.
+        return rel, _img_url(str(p)), poster_url, None
     try:
-        prev = SM.make_explore_preview(str(p))
+        prev = SM.make_explore_preview(str(p), crop=crop)
     except Exception as ex:  # noqa: BLE001
         return rel, None, None, str(ex)
     try:
-        poster = SM.make_explore_poster(str(p))
+        poster = SM.make_explore_poster(str(p), crop=crop)
     except Exception:  # noqa: BLE001
         poster = None  # poster is best-effort; the tile still works
 
@@ -2164,7 +2339,7 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
         if not local:
             return None
         try:
-            return f"/media/{Path(local).resolve().relative_to(root).as_posix()}"
+            return public_url(Path(local).resolve().relative_to(root).as_posix())
         except ValueError:
             return None
 
@@ -2174,8 +2349,16 @@ def _gen_explore_assets(rel: str) -> tuple[str, str | None, str | None, str | No
     return rel, preview_url, poster_url, None
 
 
+EXPLORE_PREVIEW_PER_MINUTE = 30
+
+
 @router.post("/explore-preview")
-def generate_explore_previews(paths: list[str]):
+def generate_explore_previews(
+    paths: list[str],
+    request: Request,
+    context: AuthContext = Depends(require_auth_csrf),
+    db: Session = Depends(get_db),
+):
     """Generate tiny muted H.264 previews + JPEG posters for Explore tiles.
 
     Capped per request and fanned out over worker threads so a fresh grid
@@ -2183,7 +2366,12 @@ def generate_explore_previews(paths: list[str]):
     than previews, so tiles paint instantly and upgrade to video as each
     transcode lands. Returns {generated: {rel: preview_url},
     posters: {rel: poster_url}, failed: [...]}.
+
+    Signed-in callers only, rate limited, and in production restricted to
+    live published posts so it is not a free transcoder for arbitrary files.
     """
+    validate_origin(request)
+    rate_limiter.check(db, f"explore-preview:{context.user.id}", EXPLORE_PREVIEW_PER_MINUTE, 60)
     if len(paths) > MAX_EXPLORE_PATHS:
         raise HTTPException(
             status_code=400,
@@ -2194,8 +2382,24 @@ def generate_explore_previews(paths: list[str]):
     generated: dict[str, str] = {}
     posters: dict[str, str] = {}
     failed = []
+    rels = list(paths)
+    if is_production():
+        hidden = unavailable_media_paths_for_viewer(context.user.id, db)
+        live = published_media_paths(db) - hidden
+        failed.extend({"path": rel, "error": "not found"} for rel in rels if rel not in live)
+        rels = [rel for rel in rels if rel in live]
+    layouts = _stereo_layouts(db, rels)
+    # Loose files without a post follow the legacy folder rule.
+    layouts.update(
+        (rel, SM.legacy_stereo_layout(rel, root=str(OUTPUT_DIR)))
+        for rel in rels
+        if rel not in layouts and Path(rel).parts[:1] and Path(rel).parts[0] in SM.LEGACY_SBS_FOLDERS
+        and db.query(Post.id).filter(Post.media_path == rel).first() is None
+    )
     with ThreadPoolExecutor(max_workers=EXPLORE_GEN_WORKERS) as ex:
-        for rel, preview_url, poster_url, err in ex.map(_gen_explore_assets, list(paths)):
+        for rel, preview_url, poster_url, err in ex.map(
+            lambda rel: _gen_explore_assets(rel, layouts.get(rel, "mono")), rels
+        ):
             if preview_url:
                 generated[rel] = preview_url
             if poster_url:
@@ -2207,9 +2411,16 @@ def generate_explore_previews(paths: list[str]):
 
 # ─── VR TELEMETRY (in-headset diagnostics) ──────────────────────────────
 
+def _dev_only() -> None:
+    """Debug endpoints exist only outside production."""
+    if is_production():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 @router.post("/diag")
 def post_diag(payload: dict):
     """Receive a live VR telemetry snapshot from the WebXR render loop."""
+    _dev_only()
     _diag.clear()
     _diag.update(payload)
     _diag["server_ts"] = time.time()
@@ -2219,6 +2430,7 @@ def post_diag(payload: dict):
 @router.get("/diag")
 def get_diag():
     """Return the most recent VR telemetry snapshot (empty until first POST)."""
+    _dev_only()
     if not _diag:
         return {"empty": True}
     return _diag
@@ -2230,11 +2442,13 @@ def get_diag():
 def get_comments(
     video_path: str,
     viewer: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
 ):
     """Return database-backed comments for the legacy player route."""
     records = reel_records(
         [video_path.strip().replace(chr(92), "/")],
         viewer_id=viewer.user.id if isinstance(viewer, AuthContext) else None,
+        db=db,
     )
     return {"video_path": video_path, "comments": records.get(video_path, {}).get("comments", [])}
 
@@ -2452,7 +2666,7 @@ def spatialize(
         _scan_cache["at"] = 0.0
         return {"generated": [d["path"] for d in done], "failed": failed}
 
-    job_id = job_manager.create_job("video")
+    job_id = job_manager.create_job("video", owner_id=context.user.id)
     job_manager.submit(job_id, _run, {})
     return {
         "job_id": job_id,
@@ -2553,6 +2767,9 @@ def reels_player(
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
 
+    # CSP nonce on the template's own <script> tags, before vendored JS is
+    # substituted in (server/security_headers.py).
+    html = nonce_request_html(request, html)
     html = _inject_icons(html)
 
     img_js = ASSETS_DIR / "quest_controller_img.js"
@@ -2679,6 +2896,7 @@ def _scope_css(css: str, root: str = "#sxReelsRoot") -> str:
 
 @router.get("/vr-video-path-ab", response_class=HTMLResponse)
 def vr_video_path_ab(
+    request: Request,
     master: str | None = None,
 ):
     """Temporary diagnostic page (black-square investigation §3.6+): plays one
@@ -2686,23 +2904,25 @@ def vr_video_path_ab(
     sites use — with no canvas proxy, no UI meshes, no readbacks.
     `master` picks a path under the media root; defaults to the largest
     master. The page's own `?src=` overrides the video URL client-side."""
+    _dev_only()
     try:
         html = (ASSETS_DIR / "vr_video_path_ab.html").read_text(encoding="utf-8")
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
+    html = nonce_request_html(request, html)
     default_rel = master
     if not default_rel:
         try:
             candidates = [
                 p for p in OUTPUT_DIR.rglob("*.mp4")
-                if not any(s in p.name for s in ("-preview", "-explore", "-quest"))
+                if not any(s in p.name for s in ("-preview", "-explore", "-quest", SM.MONO_SUFFIX + "."))
             ]
             if candidates:
                 biggest = max(candidates, key=lambda p: p.stat().st_size)
                 default_rel = biggest.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
         except (OSError, ValueError):
             default_rel = None
-    default_src = f"/media/{default_rel}" if default_rel else ""
+    default_src = public_url(default_rel) if default_rel else ""
     three_js = ASSETS_DIR / "three.min.js"
     if three_js.exists():
         html = html.replace("__THREE_JS__", three_js.read_text(encoding="utf-8"))

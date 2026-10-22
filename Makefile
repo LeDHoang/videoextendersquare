@@ -41,7 +41,8 @@ test:
 	$(PY) -m pytest -q tests
 	cd web && npm test
 
-## streamlit: legacy fallback on 8501 (app.py is untouched)
+## streamlit: legacy fallback on 8501 (app.py is untouched). Needs
+## `pip install -r requirements-streamlit.txt`, which pins Pillow below 13.
 streamlit:
 	.venv/bin/streamlit run app.py
 

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server.routers import rewards, social
 from server.social import auth
 from server.social.database import Base, get_db
@@ -45,12 +46,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client, username):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )

@@ -31,9 +31,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async (payload) => {
+    // 202: the account exists only after the emailed link is opened, so there is no session yet.
     const result = await api.post('/api/auth/register', payload);
-    setUser(result.user);
-    return result.user;
+    if (result?.user) setUser(result.user);
+    return result;
   }, []);
 
   const logout = useCallback(async () => {

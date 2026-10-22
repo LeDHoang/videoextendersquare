@@ -93,6 +93,7 @@ def import_legacy_social(force: bool = False) -> dict:
                 legacy_likes=max(0, int(meta.get("likes", 0) or 0)),
                 legacy_views=max(0, int(meta.get("views", 0) or 0)),
                 stable_legacy_id=True,
+                stereo_layout=media_service.legacy_stereo_layout(rel_path, root=str(OUTPUT_DIR)),
             )
             post_by_path[rel_path] = post
             imported_posts += 1

@@ -1,6 +1,6 @@
 # To-do List
 
-Last verified: 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
+Last verified: 2026-10-22 (staff console on `/moderation`: 605 backend pytest, 461 vitest, staging UI pass 48/48; before that, ops metrics, load runs, moderation drill and follow-ups: 590 backend pytest, 446 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier, 2026-10-16 (DB pool deadlock fix: 289 backend pytest, 341 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier record, 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
 
 VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md). Reel Packs implementation record: [Reel Packs implementation investigation](reel-packs-implementation-investigation.md).
 
@@ -28,9 +28,9 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 
 - [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
 - [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
-- [ ] Review the Explore page reels loading priority.
-- [ ] Review VR immersive-mode reel playback and loading. (Earth interaction reworked, but full playback/loading review still open.)
-- [ ] Reduce and spread out controls on the player action rail.
+- [x] Review the Explore page reels loading priority. Done 2026-10-21: preload margin 300 px, at most four concurrent video loads with visible tiles first, no video under reduced motion, first preview batch of eight.
+- [x] Review VR immersive-mode reel playback and loading. Done 2026-10-21 as a code review in `docs/vr-playback-review.md`; the device matrix and Phase 0 fixes stay open.
+- [x] Reduce and spread out controls on the player action rail. Done 2026-10-21: five primary buttons; mode, fullscreen and VR moved into More.
 - [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.
 - [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
@@ -45,16 +45,16 @@ Follow the phases in order unless measured results change a dependency.
 - [ ] Remove normal-path decoded-frame skipping and select a validated Quest/browser rendition automatically.
 - [ ] Measure and control contention from hidden preload, glow sampling, comments, and other texture uploads.
 - [ ] Verify bounded cache, cancellation, memory stability, buffering, frame pacing, and thermal behavior on device.
-- [ ] Complete the applicable security, ownership, quota, queue, recommendation-concurrency, privacy, moderation, storage, and monitoring blockers in `docs/to-beta.md`.
+- [ ] Complete the applicable security, ownership, quota, queue, recommendation-concurrency, privacy, moderation, storage, and monitoring blockers in `docs/to-beta.md`. *(Partial, 2026-10-21: P1 invite-beta items done — security headers with report-only CSP, request IDs and JSON logs, graceful shutdown, `/support` inbox with appeals, deleted-account DMs hidden, CI scans, moderation and incident runbooks. Remaining items are tracked there. 2026-10-22: in-app ops metrics with watchdog alerts, moderation drill, load/abuse/queue runs and a browser matrix on Chrome, Firefox and emulated phones; results and gaps are in `docs/to-beta.md`. Follow-ups the same day: healthz answers off the threadpool and compose reaps zombies with `init`; suspended sign-ins get an appeal hint and reports show who handled them; `/api/feed` batches viewer state (39 to 7 queries per page). The 50-user p95 is still about 1.9 s against 1.5 s. Later the same day: staff console on `/moderation` with user and content search, direct actions, report claim, audit log, admin credit adjustments and roles stored in the database.)*
 - [ ] Repeat Meta documentation verification on a supported host and record Quest Browser/Horizon OS versions.
 
 ### Phase 1 — Immersive-media contract
 
-- [ ] Store explicit projection, stereo-layout, presentation-mode, orientation, and comfort metadata.
+- [ ] Store explicit projection, stereo-layout, presentation-mode, orientation, and comfort metadata. *(Partial, 2026-10-16: `posts.stereo_layout` (`mono` / `sbs` / `tb`) shipped with 3D Reels. See `docs/stereo-3d-reels.md`. Projection, presentation mode, orientation and comfort are still open.)*
 - [ ] Store codec, dimensions, bitrate, frame rate, device target, and fallback for every rendition.
 - [ ] Add caption, translation, audio-description, generated-asset, and provenance metadata.
-- [ ] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration.
-- [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets.
+- [x] Replace filename/folder SBS detection with metadata, retaining legacy inference only during migration. *(3D Reels: migration `20261015_0013` backfills `testpipeline-3d/` 2:1 rows. The player regex is gone.)*
+- [ ] Guarantee a safe mono-flat fallback for missing, invalid, or unsupported immersive assets. *(Partial: in VR, a stereo file that fails to load falls back to its 2D left-eye rendition. Stereo posts without a rendition are CSS-cropped in 2D.)*
 
 ### Phase 2 — Reel Packs
 
@@ -116,7 +116,7 @@ people.
 
 ## Known gaps found during verification (not yet fixed)
 
-- `MessagingContext.jsx:248-256`: send-reconcile builds `reconciled` but discards it (possible duplicate bubbles on key migration); optimistic GIF sends render empty until server echo.
+- `web/src/hooks/MessagingContext.jsx:305-313`: send-reconcile checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20. Fixed 2026-10-21 (reconcile checks the target conversation, the `user:` key is dropped, optimistic GIFs carry their preview).
 - Report on an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
 - Staged uploads are process-memory: multi-worker deployments need sticky sessions (or a single worker) or quote/submit pairs may miss; a restart drops staged files (documented in `RUNNING.md`).
 - Reward threshold uses client-reported duration (accepted risk: server-elapsed gate + foreground telemetry + 5/day + IP caps bound farming; documented in `RUNNING.md`).

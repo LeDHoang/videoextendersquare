@@ -15,7 +15,7 @@ from typing import AsyncIterator
 
 from fastapi import Request
 
-from server.jobs import JobRecord
+from server.jobs import TERMINAL_STATUSES, JobRecord, public_result
 
 _POLL_INTERVAL_S = 0.5
 _PING_EVERY_N_TICKS = 20  # ~10s at the default poll interval
@@ -33,6 +33,7 @@ async def job_progress_stream(request: Request, rec: JobRecord) -> AsyncIterator
             break
 
         with rec._lock:
+            terminal = rec.status in TERMINAL_STATUSES
             status = rec.status.value
             data = {
                 "status": status,
@@ -40,13 +41,13 @@ async def job_progress_stream(request: Request, rec: JobRecord) -> AsyncIterator
                 "progress": rec.progress,
                 "elapsed": rec.elapsed,
                 "messages": list(rec.messages),
-                "result": rec.result,
+                "result": public_result(rec.result),
                 "error": rec.error,
             }
 
         yield {"data": data}
 
-        if status in ("complete", "failed"):
+        if terminal:
             break
 
         ticks += 1

@@ -1,0 +1,18 @@
+# gitleaks config for the CI `scans` job (.github/workflows/ci.yml).
+# Default rules, plus allowlists for values that are never real secrets.
+# Triaged 2026-10-21: every finding in the full history was one of these.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures set throwaway secrets with monkeypatch.setenv"
+paths = ['''^tests/''']
+
+[[allowlists]]
+description = "Env templates hold <placeholder> or empty values only; the filled .env files are gitignored"
+paths = ['''^deploy/env(\.staging)?\.example$''']
+
+[[allowlists]]
+description = "<placeholder> values in docs and examples"
+regexes = ['''^<[A-Za-z0-9_.-]+>$''']

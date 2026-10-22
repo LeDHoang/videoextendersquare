@@ -76,6 +76,33 @@ describe('CloudFundingPanel', () => {
     expect(screen.queryByText(/INSUFFICIENT ECHO CREDITS/)).toBeNull();
   });
 
+  it('discloses that cloud uploads go to fal.ai, and stays silent for local processing', () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <CloudFundingPanel required paymentSource="credits" onChange={() => {}} quoteState={quoteState} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('fal-disclosure')).toHaveTextContent(/sends the photos or videos you upload.*to fal\.ai/);
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
+    unmount();
+
+    mocks.user = null;
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel required paymentSource="credits" onChange={() => {}} quoteState={quoteState} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('fal-disclosure')).toBeInTheDocument();
+    cleanup();
+
+    render(
+      <MemoryRouter>
+        <CloudFundingPanel required={false} paymentSource="credits" onChange={() => {}} quoteState={quoteState} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('fal-disclosure')).toBeNull();
+  });
+
   it('shows the provider estimate when paying with MY FAL KEY', () => {
     render(
       <MemoryRouter>

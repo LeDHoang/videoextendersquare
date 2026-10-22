@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono, AccentBlock } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, AccentBlock } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field, ToggleRow } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -15,13 +15,14 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { assertUploadSize } from '../utils/uploadLimits.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 const CREDIT_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
-  'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+  'luma/agent/ray/v3.2/reframe',
   'fal-ai/wan-vace-14b/outpainting',
 ]);
 const CREDIT_UPSCALE_MODELS = new Set([
@@ -130,6 +131,9 @@ export default function VideoPage() {
     // never understate the charge (backend bills 480p/580p/720p at
     // $0.04/$0.06/$0.08 per second).
     wanResolution: '720p',
+    // No Ray 3.2 resolution selector either: 720p ($0.12/s) keeps the
+    // output size of the retired Ray-2 Flash entry.
+    lumaResolution: '720p',
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -195,10 +199,11 @@ export default function VideoPage() {
     const staged = [];
     for (const f of files) {
       try {
+        assertUploadSize(f, 'video', cfg?.config);
         const meta = await api.upload('/api/video/upload', f);
         staged.push({ name: f.name, file: f, ...meta });
       } catch (e) {
-        setError(`Could not read video ${f.name}: ${e.message}`);
+        setError(`Could not read video ${f.name}: ${billingErrorMessage(e)}`);
       }
     }
     setItems(staged);
@@ -382,7 +387,7 @@ export default function VideoPage() {
                   <details className="sx-expander" open>
                     <summary>▸ CUSTOM LoRA STACK (MAX 3)</summary>
                     <div className="sx-expander-body sx-cols sx-cols-2">
-                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-muted)', marginBottom: 'var(--sx-2)' }}>
+                      <div style={{ gridColumn: '1 / -1', fontSize: '0.9rem', color: 'var(--sx-ink-3)', marginBottom: 'var(--sx-2)' }}>
                         Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot. Civitai: paste the plain https://civitai.com/api/download/models/&lt;versionId&gt; link (optionally with ?fileId=&lt;id&gt;) — the server auto-appends your CIVITAI_KEY, so never include your token yourself.
                       </div>
                       {ltxLoras.map((lora, i) => (
@@ -647,10 +652,7 @@ export default function VideoPage() {
           {jobs.map((j) => (
             <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={() => refreshWallet({ silent: true })} />
           ))}
-          <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
-          <Mono>
-            {jobs.map((j) => `/api/video/jobs/${j.jobId}/result`).join('\n')}
-          </Mono>
+          <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
         </Section>
       ) : null}
     </div>

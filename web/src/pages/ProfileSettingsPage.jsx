@@ -475,7 +475,7 @@ export default function ProfileSettingsPage() {
           <Panel title="DELETE ACCOUNT" tone="danger" status={{ tone: 'danger', text: 'IRREVERSIBLE' }}>
             <form className="sx-ps-form" onSubmit={deleteAccount}>
               <p className="sx-ps-hint">
-                Permanently closes your account, hides all of your posts and comments, and removes your saved Fal.ai key. This cannot be undone.
+                Permanently closes your account, hides all of your posts and comments, and removes your saved Fal.ai key. Messages you sent are hidden from the people you talked with and kept for moderation and safety. This cannot be undone.
               </p>
               <FieldRow label="CURRENT PASSWORD" htmlFor="ps-delete-password">
                 <input id="ps-delete-password" className="sx-ps-input" type="password" autoComplete="current-password" value={deleteForm.current_password} onChange={(event) => setDeleteForm({ ...deleteForm, current_password: event.target.value })} />

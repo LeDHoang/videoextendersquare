@@ -84,6 +84,27 @@ def _effective_duration(duration: float, params: dict[str, Any]) -> Decimal:
     return _decimal(min(requested, available))
 
 
+def check_outpaint_source_seconds(entry: dict | None, seconds: float) -> None:
+    """Refuse a source longer than the outpaint model accepts (Ray 3.2: 10 s)."""
+    limit = (entry or {}).get("max_source_seconds")
+    if limit is not None and seconds > float(limit):
+        raise PricingError(
+            f"{entry.get('label', 'This model')} accepts a source of {limit} s or less "
+            f"(selected segment is {seconds:.2f} s); trim the video to {limit} s or less."
+        )
+
+
+def validate_outpaint_source(duration: float, params: dict[str, Any]) -> None:
+    """Server-side source-length gate for a video job, BYOK or credits."""
+    if bool(params.get("upscale_only", False)):
+        return
+    outpaint_model = models.normalize_model_id(
+        str(params.get("outpaint_model") or models.DEFAULT_VIDEO_MODELS["outpaint_vid"])
+    )
+    entry = _catalog_entry(outpaint_model, models.VIDEO_OUTPAINT)
+    check_outpaint_source_seconds(entry, float(_effective_duration(duration, params)))
+
+
 def _frames(duration: Decimal, fps: int, *, minimum: int, maximum: int) -> int:
     count = int((duration * fps).to_integral_value(rounding=ROUND_HALF_UP)) + 1
     if count < minimum:
@@ -164,8 +185,13 @@ def quote_video(
                 )
             )
         elif "luma" in model_lower or "reframe" in model_lower:
+            check_outpaint_source_seconds(outpaint_entry, float(effective))
+            resolution = str(params.get("luma_resolution") or outpaint_entry.get("default_resolution", "720p"))
+            rates = outpaint_entry.get("resolution_rates", {})
+            if resolution not in rates:
+                raise PricingError(f"Unsupported Luma resolution: {resolution}")
             billed_seconds = _ceil_seconds(float(effective))
-            cost = _decimal(outpaint_entry["unit_price_usd"]) * billed_seconds
+            cost = _decimal(rates[resolution]) * billed_seconds
             stages.append(
                 _stage(
                     "outpaint",
@@ -173,6 +199,7 @@ def quote_video(
                     cost,
                     duration_seconds=float(effective),
                     billed_seconds=int(billed_seconds),
+                    resolution=resolution,
                     aspect_ratio="1:1",
                 )
             )

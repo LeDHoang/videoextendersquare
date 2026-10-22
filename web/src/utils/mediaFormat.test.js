@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { formatClock, formatDuration, formatResolution, imagePostLabel, packRuntime } from './mediaFormat.js';
+import {
+  formatClock,
+  formatDuration,
+  formatPostResolution,
+  formatResolution,
+  imagePostLabel,
+  packRuntime,
+  stereoCandidate,
+  stereoCropClass,
+  stereoEyeSize,
+  stereoLayout,
+} from './mediaFormat.js';
 
 describe('formatClock', () => {
   it('formats whole seconds, including zero', () => {
@@ -84,5 +95,37 @@ describe('imagePostLabel', () => {
     expect(imagePostLabel({ media_type: 'image' })).toBe('IMAGE');
     expect(imagePostLabel({ media_type: 'image', images: [{}, {}, {}] })).toBe('IMAGES · 3');
     expect(imagePostLabel({ media_type: 'video' })).toBe('');
+  });
+});
+
+describe('stereo helpers', () => {
+  it('reads the layout and only trusts known values', () => {
+    expect(stereoLayout({ stereo_layout: 'sbs' })).toBe('sbs');
+    expect(stereoLayout({ stereo_layout: 'tb' })).toBe('tb');
+    expect(stereoLayout({ stereo_layout: 'half' })).toBe('mono');
+    expect(stereoLayout(null)).toBe('mono');
+  });
+
+  it('finds exact 2:1 and 1:2 candidates only', () => {
+    expect(stereoCandidate(3840, 1920)).toBe('sbs');
+    expect(stereoCandidate(1920, 3840)).toBe('tb');
+    expect(stereoCandidate(1920, 1080)).toBeNull();
+    expect(stereoCandidate(3842, 1920)).toBeNull();
+    expect(stereoCandidate(0, 0)).toBeNull();
+  });
+
+  it('sizes one eye and labels stereo resolutions per eye', () => {
+    expect(stereoEyeSize('sbs', 4096, 2048)).toEqual({ width: 2048, height: 2048 });
+    expect(stereoEyeSize('tb', 2048, 4096)).toEqual({ width: 2048, height: 2048 });
+    expect(formatPostResolution({ stereo_layout: 'sbs', width: 3840, height: 1920 })).toBe('1920×1920 ×2 · 3D');
+    expect(formatPostResolution({ stereo_layout: 'mono', width: 2160, height: 2160 })).toBe('2160×2160');
+    expect(formatPostResolution({ stereo_layout: 'tb' })).toBe('3D');
+  });
+
+  it('crops raw stereo files only when no 2D rendition exists', () => {
+    expect(stereoCropClass({ stereo_layout: 'sbs', stereo_crop: true })).toBe('sx-stereo-crop-sbs');
+    expect(stereoCropClass({ stereo_layout: 'tb', stereo_crop: true })).toBe('sx-stereo-crop-tb');
+    expect(stereoCropClass({ stereo_layout: 'sbs', stereo_crop: false })).toBe('');
+    expect(stereoCropClass({ stereo_layout: 'mono', stereo_crop: true })).toBe('');
   });
 });

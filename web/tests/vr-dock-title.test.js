@@ -64,3 +64,29 @@ test('controller guide explains Left/Right for both reels and image posts', () =
   const lines = labels.filter(({ x, y }) => x === title.x && y > title.y && y < title.y + 78).map(({ text }) => text);
   assert.deepEqual(lines, ['Up/Down → Next/Prev Reel', 'Reels: Left/Right → Seek ±5s', 'Images: Left/Right → Prev/Next']);
 });
+
+test('dock header shows a 3D chip only while the reel is drawn per eye', () => {
+  const api = loadCanvas();
+  const chip = (options) => {
+    const labels = [];
+    const ctx = new Proxy({
+      fillText(text, x, y) { labels.push({ text, x, y }); },
+      measureText(text) { return { width: String(text).length * 8 }; },
+    }, {
+      get(target, property) { return target[property] ?? (() => {}); },
+    });
+    api.renderControlsCanvas(ctx, options);
+    const found = labels.find(({ text }) => /^3D /.test(String(text)));
+    return found ? found.text : null;
+  };
+  assert.equal(chip({ item: { title: 'Tron' }, stereo: 'sbs' }), '3D SBS');
+  assert.equal(chip({ item: { title: 'Tron' }, stereo: 'tb' }), '3D TB');
+  assert.equal(chip({ item: { title: 'Tron' }, stereo: 'mono' }), null);
+  assert.equal(chip({ item: { title: 'Tron' } }), null);
+});
+
+test('webxr passes the on-screen stereo layout (not the stored one) to the dock', () => {
+  const call = webxrSource.match(/ui\.renderControlsCanvas\(controlsCtx, \{([\s\S]*?)\}\);/);
+  assert.ok(call, 'renderControlsCanvas call present');
+  assert.match(call[1], /\bstereo: textureStereo !== 'mono' && eyeTextures \? textureStereo : 'mono',/);
+});

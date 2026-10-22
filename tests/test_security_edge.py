@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import threading
 import time
 from unittest.mock import patch
 
@@ -16,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
+from verified_signup import register_verified
 from pipeline import utils as pipeline_utils
 from pipeline.utils import attach_civitai_token, get_image_dimensions
 from server.billing.crypto import FalKeyConfigurationError, decrypt_fal_key, encrypt_fal_key
@@ -89,12 +92,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client, username, email=None):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email or f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )
@@ -122,10 +125,9 @@ def test_registration_closed_flag_variants(app, monkeypatch, flag):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", flag)
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "v@example.com", "username": "edge_variant",
-                  "password": PASSWORD, "display_name": "v"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "v"},
         )
         assert response.status_code == 403
         assert response.json()["detail"]["code"] == "REGISTRATION_DISABLED"
@@ -135,10 +137,9 @@ def test_registration_open_ignores_allowlist(app, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.setenv("SX_REGISTRATION_ALLOWLIST", "nobody@example.com")
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "anyone@example.com", "username": "edge_open",
-                  "password": PASSWORD, "display_name": "a"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "a"},
         )
         assert response.status_code == 200, response.text
 
@@ -153,10 +154,9 @@ def test_import_time_constant_and_env_both_close(app, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     with TestClient(app) as client:
-        response = client.post(
-            "/api/auth/register",
+        response = register_verified(client,
             json={"email": "c@example.com", "username": "edge_and",
-                  "password": PASSWORD, "display_name": "c"},
+                  "password": PASSWORD, "accept_terms": True, "display_name": "c"},
         )
         assert response.status_code == 403
 
@@ -313,7 +313,7 @@ def test_civitai_host_edge_cases():
 
 _VIDEO_PARAMS = {
     "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-    "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+    "outpaint_model": "luma/agent/ray/v3.2/reframe",
     "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
     "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
     "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
@@ -499,15 +499,15 @@ def test_sse_concurrent_gate(app, monkeypatch):
 
         messages_router._SSE_STREAMS.pop(user_id, None)
         try:
-            results = await asyncio.gather(*[make_call() for _ in range(5)], return_exceptions=True)
+            results = await asyncio.gather(*[make_call() for _ in range(10)], return_exceptions=True)
             ok = sum(1 for r in results if not isinstance(r, Exception))
             limited = sum(
                 1 for r in results
                 if isinstance(r, Exception) and getattr(r, "status_code", None) == 429
             )
-            assert ok == 3
+            assert ok == 8
             assert limited == 2
-            assert messages_router._SSE_STREAMS.get(user_id) == 3
+            assert messages_router._SSE_STREAMS.get(user_id) == 8
             for r in results:
                 if not isinstance(r, Exception):
                     await r.body_iterator.aclose()
@@ -551,6 +551,49 @@ def test_sse_max_lifetime_frame(app, monkeypatch):
         finally:
             await response.body_iterator.aclose()
         assert messages_router._SSE_STREAMS.get(user_id, 0) == 0
+
+    asyncio.run(exercise())
+
+
+def test_sse_poll_runs_off_the_event_loop(app, monkeypatch):
+    # A pool checkout on the loop thread stalls every request once the pool is
+    # busy, including the ones holding the connections it waits for.
+    session_threads = []
+
+    def recording_session():
+        session_threads.append(threading.get_ident())
+        return app.state.testing_session()
+
+    monkeypatch.setattr(messages_router, "SessionLocal", recording_session)
+
+    async def exercise():
+        with app.state.testing_session() as db:
+            user = User(username="edge_sse_loop", username_norm="edge_sse_loop", display_name="p")
+            db.add(user)
+            db.commit()
+            user_id = user.id
+
+        async def _receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = StarletteRequest({"type": "http", "headers": []}, _receive)
+        context = AuthContext(
+            user=type("U", (), {"id": user_id, "status": "active", "account_type": "real"})(),
+            session=None,
+        )
+        messages_router._SSE_STREAMS.pop(user_id, None)
+        response = await messages_router.message_events(request, 0, context)
+        pending = asyncio.ensure_future(response.body_iterator.__anext__())
+        for _ in range(200):
+            if session_threads:
+                break
+            await asyncio.sleep(0.01)
+        pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await pending
+        await response.body_iterator.aclose()
+        assert session_threads
+        assert threading.get_ident() not in session_threads
 
     asyncio.run(exercise())
 

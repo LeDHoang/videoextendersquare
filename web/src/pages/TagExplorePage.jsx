@@ -217,7 +217,7 @@ export default function TagExplorePage() {
       </Toolbar>
 
       {previewMessage ? <Mono>{previewMessage}</Mono> : null}
-      {error ? <Mono>{'TAG FEED ERROR · ' + error}</Mono> : null}
+      {error ? <div className="sx-error-box" role="alert">{'TAG FEED ERROR · ' + error}</div> : null}
       {packError ? (
         <div className="sx-error-box" role="alert">
           <span>{'PACK DISCOVERY ERROR · ' + packError}</span>

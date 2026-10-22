@@ -347,7 +347,7 @@ def discover_hevc_sources(src_dir: str = os.path.join("output", "testpipeline"))
         return []
     out = []
     for p in sorted(root.rglob("*")):
-        if not p.is_file() or p.name.endswith("-preview.mp4") or p.name.startswith("."):
+        if not p.is_file() or p.name.endswith("-preview.mp4") or p.stem.endswith("-mono") or p.name.startswith("."):
             continue
         if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
             continue

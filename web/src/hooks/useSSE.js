@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 
+// Job states after which the server sends no further progress (server/sse.py).
+export const TERMINAL_STATUSES = new Set(['complete', 'failed', 'cancelled']);
+
 // Subscribe to a job's progress stream over SSE with immediate snapshot fetch
 // and polling fallback. Returns {job, error}.
 export function useSSE(url) {
@@ -21,8 +24,8 @@ export function useSSE(url) {
       if (!isMounted || !data) return;
       setState(data);
       setError(null);
-      if ((data.status === 'complete' || data.status === 'failed') && es) {
-        es.close();
+      if (TERMINAL_STATUSES.has(data.status)) {
+        if (es) es.close();
         if (pollInterval) clearInterval(pollInterval);
       }
     };

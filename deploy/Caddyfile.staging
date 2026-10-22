@@ -1,0 +1,27 @@
+# Local staging edge (deploy/compose.staging.yaml). Caddy's internal CA signs
+# the localhost certificates; browsers show a warning until it is trusted
+# (docs/local-staging.md).
+{
+	local_certs
+	skip_install_trust
+}
+
+# App origin, standing in for https://<domain> through the Tunnel.
+# Upstream keepalive stays at Caddy's default (2m); uvicorn's
+# --timeout-keep-alive (deploy/entrypoint.sh) must stay above it.
+https://localhost:8443 {
+	reverse_proxy app:8000
+}
+
+# Media origin, standing in for https://media.<domain> (R2 public bucket).
+# The two headers mirror the "set static" Response Header Transform Rule from
+# docs/deploy-runbook.md: a static ACAO so WebXR textures are never tainted.
+# header_down REPLACES the store's own CORS headers, as "set" does at the CF
+# edge; adding them instead would send ACAO twice, which browsers reject.
+https://localhost:9443 {
+	rewrite * /{$PUBLIC_BUCKET}{uri}
+	reverse_proxy objectstore:8333 {
+		header_down Access-Control-Allow-Origin "https://localhost:8443"
+		header_down Access-Control-Expose-Headers "Content-Range, Accept-Ranges, Content-Length, ETag"
+	}
+}

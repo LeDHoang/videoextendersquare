@@ -56,7 +56,7 @@ const MODELS = {
   video_outpaint_catalog: [
     { label: 'LTX 2.3 Quality', model: 'fal-ai/ltx-2.3-quality/outpaint', is_custom: false, credit_enabled: true },
     { label: 'LTX 2.3 Quality + LoRA', model: 'fal-ai/ltx-2.3-quality/outpaint/lora', is_custom: false, credit_enabled: true },
-    { label: 'Luma Ray-2 Reframe', model: 'fal-ai/luma-dream-machine/ray-2-flash/reframe', is_custom: false, credit_enabled: true },
+    { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true },
     { label: 'Wan VACE 14B', model: 'fal-ai/wan-vace-14b/outpainting', is_custom: false, credit_enabled: true },
   ],
   video_upscale_catalog: [
@@ -94,6 +94,11 @@ const META = {
   'square.mp4': meta('square.mp4', 480, 480, { duration: 2 }),
   'wide.png': meta('wide.png', 1600, 900),
   'square.png': meta('square.png', 512, 512),
+  'sbs.mp4': meta('sbs.mp4', 3840, 1920, { duration: 4, stereo: { candidate: 'sbs', detected: true, method: 'content', score: 0.91 } }),
+  'tb.png': meta('tb.png', 1024, 2048, { stereo: { candidate: 'tb', detected: true, method: 'metadata', score: null } }),
+  'screen21.mp4': meta('screen21.mp4', 2160, 1080, { duration: 3, stereo: { candidate: 'sbs', detected: false, method: null, score: 0.12 } }),
+  'eyes1.png': meta('eyes1.png', 800, 400, { stereo: { candidate: 'sbs', detected: true, method: 'content', score: 0.9 } }),
+  'eyes2.png': meta('eyes2.png', 800, 400, { stereo: { candidate: 'sbs', detected: true, method: 'content', score: 0.88 } }),
   'a.png': meta('a.png', 400, 400),
   'b.png': meta('b.png', 400, 400),
   'c.png': meta('c.png', 400, 400),
@@ -556,5 +561,117 @@ describe('UploadPage studio — batch extend', () => {
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(2));
     expect(radio('Studio mode', 'POST')).toBeDisabled();
     expect(screen.queryByText('REPLACE BATCH')).toBeNull();
+  });
+});
+
+describe('UploadPage studio — 3D stereo posts', () => {
+  it('auto-detects a side-by-side video and shares it as-is as 3D', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'sbs' }, rel_path: 'uploads/sbs.mp4', media_url: '/m' });
+    renderPage();
+    await pick(['sbs.mp4']);
+    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    const toggle = screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/);
+    expect(toggle).toBeChecked();
+    // Left eye on the stage, no outpaint bands, no extender settings, no quote.
+    expect(screen.getByText('LEFT EYE · 2D VIEW (1920×1920)')).toBeInTheDocument();
+    expect(screen.getByText('EYE: 1920×1920 ×2')).toBeInTheDocument();
+    expect(view.container.querySelectorAll('.sx-studio-zone')).toHaveLength(0);
+    expect(screen.queryByText('1:1 REQUIRED — EXTEND TO CONTINUE')).toBeNull();
+    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
+    expect(screen.getByText('3D SIDE-BY-SIDE · AS-IS · NO EXTEND')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', stage_id: 'st-sbs.mp4', stereo_layout: 'sbs' });
+    expect(mocks.post.mock.calls[0][1].job_id).toBeUndefined();
+    expect(mocks.quote).not.toHaveBeenCalled();
+    expect(mocks.estimate).not.toHaveBeenCalled();
+  });
+
+  it('labels a detected top-bottom image and sends its layout', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'tb' }, rel_path: 'uploads/tb.png', media_url: '/m' });
+    renderPage();
+    await pick(['tb.png']);
+    expect(await screen.findByText('3D TOP-BOTTOM DETECTED')).toBeInTheDocument();
+    expect(screen.getByText("Detected from the file's stereo metadata.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · TOP-BOTTOM/)).toBeChecked();
+    expect(screen.getByAltText('tb.png (left eye)')).toHaveClass('sx-stereo-tb');
+    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', stereo_layout: 'tb' });
+  });
+
+  it('keeps an undetected 2:1 frame on the extend path until 3D is switched on', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'screen21' }, rel_path: 'uploads/s.mp4', media_url: '/m' });
+    renderPage();
+    await pick(['screen21.mp4']);
+    expect(await screen.findByText('2:1 FRAME — IS THIS 3D SIDE-BY-SIDE?')).toBeInTheDocument();
+    const toggle = screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/);
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('1:1 REQUIRED — EXTEND TO CONTINUE')).toBeInTheDocument();
+    expect(screen.getByText('CORE ENGINE & PROMPT')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
+    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ stage_id: 'st-screen21.mp4', stereo_layout: 'sbs' });
+
+    // Switching it back off returns to the extender.
+    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    expect(screen.getByText('CORE ENGINE & PROMPT')).toBeInTheDocument();
+  });
+
+  it('offers no 3D choice for ordinary aspect ratios', async () => {
+    renderPage();
+    await pick(['wide.png']);
+    await screen.findByText('1:1 REQUIRED — EXTEND TO CONTINUE');
+    expect(screen.queryByLabelText(/STEREOSCOPIC 3D/)).toBeNull();
+  });
+
+  it('publishes a 3D slideshow only when every image shares the layout', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'eyes1' }, rel_path: 'uploads/e.png', media_url: '/m' });
+    renderPage();
+    await pick(['eyes1.png', 'eyes2.png']);
+    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    // Strip thumbnails show the left eye, not the seam between both eyes.
+    expect(screen.getByAltText('eyes2.png')).toHaveClass('sx-stereo-crop-sbs');
+    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    expect(screen.getByAltText('eyes2.png')).not.toHaveClass('sx-stereo-crop-sbs');
+    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({
+      stage_id: 'st-eyes1.png', extra_stage_ids: ['st-eyes2.png'], stereo_layout: 'sbs',
+    });
+    cleanup();
+    vi.clearAllMocks();
+    mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
+    renderPage();
+    await pick(['eyes1.png', 'a.png']);
+    await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
+    expect(screen.queryByLabelText(/STEREOSCOPIC 3D/)).toBeNull();
+  });
+
+  it('does not carry a 3D choice across slideshow edits', async () => {
+    renderPage();
+    // Mixed set: no 3D switch. Removing the mono image leaves one detected
+    // SBS file, which starts from its own detection.
+    await pick(['eyes1.png', 'a.png']);
+    await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
+    cleanup();
+    vi.clearAllMocks();
+    mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
+    // The user turned 3D off for the set: it stays off after a removal.
+    renderPage();
+    await pick(['eyes1.png', 'eyes2.png']);
+    fireEvent.click(await screen.findByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove eyes2.png' }));
+    await waitFor(() => expect(screen.queryByAltText('eyes2.png')).toBeNull());
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
   });
 });

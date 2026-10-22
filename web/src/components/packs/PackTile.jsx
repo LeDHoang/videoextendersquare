@@ -4,6 +4,7 @@ import { api } from '../../api/client.js';
 import { clientId } from '../../hooks/MessagingContext.jsx';
 import { formatCompactCount, locationKey } from '../explore/ExploreTile.jsx';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
+import { stereoCropClass } from '../../utils/mediaFormat.js';
 
 export function packCoverMembers(pack) {
   return (pack?.cover_items || []).map((entry) => entry?.post || entry).filter(Boolean);
@@ -33,7 +34,10 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
 
   const members = packCoverMembers(pack);
   const clips = members.map(clipFor).filter(Boolean);
-  const poster = posterFor(members[0]) || pack?.cover_url || '';
+  // The cover image comes from the first member that has one; the pack's own
+  // cover_url (no member) is never cropped.
+  const coverMember = members.find((member) => posterFor(member));
+  const poster = posterFor(coverMember) || pack?.cover_url || '';
   const reducedMotion = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -91,6 +95,9 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
   }, [visible, armed, clipIndex, clips.length, failed, reducedMotion]);
 
   const activeClip = clips.length ? clips[clipIndex % clips.length] : '';
+  const activeMember = members.find((member) => clipFor(member) === activeClip);
+  const posterClass = ['sx-explore-poster', stereoCropClass(coverMember)].filter(Boolean).join(' ');
+  const clipClass = ['sx-explore-video', stereoCropClass(activeMember)].filter(Boolean).join(' ');
   useEffect(() => {
     const vid = videoRef.current;
     if (!vid || !activeClip) return;
@@ -132,7 +139,7 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
       {poster ? (
         <img
           src={poster}
-          className="sx-explore-poster"
+          className={posterClass}
           alt=""
           loading="lazy"
           draggable="false"
@@ -143,7 +150,7 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
       {activeClip && !failed ? (
         <video
           ref={videoRef}
-          className="sx-explore-video"
+          className={clipClass}
           src={activeClip}
           muted
           loop

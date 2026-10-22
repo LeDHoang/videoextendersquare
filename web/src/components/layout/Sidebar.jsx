@@ -3,6 +3,8 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
 import { Field } from '../ui/controls.jsx';
+import { hideDevTools } from '../../utils/devTools.js';
+import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import {
   IndustrialImageIcon,
   IndustrialVideoIcon,
@@ -33,6 +35,7 @@ const MODEL_FIELDS = [
 ];
 
 export default function Sidebar({ health, config, setModels, isOpen, onClose }) {
+  const showDevTools = !hideDevTools();
   const { user } = useAuth();
   const { wallet, falKey } = useWallet();
   const [modelDraft, setModelDraft] = useState({});
@@ -150,7 +153,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
         ) : null}
         <Link to="/reels" className="sx-sidebar-brand-block" onClick={() => onClose?.()} title="ECHO Home" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <div className="sx-sidebar-hero-row">
-            <img src="/logo.svg" alt="ECHO Logo" className="sx-sidebar-hero-logo" />
+            <AnimatedEchoLogo className="sx-sidebar-hero-logo" title="ECHO Logo" />
             <h2 className="sx-sidebar-hero-title">ECHO</h2>
           </div>
           <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div>
@@ -180,7 +183,10 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       <div className="sx-sidebar-card sx-sidebar-billing-card">
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">
-            <span style={{ color: 'var(--sx-accent)' }}>⚡</span> ECHO CREDITS & KEY
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: 'var(--sx-accent)', verticalAlign: '-2px', marginRight: 6 }}>
+              <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+            </svg>
+            ECHO CREDITS & KEY
           </span>
           <div className="sx-sidebar-status-pill">
             <span
@@ -263,6 +269,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       </div>
 
       {/* ─── System Probes Module ───────────────────────────── */}
+      {showDevTools ? (
       <div className="sx-sidebar-card">
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">LIVE STATUS / ENG PROBES</span>
@@ -342,6 +349,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </details>
         ) : null}
       </div>
+      ) : null}
 
       {/* ─── Model Endpoints Customizer ─────────────────────── */}
       {user?.role === 'admin' ? (
@@ -407,6 +415,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       ) : null}
 
       {/* ─── Telemetry Bottom Bar ───────────────────────────── */}
+      {showDevTools ? (
       <div className="sx-sidebar-telemetry-bottom">
         <div className="sx-telemetry-col">
           <span className="sx-telemetry-key">PROBES_OK</span>
@@ -421,6 +430,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </span>
         </div>
       </div>
+      ) : null}
     </aside>
   );
 }

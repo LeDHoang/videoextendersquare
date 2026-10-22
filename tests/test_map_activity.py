@@ -120,6 +120,12 @@ class BboxTests(unittest.TestCase):
 
 class ClusterTests(unittest.TestCase):
     def setUp(self):
+        # These fixtures model local, unpublished files: the database answers
+        # "no published post" so the persisted META fallback applies. (A
+        # failed lookup raises a 503 instead; see test_reels_metadata_failures.)
+        self.lookup_patch = patch.object(reels, "metadata_for_paths", return_value={})
+        self.lookup_patch.start()
+        self.addCleanup(self.lookup_patch.stop)
         self.meta_patch = patch.object(reels, "_load_meta_raw", return_value=META)
         self.meta_patch.start()
         self.addCleanup(self.meta_patch.stop)

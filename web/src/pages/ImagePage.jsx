@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, Mono } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, imageBillingParameters, stagedItemNeedsCloud } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
+import { assertUploadSize } from '../utils/uploadLimits.js';
 
 const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
 const ENGINES = ['FAST', 'FAL AI'];
@@ -140,10 +141,11 @@ export default function ImagePage() {
     const staged = [];
     for (const f of files) {
       try {
+        assertUploadSize(f, 'image', cfg?.config);
         const meta = await api.upload('/api/image/upload', f);
         staged.push({ name: f.name, file: f, ...meta });
       } catch (e) {
-        setError(`Could not read image ${f.name}: ${e.message}`);
+        setError(`Could not read image ${f.name}: ${billingErrorMessage(e)}`);
       }
     }
     setItems(staged);
@@ -359,10 +361,7 @@ export default function ImagePage() {
           ))}
           {hasJobs ? (
             <>
-              <ResultHeader title="03 / RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
-              <Mono>
-                {jobs.map((j) => `/api/image/jobs/${j.jobId}/result`).join('\n')}
-              </Mono>
+              <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
             </>
           ) : null}
         </Section>

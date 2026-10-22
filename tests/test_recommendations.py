@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from datetime import timedelta
@@ -12,8 +13,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import joinedload, sessionmaker
 
+from verified_signup import register_verified
 from server.routers import reels, social
-from server.social import auth
+from server.social import auth, database, safety
 from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
@@ -36,23 +38,38 @@ from server.social.models import (
 
 
 PASSWORD = "correct-horse-battery"
+# Set to a throwaway PostgreSQL database (tables are dropped and recreated per
+# test) to run the tests parametrized with the "postgres" dialect.
+POSTGRES_URL = os.environ.get("SX_TEST_POSTGRES_URL", "")
+BOTH_DIALECTS = pytest.mark.parametrize("app", ["sqlite", "postgres"], indirect=True)
 # The `app` fixture swaps in a stub payload builder; keep the real one for wire-format tests.
 _REAL_BUILD_PAYLOAD = reels._build_payload
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(request, tmp_path, monkeypatch):
+    # SQLite unless a test opts in with BOTH_DIALECTS (indirect parametrization).
+    dialect = getattr(request, "param", "sqlite")
     monkeypatch.setattr(
         auth,
         "PASSWORD_HASHER",
         PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1),
     )
-    test_engine = create_engine(
-        "sqlite:///" + str(tmp_path / "recommendations.db"),
-        connect_args={"check_same_thread": False},
-    )
+    if dialect == "postgres":
+        if not POSTGRES_URL:
+            pytest.skip("set SX_TEST_POSTGRES_URL to run on PostgreSQL")
+        test_engine = create_engine(POSTGRES_URL)
+        Base.metadata.drop_all(test_engine)
+    else:
+        test_engine = create_engine(
+            "sqlite:///" + str(tmp_path / "recommendations.db"),
+            connect_args={"check_same_thread": False},
+        )
     testing_session = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(test_engine)
+    # Helpers that open their own session must hit the test database too.
+    monkeypatch.setattr(database, "SessionLocal", testing_session)
+    monkeypatch.setattr(safety, "SessionLocal", testing_session)
 
     application = FastAPI()
     application.include_router(social.router)
@@ -69,10 +86,10 @@ def app(tmp_path, monkeypatch):
     application.state.testing_session = testing_session
     application.state.scan_rows = []
 
-    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", lambda _viewer_id: set())
-    monkeypatch.setattr(reels, "_scan_cached", lambda: list(application.state.scan_rows))
+    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", lambda _viewer_id, db=None: set())
+    monkeypatch.setattr(reels, "_scan_cached", lambda db=None: list(application.state.scan_rows))
 
-    def payload(items, _codec, tunnel="", viewer_id=None):
+    def payload(items, _codec, tunnel="", viewer_id=None, db=None):
         paths = [item["rel_path"] for item in items]
         with testing_session() as db:
             posts = (
@@ -122,12 +139,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client: TestClient, username: str) -> dict:
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username.title(),
         },
     )
@@ -494,6 +511,7 @@ def test_materialized_creator_page_reapplies_hard_exclusions(app):
         }
 
 
+@BOTH_DIALECTS
 def test_concurrent_page_materialization_replays_winner(app):
     """Same unmaterialized cursor from N threads: all succeed, identical page."""
     from server.social.recommendations import actor_identity, get_reel_page
@@ -540,12 +558,14 @@ def test_concurrent_page_materialization_replays_winner(app):
     assert all(page_ids == results[0] for page_ids in results)
 
 
+@BOTH_DIALECTS
 def test_concurrent_affinity_upsert_dedupes(app):
     """Simultaneous view+like style writers create exactly one affinity row."""
     from server.social.models import ActorCreatorAffinity
     from server.social.recommendations.events import get_or_create
 
-    seed_catalog(app, creators=2, posts_per_creator=1)
+    # A real creator: PostgreSQL enforces the creator_id foreign key (SQLite does not).
+    creator_id = seed_catalog(app, creators=2, posts_per_creator=1)[0].owner_id
     errors = []
 
     def worker():
@@ -555,9 +575,9 @@ def test_concurrent_affinity_upsert_dedupes(app):
                 db,
                 ActorCreatorAffinity,
                 ActorCreatorAffinity.actor_key == "u:race-affinity",
-                ActorCreatorAffinity.creator_id == "creator-race",
+                ActorCreatorAffinity.creator_id == creator_id,
                 actor_key="u:race-affinity",
-                creator_id="creator-race",
+                creator_id=creator_id,
             )
             row.score = float(row.score or 0.0) + 1.0
             db.commit()
@@ -577,7 +597,7 @@ def test_concurrent_affinity_upsert_dedupes(app):
             db.query(ActorCreatorAffinity)
             .filter(
                 ActorCreatorAffinity.actor_key == "u:race-affinity",
-                ActorCreatorAffinity.creator_id == "creator-race",
+                ActorCreatorAffinity.creator_id == creator_id,
             )
             .count()
         )

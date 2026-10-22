@@ -82,6 +82,12 @@ function makeMockGl(counters = {}) {
           counters.textureSources.push(args.at(-1));
         };
       }
+      if (prop === 'texSubImage2D') {
+        return (...args) => {
+          counters.subImageSources ||= [];
+          counters.subImageSources.push(args.at(-1));
+        };
+      }
       if (prop === 'deleteBuffer' || prop === 'deleteTexture' || prop === 'deleteProgram') {
         return () => { counters.deleted = (counters.deleted || 0) + 1; };
       }
@@ -164,7 +170,7 @@ function loadRenderer(options = {}) {
     self: window,
     document: mockDocument,
     navigator: { userAgent: 'NodeTest' },
-    console: { log() {}, warn() {}, error() {} },
+    console: options.console || { log() {}, warn() {}, error() {} },
     performance: { now: options.now || (() => 0) },
     fetch: options.fetch || (async () => ({ ok: true, json: async () => ({ locations: [] }) })),
     AbortController,
@@ -179,6 +185,7 @@ function loadRenderer(options = {}) {
     Uint16Array,
     Uint32Array,
     Math,
+    ...(options.globals || {}),
   });
   vm.runInContext(threeSource, context, { filename: 'three.min.js' });
   vm.runInContext(uiCanvasSource, context, { filename: 'vr_ui_canvas.js' });
@@ -405,49 +412,64 @@ test('Reels frames skip Earth draws and Earth frames pause video texture uploads
   renderer.stopPreview();
 });
 
-test('hovering a heat zone loads at most three cancellable location reel previews', async () => {
+// Preview requests that settle or abort on demand (the host's fetch rejects
+// with an AbortError when its signal fires).
+function deferredPreviews() {
+  const requests = [];
+  const onPreviewLocation = (location, options) => new Promise((resolve, reject) => {
+    const signal = options && options.signal;
+    requests.push({ slug: location.slug, signal, resolve, reject });
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        const error = new Error('The operation was aborted.');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    }
+  });
+  return { requests, onPreviewLocation };
+}
+
+const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
+test('hovering a heat zone loads at most three location reel previews; only a different zone cancels a pending one', async () => {
   const gl = makeMockGl({ deleted: 0 });
-  let requestedLocation = null;
-  let requestedSignal = null;
-  let firstResolve = null;
-  let requestCount = 0;
   const previewRows = [
     { url: '/media/one.mp4', title: 'One' },
     { url: '/media/two.mp4', title: 'Two' },
     { url: '/media/three.mp4', title: 'Three' },
     { url: '/media/four.mp4', title: 'Four' },
   ];
+  const { requests, onPreviewLocation } = deferredPreviews();
   const renderer = loadRenderer({ gl });
-  renderer.init(null, {
-    onPreviewLocation: async (location, options) => {
-      requestCount += 1;
-      requestedLocation = location.slug;
-      requestedSignal = options.signal;
-      if (requestCount === 1) return new Promise((resolve) => { firstResolve = resolve; });
-      return previewRows;
-    },
-  });
+  renderer.init(null, { onPreviewLocation });
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.setSceneMode('earth');
-  await new Promise((resolve) => setImmediate(resolve));
+  await flushPromises();
   renderer.__test.setLocationActivity([
     { slug: 'tokyo-japan', name: 'Tokyo, Japan', lat: 35.67, lon: 139.65, heat: 0.9 },
+    { slug: 'paris-france', name: 'Paris, France', lat: 48.85, lon: 2.35, heat: 0.8 },
   ]);
 
   const stalePreview = renderer.__test.loadEarthPreviewNow(0);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(requestedSignal);
-  renderer.__test.setEarthHoveredIndex(-1);
-  assert.equal(requestedSignal.aborted, true);
-  firstResolve(previewRows);
+  assert.equal(requests.length, 1, 'hover + explicit load share one request');
+  assert.equal(requests[0].slug, 'tokyo-japan');
+  // Moving to another zone abandons Tokyo; its abort is not an error.
+  const preview = renderer.__test.loadEarthPreviewNow(1);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].signal.aborted, true);
+  assert.equal(requests[1].slug, 'paris-france');
   await stalePreview;
-  assert.equal(renderer.__test.getEarthState().previewItemCount, 0);
-
-  await renderer.__test.loadEarthPreviewNow(0);
   let state = renderer.__test.getEarthState();
-  assert.equal(requestedLocation, 'tokyo-japan');
-  assert.equal(state.previewLocationIndex, 0);
+  assert.equal(state.previewStatus, 'loading');
+  assert.equal(state.previewItemCount, 0);
+
+  requests[1].resolve(previewRows);
+  await preview;
+  state = renderer.__test.getEarthState();
+  assert.equal(state.previewLocationIndex, 1);
   assert.equal(state.previewItemCount, 3);
+  assert.equal(state.previewStatus, 'ready');
   renderer.__runScheduledFrame(48);
   state = renderer.__test.getEarthState();
   assert.ok(state.renderStats.earthPreviewUploads > 0);
@@ -456,6 +478,246 @@ test('hovering a heat zone loads at most three cancellable location reel preview
   state = renderer.__test.getEarthState();
   assert.equal(state.previewLocationIndex, -1);
   assert.equal(state.previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+test('hover preview flip-flop A → -1 → A within the TTL sends one request', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity([{ slug: 'hanoi-vietnam', name: 'Hanoi, Vietnam', lat: 21.03, lon: 105.85, heat: 0.9 }]);
+  const rows = [{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }];
+  const rest = (i) => { api.setEarthHoveredIndex(i); clock += 250; api.tickEarthPreviewDwell(); };
+
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 0, 'an uncached zone waits out the dwell');
+  rest(0);
+  assert.equal(requests.length, 1);
+  // Leaving keeps the request alive (the server finishes it regardless).
+  api.setEarthHoveredIndex(-1);
+  assert.equal(requests[0].signal.aborted, false);
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  // Re-hovering while it is still loading shares it.
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1);
+  assert.equal(api.getEarthState().previewStatus, 'loading');
+  api.setEarthHoveredIndex(-1);
+  // The late result fills the cache but stays off the closed card.
+  requests[0].resolve(rows);
+  await flushPromises();
+  let state = api.getEarthState();
+  assert.equal(state.previewItemCount, 0);
+  assert.equal(state.previewStatus, 'idle');
+  // A fresh hit applies synchronously, without a request.
+  clock += 29000;
+  api.setEarthHoveredIndex(0);
+  state = api.getEarthState();
+  assert.equal(requests.length, 1);
+  assert.equal(state.previewItemCount, 2);
+  assert.equal(state.previewStatus, 'ready');
+  for (let i = 0; i < 20; i++) {
+    api.setEarthHoveredIndex(-1);
+    api.setEarthHoveredIndex(0);
+  }
+  assert.equal(requests.length, 1, 'zone-edge jitter never refetches');
+  // Past the TTL the next hover refreshes.
+  clock += 31000;
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1, 'a stale entry waits out the dwell too');
+  rest(0);
+  assert.equal(requests.length, 2);
+  renderer.stopPreview();
+});
+
+test('hover preview cache is LRU-capped and briefly holds failures', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  const rows = Array.from({ length: 40 }, (_, i) => ({ slug: `zone-${i}`, name: `Zone ${i}`, lat: (i % 9) * 10 - 40, lon: i * 9 - 180, heat: 0.5 }));
+  api.setLocationActivity(rows);
+  const rest = (i) => { api.setEarthHoveredIndex(i); clock += 250; api.tickEarthPreviewDwell(); };
+  for (let i = 0; i < 34; i++) {
+    rest(i);
+    requests[i].resolve([{ url: `/media/${i}.mp4` }]);
+    await flushPromises();
+  }
+  assert.equal(requests.length, 34);
+  api.setEarthHoveredIndex(33);
+  api.setEarthHoveredIndex(2);
+  assert.equal(requests.length, 34, 'recent entries stay cached');
+  rest(0);
+  assert.equal(requests.length, 35, 'oldest entries were evicted');
+
+  // A failure is shown, then held so a flip-flop does not retry it.
+  rest(36);
+  requests[35].reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+  await flushPromises();
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(36);
+  assert.equal(requests.length, 36);
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  clock += 6000;
+  api.setEarthHoveredIndex(-1);
+  rest(36);
+  assert.equal(requests.length, 37, 'retried after the hold');
+  renderer.stopPreview();
+});
+
+test('an aborted hover preview after leaving a zone never reports an error', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity([
+    { slug: 'sydney-australia', name: 'Sydney, Australia', lat: -33.87, lon: 151.21, heat: 0.9 },
+    { slug: 'nyc-us', name: 'New York, US', lat: 40.71, lon: -74.0, heat: 0.9 },
+  ]);
+  // The host aborts the request after the ray left the zone.
+  const pending = api.loadEarthPreviewNow(0);
+  api.setEarthHoveredIndex(-1);
+  const abort = new Error('The operation was aborted.');
+  abort.name = 'AbortError';
+  requests[0].reject(abort);
+  await pending;
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  // Aborted requests are not cached: the next hover asks again (after the dwell).
+  api.setEarthHoveredIndex(0);
+  clock += 250;
+  api.tickEarthPreviewDwell();
+  assert.equal(requests.length, 2);
+  // An abort for the zone still under the ray settles to idle, not error.
+  const current = api.loadEarthPreviewNow(1);
+  await flushPromises();
+  assert.equal(requests[1].signal.aborted, true, 'superseded by the other zone');
+  requests[2].reject(abort);
+  await current;
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+// Hover dwell: an uncached zone must be rested on for ~200 ms before its
+// first request, so a fast sweep across many zones sends none (the server
+// keeps working on a sync handler even after the client aborts).
+async function previewDwellHarness() {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  const { requests, onPreviewLocation } = deferredPreviews();
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, { onPreviewLocation });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  await flushPromises();
+  const api = renderer.__test;
+  api.setLocationActivity(Array.from({ length: 6 }, (_, i) => ({
+    slug: `zone-${i}`, name: `Zone ${i}`, lat: i * 10 - 25, lon: i * 20 - 50, heat: 0.7,
+  })));
+  // Hold the current hover for `ms`, with a frame tick every 20 ms.
+  const hold = (ms) => {
+    for (let t = 0; t < ms; t += 20) { clock += 20; api.tickEarthPreviewDwell(); }
+  };
+  return { renderer, api, requests, hold, advance: (ms) => { clock += ms; } };
+}
+
+test('a sweep across zones, each shorter than the dwell, sends no request', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  for (let i = 0; i < 5; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(160);
+    assert.equal(api.getEarthState().previewStatus, 'loading', `zone ${i} shows the card loading`);
+  }
+  api.setEarthHoveredIndex(-1);
+  hold(400);
+  assert.equal(requests.length, 0, 'five zones swept, zero requests');
+  assert.equal(api.getEarthState().previewStatus, 'idle');
+  renderer.stopPreview();
+});
+
+test('resting past the dwell on the last swept zone sends exactly one request', async () => {
+  const { renderer, api, requests, hold, advance } = await previewDwellHarness();
+  for (let i = 0; i < 4; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(120);
+  }
+  api.setEarthHoveredIndex(4);
+  hold(180);
+  assert.equal(requests.length, 0, 'still inside the dwell');
+  advance(20);
+  renderer.__runScheduledFrame(48); // the render-loop frame is a tick too
+  assert.equal(requests.length, 1, 'dwell reached');
+  assert.equal(requests[0].slug, 'zone-4', 'only the zone rested on is requested');
+  hold(2000);
+  assert.equal(requests.length, 1, 'holding still never refetches');
+  requests[0].resolve([{ url: '/media/one.mp4', title: 'One' }]);
+  await flushPromises();
+  const state = api.getEarthState();
+  assert.equal(state.previewStatus, 'ready');
+  assert.equal(state.previewLocationIndex, 4);
+  assert.equal(state.previewItemCount, 1);
+  renderer.stopPreview();
+});
+
+test('a cached or in-flight zone shows immediately, with no dwell and no new request', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  api.setEarthHoveredIndex(0);
+  hold(220);
+  assert.equal(requests.length, 1);
+  // Moving on before it settles shares it again with no wait.
+  api.setEarthHoveredIndex(1);
+  hold(60);
+  api.setEarthHoveredIndex(0);
+  assert.equal(requests.length, 1, 'in-flight request is shared at once');
+  assert.equal(api.getEarthState().previewStatus, 'loading');
+  requests[0].resolve([{ url: '/media/one.mp4', title: 'One' }, { url: '/media/two.mp4', title: 'Two' }]);
+  await flushPromises();
+  assert.equal(api.getEarthState().previewItemCount, 2);
+  // Sweep away across uncached zones, then come back inside the TTL.
+  for (let i = 1; i < 5; i++) {
+    api.setEarthHoveredIndex(i);
+    hold(100);
+  }
+  api.setEarthHoveredIndex(0);
+  const state = api.getEarthState();
+  assert.equal(state.previewStatus, 'ready', 'applied synchronously on landing');
+  assert.equal(state.previewItemCount, 2);
+  assert.equal(requests.length, 1, 'cache hit: no request, no dwell');
+  renderer.stopPreview();
+});
+
+test('a held failure shows at once and a ray that leaves mid-dwell cancels the fetch', async () => {
+  const { renderer, api, requests, hold } = await previewDwellHarness();
+  api.setEarthHoveredIndex(2);
+  hold(220);
+  requests[0].reject(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+  await flushPromises();
+  assert.equal(api.getEarthState().previewStatus, 'error');
+  api.setEarthHoveredIndex(-1);
+  api.setEarthHoveredIndex(2);
+  assert.equal(api.getEarthState().previewStatus, 'error', 'failure hold applies without a dwell');
+  assert.equal(requests.length, 1);
+  api.setEarthHoveredIndex(3);
+  hold(180);
+  api.setEarthHoveredIndex(-1);
+  hold(600);
+  assert.equal(requests.length, 1, 'leaving inside the dwell never fetches');
   renderer.stopPreview();
 });
 
@@ -1101,6 +1363,82 @@ test('selecting a zone with reels switches to the location playlist', async () =
   renderer.stopPreview();
 });
 
+test('the Earth control restores all locations while a location feed is active', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const calls = [];
+  let feedActive = true;
+  renderer.init(null, {
+    isLocationFeedActive: () => feedActive,
+    onRestoreAllLocations: () => { calls.push('restore'); feedActive = false; return Promise.resolve(true); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['restore']);
+  // Restoring does not open the globe; the feed is whole again.
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  // Feed no longer filtered: the same control now opens Earth.
+  renderer.__test.executeControl('earth');
+  assert.equal(renderer.getPreviewState().sceneMode, 'earth');
+  assert.deepEqual(calls, ['restore']);
+  renderer.stopPreview();
+});
+
+test('with a location feed active, Earth mode itself still closes back to reels', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const calls = [];
+  renderer.init(null, {
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { calls.push('restore'); return Promise.resolve(true); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  renderer.__test.executeControl('earth');
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  assert.deepEqual(calls, []);
+  renderer.stopPreview();
+});
+
+test('a failing all-locations restore is contained and keeps the control usable', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const errors = [];
+  const renderer = loadRenderer({
+    gl,
+    console: { log() {}, warn() {}, error: (...args) => errors.push(args.map(String).join(' ')) },
+  });
+  let attempts = 0;
+  renderer.init(null, {
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { attempts += 1; throw new Error('feed offline'); },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__test.executeControl('earth');
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /All locations restore failed/);
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels');
+  renderer.stopPreview();
+});
+
+test('pack mode keeps the Earth control on the queue even if a location feed is flagged', async () => {
+  const calls = [];
+  const renderer = loadRenderer();
+  renderer.init(null, {
+    isPackMode: () => true,
+    isLocationFeedActive: () => true,
+    onRestoreAllLocations: () => { calls.push('restore'); },
+    onTogglePackQueue: () => calls.push('queue'),
+  });
+  renderer.__test.executeControl('earth');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['queue']);
+});
+
 test('selecting a zone without reels stays on the globe', async () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -1534,6 +1872,131 @@ test('xrCompatible outcome is recorded for diagnostics', async () => {
   assert.equal(renderer.getPreviewState().xrCompat, compat);
 });
 
+// A session the real three.js XR manager accepts. Like a real runtime,
+// end() never fires 'end' synchronously: tests fire it via session.fire('end').
+function makeLiveXrSession(extra = {}) {
+  const listeners = {};
+  const session = {
+    ended: 0,
+    renderState: {},
+    inputSources: [],
+    environmentBlendMode: 'opaque',
+    enabledFeatures: [],
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter((f) => f !== fn); },
+    fire(type) { (listeners[type] || []).slice().forEach((fn) => fn({ type })); },
+    updateRenderState() {},
+    requestReferenceSpace: async () => ({}),
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame() {},
+    end() { this.ended += 1; return Promise.resolve(); },
+    ...extra,
+  };
+  return session;
+}
+
+async function enterLiveSession(options = {}, sessionExtra = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const log = [];
+  const classes = { add: (c) => log.push('class+' + c), remove: (c) => log.push('class-' + c) };
+  const renderer = loadRenderer({
+    gl,
+    globals: { XRWebGLLayer: class { constructor() { this.framebuffer = null; } } },
+    ...options,
+  });
+  renderer.init(null, { onExitVR: () => log.push('onExitVR'), onVRError: (r) => log.push('error ' + r) });
+  const session = makeLiveXrSession(sessionExtra);
+  await renderer.enterVR({ xr: { requestSession: async () => session } });
+  return { renderer, session, log, classes };
+}
+
+test('exitVR resolves immediately when no session is active', async () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
+  renderer.init(null, {});
+  const result = renderer.exitVR();
+  assert.ok(result && typeof result.then === 'function', 'always returns a promise');
+  await result;
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('await exitVR() resolves only after the session end handler ran', async () => {
+  const { renderer, session, log } = await enterLiveSession();
+  assert.equal(renderer.isPresenting(), true, 'precondition: live session bound');
+  assert.deepEqual(log.filter((e) => e.startsWith('error')), []);
+
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; log.push('exitVR resolved'); });
+  assert.equal(session.ended, 1, 'session.end() requested once');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(settled, false, 'end() returning is not enough: waits for the end event');
+  assert.equal(log.includes('onExitVR'), false);
+
+  session.fire('end');
+  await exiting;
+  assert.ok(log.indexOf('onExitVR') !== -1 && log.indexOf('onExitVR') < log.indexOf('exitVR resolved'),
+    'onExitVR (3D → mono source swap) runs before the awaiter continues: ' + log.join(', '));
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('exitVR waits for the end event even when it fires after end() resolved', async () => {
+  const { renderer, session, log } = await enterLiveSession();
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; });
+  await session.end(); // a runtime resolving end() ahead of the event
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(settled, false);
+  session.fire('end');
+  await exiting;
+  assert.equal(settled, true);
+  assert.equal(log.filter((e) => e === 'onExitVR').length, 1);
+});
+
+test('concurrent exitVR calls share one end request and one wait', async () => {
+  const { renderer, session } = await enterLiveSession();
+  const first = renderer.exitVR();
+  const second = renderer.exitVR();
+  assert.equal(session.ended, 1, 'end() not issued twice');
+  session.fire('end');
+  await Promise.all([first, second]);
+  // After the session is gone a fresh call is a no-op that resolves at once.
+  await renderer.exitVR();
+  assert.equal(session.ended, 1);
+});
+
+test('exitVR resolves when end() throws (session already ended)', async () => {
+  const { renderer } = await enterLiveSession({}, { end() { throw new Error('InvalidStateError'); } });
+  await renderer.exitVR();
+  assert.equal(renderer.isPresenting(), false);
+});
+
+test('exitVR resolves when end() rejects', async () => {
+  const { renderer } = await enterLiveSession({}, { end() { return Promise.reject(new Error('already ended')); } });
+  await renderer.exitVR();
+});
+
+test('exitVR times out if the runtime never fires end, and a later session exits normally', async () => {
+  const timers = [];
+  const { renderer, session } = await enterLiveSession({
+    globals: {
+      XRWebGLLayer: class { constructor() { this.framebuffer = null; } },
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeout: () => {},
+    },
+  });
+  let settled = false;
+  const exiting = renderer.exitVR().then(() => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  const guard = timers.find((t) => t.ms >= 1000 && t.ms <= 5000);
+  assert.ok(guard, 'a bounded fallback timer guards a missing end event');
+  guard.fn();
+  await exiting;
+  assert.equal(settled, true);
+  assert.equal(session.ended, 1);
+  // Stale pending state must not leak into the next exit.
+  await renderer.exitVR();
+});
+
 test('reels.html localhost gate attempts instead of blocking', () => {  const html = readFileSync(new URL('../../ui/assets/reels.html', import.meta.url), 'utf8');
   assert.ok(html.includes('TRYING EMULATED SESSION'), 'emulator attempt flash present');
   assert.ok(html.includes('forceXR=1'), '?forceXR=1 override present');
@@ -1883,6 +2346,23 @@ test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   const free = makeRecordingCtx();
   ui.renderControlsCanvas(free.ctx, dockRenderOptions({ lockToViewer: false }));
   assert.ok(firstToken(free.texts, 'FREE'), `has FREE label: ${free.texts.join('|')}`);
+});
+
+test('dock Earth button reads ALL LOCATIONS while a location feed is active', () => {
+  const ui = loadUICanvasStandalone();
+  const plain = makeRecordingCtx();
+  ui.renderControlsCanvas(plain.ctx, dockRenderOptions());
+  assert.ok(plain.texts.some((t) => t.split(' ')[0] === 'EARTH'), `has EARTH MAP: ${plain.texts.join('|')}`);
+  assert.ok(!plain.texts.some((t) => t.startsWith('ALL LOCATIONS')));
+  const filtered = makeRecordingCtx();
+  ui.renderControlsCanvas(filtered.ctx, dockRenderOptions({ locationFeedActive: true }));
+  assert.ok(filtered.texts.some((t) => t.startsWith('ALL LOCATIONS')), `has ALL LOCATIONS: ${filtered.texts.join('|')}`);
+  assert.ok(!filtered.texts.some((t) => t.startsWith('EARTH MAP')));
+  // Pack mode keeps its QUEUE label whatever the flag says.
+  const pack = makeRecordingCtx();
+  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true, locationFeedActive: true }));
+  assert.ok(pack.texts.some((t) => t.startsWith('QUEUE')));
+  assert.ok(!pack.texts.some((t) => t.startsWith('ALL LOCATIONS')));
 });
 
 test('guide panel renders the controller artwork without errors', () => {
@@ -3237,7 +3717,8 @@ test('hover choke point resolves zones and fires previews on any ray', async () 
   // paths now share updateEarthHoverFromRay.
   const gl = makeMockGl({ deleted: 0 });
   let requestedLocation = null;
-  const renderer = loadRenderer({ gl });
+  let clock = 1000;
+  const renderer = loadRenderer({ gl, now: () => clock });
   renderer.init(null, {
     onPreviewLocation: async (location) => {
       requestedLocation = location.slug;
@@ -3263,6 +3744,11 @@ test('hover choke point resolves zones and fires previews on any ray', async () 
   const surf = { x: st.liveCenter.x + n.x * R, y: st.liveCenter.y + n.y * R, z: st.liveCenter.z + n.z * R };
   const origin = { x: surf.x + n.x * 2, y: surf.y + n.y * 2, z: surf.z + n.z * 2 };
   const ray = { x: -n.x, y: -n.y, z: -n.z };
+  assert.equal(api.updateEarthHoverFromRay(origin, ray), 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requestedLocation, null, 'the first fetch waits out the dwell');
+  // The same per-frame hover call fires it once the ray has rested.
+  clock += 250;
   assert.equal(api.updateEarthHoverFromRay(origin, ray), 0);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(requestedLocation, 'zone-a');
@@ -4329,10 +4815,12 @@ test('hovering a heat zone autoplays the first reel muted once the hover settles
   const { renderer, api, videos, setClock } = previewAutoplayHarness();
   setClock(0);
   api.setEarthHoveredIndex(0);
-  await new Promise((r) => setTimeout(r, 10)); // preview items resolve
   setClock(100);
   renderer.__runScheduledFrame(1000);
   assert.equal(videos.length, 0, 'a sweeping laser never spins up a decoder (350 ms settle)');
+  setClock(250);
+  renderer.__runScheduledFrame(1500); // dwell passed: the frame sends the fetch
+  await new Promise((r) => setTimeout(r, 10)); // preview items resolve
   setClock(500);
   renderer.__runScheduledFrame(2000);
   assert.equal(videos.length, 1, 'settled hover starts exactly one video');
@@ -4361,6 +4849,8 @@ test('autoplay respects reduced motion and falls back to the poster when a clip 
   calm.renderer.setReducedMotion(true);
   calm.setClock(0);
   calm.api.setEarthHoveredIndex(0);
+  calm.setClock(250);
+  calm.renderer.__runScheduledFrame(1500);
   await new Promise((r) => setTimeout(r, 10));
   calm.setClock(900);
   calm.renderer.__runScheduledFrame(2000);
@@ -4370,6 +4860,8 @@ test('autoplay respects reduced motion and falls back to the poster when a clip 
   const flaky = previewAutoplayHarness();
   flaky.setClock(0);
   flaky.api.setEarthHoveredIndex(0);
+  flaky.setClock(250);
+  flaky.renderer.__runScheduledFrame(1500);
   await new Promise((r) => setTimeout(r, 10));
   flaky.setClock(900);
   flaky.renderer.__runScheduledFrame(2000);
@@ -4878,6 +5370,66 @@ test('WORLD › location panel: RESET ROTATION button keeps the location and tur
   renderer.stopPreview();
 });
 
+test('a ray resting on the location panel re-hovers the zone it left once, not every frame', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 1000;
+  let calls = 0;
+  const renderer = loadRenderer({ gl, now: () => clock });
+  renderer.init(null, {
+    onPreviewLocation: async () => { calls += 1; return [{ url: '/media/one.mp4', title: 'One' }]; },
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.setSceneMode('earth');
+  const api = renderer.__test;
+  await flushPromises();
+  api.setLocationActivity([{ slug: 'mumbai-india', name: 'Mumbai, India', lat: 19.07, lon: 72.88, heat: 0.9 }]);
+  api.setEarthZoom(64, { lat: 19.0, lon: 72.7 });
+  api.setEarthHoveredIndex(0);
+  clock += 250; // dwell passes; the frame sends the one fetch
+  for (let t = 1000; t < 1600; t += 200) renderer.__runScheduledFrame(t);
+  await flushPromises();
+  assert.equal(calls, 1);
+  const T = renderer.getThree();
+  const label = api.earthLabelMeshForTest();
+  label.updateMatrixWorld(true);
+  const H = 148, W = 640, halfH = 0.86 * H / W / 2;
+  const origin = new T.Vector3(0, 1.6, 0);
+  const world = label.localToWorld(new T.Vector3((532 / W - 0.5) * 0.86, (0.5 - 126 / H) * halfH * 2, 0));
+  const onLabel = world.sub(origin).normalize();
+  const sky = { x: 0, y: 1, z: 0 };
+  // Leave the zone across bare globe, then land on RESET ROTATION.
+  assert.equal(api.updateEarthHoverFromRay(origin, sky), -1);
+  assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  assert.equal(api.getEarthState().previewLocationIndex, 0, 'grace restored the zone just left');
+  // Resting on the panel: frames never refetch or re-hover.
+  for (let i = 0; i < 120; i++) {
+    clock += 11;
+    renderer.__runScheduledFrame(clock);
+    assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  }
+  assert.equal(api.getEarthState().previewLocationIndex, 0);
+  assert.equal(calls, 1);
+  // Panels move with the hover state, so a ray on a panel edge can flip
+  // panel ↔ bare globe every frame. The grace is spent after one restore.
+  let restores = 0;
+  for (let i = 0; i < 120; i++) {
+    clock += 11;
+    api.updateEarthHoverFromRay(origin, sky);
+    api.updateEarthHoverFromRay(origin, onLabel);
+    if (api.getEarthState().previewLocationIndex === 0) restores += 1;
+    await flushPromises();
+  }
+  assert.equal(restores, 0, 'the restore does not renew its own grace');
+  assert.equal(calls, 1);
+  // Hovering the zone itself re-arms the grace.
+  api.setEarthHoveredIndex(0);
+  api.updateEarthHoverFromRay(origin, sky);
+  assert.equal(api.updateEarthHoverFromRay(origin, onLabel), 'label');
+  assert.equal(api.getEarthState().previewLocationIndex, 0);
+  assert.equal(calls, 1);
+  renderer.stopPreview();
+});
+
 test('RESET ROTATION with nothing featured re-uprights the current zoomed view', () => {
   const { renderer, api } = topdownHarness();
   api.zoomEarthTo(48.85, 2.35, 64);
@@ -4933,5 +5485,194 @@ test('RESET ROTATION on the EARTH ACTIVITY globe stands it upright, keeping the 
   for (let t = t1 + 16; t <= t1 + 1500; t += 16) api.advanceEarthZoom(t);
   const e2 = api.earthEulerYXZ(api.getEarthState().quaternion);
   assert.ok(Math.abs(e2.pitch) < 1e-6 && Math.abs(e2.roll) < 1e-4, `upright (${e2.pitch}, ${e2.roll})`);
+  renderer.stopPreview();
+});
+
+// ─── Stereoscopic 3D sources (docs/stereo-3d-reels.md) ──────────────────
+
+function stereoHarness(initialSource) {
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
+  let source = initialSource;
+  const renderer = loadRenderer({ gl });
+  renderer.init(initialSource.element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  let t = 16;
+  const frame = () => { renderer.__runScheduledFrame(t); t += 16; };
+  const setSource = (next) => { source = next; renderer.onVideoChange(); };
+  return { renderer, api: renderer.__test, frame, setSource, counters };
+}
+
+function stereoVideo(version, stereo, w = 3840, h = 1920) {
+  return {
+    kind: 'video',
+    element: {
+      readyState: 4, paused: false, currentTime: 1, duration: 10, muted: true,
+      videoWidth: w, videoHeight: h,
+      addEventListener() {}, removeEventListener() {},
+    },
+    ready: true, paused: false, muted: true, currentTime: 1, duration: 10,
+    version,
+    stereo,
+  };
+}
+
+test('an SBS source fills a 4096x2048 proxy; each XR eye samples its own half', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-1', 'sbs'));
+  frame();
+  let state = api.getStereoState();
+  assert.equal(state.textureStereo, 'sbs');
+  assert.equal(state.canvas.join(','), '4096,2048');
+  // Desktop preview: one screen showing the left eye, no per-eye meshes.
+  assert.equal(state.screenShowsLeftEye, true);
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '4096,2048');
+
+  api.setXrSessionForTest({});
+  frame();
+  state = api.getStereoState();
+  assert.equal(state.screenMaterialVisible, false);
+  assert.equal(state.screenVisible, true);
+  // Left eye: layer 1 only, left half. Right eye: layer 2 only, right half.
+  assert.equal(state.left.layers, 0b010);
+  assert.equal(state.right.layers, 0b100);
+  assert.equal(state.left.visible && state.right.visible, true);
+  assert.equal(state.left.parentIsScreen && state.right.parentIsScreen, true);
+  assert.equal(state.left.sharesGeometry && state.right.sharesGeometry, true);
+  assert.equal(state.left.mapIsEye && state.right.mapIsEye, true);
+  assert.deepEqual([...state.left.repeat], [0.5, 1]);
+  assert.deepEqual([...state.left.offset], [0, 0]);
+  assert.deepEqual([...state.right.offset], [0.5, 0]);
+  assert.equal(api.getSceneInfo().screen.eyeMeshes, true);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('each eye texture re-uploads on every stereo video frame (no first-frame freeze)', () => {
+  const source = stereoVideo('sbs-play', 'sbs');
+  const { renderer, api, frame, counters } = stereoHarness(source);
+  // Counts GPU uploads of the 4096x2048 stereo canvas, like the Quest probe.
+  // L and R share one Source, so three uploads it once per frame for both.
+  const stereoUploads = () => [...counters.textureSources, ...(counters.subImageSources || [])]
+    .filter((src) => src && src.width === 4096 && src.height === 2048).length;
+  api.setXrSessionForTest({});
+  frame();
+  api.initEyeTexturesForTest();
+  let prev = api.getStereoState();
+  let prevUploads = stereoUploads();
+  assert.ok(prevUploads >= 1, 'the stereo canvas uploads on the first frame');
+  assert.equal(prev.left.mapIsEye && prev.right.mapIsEye, true);
+  for (let i = 0; i < 3; i++) {
+    // A seek-sized clock jump bypasses the ~30/s upload throttle.
+    source.currentTime += 1;
+    source.element.currentTime += 1;
+    frame();
+    api.initEyeTexturesForTest();
+    const next = api.getStereoState();
+    assert.ok(next.left.version > prev.left.version, `left eye version advances (frame ${i})`);
+    assert.ok(next.right.version > prev.right.version, `right eye version advances (frame ${i})`);
+    const uploads = stereoUploads();
+    assert.ok(uploads > prevUploads, `the eyes re-upload the stereo canvas (frame ${i}): ${prevUploads} -> ${uploads}`);
+    prev = next;
+    prevUploads = uploads;
+  }
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('a top-bottom image uses a 2048x4096 proxy with the left eye on top', () => {
+  const image = {
+    kind: 'image', element: { complete: true, naturalWidth: 1920, naturalHeight: 3840 },
+    ready: true, paused: true, currentTime: 0, duration: 8, version: 'tb-1', stereo: 'tb',
+  };
+  const { renderer, api, frame } = stereoHarness(image);
+  api.setXrSessionForTest({});
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.textureStereo, 'tb');
+  assert.equal(state.canvas.join(','), '2048,4096');
+  assert.deepEqual([...state.left.repeat], [1, 0.5]);
+  assert.deepEqual([...state.left.offset], [0, 0.5]);
+  assert.deepEqual([...state.right.offset], [0, 0]);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('switching back to a mono reel restores the square screen in XR', () => {
+  const { renderer, api, frame, setSource } = stereoHarness(stereoVideo('sbs-2', 'sbs'));
+  api.setXrSessionForTest({});
+  frame();
+  assert.equal(api.getStereoState().left.visible, true);
+  setSource(stereoVideo('mono-1', 'mono', 2160, 2160));
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.textureStereo, 'mono');
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(state.left.visible || state.right.visible, false);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('Earth mode hides the stereo screen and returning to reels restores it', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-3', 'sbs'));
+  api.setXrSessionForTest({});
+  frame();
+  renderer.setSceneMode('earth');
+  frame();
+  // Eye meshes are children of the screen, so a hidden screen hides both.
+  assert.equal(api.getStereoState().screenVisible, false);
+  renderer.setSceneMode('reels');
+  frame();
+  const state = api.getStereoState();
+  assert.equal(state.screenVisible, true);
+  assert.equal(state.textureStereo, 'sbs');
+  assert.equal(state.left.visible && state.right.visible, true);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-4', 'sbs'));
+  api.setDebugFlags({ stereoEye: 1536 });
+  frame();
+  assert.equal(api.getStereoState().canvas.join(','), '3072,1536');
+  renderer.stopPreview();
+});
+
+test('preview split-screen and the content stereo layout are independent', () => {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { stereo: true });
+  assert.equal(renderer.getPreviewState().stereo, true);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'mono');
+  renderer.setSourceStereo('sbs');
+  assert.equal(renderer.getPreviewState().stereo, true);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'sbs');
+  renderer.setStereo(false);
+  assert.equal(renderer.getPreviewState().sourceStereo, 'sbs');
+  renderer.setSourceStereo('nonsense');
+  assert.equal(renderer.getPreviewState().sourceStereo, 'mono');
+  renderer.stopPreview();
+});
+
+test('the split preview renders an SBS source per eye without errors', () => {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  const source = stereoVideo('sbs-6', 'sbs');
+  const renderer = loadRenderer({ gl });
+  renderer.init(source.element, { getVisualSource: () => source, getPlaylist: () => [], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { stereo: true });
+  renderer.__runScheduledFrame(16);
+  renderer.__runScheduledFrame(32);
+  assert.ok(!renderer.__test.getLastRenderError());
+  const state = renderer.__test.getStereoState();
+  // After the pair the single-screen state is restored (no XR session).
+  assert.equal(state.screenMaterialVisible, true);
+  assert.equal(state.left.visible, false);
   renderer.stopPreview();
 });

@@ -8,20 +8,73 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import uuid
 from pathlib import Path
+
+from server import media_store
+from server.settings import env_int
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp"}
 VIDEO_EXTS = {"mp4", "mov", "avi", "webm"}
 
-MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
+_MB = 1024 * 1024
+# Defaults; the routers read SX_MAX_{IMAGE,VIDEO}_UPLOAD_MB through these
+# helpers. Production sets the video cap to 95 MB (Cloudflare free-plan
+# request bodies stop at 100 MB).
+MAX_IMAGE_UPLOAD_BYTES = 50 * _MB
+MAX_VIDEO_UPLOAD_BYTES = 500 * _MB
+# Ceiling on all staged uploads together (SX_STAGED_BYTES_MAX), so a burst of
+# uploads cannot fill the disk the jobs write to.
+STAGED_BYTES_MAX = 4 * 1024 * _MB
+
+# Stereoscopic posts (see docs/stereo-3d-reels.md). The original stereo file
+# is the VR source; <stem>-mono.<ext> holds the left eye for 2D surfaces.
+STEREO_LAYOUTS = ("mono", "sbs", "tb")
+MONO_SUFFIX = "-mono"
+# Long side of the H.264 stereo proxy: 2048 px per eye, inside the Quest
+# H.264 decoder limits.
+STEREO_PROXY_LONG_SIDE = 4096
+# Left-eye 2D video renditions match the square web preview cap.
+MONO_VIDEO_MAX_SIDE = 2160
+# Left-eye 2D stills keep up to the square master size.
+MONO_IMAGE_MAX_SIDE = 3840
+# Published uploads and their derived siblings live here (see media_store).
+OUTPUT_UPLOADS = Path("output") / "uploads"
 
 
 class UploadRejected(Exception):
     """Raised when a staged upload fails an extension or size check."""
+
+
+class StagingFull(Exception):
+    """Raised when staging would exceed the shared staged-bytes ceiling."""
+
+
+def max_image_upload_bytes() -> int:
+    return env_int("SX_MAX_IMAGE_UPLOAD_MB", MAX_IMAGE_UPLOAD_BYTES // _MB, minimum=1) * _MB
+
+
+def max_video_upload_bytes() -> int:
+    return env_int("SX_MAX_VIDEO_UPLOAD_MB", MAX_VIDEO_UPLOAD_BYTES // _MB, minimum=1) * _MB
+
+
+def staged_bytes_max() -> int:
+    return env_int("SX_STAGED_BYTES_MAX", STAGED_BYTES_MAX, minimum=1)
+
+
+def staged_bytes(directory: Path | None = None) -> int:
+    """Bytes currently held in the staging dir."""
+    total = 0
+    for entry in (directory or staging_dir()).iterdir():
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def staging_dir() -> Path:
@@ -52,9 +105,16 @@ def stage_upload_stream(
     Never buffers the whole upload in memory, enforces an extension
     allowlist up front, and aborts (deleting the partial file) as soon as
     *max_bytes* is exceeded rather than after the whole body has arrived.
+    Raises StagingFull when this file would push the staging dir past the
+    shared ceiling.
     """
     ext = _safe_ext(filename, allowed_exts)
-    dest = staging_dir() / f"{uuid.uuid4().hex[:10]}.{ext}"
+    directory = staging_dir()
+    ceiling = staged_bytes_max()
+    already = staged_bytes(directory)
+    if already >= ceiling:
+        raise StagingFull("Upload storage is full. Try again later.")
+    dest = directory / f"{uuid.uuid4().hex[:10]}.{ext}"
     total = 0
     try:
         with open(dest, "wb") as out:
@@ -65,8 +125,10 @@ def stage_upload_stream(
                 total += len(chunk)
                 if total > max_bytes:
                     raise UploadRejected(
-                        f"File exceeds the {max_bytes // (1024 * 1024)}MB upload limit"
+                        f"File exceeds the {max_bytes // _MB}MB upload limit"
                     )
+                if already + total > ceiling:
+                    raise StagingFull("Upload storage is full. Try again later.")
                 out.write(chunk)
     except Exception:
         dest.unlink(missing_ok=True)
@@ -127,13 +189,18 @@ def probe_media_info(src: str) -> dict | None:
     """Read duration and pixel size of a media file with one ffprobe call.
 
     Returns {"duration_ms", "width", "height"} (each None when unknown), or
-    None when the file cannot be probed at all (missing file, no ffprobe,
+    None when the file cannot be probed at all. Width/height are the size as
+    shown: a video's display-matrix rotation and a still's EXIF orientation
+    are applied, matching the frames ffmpeg decodes and the stereo layout
+    a viewer sees (missing file, no ffprobe,
     unreadable media). Duration is only meaningful for video; the caller
     decides whether to keep it.
     """
+    from pipeline.utils import display_size, exif_quarter_turn, stream_rotation
+
     cmd = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,duration:format=duration",
+        "-show_streams", "-show_entries", "format=duration",
         "-of", "json", src,
     ]
     try:
@@ -166,10 +233,23 @@ def probe_media_info(src: str) -> dict | None:
             break
     if not streams and duration_ms is None:
         return None
+    width, height = positive_int(stream.get("width")), positive_int(stream.get("height"))
+    if Path(src).suffix.lstrip(".").lower() in IMAGE_EXTS:
+        try:
+            from PIL import Image
+
+            with Image.open(src) as img:
+                turned = exif_quarter_turn(img)
+        except (OSError, ValueError):
+            turned = False
+        if turned:
+            width, height = height, width
+    else:
+        width, height = display_size(width, height, stream_rotation(stream))
     return {
         "duration_ms": duration_ms,
-        "width": positive_int(stream.get("width")),
-        "height": positive_int(stream.get("height")),
+        "width": width,
+        "height": height,
     }
 
 
@@ -180,18 +260,42 @@ def has_web_preview(src: str) -> bool:
     return dest.exists() and dest.stat().st_size > 0
 
 
-def make_web_preview(src: str, height: int | None = 3840) -> str | None:
-    """Transcode an H.264 proxy for in-browser playback (mirrors ui/media)."""
+def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = None) -> str | None:
+    """Transcode an H.264 proxy for in-browser playback (mirrors ui/media).
+
+    With a stereo layout ("sbs" / "tb") the proxy keeps the full stereo frame
+    and caps its long side at STEREO_PROXY_LONG_SIDE (2048 px per eye); an
+    H.264 source larger than that also gets a proxy, since Quest cannot
+    decode H.264 past ~4096 px.
+    """
+    stereo = stereo if stereo in ("sbs", "tb") else None
     if get_video_codec(src) in {"h264", "avc1"}:
-        return src
+        if not stereo:
+            return src
+        info = probe_media_info(src) or {}
+        if max(info.get("width") or 0, info.get("height") or 0) <= STEREO_PROXY_LONG_SIDE:
+            return src
 
     dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
     if dest.exists() and dest.stat().st_size > 0:
-        return str(dest)
+        if not stereo:
+            return str(dest)
+        # A proxy cached before the stereo cap existed may be too large.
+        cached = probe_media_info(str(dest)) or {}
+        if max(cached.get("width") or 0, cached.get("height") or 0) <= STEREO_PROXY_LONG_SIDE:
+            return str(dest)
 
-    target_h = min(height or 2160, 2160)
-    vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
+    if stereo == "sbs":
+        vf_args = ["-vf", f"scale='2*trunc(min(iw,{STEREO_PROXY_LONG_SIDE})/2)':-2"]
+    elif stereo == "tb":
+        vf_args = ["-vf", f"scale=-2:'2*trunc(min(ih,{STEREO_PROXY_LONG_SIDE})/2)'"]
+    else:
+        target_h = min(height or 2160, 2160)
+        vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
 
+    # Hidden temp file + rename: stereo_paths serves any non-empty proxy, and
+    # stereo proxies are built in the background after publish.
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
@@ -199,16 +303,130 @@ def make_web_preview(src: str, height: int | None = 3840) -> str | None:
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
-        str(dest),
+        "-f", "mp4", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=300,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    return _commit_part(part, dest)
+
+
+def _part_path(dest: Path) -> Path:
+    """Hidden temp sibling a generator writes before committing *dest*."""
+    return dest.with_name(f".{dest.name}.part")
+
+
+def _commit_part(part: Path, dest: Path) -> str | None:
+    """Publish a finished part file as *dest* (R2 first when published)."""
+    try:
+        media_store.commit(part, dest)
+    except (OSError, media_store.MediaStoreError):
+        part.unlink(missing_ok=True)
         return None
     return str(dest)
+
+
+def derived_files(stored: Path) -> list[Path]:
+    """Every generated sibling a stored upload can own (cleanup and unpublish)."""
+    stored = Path(stored)
+    mono = mono_sibling_path(str(stored))
+    return [
+        stored,
+        explore_preview_path(str(stored)),
+        explore_poster_path(str(stored)),
+        stored.with_name(stored.stem + "-preview.mp4"),
+        mono,
+        explore_preview_path(str(mono)),
+        explore_poster_path(str(mono)),
+    ]
+
+
+def discard_part_files(stored: Path) -> None:
+    """Remove the hidden .part file of every derived sibling of *stored*."""
+    for sibling in derived_files(stored)[1:]:
+        _part_path(sibling).unlink(missing_ok=True)
+
+
+def sweep_part_files(root: str | Path = OUTPUT_UPLOADS) -> int:
+    """Remove .part files left by an encode the process died in; returns the count.
+
+    Run at startup only, before any generator can be writing one.
+    """
+    removed = 0
+    for part in Path(root).glob(".*.part"):
+        try:
+            part.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+# Uploads whose derived assets a background publish job is still building.
+# Request-time generators (POST /api/reels/explore-preview) skip them, so a
+# grid visit neither re-encodes a 4K original inline nor races the job on
+# the same .part file.
+_pending_lock = threading.Lock()
+_pending_derived: set[str] = set()
+
+
+def _pending_key(src: str | Path) -> str:
+    return str(Path(src).resolve())
+
+
+def mark_derived_pending(src: str | Path) -> None:
+    with _pending_lock:
+        _pending_derived.add(_pending_key(src))
+
+
+def clear_derived_pending(src: str | Path) -> None:
+    with _pending_lock:
+        _pending_derived.discard(_pending_key(src))
+
+
+def derived_pending(src: str | Path) -> bool:
+    with _pending_lock:
+        return _pending_key(src) in _pending_derived
+
+
+def missing_derived_assets(stored: str | Path, stereo: str | None = None) -> bool:
+    """True when a published video lacks a derived file its publish job builds.
+
+    2D: poster, Explore preview, and the web preview unless the original is
+    already H.264. Stereo: the left-eye rendition with its poster and
+    Explore preview, and the stereo web preview when one is needed.
+    Only file presence is checked, so a restart-lost encode is found
+    without re-encoding anything.
+    """
+    stored = Path(stored)
+
+    def present(path: Path) -> bool:
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
+
+    if stereo in ("sbs", "tb"):
+        mono = mono_sibling_path(str(stored))
+        grid = (mono, explore_poster_path(str(mono)), explore_preview_path(str(mono)))
+        if not all(present(path) for path in grid):
+            return True
+        if present(stored.with_name(stored.stem + "-preview.mp4")):
+            return False
+        if get_video_codec(str(stored)) not in {"h264", "avc1"}:
+            return True
+        info = probe_media_info(str(stored)) or {}
+        return max(info.get("width") or 0, info.get("height") or 0) > STEREO_PROXY_LONG_SIDE
+    grid = (explore_poster_path(str(stored)), explore_preview_path(str(stored)))
+    if not all(present(path) for path in grid):
+        return True
+    return not has_web_preview(str(stored))
 
 
 def explore_preview_path(src: str) -> Path:
@@ -219,6 +437,172 @@ def explore_preview_path(src: str) -> Path:
 def explore_poster_path(src: str) -> Path:
     """Sibling path for the Explore-grid poster thumbnail (<stem>-poster.jpg)."""
     return Path(src).with_name(Path(src).stem + "-poster.jpg")
+
+
+def mono_sibling_path(src: str) -> Path:
+    """Sibling path for the left-eye 2D rendition of a stereo original.
+
+    Videos always become <stem>-mono.mp4 (H.264); stills keep their format.
+    """
+    path = Path(src)
+    ext = path.suffix.lower()
+    if ext.lstrip(".") in VIDEO_EXTS:
+        ext = ".mp4"
+    return path.with_name(path.stem + MONO_SUFFIX + ext)
+
+
+# Folders whose loose files predate stored stereo metadata and are known to
+# hold full SBS (admin spatialize output). Only consulted for media without a
+# post row, and by the 20261015_0013 backfill.
+LEGACY_SBS_FOLDERS = ("testpipeline-3d",)
+
+
+def legacy_stereo_layout(
+    rel_path: str,
+    width: int | None = None,
+    height: int | None = None,
+    root: str = "output",
+) -> str:
+    """Stereo layout implied by where a loose output/ file lives.
+
+    Same rule as migration 20261015_0013: the file must sit in a legacy SBS
+    folder *and* be exactly 2:1. The size is probed under *root* when the
+    caller does not know it; an unknown size stays mono.
+    """
+    first = Path(rel_path).parts[0] if Path(rel_path).parts else ""
+    if first not in LEGACY_SBS_FOLDERS:
+        return "mono"
+    if not width or not height:
+        info = probe_media_info(str(Path(root) / rel_path)) or {}
+        width, height = info.get("width"), info.get("height")
+    return "sbs" if width and height and width == 2 * height else "mono"
+
+
+def is_derived_media(name: str) -> bool:
+    """True for generated siblings that must never surface as their own tile."""
+    if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg")):
+        return True
+    return Path(name).stem.endswith(MONO_SUFFIX)
+
+
+def stereo_paths(src: str) -> tuple[Path | None, Path]:
+    """(left-eye mono rendition or None, best stereo playback file) of an original."""
+    path = Path(src)
+    mono = mono_sibling_path(src)
+    try:
+        has_mono = mono.is_file() and mono.stat().st_size > 0
+    except OSError:
+        has_mono = False
+    stereo = path
+    if path.suffix.lstrip(".").lower() in VIDEO_EXTS:
+        proxy = path.with_name(path.stem + "-preview.mp4")
+        try:
+            if proxy.is_file() and proxy.stat().st_size > 0 and _proxy_within_cap(proxy):
+                stereo = proxy
+        except OSError:
+            pass
+    return (mono if has_mono else None), stereo
+
+
+_proxy_side_cache: dict[tuple[str, int, int], int | None] = {}
+
+
+def _proxy_within_cap(proxy: Path) -> bool:
+    """True unless the proxy is known to exceed STEREO_PROXY_LONG_SIDE.
+
+    Proxies built before the cap existed can be 8K, which the Quest cannot
+    decode; those are skipped until `scripts/batch_stereo_mono.py` rebuilds
+    them. The probe is cached per (path, mtime, size).
+    """
+    st = proxy.stat()
+    key = (str(proxy), st.st_mtime_ns, st.st_size)
+    if key not in _proxy_side_cache:
+        info = probe_media_info(str(proxy)) or {}
+        sides = [v for v in (info.get("width"), info.get("height")) if v]
+        _proxy_side_cache[key] = max(sides) if sides else None
+    side = _proxy_side_cache[key]
+    return side is None or side <= STEREO_PROXY_LONG_SIDE
+
+
+def left_eye_crop(layout: str) -> str:
+    if layout == "sbs":
+        return "crop=iw/2:ih:0:0"
+    if layout == "tb":
+        return "crop=iw:ih/2:0:0"
+    raise ValueError(f"not a stereo layout: {layout!r}")
+
+
+def make_left_eye_rendition(src: str, layout: str) -> str | None:
+    """Write the square left eye of a stereo original next to it.
+
+    Video: H.264 + AAC, faststart, at most MONO_VIDEO_MAX_SIDE square.
+    Image: same format as the source, at most MONO_IMAGE_MAX_SIDE square.
+    Returns the rendition path, or None when it could not be produced.
+    """
+    crop = left_eye_crop(layout)
+    dest = mono_sibling_path(src)
+    try:
+        if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
+            return str(dest)
+    except OSError:
+        return None
+
+    if Path(src).suffix.lstrip(".").lower() in IMAGE_EXTS:
+        return _make_left_eye_still(src, layout, dest)
+
+    side = MONO_VIDEO_MAX_SIDE
+    vf = f"{crop},scale='2*trunc(min(iw,{side})/2)':'2*trunc(min(iw,{side})/2)'"
+    # Encode to a hidden temp file and rename: the feed treats any non-empty
+    # -mono file as ready, and this runs in the background after publish.
+    part = _part_path(dest)
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error",
+        "-i", src,
+        "-vf", vf,
+        "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-c:a", "aac", "-b:a", "192k",
+        "-f", "mp4", str(part),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=600,
+                           creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
+        return None
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    return _commit_part(part, dest)
+
+
+def _make_left_eye_still(src: str, layout: str, dest: Path) -> str | None:
+    from PIL import Image, ImageOps
+
+    part = _part_path(dest)
+    try:
+        with Image.open(src) as img:
+            img = ImageOps.exif_transpose(img)
+            w, h = img.size
+            box = (0, 0, w // 2, h) if layout == "sbs" else (0, 0, w, h // 2)
+            eye = img.crop(box)
+            if max(eye.size) > MONO_IMAGE_MAX_SIDE:
+                eye = eye.resize((MONO_IMAGE_MAX_SIDE, MONO_IMAGE_MAX_SIDE), Image.LANCZOS)
+            fmt = (img.format or "").upper()
+            ext = dest.suffix.lower()
+            if ext in (".jpg", ".jpeg"):
+                eye.convert("RGB").save(part, "JPEG", quality=92)
+            elif ext == ".webp":
+                eye.save(part, "WEBP", quality=92)
+            else:
+                eye.save(part, fmt or "PNG")
+    except (OSError, ValueError):
+        part.unlink(missing_ok=True)
+        return None
+    if not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    return _commit_part(part, dest)
 
 
 def _sibling_is_fresh(sibling: Path, src: str) -> bool:
@@ -246,41 +630,64 @@ def _sibling_matches_height(sibling: Path, height: int) -> bool:
         return True  # unreadable — let the normal flow decide
 
 
-def make_explore_preview(src: str, height: int = 720) -> str | None:
+def _sibling_is_square(sibling: Path) -> bool:
+    info = probe_media_info(str(sibling)) or {}
+    width, height = info.get("width"), info.get("height")
+    return not (width and height) or width == height
+
+
+def _cached_grid_asset(dest: Path, src: str, height: int, crop: str | None) -> bool:
+    """True when a cached grid asset can be reused as is.
+
+    A *crop* (the left eye of a stereo original without its 2D rendition)
+    also requires a square cached file, so an older full 2:1 asset rebuilds.
+    """
+    if not (dest.exists() and dest.stat().st_size > 0):
+        return False
+    if not (_sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height)):
+        return False
+    return crop is None or _sibling_is_square(dest)
+
+
+def make_explore_preview(src: str, height: int = 720, crop: str | None = None) -> str | None:
     """Transcode a tiny muted H.264 preview for the Explore gallery grid.
 
     720p, no audio, faststart — cheap enough to autoplay several tiles at
     once. Cached on disk next to the source; regenerates when the source is
-    newer than the cached preview or the height setting changed.
+    newer than the cached preview or the height setting changed. *crop* is an
+    ffmpeg crop filter applied first (see left_eye_crop).
     """
     try:
         dest = explore_preview_path(src)
-        if dest.exists() and dest.stat().st_size > 0:
-            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
-                return str(dest)
+        if _cached_grid_asset(dest, src, height, crop):
+            return str(dest)
     except OSError:
         return None
 
+    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
-        "-vf", f"scale=-2:{height}",
+        "-vf", vf,
         "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-an",
-        str(dest),
+        "-f", "mp4", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=300,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
         return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
-def make_explore_poster(src: str, height: int = 720) -> str | None:
+def make_explore_poster(src: str, height: int = 720, crop: str | None = None) -> str | None:
     """Extract a single-frame JPEG poster for the Explore gallery grid.
 
     Tens of KB and ~10x faster to produce than a preview transcode (one
@@ -291,35 +698,39 @@ def make_explore_poster(src: str, height: int = 720) -> str | None:
     """
     try:
         dest = explore_poster_path(src)
-        if dest.exists() and dest.stat().st_size > 0:
-            if _sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height):
-                return str(dest)
+        if _cached_grid_asset(dest, src, height, crop):
+            return str(dest)
     except OSError:
         return None
 
-    vf = f"scale=-2:{height}"
+    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
+    part = _part_path(dest)
+    # One MJPEG frame is a plain JPEG file; -f is needed for the .part name.
+    jpeg_out = ["-q:v", "5", "-f", "mjpeg", str(part)]
     # Keyframe-only fast path first (input seek + nokey ≈ 1 core, so parallel
     # batches don't oversubscribe the CPU), then accurate seeks as fallback
     # for very short clips where the seek point lands past EOF.
     variants = [
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-ss", "1", "-skip_frame", "nokey", "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-ss", "1", "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
         ["ffmpeg", "-y", "-hide_banner", "-v", "error",
          "-i", src,
-         "-vframes", "1", "-vf", vf, "-q:v", "5", str(dest)],
+         "-vframes", "1", "-vf", vf, *jpeg_out],
     ]
     for cmd in variants:
         try:
             p = subprocess.run(cmd, capture_output=True, timeout=120,
                                creationflags=_NO_WINDOW)
         except (OSError, subprocess.SubprocessError):
+            part.unlink(missing_ok=True)
             return None
-        if p.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
-            return str(dest)
+        if p.returncode == 0 and part.exists() and part.stat().st_size > 0:
+            return _commit_part(part, dest)
+    part.unlink(missing_ok=True)
     return None
 
 
@@ -333,7 +744,7 @@ def scan_output_videos(root: str = "output") -> list[dict]:
     for file in base.rglob("*"):
         if not file.is_file():
             continue
-        if file.name.startswith(".") or file.name.endswith("-preview.mp4") or file.name.endswith("-explore.mp4"):
+        if file.name.startswith(".") or is_derived_media(file.name):
             continue
         ext = file.suffix.lstrip(".").lower()
         if ext not in VIDEO_EXTS:
@@ -364,7 +775,8 @@ def scan_output_images(root: str = "output") -> list[dict]:
     """Recursively scan root directory for image files (single image tiles).
 
     Mirrors scan_output_videos: excludes generated poster thumbs
-    (<stem>-poster.jpg) so derived assets never appear as their own tiles.
+    (<stem>-poster.jpg) and left-eye stereo renditions (<stem>-mono.<ext>)
+    so derived assets never appear as their own tiles.
     """
     base = Path(root)
     if not base.exists():
@@ -374,7 +786,7 @@ def scan_output_images(root: str = "output") -> list[dict]:
     for file in base.rglob("*"):
         if not file.is_file():
             continue
-        if file.name.startswith(".") or file.name.endswith("-poster.jpg"):
+        if file.name.startswith(".") or is_derived_media(file.name):
             continue
         ext = file.suffix.lstrip(".").lower()
         if ext not in IMAGE_EXTS:
@@ -421,21 +833,24 @@ def make_image_poster(src: str, height: int = 720) -> str | None:
     except OSError:
         return None
 
+    part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
         "-vf", f"scale=-2:{height}",
         "-q:v", "5",
-        str(dest),
+        "-f", "mjpeg", str(part),
     ]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=120,
                            creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
         return None
-    if p.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
         return None
-    return str(dest)
+    return _commit_part(part, dest)
 
 
 def scan_pairs(root: str = "output/pairs") -> list[dict]:
@@ -458,7 +873,7 @@ def scan_pairs(root: str = "output/pairs") -> list[dict]:
 
         fast_files = sorted(list(base.glob("*_fast.mp4")) + list(base.glob("*_fast_4k.mp4")))
         for fast in fast_files:
-            if fast.name.endswith("-preview.mp4") or fast.name.endswith("-explore.mp4"):
+            if is_derived_media(fast.name):
                 continue
             fast_suffix = "_fast_4k.mp4" if fast.name.endswith("_fast_4k.mp4") else "_fast.mp4"
             stem = fast.name[: -len(fast_suffix)]

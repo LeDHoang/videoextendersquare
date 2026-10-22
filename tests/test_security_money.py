@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 
+from verified_signup import register_verified
 from pipeline import utils as pipeline_utils
 from pipeline.utils import attach_civitai_token, get_image_dimensions
 from server.billing.crypto import FalKeyConfigurationError, decrypt_fal_key, encrypt_fal_key
@@ -97,12 +98,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client, username, email=None):
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email or f"{username}@example.com",
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username,
         },
     )
@@ -244,7 +245,7 @@ def test_civitai_token_only_on_real_host():
 def test_quote_spend_cap_enforced(app, monkeypatch):
     params = {
         "prompt": "", "upscale_only": False, "upscale_engine": "fal", "sharpening": 0.0,
-        "outpaint_model": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+        "outpaint_model": "luma/agent/ray/v3.2/reframe",
         "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
         "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
         "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
@@ -398,7 +399,7 @@ def test_pack_progress_coalesced(app):
 def test_sse_connection_cap(app):
     with TestClient(app) as client:
         user = register(client, "sec_sse_user")
-        messages_router._SSE_STREAMS[user["id"]] = 3
+        messages_router._SSE_STREAMS[user["id"]] = 8
         try:
             response = client.get("/api/messages/events")
             assert response.status_code == 429

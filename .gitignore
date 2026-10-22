@@ -61,3 +61,7 @@ ui/assets/quest_controller.png
 
 # Design-tool exports (regenerated locally)
 .stitch/
+
+# Remotion promo video lives only on the `video` branch
+/video/
+.env.staging

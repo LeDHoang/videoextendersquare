@@ -190,6 +190,11 @@ describe('ProfileSettingsPage', () => {
     expect(screen.queryByText('● SIGNED IN')).not.toBeInTheDocument();
   });
 
+  it('warns that sent messages are hidden from contacts but kept for moderation', () => {
+    renderPage();
+    expect(screen.getByText(/Messages you sent are hidden from the people you talked with and kept for moderation and safety\./)).toBeInTheDocument();
+  });
+
   function armDelete(password = 'pw-correct-1', typed = 'echodev') {
     fireEvent.change(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-delete-password' }), { target: { value: password } });
     fireEvent.change(screen.getByLabelText(/TO AUTHORIZE/), { target: { value: typed } });

@@ -1,11 +1,53 @@
-import { useEffect, useRef } from 'react';
-import { useSSE } from '../../hooks/useSSE.js';
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../../api/client.js';
+import { TERMINAL_STATUSES, useSSE } from '../../hooks/useSSE.js';
 import { billingErrorMessage } from '../../utils/billingErrors.js';
 import Progress from './Progress.jsx';
+import { Button } from './controls.jsx';
 import Emoji from './Emoji.jsx';
+
+// Cancel control for a queued/running job. POST /api/{kind}/jobs/{id}/cancel
+// answers 202 (the server stops before the next stage; the SSE stream then
+// reports "cancelled"), 409 when the job already finished, and 404/405 on a
+// server without cancel support — the button then hides itself.
+function CancelJobButton({ jobId, kind }) {
+  const [state, setState] = useState('idle'); // idle | pending | requested | unsupported
+  const [message, setMessage] = useState('');
+  if (state === 'unsupported') return null;
+  const cancel = async () => {
+    setState('pending');
+    setMessage('');
+    try {
+      await api.post(`/api/${kind}/jobs/${encodeURIComponent(jobId)}/cancel`);
+      setState('requested');
+    } catch (err) {
+      if (err?.status === 404 || err?.status === 405) {
+        setState('unsupported');
+      } else if (err?.status === 409) {
+        setState('requested');
+        setMessage('This job already finished.');
+      } else {
+        setState('idle');
+        setMessage(billingErrorMessage(err, 'Could not cancel the job. Try again.'));
+      }
+    }
+  };
+  return (
+    <div className="sx-job-cancel">
+      <Button onClick={cancel} disabled={state !== 'idle'} loading={state === 'pending'}>
+        {state === 'pending' ? 'CANCELLING…' : state === 'requested' ? 'CANCEL REQUESTED' : '✕ CANCEL JOB'}
+      </Button>
+      {state === 'requested' && !message ? (
+        <span className="sx-job-cancel-note">Stops before the next stage; a running step finishes first.</span>
+      ) : null}
+      {message ? <span className="sx-job-cancel-note" role="status">{message}</span> : null}
+    </div>
+  );
+}
 
 // Tracks a single pipeline job over SSE and renders progress + result.
 // onDone(result), when provided, fires exactly once when the job completes.
+// onSettled(job) fires once on any terminal state (complete, failed, cancelled).
 // showMedia={false} keeps the status + downloads but leaves the rendered
 // media to the caller (the Upload Studio shows it on its stage).
 export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMedia = true }) {
@@ -22,7 +64,7 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
   }, [done, onDone]);
 
   useEffect(() => {
-    if (!settledRef.current && (job?.status === 'complete' || job?.status === 'failed')) {
+    if (!settledRef.current && TERMINAL_STATUSES.has(job?.status)) {
       settledRef.current = true;
       onSettled?.(job);
     }
@@ -35,7 +77,14 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
           <span className="sx-job-name">{name}</span>
           <span className="sx-job-status sx-queued">CONNECTING TO PIPELINE…</span>
         </div>
-        <div className="sx-progress-track">
+        <div
+          className="sx-progress-track"
+          role="progressbar"
+          aria-valuenow={10}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuetext="Connecting to pipeline · 10%"
+        >
           <div className="sx-progress-fill" style={{ width: '10%' }} />
         </div>
       </div>
@@ -95,6 +144,22 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
     );
   }
 
+  if (job?.status === 'cancelled') {
+    return (
+      <div className="sx-job" aria-live="polite">
+        <div className="sx-job-head">
+          <span className="sx-job-name" title={name}>
+            {name}
+          </span>
+          <span className="sx-job-status sx-cancelled">CANCELLED</span>
+        </div>
+        <div className="sx-job-phase">
+          {job.error?.[1] || 'This job was cancelled. Any ECHO Credits reserved for it are released.'}
+        </div>
+      </div>
+    );
+  }
+
   if (job?.status === 'failed' || (!job && error)) {
     const detail = job?.error?.[1] || error?.message || 'Unknown pipeline execution error';
     // Billing/credit failures map to user copy; pipeline errors pass through.
@@ -107,5 +172,10 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
     );
   }
 
-  return <Progress job={job} name={name} />;
+  return (
+    <>
+      <Progress job={job} name={name} />
+      <CancelJobButton jobId={jobId} kind={kind} />
+    </>
+  );
 }

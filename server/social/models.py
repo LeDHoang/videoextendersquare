@@ -56,6 +56,10 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    # Terms of Service version agreed to at signup (server.routers.social.TERMS_VERSION); NULL for
+    # accounts created before acceptance was recorded, or not through /api/auth/register.
+    terms_version = Column(String(32), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class AuthSession(Base):
@@ -77,6 +81,19 @@ class AuthSession(Base):
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class EmailVerificationToken(Base):
+    """One-time link that turns a ``pending`` user into an ``active`` one."""
+
+    __tablename__ = "email_verification_tokens"
 
     id = Column(String(36), primary_key=True, default=uuid4_string)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -122,6 +139,11 @@ class Post(Base):
     # How long an image post stays on screen in the player; NULL means the
     # default (IMAGE_POST_DWELL_MS). Unused for video posts.
     dwell_ms = Column(Integer, nullable=True)
+    # Stereoscopic layout of the original file: "mono", "sbs" (full
+    # side-by-side, left eye left) or "tb" (full top-bottom, left eye top).
+    # Stereo posts keep the original at media_path (the VR source) and a
+    # left-eye <stem>-mono sibling for every 2D surface.
+    stereo_layout = Column(String(16), nullable=False, default="mono", server_default="mono")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -731,8 +753,64 @@ class Report(Base):
     evidence_ciphertext = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # A moderator's claim tells others they are working on it; it lapses after
+    # server.routers.account_safety.CLAIM_TTL so an abandoned report is not stuck.
+    claimed_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_reports_status_created", "status", "created_at"),)
+
+
+class StaffAction(Base):
+    """Append-only audit row for every action a moderator or admin takes."""
+
+    __tablename__ = "staff_actions"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(40), nullable=False, index=True)
+    target_type = Column(String(16), nullable=False)
+    target_id = Column(String(64), nullable=False)
+    report_id = Column(String(36), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
+    reason = Column(String(500), nullable=False, default="")
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (Index("ix_staff_actions_target", "target_type", "target_id"),)
+
+
+@event.listens_for(StaffAction, "before_update")
+def _staff_action_no_update(_mapper, _connection, _target):
+    raise ValueError("Staff actions are immutable")
+
+
+@event.listens_for(StaffAction, "before_delete")
+def _staff_action_no_delete(_mapper, _connection, _target):
+    raise ValueError("Staff actions are immutable")
+
+
+class SupportRequest(Base):
+    """A support inbox entry, fileable signed out (suspended users cannot sign in)."""
+
+    __tablename__ = "support_requests"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    category = Column(String(24), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="open", index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    email = Column(String(320), nullable=True)
+    subject = Column(String(120), nullable=False, default="")
+    body = Column(String(4000), nullable=False, default="")
+    link = Column(String(500), nullable=False, default="")
+    report_id = Column(String(36), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    # HMAC of the client IP with the security secret; the raw IP is never stored.
+    ip_hash = Column(String(64), nullable=True, index=True)
+    moderator_note = Column(String(1000), nullable=False, default="")
+    handled_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_support_requests_status_created", "status", "created_at"),)
 
 
 class DataMigration(Base):

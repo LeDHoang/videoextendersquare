@@ -90,6 +90,59 @@ def fetch_fal_result(url: str, dest_path: str, timeout: float = 120.0,
                     )
                 out.write(chunk)
 
+EXIF_ORIENTATION = 0x0112
+# EXIF orientations 5-8 store the image rotated a quarter turn.
+_EXIF_QUARTER_TURNS = {5, 6, 7, 8}
+
+
+def stream_rotation(stream: dict) -> int:
+    """Display rotation of an ffprobe stream in degrees (0/90/180/270).
+
+    Reads the "Display Matrix" side data (MP4 tkhd / displaymatrix), falling
+    back to the legacy ``rotate`` tag.
+    """
+    raw = None
+    for side in stream.get("side_data_list") or []:
+        if "rotation" in side:
+            raw = side.get("rotation")
+            break
+    if raw is None:
+        raw = (stream.get("tags") or {}).get("rotate")
+    try:
+        return int(round(float(raw) / 90.0)) * 90 % 360
+    except (TypeError, ValueError):
+        return 0
+
+
+def display_size(width, height, rotation: int):
+    """(width, height) as shown: a quarter-turn rotation swaps the axes."""
+    if rotation % 180 == 90:
+        return height, width
+    return width, height
+
+
+def exif_quarter_turn(img) -> bool:
+    """True when a still's EXIF orientation shows it rotated 90/270 degrees."""
+    try:
+        return img.getexif().get(EXIF_ORIENTATION) in _EXIF_QUARTER_TURNS
+    except Exception:
+        return False
+
+
+def shown_image_size(image_path, width, height):
+    """(width, height) of a still as shown: EXIF orientation 5-8 swaps them.
+
+    Falls back to the given size when the file cannot be read.
+    """
+    try:
+        with Image.open(image_path) as img:
+            if exif_quarter_turn(img):
+                return height, width
+    except (OSError, ValueError):
+        pass
+    return width, height
+
+
 def get_image_dimensions(image_path_or_bytes):
     """
     Reads an image from a file path or bytes and returns its dimensions.
@@ -113,20 +166,22 @@ def get_image_dimensions(image_path_or_bytes):
         )
     return width, height
 
-def get_video_dimensions_and_duration(video_path):
+def get_video_dimensions_and_duration(video_path, display=False):
     """
     Reads a video from a file path and returns its dimensions and duration using ffprobe.
 
     Args:
         video_path: Path to the local video file.
+        display: Apply the display-matrix rotation (the size ffmpeg decodes
+            to and players show) instead of the coded size.
 
     Returns:
         tuple: (width, height, duration_seconds)
     """
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-             "stream=width,height,duration", "-of", "json", video_path],
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_streams",
+             "-of", "json", video_path],
             capture_output=True,
             text=True,
             check=True,
@@ -141,6 +196,8 @@ def get_video_dimensions_and_duration(video_path):
         if width == 0 or height == 0:
             raise ValueError(f"Could not determine video dimensions for {video_path}")
 
+        if display:
+            width, height = display_size(width, height, stream_rotation(stream))
         return width, height, duration
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError) as e:
         raise ValueError(f"Could not read video metadata from {video_path}: {e}")

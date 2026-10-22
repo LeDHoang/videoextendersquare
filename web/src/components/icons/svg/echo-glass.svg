@@ -1,0 +1,41 @@
+<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- ECHO "Echo Glass" mark (concept A2), static master at rest.
+       Animated twin: components/icons/AnimatedEchoLogo.jsx (geometry in echoGlass.js).
+       Concept sheet: echo-mark-concepts.html in this folder.
+       Below 24 px: drop both echo layers and the glint, outline stroke 3.4 -> 4.6. -->
+  <defs>
+    <!-- Cuts the lines away around the eye, whatever the background. -->
+    <mask id="echo-glass-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="48">
+      <rect width="48" height="48" fill="#fff"/>
+      <polygon points="12,24 18,17.5 30,17.5 36,24 30,30.5 18,30.5" fill="#000" stroke="#000" stroke-width="3.2" stroke-linejoin="bevel"/>
+    </mask>
+    <clipPath id="echo-glass-lens">
+      <polygon points="12,24 18,17.5 30,17.5 36,24 30,30.5 18,30.5"/>
+    </clipPath>
+  </defs>
+
+  <g mask="url(#echo-glass-cut)">
+    <!-- Hourglass: two chamfered triangles meeting at the eye -->
+    <polygon points="9,4 39,4 43,8 24,25 5,8" stroke="#f2f3f5" stroke-width="3.4" stroke-linejoin="bevel"/>
+    <polygon points="9,44 39,44 43,40 24,23 5,40" stroke="#f2f3f5" stroke-width="3.4" stroke-linejoin="bevel"/>
+
+    <!-- Echo 1: the hourglass at 0.68 about the centre -->
+    <g opacity="0.5" transform="translate(24 24) scale(0.68) translate(-24 -24)">
+      <polygon points="9,4 39,4 43,8 24,25 5,8" stroke="#f2f3f5" stroke-width="2.647" stroke-linejoin="bevel"/>
+      <polygon points="9,44 39,44 43,40 24,23 5,40" stroke="#f2f3f5" stroke-width="2.647" stroke-linejoin="bevel"/>
+    </g>
+    <!-- Echo 2: the hourglass at 0.44 -->
+    <g opacity="0.28" transform="translate(24 24) scale(0.44) translate(-24 -24)">
+      <polygon points="9,4 39,4 43,8 24,25 5,8" stroke="#f2f3f5" stroke-width="2.955" stroke-linejoin="bevel"/>
+      <polygon points="9,44 39,44 43,40 24,23 5,40" stroke="#f2f3f5" stroke-width="2.955" stroke-linejoin="bevel"/>
+    </g>
+  </g>
+
+  <!-- Eye: hex lens, vermilion diamond iris, dark pupil, glint -->
+  <polygon points="12,24 18,17.5 30,17.5 36,24 30,30.5 18,30.5" fill="#f2f3f5"/>
+  <g clip-path="url(#echo-glass-lens)">
+    <polygon points="24,17.5 30.5,24 24,30.5 17.5,24" fill="#ff3b1f"/>
+    <polygon points="24,21 27,24 24,27 21,24" fill="#08090a"/>
+    <rect x="25.4" y="20.4" width="1.6" height="1.6" fill="#f2f3f5"/>
+  </g>
+</svg>

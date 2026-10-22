@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
-import { formatClock, formatDuration, imagePostLabel } from '../../utils/mediaFormat.js';
+import { formatClock, formatDuration, imagePostLabel, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
 
 export function formatCompactCount(value) {
   const count = Number(value) || 0;
@@ -18,6 +18,52 @@ export function locationKey(city, country) {
   return citySlug + (countrySlug ? '--' + countrySlug : '');
 }
 
+// Browsers throttle parallel media loads, so a screenful of tiles asking at once delays the ones in view.
+// Nearby tiles queue here; a tile that scrolls into view jumps to the front.
+const MAX_CONCURRENT_LOADS = 4;
+const LOAD_SLOT_TIMEOUT_MS = 8000;
+const waitingLoads = [];
+let runningLoads = 0;
+
+function pumpLoads() {
+  while (runningLoads < MAX_CONCURRENT_LOADS && waitingLoads.length) {
+    const job = waitingLoads.shift();
+    job.started = true;
+    runningLoads += 1;
+    job.timer = setTimeout(job.release, LOAD_SLOT_TIMEOUT_MS);
+    job.start();
+  }
+}
+
+function queueVideoLoad(start, urgent) {
+  const job = { start, started: false, done: false, timer: null };
+  const dequeue = () => {
+    const index = waitingLoads.indexOf(job);
+    if (index >= 0) waitingLoads.splice(index, 1);
+  };
+  job.release = () => {
+    if (job.done) return;
+    job.done = true;
+    clearTimeout(job.timer);
+    if (job.started) runningLoads -= 1;
+    else dequeue();
+    pumpLoads();
+  };
+  job.prioritize = () => {
+    if (job.started || job.done) return;
+    dequeue();
+    waitingLoads.unshift(job);
+    pumpLoads();
+  };
+  if (urgent) waitingLoads.unshift(job);
+  else waitingLoads.push(job);
+  pumpLoads();
+  return job;
+}
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 /* orderLabel (e.g. "01") adds a top-right badge with the reel's runtime, which counts down while it autoplays. */
 export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare, orderLabel = '' }) {
   const navigate = useNavigate();
@@ -30,12 +76,14 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const [ready, setReady] = useState(false);
   const [remaining, setRemaining] = useState(null);
   const visibleRef = useRef(false);
+  const loadJobRef = useRef(null);
 
   // Play only while the tile is on screen and the <video> actually has a source. The visibility callback can
   // fire before React has put `src` on the element (play() then rejects and nothing retries), and a
   // preview -> original fallback reloads the element, so this is also called once media is ready.
   const tryPlay = () => {
     const vid = videoRef.current;
+    if (prefersReducedMotion()) return;
     if (!vid || !visibleRef.current || !vid.paused || !vid.getAttribute('src')) return;
     vid.play().catch(() => {
       /* Still throttled by the browser: the next canplay / visibility event retries. */
@@ -48,26 +96,40 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     const vid = videoRef.current;
     if (!el || !vid) return undefined;
     let nearArmed = false;
+    // Under reduced motion a tile with a poster shows only that; one without loads metadata for its first frame.
+    const still = prefersReducedMotion();
+    const wantsLoad = !still || !video.poster_url;
+
+    const requestSource = (urgent) => {
+      if (!wantsLoad) return;
+      if (loadJobRef.current) {
+        if (urgent) loadJobRef.current.prioritize();
+        return;
+      }
+      loadJobRef.current = queueVideoLoad(() => setSrc((current) => current || video.preview_url || video.url), urgent);
+    };
 
     const nearIO = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && !nearArmed) {
           nearArmed = true;
-          setSrc(video.preview_url || video.url);
+          requestSource(false);
           nearIO.disconnect();
         }
       },
-      { rootMargin: '800px', threshold: 0 },
+      { rootMargin: '300px', threshold: 0 },
     );
 
     const visIO = new IntersectionObserver(
       (entries) => {
         const visible = entries[0]?.isIntersecting;
         visibleRef.current = !!visible;
-        if (visible) {
-          setSrc((current) => current || video.preview_url || video.url);
+        if (visible && !still) {
+          requestSource(true);
           setPreload('auto');
           tryPlay();
+        } else if (visible) {
+          requestSource(true);
         } else if (!vid.paused) {
           vid.pause();
         }
@@ -79,6 +141,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     visIO.observe(el);
     return () => {
       visibleRef.current = false;
+      if (loadJobRef.current) loadJobRef.current.release();
+      loadJobRef.current = null;
       nearIO.disconnect();
       visIO.disconnect();
       if (!vid.paused) vid.pause();
@@ -103,7 +167,12 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename || video.path?.split('/').pop() || 'Untitled reel';
-  const badge = contextTag ? '#' + contextTag : imagePostLabel(video);
+  // 3D posts carry a "3D" tag next to the kind/context badge.
+  const badge = [contextTag ? '#' + contextTag : imagePostLabel(video), stereoLayout(video) !== 'mono' ? '3D' : '']
+    .filter(Boolean)
+    .join(' · ');
+  const crop = stereoCropClass(video);
+  const withCrop = (name) => (crop ? `${name} ${crop}` : name);
   const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
 
   return (
@@ -120,12 +189,12 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
         }
       }}
       title={[label, place ? 'Location: ' + place : '', tagHint].filter(Boolean).join(' — ')}
-      aria-label={'Open ' + label + ' in Reels player'}
+      aria-label={'Open ' + label + (stereoLayout(video) !== 'mono' ? ' (3D)' : '') + ' in Reels player'}
     >
       {isImage ? (
         <img
           src={video.poster_url || video.preview_url || video.url}
-          className="sx-explore-image"
+          className={withCrop('sx-explore-image')}
           alt={label}
           loading="lazy"
           draggable="false"
@@ -137,7 +206,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           {video.poster_url ? (
             <img
               src={video.poster_url}
-              className="sx-explore-poster"
+              className={withCrop('sx-explore-poster')}
               alt=""
               loading="lazy"
               draggable="false"
@@ -153,18 +222,25 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           ) : (
             <video
               ref={videoRef}
-              className="sx-explore-video"
+              className={withCrop('sx-explore-video')}
               src={src}
               muted
               loop
               playsInline
               preload={preload}
               disablePictureInPicture
-              onLoadedData={() => setReady(true)}
+              onLoadedData={() => {
+                setReady(true);
+                loadJobRef.current?.release();
+              }}
               onCanPlay={tryPlay}
-              onLoadedMetadata={syncRemaining}
+              onLoadedMetadata={(event) => {
+                syncRemaining(event);
+                loadJobRef.current?.release();
+              }}
               onTimeUpdate={syncRemaining}
               onError={() => {
+                loadJobRef.current?.release();
                 if (src !== video.url) setSrc(video.url);
                 else {
                   setFailed(true);

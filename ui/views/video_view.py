@@ -138,7 +138,7 @@ def render(ctx: dict) -> None:
             outpaint_options = {
                 "LTX 2.3 Quality": "fal-ai/ltx-2.3-quality/outpaint",
                 "LTX 2.3 Quality + LoRA": "fal-ai/ltx-2.3-quality/outpaint/lora",
-                "Luma Ray-2 Reframe": "fal-ai/luma-dream-machine/ray-2-flash/reframe",
+                "Luma Ray 3.2 Reframe": "luma/agent/ray/v3.2/reframe",
                 "Wan VACE 14B": "fal-ai/wan-vace-14b/video-to-video",
             }
             selected_outpaint = st.segmented_control(
@@ -390,8 +390,9 @@ def render(ctx: dict) -> None:
         if not upscale_only:
             outpaint_lower = outpaint_model_id.lower()
             if "luma" in outpaint_lower or "reframe" in outpaint_lower:
-                est_outpaint_cost = total_effective_dur * 0.06
-                outpaint_label = "Luma Ray-2 Reframe ($0.06/s)"
+                # Worker default is 720p; sources over 10 s are rejected.
+                est_outpaint_cost = total_effective_dur * 0.12
+                outpaint_label = "Luma Ray 3.2 Reframe 720p ($0.12/s)"
             elif "ltx" in outpaint_lower:
                 w_ltx, h_ltx = (720, 720) if ltx_resolution == "720p" else ((1080, 1080) if ltx_resolution == "1080p" else (480, 480))
                 frames_est = int(total_effective_dur * 24) if total_effective_dur > 0 else 121

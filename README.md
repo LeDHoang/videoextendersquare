@@ -19,7 +19,7 @@ Generatively extend canvas borders to 1:1 square (3840×3840) with instant paddi
 ![Image Processing Interface](docs/images/image_extender.png)
 
 ### 2. Video Extender & Live Cost Breakdown
-Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Luma Ray-2, local hardware HEVC master encoding, and live pre-render billing estimator.
+Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Luma Ray 3.2, local hardware HEVC master encoding, and live pre-render billing estimator.
 ![Video Processing Interface](docs/images/video_extender.png)
 
 ### 3. WebXR 4K Reels Player (Desktop Viewport with Dynamic Glow)
@@ -71,7 +71,7 @@ Diagnostic desktop tool replicating the exact Three.js 3D WebXR coordinate space
 
 ### 🎨 Generative 1:1 Square Outpainting & 4K Encoding
 - **Dual Pipeline Modes**:
-  - **OUTPAINT + UPSCALE**: Generatively extends portrait/landscape videos to 1:1 square via supported `fal.ai` models (LTX 2.3, Luma Ray-2 Flash, or Wan VACE) before upscaling.
+  - **OUTPAINT + UPSCALE**: Generatively extends portrait/landscape videos to 1:1 square via supported `fal.ai` models (LTX 2.3, Luma Ray 3.2 Reframe, or Wan VACE) before upscaling.
   - **UPSCALE ONLY**: Runs locally with FAST/STUDIO, or through supported Fal upscalers when FAL AI is selected.
 - **Bytedance Video Upscaler Integration**:
   - Model ID: `fal-ai/bytedance-upscaler/upscale/video`
@@ -133,6 +133,9 @@ cd videoextendersquare
 python -m venv .venv
 source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+# Legacy Streamlit UI only (`make streamlit`). It pins Pillow below 13, so
+# keep it in a separate venv:
+# pip install -r requirements-streamlit.txt
 
 # Install frontend dependencies
 cd web

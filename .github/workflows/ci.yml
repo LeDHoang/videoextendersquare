@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 3dreels]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: make test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install Python deps into .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: Install web deps
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: make test
+        run: make test
+
+  postgres:
+    name: migrations + pool + recommendation tests on PostgreSQL 16
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: echo
+          POSTGRES_PASSWORD: echo
+          POSTGRES_DB: echo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U echo -d echo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: echo
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install Python deps into .venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg://echo:echo@localhost:5432/echo
+        run: .venv/bin/python -m alembic upgrade head
+      - name: Create throwaway database for the PostgreSQL tests
+        run: psql -h localhost -U echo -d echo -c "CREATE DATABASE pool_test"
+      - name: Pool isolation test on PostgreSQL
+        env:
+          SX_TEST_POSTGRES_URL: postgresql+psycopg://echo:echo@localhost:5432/pool_test
+        run: .venv/bin/python -m pytest -q tests/test_db_pool_isolation.py
+      - name: Recommendation concurrency tests on PostgreSQL
+        # Reuses pool_test (tables dropped and recreated per test); runs after
+        # the pool step, never in parallel with it.
+        env:
+          SX_TEST_POSTGRES_URL: postgresql+psycopg://echo:echo@localhost:5432/pool_test
+        run: .venv/bin/python -m pytest -q tests/test_recommendations.py -k concurrent
+
+  docker:
+    name: image build + contents check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t echo-app:ci .
+      - name: Assert image contents
+        run: |
+          set -euo pipefail
+          run() { docker run --rm --entrypoint sh echo-app:ci -c "$1"; }
+          # Nothing from tests/, video/ or a local .env may be baked in.
+          run 'for p in /app/tests /app/video /app/.env /app/web/node_modules; do
+                 if [ -e "$p" ]; then echo "unexpected in image: $p" >&2; exit 1; fi
+               done'
+          # data/ and output/ exist (volume mount points owned by the app
+          # user) but must ship empty.
+          run 'for d in /app/data /app/output; do
+                 [ -d "$d" ] || { echo "missing $d" >&2; exit 1; }
+                 if [ -n "$(ls -A "$d")" ]; then echo "$d is not empty:" >&2; ls -A "$d" >&2; exit 1; fi
+               done'
+          run 'test -f /app/server/static/index.html'
+          run 'uid=$(id -u); [ "$uid" != 0 ] || { echo "image runs as root" >&2; exit 1; }'
+          run 'ffmpeg -version | head -1'
+          # The base image is pinned, so a different ffmpeg major means the
+          # pin was bumped without re-checking the encode settings.
+          run 'ffmpeg -version | head -1 | grep -E "^ffmpeg version (7:)?7\."'
+          run 'test "$(ls /app/ui)" = assets'
+          run 'test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg'
+          echo "image contents OK"
+
+  scans:
+    name: dependency + secret scans
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # gitleaks scans the full history
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: pip-audit (runtime requirements)
+        # No ignores today. To accept a finding that has no fix yet, add
+        # `--ignore-vuln <ID>` here with a comment saying why and when to revisit.
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit -r requirements.txt
+      - name: npm audit (production deps, high and above)
+        run: npm audit --audit-level=high --omit=dev
+        working-directory: web
+      - name: gitleaks (full history)
+        # Release binary with its checksum checked; triaged false positives
+        # live in .gitleaks.toml and .gitleaksignore.
+        run: |
+          set -euo pipefail
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLO "$base/$f"
+          curl -fsSLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " $f\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar xzf "$f" gitleaks
+          ./gitleaks git . --no-banner --redact --config .gitleaks.toml

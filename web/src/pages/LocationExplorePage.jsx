@@ -220,7 +220,7 @@ export default function LocationExplorePage() {
       </Toolbar>
 
       {previewMessage ? <Mono>{previewMessage}</Mono> : null}
-      {error ? <Mono>{'LOCATION FEED ERROR · ' + error}</Mono> : null}
+      {error ? <div className="sx-error-box" role="alert">{'LOCATION FEED ERROR · ' + error}</div> : null}
       {packError ? (
         <div className="sx-error-box" role="alert">
           <span>{'PACK DISCOVERY ERROR · ' + packError}</span>

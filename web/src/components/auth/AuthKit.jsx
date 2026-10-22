@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PASSWORD_MAX, PASSWORD_MIN, passwordChecks, passwordStrength } from '../../utils/authForm.js';
+import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 
 /*
  * Building blocks shared by sign-in, sign-up and password recovery.
@@ -16,7 +17,7 @@ export function AuthLayout({ rail, tabs, title, intro, step, children }) {
       <div className="sx-au">
         <aside className="sx-au-rail">
           <Link to="/reels" className="sx-au-mark" aria-label="ECHO home">
-            <img src="/logo.svg" alt="" width="34" height="34" />
+            <AnimatedEchoLogo className="sx-au-logo" />
             <span>ECHO</span>
           </Link>
           <p className="sx-au-kicker">{rail.kicker}</p>
@@ -116,6 +117,27 @@ export function AuthField({ label, hint, error, aside, prefix, suffix, inputRef,
       ) : null}
       {/* Last in the DOM so Tab runs input → show/hide → aside; CSS draws it beside the label. */}
       {aside ? <div className="sx-au-aside">{aside}</div> : null}
+    </div>
+  );
+}
+
+// Checkbox row for consent-style fields; children are the label (may contain links).
+export function AuthCheckbox({ checked, onChange, error, inputRef, children }) {
+  const id = useId();
+  const messageId = id + '-msg';
+  return (
+    <div className="sx-au-consent">
+      <input
+        id={id}
+        ref={inputRef}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? messageId : undefined}
+      />
+      <label htmlFor={id}>{children}</label>
+      {error ? <p id={messageId} className="sx-au-msg sx-au-msg--err">{error}</p> : null}
     </div>
   );
 }

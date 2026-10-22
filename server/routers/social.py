@@ -5,23 +5,30 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
+import math
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, StrictBool
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from server import media_store
+from server import settings
+from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
     AuthContext,
+    aware,
     clear_auth_cookies,
     create_auth_session,
     ensure_anonymous_cookie,
@@ -36,6 +43,7 @@ from server.social.auth import (
     require_auth,
     require_auth_csrf,
     set_auth_cookies,
+    token_hash,
     validate_origin,
     validate_csrf,
     validate_password,
@@ -43,10 +51,12 @@ from server.social.auth import (
     verify_password,
 )
 from server.social.database import get_db
+from server.social.email import send_verification_email, verification_ttl_minutes
 from server.social.models import (
     AuthSession,
     Comment,
     CommentLike,
+    EmailVerificationToken,
     Follow,
     Post,
     PostLike,
@@ -60,23 +70,32 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import blocked_user_ids, users_blocked
+from server.social.turnstile import verify_turnstile
 from server.social.services import (
+    post_media_files,
     apply_cursor,
+    clamp_playback,
     create_or_update_post,
     encode_cursor,
+    event_dict_is_valid,
     get_post_by_reference,
     post_card,
     record_event,
     serialize_comment,
     sync_post_tags,
     tag_slug,
+    viewer_post_state,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["social"])
 AVATAR_DIR = Path("data/avatars")
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 PACK_VIEW_WINDOW_MINUTES = 10
 REGISTRATION_ENABLED = os.environ.get("SX_REGISTRATION_ENABLED", "1").lower() not in {"0", "false", "no"}
+# Version of the Terms of Service / Privacy Policy a new account agrees to. Bump it together with the
+# effective date on web/src/pages/TermsPage.jsx and PrivacyPage.jsx so each user row shows what they accepted.
+TERMS_VERSION = "2026-10-20"
 
 
 def registration_enabled() -> bool:
@@ -133,6 +152,24 @@ def configured_role(email: str, username: str) -> str:
         if value.strip()
     }
     return "admin" if identities & admins else "moderator" if identities & moderators else "user"
+
+
+ROLE_RANKS = {"user": 0, "moderator": 1, "admin": 2}
+
+
+def role_rank(role: str | None) -> int:
+    return ROLE_RANKS.get(role or "user", 0)
+
+
+def bootstrap_role(user: User) -> None:
+    """Raise a user to the role SX_ADMIN_USERS / SX_MODERATOR_USERS give them; never lower it.
+
+    The env lists only bootstrap staff. Roles granted or removed in the admin
+    console live in the database and survive the next sign-in.
+    """
+    assigned_role = configured_role(user.email or "", user.username)
+    if role_rank(assigned_role) > role_rank(user.role):
+        user.role = assigned_role
 
 
 def error(status: int, code: str, message: str, field: str | None = None):
@@ -269,9 +306,14 @@ def get_visible_comment(db: Session, comment_id: str, viewer_id: str | None) -> 
         error(404, "COMMENT_NOT_FOUND", "Comment not found.")
     return comment
 
-def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
+def media_card(
+    post: Post,
+    db: Session,
+    viewer_id: str | None = None,
+    state: tuple[set[str], set[str], set[str]] | None = None,
+) -> dict:
 
-    card = post_card(post, db, viewer_id)
+    card = post_card(post, db, viewer_id, state)
     source = Path("output") / post.media_path
     card["filename"] = source.name
     card["folder"] = source.parent.name if source.parent != Path("output") else "root"
@@ -279,23 +321,30 @@ def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         card["size"] = media_service.human_bytes(source.stat().st_size)
     except (OSError, AttributeError):
         card["size"] = ""
+    stereo = (post.stereo_layout or "mono") != "mono"
     if post.media_type == "image":
         card["preview_url"] = card["url"]
-        card["poster_url"] = card["url"]
+        # A 3D still keeps its left-eye poster from post_card.
+        if not (stereo and card.get("poster_url")):
+            card["poster_url"] = card["url"]
         card["codec"] = "IMG"
         return card
+    # Grid assets of a 3D video come from its left-eye rendition.
+    grid_source = source
+    if stereo and not card.get("stereo_crop"):
+        grid_source = media_service.mono_sibling_path(str(source))
 
     def sibling_url(path: Path) -> str | None:
         try:
             if path.exists() and path.stat().st_size > 0:
                 rel = path.resolve().relative_to(Path("output").resolve()).as_posix()
-                return f"/media/{rel}"
+                return public_url(rel)
         except (OSError, ValueError):
             return None
         return None
 
-    card["preview_url"] = sibling_url(media_service.explore_preview_path(str(source)))
-    card["poster_url"] = sibling_url(media_service.explore_poster_path(str(source)))
+    card["preview_url"] = sibling_url(media_service.explore_preview_path(str(grid_source)))
+    card["poster_url"] = sibling_url(media_service.explore_poster_path(str(grid_source)))
     try:
         card["codec"] = media_service.get_video_codec(str(source)).upper()
     except Exception:
@@ -317,6 +366,20 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     display_name: str = ""
+    # Strict so only a real JSON true counts as consent ("yes"/1 are rejected).
+    accept_terms: StrictBool = False
+    # Cloudflare Turnstile response; checked only when SX_TURNSTILE_SECRET is set.
+    turnstile_token: str | None = None
+    # Honeypot: hidden in the SPA, so a non-empty value means a bot.
+    website: str = ""
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class LoginRequest(BaseModel):
@@ -348,11 +411,11 @@ class CommentRequest(BaseModel):
 
 
 class ViewRequest(BaseModel):
-    watch_ms: int = 0
-    foreground_ms: int | None = None
-    duration_ms: int | None = None
+    watch_ms: int = Field(default=0, ge=0)
+    foreground_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     watch_ratio: float | None = None
-    position_ms: int | None = None
+    position_ms: int | None = Field(default=None, ge=0)
     completed: bool = False
     navigation_reason: str | None = None
     playback_quality: dict = Field(default_factory=dict)
@@ -368,11 +431,11 @@ class EventRequest(BaseModel):
     event_type: str
     post_id: str | None = None
     pack_id: str | None = None
-    watch_ms: int | None = None
-    foreground_ms: int | None = None
-    duration_ms: int | None = None
+    watch_ms: int | None = Field(default=None, ge=0)
+    foreground_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     watch_ratio: float | None = None
-    position_ms: int | None = None
+    position_ms: int | None = Field(default=None, ge=0)
     completed: bool = False
     navigation_reason: str | None = None
     playback_quality: dict = Field(default_factory=dict)
@@ -391,18 +454,87 @@ class RecommendationFeedbackRequest(BaseModel):
     client_event_id: str | None = None
 
 
-@router.post("/api/auth/register")
-def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+def _issue_verification_token(db: Session, user: User) -> str:
+    """Retire older links for ``user`` and store a fresh one; returns the raw token."""
+    now = utcnow()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    raw_token = secrets.token_urlsafe(40)
+    db.add(
+        EmailVerificationToken(
+            user_id=user.id,
+            token_hash=token_hash(raw_token),
+            expires_at=now + timedelta(minutes=verification_ttl_minutes()),
+        )
+    )
+    db.commit()
+    return raw_token
+
+
+def _deliver_verification_email(recipient: str, raw_token: str) -> None:
+    try:
+        send_verification_email(recipient, raw_token)
+    except Exception:
+        logger.exception("Verification email delivery failed")
+
+
+def _expose_verification_token() -> bool:
+    return os.environ.get("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0").lower() in {"1", "true", "yes"}
+
+
+def _verification_accepted(raw_token: str | None = None) -> JSONResponse:
+    payload = {"verification_sent": True}
+    if raw_token and _expose_verification_token():
+        payload["debug_token"] = raw_token
+    return JSONResponse(payload, status_code=202)
+
+
+def _clear_expired_pending(db: Session, email: str, username: str) -> None:
+    """Drop pending users holding this email/username whose verification lapsed."""
+    rows = db.query(User).filter(
+        User.status == "pending",
+        or_(User.email_norm == email, User.username_norm == username),
+    ).all()
+    now = utcnow()
+    for row in rows:
+        latest = db.query(func.max(EmailVerificationToken.expires_at)).filter(
+            EmailVerificationToken.user_id == row.id,
+        ).scalar()
+        if latest is not None and aware(latest) > now:
+            continue
+        db.query(EmailVerificationToken).filter(
+            EmailVerificationToken.user_id == row.id,
+        ).delete(synchronize_session=False)
+        db.delete(row)
+    db.commit()
+
+
+@router.post("/api/auth/register", status_code=202)
+def register(
+    req: RegisterRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     validate_origin(request)
+    if req.website.strip():
+        # Honeypot: only bots fill the hidden field. Look like success, create nothing.
+        return _verification_accepted()
     email_for_gate = normalize_email(str(req.email))
     is_open = REGISTRATION_ENABLED and registration_enabled()
     if not is_open and not is_registration_allowlisted(email_for_gate):
         error(403, "REGISTRATION_DISABLED", "New account registration is disabled.")
     rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
+    if req.accept_terms is not True:
+        error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
+    verify_turnstile(req.turnstile_token, request_identity(request))
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
     rate_limiter.check(db, f"register-account:{email}:{username}", 3, 60 * 60)
+    _clear_expired_pending(db, email, username)
     if db.query(User.id).filter(User.email_norm == email).first():
         error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
     if db.query(User.id).filter(User.username_norm == username).first():
@@ -416,7 +548,9 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
         role=configured_role(email, username),
-        status="active",
+        status="pending",
+        terms_version=TERMS_VERSION,
+        terms_accepted_at=utcnow(),
     )
     db.add(user)
     try:
@@ -429,21 +563,71 @@ def register(req: RegisterRequest, request: Request, db: Session = Depends(get_d
             error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
         error(409, "ACCOUNT_CONFLICT", "The account details are already in use.")
     db.refresh(user)
+    raw_token = _issue_verification_token(db, user)
+    background_tasks.add_task(_deliver_verification_email, email, raw_token)
+    return _verification_accepted(raw_token)
+
+
+@router.post("/api/auth/verify-email")
+def verify_email(req: VerifyEmailRequest, request: Request, db: Session = Depends(get_db)):
+    validate_origin(request)
+    rate_limiter.check(db, f"verify-email:{request_identity(request)}", 12, 15 * 60)
+    row = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash(str(req.token or "").strip()),
+        EmailVerificationToken.used_at.is_(None),
+        EmailVerificationToken.expires_at > utcnow(),
+    ).first()
+    user = db.get(User, row.user_id) if row else None
+    if not row or not user or user.status != "pending" or user.account_type != "real":
+        error(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or expired.")
+    now = utcnow()
+    user.status = "active"
+    bootstrap_role(user)
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    db.commit()
+    db.refresh(user)
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
     return response
 
 
+@router.post("/api/auth/resend-verification", status_code=202)
+def resend_verification(
+    req: ResendVerificationRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    validate_origin(request)
+    email = normalize_email(str(req.email))
+    rate_limiter.check(db, f"resend-verification-ip:{request_identity(request)}", 8, 60 * 60)
+    rate_limiter.check(db, f"resend-verification-account:{email}", 3, 60 * 60)
+    user = db.query(User).filter(
+        User.email_norm == email,
+        User.status == "pending",
+        User.account_type == "real",
+    ).first()
+    if not user:
+        return _verification_accepted()
+    raw_token = _issue_verification_token(db, user)
+    background_tasks.add_task(_deliver_verification_email, user.email or email, raw_token)
+    return _verification_accepted(raw_token)
+
+
 @router.post("/api/auth/login")
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
     identity = request_identity(request)
-    rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
-    rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
+    if settings.login_rate_limit_enabled():
+        rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
+        rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
     user = db.query(User).filter(
-        User.status == "active",
+        User.status.in_(("active", "suspended")),
         User.account_type == "real",
         or_(User.email_norm == identifier, User.username_norm == identifier),
     ).first()
@@ -452,9 +636,10 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
     if not verify_password(user.password_hash, req.password):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
-    assigned_role = configured_role(user.email or "", user.username)
-    if user.role != assigned_role:
-        user.role = assigned_role
+    # Only after the right password, so the status is not an account-probing oracle.
+    if user.status == "suspended":
+        error(403, "ACCOUNT_SUSPENDED", "This account is suspended. You can appeal on the Support page.")
+    bootstrap_role(user)
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
@@ -912,11 +1097,13 @@ def delete_post(
     post = get_target_post(db, post_id)
     if post.owner_id != context.user.id:
         error(403, "FORBIDDEN", "Only the post owner can delete this post.")
+    media_files = post_media_files([post])
     post.status = "deleted"
     post.deleted_at = utcnow()
     context.user.post_count = max(0, int(context.user.post_count or 0) - 1)
     record_event(db, event_type="delete_post", post_id=post.id, user_id=context.user.id, source="profile")
     db.commit()
+    media_store.delete_paths(media_files)
     return {"ok": True}
 
 
@@ -1145,6 +1332,35 @@ def unlike_social_comment(comment_id: str, context: AuthContext = Depends(requir
     return set_comment_like(db, get_visible_comment(db, comment_id, context.user.id), context.user.id, False)
 
 
+def event_rpm() -> int:
+    try:
+        return max(1, int(os.environ.get("SX_EVENT_RPM", "120")))
+    except ValueError:
+        return 120
+
+
+def check_event_rate_limits(db: Session, request: Request, viewer_id: str | None, anonymous_hash: str) -> None:
+    """Per-actor (SX_EVENT_RPM/min) and per-IP (5x that) limits for view/event writes."""
+    rpm = event_rpm()
+    actor = f"u:{viewer_id}" if viewer_id else f"a:{anonymous_hash[:48]}"
+    rate_limiter.check(db, f"events-actor:{actor}", rpm, 60)
+    rate_limiter.check(db, f"events-ip:{request_identity(request)}", rpm * 5, 60)
+
+
+def validate_event_dicts(req) -> None:
+    # Checked here rather than with Field(ge=0): pydantic's NaN/inf error echoes the
+    # input back, which the JSON error response cannot encode (a 500).
+    if req.watch_ratio is not None and not (math.isfinite(req.watch_ratio) and req.watch_ratio >= 0):
+        error(422, "INVALID_EVENT", "watch_ratio must be a non-negative finite number.", "watch_ratio")
+    if not event_dict_is_valid(req.context) or not event_dict_is_valid(req.playback_quality):
+        error(
+            422,
+            "EVENT_CONTEXT_TOO_LARGE",
+            "Event context must be at most 2 KB and 16 keys with scalar values.",
+            "context",
+        )
+
+
 @router.post("/api/posts/{post_id}/view")
 def record_view(
     post_id: str,
@@ -1156,6 +1372,9 @@ def record_view(
 ):
     validate_origin(request)
     viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    check_event_rate_limits(db, request, viewer_id, anonymous_hash)
+    validate_event_dicts(req)
     post = get_visible_post(db, post_id, viewer_id)
     pack = None
     if req.pack_id:
@@ -1167,8 +1386,15 @@ def record_view(
             for item in pack.items
         ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
-    anonymous_hash = ensure_anonymous_cookie(request, response)
-    qualified = req.completed or req.watch_ms >= (2000 if post.media_type == "image" else 3000)
+    clamped = clamp_playback(
+        db,
+        post.id,
+        watch_ms=req.watch_ms,
+        foreground_ms=req.foreground_ms,
+        duration_ms=req.duration_ms,
+        position_ms=req.position_ms,
+    )
+    qualified = req.completed or clamped["watch_ms"] >= (2000 if post.media_type == "image" else 3000)
     counted = False
     if qualified:
         key = f"u:{viewer_id}" if viewer_id else f"a:{anonymous_hash[:48]}"
@@ -1190,11 +1416,11 @@ def record_view(
         user_id=viewer_id,
         anonymous_id=None if viewer_id else anonymous_hash,
         source=req.source,
-        watch_ms=req.watch_ms,
-        foreground_ms=req.foreground_ms,
-        duration_ms=req.duration_ms,
+        watch_ms=clamped["watch_ms"],
+        foreground_ms=clamped["foreground_ms"],
+        duration_ms=clamped["duration_ms"],
         watch_ratio=req.watch_ratio,
-        position_ms=req.position_ms,
+        position_ms=clamped["position_ms"],
         completed=req.completed,
         navigation_reason=req.navigation_reason,
         playback_quality=req.playback_quality,
@@ -1232,6 +1458,9 @@ def create_event(
     if event_type not in allowed:
         error(422, "INVALID_EVENT", "Unsupported event type.", "event_type")
     viewer_id = auth_user_id(context)
+    anonymous_hash = ensure_anonymous_cookie(request, response)
+    check_event_rate_limits(db, request, viewer_id, anonymous_hash)
+    validate_event_dicts(req)
     post = get_visible_post(db, req.post_id, viewer_id) if req.post_id else None
     pack = None
     if req.pack_id:
@@ -1243,7 +1472,6 @@ def create_event(
             for item in pack.items
         ):
             error(422, "POST_NOT_IN_PACK", "That reel is not available in this Reel Pack.", "post_id")
-    anonymous_hash = ensure_anonymous_cookie(request, response)
     if pack and event_type == "pack_start":
         # A collection view is any member reel starting playback. Anonymous
         # and authenticated viewers both count, de-duplicated per viewer in a
@@ -1404,7 +1632,7 @@ def get_feed(
         error(401, "AUTH_REQUIRED", "Sign in to view posts from people you follow.")
     limit = max(1, min(int(limit), 50))
     hidden_ids = blocked_user_ids(db, viewer_id)
-    query = post_query(db).join(User, User.id == Post.owner_id).filter(User.status == "active")
+    query = post_query(db).options(selectinload(Post.slides)).join(User, User.id == Post.owner_id).filter(User.status == "active")
     if hidden_ids:
         query = query.filter(~Post.owner_id.in_(hidden_ids))
     if media in {"video", "image"}:
@@ -1418,9 +1646,10 @@ def get_feed(
     rows = query.limit(limit + 1).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
+    state = viewer_post_state(db, viewer_id, rows) if viewer_id else None
     return {
         "scope": scope,
-        "items": [media_card(post, db, viewer_id) for post in rows],
+        "items": [media_card(post, db, viewer_id, state) for post in rows],
         "next_cursor": encode_cursor(rows[-1]) if has_more and rows else None,
     }
 
@@ -1475,7 +1704,7 @@ def search_suggestions(
             for user in candidates
         ]
 
-    tag_rows = reels_router.list_reel_tags(q=query, limit=bounded).get("tags", [])
+    tag_rows = reels_router.tag_suggestions(q=query, limit=bounded, db=db).get("tags", [])
 
     posts = []
     if key:

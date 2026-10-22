@@ -307,6 +307,18 @@ def _process_video_impl(
         else:
             if not fal_key and not os.environ.get("FAL_KEY"):
                 raise ValueError("A Fal API key is required for cloud outpainting.")
+            source_limit = next(
+                (e.get("max_source_seconds") for e in _models.VIDEO_OUTPAINT
+                 if e["model"].lower() == (outpaint_model or "").lower()),
+                None,
+            )
+            # 0.1 s slack: a stream-copy trim to exactly the limit can probe a
+            # few frames long; the quote already enforced the requested length.
+            if source_limit is not None and duration > float(source_limit) + 0.1:
+                raise ValueError(
+                    f"{outpaint_model} accepts a source of {source_limit} s or less "
+                    f"(got {duration:.2f} s); trim the video to {source_limit} s or less."
+                )
             if status_callback:
                 status_callback("Uploading video file to fal.ai CDN...")
             t_up_start = time.time()
@@ -322,13 +334,19 @@ def _process_video_impl(
             )
             model_lower = (outpaint_model or "").lower()
             if "luma" in model_lower or "reframe" in model_lower:
+                # Ray 3.2 reframe: prompt is required, resolution sets the
+                # per-second rate, and duration is left to default to the
+                # source length (the source length was checked before upload).
+                luma_resolution = kwargs.get("luma_resolution", "720p")
                 arguments = {
                     "video_url": video_url,
+                    "prompt": (prompt or "").strip() or default_prompt,
                     "aspect_ratio": kwargs.get("luma_aspect_ratio", "1:1"),
+                    "resolution": luma_resolution,
                 }
-                if prompt and prompt.strip():
-                    arguments["prompt"] = prompt.strip()
-                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration, resolution=luma_resolution,
+                )
             elif "ltx" in model_lower:
                 neg_prompt = kwargs.get("ltx_negative_prompt")
                 if neg_prompt is None or not str(neg_prompt).strip():

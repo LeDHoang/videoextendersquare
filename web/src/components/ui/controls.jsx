@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useId } from 'react';
+import { Children, cloneElement, isValidElement, useEffect, useRef, useState, useId } from 'react';
 import Emoji from './Emoji.jsx';
 
 // Accessible Combobox Dropdown — WAI-ARIA compliant with full keyboard navigation:
@@ -199,18 +199,25 @@ export function Button({
   );
 }
 
-export function Field({ label, id, children, help }) {
+const BINDABLE_TAGS = new Set(['input', 'textarea', 'select']);
+
+export function Field({ label, id, children, help, className = '', style }) {
   const generatedId = useId();
-  const fieldId = id || generatedId;
+  const only = Children.count(children) === 1 ? Children.toArray(children)[0] : null;
+  const bindable =
+    isValidElement(only) && (BINDABLE_TAGS.has(only.type) || only.type === Dropdown);
+  const fieldId = id || (bindable && only.props.id) || generatedId;
+  const control =
+    bindable && !only.props.id ? cloneElement(only, { id: fieldId }) : children;
 
   return (
-    <div style={{ marginBottom: 'var(--sx-2)' }}>
+    <div className={className || undefined} style={{ marginBottom: 'var(--sx-2)', ...style }}>
       {label ? (
         <label className="sx-label" htmlFor={fieldId}>
           {label}
         </label>
       ) : null}
-      {children}
+      {control}
       {help ? <div className="sx-monospace-sm" style={{ marginTop: 2 }}>{help}</div> : null}
     </div>
   );

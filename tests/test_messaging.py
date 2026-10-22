@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from verified_signup import register_verified
 from server.routers import account_safety, messages, social
 from server.social import auth
 from server.social.database import Base, get_db
@@ -57,12 +58,12 @@ def app(tmp_path, monkeypatch):
 
 
 def register(client: TestClient, username: str, email: str) -> dict:
-    response = client.post(
-        "/api/auth/register",
+    response = register_verified(client,
         json={
             "email": email,
             "username": username,
             "password": PASSWORD,
+            "accept_terms": True,
             "display_name": username.title(),
         },
     )
@@ -476,3 +477,65 @@ def test_conversation_list_pages_with_a_cursor_without_gaps_or_repeats(app):
         finally:
             for client in senders:
                 client.__exit__(None, None, None)
+
+
+def test_deleted_account_dms_are_hidden_from_the_other_participant_but_kept(app, monkeypatch):
+    monkeypatch.setenv("SX_ADMIN_USERS", "moderator_admin")
+    with TestClient(app) as alice_client, TestClient(app) as bob_client, TestClient(app) as admin_client:
+        alice = register(alice_client, "alice_user", "alice@example.com")
+        bob = register(bob_client, "bob_user", "bob@example.com")
+        register(admin_client, "moderator_admin", "admin@example.com")
+        conversation_id, _ = _open_conversation(alice_client)
+        base = f"/api/messages/conversations/{conversation_id}"
+        assert mutate(bob_client, "POST", f"{base}/accept").status_code == 200
+        reply = mutate(bob_client, "POST", f"{base}/messages", {"kind": "text", "text": "rude reply", "client_id": "bob-rude-0001"})
+        bob_message_id = reply.json()["message"]["id"]
+        unread_message = mutate(bob_client, "POST", f"{base}/messages", {"kind": "text", "text": "unread", "client_id": "bob-unread-001"})
+        assert unread_message.status_code == 200
+        reported = mutate(alice_client, "POST", "/api/reports", {"target_type": "message", "target_id": bob_message_id, "reason": "harassment"})
+        assert reported.status_code == 200, reported.text
+        report_id = reported.json()["report"]["id"]
+        assert alice_client.get("/api/messages/unread-count").json()["unread_count"] == 2
+
+        deleted = mutate(bob_client, "DELETE", "/api/users/me", {"current_password": PASSWORD, "confirmation": "DELETE"})
+        assert deleted.status_code == 200, deleted.text
+
+        # Alice no longer sees the conversation, its unread count, or its history.
+        inbox = alice_client.get("/api/messages/bootstrap").json()
+        assert inbox["conversations"] == [] and inbox["unread"]["total"] == 0
+        assert alice_client.get("/api/messages/bootstrap", params={"box": "requests"}).json()["conversations"] == []
+        assert alice_client.get("/api/messages/unread-count").json()["unread_count"] == 0
+        assert alice_client.get(f"{base}/messages").status_code == 404
+        send = mutate(alice_client, "POST", f"{base}/messages", {"kind": "text", "text": "hello?", "client_id": "after-delete-01"})
+        assert send.status_code == 404
+        assert mutate(alice_client, "POST", f"{base}/read", {}).status_code == 404
+
+        with app.state.testing_session() as db:
+            # Rows are kept for moderation; nothing is soft-deleted.
+            assert db.query(DirectMessage).filter(DirectMessage.conversation_id == conversation_id).count() == 3
+            assert db.query(DirectMessage).filter(DirectMessage.deleted_at.isnot(None)).count() == 0
+            # The live stream skips the hidden conversation's events.
+            assert db.query(MessageEvent).filter(MessageEvent.recipient_id == alice["id"]).count() > 0
+            visible_events = db.query(MessageEvent).filter(
+                MessageEvent.recipient_id == alice["id"],
+                ~messages.deleted_counterpart_clause(MessageEvent.conversation_id, alice["id"]),
+            ).count()
+            assert visible_events == 0
+
+        # A moderator can still open and act on the earlier report.
+        queue = admin_client.get("/api/moderation/reports")
+        assert queue.status_code == 200
+        report_payload = next(row for row in queue.json()["reports"] if row["id"] == report_id)
+        assert report_payload["target"]["content"]["text"] == "rude reply"
+        acted = mutate(
+            admin_client,
+            "PATCH",
+            f"/api/moderation/reports/{report_id}",
+            {"action": "suspend_user", "resolution": "Harassment"},
+        )
+        assert acted.status_code == 200, acted.text
+        assert acted.json()["report"]["status"] == "resolved"
+        with app.state.testing_session() as db:
+            # Moderation never revives a deleted account or its hidden thread.
+            assert db.get(User, bob["id"]).status == "deleted"
+        assert alice_client.get("/api/messages/bootstrap").json()["conversations"] == []

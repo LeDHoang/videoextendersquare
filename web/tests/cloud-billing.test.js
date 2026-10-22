@@ -57,7 +57,7 @@ test('missing optionals never serialize as undefined or NaN', () => {
     upscaleOnly: true,
     falPicked: false,
     studioPicked: false,
-    outpaintModel: 'fal-ai/luma-dream-machine/ray-2-flash/reframe',
+    outpaintModel: 'luma/agent/ray/v3.2/reframe',
     upscaleModel: 'fal-ai/bytedance-upscaler/upscale/video',
   });
   const form = appendProcessingParameters(new FormData(), { ...parameters, extra: undefined, nil: null });

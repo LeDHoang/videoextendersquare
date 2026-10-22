@@ -2,9 +2,48 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>ECHO Reels</title>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
 <style>
+  /* ECHO tokens for the standalone player. _scope_css drops bare html/body rules, so
+     when embedded in the SPA the app's own tokens.css supplies these same names.
+     Keep in sync with web/src/styles/tokens.css (web/tests/echo-token-parity.test.js). */
+  html {
+    color-scheme: dark;
+    --sx-bg: #08090a;
+    --sx-surface: #101214;
+    --sx-surface-2: #16191c;
+    --sx-surface-3: #1d2126;
+    --sx-surface-hover: #1b1e22;
+    --sx-surface-glass: rgba(16, 18, 20, 0.82);
+    --sx-rule: #24282d;
+    --sx-rule-strong: #3a4047;
+    --sx-ink: #f2f3f5;
+    --sx-ink-2: #a4abb3;
+    --sx-ink-3: #8e959e;
+    --sx-ink-muted: #646b74;
+    --sx-accent: #ff3b1f;
+    --sx-accent-hi: #ff5c42;
+    --sx-accent-dim: rgba(255, 59, 31, 0.12);
+    --sx-accent-glow: rgba(255, 59, 31, 0.35);
+    --sx-accent-border: rgba(255, 59, 31, 0.45);
+    --sx-on-accent: #0a0a0a;
+    --sx-success: #22c55e;
+    --sx-success-hi: #4ade80;
+    --sx-warn: #f2c744;
+    --sx-warn-hi: #fde047;
+    --sx-danger: #ef4444;
+    --sx-danger-hi: #f87171;
+    --sx-info: #3b82f6;
+    --sx-info-hi: #60a5fa;
+    --sx-font-display: 'Archivo Black', Archivo, sans-serif;
+    --sx-font-sans: Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --sx-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sx-font-brand: Orbitron, 'Archivo Black', sans-serif;
+  }
   * {
     box-sizing: border-box;
     margin: 0;
@@ -14,8 +53,8 @@
   html, body {
     width: 100%;
     height: 100%;
-    background-color: #08090A;
-    color: #F2F3F5;
+    background-color: var(--sx-bg);
+    color: var(--sx-ink);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     display: flex;
     justify-content: center;
@@ -31,14 +70,15 @@
     max-width: 100%;
     max-height: 100%;
     aspect-ratio: 1 / 1;
-    background: #101214;
+    background: var(--sx-surface);
     border-radius: 0px;
-    border: 1px solid #24282D;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 59, 31, 0.35);
+    border: 1px solid var(--sx-rule);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.95), 0 0 1px color-mix(in srgb, var(--sx-accent) 35%, transparent);
     overflow: hidden;
     /* clip never makes a scroll container so focus or hit-testing cannot shift the
        picture inside the frame (the ambient glow overflows it by 20px) */
     overflow: clip;
+    overflow-clip-margin: 10px;
     display: flex;
     flex-direction: column;
     margin: auto;
@@ -81,7 +121,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #08090A;
+    background: var(--sx-bg);
     overflow: hidden;
   }
 
@@ -225,6 +265,17 @@
     display: block;
     background: #000;
   }
+  /* Stereo posts without a left-eye 2D rendition yet play the raw stereo
+     file in 2D: cover-fit in the 1:1 frame, anchored to the left eye
+     (left half of side-by-side, top half of top-bottom). */
+  .reels-video-wrap.stereo-crop-sbs video,
+  .reels-video-wrap.stereo-crop-sbs img {
+    object-position: 0% 50% !important;
+  }
+  .reels-video-wrap.stereo-crop-tb video,
+  .reels-video-wrap.stereo-crop-tb img {
+    object-position: 50% 0% !important;
+  }
   /* Image reels have no timeline — the scrubber hides during the dwell. */
   .reels-progress-wrap.image-hidden {
     visibility: hidden;
@@ -253,7 +304,7 @@
   .reels-slide-seg i {
     position: absolute;
     inset: 0;
-    background: #FF3B1F;
+    background: var(--sx-accent);
     transform: scaleX(0);
     transform-origin: left center;
   }
@@ -270,7 +321,7 @@
     border: 1px solid rgba(242, 243, 245, 0.18);
     border-radius: 4px;
     background: rgba(13, 14, 16, 0.62);
-    color: #F2F3F5;
+    color: var(--sx-ink);
     cursor: pointer;
     transform: translateY(-50%);
     opacity: 0;
@@ -283,8 +334,8 @@
   .reels-video-wrap.slides-multi .reels-slide-nav { display: block; }
   .reels-video-wrap.slides-multi:hover .reels-slide-nav,
   .reels-slide-nav:focus-visible { opacity: 1; }
-  .reels-slide-nav:hover { border-color: #FF3B1F; color: #FF3B1F; }
-  .reels-slide-nav:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .reels-slide-nav:hover { border-color: var(--sx-accent); color: var(--sx-accent); }
+  .reels-slide-nav:focus-visible { outline: 2px solid var(--sx-ink); outline-offset: 2px; }
   @media (hover: none) {
     .reels-video-wrap.slides-multi .reels-slide-nav { display: none; }
   }
@@ -297,12 +348,12 @@
     height: 18px;
     z-index: 5;
     pointer-events: none;
-    border: 0 solid #FF3B1F;
+    border: 0 solid var(--sx-accent);
   }
-  .reels-reticle.tl { top: 14px; left: 14px; border-top-width: 2px; border-left-width: 2px; }
-  .reels-reticle.tr { top: 14px; right: 14px; border-top-width: 2px; border-right-width: 2px; }
-  .reels-reticle.bl { bottom: 34px; left: 14px; border-bottom-width: 2px; border-left-width: 2px; }
-  .reels-reticle.br { bottom: 34px; right: 14px; border-bottom-width: 2px; border-right-width: 2px; }
+  .reels-reticle.tl { top: -7.6px; left: -7.6px; border-top-width: 2px; border-left-width: 2px; }
+  .reels-reticle.tr { top: -7.6px; right: -7.6px; border-top-width: 2px; border-right-width: 2px; }
+  .reels-reticle.bl { bottom: -7.6px; left: -7.6px; border-bottom-width: 2px; border-left-width: 2px; }
+  .reels-reticle.br { bottom: -7.6px; right: -7.6px; border-bottom-width: 2px; border-right-width: 2px; }
   .reels-phone-frame.sx-fs-active .reels-reticle,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-reticle {
     display: none;
@@ -322,7 +373,7 @@
   .sync-time-toggle:focus-visible,
   .account-btn:focus-visible,
   .comment-submit-btn:focus-visible {
-    outline: 2px solid #FFFFFF;
+    outline: 2px solid var(--sx-ink);
     outline-offset: 2px;
   }
 
@@ -361,8 +412,8 @@
     pointer-events: none;
   }
   .reels-badge {
-    background: #FF3B1F;
-    color: #0A0A0A;
+    background: var(--sx-accent);
+    color: var(--sx-on-accent);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     font-weight: 800;
@@ -370,15 +421,15 @@
     padding: 3px 10px;
     border-radius: 0px;
     text-transform: uppercase;
-    box-shadow: 0 0 12px rgba(255, 59, 31, 0.4);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 40%, transparent);
   }
   .reels-counter {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     font-weight: 700;
-    color: #F2F3F5;
-    background: #16191C;
-    border: 1px solid #24282D;
+    color: var(--sx-ink);
+    background: var(--sx-surface-2);
+    border: 1px solid var(--sx-rule);
     padding: 3px 10px;
     border-radius: 0px;
     letter-spacing: 0.08em;
@@ -392,7 +443,7 @@
     transform: translateY(-50%);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5.4px;
     align-items: center;
     z-index: 25;
     /* Never clip even if buttons are added later. */
@@ -407,12 +458,12 @@
     background: rgba(13, 14, 16, 0.9);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
-    border: 1px solid #24282E;
+    border: 1px solid var(--sx-rule);
     border-radius: 12px;
     padding: 6px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5.4px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   }
   /* The `hidden` attribute must win over the flex display above, otherwise
@@ -420,19 +471,24 @@
   .reels-cluster[hidden] {
     display: none !important;
   }
+  /* Only five keys live here now, so give them room. */
+  #railPrimary {
+    gap: 10px;
+    padding: 8px;
+  }
   .reels-cluster-divider {
     width: 100%;
     height: 1px;
-    background: #24282E;
+    background: var(--sx-rule);
     margin: 0;
   }
   .action-btn {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border-radius: 8px;
-    background: #16191C;
-    border: 1px solid #24282E;
-    color: #A4ABB3;
+    background: var(--sx-surface-2);
+    border: 1px solid var(--sx-rule);
+    color: var(--sx-ink-2);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -444,23 +500,23 @@
     text-decoration: none;
   }
   .action-btn:hover {
-    background: rgba(255, 59, 31, 0.14);
-    color: #FF3B1F;
-    border-color: #FF3B1F;
+    background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
+    color: var(--sx-accent);
+    border-color: var(--sx-accent);
   }
   .action-btn:focus-visible {
-    outline: 2px solid #FFFFFF;
+    outline: 2px solid var(--sx-ink);
     outline-offset: 2px;
   }
   .action-btn:active, .action-btn.flash-click {
-    background: #FF3B1F !important;
-    color: #0A0A0A !important;
-    border-color: #FF3B1F !important;
-    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45) !important;
+    background: var(--sx-accent) !important;
+    color: var(--sx-on-accent) !important;
+    border-color: var(--sx-accent) !important;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--sx-accent) 45%, transparent) !important;
     transform: scale(0.96);
   }
   .action-btn:active .action-btn-label, .action-btn.flash-click .action-btn-label {
-    color: #0A0A0A !important;
+    color: var(--sx-on-accent) !important;
   }
   .action-btn .btn-icon {
     display: flex;
@@ -489,61 +545,65 @@
     line-height: 1;
     white-space: nowrap;
   }
+  /* Icon-only buttons: only the like and comment counts keep text. */
+  .action-btn-label:not(#likeCount):not(#commentBadge) {
+    display: none;
+  }
   /* Toggled-on state (sound on or comments open): vermilion text and ring.
      The old rule painted the label dark on a dark button. */
   .action-btn.active {
-    background: rgba(255, 59, 31, 0.14);
-    color: #FF3B1F;
-    border-color: #FF3B1F;
-    box-shadow: 0 0 12px rgba(255, 59, 31, 0.25);
+    background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
+    color: var(--sx-accent);
+    border-color: var(--sx-accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 25%, transparent);
   }
   .action-btn.active .action-btn-label {
-    color: #FF3B1F;
+    color: var(--sx-accent);
   }
   /* Auto-advance on reads as a solid vermilion key like the mockup. */
   #modeBtn.active {
     background: #FF3B1F;
     border-color: #FF3B1F;
-    color: #0A0A0A;
+    color: var(--sx-on-accent);
     box-shadow: 0 0 16px rgba(255, 59, 31, 0.45);
   }
   #modeBtn.active .action-btn-label {
-    color: #0A0A0A;
+    color: var(--sx-on-accent);
   }
   /* Amber accents: comment count and the cache button. */
   #commentBadge,
   #preloadBtn {
-    color: #F59E0B;
+    color: var(--sx-warn);
   }
   #preloadBtn:hover {
     background: rgba(245, 158, 11, 0.14);
-    border-color: #F59E0B;
-    color: #F59E0B;
+    border-color: var(--sx-warn);
+    color: var(--sx-warn);
   }
   /* Liked state for the reel LIKE button — red glow + red-filled heart. */
   #likeBtn.active {
-    border-color: #FF3B1F !important;
-    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45);
+    border-color: var(--sx-accent) !important;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--sx-accent) 45%, transparent);
   }
   #likeBtn.active .btn-icon svg {
-    filter: drop-shadow(0 0 4px rgba(255, 59, 31, 0.8));
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sx-accent) 80%, transparent));
   }
   #likeBtn.active .btn-icon svg #edge {
-    fill: #ff3b1f;
-    stroke: #ff3b1f;
+    fill: var(--sx-accent);
+    stroke: var(--sx-accent);
   }
   #likeBtn.active .action-btn-label {
-    color: #FF3B1F !important;
+    color: var(--sx-accent) !important;
   }
   #saveBtn.active,
   #followBtn.active,
   .follow-pill.active {
-    border-color: #00E5FF !important;
-    box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+    border-color: var(--sx-info-hi) !important;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--sx-info-hi) 35%, transparent);
   }
   #saveBtn.active .action-btn-label,
   #followBtn.active .action-btn-label {
-    color: #00E5FF !important;
+    color: var(--sx-info-hi) !important;
   }
 
   /* Creator row: profile link + follow pill (bottom-left meta overlay). */
@@ -565,9 +625,9 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    border: 1px solid #24282D;
-    background: #16191C;
-    color: #FF3B1F;
+    border: 1px solid var(--sx-rule);
+    background: var(--sx-surface-2);
+    color: var(--sx-accent);
     font: 700 9px/1 'JetBrains Mono', monospace;
     letter-spacing: 0.08em;
     padding: 5px 9px;
@@ -587,13 +647,13 @@
     display: block;
   }
   .follow-pill:hover {
-    border-color: #FF3B1F;
-    color: #ffffff;
+    border-color: var(--sx-accent);
+    color: var(--sx-ink);
   }
   .follow-pill.active {
-    border-color: #FF3B1F !important;
-    box-shadow: 0 0 14px rgba(255, 59, 31, 0.35);
-    color: #FF3B1F;
+    border-color: var(--sx-accent) !important;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--sx-accent) 35%, transparent);
+    color: var(--sx-accent);
   }
 
   /* Page-edge prev/next chevrons: fixed to the viewport's right edge,
@@ -607,19 +667,19 @@
     transform: translateY(-50%);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5.4px;
     z-index: 24;
   }
   .reels-edge-nav[hidden] {
     display: none;
   }
   .edge-chevron {
-    width: 40px;
-    height: 40px;
-    border-radius: 0px;
-    background: #16191C;
-    border: 1px solid #24282D;
-    color: #A4ABB3;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--sx-surface-2);
+    border: 1px solid var(--sx-rule);
+    color: var(--sx-ink-2);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -631,19 +691,19 @@
     transition: all 0.15s ease;
   }
   .edge-chevron:hover {
-    background: #1D2126;
-    color: #FF3B1F;
-    border-color: #FF3B1F;
+    background: var(--sx-surface-3);
+    color: var(--sx-accent);
+    border-color: var(--sx-accent);
   }
   .edge-chevron:active {
-    background: #FF3B1F !important;
-    color: #0A0A0A !important;
-    border-color: #FF3B1F !important;
-    box-shadow: 0 0 16px rgba(255, 59, 31, 0.45) !important;
+    background: var(--sx-accent) !important;
+    color: var(--sx-on-accent) !important;
+    border-color: var(--sx-accent) !important;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--sx-accent) 45%, transparent) !important;
     transform: scale(0.96);
   }
   .edge-chevron:active .action-btn-label {
-    color: #0A0A0A !important;
+    color: var(--sx-on-accent) !important;
   }
   .edge-chevron .btn-icon {
     display: flex;
@@ -666,14 +726,14 @@
     border: 0;
     padding: 0;
     background: transparent;
-    color: #FF3B1F;
+    color: var(--sx-accent);
     font: 700 10px/1.2 'JetBrains Mono', monospace;
     letter-spacing: 0.06em;
     cursor: pointer;
     pointer-events: auto;
     text-align: left;
   }
-  .meta-creator:hover { color: #ffffff; text-decoration: underline; }
+  .meta-creator:hover { color: var(--sx-ink); text-decoration: underline; }
 
   .reels-meta {
     position: absolute;
@@ -699,9 +759,9 @@
     gap: 4px;
     font-size: 10px;
     font-weight: 700;
-    color: #FF3B1F;
-    background: rgba(255, 59, 31, 0.14);
-    border: 1px solid rgba(255, 59, 31, 0.3);
+    color: var(--sx-accent);
+    background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--sx-accent) 30%, transparent);
     padding: 3px 8px;
     border-radius: 0px;
     width: fit-content;
@@ -711,14 +771,14 @@
   .meta-title {
     font-size: 12px;
     font-weight: 700;
-    color: #FFFFFF;
+    color: var(--sx-ink);
     line-height: 1.3;
     word-break: break-all;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   }
   .meta-sub {
     font-size: 10px;
-    color: #9BA1A8;
+    color: var(--sx-ink-3);
     display: flex;
     gap: 8px;
   }
@@ -751,7 +811,7 @@
   .reels-progress-bar {
     width: 100%;
     height: 6px;
-    background: #24282E;
+    background: var(--sx-rule);
     cursor: pointer;
     position: relative;
     transition: height 0.15s;
@@ -761,15 +821,15 @@
     height: 8px;
   }
   .reels-progress-bar:focus-visible {
-    outline: 2px solid #FFFFFF;
+    outline: 2px solid var(--sx-ink);
     outline-offset: 1px;
   }
   .reels-progress-fill {
     position: relative;
     height: 100%;
     width: 0%;
-    background: #FF3B1F;
-    box-shadow: 0 0 12px rgba(255, 59, 31, 0.7);
+    background: var(--sx-accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 70%, transparent);
     transition: width 0.1s linear;
   }
   /* Round scrub handle riding the end of the fill. */
@@ -782,8 +842,8 @@
     height: 14px;
     margin-top: -7px;
     border-radius: 50%;
-    background: #FFFFFF;
-    border: 2px solid #FF3B1F;
+    background: var(--sx-ink);
+    border: 2px solid var(--sx-accent);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
     transition: transform 0.15s ease;
   }
@@ -797,7 +857,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     font-weight: 700;
-    color: #A4ABB3;
+    color: var(--sx-ink-2);
     pointer-events: none;
     letter-spacing: 0.05em;
   }
@@ -816,17 +876,17 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #FF3B1F;
-    border: 1px solid #08090A;
+    background: var(--sx-accent);
+    border: 1px solid var(--sx-bg);
     pointer-events: auto;
     cursor: pointer;
     transition: transform 0.15s ease, background 0.15s ease;
-    box-shadow: 0 0 6px rgba(255, 59, 31, 0.8);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--sx-accent) 80%, transparent);
   }
   .reels-comment-dot:hover {
     transform: translate(-50%, -50%) scale(2.0);
-    background: #FFF;
-    border-color: #FF3B1F;
+    background: var(--sx-ink);
+    border-color: var(--sx-accent);
     z-index: 10;
   }
   .reels-dot-tooltip {
@@ -834,12 +894,12 @@
     bottom: 18px;
     left: 50%;
     transform: translateX(-50%);
-    background: #101214;
-    border: 1px solid #FF3B1F;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-accent);
     border-radius: 0px;
     padding: 4px 8px;
     font-size: 10px;
-    color: #FFF;
+    color: var(--sx-ink);
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
@@ -877,12 +937,12 @@
     align-items: center;
     gap: 8px;
     background: rgba(16, 18, 20, 0.95);
-    border: 1px solid #24282D;
-    border-left: 3px solid #FF3B1F;
+    border: 1px solid var(--sx-rule);
+    border-left: 3px solid var(--sx-accent);
     backdrop-filter: blur(12px);
     padding: 6px 12px;
     font-size: 11px;
-    color: #FFF;
+    color: var(--sx-ink);
     border-radius: 0px;
     pointer-events: auto;
     cursor: pointer;
@@ -897,10 +957,10 @@
     to { opacity: 1; transform: translateY(0); }
   }
   .twitch-comment-pill:hover {
-    border-color: #ff553a;
-    border-left-color: #FF3B1F;
+    border-color: var(--sx-accent);
+    border-left-color: var(--sx-accent);
     transform: translateX(3px);
-    box-shadow: 0 0 18px rgba(255, 85, 58, 0.3);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--sx-accent) 30%, transparent);
   }
   .twitch-avatar {
     font-size: 14px;
@@ -911,18 +971,18 @@
     font-family: Archivo, sans-serif;
     font-weight: 800;
     font-size: 11px;
-    color: #FF3B1F;
+    color: var(--sx-accent);
     flex-shrink: 0;
   }
   .twitch-tag {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
     font-weight: 700;
-    color: #A4ABB3;
+    color: var(--sx-ink-2);
     flex-shrink: 0;
   }
   .twitch-text {
-    color: #F2F3F5;
+    color: var(--sx-ink);
     font-family: Archivo, sans-serif;
     font-size: 12px;
     font-weight: 500;
@@ -932,7 +992,7 @@
   }
 
   /* ── ECHO Industrial Comments Drawer — 2D Viewport (Aesthetic Refresh) ── */
-  /* Palette: surface #121315 / container-low #1b1c1d / lowest #0d0e0f / variant #343536 / primary-container #ff553a / on-primary-container #5a0600 */
+  /* Palette: surface #121315 / container-low #1b1c1d / lowest #0d0e0f / variant var(--sx-rule-strong) / primary-container var(--sx-accent) / on-primary-container #5a0600 */
   .reels-comments-drawer {
     position: absolute;
     bottom: 0;
@@ -940,15 +1000,15 @@
     right: 0;
     height: 68%;
     max-height: 560px;
-    background: #1b1c1d;
-    border-top: 2px solid #ff553a;
+    background: var(--sx-surface-hover);
+    border-top: 2px solid var(--sx-accent);
     border-radius: 0;
     z-index: 50;
     display: flex;
     flex-direction: column;
     transform: translateY(105%);
     transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 -12px 40px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,85,58,0.12);
+    box-shadow: 0 -12px 40px rgba(0,0,0,0.95), 0 0 0 1px color-mix(in srgb, var(--sx-accent) 12%, transparent);
     user-select: auto;
     overflow: hidden;
   }
@@ -976,8 +1036,8 @@
     justify-content: space-between;
     gap: 12px;
     padding: 14px 16px;
-    border-bottom: 1px solid #343536;
-    background: #0d0e0f;
+    border-bottom: 1px solid var(--sx-rule-strong);
+    background: var(--sx-bg);
     flex-wrap: wrap;
   }
   .drawer-header-left {
@@ -986,13 +1046,13 @@
     gap: 8px;
     min-width: 0;
   }
-  .drawer-header-left .material-symbols-outlined { color: #ff553a; font-size: 18px; }
+  .drawer-header-left .material-symbols-outlined { color: var(--sx-accent); font-size: 18px; }
   .drawer-header-left svg { width: 18px; height: 18px; display: block; }
   .drawer-title {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     font-weight: 700;
-    color: #ff553a;
+    color: var(--sx-accent);
     letter-spacing: 0.14em;
     text-transform: uppercase;
     line-height: 12px;
@@ -1014,9 +1074,9 @@
     align-items: center;
     gap: 6px;
     height: 32px;
-    background: #1f2021;
-    border: 1px solid #343536;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-rule-strong);
+    color: var(--sx-accent);
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px;
     font-weight: 700;
@@ -1031,27 +1091,27 @@
   }
   .drawer-tab .material-symbols-outlined { font-size: 14px; line-height: 1; }
   .drawer-tab svg { width: 14px; height: 14px; display: block; }
-  .drawer-tab:hover { background: #292a2b; border-color: #ff553a; }
+  .drawer-tab:hover { background: var(--sx-surface-3); border-color: var(--sx-accent); }
   .drawer-tab.active {
-    background: #ff553a;
-    color: #5a0600;
-    border-color: #ff553a;
-    box-shadow: 0 0 12px rgba(255,85,58,0.28);
+    background: var(--sx-accent);
+    color: var(--sx-on-accent);
+    border-color: var(--sx-accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 28%, transparent);
   }
   .drawer-close-btn {
     width: 32px; height: 32px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #1f2021;
-    border: 1px solid #343536;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-rule-strong);
+    color: var(--sx-accent);
     cursor: pointer;
     transition: all 0.15s ease;
     flex-shrink: 0;
     box-sizing: border-box;
   }
-  .drawer-close-btn:hover { border-color: #ff553a; background: #292a2b; color: #ff553a; }
+  .drawer-close-btn:hover { border-color: var(--sx-accent); background: var(--sx-surface-3); color: var(--sx-accent); }
   .drawer-body {
     flex: 1;
     overflow-y: auto;
@@ -1059,32 +1119,32 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    background: #121315;
+    background: var(--sx-surface);
     scrollbar-width: thin;
-    scrollbar-color: #343536 #121315;
+    scrollbar-color: var(--sx-rule-strong) var(--sx-surface);
   }
   .drawer-body::-webkit-scrollbar { width: 6px; }
-  .drawer-body::-webkit-scrollbar-track { background: #121315; }
-  .drawer-body::-webkit-scrollbar-thumb { background: #343536; }
+  .drawer-body::-webkit-scrollbar-track { background: var(--sx-surface); }
+  .drawer-body::-webkit-scrollbar-thumb { background: var(--sx-rule-strong); }
   .comment-item {
     display: flex;
     flex-direction: column;
     gap: 0;
     padding: 14px 14px 12px 14px;
-    background: #0d0e0f;
-    border: 1px solid #343536;
+    background: var(--sx-bg);
+    border: 1px solid var(--sx-rule-strong);
     transition: border-color 0.15s ease, background 0.15s ease;
   }
-  .comment-item:hover { border-color: #5d3f3a; background: #121315; }
+  .comment-item:hover { border-color: #5d3f3a; background: var(--sx-surface); }
   .comment-item.comment-highlight {
-    border-color: #ff553a;
-    background: #1f2021;
-    box-shadow: 0 0 0 1px #ff553a, 0 0 24px rgba(255, 85, 58, 0.35);
+    border-color: var(--sx-accent);
+    background: var(--sx-surface-3);
+    box-shadow: 0 0 0 1px var(--sx-accent), 0 0 24px color-mix(in srgb, var(--sx-accent) 35%, transparent);
     animation: commentPulse 0.9s ease-in-out infinite alternate;
   }
   @keyframes commentPulse {
-    from { box-shadow: 0 0 0 1px #ff553a, 0 0 8px rgba(255, 85, 58, 0.25); }
-    to { box-shadow: 0 0 0 1px #ff553a, 0 0 28px rgba(255, 85, 58, 0.55); }
+    from { box-shadow: 0 0 0 1px var(--sx-accent-hi), 0 0 8px rgba(255, 85, 58, 0.25); }
+    to { box-shadow: 0 0 0 1px var(--sx-accent-hi), 0 0 28px rgba(255, 85, 58, 0.55); }
   }
   .comment-item-head {
     display: flex;
@@ -1098,21 +1158,21 @@
     width: 32px; height: 32px;
     display: flex; align-items: center; justify-content: center;
     font-size: 15px; line-height: 1;
-    background: #1f2021;
-    border: 1px solid var(--avatar-border, #ff553a);
+    background: var(--sx-surface-3);
+    border: 1px solid var(--avatar-border, var(--sx-accent));
     flex-shrink: 0;
   }
   .comment-avatar-initials {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px; font-weight: 700;
-    color: var(--avatar-border, #ff553a);
+    color: var(--avatar-border, var(--sx-accent));
     letter-spacing: 0.06em;
   }
   .comment-name {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-size: 11px; font-weight: 700;
     letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--avatar-border, #ff553a);
+    color: var(--avatar-border, var(--sx-accent));
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .comment-time-btn, .comment-time-gen {
@@ -1125,9 +1185,9 @@
     flex-shrink: 0;
   }
   .comment-time-btn {
-    background: #292a2b;
-    border: 1px solid #ff553a;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-accent);
+    color: var(--sx-accent-hi);
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -1135,11 +1195,11 @@
   .comment-time-btn svg { width: 12px; height: 12px; display: block; }
   .sync-time-toggle svg { width: 13px; height: 13px; display: block; }
   .sync-time-icon { display: inline-flex; line-height: 1; }
-  .comment-time-btn:hover { background: #ff553a; border-color: #ff553a; color: #5a0600; }
+  .comment-time-btn:hover { background: var(--sx-accent); border-color: var(--sx-accent); color: var(--sx-on-accent); }
   .comment-time-gen {
-    background: #292a2b;
-    border: 1px solid #ff553a;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-accent);
+    color: var(--sx-accent-hi);
   }
   .comment-msg {
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
@@ -1151,7 +1211,7 @@
   .comment-like-btn {
     background: transparent;
     border: none;
-    color: #ff553a;
+    color: var(--sx-accent);
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     cursor: pointer;
@@ -1164,8 +1224,8 @@
     transition: opacity 0.15s ease, color 0.15s ease;
   }
   .comment-item:hover .comment-like-btn { opacity: 1; }
-  .comment-like-btn:hover { color: #ff553a; }
-  .comment-like-btn .material-symbols-outlined { font-size: 14px; color: #ff553a; font-variation-settings: 'FILL' 0; }
+  .comment-like-btn:hover { color: var(--sx-accent); }
+  .comment-like-btn .material-symbols-outlined { font-size: 14px; color: var(--sx-accent); font-variation-settings: 'FILL' 0; }
   .comment-like-btn.active .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
   .comment-actions {
     display: flex;
@@ -1175,9 +1235,9 @@
   }
   .comment-empty {
     padding: 32px 16px;
-    border: 1px dashed #343536;
-    background: #0d0e0f;
-    color: #ff553a;
+    border: 1px dashed var(--sx-rule-strong);
+    background: var(--sx-bg);
+    color: var(--sx-accent);
     text-align: center;
     font: 700 11px/1.6 'JetBrains Mono', monospace;
     letter-spacing: 0.08em;
@@ -1185,8 +1245,8 @@
   /* Footer */
   .drawer-footer {
     padding: 16px;
-    border-top: 1px solid #343536;
-    background: #0d0e0f;
+    border-top: 1px solid var(--sx-rule-strong);
+    background: var(--sx-bg);
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -1205,8 +1265,8 @@
     min-width: 0;
   }
   .account-btn {
-    background: #1f2021;
-    border: 1px solid #343536;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-rule-strong);
     color: #e3e2e3;
     padding: 5px 10px;
     border-radius: 0;
@@ -1219,7 +1279,7 @@
     transition: border-color 0.15s ease, background 0.15s ease;
     white-space: nowrap;
   }
-  .account-btn:hover { border-color: #ff553a; background: #292a2b; }
+  .account-btn:hover { border-color: var(--sx-accent); background: var(--sx-surface-3); }
   .account-btn img {
     width: 20px;
     height: 20px;
@@ -1243,17 +1303,17 @@
     border: 0;
     padding: 4px 0;
     background: transparent;
-    color: #9ba1a8;
+    color: var(--sx-ink-3);
     cursor: pointer;
     font: 700 9px/1 'JetBrains Mono', monospace;
     letter-spacing: 0.06em;
   }
-  .comment-delete-btn:hover { color: #ff553a; }
+  .comment-delete-btn:hover { color: var(--sx-accent); }
   .sync-time-toggle {
     display: inline-flex; align-items: center; gap: 6px;
-    background: #1f2021;
-    border: 1px solid #343536;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border: 1px solid var(--sx-rule-strong);
+    color: var(--sx-accent);
     padding: 5px 12px;
     border-radius: 0;
     cursor: pointer;
@@ -1265,14 +1325,14 @@
   }
   .sync-time-toggle .material-symbols-outlined { font-size: 12px; }
   .sync-time-toggle:not(.inactive) {
-    background: #1f2021;
-    border-color: #ff553a;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border-color: var(--sx-accent);
+    color: var(--sx-accent);
   }
   .sync-time-toggle.inactive {
-    background: #1f2021;
-    border-color: #ff553a;
-    color: #ff553a;
+    background: var(--sx-surface-3);
+    border-color: var(--sx-accent);
+    color: var(--sx-accent);
     opacity: 0.6;
   }
   .comment-form {
@@ -1285,15 +1345,15 @@
     flex: 1;
     display: flex;
     align-items: center;
-    background: #121315;
-    border: 1px solid #343536;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-rule-strong);
     transition: border-color 0.18s ease, box-shadow 0.18s ease;
     position: relative;
     overflow: hidden;
   }
   .comment-input-wrap:focus-within {
-    border-color: #ff553a;
-    box-shadow: 0 0 0 1px #ff553a, 0 0 24px rgba(255,85,58,0.15);
+    border-color: var(--sx-accent);
+    box-shadow: 0 0 0 1px var(--sx-accent), 0 0 24px color-mix(in srgb, var(--sx-accent) 15%, transparent);
   }
   .comment-input {
     flex: 1; width: 100%; height: 100%;
@@ -1305,11 +1365,11 @@
     font-size: 15px;
     outline: none;
   }
-  .comment-input::placeholder { color: #ff553a; opacity: 0.55; }
+  .comment-input::placeholder { color: var(--sx-accent); opacity: 0.55; }
   .comment-submit-btn {
-    background: #ff553a;
-    color: #5a0600;
-    border: 1px solid #ff553a;
+    background: var(--sx-accent);
+    color: var(--sx-on-accent);
+    border: 1px solid var(--sx-accent);
     padding: 0 24px;
     font-family: 'JetBrains Mono', monospace;
     font-weight: 700;
@@ -1321,7 +1381,7 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .comment-submit-btn:hover { opacity: 0.92; box-shadow: 0 0 24px rgba(255,85,58,0.35); }
+  .comment-submit-btn:hover { opacity: 0.92; box-shadow: 0 0 24px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
   .comment-submit-btn:active { transform: scale(0.98); }
   .drawer-telemetry {
     display: flex;
@@ -1330,8 +1390,8 @@
     opacity: 0.32;
     margin-top: 2px;
   }
-  .drawer-telemetry-line { flex: 1; height: 1px; background: #ff553a; opacity: 0.45; }
-  .drawer-telemetry-dot { width: 4px; height: 4px; background: #ff553a; flex-shrink: 0; }
+  .drawer-telemetry-line { flex: 1; height: 1px; background: var(--sx-accent); opacity: 0.45; }
+  .drawer-telemetry-dot { width: 4px; height: 4px; background: var(--sx-accent); flex-shrink: 0; }
 
   /* Center Flash & Error Overlay */
   .center-flash {
@@ -1341,9 +1401,9 @@
     transform: translate(-50%, -50%) scale(0.8);
     padding: 10px 20px;
     border-radius: 0px;
-    background: #101214;
-    border: 1px solid #FF3B1F;
-    color: #FFF;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-accent);
+    color: var(--sx-ink);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1353,7 +1413,7 @@
     pointer-events: none;
     transition: all 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 40;
-    box-shadow: 0 0 20px rgba(255, 59, 31, 0.4);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--sx-accent) 40%, transparent);
   }
   .center-flash.show {
     opacity: 1;
@@ -1367,9 +1427,9 @@
     transform: translate(-50%, -10px);
     max-width: calc(100% - 32px);
     padding: 9px 14px;
-    border: 1px solid #3A4047;
+    border: 1px solid var(--sx-rule-strong);
     background: rgba(12, 14, 17, 0.96);
-    color: #F2F3F5;
+    color: var(--sx-ink);
     font: 800 10px/1.35 'JetBrains Mono', monospace;
     letter-spacing: 0.06em;
     text-align: center;
@@ -1379,7 +1439,7 @@
     z-index: 46;
   }
   .reward-toast.show { opacity: 1; transform: translate(-50%, 0); }
-  .reward-toast.award { border-color: #00FF88; color: #00FF88; box-shadow: 0 0 22px rgba(0, 255, 136, 0.24); }
+  .reward-toast.award { border-color: var(--sx-success-hi); color: var(--sx-success-hi); box-shadow: 0 0 22px color-mix(in srgb, var(--sx-success-hi) 24%, transparent); }
 
   .video-error-overlay {
     position: absolute;
@@ -1411,7 +1471,7 @@
     align-items: center;
     justify-content: center;
     gap: 12px;
-    color: #9BA1A8;
+    color: var(--sx-ink-3);
     text-align: center;
     padding: 24px;
   }
@@ -1425,7 +1485,7 @@
   #vrBtn:hover {
     background: rgba(168, 85, 247, 0.3);
     border-color: #A855F7;
-    color: #FFFFFF;
+    color: var(--sx-ink);
     box-shadow: 0 0 16px rgba(168, 85, 247, 0.35);
   }
   .vr-active .reels-badge {
@@ -1456,8 +1516,8 @@
       padding: 2px;
     }
     .action-btn {
-      width: 36px;
-      height: 36px;
+      width: 30px;
+      height: 30px;
     }
     .action-btn .btn-icon,
     .action-btn .btn-icon svg {
@@ -1523,8 +1583,8 @@
      to 32px and park the bulk-cache utility (auto-preload keeps working). */
   @media (max-width: 480px) {
     .action-btn {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
     }
     .action-btn .btn-icon,
     .action-btn .btn-icon svg {
@@ -1588,62 +1648,75 @@
   }
   .reels-pack-bar { position:absolute; top:14px; left:14px; right:88px; z-index:16; display:flex; align-items:stretch; gap:6px; pointer-events:none; }
   .reels-pack-bar[hidden], .reels-pack-card[hidden], .reels-pack-queue[hidden] { display:none !important; }
-  .reels-pack-pill { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:40px; padding:8px 12px; border:1px solid #2F353C; border-radius:4px; background:rgba(13,14,16,.9); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; white-space:nowrap; cursor:pointer; pointer-events:auto; box-shadow:0 8px 24px rgba(0,0,0,.5); transition:background .15s ease,border-color .15s ease,color .15s ease; }
+  .reels-pack-pill { position:relative; display:inline-flex; align-items:center; gap:8px; min-height:40px; padding:8px 12px; border:1px solid var(--sx-rule-strong); border-radius:4px; background:rgba(13,14,16,.9); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; white-space:nowrap; cursor:pointer; pointer-events:auto; box-shadow:0 8px 24px rgba(0,0,0,.5); transition:background .15s ease,border-color .15s ease,color .15s ease; }
   .reels-pack-pill svg, .reels-pack-btn svg { width:16px; height:16px; flex:none; display:block; }
-  .reels-pack-pill:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
-  .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; }
-  .reels-pack-pill.primary { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; box-shadow:0 0 18px rgba(255,59,31,.35); }
-  .reels-pack-pill.primary:hover { background:#ff5a42; color:#0A0A0A; }
-  .reels-pack-pill.is-saved { border-color:#FF3B1F; color:#FF3B1F; }
+  .reels-pack-pill:hover { border-color:var(--sx-accent); color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); }
+  .reels-pack-pill:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-pack-pill.primary { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); box-shadow:0 0 18px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
+  .reels-pack-pill.primary:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
+  .reels-pack-pill.is-saved { border-color:var(--sx-accent); color:var(--sx-accent); }
   .reels-pack-pill.is-saved svg path { fill:currentColor; }
   .reels-pack-title-pill { min-width:0; max-width:48%; }
   .reels-pack-pill-k { opacity:.72; margin-right:6px; }
-  .reels-pack-card { position:absolute; inset:0; z-index:12; display:flex; padding:clamp(14px,4%,34px) 76px; overflow:auto; color:#F2F3F5; background:radial-gradient(ellipse at 10% 105%,rgba(255,59,31,.22),transparent 55%),linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,rgba(8,9,10,.93); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
-  .reels-pack-card-inner { position:relative; margin:var(--pk-m,auto); width:min(600px,100%); padding:clamp(18px,4vmin,32px); border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.96); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px rgba(255,59,31,.10); text-align:left; animation:sx-pack-rise .32s cubic-bezier(.2,.8,.2,1) both; }
-  .reels-pack-card-inner::before, .reels-pack-card-inner::after { content:""; position:absolute; bottom:-1px; width:18px; height:18px; pointer-events:none; border:0 solid #FF3B1F; }
+  .reels-pack-card { position:absolute; inset:0; z-index:12; display:flex; padding:clamp(14px,4%,34px) 76px; overflow:auto; color:var(--sx-ink); background:radial-gradient(ellipse at 10% 105%,color-mix(in srgb, var(--sx-accent) 22%, transparent),transparent 55%),linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,rgba(8,9,10,.93); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+  .reels-pack-card-inner { position:relative; margin:var(--pk-m,auto); width:min(600px,100%); padding:clamp(18px,4vmin,32px); border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.96); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px color-mix(in srgb, var(--sx-accent) 10%, transparent); text-align:left; animation:sx-pack-rise .32s cubic-bezier(.2,.8,.2,1) both; }
+  .reels-pack-card-inner::before, .reels-pack-card-inner::after { content:""; position:absolute; bottom:-1px; width:18px; height:18px; pointer-events:none; border:0 solid var(--sx-accent); }
   .reels-pack-card-inner::before { left:-1px; border-bottom-width:2px; border-left-width:2px; }
   .reels-pack-card-inner::after { right:-1px; border-bottom-width:2px; border-right-width:2px; }
   .reels-pack-card-head { display:flex; align-items:center; gap:10px; }
-  .reels-pack-card-dot { width:8px; height:8px; flex:none; background:#FF3B1F; box-shadow:0 0 10px rgba(255,59,31,.8); animation:sx-pack-blink 1.6s steps(2,jump-none) infinite; }
-  .reels-pack-card-label { flex:1; min-width:0; color:#FF3B1F; font:800 11px/1.2 "JetBrains Mono",monospace; letter-spacing:.18em; text-transform:uppercase; }
-  .reels-pack-card-count { padding:4px 8px; border:1px solid #2F353C; background:#16191C; color:#A4ABB3; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
-  .reels-pack-card h2 { margin:16px 0 10px; font:400 clamp(26px,6vmin,46px)/1.02 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; overflow-wrap:anywhere; color:#F2F3F5; }
-  .reels-pack-card p { margin:0; max-width:46ch; color:#A4ABB3; font:400 14px/1.55 "Archivo",sans-serif; }
-  .reels-pack-card-status { margin:0 !important; padding-top:12px; border-top:1px dashed #2F353C; color:#8A919A !important; font:700 10px/1.5 "JetBrains Mono",monospace !important; letter-spacing:.1em; text-transform:uppercase; }
+  .reels-pack-card-dot { width:8px; height:8px; flex:none; background:var(--sx-accent); box-shadow:0 0 10px color-mix(in srgb, var(--sx-accent) 80%, transparent); animation:sx-pack-blink 1.6s steps(2,jump-none) infinite; }
+  .reels-pack-card-label { flex:1; min-width:0; color:var(--sx-accent); font:800 11px/1.2 "JetBrains Mono",monospace; letter-spacing:.18em; text-transform:uppercase; }
+  .reels-pack-card-count { padding:4px 8px; border:1px solid var(--sx-rule-strong); background:var(--sx-surface-2); color:var(--sx-ink-2); font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
+  .reels-pack-card h2 { margin:16px 0 10px; font:400 clamp(26px,6vmin,46px)/1.02 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; overflow-wrap:anywhere; color:var(--sx-ink); }
+  .reels-pack-card p { margin:0; max-width:46ch; color:var(--sx-ink-2); font:400 14px/1.55 "Archivo",sans-serif; }
+  .reels-pack-card-status { margin:0 !important; padding-top:12px; border-top:1px dashed var(--sx-rule-strong); color:var(--sx-ink-3) !important; font:700 10px/1.5 "JetBrains Mono",monospace !important; letter-spacing:.1em; text-transform:uppercase; }
   .reels-pack-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
-  .reels-pack-btn { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:44px; padding:10px 16px; border:1px solid #2F353C; border-radius:4px; background:#16191C; color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease; }
+  .reels-pack-btn { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:44px; padding:10px 16px; border:1px solid var(--sx-rule-strong); border-radius:4px; background:var(--sx-surface-2); color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease; }
   .reels-pack-btn[hidden] { display:none !important; }
-  .reels-pack-btn:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
-  .reels-pack-btn.primary { grid-column:1 / -1; min-height:48px; border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; font-size:12px; box-shadow:0 0 22px rgba(255,59,31,.35); }
-  .reels-pack-btn.primary:hover { background:#ff5a42; color:#0A0A0A; }
-  .reels-pack-btn:focus-visible, .reels-pack-pill:focus-visible { outline:2px solid #fff; outline-offset:2px; }
-  .reels-pack-card.is-unavailable .reels-pack-card-inner { border-top-color:#FFB224; box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px rgba(255,178,36,.08); }
-  .reels-pack-card.is-unavailable .reels-pack-card-inner::before, .reels-pack-card.is-unavailable .reels-pack-card-inner::after { border-color:#FFB224; }
-  .reels-pack-card.is-unavailable .reels-pack-card-dot { background:#FFB224; box-shadow:0 0 10px rgba(255,178,36,.8); }
-  .reels-pack-card.is-unavailable .reels-pack-card-label { color:#FFB224; }
-  .reels-pack-card.is-unavailable .reels-pack-btn.primary { border-color:#FFB224; background:#FFB224; box-shadow:0 0 22px rgba(255,178,36,.3); }
-  .reels-pack-queue { position:absolute; inset:54px 76px auto 54px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.98); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); color:#F2F3F5; box-shadow:0 24px 90px rgba(0,0,0,.75),0 0 60px rgba(255,59,31,.08); animation:sx-pack-rise .24s cubic-bezier(.2,.8,.2,1) both; }
-  .reels-pack-queue-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid #24282E; }
+  .reels-pack-btn:hover { border-color:var(--sx-accent); color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); }
+  .reels-pack-btn.primary { grid-column:1 / -1; min-height:48px; border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); font-size:12px; box-shadow:0 0 22px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
+  .reels-pack-btn.primary:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
+  .reels-pack-btn:focus-visible, .reels-pack-pill:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-pack-card.is-unavailable .reels-pack-card-inner { border-top-color:var(--sx-warn); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px color-mix(in srgb, var(--sx-warn) 8%, transparent); }
+  .reels-pack-card.is-unavailable .reels-pack-card-inner::before, .reels-pack-card.is-unavailable .reels-pack-card-inner::after { border-color:var(--sx-warn); }
+  .reels-pack-card.is-unavailable .reels-pack-card-dot { background:var(--sx-warn); box-shadow:0 0 10px color-mix(in srgb, var(--sx-warn) 80%, transparent); }
+  .reels-pack-card.is-unavailable .reels-pack-card-label { color:var(--sx-warn); }
+  .reels-pack-card.is-unavailable .reels-pack-btn.primary { border-color:var(--sx-warn); background:var(--sx-warn); box-shadow:0 0 22px color-mix(in srgb, var(--sx-warn) 30%, transparent); }
+  .reels-pack-queue { position:absolute; inset:54px 76px auto 54px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75),0 0 60px color-mix(in srgb, var(--sx-accent) 8%, transparent); animation:sx-pack-rise .24s cubic-bezier(.2,.8,.2,1) both; }
+  .reels-pack-queue-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--sx-rule); }
   .reels-pack-queue-head div { min-width:0; flex:1; }
   .reels-pack-queue-head strong, .reels-pack-queue-head small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .reels-pack-queue-head strong { font:400 clamp(16px,3.4vmin,22px)/1.1 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; }
-  .reels-pack-queue-head small { margin-top:6px; color:#8A919A; font:700 10px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; }
-  .reels-pack-queue-eyebrow { display:block; margin-bottom:6px; color:#FF3B1F; font:800 9px/1 "JetBrains Mono",monospace; letter-spacing:.18em; font-style:normal; }
-  .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; scrollbar-width:thin; scrollbar-color:#2F353C transparent; }
-  .reels-pack-queue-item { position:relative; width:100%; min-height:52px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:12px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:#F2F3F5; font:700 13px/1.2 "Archivo",sans-serif; text-align:left; cursor:pointer; transition:background .12s ease,border-color .12s ease; }
-  .reels-pack-queue-item span:first-child { display:grid; place-items:center; height:30px; border:1px solid #2F353C; background:#16191C; color:#A4ABB3; font:800 11px/1 "JetBrains Mono",monospace; }
-  .reels-pack-queue-item span:last-child { padding:6px 8px; border:1px solid #2F353C; color:#A4ABB3; font:800 10px/1 "JetBrains Mono",monospace; letter-spacing:.12em; }
-  .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible { border-color:#FF3B1F; background:rgba(255,59,31,.08); outline:none; }
-  .reels-pack-queue-item:hover span:last-child, .reels-pack-queue-item:focus-visible span:last-child { border-color:#FF3B1F; color:#FF3B1F; }
-  .reels-pack-queue-item.current { border-color:#FF3B1F; background:rgba(255,59,31,.14); box-shadow:inset 3px 0 0 #FF3B1F; }
-  .reels-pack-queue-item.current span:first-child { border-color:#FF3B1F; color:#FF3B1F; }
-  .reels-pack-queue-item.current span:last-child { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; }
-  .reels-pack-queue-item:disabled { color:#6B727A; cursor:not-allowed; background:repeating-linear-gradient(135deg,rgba(255,178,36,.06) 0 4px,transparent 4px 8px); }
-  .reels-pack-queue-item:disabled span:last-child { border-style:dashed; border-color:rgba(255,178,36,.5); color:#FFB224; }
-  .reels-pack-queue-empty { margin:0; padding:18px 14px; color:#8A919A; font:700 12px/1.4 "JetBrains Mono",monospace; letter-spacing:.04em; }
+  .reels-pack-queue-head small { margin-top:6px; color:var(--sx-ink-3); font:700 10px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; }
+  .reels-pack-queue-eyebrow { display:block; margin-bottom:6px; color:var(--sx-accent); font:800 9px/1 "JetBrains Mono",monospace; letter-spacing:.18em; font-style:normal; }
+  .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; scrollbar-width:thin; scrollbar-color:var(--sx-rule-strong) transparent; }
+  .reels-pack-queue-item { position:relative; width:100%; min-height:52px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:12px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--sx-ink); font:700 13px/1.2 "Archivo",sans-serif; text-align:left; cursor:pointer; transition:background .12s ease,border-color .12s ease; }
+  .reels-pack-queue-item span:first-child { display:grid; place-items:center; height:30px; border:1px solid var(--sx-rule-strong); background:var(--sx-surface-2); color:var(--sx-ink-2); font:800 11px/1 "JetBrains Mono",monospace; }
+  .reels-pack-queue-item span:last-child { padding:6px 8px; border:1px solid var(--sx-rule-strong); color:var(--sx-ink-2); font:800 10px/1 "JetBrains Mono",monospace; letter-spacing:.12em; }
+  .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible { border-color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 8%, transparent); outline:none; }
+  .reels-pack-queue-item:hover span:last-child, .reels-pack-queue-item:focus-visible span:last-child { border-color:var(--sx-accent); color:var(--sx-accent); }
+  .reels-pack-queue-item.current { border-color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); box-shadow:inset 3px 0 0 var(--sx-accent); }
+  .reels-pack-queue-item.current span:first-child { border-color:var(--sx-accent); color:var(--sx-accent); }
+  .reels-pack-queue-item.current span:last-child { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); }
+  .reels-pack-queue-item:disabled { color:var(--sx-ink-muted); cursor:not-allowed; background:repeating-linear-gradient(135deg,color-mix(in srgb, var(--sx-warn) 6%, transparent) 0 4px,transparent 4px 8px); }
+  .reels-pack-queue-item:disabled span:last-child { border-style:dashed; border-color:color-mix(in srgb, var(--sx-warn) 50%, transparent); color:var(--sx-warn); }
+  .reels-pack-queue-empty { margin:0; padding:18px 14px; color:var(--sx-ink-3); font:700 12px/1.4 "JetBrains Mono",monospace; letter-spacing:.04em; }
   .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
-  .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid #24282E; border-top:3px solid #FF3B1F; background:rgba(13,14,16,.98); color:#F2F3F5; box-shadow:0 24px 90px rgba(0,0,0,.75); }
+  .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
   .reels-collect-dialog[hidden], .reels-collect-backdrop[hidden] { display:none !important; }
+  .reels-report-dialog { width:min(440px,94vw); max-height:calc(100vh - 48px); padding:0; overflow:auto; border:1px solid var(--sx-rule-strong); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
+  .reels-report-dialog::backdrop { background:rgba(3,5,9,.78); }
+  .reels-report-dialog form { display:flex; flex-direction:column; gap:14px; padding:16px; }
+  .reels-report-dialog h2 { margin:0; font:800 13px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
+  .reels-report-dialog label { display:flex; flex-direction:column; gap:6px; color:var(--sx-ink-3); font:700 10px/1 "JetBrains Mono",monospace; letter-spacing:.1em; }
+  .reels-report-dialog select, .reels-report-dialog textarea { width:100%; box-sizing:border-box; min-height:44px; padding:10px 12px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:600 13px/1.4 "JetBrains Mono",monospace; }
+  .reels-report-dialog textarea { resize:vertical; }
+  .reels-report-dialog select:focus-visible, .reels-report-dialog textarea:focus-visible, .reels-report-dialog button:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-report-dialog small { align-self:flex-end; font:600 10px/1 "JetBrains Mono",monospace; }
+  .reels-report-actions { display:flex; justify-content:flex-end; gap:8px; }
+  .reels-report-actions button { min-height:44px; padding:8px 14px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
+  .reels-report-actions button[type="submit"] { border-color:var(--sx-accent); background:var(--sx-accent); color:#090b0e; }
+  .reels-vr-notice-text { margin:0; padding:16px 14px; color:var(--sx-ink-2); font:500 13px/1.55 "JetBrains Mono",monospace; }
   .reels-phone-frame.sx-fs-active .reels-pack-bar, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-bar { top:max(14px, calc(env(safe-area-inset-top) + 8px)); left:max(14px, env(safe-area-inset-left)); right:76px; }
   .reels-phone-frame.sx-fs-active .reels-pack-card, .reels-phone-frame.sx-pseudo-fullscreen .reels-pack-card { padding:max(62px, calc(env(safe-area-inset-top) + 56px)) var(--pk-r,76px) var(--pk-b,40px) var(--pk-l,max(14px, env(safe-area-inset-left))); }
   .reels-phone-frame.sx-pack-stage .reels-meta, .reels-phone-frame.sx-pack-stage .reels-twitch-ticker { visibility:hidden; }
@@ -1651,20 +1724,20 @@
   .reels-phone-frame.sx-collect-open .reels-progress-wrap,
   .reels-phone-frame.sx-collect-open .reels-pack-bar,
   body.sx-collect-open .reels-edge-nav { visibility:hidden; }
-  .reels-collect-newrow { display:flex; gap:8px; padding:10px 16px; border-top:1px solid #30363d; }
+  .reels-collect-newrow { display:flex; gap:8px; padding:10px 16px; border-top:1px solid var(--sx-rule-strong); }
   .reels-collect-newrow[hidden] { display:none !important; }
-  .reels-collect-newrow input { flex:1; min-width:0; min-height:44px; padding:8px 12px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:700 13px/1.2 "JetBrains Mono",monospace; }
-  .reels-collect-newrow input:focus-visible { outline:2px solid #fff; outline-offset:2px; }
-  .reels-collect-newrow button { min-height:44px; padding:8px 14px; border:1px solid #626b76; border-radius:4px; background:#15191e; color:#fff; font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
-  .reels-collect-newrow button:first-of-type { border-color:#ff553a; background:#ff553a; color:#090b0e; }
-  .reels-collect-newrow button:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-collect-newrow input { flex:1; min-width:0; min-height:44px; padding:8px 12px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:700 13px/1.2 "JetBrains Mono",monospace; }
+  .reels-collect-newrow input:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-collect-newrow button { min-height:44px; padding:8px 14px; border:1px solid var(--sx-ink-muted); border-radius:4px; background:#15191e; color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; cursor:pointer; }
+  .reels-collect-newrow button:first-of-type { border-color:var(--sx-accent); background:var(--sx-accent); color:#090b0e; }
+  .reels-collect-newrow button:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
   .reels-pack-queue-item strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid #24282E; }
-  .reels-pack-queue-actions button, .reels-pack-queue-close { min-height:44px; padding:10px 14px; border:1px solid #2F353C; border-radius:4px; background:#16191C; color:#F2F3F5; font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease; }
-  .reels-pack-queue-actions button:hover, .reels-pack-queue-close:hover { border-color:#FF3B1F; color:#FF3B1F; background:rgba(255,59,31,.14); }
-  .reels-pack-queue-actions button:first-child { border-color:#FF3B1F; background:#FF3B1F; color:#0A0A0A; }
-  .reels-pack-queue-actions button:first-child:hover { background:#ff5a42; color:#0A0A0A; }
-  .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+  .reels-pack-queue-actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px 16px; border-top:1px solid var(--sx-rule); }
+  .reels-pack-queue-actions button, .reels-pack-queue-close { min-height:44px; padding:10px 14px; border:1px solid var(--sx-rule-strong); border-radius:4px; background:var(--sx-surface-2); color:var(--sx-ink); font:800 11px/1 "JetBrains Mono",monospace; letter-spacing:.1em; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease; }
+  .reels-pack-queue-actions button:hover, .reels-pack-queue-close:hover { border-color:var(--sx-accent); color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); }
+  .reels-pack-queue-actions button:first-child { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); }
+  .reels-pack-queue-actions button:first-child:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
+  .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
   @keyframes sx-pack-rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
   @keyframes sx-pack-blink { from { opacity:1; } to { opacity:.25; } }
   @media (prefers-reduced-motion: reduce) {
@@ -1735,9 +1808,9 @@
     position: relative;
     min-width: 0;
     min-height: 0;
-    background: #0D0E10;
-    border: 1px solid #24282E;
-    border-radius: 8px;
+    background: var(--sx-bg);
+    border: 1px solid var(--sx-rule);
+    border-radius: 0;
     overflow: hidden;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   }
@@ -1747,16 +1820,17 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--sx-rule-strong) var(--sx-bg);
   }
   .side-head {
     flex: 0 0 auto;
     display: grid;
     gap: 10px;
-    max-height: 46%;
-    overflow-y: auto;
     padding: 14px;
     background: rgba(8, 9, 10, 0.8);
-    border-bottom: 1px solid #24282E;
+    border-bottom: 1px solid var(--sx-rule);
     user-select: auto;
   }
   .side-creator-row {
@@ -1769,16 +1843,16 @@
     flex: 0 0 auto;
     width: 36px;
     height: 36px;
-    border-radius: 8px;
+    border-radius: 0;
     background: #121417;
-    border: 1px solid #FF3B1F;
-    box-shadow: 0 0 8px rgba(255, 59, 31, 0.35);
+    border: 1px solid var(--sx-accent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--sx-accent) 35%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
     font: 800 13px/1 'JetBrains Mono', monospace;
-    color: #FF3B1F;
+    color: var(--sx-accent);
   }
   .side-avatar img {
     width: 100%;
@@ -1797,7 +1871,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: #FF3B1F;
+    color: var(--sx-accent);
     font: 700 12px/1.2 'JetBrains Mono', monospace;
     text-align: left;
     overflow: hidden;
@@ -1806,18 +1880,18 @@
     cursor: pointer;
   }
   .side-creator:hover {
-    color: #FFFFFF;
+    color: var(--sx-ink);
     text-decoration: underline;
   }
   .side-creator:focus-visible,
   .side-more:focus-visible,
   .side-chip:focus-visible {
-    outline: 2px solid #FFFFFF;
+    outline: 2px solid var(--sx-ink);
     outline-offset: 2px;
   }
   .side-age {
     font: 600 10px/1.2 'JetBrains Mono', monospace;
-    color: #7E8794;
+    color: var(--sx-ink-3);
     letter-spacing: 0.08em;
   }
   .side-title,
@@ -1827,7 +1901,7 @@
   .side-title {
     margin: 0;
     font: 800 14px/1.3 Archivo, sans-serif;
-    color: #F2F3F5;
+    color: var(--sx-ink);
     text-transform: uppercase;
     overflow-wrap: anywhere;
     display: -webkit-box;
@@ -1838,7 +1912,7 @@
   .side-caption {
     margin: 0;
     font: 400 12px/1.5 Archivo, sans-serif;
-    color: #A4ABB3;
+    color: var(--sx-ink-2);
     overflow-wrap: anywhere;
     white-space: pre-line;
     display: -webkit-box;
@@ -1862,7 +1936,7 @@
     padding: 2px 0;
     border: 0;
     background: transparent;
-    color: #FF3B1F;
+    color: var(--sx-accent);
     font: 700 10px/1 'JetBrains Mono', monospace;
     letter-spacing: 0.1em;
     cursor: pointer;
@@ -1877,38 +1951,50 @@
   .side-specs:empty {
     display: none;
   }
+  .side-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .side-chips:empty {
+    display: none;
+  }
+  .side-chips > .side-tags,
+  .side-chips > .side-specs {
+    display: contents;
+  }
   .side-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     max-width: 100%;
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: 0;
     background: #121417;
-    border: 1px solid #24282E;
-    color: #A4ABB3;
+    border: 1px solid var(--sx-rule);
+    color: var(--sx-ink-2);
     font: 600 10px/1.3 'JetBrains Mono', monospace;
     text-decoration: none;
     cursor: pointer;
     overflow-wrap: anywhere;
   }
   .side-chip:hover {
-    color: #FFFFFF;
-    border-color: #FF3B1F;
+    color: var(--sx-ink);
+    border-color: var(--sx-accent);
   }
   .side-chip.tag {
-    color: #FF3B1F;
-    border-color: rgba(255, 59, 31, 0.3);
+    color: var(--sx-accent);
+    border-color: color-mix(in srgb, var(--sx-accent) 30%, transparent);
   }
   .side-chip.spec {
-    color: #F2F3F5;
+    color: var(--sx-ink);
     cursor: default;
   }
   .side-chip.spec:hover {
-    border-color: #24282E;
+    border-color: var(--sx-rule);
   }
   .side-chip.spec b {
-    color: #7E8794;
+    color: var(--sx-ink-3);
     font-weight: 700;
     letter-spacing: 0.08em;
   }
@@ -1916,8 +2002,8 @@
     margin: 0;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    border: 1px solid #24282E;
-    border-radius: 6px;
+    border: 1px solid var(--sx-rule);
+    border-radius: 0;
     background: #121417;
   }
   .side-stats > div {
@@ -1926,21 +2012,21 @@
     min-width: 0;
   }
   .side-stats > div + div {
-    border-left: 1px solid #24282E;
+    border-left: 1px solid var(--sx-rule);
   }
   .side-stats dt {
     font: 600 9px/1 'JetBrains Mono', monospace;
-    color: #7E8794;
+    color: var(--sx-ink-3);
     letter-spacing: 0.1em;
   }
   .side-stats dd {
     margin: 4px 0 0;
     font: 800 13px/1 Archivo, sans-serif;
-    color: #FFFFFF;
+    color: var(--sx-ink);
   }
   .side-comments {
-    flex: 1 1 auto;
-    min-height: 0;
+    flex: 1 0 auto;
+    min-height: 60%;
     display: flex;
     flex-direction: column;
   }
@@ -1949,13 +2035,22 @@
     inset: auto;
     transform: none;
     transition: none;
-    height: 100%;
+    height: auto;
     max-height: none;
-    flex: 1 1 auto;
+    flex: 1 0 auto;
     min-height: 0;
     border-top: 0;
     box-shadow: none;
-    background: #0D0E10;
+    background: var(--sx-bg);
+  }
+  #sxReelsHost.sx-reels-docked .drawer-body {
+    flex: 1 0 auto;
+    overflow: visible;
+  }
+  #sxReelsHost.sx-reels-docked .drawer-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
   }
   #sxReelsHost.sx-reels-docked .drawer-close-btn,
   #sxReelsHost.sx-reels-docked .drawer-telemetry {
@@ -1968,7 +2063,7 @@
      page stylesheet. Phones and small tablets never get the class and keep the old layout. */
   #sxReelsHost.sx-fs-docked {
     display: grid !important;
-    grid-template-columns: minmax(0, min(100dvh, calc(100vw - 64px - clamp(320px, 30vw, 600px)))) 64px clamp(320px, 30vw, 600px);
+    grid-template-columns: minmax(0, min(100dvh, calc(100vw - 48px - clamp(320px, 30vw, 600px)))) 48px clamp(320px, 30vw, 600px);
     justify-content: center;
     align-content: center;
     align-items: stretch;
@@ -1983,7 +2078,7 @@
     aspect-ratio: 1 / 1 !important;
     margin: 0 !important;
     align-self: start;
-    border: 1px solid #24282D !important;
+    border: 1px solid var(--sx-rule) !important;
     overflow: hidden !important;
     overflow: clip !important;
   }
@@ -2009,10 +2104,18 @@
   /* In the gutter the PREV and NEXT keys follow the same rounded look as the action bar. */
   .edge-chevron {
     border-radius: 8px;
-    border-color: #24282E;
+    border-color: var(--sx-rule);
   }
   .edge-chevron:hover {
-    background: rgba(255, 59, 31, 0.14);
+    background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
+  }
+  /* On narrow tablets the square frame fills the width and the action bar reaches the
+     right edge, so the page-edge keys overlap it. Same fix as phones: use the left edge. */
+  @media (min-width: 701px) and (max-width: 820px) {
+    .reels-edge-nav {
+      right: auto;
+      left: max(10px, env(safe-area-inset-left));
+    }
   }
   /* On phones the right edge belongs to the action bar. The page-edge PREV and NEXT
      keys used to sit behind it so they now move to the left edge. */
@@ -2040,9 +2143,10 @@
 <body>
 
 <div class="reels-phone-frame" id="reelsFrame" tabindex="0">
+  <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
   <div class="reels-ambient-glow" id="reelsAmbientGlow"></div>
   <div class="reels-top-bar">
-    <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:#00FF88; background:#16191C; padding:3px 8px; border-radius:0px; border:1px solid #00FF88;">⚡ 0/0</div>
+    <div id="preloadStatus" style="display:none; font-size:10px; font-weight:700; color:var(--sx-success-hi); background:var(--sx-surface-2); padding:3px 8px; border-radius:0px; border:1px solid var(--sx-success-hi);">⚡ 0/0</div>
   </div>
 
   <div class="reels-pack-bar" id="packModeBar" hidden>
@@ -2052,7 +2156,6 @@
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
-    <i class="reels-reticle tl" aria-hidden="true"></i><i class="reels-reticle tr" aria-hidden="true"></i><i class="reels-reticle bl" aria-hidden="true"></i><i class="reels-reticle br" aria-hidden="true"></i>
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
     <div class="reels-slide-bar" id="slideBar" role="progressbar" aria-label="Image post progress" hidden></div>
@@ -2125,6 +2228,46 @@
     </div>
   </section>
 
+  <!-- One-time notice shown before the first immersive VR session. -->
+  <div class="reels-collect-backdrop" id="vrNoticeBackdrop" hidden></div>
+  <section class="reels-collect-dialog" id="vrNoticePanel" role="dialog" aria-modal="true" aria-labelledby="vrNoticeTitle" aria-describedby="vrNoticeText" hidden>
+    <div class="reels-pack-queue-head">
+      <div><strong id="vrNoticeTitle">BEFORE YOU ENTER VR</strong><small>Shown once on this device</small></div>
+    </div>
+    <p class="reels-vr-notice-text" id="vrNoticeText">VR uses your head and hand position to draw the scene. This pose data is processed on your device only. ECHO never sends it to a server or stores it.</p>
+    <div class="reels-pack-queue-actions">
+      <button type="button" id="vrNoticeCancel">CANCEL</button>
+      <button type="button" id="vrNoticeContinue">CONTINUE TO VR</button>
+    </div>
+  </section>
+
+  <!-- Report form: browser prompts are invisible in a headset, so reports use a native modal dialog. -->
+  <dialog class="reels-report-dialog" id="reportDialog" aria-labelledby="reportDialogTitle">
+    <form method="dialog" id="reportDialogForm">
+      <h2 id="reportDialogTitle">REPORT</h2>
+      <label>REASON
+        <select id="reportReason" aria-label="Report reason">
+          <option value="spam">SPAM</option>
+          <option value="harassment">HARASSMENT</option>
+          <option value="hate">HATE</option>
+          <option value="sexual">SEXUAL CONTENT</option>
+          <option value="violence">VIOLENCE</option>
+          <option value="impersonation">IMPERSONATION</option>
+          <option value="privacy">PRIVACY</option>
+          <option value="other">OTHER</option>
+        </select>
+      </label>
+      <label>DETAILS (OPTIONAL)
+        <textarea id="reportDetails" aria-label="Report details" rows="4" maxlength="500"></textarea>
+        <small id="reportDetailsCount">0/500</small>
+      </label>
+      <div class="reels-report-actions">
+        <button type="button" id="reportCancel">CANCEL</button>
+        <button type="submit" id="reportSubmit">SUBMIT REPORT</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Floating Command Grid (Right Side).
        Primary group is always visible; the "..." button swaps in the
        overflow group. Tapping the video dismisses the overflow. -->
@@ -2136,12 +2279,6 @@
           __ICON_SOUND_MUTE__
         </span>
         <span class="action-btn-label">MUTE</span>
-      </button>
-      <button class="action-btn active" id="modeBtn" type="button" title="Auto-Next / Loop" aria-label="Auto-advance to the next reel" aria-pressed="true">
-        <span class="btn-icon sx-flip-x">
-          __ICON_BACK__
-        </span>
-        <span class="action-btn-label" id="modeLabel">AUTO</span>
       </button>
       <div class="reels-cluster-divider"></div>
       <button class="action-btn" id="likeBtn" type="button" title="Like / Unlike (F)" aria-label="Like reel" aria-pressed="false" aria-keyshortcuts="F">
@@ -2162,20 +2299,6 @@
         </span>
         <span class="action-btn-label">SHARE</span>
       </button>
-      <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
-        <span class="btn-icon">
-          __ICON_FULLSCREEN__
-        </span>
-        <span class="action-btn-label">FULL</span>
-      </button>
-      <div id="vrBtnWrap" style="display:none;">
-        <button class="action-btn" id="vrBtn" type="button" title="Enter VR Mode — requires WebXR device or Chrome emulator extension" aria-label="Enter VR mode">
-          <span class="btn-icon">
-            __ICON_VR__
-          </span>
-          <span class="action-btn-label" style="color: #A855F7;">VR</span>
-        </button>
-      </div>
       <button class="action-btn" id="moreBtn" type="button" title="More actions" aria-label="More actions" aria-expanded="false" aria-controls="railMore">
         <span class="btn-icon">
           __ICON_MORE__
@@ -2192,6 +2315,26 @@
         </span>
         <span class="action-btn-label">BACK</span>
       </button>
+      <button class="action-btn active" id="modeBtn" type="button" title="Auto-Next / Loop" aria-label="Auto-advance to the next reel" aria-pressed="true">
+        <span class="btn-icon sx-flip-x">
+          __ICON_BACK__
+        </span>
+        <span class="action-btn-label" id="modeLabel">AUTO</span>
+      </button>
+      <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
+        <span class="btn-icon">
+          __ICON_FULLSCREEN__
+        </span>
+        <span class="action-btn-label">FULL</span>
+      </button>
+      <div id="vrBtnWrap" style="display:none;">
+        <button class="action-btn" id="vrBtn" type="button" title="Enter VR Mode — requires WebXR device or Chrome emulator extension" aria-label="Enter VR mode">
+          <span class="btn-icon">
+            __ICON_VR__
+          </span>
+          <span class="action-btn-label" style="color: #A855F7;">VR</span>
+        </button>
+      </div>
       <div class="reels-cluster-divider"></div>
       <button class="action-btn" id="saveBtn" type="button" title="Save / Unsave" aria-label="Save reel" aria-pressed="false">
         <span class="btn-icon">
@@ -2291,7 +2434,7 @@
       </div>
       <form class="comment-form" id="commentForm">
         <div class="comment-input-wrap">
-          <input type="text" class="comment-input" id="commentInput" maxlength="500" placeholder="Add a comment at 0:00..." autocomplete="off" />
+          <input type="text" class="comment-input" id="commentInput" aria-label="Add a comment" maxlength="500" placeholder="Add a comment at 0:00..." autocomplete="off" />
         </div>
         <button type="submit" class="comment-submit-btn" id="commentSubmitBtn">SEND</button>
       </form>
@@ -2322,8 +2465,10 @@
       <h2 class="side-title" id="sideTitle">Loading video…</h2>
       <p class="side-caption" id="sideCaption" hidden></p>
       <button type="button" class="side-more" id="sideCaptionToggle" hidden aria-expanded="false" aria-controls="sideCaption">MORE</button>
-      <div class="side-tags" id="sideTags"></div>
-      <div class="side-specs" id="sideSpecs"></div>
+      <div class="side-chips">
+        <div class="side-tags" id="sideTags"></div>
+        <div class="side-specs" id="sideSpecs"></div>
+      </div>
       <dl class="side-stats">
         <div><dt>LIKES</dt><dd id="sideLikes">0</dd></div>
         <div><dt>COMMENTS</dt><dd id="sideComms">0</dd></div>
@@ -2531,6 +2676,9 @@
     const commentSubmitBtn = document.getElementById('commentSubmitBtn');
 
     const blobUrlMap = {};
+    // Which URL each cached blob was fetched from: an index can hold the 2D
+    // or the stereo file of a 3D post, and only the matching one may be used.
+    const blobSourceMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
     // v8.9: background transfers started during rapid prev/next flight
@@ -2541,6 +2689,67 @@
     function isImageItem(item) {
       return !!item && item.media_type === 'image';
     }
+
+    // <reels-stereo>
+    // 3D posts (docs/stereo-3d-reels.md): `url` is the left-eye 2D rendition,
+    // `stereo_url` the full side-by-side / top-bottom file. The stereo file is
+    // only loaded while a WebXR session presents, so each eye gets its half.
+    // Stereo layout of the media now loaded in #reelsVideo / #reelsImage
+    // ('mono' | 'sbs' | 'tb'), and the left-eye CSS crop applied in 2D.
+    let activeVisualLayout = 'mono';
+    let activeCropLayout = '';
+
+    function entryStereoLayout(entry) {
+      const layout = entry && entry.stereo_layout;
+      return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+    }
+
+    function wantsStereoSource() {
+      try {
+        if (typeof WebXRVR === 'undefined') return false;
+        if (WebXRVR.isPresenting && WebXRVR.isPresenting()) return true;
+        // The desktop split-screen VR preview shows each eye like a headset.
+        const preview = WebXRVR.getPreviewState && WebXRVR.getPreviewState();
+        return !!(preview && preview.running && preview.stereo);
+      } catch (e) { return false; }
+    }
+
+    // What to load for a post or slide right now: {url, layout, crop}.
+    // `layout` is the stereo layout of that file; `crop` names the layout to
+    // crop to the left eye in 2D when no rendition exists yet.
+    function playbackFor(entry, item) {
+      const layout = entryStereoLayout(entry);
+      const failed = !!(item && item.stereoFailed);
+      if (layout !== 'mono' && entry.stereo_url && !failed && wantsStereoSource()) {
+        return { url: entry.stereo_url, layout: layout, crop: '' };
+      }
+      const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
+      return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
+    }
+
+    function playbackUrlFor(entry, item) {
+      return resolveItemUrl({ url: playbackFor(entry, item).url, tunnel_url: item && item.tunnel_url });
+    }
+
+    function blobFor(index, url) {
+      return blobUrlMap[index] && blobSourceMap[index] === url ? blobUrlMap[index] : '';
+    }
+
+    // Record what the element now shows and tell the VR engine how to
+    // sample it; in 2D a raw stereo file is cropped to the left eye.
+    function applyEntryStereo(playback) {
+      const crop = wantsStereoSource() ? '' : (playback.crop || '');
+      activeVisualLayout = playback.layout;
+      activeCropLayout = crop;
+      if (videoWrap && videoWrap.classList) {
+        videoWrap.classList.toggle('stereo-crop-sbs', crop === 'sbs');
+        videoWrap.classList.toggle('stereo-crop-tb', crop === 'tb');
+      }
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceStereo) {
+        WebXRVR.setSourceStereo(activeVisualLayout);
+      }
+    }
+    // </reels-stereo>
 
     // <reels-image-slides>
     // Every image of an image post, in order (older payloads carry only url).
@@ -2567,9 +2776,10 @@
     function resolveSlideUrl(item, slideIndex) {
       const slide = imagePostSlides[slideIndex];
       if (!slide) return '';
+      const url = playbackUrlFor(slide, item);
       // The cover may already be cached as a blob by the preloader.
-      if (slideIndex === 0 && blobUrlMap[idx]) return blobUrlMap[idx];
-      return resolveItemUrl({ url: slide.url, tunnel_url: item && item.tunnel_url });
+      if (slideIndex === 0) return blobFor(idx, url) || url;
+      return url;
     }
 
     // Show one image of the current post and warm the one after it.
@@ -2578,6 +2788,7 @@
       if (!reelsImage || !imagePostSlides.length) return;
       imageSlideIndex = Math.max(0, Math.min(imagePostSlides.length - 1, slideIndex));
       const url = resolveSlideUrl(item, imageSlideIndex);
+      applyEntryStereo(playbackFor(imagePostSlides[imageSlideIndex], item));
       if (url && reelsImage.getAttribute('src') !== url) reelsImage.src = url;
       const label = (item && (item.title || item.filename)) || 'Image post';
       reelsImage.alt = imagePostSlides.length > 1
@@ -2801,8 +3012,28 @@
       return row ? decodeURIComponent(row.slice(prefix.length)) : '';
     }
 
+    // Canvas cards cannot use var(). Read the ECHO token once from the page and keep the
+    // original hex as the fallback for hosts that do not define it.
+    const sxTokCache = {};
+    function sxTok(name, fallback) {
+      if (!(name in sxTokCache)) {
+        let v = '';
+        try { v = getComputedStyle(document.documentElement).getPropertyValue('--sx-' + name).trim(); } catch (_) {}
+        sxTokCache[name] = v || fallback;
+      }
+      return sxTokCache[name];
+    }
     function safeColor(value, fallback) {
       return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? value : (fallback || '#ff553a');
+    }
+    // Avatar colours are data driven. Keep the hue for borders and dots, but fall back to the
+    // ink token for text when the colour is under 4.5:1 on the dark avatar chip (#1f2021).
+    function readableOnDark(value, fallback) {
+      const c = safeColor(value, fallback);
+      const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const n = parseInt(c.slice(1), 16);
+      const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+      return (L + 0.05) / (0.0137 + 0.05) >= 4.5 ? c : 'var(--sx-ink)';
     }
 
     function eventId() {
@@ -2880,6 +3111,7 @@
           currentTime: imageElapsedNow() / 1000,
           duration: imagePostDwellMs / 1000,
           version: String(reelsImage && reelsImage.currentSrc || ''),
+          stereo: activeVisualLayout,
         };
       }
       return {
@@ -2891,8 +3123,92 @@
         currentTime: video ? video.currentTime || 0 : 0,
         duration: video && Number.isFinite(video.duration) ? video.duration : 0,
         version: String(video && video.currentSrc || ''),
+        stereo: activeVisualLayout,
       };
     }
+
+    // <reels-stereo-sync>
+    // Entering or leaving VR swaps a 3D post between its 2D rendition and its
+    // stereo file in place: same reel, same playhead, same play/pause state.
+    // Unlike loadVideo it records no new view and touches no feed state.
+    // Playhead of the last swap: a stereo file that fails to load reports
+    // currentTime 0, so its fallback resumes from here instead.
+    let stereoSwapResumeAt = 0;
+    function syncStereoSource(resumeOverride) {
+      const item = videoData[idx];
+      if (!item || item.available === false || item.media_type === 'static') return;
+      if (isImageItem(item)) {
+        if (imagePostSlides.length) showImageSlide(imageSlideIndex);
+        // The warmed next item was the variant for the old VR state.
+        preloadNext(idx);
+        notifyVisualSourceChange();
+        return;
+      }
+      const playback = playbackFor(item, item);
+      const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
+      const nextUrl = blobFor(idx, playUrl) || playUrl;
+      if (video.getAttribute('src') === nextUrl) {
+        applyEntryStereo(playback);
+        return;
+      }
+      const resumeAt = typeof resumeOverride === 'number' ? resumeOverride : (video.currentTime || 0);
+      stereoSwapResumeAt = resumeAt;
+      const wasPlaying = !video.paused;
+      applyEntryStereo(playback);
+      video.src = nextUrl;
+      video.muted = isMuted;
+      // The element has the autoplay attribute, which would restart a paused
+      // reel after the swap; pause() clears the autoplaying flag the new
+      // load just set.
+      if (!wasPlaying) video.pause();
+      if (resumeAt > 0) {
+        video.addEventListener('loadedmetadata', function () {
+          // A swipe during the swap loads another reel; its metadata must
+          // not inherit this reel's playhead.
+          if (video.getAttribute('src') !== nextUrl) return;
+          try { video.currentTime = Math.min(resumeAt, video.duration || resumeAt); } catch (e) {}
+        }, { once: true });
+      }
+      if (wasPlaying) {
+        video.play().catch(function () {
+          video.muted = true;
+          isMuted = true;
+          updateSoundBtnUI(true);
+          video.play().catch(function () { updatePlayBtnUI(false); });
+        });
+      }
+      preloadNext(idx);
+      notifyVisualSourceChange();
+    }
+
+    // A stereo file that fails in VR falls back to the 2D rendition (mono-flat)
+    // instead of an error card. The first failure retries the stereo file once
+    // after STEREO_RETRY_MS (a transient 404 or network drop); a second one
+    // stays on 2D until the user leaves the post. Returns true when handled.
+    const STEREO_RETRY_MS = 5000;
+    function handleStereoFailure(failedItem) {
+      if (activeVisualLayout === 'mono' || !failedItem || failedItem.stereoFailed || !wantsStereoSource()) return false;
+      failedItem.stereoFailed = true;
+      failedItem.stereoFailures = (failedItem.stereoFailures || 0) + 1;
+      syncStereoSource(video.currentTime || stereoSwapResumeAt);
+      if (failedItem.stereoFailures === 1) {
+        setTimeout(function () {
+          if (videoData[idx] !== failedItem || !failedItem.stereoFailed || !wantsStereoSource()) return;
+          failedItem.stereoFailed = false;
+          syncStereoSource();
+        }, STEREO_RETRY_MS);
+      } else {
+        showFlash('3D UNAVAILABLE — SHOWING 2D');
+      }
+      return true;
+    }
+
+    function clearStereoFailure(item) {
+      if (!item) return;
+      item.stereoFailed = false;
+      item.stereoFailures = 0;
+    }
+    // </reels-stereo-sync>
 
     function notifyVisualSourceChange() {
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) WebXRVR.onVideoChange();
@@ -2926,7 +3242,7 @@
     // Shared obsidian frame for the pack / collect canvases: grid, vermilion glow, corner brackets, status label.
     function drawPackCanvasFrame(ctx, label, accent, chip) {
       ctx.clearRect(0, 0, 1024, 1024);
-      ctx.fillStyle = '#0d0e10';
+      ctx.fillStyle = sxTok('bg', '#0d0e10');
       ctx.fillRect(0, 0, 1024, 1024);
       const glow = ctx.createRadialGradient(100, 1000, 0, 100, 1000, 760);
       glow.addColorStop(0, accent === '#ffb224' ? 'rgba(255,178,36,.20)' : 'rgba(255,59,31,.24)');
@@ -2941,7 +3257,7 @@
         ctx.moveTo(0, g + 0.5); ctx.lineTo(1024, g + 0.5);
       }
       ctx.stroke();
-      ctx.strokeStyle = '#24282e';
+      ctx.strokeStyle = sxTok('rule', '#24282e');
       ctx.lineWidth = 2;
       ctx.strokeRect(34, 34, 956, 956);
       ctx.fillStyle = accent;
@@ -2966,12 +3282,12 @@
         ctx.font = '800 22px "JetBrains Mono", monospace';
         setPackCanvasSpacing(ctx, 1);
         const chipW = ctx.measureText(chip).width + 32;
-        ctx.fillStyle = '#16191c';
+        ctx.fillStyle = sxTok('surface-2', '#16191c');
         ctx.fillRect(932 - chipW, 78, chipW, 42);
         ctx.strokeStyle = '#2f353c';
         ctx.lineWidth = 2;
         ctx.strokeRect(932 - chipW, 78, chipW, 42);
-        ctx.fillStyle = '#a4abb3';
+        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
         ctx.fillText(chip, 916, 99);
       }
       setPackCanvasSpacing(ctx, 0);
@@ -2979,14 +3295,14 @@
     }
 
     function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra) {
-      ctx.fillStyle = primary ? '#ff3b1f' : '#16191c';
-      ctx.strokeStyle = primary ? '#ff3b1f' : '#2f353c';
+      ctx.fillStyle = primary ? sxTok('accent', '#ff3b1f') : sxTok('surface-2', '#16191c');
+      ctx.strokeStyle = primary ? sxTok('accent', '#ff3b1f') : '#2f353c';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = primary ? '#0a0a0a' : '#f2f3f5';
+      ctx.fillStyle = primary ? sxTok('on-accent', '#0a0a0a') : sxTok('ink', '#f2f3f5');
       ctx.font = '800 23px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -3019,10 +3335,10 @@
       ctx.textBaseline = 'alphabetic';
 
       if (mode === 'queue') {
-        ctx.fillStyle = '#f2f3f5';
+        ctx.fillStyle = sxTok('ink', '#f2f3f5');
         ctx.font = '400 44px "Archivo Black", "Archivo", sans-serif';
         ctx.fillText(String(pack.title || 'Untitled Pack').toUpperCase().slice(0, 30), 92, 164);
-        ctx.fillStyle = '#8a919a';
+        ctx.fillStyle = sxTok('ink-3', '#8a919a');
         ctx.font = '700 20px "JetBrains Mono", monospace';
         ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 92, 198);
         const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
@@ -3035,34 +3351,34 @@
           const current = index === idx;
           const available = item && item.available !== false;
           ctx.fillStyle = current ? 'rgba(255,59,31,.16)' : '#12151a';
-          ctx.strokeStyle = current ? '#ff3b1f' : '#24282e';
+          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('rule', '#24282e');
           ctx.lineWidth = current ? 3 : 1;
           ctx.fillRect(rowX, y, rowW, rowH);
           ctx.strokeRect(rowX, y, rowW, rowH);
-          if (current) { ctx.fillStyle = '#ff3b1f'; ctx.fillRect(rowX, y, 7, rowH); }
+          if (current) { ctx.fillStyle = sxTok('accent', '#ff3b1f'); ctx.fillRect(rowX, y, 7, rowH); }
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#16191c';
+          ctx.fillStyle = sxTok('surface-2', '#16191c');
           ctx.fillRect(rowX + 20, y + 9, 40, 30);
-          ctx.strokeStyle = current ? '#ff3b1f' : '#2f353c';
+          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : '#2f353c';
           ctx.lineWidth = 1;
           ctx.strokeRect(rowX + 20, y + 9, 40, 30);
-          ctx.fillStyle = current ? '#ff3b1f' : '#a4abb3';
+          ctx.fillStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3');
           ctx.font = '800 17px "JetBrains Mono", monospace';
           ctx.fillText(pad(index + 1), rowX + 40, y + rowH / 2 + 1);
           ctx.textAlign = 'left';
-          ctx.fillStyle = available ? '#f2f3f5' : '#6b727a';
+          ctx.fillStyle = available ? sxTok('ink', '#f2f3f5') : sxTok('ink-muted', '#6b727a');
           ctx.font = '700 21px "Archivo", sans-serif';
           const name = available ? (item.title || item.filename || 'Untitled reel') : 'Reel unavailable';
           ctx.fillText(String(name).slice(0, 46), rowX + 80, y + rowH / 2);
           ctx.textAlign = 'right';
           ctx.font = '800 15px "JetBrains Mono", monospace';
-          ctx.fillStyle = !available ? '#ffb224' : (current ? '#ff3b1f' : '#a4abb3');
+          ctx.fillStyle = !available ? sxTok('warn', '#ffb224') : (current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3'));
           ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
           if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
         });
         if (videoData.length > maxRows) {
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'center';
           ctx.textBaseline = 'alphabetic';
           ctx.font = '700 18px "JetBrains Mono", monospace';
@@ -3073,7 +3389,7 @@
           if (queuePlayable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 796, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#6b727a';
+            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -3084,11 +3400,11 @@
         drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
         drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
       } else {
-        ctx.fillStyle = '#f2f3f5';
+        ctx.fillStyle = sxTok('ink', '#f2f3f5');
         ctx.font = '400 64px "Archivo Black", "Archivo", sans-serif';
         const title = unavailable ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack').toUpperCase();
         wrapPackCanvasText(ctx, title, 92, 250, 840, 72, 2);
-        ctx.fillStyle = '#a4abb3';
+        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
         ctx.font = '400 26px "Archivo", sans-serif';
         const description = mode === 'complete'
           ? 'You reached the end of this authored collection.'
@@ -3102,7 +3418,7 @@
           ctx.setLineDash([8, 6]);
           ctx.beginPath(); ctx.moveTo(92, 590); ctx.lineTo(932, 590); ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'left';
           ctx.font = '700 18px "JetBrains Mono", monospace';
           setPackCanvasSpacing(ctx, 1.5);
@@ -3112,7 +3428,7 @@
           drawPackCanvasButton(ctx, 'RETURN TO PACK', 387, 720, 250, 76, false, 'return');
           drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
         } else if (unavailable) {
-          ctx.fillStyle = '#8a919a';
+          ctx.fillStyle = sxTok('ink-3', '#8a919a');
           ctx.textAlign = 'left';
           ctx.font = '700 18px "JetBrains Mono", monospace';
           ctx.fillText('SKIPPING WITHOUT EXPOSING PROTECTED MEDIA.', 92, 636);
@@ -3124,7 +3440,7 @@
           if (playable >= 3) {
             drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 822, 350, 64, false, 'publish-pack');
           } else {
-            ctx.fillStyle = '#6b727a';
+            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '800 19px "JetBrains Mono", monospace';
@@ -3436,16 +3752,28 @@
       if (packVisualMode) renderPackVisual(packVisualMode);
     }
 
+    // <reels-xr-dom-ui> (extracted by web/tests/reels-xr-dom-ui.test.js)
+    // The immersive-vr session requests no dom-overlay, so DOM UI (share
+    // dialogs, report prompts) is invisible while presenting: leave XR first.
+    async function exitXrForDomUi() {
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting() && WebXRVR.exitVR) {
+          await WebXRVR.exitVR();
+        }
+      } catch (e) {}
+    }
+
     async function shareCurrentPack() {
       if (!isPackMode || !packState.pack) return;
       pauseCurrentPlayback();
       await persistPackProgress(true);
       recordPackEvent('pack_share');
-      try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+      await exitXrForDomUi();
       const detail = { kind: 'pack', id: packState.pack.id, pack_id: packState.pack.id, title: packState.pack.title || 'Reel Pack' };
       window.dispatchEvent(new CustomEvent('echo:share-pack', { detail }));
       try { if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-pack', { detail })); } catch (e) {}
     }
+    // </reels-xr-dom-ui>
 
     function returnToPack() {
       if (!isPackMode || !packState.pack) return;
@@ -3704,9 +4032,9 @@
       packVisualRegions = [];
       const ctx = packVisualCanvas.getContext('2d');
       ctx.clearRect(0, 0, 1024, 1024);
-      drawPackCanvasFrame(ctx, 'SAVE TO COLLECTION', '#ff3b1f', '');
+      drawPackCanvasFrame(ctx, 'SAVE TO COLLECTION', sxTok('accent', '#ff3b1f'), '');
       const item = videoData[idx];
-      ctx.fillStyle = '#f2f3f5';
+      ctx.fillStyle = sxTok('ink', '#f2f3f5');
       ctx.font = '400 40px "Archivo Black", "Archivo", sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(String((item && (item.title || item.filename)) || 'This reel').toUpperCase().slice(0, 32), 92, 168);
@@ -3715,7 +4043,7 @@
       shown.forEach((row, index) => {
         const y = rowStart + index * (rowH + rowGap);
         ctx.fillStyle = row.added ? '#14251c' : '#11161d';
-        ctx.strokeStyle = row.added ? '#4ade80' : '#303945';
+        ctx.strokeStyle = row.added ? sxTok('success-hi', '#4ade80') : '#303945';
         ctx.lineWidth = row.added ? 3 : 1;
         ctx.beginPath();
         ctx.roundRect(rowX, y, rowW, rowH, 6);
@@ -3723,11 +4051,11 @@
         ctx.stroke();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = sxTok('ink', '#ffffff');
         ctx.font = '700 22px "Archivo", sans-serif';
         ctx.fillText(String(row.title).slice(0, 42), rowX + 22, y + rowH / 2);
         ctx.textAlign = 'right';
-        ctx.fillStyle = row.added ? '#4ade80' : '#aeb7c3';
+        ctx.fillStyle = row.added ? sxTok('success-hi', '#4ade80') : '#aeb7c3';
         ctx.font = '800 17px "JetBrains Mono", monospace';
         ctx.fillText(row.added ? 'ADDED' : 'ADD', rowX + rowW - 22, y + rowH / 2);
         if (!row.added) addPackVisualRegion('collect-pack', rowX, y, rowW, rowH, { packId: row.id, row });
@@ -3802,8 +4130,14 @@
       }
     }
 
+    // <reels-reward-claim>
+    // Set once the server reports reel rewards are switched off (503 REWARDS_DISABLED,
+    // SX_REEL_REWARDS_ENABLED=0): no more reward_eligible events or claims this page session.
+    let rewardClaimsDisabled = false;
+    const REWARD_TRANSIENT_RETRY_LIMIT = 3;
+
     async function maybeClaimReelReward(state) {
-      if (!state || state.finished || state.rewardClaimSent || !currentUser) return;
+      if (rewardClaimsDisabled || !state || state.finished || state.rewardClaimSent || !currentUser) return;
       const impressionId = recommendationImpressionId(state.item);
       if (!impressionId) return;
       const measurements = playbackMeasurements(state.item, state);
@@ -3843,18 +4177,28 @@
         });
         showRewardProgress(result);
       } catch (error) {
-        if (error.status === 401 || error.status === 403) {
+        if (error.code === 'REWARDS_DISABLED') {
+          // Rewards are off server-side: terminal and silent. Leaving rewardClaimSent set
+          // and the page flag on stops this reel and every later one from re-posting.
+          rewardClaimsDisabled = true;
+        } else if (error.status === 401 || error.status === 403) {
           currentUser = null;
           refreshAccountUI();
         } else if (error.status === 409 || error.code === 'REWARD_ALREADY_CLAIMED') {
           // Terminal duplicate: this reel already counted. Informative, no retry.
           showRewardToast('ALREADY CLAIMED FOR THIS REEL', false);
         } else if (!error.status || error.status >= 500 || error.status === 429 || error.code === 'REWARD_RETRYABLE') {
-          // Transient (network / 5xx / rate-limit / busy): retry after backoff.
-          const delay = error.status === 429 ? 5000 : 2000;
-          setTimeout(() => {
-            if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
-          }, delay);
+          // Transient (network / 5xx / rate-limit / busy): retry with doubling backoff,
+          // capped so an outage can't re-post the event + claim for as long as the reel plays.
+          state.rewardTransientAttempts = (state.rewardTransientAttempts || 0) + 1;
+          if (state.rewardTransientAttempts <= REWARD_TRANSIENT_RETRY_LIMIT) {
+            const delay = (error.status === 429 ? 5000 : 2000) * 2 ** (state.rewardTransientAttempts - 1);
+            setTimeout(() => {
+              if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
+            }, delay);
+          } else {
+            showRewardToast('REWARDS UNAVAILABLE RIGHT NOW', false);
+          }
         } else {
           // Other 4xx (validation / telemetry timing): the server event may
           // land just after the claim — allow up to 2 retries with backoff,
@@ -3870,6 +4214,7 @@
         }
       }
     }
+    // </reels-reward-claim>
 
     function recommendationImpressionId(item) {
       return item && item.recommendation && item.recommendation.impression_id
@@ -3913,6 +4258,7 @@
       Object.keys(blobUrlMap).forEach((key) => {
         try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
         delete blobUrlMap[key];
+        delete blobSourceMap[key];
       });
     }
 
@@ -3922,6 +4268,7 @@
         if (keep.has(key)) return;
         try { URL.revokeObjectURL(blobUrlMap[key]); } catch (e) {}
         delete blobUrlMap[key];
+        delete blobSourceMap[key];
       });
     }
 
@@ -4264,14 +4611,16 @@
       refreshEngagementUI();
     }
 
+    // <reels-share-reel> (extracted by web/tests/reels-xr-dom-ui.test.js)
     async function shareCurrentReel() {
       const item = videoData[idx];
       if (!item || !item.post_id) return;
       if (isPackMode) {
         pauseCurrentPlayback();
         await persistPackProgress(true);
-        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
       }
+      // ReelShareDialog is DOM-only, in feed mode as well as pack mode.
+      await exitXrForDomUi();
       requestJson('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4295,6 +4644,7 @@
         if (window.top && window.top !== window) window.top.dispatchEvent(new CustomEvent('echo:share-reel', { detail }));
       } catch (e) {}
     }
+    // </reels-share-reel>
 
     function setCreatorFollowing(creatorId, following) {
       videoData.forEach((entry) => {
@@ -4373,25 +4723,72 @@
       showFlash(action === 'hide_creator' ? 'CREATOR HIDDEN' : 'SHOWING FEWER');
       loadVideo(idx);
     }
+    // <reels-report-dialog> (stubbed by web/tests/reels-xr-dom-ui.test.js)
+    // Resolves { reason, details } on submit, or null when dismissed.
+    function askReportDetails(targetType) {
+      const dialog = document.getElementById('reportDialog');
+      const form = document.getElementById('reportDialogForm');
+      const reasonEl = document.getElementById('reportReason');
+      const detailsEl = document.getElementById('reportDetails');
+      const countEl = document.getElementById('reportDetailsCount');
+      const cancelBtn = document.getElementById('reportCancel');
+      const titleEl = document.getElementById('reportDialogTitle');
+      if (!dialog || !form || !reasonEl || !detailsEl) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        let result = null;
+        const syncCount = () => { if (countEl) countEl.textContent = detailsEl.value.length + '/500'; };
+        const onSubmit = (event) => {
+          event.preventDefault();
+          result = { reason: reasonEl.value, details: detailsEl.value.trim() };
+          dialog.close();
+        };
+        const onCancel = () => dialog.close();
+        // Keep player shortcuts (space, arrows) from firing while typing in the dialog.
+        const onKey = (event) => event.stopPropagation();
+        const onClose = () => {
+          form.removeEventListener('submit', onSubmit);
+          cancelBtn.removeEventListener('click', onCancel);
+          dialog.removeEventListener('close', onClose);
+          dialog.removeEventListener('keydown', onKey);
+          resolve(result);
+        };
+        form.addEventListener('submit', onSubmit);
+        cancelBtn.addEventListener('click', onCancel);
+        dialog.addEventListener('close', onClose);
+        dialog.addEventListener('keydown', onKey);
+        if (titleEl) titleEl.textContent = 'REPORT ' + String(targetType || '').toUpperCase();
+        reasonEl.value = 'spam';
+        detailsEl.value = '';
+        syncCount();
+        detailsEl.oninput = syncCount;
+        if (typeof dialog.showModal === 'function') dialog.showModal();
+        else dialog.setAttribute('open', '');
+        reasonEl.focus();
+      });
+    }
+    // </reels-report-dialog>
+
+    // <reels-report> (extracted by web/tests/reels-xr-dom-ui.test.js)
     async function reportTarget(targetType, targetId) {
       if (!targetId) return;
       if (isPackMode) {
         pauseCurrentPlayback();
         await persistPackProgress(true);
-        try { if (typeof WebXRVR !== 'undefined' && WebXRVR.exitVR) await WebXRVR.exitVR(); } catch (e) {}
+        await exitXrForDomUi();
       }
       if (!currentUser) {
         requestAuthentication({ kind: 'report', target_type: targetType, target_id: targetId });
         return;
       }
-      const reason = window.prompt('Report reason: spam, harassment, hate, sexual, violence, impersonation, privacy, or other');
-      if (!reason) return;
-      const details = window.prompt('Optional details') || '';
+      // The DOM report dialog is invisible in the headset: leave XR first.
+      await exitXrForDomUi();
+      const answer = await askReportDetails(targetType);
+      if (!answer) return;
       try {
         await requestJson('/api/reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason: reason, details: details }),
+          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason: answer.reason, details: answer.details }),
         });
         showFlash('REPORT SUBMITTED');
       } catch (error) {
@@ -4402,6 +4799,7 @@
         } else showFlash('REPORT FAILED');
       }
     }
+    // </reels-report>
 
 
     function playbackMeasurements(item, state) {
@@ -4664,7 +5062,7 @@
       const initials = document.createElement('span');
       initials.className = 'comment-avatar-initials';
       initials.textContent = comment.author_avatar || getInitials(comment.author_name || 'Anonymous');
-      initials.style.color = safeColor(comment.avatar_color, '#ff553a');
+      initials.style.color = readableOnDark(comment.avatar_color, '#ff553a');
       container.appendChild(initials);
     }
 
@@ -5138,12 +5536,15 @@
         // decode image files.
         try {
           const warmer = new Image();
-          warmer.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
+          const nextUrl = playbackUrlFor(nextItem, nextItem);
+          warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
         } catch (e) {}
         return;
       }
       if (preloadVideo) {
-        preloadVideo.src = blobUrlMap[nextIdx] || resolveItemUrl(nextItem);
+        // Warm the variant the next load will use (2D, or stereo in VR).
+        const nextUrl = playbackUrlFor(nextItem, nextItem);
+        preloadVideo.src = blobFor(nextIdx, nextUrl) || nextUrl;
         preloadVideo.load();
       }
     }
@@ -5170,10 +5571,7 @@
       // Preload subsequent track in background
       preloadNext(idx);
 
-      // Stills carry no stereo layout; reset any SBS sampling from video reels.
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
-        WebXRVR.setStereo(false);
-      }
+      // showImageSlide already told the VR engine the slide's stereo layout.
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
       }
@@ -5197,6 +5595,8 @@
       }
       if (index < 0) index = 0;
       if (index >= videoData.length) index = videoData.length - 1;
+      // A post that failed in 3D gets a fresh try when the user leaves it.
+      if (videoData[idx] && idx !== index) clearStereoFailure(videoData[idx]);
       idx = index;
       pruneBlobCache(idx);
 
@@ -5257,7 +5657,10 @@
       if (videoWrap) videoWrap.classList.remove('image-mode');
       if (progressWrap) progressWrap.classList.remove('image-hidden');
 
-      const itemUrl = blobUrlMap[idx] || resolveItemUrl(item);
+      const playback = playbackFor(item, item);
+      const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
+      const itemUrl = blobFor(idx, playUrl) || playUrl;
+      applyEntryStereo(playback);
       video.src = itemUrl;
       video.muted = isMuted;
       const requestedTime = Number(loadOptions.seekTo);
@@ -5275,15 +5678,6 @@
 
       // Preload subsequent video track in background
       preloadNext(idx);
-
-      // SBS stereo detection: enable per-eye half-frame sampling in VR mode for
-      // spatialized reels (e.g. folder "testpipeline-3d" or *_sbs/_3d filenames).
-      const isSbs =
-        /(^|[\s_\-.])(sbs|3d)([\s_\-.]|$)/i.test(item.filename || '') ||
-        /3d/i.test(item.folder || '');
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.setStereo) {
-        WebXRVR.setStereo(isSbs);
-      }
 
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) {
         WebXRVR.onVideoChange();
@@ -5381,6 +5775,12 @@
       const err = video.error;
       console.error('[ReelsPlayer] Video load error:', err, 'src:', video.src);
       if (!video.src) return;
+      // A stereo file that fails in VR falls back to the 2D rendition.
+      const stereoSrc = video.src;
+      if (handleStereoFailure(videoData[idx])) {
+        console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', stereoSrc);
+        return;
+      }
       
       const isProxy = video.src.includes('-preview.mp4');
       if (window.location.protocol === 'https:' && video.src.startsWith('http:')) {
@@ -5499,13 +5899,13 @@
 
       for (let off = 1; off <= total; off++) {
         const i = idx + off;
-        if (blobUrlMap[i]) {
+        const url = playbackUrlFor(videoData[i], videoData[i]);
+        if (blobFor(i, url)) {
           preloadedCount++;
           updatePreloadStatus();
           continue;
         }
         try {
-          const url = resolveItemUrl(videoData[i]);
           const res = await fetch(url, {
             signal: preloadController ? preloadController.signal : undefined,
           });
@@ -5515,7 +5915,11 @@
             URL.revokeObjectURL(blobUrl);
             break;
           }
+          if (blobUrlMap[i]) {
+            try { URL.revokeObjectURL(blobUrlMap[i]); } catch (e) {}
+          }
           blobUrlMap[i] = blobUrl;
+          blobSourceMap[i] = url;
           preloadedCount++;
           updatePreloadStatus();
         } catch (e) {
@@ -6343,13 +6747,13 @@
       if (!sideSpecs) return;
       sideSpecs.replaceChildren();
       if (!item || item.available === false) return;
-      const total = videoData.length;
-      sideSpecs.appendChild(specChip(isPackMode ? 'PACK' : 'QUEUE', (idx + 1) + ' / ' + total + (feedHasMore ? '+' : '')));
       const width = Number(item.width);
       const height = Number(item.height);
       const durationMs = Number(item.duration_ms);
-      if (item.size) sideSpecs.appendChild(specChip('SIZE', item.size));
-      if (width > 0 && height > 0) sideSpecs.appendChild(specChip('RES', width + '×' + height));
+      const stereoLayout = entryStereoLayout(item);
+      if (width > 0 && height > 0 && stereoLayout !== 'mono') {
+        sideSpecs.appendChild(specChip('3D', stereoLayout === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM'));
+      }
       if (durationMs > 0 && !isImageItem(item)) sideSpecs.appendChild(specChip('DUR', formatTime(durationMs / 1000)));
     }
     // Everything in the column that depends on WHICH reel is playing.
@@ -6566,6 +6970,10 @@
         onSeek: seekRelative,
         onToggleMute: toggleSound,
         getVisualSource: currentVisualSource,
+        // 3D posts switch between their 2D rendition and stereo file.
+        onEnterVR: () => syncStereoSource(),
+        onExitVR: () => syncStereoSource(),
+        onPreviewStereo: () => syncStereoSource(),
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {
           if (!isPackMode || !packState.pack) return null;
@@ -6682,6 +7090,68 @@
         navigator.xr.addEventListener('devicechange', refreshVrButton);
       }
 
+      // Calls enterVR before any await so it runs inside the caller's click
+      // (WebXR requestSession needs that user activation).
+      async function startImmersiveSession() {
+        try {
+          const session = await WebXRVR.enterVR();
+          if (!session) {
+            showFlash('VR SESSION FAILED — CHECK CONSOLE');
+          } else {
+            // The onEnterVR callback already swapped 3D posts to stereo.
+            showFlash('ENTERING IMMERSIVE VR');
+          }
+        } catch (err) {
+          console.error('[WebXRVR] enterVR error:', err);
+          showFlash('VR ERROR: ' + (err.message || 'SESSION FAILED'));
+        }
+      }
+
+      // <vr-pose-notice>
+      // One-time notice before the first immersive session: head/hand pose is
+      // processed on-device only. Continue's own click handler calls
+      // onContinue (enterVR) synchronously — window.confirm or an await here
+      // would spend the user activation WebXR requires.
+      const VR_POSE_NOTICE_KEY = 'echo_vr_pose_notice_v1';
+      function vrPoseNoticeSeen() {
+        try { return window.localStorage.getItem(VR_POSE_NOTICE_KEY) === '1'; } catch (e) { return false; }
+      }
+      function rememberVrPoseNotice() {
+        try { window.localStorage.setItem(VR_POSE_NOTICE_KEY, '1'); } catch (e) {}
+      }
+      function showVrPoseNotice(onContinue) {
+        const panel = document.getElementById('vrNoticePanel');
+        const backdrop = document.getElementById('vrNoticeBackdrop');
+        const continueBtn = document.getElementById('vrNoticeContinue');
+        const cancelBtn = document.getElementById('vrNoticeCancel');
+        if (!panel || !continueBtn) { onContinue(); return; }
+        const close = () => {
+          panel.hidden = true;
+          if (backdrop) backdrop.hidden = true;
+          continueBtn.onclick = null;
+          if (cancelBtn) cancelBtn.onclick = null;
+          if (backdrop) backdrop.onclick = null;
+          panel.onkeydown = null;
+        };
+        continueBtn.onclick = () => {
+          close();
+          rememberVrPoseNotice();
+          onContinue();
+        };
+        if (cancelBtn) cancelBtn.onclick = close;
+        if (backdrop) backdrop.onclick = close;
+        // Keep player shortcuts (arrows, Esc → drawer) from acting behind the notice.
+        panel.onkeydown = (ev) => {
+          if (ev.key === 'Tab') return;
+          if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+          ev.stopPropagation();
+        };
+        panel.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        try { continueBtn.focus(); } catch (e) {}
+      }
+      // </vr-pose-notice>
+
       if (vrBtn) {
         vrBtn.addEventListener('click', async function() {
           if (!window.__sxReelsReady) {
@@ -6737,17 +7207,12 @@
             return;
           }
 
-          try {
-            const session = await WebXRVR.enterVR();
-            if (!session) {
-              showFlash('VR SESSION FAILED — CHECK CONSOLE');
-            } else {
-              showFlash('ENTERING IMMERSIVE VR');
-            }
-          } catch (err) {
-            console.error('[WebXRVR] enterVR error:', err);
-            showFlash('VR ERROR: ' + (err.message || 'SESSION FAILED'));
+          // First time only: the notice's Continue click starts the session.
+          if (!vrPoseNoticeSeen()) {
+            showVrPoseNotice(startImmersiveSession);
+            return;
           }
+          startImmersiveSession();
         });
       }
     }
@@ -6765,7 +7230,14 @@
         if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) return;
       } catch (e) {}
       try {
-        glowCtx.drawImage(video, 0, 0, 4, 4);
+        if (activeCropLayout && video.videoWidth && video.videoHeight) {
+          // Raw stereo file in 2D: sample only the left eye that is on screen.
+          const eyeW = activeCropLayout === 'sbs' ? video.videoWidth / 2 : video.videoWidth;
+          const eyeH = activeCropLayout === 'tb' ? video.videoHeight / 2 : video.videoHeight;
+          glowCtx.drawImage(video, 0, 0, eyeW, eyeH, 0, 0, 4, 4);
+        } else {
+          glowCtx.drawImage(video, 0, 0, 4, 4);
+        }
         const data = glowCtx.getImageData(0, 0, 4, 4).data;
         let r = 0, g = 0, b = 0;
         for (let i = 0; i < data.length; i += 4) {

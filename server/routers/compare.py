@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from server import media as SM
+from server.security_headers import nonce_request_html
 
 router = APIRouter(prefix="/api/compare", tags=["compare"])
 
@@ -58,7 +59,7 @@ def prepare_pair(pair: str):
 
 
 @router.get("/player", response_class=HTMLResponse)
-def compare_player(pair: str):
+def compare_player(pair: str, request: Request):
     """Render the before/after slider page for embedding in an iframe."""
     pairs = SM.scan_pairs(str(PAIRS_DIR))
     p = next((x for x in pairs if x["name"] == pair and x["complete"]), None)
@@ -74,7 +75,7 @@ def compare_player(pair: str):
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
 
     return HTMLResponse(
-        html
+        nonce_request_html(request, html)
         .replace("__BEFORE_URL__", _media_rel(fast_play))
         .replace("__AFTER_URL__", _media_rel(studio_play))
         .replace("__BEFORE_LABEL__", FAST_LABEL)

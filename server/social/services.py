@@ -6,14 +6,18 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import re
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from server import metrics
+from server.media_store import public_url
 from .auth import avatar_url, public_user
 from .models import (
     Comment,
@@ -176,13 +180,30 @@ def serialize_comment(
     }
 
 
-def reel_records(paths: list[str], viewer_id: str | None = None, include_comments: bool = True) -> dict[str, dict]:
-    if not paths:
-        return {}
+def _session_scope(db: Session | None):
+    """The caller's session when given, else a short-lived one of our own.
+
+    Routes pass their request ``db`` so one request holds at most one pooled
+    connection; a helper that opens a second session while the request
+    session holds the first is a hold-and-wait that deadlocks a busy pool.
+    """
+    if db is not None:
+        return nullcontext(db)
     from .database import SessionLocal
 
+    return SessionLocal()
+
+
+def reel_records(
+    paths: list[str],
+    viewer_id: str | None = None,
+    include_comments: bool = True,
+    db: Session | None = None,
+) -> dict[str, dict]:
+    if not paths:
+        return {}
     normalized = [normalize_media_path(path) for path in paths]
-    with SessionLocal() as db:
+    with _session_scope(db) as db:
         from .safety import blocked_user_ids
 
         hidden_ids = blocked_user_ids(db, viewer_id)
@@ -271,6 +292,7 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
                 "duration_ms": post.duration_ms,
                 "width": post.width,
                 "height": post.height,
+                "stereo_layout": post.stereo_layout or "mono",
                 **post_image_fields(post),
                 "author_name": post.owner.username,
                 "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
@@ -292,8 +314,8 @@ def reel_records(paths: list[str], viewer_id: str | None = None, include_comment
         return records
 
 
-def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
-    records = reel_records(paths, include_comments=False)
+def metadata_for_paths(paths: list[str], db: Session | None = None) -> dict[str, dict]:
+    records = reel_records(paths, include_comments=False, db=db)
     return {
         path: {
             "post_id": row["post_id"],
@@ -312,31 +334,99 @@ def metadata_for_paths(paths: list[str]) -> dict[str, dict]:
     }
 
 
-def _image_entry(media_path: str, width: int | None, height: int | None) -> dict:
-    """One image of an image post as the player needs it."""
+def post_media_files(posts) -> list[Path]:
+    """Every local file (originals and generated siblings) of *posts*.
+
+    Collect before the commit that deletes the posts, then pass the list to
+    ``media_store.delete_paths`` once it has landed: unpublishing removes the
+    public R2 copies and keeps local files as unserved moderation evidence.
+    """
     from server import media as media_service
 
-    url = f"/media/{media_path}"
+    files: list[Path] = []
+    for post in posts:
+        for rel in [post.media_path, *(slide.media_path for slide in post.slides)]:
+            if rel:
+                files.extend(media_service.derived_files(Path("output") / rel))
+    return files
+
+
+def _output_url(path: Path) -> str | None:
+    try:
+        return public_url(path.resolve().relative_to(Path('output').resolve()).as_posix())
+    except (OSError, ValueError):
+        return None
+
+
+def stereo_fields(media_path: str, layout: str | None) -> dict:
+    """Playback fields for a post's stereo layout (docs/stereo-3d-reels.md).
+
+    Mono posts get {"stereo_layout": "mono", "stereo_url": None}. Stereo posts
+    also get "url" pointing at the left-eye <stem>-mono rendition every 2D
+    surface plays, "stereo_url" at the full stereo file (or its H.264 proxy)
+    the VR player samples per eye, and "stereo_crop" when no rendition exists
+    yet so 2D shows the raw file cropped to the left eye instead.
+    """
+    from server import media as media_service
+
+    layout = layout if layout in media_service.STEREO_LAYOUTS else "mono"
+    if layout == "mono":
+        return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False}
+    source = Path("output") / media_path
+    mono, stereo = media_service.stereo_paths(str(source))
+    raw_url = public_url(media_path)
+    mono_url = _output_url(mono) if mono else None
+    return {
+        "stereo_layout": layout,
+        "url": mono_url or raw_url,
+        "stereo_url": _output_url(stereo) or raw_url,
+        "stereo_crop": mono_url is None,
+    }
+
+
+def _image_entry(media_path: str, width: int | None, height: int | None, layout: str = "mono") -> dict:
+    """One image of an image post as the player needs it.
+
+    For stereo images "url"/"poster_url" are the left-eye rendition and its
+    poster, and "stereo_url" is the full stereo still.
+    """
+    from server import media as media_service
+
+    stereo = stereo_fields(media_path, layout)
+    url = stereo.get("url") or public_url(media_path)
     poster_url = url
     try:
         source = Path("output") / media_path
+        if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
+            source = media_service.mono_sibling_path(str(source))
         poster = Path(media_service.explore_poster_path(str(source)))
         if poster.is_file() and poster.stat().st_size > 0 and poster.stat().st_mtime >= source.stat().st_mtime:
-            poster_url = f"/media/{poster.resolve().relative_to(Path('output').resolve()).as_posix()}"
+            poster_url = _output_url(poster) or poster_url
     except (OSError, ValueError):
         pass
-    return {"path": media_path, "url": url, "poster_url": poster_url, "width": width, "height": height}
+    return {
+        "path": media_path,
+        "url": url,
+        "poster_url": poster_url,
+        "width": width,
+        "height": height,
+        "stereo_layout": stereo["stereo_layout"],
+        "stereo_url": stereo["stereo_url"],
+        "stereo_crop": stereo["stereo_crop"],
+    }
 
 
 def post_image_fields(post: Post) -> dict:
     """Slideshow fields for an image post: every image in order and the dwell.
 
     Video posts get an empty image list so callers can branch on media_type.
+    Every slide of a stereo post shares the post's stereo layout.
     """
     if post.media_type != "image":
         return {"images": [], "dwell_ms": None}
-    images = [_image_entry(post.media_path, post.width, post.height)]
-    images.extend(_image_entry(slide.media_path, slide.width, slide.height) for slide in post.slides)
+    layout = post.stereo_layout or "mono"
+    images = [_image_entry(post.media_path, post.width, post.height, layout)]
+    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout) for slide in post.slides)
     return {"images": images, "dwell_ms": int(post.dwell_ms or IMAGE_POST_DWELL_MS)}
 
 
@@ -348,6 +438,16 @@ def slide_media_paths(db: Session | None = None) -> set[str]:
 
     with SessionLocal() as session:
         return {row[0] for row in session.query(PostSlide.media_path).all()}
+
+
+def published_media_paths(db: Session | None = None) -> set[str]:
+    """Primary media paths of every post row (status filtering is per viewer)."""
+    if db is not None:
+        return {row[0] for row in db.query(Post.media_path).all()}
+    from .database import SessionLocal
+
+    with SessionLocal() as session:
+        return {row[0] for row in session.query(Post.media_path).all()}
 
 
 def _probe_size(media_path: str) -> tuple[int | None, int | None]:
@@ -482,6 +582,7 @@ def create_or_update_post(
     legacy_views: int = 0,
     stable_legacy_id: bool = False,
     slide_paths: list[str] | None = None,
+    stereo_layout: str | None = None,
 ) -> Post:
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
@@ -508,6 +609,10 @@ def create_or_update_post(
     post.source = str(source or "upload")[:32]
     post.status = "published"
     post.deleted_at = None
+    if stereo_layout is not None:
+        post.stereo_layout = stereo_layout if stereo_layout in {"mono", "sbs", "tb"} else "mono"
+    elif not post.stereo_layout:
+        post.stereo_layout = "mono"
     apply_media_info(post)
     post.legacy_like_count = max(0, int(legacy_likes or 0))
     post.legacy_view_count = max(0, int(legacy_views or 0))
@@ -529,17 +634,25 @@ def shared_preview_urls(post: Post) -> dict:
     """
     from server import media as media_service
 
-    url = f"/media/{post.media_path}"
+    url = public_url(post.media_path)
+    stereo = stereo_fields(post.media_path, post.stereo_layout)
     if post.media_type == "image":
+        if stereo["stereo_layout"] != "mono":
+            cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"])
+            return {"preview_url": cover["url"], "poster_url": cover["poster_url"]}
         return {"preview_url": url, "poster_url": url}
     try:
         source = Path("output") / post.media_path
+        if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
+            # Grid assets of a stereo video come from its left-eye rendition.
+            source = media_service.mono_sibling_path(str(source))
+            url = stereo["url"]
         root = Path("output").resolve()
 
         def sibling_url(path: Path) -> str | None:
             try:
                 if path.exists() and path.stat().st_size > 0:
-                    return f"/media/{path.resolve().relative_to(root).as_posix()}"
+                    return public_url(path.resolve().relative_to(root).as_posix())
             except (OSError, ValueError):
                 return None
             return None
@@ -552,21 +665,58 @@ def shared_preview_urls(post: Post) -> dict:
     return {"preview_url": preview or url, "poster_url": poster}
 
 
-def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
+def viewer_post_state(db: Session, viewer_id: str, posts: list[Post]) -> tuple[set[str], set[str], set[str]]:
+    """Liked post ids, saved post ids and followed owner ids for a page of posts.
+
+    Three queries for the whole page, so a list endpoint does not run three
+    per card.
+    """
+    post_ids = [post.id for post in posts]
+    owner_ids = {post.owner_id for post in posts}
+    if not post_ids:
+        return set(), set(), set()
+    liked = {
+        row[0]
+        for row in db.query(PostLike.post_id)
+        .filter(PostLike.user_id == viewer_id, PostLike.post_id.in_(post_ids))
+        .all()
+    }
+    saved = {
+        row[0]
+        for row in db.query(PostSave.post_id)
+        .filter(PostSave.user_id == viewer_id, PostSave.post_id.in_(post_ids))
+        .all()
+    }
+    following = {
+        row[0]
+        for row in db.query(Follow.followee_id)
+        .filter(Follow.follower_id == viewer_id, Follow.followee_id.in_(owner_ids))
+        .all()
+    }
+    return liked, saved, following
+
+
+def post_card(
+    post: Post,
+    db: Session,
+    viewer_id: str | None = None,
+    state: tuple[set[str], set[str], set[str]] | None = None,
+) -> dict:
     liked = False
     saved = False
     following = False
     if viewer_id:
-        liked = db.query(PostLike.id).filter(PostLike.user_id == viewer_id, PostLike.post_id == post.id).first() is not None
-        saved = db.query(PostSave.id).filter(PostSave.user_id == viewer_id, PostSave.post_id == post.id).first() is not None
-        following = db.query(Follow.id).filter(Follow.follower_id == viewer_id, Follow.followee_id == post.owner_id).first() is not None
+        liked_ids, saved_ids, following_ids = state if state is not None else viewer_post_state(db, viewer_id, [post])
+        liked = post.id in liked_ids
+        saved = post.id in saved_ids
+        following = post.owner_id in following_ids
     creator = public_user(post.owner, viewer_id=viewer_id, is_following=following)
     card = {
         "id": post.id,
         "post_id": post.id,
         "path": post.media_path,
         "media_type": post.media_type,
-        "url": f"/media/{post.media_path}",
+        "url": public_url(post.media_path),
         "title": post.title,
         "caption": post.caption,
         "tags": post_tags(post),
@@ -592,6 +742,7 @@ def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
         },
         "created_at": post.created_at.isoformat() if post.created_at else None,
     }
+    card.update(stereo_fields(post.media_path, post.stereo_layout))
     card.update(shared_preview_urls(post))
     return card
 
@@ -626,6 +777,70 @@ def apply_cursor(query, cursor: str | None):
             and_(Post.created_at == created_at, Post.id < post_id),
         )
     )
+
+
+MAX_UNKNOWN_DURATION_MS = 30 * 60 * 1000
+PLAYBACK_LOOP_FACTOR = 4
+EVENT_DICT_MAX_BYTES = 2048
+EVENT_DICT_MAX_KEYS = 16
+
+
+def event_dict_is_valid(value: dict | None) -> bool:
+    """Context/playback_quality dicts: <=16 keys, scalar values, <=2 KB serialized."""
+    if not value:
+        return True
+    if len(value) > EVENT_DICT_MAX_KEYS:
+        return False
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return False
+        if item is not None and not isinstance(item, (str, int, float, bool)):
+            return False
+        if isinstance(item, float) and not math.isfinite(item):
+            return False
+    try:
+        return len(json.dumps(value, ensure_ascii=False).encode("utf-8")) <= EVENT_DICT_MAX_BYTES
+    except (TypeError, ValueError):
+        return False
+
+
+def clamp_playback(
+    db: Session,
+    post_id: str | None,
+    *,
+    watch_ms: int | None = None,
+    foreground_ms: int | None = None,
+    duration_ms: int | None = None,
+    position_ms: int | None = None,
+) -> dict:
+    """Bound client-reported playback numbers by the server's known duration.
+
+    The server duration wins over the client's; with none known, durations are
+    capped at 30 minutes. Watch/foreground/position may exceed one pass by up
+    to 4x to allow loops.
+    """
+    server_duration = None
+    if post_id:
+        row = db.query(Post.duration_ms).filter(Post.id == post_id).first()
+        if row and row[0] and int(row[0]) > 0:
+            server_duration = int(row[0])
+    if server_duration:
+        duration = server_duration
+        ceiling = server_duration * PLAYBACK_LOOP_FACTOR
+    else:
+        duration = min(max(0, int(duration_ms)), MAX_UNKNOWN_DURATION_MS) if duration_ms is not None else None
+        ceiling = MAX_UNKNOWN_DURATION_MS
+
+    def bound(value):
+        return None if value is None else max(0, min(int(value), ceiling))
+
+    return {
+        "watch_ms": bound(watch_ms),
+        "foreground_ms": bound(foreground_ms),
+        "duration_ms": duration,
+        "position_ms": bound(position_ms),
+        "server_duration": server_duration is not None,
+    }
 
 
 def record_event(
@@ -673,6 +888,7 @@ def record_event(
                 context=dict(context or {}),
             )
         except RecommendationAttributionError as exc:
+            metrics.incr("rec_attribution_failed")
             # Fail open: attribution is enrichment, never a reason to reject
             # the underlying action (like/follow/feedback). Record the event
             # unattributed so engagement is never lost to a stale client id.
@@ -689,9 +905,22 @@ def record_event(
             recommendation_impression_id = impression.id
             recommendation_request_id = impression.request_id
             recommendation_session_id = impression.session_id
-    bounded_duration = max(0, int(duration_ms)) if duration_ms is not None else None
-    bounded_watch = max(0, int(watch_ms)) if watch_ms is not None else None
-    if watch_ratio is None and bounded_duration and bounded_watch is not None:
+    clamped = clamp_playback(
+        db,
+        post_id,
+        watch_ms=watch_ms,
+        foreground_ms=foreground_ms,
+        duration_ms=duration_ms,
+        position_ms=position_ms,
+    )
+    bounded_duration = clamped["duration_ms"]
+    bounded_watch = clamped["watch_ms"]
+    foreground_ms = clamped["foreground_ms"]
+    position_ms = clamped["position_ms"]
+    if clamped["server_duration"] and bounded_duration and bounded_watch is not None:
+        # The client's ratio is untrusted when the server knows the duration.
+        watch_ratio = bounded_watch / bounded_duration
+    elif watch_ratio is None and bounded_duration and bounded_watch is not None:
         watch_ratio = bounded_watch / bounded_duration
     bounded_ratio = max(0.0, min(4.0, float(watch_ratio))) if watch_ratio is not None else None
     row = EngagementEvent(
@@ -706,10 +935,10 @@ def record_event(
         event_type=event_type[:40],
         source=str(source or "unknown")[:40],
         watch_ms=bounded_watch,
-        foreground_ms=max(0, int(foreground_ms)) if foreground_ms is not None else bounded_watch,
+        foreground_ms=foreground_ms if foreground_ms is not None else bounded_watch,
         duration_ms=bounded_duration,
         watch_ratio=bounded_ratio,
-        position_ms=max(0, int(position_ms)) if position_ms is not None else None,
+        position_ms=position_ms,
         completed=bool(completed),
         navigation_reason=str(navigation_reason or "")[:32] or None,
         playback_quality=dict(playback_quality or {}),
@@ -736,13 +965,12 @@ def scoped_media_paths(
     viewer_id: str | None = None,
     feed: str | None = None,
     author: str | None = None,
+    db: Session | None = None,
 ) -> list[str] | None:
     """Return an ordered media-path allowlist for a creator or Following feed."""
     if not feed and not author:
         return None
-    from .database import SessionLocal
-
-    with SessionLocal() as db:
+    with _session_scope(db) as db:
         query = db.query(Post).join(User, User.id == Post.owner_id).filter(
             Post.status == "published",
             Post.deleted_at.is_(None),
