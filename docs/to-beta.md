@@ -129,6 +129,23 @@ The review also found that fal is retiring the Ray-2 reframe endpoint on 2026-10
     - the free FFmpeg `fast` engine is the default;
     - `pipeline/spatial_worker.py` already runs Video-Depth-Anything locally (cuda/mps/cpu);
     - the VapourSynth Studio engine is one dependency fix from shipping.
+- **MAKE 3D on the VPS (measured 2026-10-23): images yes, video no.** MAKE 3D (`POST /api/stereo/convert`, `pipeline/spatial_worker.py`, W8T recipe) was measured in a scratch image built from the app `Dockerfile` plus `requirements-3d.txt` (torch CPU). It ran with `--cpus=3 --memory=6g`, the app container's CPX32 budget, on 1080² sources. These numbers are optimistic: the host was M1 arm64, which is faster per core than shared EPYC vCPUs.
+
+  | Source | Wall time | Peak memory | Limit set beforehand |
+  |---|---|---|---|
+  | Image | 6 s | 1.0 GB | ≤ 30 s, ≤ 3 GB: pass |
+  | 10 s video (300 frames) | 14.3 min | 4.1 GB | ≤ 5 min, ≤ 5 GB: **fail** |
+  | 30 s video (900 frames) | 64 min | 4.5 GB | fail |
+
+  - Depth costs about 2.7 s per frame on CPU; the render costs only about 0.15 s per frame.
+  - The same clips on the Mac (MPS) took 99 s (10 s video) and 309 s (30 s video).
+  - Decision: production keeps `SX_STEREO_CONVERT_ENABLED=0`, and the app image ships without torch.
+  - Video MAKE 3D needs a GPU worker. Either run it per job on serverless GPU, or move it onto the planned L40S at the hybrid trigger above.
+  - Image-only MAKE 3D could run on CPX32 if wanted. It needs torch (about 1 GB of image size) and a split of the flag by kind, and it takes one 3-CPU job slot for about 6 s.
+  - Also open before enabling it anywhere:
+    - Memory: the worker holds the whole clip's depth-resolution frames, about 0.8 MB per frame, so a 60 fps 60 s clip is about 2.9 GB.
+    - The checkpoint download has no SHA-256 pin.
+    - HDR (PQ/HLG) sources are not tone-mapped.
 - **fal repricing (2026-10-04):** hourly GPU rental prices rose. That affects only the L40S/self-host comparison. No change to per-second model API prices was reported. The source is a single third-party capture.
 - **Known margin pressure (recompute):** the earlier example, "60s hero outpaint ≈ $3.60 fal COGS vs ~$4.56 net on a $5 pack", is **obsolete**. Ray-2 is retired, and Ray 3.2 reframe caps the source at 10 s, so a 60 s hero outpaint is no longer one job. The largest Ray 3.2 job is now 10 s: $0.60 at 540p, $1.20 at 720p (the UI default, 162 credits) or $3.60 at 1080p. Recompute per-clip margin for every outpaint model in the catalog against the $5/$10/$25 packs before enabling credits. fal's documented price instability (`core/models.py`: "Estimate only — pull live pricing") means credit pricing must track fal pricing.
 

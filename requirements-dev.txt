@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8,<9
 httpx>=0.27,<1
+# The 3D render tests (tests/test_spatial_*.py) need cv2 but not torch.
+opencv-python-headless>=4.10,<6

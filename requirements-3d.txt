@@ -1,0 +1,16 @@
+# Convert-to-3D (pipeline/spatial_worker.py, POST /api/stereo/convert). Kept out
+# of requirements.txt: torch is ~1 GB and the production VPS has no GPU, so the
+# Docker image ships without it and the feature stays off there
+# (docs/to-beta.md, "AI inference").
+# The depth model code itself is vendored in pipeline/third_party.
+# Linux CPU-only torch (much smaller wheel):
+#   pip install -r requirements-3d.txt --extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+torch>=2.4,<3
+torchvision>=0.19
+# Already provides cv2 if opencv-python is installed; do not install both.
+opencv-python-headless>=4.10,<6
+huggingface_hub>=0.24
+einops>=0.8
+easydict>=1.13
+tqdm>=4.66

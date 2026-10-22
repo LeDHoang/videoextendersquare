@@ -130,8 +130,27 @@ def _resolve_extra_images(
 _STEREO_NAMES = {"sbs": "side-by-side (2:1)", "tb": "top-bottom (1:2)"}
 
 
-def _check_stereo_pointer(req: "PublishRequest") -> None:
-    """Stereo posts are published as-is: extended renders are always 2D."""
+def _converted_layout(req: "PublishRequest", context: AuthContext) -> str | None:
+    """Stereo layout of the caller's own MAKE 3D job (stereo_convert router), else None."""
+    rec = job_manager.get_job(req.job_id) if req.job_id else None
+    if not rec or not rec.result or rec.owner_id != context.user.id:
+        return None
+    return rec.result.get("stereo_layout")
+
+
+def _check_stereo_pointer(req: "PublishRequest", context: AuthContext) -> None:
+    """Stereo posts are published as-is or from a MAKE 3D job in that layout:
+    extended renders are always 2D."""
+    converted = _converted_layout(req, context)
+    if converted:
+        if job_manager.get_job(req.job_id).kind != req.kind:
+            raise HTTPException(status_code=422, detail="This MAKE 3D render is a different media kind.")
+        if req.stereo_layout != converted:
+            raise HTTPException(
+                status_code=422,
+                detail=f"This MAKE 3D render is 3D {_STEREO_NAMES[converted]}; publish it in that layout.",
+            )
+        return
     if req.stereo_layout != "mono" and (req.job_id or not req.stage_id):
         raise HTTPException(
             status_code=422,
@@ -433,7 +452,7 @@ def publish_upload(
         daily_cap = 20
     rate_limiter.check(db, f"publish-hour:{context.user.id}", hourly_cap, 60 * 60)
     rate_limiter.check(db, f"publish-day:{context.user.id}", daily_cap, 24 * 60 * 60)
-    _check_stereo_pointer(req)
+    _check_stereo_pointer(req, context)
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     extra_sources = _resolve_extra_images(req, request, context)
     _check_stereo_sources(req, [src_path, *extra_sources])
@@ -545,7 +564,7 @@ def publish_upload(
                 "lon": loc.lon,
                 "osm_id": str(loc.osm_id) if loc.osm_id is not None else None,
             },
-            source="extended" if req.job_id else "upload",
+            source="converted" if _converted_layout(req, context) else "extended" if req.job_id else "upload",
             slide_paths=[target.resolve().relative_to(root).as_posix() for target in extra_dests] if req.kind == "image" else None,
             stereo_layout=req.stereo_layout,
         )

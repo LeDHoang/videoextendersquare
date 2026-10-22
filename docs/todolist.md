@@ -33,6 +33,12 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 - [x] Reduce and spread out controls on the player action rail. Done 2026-10-21: five primary buttons; mode, fullscreen and VR moved into More.
 - [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.
 - [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
+- [ ] MAKE 3D on the server: decide how 3D video runs in production. Measured 2026-10-23 in a CPX32-shaped container (`--cpus=3 --memory=6g`, torch CPU): an image takes 6 s and 1.0 GB, but a 10 s 1080² video takes 14.3 min and 4.1 GB, and a 30 s video takes 64 min. Video therefore needs a GPU worker (serverless per job, or the L40S at the hybrid trigger); production keeps `SX_STEREO_CONVERT_ENABLED=0` until then. Details are in `docs/to-beta.md` under "AI inference". Open items before enabling it:
+  - Stream depth frames per shot instead of holding the whole clip.
+  - Pin the checkpoint's SHA-256.
+  - Handle or refuse HDR sources.
+  - Decide whether image-only MAKE 3D ships on the VPS first.
+  - Scene cuts that change little in brightness are missed (ffmpeg scene score below 0.4); a histogram-distance rule is proposed but not yet built.
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
 
 ## VR Reels recommended execution order

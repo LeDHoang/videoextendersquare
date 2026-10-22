@@ -22,6 +22,9 @@ PHASES: list[tuple[str, str, float]] = [
     ("Downloading", "DOWNLOAD RESULT", 0.70),
     ("Performing studio-quality", "STUDIO UPSCALE", 0.80),
     ("Performing", "LOCAL 4K UPSCALE", 0.85),
+    # Make 3D (pipeline/spatial_worker.py)
+    ("Estimating depth", "ESTIMATE DEPTH", 0.30),
+    ("Rendering 3D", "RENDER 3D", 0.60),
 ]
 
 MAX_LOG_LINES = 200

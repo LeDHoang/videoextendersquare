@@ -3,7 +3,7 @@
 Standalone CLI twin of the /api/reels/spatialize endpoint — run without the
 server (from the repo root):
     .venv/bin/python scripts/batch_spatialize.py            # default dirs
-    .venv/bin/python scripts/batch_spatialize.py --half     # half-SBS (3840x3840)
+    .venv/bin/python scripts/batch_spatialize.py --half     # half-SBS (each eye half width)
 """
 
 import argparse
