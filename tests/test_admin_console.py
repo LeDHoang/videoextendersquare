@@ -23,7 +23,7 @@ from verified_signup import register_verified
 from server.routers import account_safety, admin, social, support
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import AuthSession, Comment, Post, ReelPack, Report, StaffAction, User, utcnow
+from server.social.models import AuthSession, Comment, Post, ReelPack, ReelPackItem, Report, StaffAction, User, utcnow
 
 REPO = Path(__file__).resolve().parents[1]
 PASSWORD = "correct-horse-battery-99"
@@ -464,6 +464,23 @@ def test_reports_carry_a_preview_of_their_target(app, staff):
     user_report = file_report(other_client, target["id"])
     listed = {row["id"]: row for row in mod_client.get("/api/moderation/reports", params={"status": "all"}).json()["reports"]}
     assert listed[user_report]["target"]["link"] == "/profile/target_user"
+
+
+def test_pack_reports_preview_the_cover_and_first_reels(app, staff):
+    _, target = staff["user"]
+    other_client, _ = staff["other"]
+    pack_id = create_pack(app, target["id"])
+    post_ids = [create_post(app, target["id"], title=f"Stop {index}") for index in range(6)]
+    with app.state.Session() as db:
+        for position, post_id in enumerate(post_ids):
+            db.add(ReelPackItem(pack_id=pack_id, post_id=post_id, position=position))
+        db.get(ReelPack, pack_id).cover_post_id = post_ids[3]
+        db.commit()
+    reported = mutate(other_client, "POST", "/api/reports", {"target_type": "pack", "target_id": pack_id, "reason": "spam"})
+    pack = reported.json()["report"]["target"]
+    assert pack["owner"] == "target_user" and pack["item_count"] == 6
+    assert [item["title"] for item in pack["items"]] == ["Stop 3", "Stop 0", "Stop 1", "Stop 2"]
+    assert all(item["preview_url"] and item["link"] == f"/reels?post={item['id']}" for item in pack["items"])
 
 
 def test_report_and_support_actions_are_audited_with_report_ids(app, staff):

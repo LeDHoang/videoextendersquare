@@ -4,11 +4,12 @@ function LiveLink({ href, children = 'VIEW LIVE ↗' }) {
   return href ? <a className="sx-report-live" href={href} target="_blank" rel="noreferrer">{children}</a> : null;
 }
 
-function Media({ target, small = false }) {
-  const className = 'sx-report-media' + (small ? ' sx-report-media-small' : '');
-  if (target.removed) return <div className={className + ' sx-report-media-gone'}>{small ? 'REMOVED' : 'REMOVED · MEDIA UNPUBLISHED'}</div>;
+// Square like all our media; videos play in place so reviewers need not open the reel.
+function Media({ target }) {
+  const className = 'sx-report-media';
+  if (target.removed) return <div className={className + ' sx-report-media-gone'}>REMOVED · MEDIA UNPUBLISHED</div>;
   if (!target.preview_url && !target.poster_url) return <div className={className + ' sx-report-media-gone'}>NO PREVIEW</div>;
-  if (small || target.media_type === 'image') {
+  if (target.media_type === 'image') {
     return <a className={className} href={target.link} target="_blank" rel="noreferrer"><img src={target.poster_url || target.preview_url} alt="" loading="lazy" /></a>;
   }
   // preload="none": a long queue must not download every clip.
@@ -43,7 +44,7 @@ export default function ReportTarget({ report }) {
         </blockquote>
         {target.post ? (
           <div className="sx-report-parent">
-            <Media target={target.post} small />
+            <Media target={target.post} />
             <div className="sx-report-target-text">
               <span>ON POST</span>
               <strong>{target.post.title || 'Untitled post'}</strong>
@@ -56,12 +57,27 @@ export default function ReportTarget({ report }) {
   }
   if (type === 'pack') {
     return (
-      <div className="sx-report-target">
+      <div className="sx-report-target sx-report-pack">
         <div className="sx-report-target-text">
           <strong>{target.title || 'Untitled pack'}</strong>
-          <span>REEL PACK · {(target.removed ? 'removed' : target.status || '').toUpperCase()}{target.visibility ? ' · ' + target.visibility.toUpperCase() : ''}</span>
+          {target.description ? <p>{target.description}</p> : null}
+          <span>
+            REEL PACK{target.owner ? ' BY @' + target.owner : ''} · {(target.removed ? 'removed' : target.status || '').toUpperCase()}
+            {target.visibility ? ' · ' + target.visibility.toUpperCase() : ''}
+            {target.item_count !== undefined ? ' · ' + target.item_count + ' REELS' : ''}
+          </span>
           {target.removed ? null : <LiveLink href={target.link}>OPEN PACK ↗</LiveLink>}
         </div>
+        {target.items?.length ? (
+          <ul className="sx-report-pack-items">
+            {target.items.map((item) => (
+              <li key={item.id}>
+                <Media target={item} />
+                <span title={item.title}>{item.title || 'Untitled post'}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     );
   }

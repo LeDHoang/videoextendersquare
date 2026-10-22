@@ -60,6 +60,7 @@ from server.social.models import (
     PostLike,
     PostSave,
     ReelPack,
+    ReelPackItem,
     ReelPackSave,
     Report,
     StaffAction,
@@ -157,6 +158,10 @@ def report_history(db: Session, report_id: str) -> list[dict]:
     return history
 
 
+# Member reels shown on a reported pack's card.
+PACK_PREVIEW_ITEMS = 4
+
+
 def post_preview(post: Post) -> dict:
     """What staff need to see a reported post: its media while live, and where it plays."""
     removed = post.deleted_at is not None
@@ -197,13 +202,30 @@ def serialize_report(db: Session, report: Report) -> dict:
     elif report.target_type == "pack":
         pack = db.get(ReelPack, report.target_id)
         if pack:
+            owner = db.get(User, pack.owner_id)
+            member_ids = [
+                row[0]
+                for row in db.query(ReelPackItem.post_id)
+                .filter(ReelPackItem.pack_id == pack.id, ReelPackItem.post_id.isnot(None))
+                .order_by(ReelPackItem.position)
+                .all()
+            ]
+            # Cover first, then pack order: the reels a viewer meets first.
+            if pack.cover_post_id in member_ids:
+                member_ids.remove(pack.cover_post_id)
+                member_ids.insert(0, pack.cover_post_id)
+            members = [db.get(Post, post_id) for post_id in member_ids[:PACK_PREVIEW_ITEMS]]
             target = {
                 "title": pack.title,
+                "description": pack.description,
                 "owner_id": pack.owner_id,
+                "owner": owner.username if owner else None,
                 "status": pack.status,
                 "visibility": pack.visibility,
                 "link": f"/packs/{pack.id}",
                 "removed": pack.deleted_at is not None,
+                "item_count": len(member_ids),
+                "items": [{"id": post.id, "title": post.title, **post_preview(post)} for post in members if post],
             }
     elif report.target_type == "comment":
         comment = db.get(Comment, report.target_id)

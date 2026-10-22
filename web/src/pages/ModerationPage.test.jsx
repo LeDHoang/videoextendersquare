@@ -218,6 +218,34 @@ describe('ModerationPage reports', () => {
     const live = screen.getByText('OPEN POST ↗');
     expect(live.getAttribute('href')).toBe('/reels?post=p1');
     expect(live.getAttribute('target')).toBe('_blank');
+    // The parent reel plays in place.
+    const video = document.querySelector('video.sx-report-media');
+    expect(video.getAttribute('src')).toBe('/m/p1.mp4');
+    expect(video.hasAttribute('controls')).toBe(true);
+  });
+
+  it('previews a reported pack with its cover first and playable reels', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [{
+      ...report('r1', 'open', null), target_type: 'pack', target_id: 'k1',
+      target: {
+        title: 'Alps trip', description: 'Five stops', owner: 'bob', status: 'published', visibility: 'public',
+        link: '/packs/k1', removed: false, item_count: 6,
+        items: [
+          { id: 'p3', title: 'Summit', media_type: 'video', link: '/reels?post=p3', removed: false, preview_url: '/m/p3.mp4', poster_url: '/m/p3.jpg' },
+          { id: 'p1', title: 'Lake', media_type: 'image', link: '/reels?post=p1', removed: false, preview_url: '/m/p1.webp', poster_url: '/m/p1.webp' },
+          { id: 'p2', title: 'Gone', media_type: 'video', link: '/reels?post=p2', removed: true },
+        ],
+      },
+    }] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('Alps trip')).toBeTruthy());
+    expect(screen.getByText('Five stops')).toBeTruthy();
+    expect(screen.getByText(/REEL PACK BY @bob · PUBLISHED · PUBLIC · 6 REELS/)).toBeTruthy();
+    expect(screen.getByText('OPEN PACK ↗').getAttribute('href')).toBe('/packs/k1');
+    const tiles = document.querySelectorAll('.sx-report-pack-items li');
+    expect([...tiles].map((tile) => tile.textContent)).toEqual(['Summit', 'Lake', 'REMOVED · MEDIA UNPUBLISHEDGone']);
+    expect(tiles[0].querySelector('video').getAttribute('src')).toBe('/m/p3.mp4');
+    expect(tiles[1].querySelector('img').getAttribute('src')).toBe('/m/p1.webp');
   });
 
   it('shows a removed post without media and lets an admin restore it', async () => {
