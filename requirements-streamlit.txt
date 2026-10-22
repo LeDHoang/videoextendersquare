@@ -2,4 +2,4 @@
 # requirements.txt: the FastAPI server never imports it, and streamlit still
 # pins pillow<13, which would hold the server on a vulnerable Pillow.
 # Install into a separate venv: it downgrades Pillow below 13.
-streamlit>=1.60,<2
+streamlit>=1.66.0,<2
