@@ -119,6 +119,7 @@ def get_active_user(db: Session, username: str) -> User:
 
 def serialize_report(db: Session, report: Report) -> dict:
     reporter = db.get(User, report.reporter_id) if report.reporter_id else None
+    moderator = db.get(User, report.moderator_id) if report.moderator_id else None
     target = {}
     if report.target_type == "user":
         user = db.get(User, report.target_id)
@@ -163,6 +164,7 @@ def serialize_report(db: Session, report: Report) -> dict:
         "resolution": report.resolution,
         "created_at": report.created_at.isoformat() if report.created_at else None,
         "reviewed_at": report.reviewed_at.isoformat() if report.reviewed_at else None,
+        "handled_by": moderator.username if moderator else None,
     }
 
 

@@ -321,6 +321,46 @@ def test_reinstate_user_is_admin_only_and_refuses_deleted_accounts(app):
             assert db.get(User, target["id"]).status == "deleted"
 
 
+def test_suspended_login_says_suspended_only_with_the_right_password(app):
+    with TestClient(app) as target_client, TestClient(app) as reporter_client, TestClient(app) as admin_client:
+        target = register(target_client, "suspended_one")
+        register(reporter_client, "reporter")
+        register(admin_client, "admin_user")
+        report_id = _suspend_via_report(app, admin_client, reporter_client, target["id"])
+
+        with TestClient(app) as client:
+            wrong = client.post("/api/auth/login", json={"identifier": "suspended_one", "password": "wrong-password-1"})
+            assert wrong.status_code == 401
+            assert wrong.json()["detail"]["code"] == "INVALID_CREDENTIALS"
+            refused = client.post("/api/auth/login", json={"identifier": "suspended_one@example.com", "password": PASSWORD})
+            assert refused.status_code == 403
+            assert refused.json()["detail"]["code"] == "ACCOUNT_SUSPENDED"
+            assert "appeal" in refused.json()["detail"]["message"]
+            assert "echo_session" not in refused.cookies
+            assert client.get("/api/auth/me").json()["user"] is None
+
+            reinstated = mutate(admin_client, "PATCH", f"/api/moderation/reports/{report_id}", {"action": "reinstate_user"})
+            assert reinstated.status_code == 200, reinstated.text
+            assert client.post("/api/auth/login", json={"identifier": "suspended_one", "password": PASSWORD}).status_code == 200
+
+
+def test_report_queue_shows_who_handled_a_report(app):
+    with TestClient(app) as target_client, TestClient(app) as reporter_client, TestClient(app) as mod_client:
+        target = register(target_client, "target")
+        register(reporter_client, "reporter")
+        register(mod_client, "mod_user")
+        filed = mutate(reporter_client, "POST", "/api/reports", {"target_type": "user", "target_id": target["id"], "reason": "spam"})
+        assert filed.status_code == 200, filed.text
+        report_id = filed.json()["report"]["id"]
+        assert mod_client.get("/api/moderation/reports").json()["reports"][0]["handled_by"] is None
+
+        dismissed = mutate(mod_client, "PATCH", f"/api/moderation/reports/{report_id}", {"action": "dismiss"})
+        assert dismissed.status_code == 200, dismissed.text
+        assert dismissed.json()["report"]["handled_by"] == "mod_user"
+        rows = mod_client.get("/api/moderation/reports", params={"status": "all"}).json()["reports"]
+        assert [(row["id"], row["handled_by"]) for row in rows] == [(report_id, "mod_user")]
+
+
 def _alembic(url: str, monkeypatch) -> Config:
     monkeypatch.setenv("DATABASE_URL", url)
     config = Config()

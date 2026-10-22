@@ -601,7 +601,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
     user = db.query(User).filter(
-        User.status == "active",
+        User.status.in_(("active", "suspended")),
         User.account_type == "real",
         or_(User.email_norm == identifier, User.username_norm == identifier),
     ).first()
@@ -610,6 +610,9 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
     if not verify_password(user.password_hash, req.password):
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
+    # Only after the right password, so the status is not an account-probing oracle.
+    if user.status == "suspended":
+        error(403, "ACCOUNT_SUSPENDED", "This account is suspended. You can appeal on the Support page.")
     assigned_role = configured_role(user.email or "", user.username)
     if user.role != assigned_role:
         user.role = assigned_role

@@ -154,6 +154,27 @@ describe('AuthPage — sign in', () => {
     expect(screen.getByRole('button', { name: 'SIGN IN' })).toBeEnabled();
   });
 
+  it('tells a suspended account it is suspended and links to the appeal form', async () => {
+    mocks.auth.login.mockRejectedValue(new FakeApiError('This account is suspended. You can appeal on the Support page.', { code: 'ACCOUNT_SUSPENDED', status: 403 }));
+    renderAt('/login');
+    type('EMAIL OR USERNAME', 'bob');
+    type('PASSWORD', 'right password');
+    submit();
+    expect(await screen.findByRole('alert')).toHaveTextContent('This account is suspended.');
+    expect(screen.getByRole('link', { name: 'Appeal on the Support page' })).toHaveAttribute('href', '/support?category=appeal');
+    expect(screen.queryByRole('button', { name: 'Resend the link' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer the appeal link for a wrong password', async () => {
+    mocks.auth.login.mockRejectedValue(new FakeApiError('Email/username or password is incorrect.', { code: 'INVALID_CREDENTIALS', status: 401 }));
+    renderAt('/login');
+    type('EMAIL OR USERNAME', 'bob');
+    type('PASSWORD', 'wrong password');
+    submit();
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('link', { name: 'Appeal on the Support page' })).not.toBeInTheDocument();
+  });
+
   it('shows rate-limit and network failures without clearing what was typed', async () => {
     mocks.auth.login.mockRejectedValue(new FakeApiError('Too many requests. Try again shortly.', { code: 'RATE_LIMITED', status: 429 }));
     renderAt('/login');

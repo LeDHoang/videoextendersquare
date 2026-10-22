@@ -222,6 +222,7 @@ export default function ModerationPage() {
         {report.target?.text ? <p>{report.target.text}</p> : null}
         {report.details ? <p>{report.details}</p> : null}
         {report.resolution ? <Mono>RESOLUTION: {report.resolution}</Mono> : null}
+        {report.handled_by ? <Mono>HANDLED BY: @{report.handled_by}</Mono> : null}
         {report.status === 'open' || isAdmin ? (
           <NoteField id={'note-' + report.id} value={notes[report.id] || ''} onChange={setNote(report.id)} placeholder="Optional · defaults to the action name" />
         ) : null}

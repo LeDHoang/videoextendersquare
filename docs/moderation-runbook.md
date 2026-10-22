@@ -147,8 +147,17 @@ Gaps found:
 
 - **Fixed:** a reported pack whose text was one long unbroken string widened `/moderation`
   to about 3,700 px. The report card now wraps it (`.sx-moderation-report` in `global.css`).
-- **Open:** a suspended account that signs in with the right password sees "Email/username
-  or password is incorrect." It is not told it is suspended or that it can appeal on
-  `/support`. Only the footer Support link leads there.
-- **Open:** the queue and API do not show which moderator acted. It is stored in
-  `reports.moderator_id` and can be read with SQL only.
+- **Fixed:** a suspended account that signs in with the right password saw "Email/username
+  or password is incorrect." It was not told it is suspended or that it can appeal on
+  `/support`. `POST /api/auth/login` now returns 403 `ACCOUNT_SUSPENDED` after the password
+  checks out (a wrong password still gets 401 `INVALID_CREDENTIALS`, so the status is not
+  revealed without the password), and the sign-in page links to `/support?category=appeal`.
+- **Fixed:** the queue and API did not show which moderator acted (`reports.moderator_id`,
+  SQL only). Each report from `/api/moderation/reports` now carries `handled_by` (username),
+  and the queue shows `HANDLED BY: @name` on reviewed reports.
+- **Open:** reports have no claim or assignment step, so two moderators can open the same
+  report at once; the second action gets 409 `REPORT_ALREADY_REVIEWED`. Adding claims is a
+  new feature (schema and UI), not a drill fix.
+- **Open:** `reinstate_user` on an already-reviewed report keeps the original
+  `moderator_id`, so `handled_by` shows who suspended, not which admin reinstated. The
+  reinstating admin's id is in the app log only (`Admin ... reinstated user ...`).

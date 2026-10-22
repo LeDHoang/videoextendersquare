@@ -78,6 +78,7 @@ export default function AuthPage({ mode = 'login' }) {
   const [botReset, setBotReset] = useState(0);
   const [botUnavailable, setBotUnavailable] = useState(false);
   const [unverifiedHint, setUnverifiedHint] = useState(false);
+  const [suspendedHint, setSuspendedHint] = useState(false);
   const fields = useRef({});
   const previousMode = useRef(mode);
 
@@ -150,6 +151,7 @@ export default function AuthPage({ mode = 'login' }) {
     setBusy(true);
     setError('');
     setUnverifiedHint(false);
+    setSuspendedHint(false);
     try {
       if (isRegister) {
         const payload = {
@@ -186,6 +188,7 @@ export default function AuthPage({ mode = 'login' }) {
           setBotToken('');
           setBotReset((value) => value + 1);
         }
+        if (requestError?.code === 'ACCOUNT_SUSPENDED') setSuspendedHint(true);
         if (requestError?.code === 'INVALID_CREDENTIALS') {
           setUnverifiedHint(true);
           setForm((current) => ({ ...current, password: '' }));
@@ -343,6 +346,12 @@ export default function AuthPage({ mode = 'login' }) {
           <p className="sx-au-hint">
             Signed up but never opened the verification email?{' '}
             <button type="button" className="sx-au-link sx-au-linkbtn" onClick={resendFromLogin} disabled={busy}>Resend the link</button>
+          </p>
+        ) : null}
+        {!isRegister && suspendedHint ? (
+          <p className="sx-au-hint">
+            Think this was a mistake?{' '}
+            <Link className="sx-au-link" to="/support?category=appeal">Appeal on the Support page</Link>
           </p>
         ) : null}
         <SubmitButton busy={busy}>{isRegister ? 'CREATE ACCOUNT' : 'SIGN IN'}</SubmitButton>

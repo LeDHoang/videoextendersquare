@@ -108,3 +108,24 @@ describe('ModerationPage overview', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('boom'));
   });
 });
+
+describe('ModerationPage reports', () => {
+  const report = (id, status, handledBy) => ({
+    id, status, target_type: 'user', target_id: 'u-' + id, target: {}, reason: 'spam', details: '',
+    reporter: 'alice', resolution: status === 'open' ? null : 'dismiss', created_at: '2026-10-22T10:00:00', handled_by: handledBy,
+  });
+
+  beforeEach(() => {
+    mocks.api.get.mockReset();
+    mocks.api.patch.mockReset();
+    mocks.auth.user = { username: 'mod', role: 'moderator', can_moderate: true };
+  });
+  afterEach(cleanup);
+
+  it('shows which moderator handled a reviewed report and none for an open one', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [report('r1', 'dismissed', 'alice'), report('r2', 'open', null)] });
+    render(<MemoryRouter initialEntries={['/moderation']}><ModerationPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HANDLED BY: @alice')).toBeTruthy());
+    expect(screen.getAllByText(/HANDLED BY/)).toHaveLength(1);
+  });
+});
