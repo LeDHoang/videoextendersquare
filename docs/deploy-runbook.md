@@ -142,6 +142,13 @@ Resource caps:
 
 Encodes cannot starve the database.
 
+Health checks:
+- The Docker HEALTHCHECK calls `/api/healthz` every 30 s, with a 10 s timeout and 3 retries. After about 90 s with no answer, the container is marked unhealthy. `restart: unless-stopped` restarts the app only when it exits, not when it is unhealthy.
+- `/api/healthz` is async and does no I/O, so it stays fast when sync handlers fill the threadpool. Under 100 load-test users before this change, it waited for a threadpool slot: p95 2.2 s, max 3.3 s, against the old 4 s probe timeout. After the change: p95 0.2 s, max 0.4 s (1.1 s p95 right after a restart).
+- `/api/readyz` checks the DB and storage. It still runs in the threadpool and uses a pool connection, so it slows down under load. It is for humans and scripts, not the HEALTHCHECK.
+- `/api/health` (ffmpeg probes, cached 60 s) rebuilds in one request at a time. Other polls get the previous snapshot meanwhile.
+- The app service sets `init: true`. tini runs as PID 1 and reaps orphaned processes. Before, they stayed as `[python] <defunct>`. To check: `docker compose exec app ps -eo stat,args | grep -c defunct`. Expect `0`.
+
 ## 5. Takedowns
 
 Deleting a post deletes its R2 object. However, **the Cloudflare edge can keep serving a cached copy for up to 1 day**. For an urgent takedown (CSAM, legal request, doxxing):

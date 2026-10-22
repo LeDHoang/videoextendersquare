@@ -34,6 +34,7 @@ _CACHE_TTL_S = 60.0
 _cached_probes: dict | None = None
 _cached_at: float = 0.0
 _cache_lock = threading.Lock()
+_rebuild_lock = threading.Lock()
 # system_memory() may spawn nvidia-smi (10 s timeout); keep it off the
 # per-request path for the 8s poller.
 _SYSTEM_TTL_S = 10.0
@@ -86,17 +87,22 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
         refresh = False
 
     now = time.time()
-    from_cache = False
-    with _cache_lock:
-        expired = _cached_probes is None or (now - _cached_at) > _CACHE_TTL_S
-        if refresh or expired:
+    from_cache = True
+    expired = _cached_probes is None or (now - _cached_at) > _CACHE_TTL_S
+    # One rebuild at a time. While it runs, other pollers get the previous
+    # snapshot instead of parking a threadpool thread behind the ffmpeg
+    # smoke-tests; only the very first build and an admin refresh wait.
+    if (refresh or expired) and _rebuild_lock.acquire(blocking=refresh or _cached_probes is None):
+        try:
             _tooling.ensure_ffmpeg_on_path()
             # Build probes without Streamlit dependency
             probes = _probes.build_probes()
-            _cached_probes = {k: _probe_to_dict(v) for k, v in probes.items()}
-            _cached_at = time.time()
-        else:
-            from_cache = True
+            with _cache_lock:
+                _cached_probes = {k: _probe_to_dict(v) for k, v in probes.items()}
+                _cached_at = time.time()
+            from_cache = False
+        finally:
+            _rebuild_lock.release()
 
     fal = _probe_to_dict(_probes.fal_key_probe())
     if is_production():
@@ -114,8 +120,13 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
 
 
 @router.get("/api/healthz")
-def healthz():
-    """Liveness: the process is up and serving. No I/O."""
+async def healthz():
+    """Liveness: the process is up and serving. No I/O.
+
+    async on purpose: a sync handler waits for a threadpool slot behind the
+    sync feed/DB handlers, which pushed the Docker HEALTHCHECK past its
+    timeout under load. On the event loop it answers in milliseconds.
+    """
     return {"ok": True}
 
 

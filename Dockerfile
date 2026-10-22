@@ -72,7 +72,11 @@ USER app
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=4)"
+# Liveness only (/api/healthz answers on the event loop, no I/O). The probe
+# itself starts a Python interpreter, which takes ~1 s when encodes hold the
+# CPU cap, so allow 8 s per request; three misses in a row (about 90 s) mark
+# the container unhealthy.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=8)"
 
 ENTRYPOINT ["/usr/local/bin/sx-entrypoint"]

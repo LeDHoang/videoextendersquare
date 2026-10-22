@@ -23,6 +23,10 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
     image: echo-app:latest
     restart: unless-stopped
+    # tini as PID 1: reaps orphaned child processes that get reparented to
+    # PID 1. uvicorn as PID 1 never waits for them, so they piled up as
+    # <defunct> after load and job runs.
+    init: true
     # .env in production; local staging points this at .env.staging
     # (docs/local-staging.md).
     env_file: ${SX_ENV_FILE:-.env}

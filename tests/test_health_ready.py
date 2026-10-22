@@ -143,3 +143,43 @@ def test_fal_key_suffix_hidden_in_production(tmp_path, stub_probes, monkeypatch)
     monkeypatch.setenv("SX_ENV", "production")
     assert client.get("/api/health").json()["fal_key"]["detail"] == "set"
     engine.dispose()
+
+
+def test_expired_snapshot_is_served_while_another_poll_rebuilds(tmp_path, stub_probes, monkeypatch):
+    application, engine = _make_app(tmp_path, revision=EXPECTED_SCHEMA_REVISION)
+    client = TestClient(application)
+    client.get("/api/health")
+    monkeypatch.setattr(health, "_cached_at", 0.0)  # expire the snapshot
+    assert health._rebuild_lock.acquire(blocking=False)  # a rebuild is running
+    try:
+        body = client.get("/api/health").json()
+    finally:
+        health._rebuild_lock.release()
+    assert body["from_cache"] is True
+    assert stub_probes["build"] == 1
+    engine.dispose()
+
+
+def test_healthz_does_not_wait_for_the_threadpool(tmp_path, stub_probes):
+    import anyio
+    import anyio.to_thread
+    import httpx
+
+    application, engine = _make_app(tmp_path, revision=None)
+
+    async def probe():
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        tokens, limiter.total_tokens = limiter.total_tokens, 1
+        busy = object()
+        await limiter.acquire_on_behalf_of(busy)  # every threadpool slot taken
+        try:
+            transport = httpx.ASGITransport(app=application)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                with anyio.fail_after(2):
+                    return (await client.get("/api/healthz")).json()
+        finally:
+            limiter.release_on_behalf_of(busy)
+            limiter.total_tokens = tokens
+
+    assert anyio.run(probe) == {"ok": True}
+    engine.dispose()
