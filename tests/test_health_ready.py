@@ -160,6 +160,52 @@ def test_expired_snapshot_is_served_while_another_poll_rebuilds(tmp_path, stub_p
     engine.dispose()
 
 
+def test_expired_snapshot_rebuilds_in_the_background(tmp_path, stub_probes, monkeypatch):
+    import threading
+    import time
+
+    started, finish = threading.Event(), threading.Event()
+    builds = []
+
+    def slow_build_probes():
+        builds.append(len(builds) + 1)
+        if len(builds) > 1:
+            started.set()
+            finish.wait(5)
+        probe = SimpleNamespace(id="ffmpeg", label="ffmpeg", ok=True, severity="info", detail=f"build {len(builds)}", fix=None)
+        return {"ffmpeg": probe}
+
+    monkeypatch.setattr(health._probes, "build_probes", slow_build_probes)
+    application, engine = _make_app(tmp_path, revision=EXPECTED_SCHEMA_REVISION)
+    client = TestClient(application)
+    first = client.get("/api/health").json()
+    assert first["from_cache"] is False  # the very first build waits
+    monkeypatch.setattr(health, "_cached_at", 0.0)  # expire the snapshot
+
+    try:
+        t0 = time.monotonic()
+        stale = client.get("/api/health").json()
+        assert time.monotonic() - t0 < 1.0  # did not wait for the slow rebuild
+        assert started.wait(2)  # but it did start one
+        assert stale["from_cache"] is True
+        assert stale["probes"]["ffmpeg"]["detail"] == "build 1"
+        assert stale["refreshed_at"] == 0.0
+        # A second poll during the rebuild neither waits nor starts another one.
+        assert client.get("/api/health").json()["probes"]["ffmpeg"]["detail"] == "build 1"
+        assert builds == [1, 2]
+    finally:
+        finish.set()
+    assert health._rebuild_lock.acquire(timeout=5)  # background rebuild finished
+    health._rebuild_lock.release()
+
+    fresh = client.get("/api/health").json()
+    assert fresh["from_cache"] is True
+    assert fresh["probes"]["ffmpeg"]["detail"] == "build 2"
+    assert fresh["refreshed_at"] > first["refreshed_at"]
+    assert builds == [1, 2]
+    engine.dispose()
+
+
 def test_healthz_does_not_wait_for_the_threadpool(tmp_path, stub_probes):
     import anyio
     import anyio.to_thread

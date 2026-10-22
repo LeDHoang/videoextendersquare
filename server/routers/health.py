@@ -63,6 +63,20 @@ def _system_snapshot() -> dict:
         return _cached_system
 
 
+def _rebuild_probes() -> None:
+    """Re-run the probes into the cache. Caller holds ``_rebuild_lock``; this releases it."""
+    global _cached_probes, _cached_at
+    try:
+        _tooling.ensure_ffmpeg_on_path()
+        # Build probes without Streamlit dependency
+        probes = _probes.build_probes()
+        with _cache_lock:
+            _cached_probes = {k: _probe_to_dict(v) for k, v in probes.items()}
+            _cached_at = time.time()
+    finally:
+        _rebuild_lock.release()
+
+
 def _is_admin(request: Request, db: Session) -> bool:
     from server.social.auth import get_optional_auth
 
@@ -79,8 +93,6 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
     admins only; everyone else silently gets the cached snapshot, since a
     re-probe spawns several ffmpeg smoke-tests.
     """
-    global _cached_probes, _cached_at
-
     # The session is only used (and a connection only checked out) when a
     # refresh is requested and a session cookie is present.
     if refresh and not _is_admin(request, db):
@@ -92,17 +104,17 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
     # One rebuild at a time. While it runs, other pollers get the previous
     # snapshot instead of parking a threadpool thread behind the ffmpeg
     # smoke-tests; only the very first build and an admin refresh wait.
-    if (refresh or expired) and _rebuild_lock.acquire(blocking=refresh or _cached_probes is None):
-        try:
-            _tooling.ensure_ffmpeg_on_path()
-            # Build probes without Streamlit dependency
-            probes = _probes.build_probes()
-            with _cache_lock:
-                _cached_probes = {k: _probe_to_dict(v) for k, v in probes.items()}
-                _cached_at = time.time()
+    wait = refresh or _cached_probes is None
+    if (refresh or expired) and _rebuild_lock.acquire(blocking=wait):
+        if wait:
+            _rebuild_probes()
             from_cache = False
-        finally:
-            _rebuild_lock.release()
+        else:
+            # Stale-while-revalidate: the poll that finds the snapshot expired
+            # returns it right away and the rebuild runs off the request path.
+            threading.Thread(target=_rebuild_probes, name="health-probes", daemon=True).start()
+    with _cache_lock:
+        cached_probes, cached_at = _cached_probes, _cached_at
 
     fal = _probe_to_dict(_probes.fal_key_probe())
     if is_production():
@@ -110,10 +122,10 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
         fal["detail"] = "set" if fal["ok"] else "not set"
 
     return {
-        "probes": _cached_probes,
+        "probes": cached_probes,
         "fal_key": fal,
         "from_cache": from_cache,
-        "refreshed_at": _cached_at,
+        "refreshed_at": cached_at,
         # Informational only, never part of the ENG ok-count.
         "system": _system_snapshot(),
     }
