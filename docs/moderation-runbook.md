@@ -69,8 +69,13 @@ which goes to the audit log, and each staff account is limited to 120 actions an
 | Users | Moderator | Search by username, email or id. A user page shows status, role, sessions, reports against and by them, posts, support requests and staff history. SUSPEND and SIGN OUT EVERYWHERE (not on staff accounts). |
 | Users | Admin | Also REINSTATE, CHANGE ROLE, ADJUST CREDITS and DELETE ACCOUNT, plus the wallet, ledger and purchases with a Stripe link. |
 | Content | Moderator | Search posts, Reel Packs and comments by text, id or owner. REMOVE works as `remove_content`. Messages stay reachable only through reports. |
-| Content | Admin | RESTORE a removed pack (it returns as a draft) or comment. Post removal is final: the media is gone from the bucket. Content its author deleted cannot be restored (`NOT_REMOVED_BY_STAFF`). |
+| Content | Admin | RESTORE a removed post, pack or comment, here or from its report. A post comes back published: its kept local media is uploaded to the bucket again (409 `MEDIA_MISSING` if the originals are gone, 503 `MEDIA_STORE_UNAVAILABLE` if the upload fails; nothing changes in either case). A pack returns as a draft. Content its author deleted cannot be restored (`NOT_REMOVED_BY_STAFF`). |
+| Overview | Moderator | Open queues as tiles (click to open them), reports by status and reason, and each metric against the period before, as bars. Admins also see the operations block. |
 | Audit | Admin | Every staff action, newest first. Filter by staff username, action or target id. |
+
+Report cards show what was reported the way users see it: the post's media, or the
+comment with its post, and VIEW LIVE / OPEN POST links that open the live page in a new
+tab. The reporter's note sits beside it. A removed post shows no media and no live link.
 
 Credits:
 - ADJUST CREDITS writes an `admin` entry to the ledger. A negative amount removes

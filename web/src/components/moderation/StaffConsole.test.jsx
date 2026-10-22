@@ -148,16 +148,17 @@ describe('ContentPanel', () => {
     expect(screen.queryByText('RESTORE')).toBeNull();
   });
 
-  it('offers restore to an admin, not for posts', async () => {
-    mocks.api.get.mockImplementation((path, params) => Promise.resolve({
-      items: [params.type === 'post' ? { ...comment(true), type: 'post', id: 'p1' } : comment(true)],
-      next_cursor: null,
-    }));
+  it('offers restore to an admin, posts included', async () => {
+    const post = (removed) => ({ ...comment(removed), type: 'post', id: 'p1' });
+    mocks.api.get.mockResolvedValue({ items: [post(true)], next_cursor: null });
+    mocks.api.post.mockResolvedValue({ item: post(false) });
     render(<ContentPanel viewer={ADMIN} onOpenUser={() => {}} />);
     await waitFor(() => expect(screen.getByText(/POST · REMOVED/)).toBeTruthy());
-    expect(screen.queryByText('RESTORE')).toBeNull();
-    fireEvent.click(screen.getByRole('radio', { name: 'COMMENTS' }));
-    await waitFor(() => expect(screen.getByText('RESTORE')).toBeTruthy());
+    fireEvent.click(screen.getByText('RESTORE'));
+    expect(screen.getByText('The post is published again with its original media.')).toBeTruthy();
+    reasonAndSubmit('RESTORE');
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/content/post/p1/restore', { reason: 'test reason' }));
+    await waitFor(() => expect(screen.queryByText('RESTORE')).toBeNull());
   });
 });
 

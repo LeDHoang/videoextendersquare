@@ -17,7 +17,7 @@ const STATUS_OPTIONS = [
   { value: 'removed', label: 'REMOVED' },
 ];
 
-/** Find posts, Reel Packs and comments; remove them, or (admins) restore packs and comments. */
+/** Find posts, Reel Packs and comments; remove them, or (admins) restore them. */
 export default function ContentPanel({ viewer, onOpenUser }) {
   const [type, setType] = useState('post');
   const [status, setStatus] = useState('all');
@@ -30,7 +30,8 @@ export default function ContentPanel({ viewer, onOpenUser }) {
   const act = (item, verb) => setDialog({
     title: (verb === 'remove' ? 'REMOVE ' : 'RESTORE ') + item.type.toUpperCase(),
     text: verb === 'remove' && item.type === 'post'
-      ? 'Removing a post deletes its media. It cannot be restored.'
+      ? 'Removing a post unpublishes its media. An admin can restore it.'
+      : verb === 'restore' && item.type === 'post' ? 'The post is published again with its original media.'
       : verb === 'restore' && item.type === 'pack' ? 'The pack comes back as a draft; its owner republishes it.' : '',
     confirmLabel: verb.toUpperCase(),
     onSubmit: async (values) => {
@@ -68,7 +69,7 @@ export default function ContentPanel({ viewer, onOpenUser }) {
               </div>
               <div className="sx-profile-actions">
                 {!item.removed ? <Button onClick={() => act(item, 'remove')}>REMOVE</Button> : null}
-                {item.removed && isAdmin && item.type !== 'post' ? <Button onClick={() => act(item, 'restore')}>RESTORE</Button> : null}
+                {item.removed && isAdmin ? <Button onClick={() => act(item, 'restore')}>RESTORE</Button> : null}
               </div>
             </li>
           ))}

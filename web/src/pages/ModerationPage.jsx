@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Button, Pills } from '../components/ui/controls.jsx';
-import { EmptyState, Hero, Mono, Section, SpecRow } from '../components/ui/primitives.jsx';
+import { EmptyState, Hero, Mono, Section } from '../components/ui/primitives.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import AuditPanel from '../components/moderation/AuditPanel.jsx';
 import ContentPanel from '../components/moderation/ContentPanel.jsx';
+import { OpsPanel, OverviewPanel } from '../components/moderation/OverviewDashboard.jsx';
+import ReportTarget from '../components/moderation/ReportTarget.jsx';
+import StaffActionDialog from '../components/moderation/StaffActionDialog.jsx';
 import UserDetail from '../components/moderation/UserDetail.jsx';
 import UsersPanel from '../components/moderation/UsersPanel.jsx';
 import { when } from '../components/moderation/usePagedList.js';
@@ -58,71 +61,6 @@ function NoteField({ id, value, onChange, placeholder }) {
   );
 }
 
-// One cell per metric: current window, the window before it, and a loud flag on a spike.
-function statCell(label, metric, sub) {
-  const detail = 'PREVIOUS ' + metric.previous + (sub ? ' · ' + sub : '');
-  return [label + (metric.spike ? ' · SPIKE' : ''), metric.current, detail];
-}
-
-function OverviewPanel({ stats, windowKey }) {
-  const w = stats.windows[windowKey];
-  const topSenders = w.messages.top_senders.map((row) => '@' + row.username + ' ' + row.sent).join(', ') || 'none';
-  const reasons = Object.entries(w.reports.by_reason).map(([reason, count]) => reason + ' ' + count).join(', ') || 'none';
-  const spikes = [
-    w.reports.spike && 'REPORTS', w.registrations.active.spike && 'SIGN-UPS', w.registrations.pending.spike && 'UNVERIFIED SIGN-UPS',
-    w.messages.spike && 'MESSAGES', w.posts.spike && 'POSTS', w.credits_captured.spike && 'CREDITS', w.support_requests.spike && 'SUPPORT',
-  ].filter(Boolean);
-  const lowDisk = (stats.disk || []).filter((volume) => !volume.ok);
-  return (
-    <div>
-      {spikes.length ? <div className="sx-error-box" role="alert">SPIKE: {spikes.join(' · ')}. At least {stats.spike_floor} and 3x the period before.</div> : null}
-      {lowDisk.length ? <div className="sx-error-box" role="alert">LOW DISK: {lowDisk.map((volume) => volume.volume).join(', ')}</div> : null}
-      <SpecRow cells={[
-        ['OPEN REPORTS', stats.open_reports, 'ALL TIME'],
-        ['OPEN SUPPORT', stats.open_support_requests, 'ALL TIME'],
-        ...(stats.disk || []).map((volume) => ['DISK ' + volume.volume.toUpperCase(), volume.free_gb === null ? 'N/A' : volume.free_gb + ' GB', volume.ok ? 'OK' : 'LOW']),
-      ]} />
-      <SpecRow cells={[
-        statCell('REPORTS', w.reports, reasons),
-        statCell('SUPPORT REQUESTS', w.support_requests),
-        statCell('NEW POSTS', w.posts),
-        statCell('CREDITS CAPTURED', w.credits_captured),
-      ]} />
-      <SpecRow cells={[
-        statCell('SIGN-UPS', w.registrations.active),
-        statCell('UNVERIFIED', w.registrations.pending),
-        statCell('MESSAGES', w.messages, 'top: ' + topSenders),
-      ]} />
-    </div>
-  );
-}
-
-// Admin only: live numbers from GET /api/ops/metrics over its rolling window (5 min).
-function OpsPanel({ ops }) {
-  const r = ops.requests;
-  const ms = (value) => (value === null || value === undefined ? 'N/A' : value + ' ms');
-  const pool = ops.db_pool;
-  const failures = (ops.events.job_failed || 0) + (ops.events.derived_failed || 0);
-  const slow = r.routes.slice(0, 3).map((row) => row.route + ' ' + ms(row.p95_ms) + (row.errors_5xx ? ' · 5xx ' + row.errors_5xx : '')).join(', ') || 'none';
-  return (
-    <div>
-      <Mono>OPERATIONS · LAST {Math.round(ops.window_s / 60)} MIN</Mono>
-      <SpecRow cells={[
-        ['REQUESTS', r.count, '5XX ' + r.errors_5xx + ' (' + (r.error_rate * 100).toFixed(1) + '%)'],
-        ['P95 LATENCY', ms(r.p95_ms), 'P50 ' + ms(r.p50_ms)],
-        ['RATE LIMITED', r.status['429'] || 0, 'QUEUE FULL ' + ((ops.events.queue_full || 0) + (ops.events.queue_full_user || 0))],
-        ['FAILURES', failures, 'JOBS + DERIVED ENCODES'],
-      ]} />
-      <SpecRow cells={[
-        ['JOB QUEUE', ops.jobs.active + ' / ' + ops.jobs.capacity, 'QUEUED ' + ops.jobs.queued + ' · RUNNING ' + ops.jobs.running],
-        ['DB POOL', (pool.checkedout ?? 'N/A') + (pool.capacity ? ' / ' + pool.capacity : ''), pool.class],
-        ['SSE STREAMS', ops.sse.open_streams, 'OPEN NOW'],
-      ]} />
-      <Mono>SLOWEST ROUTES: {slow}</Mono>
-    </div>
-  );
-}
-
 export default function ModerationPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -145,6 +83,7 @@ export default function ModerationPage() {
   const [notes, setNotes] = useState({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [dialog, setDialog] = useState(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -237,33 +176,50 @@ export default function ModerationPage() {
     replaceOrDrop(result.request);
   });
 
+  const restoreTarget = (report) => setDialog({
+    title: 'RESTORE ' + report.target_type.toUpperCase(),
+    text: report.target_type === 'post'
+      ? 'The post is published again with its original media.'
+      : report.target_type === 'pack' ? 'The pack comes back as a draft; its owner republishes it.' : '',
+    confirmLabel: 'RESTORE',
+    onSubmit: async (values) => {
+      await api.post('/api/admin/content/' + report.target_type + '/' + encodeURIComponent(report.target_id) + '/restore', values);
+      await load();
+    },
+  });
+
   const reportUserId = (report) => (report.target_type === 'user'
     ? report.target_id
     : report.target?.owner_id || report.target?.author_id || report.target?.sender_id || null);
 
   const renderReport = (report, index) => (
-    <Section key={report.id} num={index + 1} title={report.target_type.toUpperCase() + ' · ' + report.reason.toUpperCase()} active note={report.created_at || ''}>
+    <Section key={report.id} num={index + 1} title={report.target_type.toUpperCase() + ' · ' + report.reason.replace(/_/g, ' ').toUpperCase()} active note={when(report.created_at)}>
       <div className="sx-moderation-report">
-        <Mono>REPORTER: @{report.reporter || 'deleted'} · TARGET: {report.target_id} · {report.status.toUpperCase()}</Mono>
-        {report.target?.username ? <p>@{report.target.username} · {report.target.display_name}{report.target.status && report.target.status !== 'active' ? ' · ' + report.target.status.toUpperCase() : ''}</p> : null}
-        {report.target?.title ? <p>{report.target.title}</p> : null}
-        {report.target?.text ? <p>{report.target.text}</p> : null}
-        {report.details ? <p>{report.details}</p> : null}
-        {report.resolution ? <Mono>RESOLUTION: {report.resolution}</Mono> : null}
-        {report.handled_by ? <Mono>HANDLED BY: @{report.handled_by}</Mono> : null}
-        {report.claimed_by ? (
-          <Mono>
-            CLAIMED BY: @{report.claimed_by} · {when(report.claimed_at)}
-            {isAdmin && claimedByOther(report) ? ' · YOUR ACTION OVERRIDES THIS CLAIM AND IS LOGGED' : ''}
-          </Mono>
-        ) : null}
-        {report.history?.length ? (
-          <ul className="sx-staff-list" aria-label="Report history">
-            {report.history.map((row, rowIndex) => (
-              <li key={rowIndex}><Mono>{when(row.created_at)} · @{row.actor || 'deleted'} · {row.action.toUpperCase()}{row.reason ? ' · ' + row.reason : ''}</Mono></li>
-            ))}
-          </ul>
-        ) : null}
+        <div className="sx-report-chips">
+          <span className={'sx-report-chip sx-report-' + report.status}>{report.status.toUpperCase()}</span>
+          <span className="sx-report-chip">REPORTED BY @{report.reporter || 'deleted'}</span>
+          {report.claimed_by ? <span className="sx-report-chip sx-report-claimed">CLAIMED BY: @{report.claimed_by} · {when(report.claimed_at)}</span> : null}
+        </div>
+        <div className="sx-report-layout">
+          <ReportTarget report={report} />
+          <div className="sx-report-side">
+            <blockquote className="sx-report-note">
+              <span>REPORTER NOTE</span>
+              <p>{report.details || 'No note left.'}</p>
+            </blockquote>
+            {report.resolution ? <Mono>RESOLUTION: {report.resolution}</Mono> : null}
+            {report.handled_by ? <Mono>HANDLED BY: @{report.handled_by}</Mono> : null}
+            {isAdmin && claimedByOther(report) ? <Mono>YOUR ACTION OVERRIDES THIS CLAIM AND IS LOGGED</Mono> : null}
+            {report.history?.length ? (
+              <ul className="sx-report-history" aria-label="Report history">
+                {report.history.map((row, rowIndex) => (
+                  <li key={rowIndex}><Mono>{when(row.created_at)} · @{row.actor || 'deleted'} · {row.action.toUpperCase()}{row.reason ? ' · ' + row.reason : ''}</Mono></li>
+                ))}
+              </ul>
+            ) : null}
+            <Mono>REPORT {report.id} · TARGET {report.target_id}</Mono>
+          </div>
+        </div>
         {report.status === 'open' || isAdmin ? (
           <NoteField id={'note-' + report.id} value={notes[report.id] || ''} onChange={setNote(report.id)} placeholder="Optional · defaults to the action name" />
         ) : null}
@@ -277,10 +233,11 @@ export default function ModerationPage() {
             <>
               <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'dismiss')}>DISMISS</Button>
               <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'resolve')}>RESOLVE</Button>
-              {report.target_type !== 'user' ? <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'remove_content')}>REMOVE CONTENT</Button> : null}
+              {report.target_type !== 'user' && !report.target?.removed ? <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'remove_content')}>REMOVE CONTENT</Button> : null}
               <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'suspend_user')}>SUSPEND USER</Button>
             </>
           ) : null}
+          {isAdmin && report.target?.removed ? <Button disabled={busy === report.id} onClick={() => restoreTarget(report)}>RESTORE CONTENT</Button> : null}
           {isAdmin ? <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'reinstate_user')}>REINSTATE USER</Button> : null}
         </div>
       </div>
@@ -337,13 +294,14 @@ export default function ModerationPage() {
         : tab === 'overview' ? (
         stats ? (
           <>
-            <OverviewPanel stats={stats} windowKey={statsWindow} />
+            <OverviewPanel stats={stats} windowKey={statsWindow} onOpenTab={switchTab} />
             {ops ? <OpsPanel ops={ops} /> : null}
           </>
         ) : error ? null : <SectionSkeleton label="Loading overview" />
       ) : items === null ? <SectionSkeleton label="Loading queue" /> : items.length
         ? items.map(tab === 'support' ? renderRequest : renderReport)
         : <EmptyState title="QUEUE CLEAR" text={emptyText} />}
+      {dialog ? <StaffActionDialog {...dialog} onClose={() => setDialog(null)} /> : null}
     </div>
   );
 }

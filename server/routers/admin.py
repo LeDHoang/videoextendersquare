@@ -508,8 +508,14 @@ def restore_content(
     db: Session = Depends(get_db),
 ):
     reason = staff_reason(db, context.user, req.reason)
-    restore_target(db, content_type, content_id)
+    media_files = restore_target(db, content_type, content_id)
     record_action(db, context.user, "content.restore", content_type, content_id, reason=reason)
+    # Upload before commit: a restored post must never point at missing media.
+    try:
+        media_store.republish_paths(media_files)
+    except media_store.MediaStoreError:
+        db.rollback()
+        fail(503, "MEDIA_STORE_UNAVAILABLE", "The post's media could not be published again. Try later.")
     db.commit()
     return {"item": serialize_content(db, content_type, get_content(db, content_type, content_id))}
 

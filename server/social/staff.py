@@ -7,6 +7,8 @@ objects first could lose media for a row that a rollback keeps.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -108,7 +110,8 @@ def reinstate_user(target: User) -> None:
 def remove_target(db: Session, target_type: str, target_id: str) -> tuple[bool, list]:
     """Soft-delete content. Returns (removed, media_files); removed is False if it was already gone.
 
-    A post's media files are returned for deletion after commit, so removing a post is final.
+    A post's media files are returned so the caller unpublishes them after
+    commit; the local copies stay on disk, which lets an admin restore the post.
     """
     now = utcnow()
     model, _owner_field = CONTENT_MODELS[target_type]
@@ -146,17 +149,16 @@ def remove_target(db: Session, target_type: str, target_id: str) -> tuple[bool, 
     return True, media_files
 
 
-def restore_target(db: Session, target_type: str, target_id: str) -> None:
-    """Undo a staff removal of a Reel Pack or comment.
+def restore_target(db: Session, target_type: str, target_id: str) -> list:
+    """Undo a staff removal of a post, Reel Pack or comment. Returns media files to republish.
 
-    Posts are not restorable (their media are gone). Content the author deleted
-    themselves, or that went with a deleted account, stays deleted: only the
-    latest staff action on the target being a removal allows a restore.
+    Content the author deleted themselves, or that went with a deleted account,
+    stays deleted: only the latest staff action on the target being a removal
+    allows a restore. A post's kept local media files are returned so the
+    caller uploads them again before commit.
     """
-    if target_type == "post":
-        fail(422, "POST_REMOVAL_FINAL", "Removed posts cannot be restored: their media were deleted.")
-    if target_type not in ("pack", "comment"):
-        fail(422, "INVALID_CONTENT_TYPE", "Only Reel Packs and comments can be restored.")
+    if target_type not in ("post", "pack", "comment"):
+        fail(422, "INVALID_CONTENT_TYPE", "Only posts, Reel Packs and comments can be restored.")
     model, owner_field = CONTENT_MODELS[target_type]
     row = db.get(model, target_id)
     if not row:
@@ -173,8 +175,16 @@ def restore_target(db: Session, target_type: str, target_id: str) -> None:
     owner = db.get(User, getattr(row, owner_field))
     if not owner or owner.status == "deleted":
         fail(409, "ACCOUNT_DELETED", "The author's account was deleted.")
-    row.deleted_at = None
-    if target_type == "pack":
+    media_files = []
+    if target_type == "post":
+        media_files = post_media_files([row])
+        # Only the originals are required; generated siblings that are missing get skipped.
+        originals = [row.media_path, *(slide.media_path for slide in row.slides)]
+        if not all((Path("output") / rel).is_file() for rel in originals if rel):
+            fail(409, "MEDIA_MISSING", "The post's media files are no longer on the server.")
+        row.status = "published"
+        owner.post_count = int(owner.post_count or 0) + 1
+    elif target_type == "pack":
         # Removal does not keep the previous status; a restored pack comes back
         # as a draft so its owner decides when it is public again.
         row.status = "draft"
@@ -182,3 +192,5 @@ def restore_target(db: Session, target_type: str, target_id: str) -> None:
         post = db.get(Post, row.post_id)
         if post:
             post.comment_count = int(post.comment_count or 0) + 1
+    row.deleted_at = None
+    return media_files

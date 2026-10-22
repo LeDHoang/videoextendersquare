@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModerationPage from './ModerationPage.jsx';
@@ -63,14 +63,25 @@ describe('ModerationPage overview', () => {
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
     expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats');
     expect(screen.getByText('300')).toBeTruthy();
-    expect(screen.getByText(/top: @loud 12/)).toBeTruthy();
+    expect(screen.getByRole('img', { name: '@loud 12' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'OPEN 9, RESOLVED 0, DISMISSED 0' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'SPAM 9' })).toBeTruthy();
+    expect(screen.getByText('+350%')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('opens the reports queue from its tile', async () => {
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/moderation/stats' ? stats(false) : { reports: [] }));
+    renderOverview();
+    await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
+    fireEvent.click(screen.getByText('OPEN REPORTS'));
+    await waitFor(() => expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/reports', expect.anything()));
   });
 
   it('flags a spiking metric', async () => {
     mocks.api.get.mockResolvedValue(stats(true));
     renderOverview();
-    await waitFor(() => expect(screen.getByText('REPORTS · SPIKE')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('SPIKE')).toBeTruthy());
     expect(screen.getByRole('alert').textContent).toMatch(/SPIKE: REPORTS/);
   });
 
@@ -90,7 +101,9 @@ describe('ModerationPage overview', () => {
     expect(screen.getByText('310 ms')).toBeTruthy();
     expect(screen.getByText('3 / 6')).toBeTruthy();
     expect(screen.getByText('2 / 15')).toBeTruthy();
-    expect(screen.getByText(/SLOWEST ROUTES: \/api\/reels\/feed 900 ms · 5xx 3/)).toBeTruthy();
+    expect(screen.getByText('SLOWEST ROUTES')).toBeTruthy();
+    expect(screen.getByText('/api/reels/feed')).toBeTruthy();
+    expect(screen.getByText('900 ms · 5XX 3')).toBeTruthy();
   });
 
   it('keeps the moderation overview when the operations call fails', async () => {
@@ -185,5 +198,52 @@ describe('ModerationPage reports', () => {
     mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
     renderReports();
     await waitFor(() => expect(screen.getByRole('radio', { name: 'AUDIT' })).toBeTruthy());
+  });
+
+  it('shows the reported comment, its post and the reporter note with live links', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [{
+      ...report('r1', 'open', null), target_type: 'comment', target_id: 'c1', details: 'Keeps insulting me',
+      target: {
+        text: 'you are awful', author: 'troll', author_id: 'u9', removed: false, deleted: false, link: '/reels?post=p1',
+        post: { title: 'Beach day', media_type: 'video', link: '/reels?post=p1', removed: false, preview_url: '/m/p1.mp4', poster_url: '/m/p1.jpg' },
+      },
+    }] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('you are awful')).toBeTruthy());
+    expect(screen.getByText('@troll COMMENTED')).toBeTruthy();
+    expect(screen.getByText('Beach day')).toBeTruthy();
+    expect(screen.getByText('Keeps insulting me')).toBeTruthy();
+    expect(screen.getByText('REPORTED BY @alice')).toBeTruthy();
+    expect(screen.getByText('2026-10-22 10:00')).toBeTruthy();
+    const live = screen.getByText('OPEN POST ↗');
+    expect(live.getAttribute('href')).toBe('/reels?post=p1');
+    expect(live.getAttribute('target')).toBe('_blank');
+  });
+
+  it('shows a removed post without media and lets an admin restore it', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    const removed = {
+      ...report('r1', 'resolved', 'boss'), target_type: 'post', target_id: 'p1',
+      target: { title: 'Beach day', owner: 'bob', status: 'deleted', media_type: 'video', link: '/reels?post=p1', removed: true },
+    };
+    mocks.api.get.mockResolvedValue({ reports: [removed] });
+    mocks.api.post.mockResolvedValue({ item: {} });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('REMOVED · MEDIA UNPUBLISHED')).toBeTruthy());
+    expect(screen.getByText('No note left.')).toBeTruthy();
+    expect(screen.queryByText('VIEW LIVE ↗')).toBeNull();
+    fireEvent.click(screen.getByText('RESTORE CONTENT'));
+    expect(screen.getByText('The post is published again with its original media.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'appeal upheld' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'RESTORE' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/content/post/p1/restore', { reason: 'appeal upheld' }));
+    await waitFor(() => expect(mocks.api.get).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not offer restore to a moderator', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [{ ...report('r1', 'resolved', 'mod'), target_type: 'comment', target_id: 'c1', target: { text: 'gone', author: 'x', removed: true } }] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('gone')).toBeTruthy());
+    expect(screen.queryByText('RESTORE CONTENT')).toBeNull();
   });
 });

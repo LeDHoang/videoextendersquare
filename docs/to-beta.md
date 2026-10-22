@@ -459,6 +459,7 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - [x] Password reset and the initial account-deletion flow.
 - [x] Database-backed authentication throttling and trusted-proxy opt-in.
 - [x] Staff console on `/moderation` (2026-10-22, schema `20261022_0017`). It adds USERS, CONTENT and AUDIT tabs, report claims, an immutable `staff_actions` audit log, direct suspend, sign-out and reinstate, roles stored in the database with the env vars as bootstrap, content remove and restore, admin credit adjustments, and admin account deletion. API: `server/routers/admin.py`. Runbook: `docs/moderation-runbook.md` §Staff console.
+- [x] Moderation overview as a dashboard, report cards with a live preview of the post or comment and the reporter note, and admin restore of removed posts (2026-10-22). A restored post re-uploads its kept local media before the database commit; if the commit then fails, the uploaded objects stay public but unreferenced. Staging UI pass 32/32 (desktop and 375 px): remove a post (media 404), restore it from the report card (media 200, status published), restore a comment, both audited.
 - [x] Avatar upload dimension protection.
 - [x] Backend profile/safety integration tests.
 - [x] Frontend Saved-link regression tests.

@@ -69,7 +69,7 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import recompute_follow_counts, remove_relationships
-from server.social.services import post_media_files
+from server.social.services import post_media_files, shared_preview_urls
 from server.social.staff import (
     REMOVE_ACTION,
     record_action,
@@ -157,6 +157,16 @@ def report_history(db: Session, report_id: str) -> list[dict]:
     return history
 
 
+def post_preview(post: Post) -> dict:
+    """What staff need to see a reported post: its media while live, and where it plays."""
+    removed = post.deleted_at is not None
+    preview = {"media_type": post.media_type, "link": f"/reels?post={post.id}", "removed": removed}
+    if not removed:
+        # Removed media are unpublished, so their URLs would not load.
+        preview.update(shared_preview_urls(post))
+    return preview
+
+
 def serialize_report(db: Session, report: Report) -> dict:
     reporter = db.get(User, report.reporter_id) if report.reporter_id else None
     moderator = db.get(User, report.moderator_id) if report.moderator_id else None
@@ -166,11 +176,24 @@ def serialize_report(db: Session, report: Report) -> dict:
     if report.target_type == "user":
         user = db.get(User, report.target_id)
         if user:
-            target = {"username": user.username, "display_name": user.display_name, "status": user.status}
+            target = {
+                "username": user.username,
+                "display_name": user.display_name,
+                "status": user.status,
+                "link": f"/profile/{user.username}",
+            }
     elif report.target_type == "post":
         post = db.get(Post, report.target_id)
         if post:
-            target = {"title": post.title, "owner_id": post.owner_id, "status": post.status}
+            owner = db.get(User, post.owner_id)
+            target = {
+                "title": post.title,
+                "caption": post.caption,
+                "owner_id": post.owner_id,
+                "owner": owner.username if owner else None,
+                "status": post.status,
+                **post_preview(post),
+            }
     elif report.target_type == "pack":
         pack = db.get(ReelPack, report.target_id)
         if pack:
@@ -179,11 +202,24 @@ def serialize_report(db: Session, report: Report) -> dict:
                 "owner_id": pack.owner_id,
                 "status": pack.status,
                 "visibility": pack.visibility,
+                "link": f"/packs/{pack.id}",
+                "removed": pack.deleted_at is not None,
             }
     elif report.target_type == "comment":
         comment = db.get(Comment, report.target_id)
         if comment:
-            target = {"text": comment.text, "author_id": comment.author_id, "deleted": comment.deleted_at is not None}
+            author = db.get(User, comment.author_id)
+            post = db.get(Post, comment.post_id)
+            target = {
+                "text": comment.text,
+                "author_id": comment.author_id,
+                "author": author.username if author else None,
+                "deleted": comment.deleted_at is not None,
+                "removed": comment.deleted_at is not None,
+                "link": f"/reels?post={comment.post_id}",
+                # The post the comment sits under, for context.
+                "post": {"title": post.title, **post_preview(post)} if post else None,
+            }
     elif report.target_type == "message":
         target = {"unavailable": True}
         if report.evidence_ciphertext:

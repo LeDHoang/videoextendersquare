@@ -44,6 +44,8 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(support, "send_support_notification", lambda *args: None)
     deleted_media: list = []
     monkeypatch.setattr(admin.media_store, "delete_paths", lambda paths: deleted_media.extend(paths) or 0)
+    republished_media: list = []
+    monkeypatch.setattr(admin.media_store, "republish_paths", lambda paths: republished_media.extend(paths) or 0)
     engine = sa.create_engine(
         "sqlite:///" + str(tmp_path / "admin.db"), connect_args={"check_same_thread": False}
     )
@@ -60,6 +62,7 @@ def app(tmp_path, monkeypatch):
     application.dependency_overrides[get_db] = override_get_db
     application.state.Session = Session
     application.state.deleted_media = deleted_media
+    application.state.republished_media = republished_media
     yield application
     engine.dispose()
 
@@ -261,7 +264,7 @@ def test_roles_live_in_the_db_and_env_is_a_floor(app, staff):
         assert row.details == {"from": "user", "to": "moderator"}
 
 
-def test_content_search_remove_and_restore(app, staff):
+def test_content_search_remove_and_restore(app, staff, tmp_path, monkeypatch):
     admin_client, _ = staff["admin"]
     mod_client, _ = staff["mod"]
     user_client, target = staff["user"]
@@ -300,13 +303,27 @@ def test_content_search_remove_and_restore(app, staff):
     with app.state.Session() as db:
         assert db.get(Post, post_id).status == "deleted"
         assert db.get(User, target["id"]).post_count == 0
-    final = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
-    assert final.status_code == 422 and code(final) == "POST_REMOVAL_FINAL"
     removed_only = mod_client.get("/api/admin/content", params={"type": "post", "status": "removed"}).json()["items"]
     assert [row["id"] for row in removed_only] == [post_id]
 
+    # The kept local original is what makes a post restorable.
+    monkeypatch.chdir(tmp_path)
+    missing = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
+    assert missing.status_code == 409 and code(missing) == "MEDIA_MISSING"
+    with app.state.Session() as db:
+        original = tmp_path / "output" / db.get(Post, post_id).media_path
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b"webp")
+    restored_post = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
+    assert restored_post.status_code == 200, restored_post.text
+    assert restored_post.json()["item"]["status"] == "published"
+    assert app.state.republished_media, "post media are uploaded again"
+    with app.state.Session() as db:
+        assert db.get(Post, post_id).deleted_at is None
+        assert db.get(User, target["id"]).post_count == 1
+
     assert [row[0] for row in actions(app)] == [
-        "content.remove", "content.restore", "content.remove", "content.restore", "content.remove",
+        "content.remove", "content.restore", "content.remove", "content.restore", "content.remove", "content.restore",
     ]
 
 
@@ -419,6 +436,34 @@ def test_report_claims_block_other_moderators_until_released_or_stale(app, staff
         assert forced.json()["report"]["claimed_by"] is None
         late = mutate(mod_client, "PATCH", f"/api/moderation/reports/{report_id}", {"action": "resolve"})
         assert late.status_code == 409 and code(late) == "REPORT_ALREADY_REVIEWED"
+
+
+def test_reports_carry_a_preview_of_their_target(app, staff):
+    mod_client, _ = staff["mod"]
+    user_client, target = staff["user"]
+    other_client, _ = staff["other"]
+    post_id = create_post(app, target["id"], title="Lake")
+    comment_id = mutate(user_client, "POST", f"/api/posts/{post_id}/comments", {"text": "rude words"}).json()["id"]
+    reported = mutate(other_client, "POST", "/api/reports", {
+        "target_type": "comment", "target_id": comment_id, "reason": "harassment", "details": "Insults me under my reel",
+    }).json()["report"]
+    assert reported["details"] == "Insults me under my reel"
+    comment = reported["target"]
+    assert comment["author"] == "target_user" and comment["link"] == f"/reels?post={post_id}"
+    assert comment["post"]["title"] == "Lake" and comment["post"]["poster_url"]
+    post_report = mutate(other_client, "POST", "/api/reports", {"target_type": "post", "target_id": post_id, "reason": "spam"})
+    post = post_report.json()["report"]["target"]
+    assert post["owner"] == "target_user" and post["removed"] is False and post["preview_url"]
+
+    report_id = post_report.json()["report"]["id"]
+    removed = mutate(mod_client, "PATCH", f"/api/moderation/reports/{report_id}", {"action": "remove_content"})
+    post = removed.json()["report"]["target"]
+    # Removed media are unpublished: no URL to load.
+    assert post["removed"] is True and "preview_url" not in post
+    assert post["link"] == f"/reels?post={post_id}"
+    user_report = file_report(other_client, target["id"])
+    listed = {row["id"]: row for row in mod_client.get("/api/moderation/reports", params={"status": "all"}).json()["reports"]}
+    assert listed[user_report]["target"]["link"] == "/profile/target_user"
 
 
 def test_report_and_support_actions_are_audited_with_report_ids(app, staff):

@@ -137,17 +137,38 @@ def commit(part: str | Path, dest: str | Path) -> None:
     """
     rel = rel_path(dest)
     if enabled() and is_published(rel):
-        try:
-            client().upload_file(
-                str(part),
-                _bucket(),
-                rel,
-                ExtraArgs={"ContentType": content_type(str(dest)), "CacheControl": CACHE_CONTROL},
-            )
-        except Exception as ex:
-            logger.error("R2 upload of %s failed: %s", rel, ex)
-            raise MediaStoreError(f"Could not store {rel}") from ex
+        _upload(part, rel)
     os.replace(part, dest)
+
+
+def _upload(local: str | Path, rel: str) -> None:
+    try:
+        client().upload_file(
+            str(local),
+            _bucket(),
+            rel,
+            ExtraArgs={"ContentType": content_type(rel), "CacheControl": CACHE_CONTROL},
+        )
+    except Exception as ex:
+        logger.error("R2 upload of %s failed: %s", rel, ex)
+        raise MediaStoreError(f"Could not store {rel}") from ex
+
+
+def republish_paths(paths: Iterable[str | Path]) -> int:
+    """Upload the kept local copies of *paths* again (a restored post); returns how many.
+
+    The reverse of :func:`delete_paths`. Missing files are skipped. Raises
+    MediaStoreError on the first failed upload.
+    """
+    count = 0
+    for path in paths:
+        rel = rel_path(path)
+        if not is_published(rel) or not Path(path).is_file():
+            continue
+        if enabled():
+            _upload(path, rel)
+        count += 1
+    return count
 
 
 def delete(rels: Iterable[str]) -> int:

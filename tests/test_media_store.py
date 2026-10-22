@@ -127,6 +127,19 @@ def test_failed_upload_never_creates_the_local_file(r2):
     assert not part.exists() and not dest.exists()
 
 
+def test_republish_uploads_kept_local_copies(r2):
+    Path("output/uploads/clip.mp4").write_bytes(b"video")
+    count = media_store.republish_paths([
+        Path("output/uploads/clip.mp4"),
+        Path("output/uploads/clip-preview.mp4"),  # never generated: skipped
+    ])
+    assert count == 1
+    assert r2.objects["uploads/clip.mp4"]["body"] == b"video"
+    r2.fail_uploads = True
+    with pytest.raises(media_store.MediaStoreError):
+        media_store.republish_paths([Path("output/uploads/clip.mp4")])
+
+
 def test_delete_skips_unpublished_keys_and_batches(r2, monkeypatch):
     monkeypatch.setattr(media_store, "_DELETE_BATCH", 2)
     count = media_store.delete(["uploads/a.mp4", "uploads/b.jpg", "uploads/c.jpg", "testpipeline/x.mp4"])
