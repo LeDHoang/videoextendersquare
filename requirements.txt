@@ -23,5 +23,5 @@ psycopg[binary]>=3.1
 # 50.0.0 fixes PYSEC-2026-3552, -3553 and -3554 (pip-audit, 2026-10-21).
 cryptography>=50,<51
 stripe>=11,<13
-boto3>=1.35,<2
+boto3>=1.43.114,<2
 sentry-sdk[fastapi]>=2.0,<3
