@@ -79,7 +79,7 @@ class RequestIDMiddleware:
                 extra={"method": method, "path": path, "status": status, "duration_ms": duration_ms},
             )
             # Route template (bounded cardinality), never the raw path.
-            metrics.record_request(getattr(scope.get("route"), "path", None) or "other", status, duration_ms)
+            metrics.record_request(getattr(scope.get("route"), "path", None) or "other", status, duration_ms, method)
 
         async def send_with_id(message):
             nonlocal response_started

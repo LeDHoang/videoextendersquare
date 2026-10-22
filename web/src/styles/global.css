@@ -6203,7 +6203,8 @@ button.sx-dash-tile:focus-visible { background: var(--sx-surface-2); }
 
 .sx-dash-card-head span,
 .sx-dash-empty,
-.sx-dash-trend-prev {
+.sx-dash-trend-prev,
+.sx-dash-bar-detail {
   margin: 0;
   color: var(--sx-ink-3);
   font-family: var(--sx-font-mono);
@@ -6257,6 +6258,22 @@ button.sx-dash-tile:focus-visible { background: var(--sx-surface-2); }
   font-family: var(--sx-font-mono);
   font-size: var(--sx-t-eyebrow);
   white-space: nowrap;
+}
+
+.sx-dash-bar-detail {
+  grid-column: 1 / -1;
+  margin-top: -6px;
+}
+
+/* Route names are long: full line for the name, then bar and p95. */
+.sx-dash-bars.sx-dash-routes li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sx-dash-routes .sx-dash-bar-label {
+  grid-column: 1 / -1;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .sx-dash-trends {

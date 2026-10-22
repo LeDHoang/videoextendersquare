@@ -33,7 +33,10 @@ const ops = {
   requests: {
     count: 120, errors_5xx: 3, error_rate: 0.025, p50_ms: 40, p95_ms: 310,
     status: { '2xx': 110, '429': 7, '5xx': 3 },
-    routes: [{ route: '/api/reels/feed', count: 50, errors_5xx: 3, rate_limited: 0, p95_ms: 900 }],
+    routes: [
+      { method: 'GET', route: '/api/reels/feed', count: 50, errors_5xx: 3, rate_limited: 0, p50_ms: 120, p95_ms: 900, max_ms: 1500 },
+      { method: 'GET', route: '/{full_path:path}', count: 1, errors_5xx: 0, rate_limited: 2, p50_ms: 9, p95_ms: 9, max_ms: 9 },
+    ],
   },
   events: { queue_full: 2, job_failed: 1 },
   jobs: { queued: 1, running: 2, active: 3, capacity: 6 },
@@ -102,8 +105,12 @@ describe('ModerationPage overview', () => {
     expect(screen.getByText('3 / 6')).toBeTruthy();
     expect(screen.getByText('2 / 15')).toBeTruthy();
     expect(screen.getByText('SLOWEST ROUTES')).toBeTruthy();
-    expect(screen.getByText('/api/reels/feed')).toBeTruthy();
+    expect(screen.getByText('GET /api/reels/feed')).toBeTruthy();
     expect(screen.getByText('900 ms · 5XX 3')).toBeTruthy();
+    expect(screen.getByText('50 REQS · P50 120 ms · MAX 1500 ms')).toBeTruthy();
+    expect(screen.getByText('GET PAGES + STATIC FILES')).toBeTruthy();
+    expect(screen.getByText('1 REQ · P50 9 ms · MAX 9 ms · 429 2')).toBeTruthy();
+    expect(screen.getByText(/Only routes hit in the last 5 min appear/)).toBeTruthy();
   });
 
   it('keeps the moderation overview when the operations call fails', async () => {

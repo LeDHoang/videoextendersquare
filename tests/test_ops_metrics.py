@@ -125,6 +125,9 @@ def test_requests_are_grouped_by_route_template_with_5xx_counted(app):
     # Raw ids never become keys.
     assert set(routes) == {"/api/items/{item_id}", "/api/broken"}
     assert routes["/api/items/{item_id}"]["count"] == 3
+    assert routes["/api/items/{item_id}"]["method"] == "GET"
+    items = routes["/api/items/{item_id}"]
+    assert items["p50_ms"] <= items["p95_ms"] <= items["max_ms"]
     assert routes["/api/broken"]["errors_5xx"] == 1
     assert window["p95_ms"] is not None
 

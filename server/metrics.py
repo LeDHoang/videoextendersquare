@@ -34,7 +34,7 @@ MIN_REQUESTS_FOR_ALERT = 20
 
 _lock = threading.Lock()
 _started = time.time()
-_requests: deque[tuple[float, str, int, float]] = deque(maxlen=50_000)
+_requests: deque[tuple[float, str, int, float, str]] = deque(maxlen=50_000)
 _events: dict[str, deque[float]] = {}
 _totals: Counter[str] = Counter()
 _last_alert: dict[str, float] = {}
@@ -47,10 +47,10 @@ def env_float(name: str, default: float) -> float:
         return default
 
 
-def record_request(route: str, status: int, duration_ms: float) -> None:
+def record_request(route: str, status: int, duration_ms: float, method: str = "") -> None:
     now = time.time()
     with _lock:
-        _requests.append((now, route, int(status), float(duration_ms)))
+        _requests.append((now, route, int(status), float(duration_ms), method))
         _totals["requests"] += 1
         if status >= 500:
             _totals["errors_5xx"] += 1
@@ -82,18 +82,21 @@ def request_window(now: float | None = None) -> dict:
         samples = [sample for sample in _requests if sample[0] >= cutoff]
     durations = [sample[3] for sample in samples]
     errors = sum(1 for sample in samples if sample[2] >= 500)
-    by_route: dict[str, list[tuple[int, float]]] = {}
-    for _ts, route, status, duration in samples:
-        by_route.setdefault(route, []).append((status, duration))
+    by_route: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    for _ts, route, status, duration, method in samples:
+        by_route.setdefault((method, route), []).append((status, duration))
     routes = [
         {
+            "method": method,
             "route": route,
             "count": len(rows),
             "errors_5xx": sum(1 for status, _ in rows if status >= 500),
             "rate_limited": sum(1 for status, _ in rows if status == 429),
+            "p50_ms": _percentile([duration for _, duration in rows], 0.50),
             "p95_ms": _percentile([duration for _, duration in rows], 0.95),
+            "max_ms": round(max(duration for _, duration in rows), 1),
         }
-        for route, rows in by_route.items()
+        for (method, route), rows in by_route.items()
     ]
     routes.sort(key=lambda row: (row["errors_5xx"], row["p95_ms"] or 0), reverse=True)
     return {

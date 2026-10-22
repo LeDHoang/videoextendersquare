@@ -148,13 +148,16 @@ export function OverviewPanel({ stats, windowKey, onOpenTab }) {
   );
 }
 
+// The SPA catch-all and unmatched paths have no readable template of their own.
+const ROUTE_NAMES = { '/{full_path:path}': 'PAGES + STATIC FILES', other: 'UNMATCHED PATHS' };
+
 // Admin only: live numbers from GET /api/ops/metrics over its rolling window (5 min).
 export function OpsPanel({ ops }) {
   const r = ops.requests;
   const ms = (value) => (value === null || value === undefined ? 'N/A' : value + ' ms');
   const pool = ops.db_pool;
   const failures = (ops.events.job_failed || 0) + (ops.events.derived_failed || 0);
-  const slowest = r.routes.slice(0, 5);
+  const slowest = r.routes;
   const slowMax = Math.max(0, ...slowest.map((row) => row.p95_ms || 0));
   return (
     <div className="sx-dash">
@@ -182,18 +185,26 @@ export function OpsPanel({ ops }) {
           </ul>
           <p className="sx-dash-empty">QUEUED {ops.jobs.queued} · RUNNING {ops.jobs.running} · {pool.class}</p>
         </Card>
-        <Card title="SLOWEST ROUTES" sub="P95">
+        <Card title="SLOWEST ROUTES" sub="P95 · ERRORS FIRST">
           {slowest.length ? (
-            <ul className="sx-dash-bars">
-              {slowest.map((row) => (
-                <li key={row.route}>
-                  <span className="sx-dash-bar-label" title={row.route}>{row.route}</span>
-                  <Meter value={row.p95_ms || 0} max={slowMax} tone={row.errors_5xx ? 'danger' : 'warn'} label={row.route + ' ' + ms(row.p95_ms)} />
-                  <span className="sx-dash-bar-value">{ms(row.p95_ms) + (row.errors_5xx ? ' · 5XX ' + row.errors_5xx : '')}</span>
-                </li>
-              ))}
+            <ul className="sx-dash-bars sx-dash-routes">
+              {slowest.map((row) => {
+                const name = (row.method ? row.method + ' ' : '') + (ROUTE_NAMES[row.route] || row.route);
+                return (
+                  <li key={row.method + ' ' + row.route}>
+                    <span className="sx-dash-bar-label" title={row.route}>{name}</span>
+                    <Meter value={row.p95_ms || 0} max={slowMax} tone={row.errors_5xx ? 'danger' : 'warn'} label={name + ' ' + ms(row.p95_ms)} />
+                    <span className="sx-dash-bar-value">{ms(row.p95_ms) + (row.errors_5xx ? ' · 5XX ' + row.errors_5xx : '')}</span>
+                    <span className="sx-dash-bar-detail">
+                      {row.count + (row.count === 1 ? ' REQ' : ' REQS') + ' · P50 ' + ms(row.p50_ms) + ' · MAX ' + ms(row.max_ms)
+                        + (row.rate_limited ? ' · 429 ' + row.rate_limited : '')}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           ) : <p className="sx-dash-empty">No requests yet.</p>}
+          <p className="sx-dash-empty">Only routes hit in the last {Math.round(ops.window_s / 60)} min appear, top {slowest.length || 10} shown.</p>
         </Card>
       </div>
     </div>
