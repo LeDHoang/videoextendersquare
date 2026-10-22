@@ -665,14 +665,51 @@ def shared_preview_urls(post: Post) -> dict:
     return {"preview_url": preview or url, "poster_url": poster}
 
 
-def post_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
+def viewer_post_state(db: Session, viewer_id: str, posts: list[Post]) -> tuple[set[str], set[str], set[str]]:
+    """Liked post ids, saved post ids and followed owner ids for a page of posts.
+
+    Three queries for the whole page, so a list endpoint does not run three
+    per card.
+    """
+    post_ids = [post.id for post in posts]
+    owner_ids = {post.owner_id for post in posts}
+    if not post_ids:
+        return set(), set(), set()
+    liked = {
+        row[0]
+        for row in db.query(PostLike.post_id)
+        .filter(PostLike.user_id == viewer_id, PostLike.post_id.in_(post_ids))
+        .all()
+    }
+    saved = {
+        row[0]
+        for row in db.query(PostSave.post_id)
+        .filter(PostSave.user_id == viewer_id, PostSave.post_id.in_(post_ids))
+        .all()
+    }
+    following = {
+        row[0]
+        for row in db.query(Follow.followee_id)
+        .filter(Follow.follower_id == viewer_id, Follow.followee_id.in_(owner_ids))
+        .all()
+    }
+    return liked, saved, following
+
+
+def post_card(
+    post: Post,
+    db: Session,
+    viewer_id: str | None = None,
+    state: tuple[set[str], set[str], set[str]] | None = None,
+) -> dict:
     liked = False
     saved = False
     following = False
     if viewer_id:
-        liked = db.query(PostLike.id).filter(PostLike.user_id == viewer_id, PostLike.post_id == post.id).first() is not None
-        saved = db.query(PostSave.id).filter(PostSave.user_id == viewer_id, PostSave.post_id == post.id).first() is not None
-        following = db.query(Follow.id).filter(Follow.follower_id == viewer_id, Follow.followee_id == post.owner_id).first() is not None
+        liked_ids, saved_ids, following_ids = state if state is not None else viewer_post_state(db, viewer_id, [post])
+        liked = post.id in liked_ids
+        saved = post.id in saved_ids
+        following = post.owner_id in following_ids
     creator = public_user(post.owner, viewer_id=viewer_id, is_following=following)
     card = {
         "id": post.id,

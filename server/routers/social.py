@@ -83,6 +83,7 @@ from server.social.services import (
     serialize_comment,
     sync_post_tags,
     tag_slug,
+    viewer_post_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -286,9 +287,14 @@ def get_visible_comment(db: Session, comment_id: str, viewer_id: str | None) -> 
         error(404, "COMMENT_NOT_FOUND", "Comment not found.")
     return comment
 
-def media_card(post: Post, db: Session, viewer_id: str | None = None) -> dict:
+def media_card(
+    post: Post,
+    db: Session,
+    viewer_id: str | None = None,
+    state: tuple[set[str], set[str], set[str]] | None = None,
+) -> dict:
 
-    card = post_card(post, db, viewer_id)
+    card = post_card(post, db, viewer_id, state)
     source = Path("output") / post.media_path
     card["filename"] = source.name
     card["folder"] = source.parent.name if source.parent != Path("output") else "root"
@@ -1608,7 +1614,7 @@ def get_feed(
         error(401, "AUTH_REQUIRED", "Sign in to view posts from people you follow.")
     limit = max(1, min(int(limit), 50))
     hidden_ids = blocked_user_ids(db, viewer_id)
-    query = post_query(db).join(User, User.id == Post.owner_id).filter(User.status == "active")
+    query = post_query(db).options(selectinload(Post.slides)).join(User, User.id == Post.owner_id).filter(User.status == "active")
     if hidden_ids:
         query = query.filter(~Post.owner_id.in_(hidden_ids))
     if media in {"video", "image"}:
@@ -1622,9 +1628,10 @@ def get_feed(
     rows = query.limit(limit + 1).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
+    state = viewer_post_state(db, viewer_id, rows) if viewer_id else None
     return {
         "scope": scope,
-        "items": [media_card(post, db, viewer_id) for post in rows],
+        "items": [media_card(post, db, viewer_id, state) for post in rows],
         "next_cursor": encode_cursor(rows[-1]) if has_more and rows else None,
     }
 
