@@ -9,7 +9,7 @@ numpy>=2,<3
 # "Studio" upscale engine. The container already runs without it (Dockerfile
 # comment) and detects its absence gracefully.
 vapoursynth==78; sys_platform != "linux"
-fastapi>=0.115
+fastapi>=0.146.0
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 sse-starlette>=2.0
