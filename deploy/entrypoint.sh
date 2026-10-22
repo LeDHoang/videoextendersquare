@@ -24,6 +24,13 @@ done
 # X-Forwarded-* from any peer is safe here.
 # --no-access-log: server/observability.py writes one sx.access line per
 # request (with its request ID, without the client IP) instead.
+# --timeout-keep-alive 150: the proxy, not uvicorn, must be the side that
+# closes an idle keep-alive connection. With uvicorn's default of 5 s, a
+# request the proxy sends on a pooled connection just as uvicorn closes it gets
+# "connection reset by peer", and neither proxy retries a POST, so the client
+# sees a 502. 150 s is above cloudflared's originRequest keepAliveTimeout
+# (default 90 s, production) and Caddy's reverse_proxy keepalive (default 2m,
+# local staging). Raise it if either proxy's idle timeout is raised.
 exec uvicorn server.app:app \
     --host 0.0.0.0 \
     --port 8000 \
@@ -31,4 +38,5 @@ exec uvicorn server.app:app \
     --proxy-headers \
     --forwarded-allow-ips='*' \
     --no-access-log \
+    --timeout-keep-alive 150 \
     --timeout-graceful-shutdown 20
