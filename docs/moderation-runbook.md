@@ -5,8 +5,12 @@ legal points marked **(confirm with lawyer)** are working assumptions, not advic
 
 ## Who moderates
 
-- Moderators are the addresses in `SX_MODERATOR_USERS`. Admins (`SX_ADMIN_USERS`)
-  are moderators too, and only admins can reinstate accounts or suspend moderators.
+- Roles live in the database (`users.role`). `SX_MODERATOR_USERS` and `SX_ADMIN_USERS`
+  only bootstrap them: sign-up and sign-in raise an account to its env role but never
+  lower it. Promote or demote in `/moderation` → USERS → CHANGE ROLE. An account cannot
+  go below its env role, so remove it from the env list first.
+- Admins are moderators too. Only admins can reinstate accounts, suspend moderators,
+  change roles, adjust credits, delete accounts, restore content and read the audit log.
 - For the beta, the operator is the only admin. Add one invited moderator once the
   beta has more than about 50 active users.
 - Check the queue at `/moderation` **at least twice a day** (morning and evening),
@@ -26,11 +30,17 @@ for illegal content differ by country **(confirm with lawyer)**.
 
 ## The queue
 
-`/moderation` has two tabs:
+`/moderation` (also STAFF in the account menu) has these tabs:
 
+- **Overview**: trends, spikes and, for admins, live operations numbers.
 - **Reports**: user reports on posts, packs, comments, messages and users.
 - **Support**: requests from `/support`. Categories are `appeal`, `copyright`,
   `privacy`, `account`, `bug`, `report_content` and `other`.
+- **Users**, **Content** and, for admins, **Audit**: see §Staff console.
+
+Before working on a report, press **CLAIM**. Another moderator then gets 409
+`REPORT_CLAIMED` on that report until you act, press RELEASE, or 30 minutes pass.
+An admin can act over a claim; the override is logged as `forced_claim_of`.
 
 Report actions (`PATCH /api/moderation/reports/{id}`):
 
@@ -42,11 +52,36 @@ Report actions (`PATCH /api/moderation/reports/{id}`):
 | `suspend_user` | Serious or repeated breaks | Suspends the account and signs it out everywhere. Admins cannot be suspended, moderators only by an admin, and nobody can suspend themselves. |
 | `reinstate_user` | An appeal succeeds | **Admin only.** Sets a suspended account back to active. Works on the report that led to the suspension, even after it was reviewed; it closes that report if it is still open. Deleted accounts cannot be reinstated (409 `ACCOUNT_DELETED`). |
 
-Every action is logged with the moderator, the action and the note. Write a note on
-every action that is not `dismiss`: it is the record an appeal is judged against.
+Every action is logged with the moderator, the action and the note, in the report's
+history and in the audit log. Write a note on every action that is not `dismiss`: it
+is the record an appeal is judged against.
 
 Removing a post deletes the bucket object, but the edge can serve a cached copy for
 up to a day. For S1 and copyright cases, also follow **Takedowns** below.
+
+## Staff console
+
+Direct actions, without a report. Every one asks for a reason (3 to 500 characters),
+which goes to the audit log, and each staff account is limited to 120 actions an hour.
+
+| Tab | Who | What |
+|---|---|---|
+| Users | Moderator | Search by username, email or id. A user page shows status, role, sessions, reports against and by them, posts, support requests and staff history. SUSPEND and SIGN OUT EVERYWHERE (not on staff accounts). |
+| Users | Admin | Also REINSTATE, CHANGE ROLE, ADJUST CREDITS and DELETE ACCOUNT, plus the wallet, ledger and purchases with a Stripe link. |
+| Content | Moderator | Search posts, Reel Packs and comments by text, id or owner. REMOVE works as `remove_content`. Messages stay reachable only through reports. |
+| Content | Admin | RESTORE a removed pack (it returns as a draft) or comment. Post removal is final: the media is gone from the bucket. Content its author deleted cannot be restored (`NOT_REMOVED_BY_STAFF`). |
+| Audit | Admin | Every staff action, newest first. Filter by staff username, action or target id. |
+
+Credits:
+- ADJUST CREDITS writes an `admin` entry to the ledger. A negative amount removes
+  credits and can leave a negative balance.
+- Each dialog sends one `request_id`, so a retried submit never applies twice.
+- Refund real money in the Stripe dashboard. The webhook then takes the credits back.
+
+DELETE ACCOUNT:
+- It runs the same erasure as a user's own account deletion.
+- You must type the username to confirm.
+- It cannot be undone, and it is refused for admins and for yourself.
 
 ## Message evidence
 

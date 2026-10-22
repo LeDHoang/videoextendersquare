@@ -163,6 +163,15 @@ def test_verify_email_is_rate_limited(env):
     assert codes[12] == 429
 
 
+def test_login_rate_limit_switch(env, monkeypatch):
+    client, _Session, _sent = env
+    codes = [_login(client, "nobody", "wrong").status_code for _ in range(11)]
+    assert codes[:10] == [401] * 10
+    assert codes[10] == 429
+    monkeypatch.setenv("SX_LOGIN_RATE_LIMIT", "0")
+    assert _login(client, "nobody", "wrong").status_code == 401
+
+
 def test_resend_answers_the_same_for_unknown_email(env):
     client, _Session, sent = env
     _register(client)

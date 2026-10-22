@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from server import media_store
+from server import settings
 from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
@@ -151,6 +152,24 @@ def configured_role(email: str, username: str) -> str:
         if value.strip()
     }
     return "admin" if identities & admins else "moderator" if identities & moderators else "user"
+
+
+ROLE_RANKS = {"user": 0, "moderator": 1, "admin": 2}
+
+
+def role_rank(role: str | None) -> int:
+    return ROLE_RANKS.get(role or "user", 0)
+
+
+def bootstrap_role(user: User) -> None:
+    """Raise a user to the role SX_ADMIN_USERS / SX_MODERATOR_USERS give them; never lower it.
+
+    The env lists only bootstrap staff. Roles granted or removed in the admin
+    console live in the database and survive the next sign-in.
+    """
+    assigned_role = configured_role(user.email or "", user.username)
+    if role_rank(assigned_role) > role_rank(user.role):
+        user.role = assigned_role
 
 
 def error(status: int, code: str, message: str, field: str | None = None):
@@ -563,7 +582,7 @@ def verify_email(req: VerifyEmailRequest, request: Request, db: Session = Depend
         error(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or expired.")
     now = utcnow()
     user.status = "active"
-    user.role = configured_role(user.email or "", user.username)
+    bootstrap_role(user)
     db.query(EmailVerificationToken).filter(
         EmailVerificationToken.user_id == user.id,
         EmailVerificationToken.used_at.is_(None),
@@ -603,8 +622,9 @@ def resend_verification(
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
     identity = request_identity(request)
-    rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
-    rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
+    if settings.login_rate_limit_enabled():
+        rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
+        rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
     user = db.query(User).filter(
         User.status.in_(("active", "suspended")),
@@ -619,9 +639,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     # Only after the right password, so the status is not an account-probing oracle.
     if user.status == "suspended":
         error(403, "ACCOUNT_SUSPENDED", "This account is suspended. You can appeal on the Support page.")
-    assigned_role = configured_role(user.email or "", user.username)
-    if user.role != assigned_role:
-        user.role = assigned_role
+    bootstrap_role(user)
     _session, session_token, csrf_token = create_auth_session(db, user, request)
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)

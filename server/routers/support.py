@@ -33,6 +33,7 @@ from server.social.auth import (
 from server.social.database import get_db
 from server.social.email import send_support_notification
 from server.social.models import Post, ReelPack, Report, SupportRequest, User, utcnow
+from server.social.staff import record_action
 
 router = APIRouter(tags=["support"])
 
@@ -217,6 +218,11 @@ def update_support_request(
         row.moderator_note = req.note.strip()[:1000]
     row.handled_by_id = context.user.id
     row.updated_at = utcnow()
+    record_action(
+        db, context.user, "support.update", "support", row.id,
+        reason=req.note or "",
+        details={"status": req.status} if req.status is not None else None,
+    )
     db.commit()
     return {"request": serialize_support(db, row)}
 
@@ -240,5 +246,6 @@ def file_support_report(
         row.status = "in_progress"
     row.handled_by_id = context.user.id
     row.updated_at = utcnow()
+    record_action(db, context.user, "support.file_report", "support", row.id, report_id=report.id)
     db.commit()
     return {"request": serialize_support(db, row), "report_id": report.id}

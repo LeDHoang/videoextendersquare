@@ -49,6 +49,19 @@ def env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     return value
 
 
+def login_rate_limit_enabled() -> bool:
+    """``SX_LOGIN_RATE_LIMIT=0`` lifts the sign-in limits for scripted local staging runs.
+
+    Production refuses to boot with it unless ``SX_PUBLIC_URL`` is a localhost URL.
+    """
+    return env_flag("SX_LOGIN_RATE_LIMIT", True)
+
+
+def _local_url(value: str) -> bool:
+    host = (urlparse(value.strip()).hostname or "").casefold()
+    return host in _LOCAL_HOSTS or host.endswith(".localhost")
+
+
 def _https(value: str) -> bool:
     parsed = urlparse(value.strip())
     return parsed.scheme == "https" and bool(parsed.netloc)
@@ -87,4 +100,6 @@ def production_config_errors() -> list[str]:
         host = (urlparse(origin.strip()).hostname or "").casefold()
         if host in _LOCAL_HOSTS or host.endswith(".localhost"):
             errors.append(f"SX_DEV_ORIGINS must not include local origin {origin.strip()}")
+    if not login_rate_limit_enabled() and not _local_url(os.environ.get("SX_PUBLIC_URL", "")):
+        errors.append("SX_LOGIN_RATE_LIMIT=0 is only allowed when SX_PUBLIC_URL is a localhost URL")
     return errors

@@ -1768,6 +1768,66 @@ button:hover .sx-sidebar-hero-logo,
   min-height: 64px;
 }
 
+/* Staff console (/moderation USERS, CONTENT, AUDIT). */
+.sx-staff-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sx-2);
+  margin-bottom: var(--sx-3);
+}
+
+.sx-staff-search .sx-ps-input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.sx-staff-rows,
+.sx-staff-list {
+  display: grid;
+  gap: var(--sx-2);
+  margin: 0 0 var(--sx-3);
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.sx-staff-row,
+.sx-staff-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--sx-rule);
+  background: var(--sx-bg);
+  color: var(--sx-ink);
+  text-align: left;
+  font: inherit;
+}
+
+.sx-staff-row {
+  cursor: pointer;
+}
+
+.sx-staff-row:hover,
+.sx-staff-row:focus-visible {
+  border-color: var(--sx-accent);
+}
+
+.sx-staff-item p {
+  margin: 0;
+}
+
+.sx-staff-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sx-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Unfilled legal values: loud on purpose so a placeholder can't ship unnoticed */
 .sx-legal-todo {
   padding: 0 4px;
@@ -9522,7 +9582,8 @@ a.sx-xh-btn { text-decoration: none; }
   padding: var(--sx-5);
   border: 1px solid var(--sx-rule-strong);
   border-top: 2px solid var(--sx-accent);
-  background: var(--pk-panel);
+  /* --pk-panel exists only inside .sx-pk; the dialog also opens on profile and moderation pages. */
+  background: var(--pk-panel, var(--sx-surface));
   box-shadow: var(--sx-shadow-popover);
 }
 
@@ -9593,6 +9654,7 @@ a.sx-xh-btn { text-decoration: none; }
   letter-spacing: 0.1em;
 }
 
+.sx-pk-dialog input,
 .sx-pk-dialog select,
 .sx-pk-dialog textarea {
   width: 100%;
@@ -9609,6 +9671,7 @@ a.sx-xh-btn { text-decoration: none; }
   resize: vertical;
 }
 
+.sx-pk-dialog input:focus-visible,
 .sx-pk-dialog select:focus-visible,
 .sx-pk-dialog textarea:focus-visible {
   outline: 2px solid var(--sx-accent);

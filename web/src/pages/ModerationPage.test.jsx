@@ -1,11 +1,11 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModerationPage from './ModerationPage.jsx';
 
 const mocks = vi.hoisted(() => ({
   auth: { user: { username: 'mod', role: 'moderator', can_moderate: true }, loading: false },
-  api: { get: vi.fn(), patch: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), patch: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 
 vi.mock('../api/client.js', () => ({ api: mocks.api }));
@@ -110,14 +110,18 @@ describe('ModerationPage overview', () => {
 });
 
 describe('ModerationPage reports', () => {
-  const report = (id, status, handledBy) => ({
+  const report = (id, status, handledBy, claimedBy = null) => ({
     id, status, target_type: 'user', target_id: 'u-' + id, target: {}, reason: 'spam', details: '',
     reporter: 'alice', resolution: status === 'open' ? null : 'dismiss', created_at: '2026-10-22T10:00:00', handled_by: handledBy,
+    claimed_by: claimedBy, claimed_at: claimedBy ? '2026-10-22T10:05:00' : null, history: [],
   });
+  const renderReports = () => render(<MemoryRouter initialEntries={['/moderation']}><ModerationPage /></MemoryRouter>);
 
   beforeEach(() => {
     mocks.api.get.mockReset();
     mocks.api.patch.mockReset();
+    mocks.api.post.mockReset();
+    mocks.api.delete.mockReset();
     mocks.auth.user = { username: 'mod', role: 'moderator', can_moderate: true };
   });
   afterEach(cleanup);
@@ -127,5 +131,59 @@ describe('ModerationPage reports', () => {
     render(<MemoryRouter initialEntries={['/moderation']}><ModerationPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HANDLED BY: @alice')).toBeTruthy());
     expect(screen.getAllByText(/HANDLED BY/)).toHaveLength(1);
+  });
+
+  it('claims an open report and shows who holds it', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [report('r1', 'open', null)] });
+    mocks.api.post.mockResolvedValue({ report: { ...report('r1', 'open', null, 'mod'), history: [{ action: 'report.claim', actor: 'mod', reason: '', created_at: '2026-10-22T10:05:00' }] } });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('CLAIM')).toBeTruthy());
+    fireEvent.click(screen.getByText('CLAIM'));
+    await waitFor(() => expect(screen.getByText(/CLAIMED BY: @mod/)).toBeTruthy());
+    expect(mocks.api.post).toHaveBeenCalledWith('/api/moderation/reports/r1/claim', {});
+    expect(screen.getByText(/@mod · REPORT.CLAIM/)).toBeTruthy();
+    expect(screen.getByText('RELEASE')).toBeTruthy();
+  });
+
+  it('hides release from a moderator on another moderator\'s claim', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [report('r1', 'open', null, 'other')] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText(/CLAIMED BY: @other/)).toBeTruthy());
+    expect(screen.queryByText('CLAIM')).toBeNull();
+    expect(screen.queryByText('RELEASE')).toBeNull();
+    expect(screen.queryByText(/OVERRIDES/)).toBeNull();
+  });
+
+  it('sends force when an admin acts over another claim', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    mocks.api.get.mockResolvedValue({ reports: [report('r1', 'open', null, 'other')] });
+    mocks.api.patch.mockResolvedValue({ report: report('r1', 'dismissed', 'boss') });
+    renderReports();
+    await waitFor(() => expect(screen.getByText(/OVERRIDES THIS CLAIM/)).toBeTruthy());
+    fireEvent.click(screen.getByText('DISMISS'));
+    await waitFor(() => expect(mocks.api.patch).toHaveBeenCalledWith('/api/moderation/reports/r1', { action: 'dismiss', resolution: 'dismiss', force: true }));
+  });
+
+  it('opens the reported user in the users tab', async () => {
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/moderation/reports'
+      ? { reports: [report('r1', 'open', null)] }
+      : { user: { id: 'u-r1', username: 'target', email: '', role: 'user', env_role: 'user', status: 'active', created_at: null, last_seen_at: null, post_count: 0, follower_count: 0 }, active_sessions: 0, reports_against: [], reports_filed: [], posts: [], support_requests: [], history: [] }));
+    renderReports();
+    await waitFor(() => expect(screen.getByText('OPEN USER')).toBeTruthy());
+    fireEvent.click(screen.getByText('OPEN USER'));
+    await waitFor(() => expect(screen.getByText('@target')).toBeTruthy());
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/admin/users/u-r1');
+    expect(screen.getByRole('radio', { name: 'USERS' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('shows the audit tab to admins only', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('QUEUE CLEAR')).toBeTruthy());
+    expect(screen.queryByRole('radio', { name: 'AUDIT' })).toBeNull();
+    cleanup();
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    renderReports();
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'AUDIT' })).toBeTruthy());
   });
 });

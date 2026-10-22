@@ -517,6 +517,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
                       <button type="button" onClick={() => navigate('/profile/' + user.username + '?tab=saved')}>SAVED</button>
                       <button type="button" onClick={() => navigate('/settings/profile')}>SETTINGS</button>
                       <button type="button" onClick={() => navigate('/wallet')}>CREDITS / FAL KEY</button>
+                      {user.can_moderate ? <button type="button" onClick={() => navigate('/moderation')}>STAFF</button> : null}
                       <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>LOG OUT</button>
                     </div>
                   ) : null}

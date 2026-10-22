@@ -280,7 +280,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] **New:** Decide and record the billing flag trio: `SX_CREDITS_ENABLED` / `SX_STRIPE_ENABLED` / `SX_REEL_REWARDS_ENABLED` — all default `0` and fail closed with `BILLING_MISCONFIGURED` 503 if secrets are placeholders (RUNNING.md §Credits). Keep all off until the Stripe test-mode + live-webhook walkthrough in RUNNING.md passes.
 - [ ] If GIF search is enabled, configure `SX_TENOR_API_KEY`, `SX_TENOR_CLIENT_KEY`, and the narrowest practical `SX_TENOR_ALLOWED_HOSTS` list.
 - [x] **New:** Record launch decisions for the reel-pack flags, which default **ON**: `SX_REEL_PACK_CREATION_ENABLED`, `SX_REEL_PACK_DISCOVERY_ENABLED`, `SX_REEL_PACK_IMMERSIVE_ENABLED`. **Decided 2026-10-20: all three ON for the beta**, set explicitly to `1` in `deploy/env.example` (not left to the code default).
-- [ ] Set `SX_ADMIN_USERS` and/or `SX_MODERATOR_USERS` to the launch-team usernames or emails.
+- [ ] Set `SX_ADMIN_USERS` and/or `SX_MODERATOR_USERS` to the launch-team usernames or emails. Since `20261022_0017` these only bootstrap roles: sign-in never lowers a stored role, so demote in `/moderation` → USERS.
 - [ ] Set `SX_PUBLIC_URL` to the deployed HTTPS website origin.
 - [ ] Set `SX_COOKIE_SECURE=1` when serving over HTTPS.
 - [ ] Keep `SX_PASSWORD_RESET_EXPOSE_TOKEN=0` outside local development.
@@ -333,7 +333,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [ ] Run `make test` in the normal project `.venv` and record the exact commit and dependency versions. (`.venv` exists again as of 2026-09-19, Python 3.14.6 — but standardize on 3.12 to match the image; see container-hygiene item.)
 - [ ] Run `make build` and deploy the generated frontend from the same tested commit.
 - [ ] Run Python compilation and frontend/inline JavaScript parse checks.
-- [ ] Run `make migrate` on a production-like database and verify the schema reaches **`20261022_0016`** (source of truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py:14`).
+- [ ] Run `make migrate` on a production-like database and verify the schema reaches **`20261022_0017`** (source of truth: `EXPECTED_SCHEMA_REVISION` in `server/social/database.py:14`).
 - [ ] Test fresh database creation, upgrade from the oldest supported production schema, failed-migration recovery, and backup restoration.
 - [~] Test the chosen production database rather than relying only on SQLite test runs — **priority:** re-run the billing suite and the recommendation concurrency tests (`tests/test_recommendations.py -k concurrent`, currently SQLite-fixture-only) against PostgreSQL. **Partial (2026-10-16):** the DB-pool isolation tests take `SX_TEST_POSTGRES_URL` and passed 13/13 on a local PostgreSQL 15.15 cluster; billing and recommendation concurrency fixtures are still SQLite-only. **Update (2026-10-21):** the recommendation concurrency tests run on Postgres in CI; the billing suite on Postgres is not re-run.
 - [ ] Require CI success, migration success, a clean worktree, and an approved release checklist before deployment.
@@ -370,7 +370,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 - [x] **New (2026-09-22, Earth Zoom Map tile provider):** pre-launch decision — stay on OSM tile-policy limits (compliant UA + disk cache already in place) or swap `SX_MAP_TILES_URL` to a paid MapTiler/Mapbox endpoint (no code change). Either way, carve `/api/reels/map-tiles/*` out of the Cloudflare `/api/*` cache-bypass above (tiles are immutable with a 7-day `Cache-Control`; bypassing forces every zoom through origin and risks tripping OSM limits). **Decided 2026-10-21: keep OSM for the beta** (`docs/deploy-runbook.md` Cloudflare checklist); the carve-out is already in the runbook. Switch `SX_MAP_TILES_URL` / `SX_MAP_LABELS_URL` before the public launch.
 - [~] Verify keyboard navigation, focus visibility, reduced-motion behavior, readable contrast, captions/accessible alternatives where applicable, and responsive layouts. **Decision needed:** no caption/WebVTT capability exists anywhere (`ReelsPlayer.jsx`, VR modules) — declare captions out-of-scope for beta or build VTT support. **Decided 2026-10-21:** captions out of scope for the beta. **Partly done (2026-10-21):** `docs/accessibility-pass.md` (keyboard, names, contrast, focus on 11 pages in Chrome); screen readers, 375 px and reduced motion on every page are open. Captions stay out of scope.
 - [x] **New:** Gate `/reels/immersive-preview` — it is currently unauthenticated (`App.jsx:36`, no `RequireAuth` wrapper) despite being a creator desktop tool; wrap it or tie it to `SX_REEL_PACK_IMMERSIVE_ENABLED`. **Done (2026-09-20):** wrapped in the existing `RequireAuth` (logged-out redirects to login); `vite build` clean.
-- [~] Run a final moderation drill using real reports, blocks, content removal, account suspension, appeal handling, and audit evidence. **Staging drill done (2026-10-22):** all steps passed on local staging (`docs/moderation-runbook.md` §Drill log). One display bug was fixed. **Both drill gaps fixed (2026-10-22, `7873e99`):** a suspended account with the right password now gets 403 `ACCOUNT_SUSPENDED` and an "Appeal on the Support page" link (a wrong password is still a plain 401), and each report shows `HANDLED BY`. Checked on staging by suspending and reinstating dave. Still open: no claim step for a report (a second moderator gets 409 `REPORT_ALREADY_REVIEWED`), and `reinstate_user` keeps the original `moderator_id`. Repeat on the production stack before invites, including the Cloudflare purge.
+- [~] Run a final moderation drill using real reports, blocks, content removal, account suspension, appeal handling, and audit evidence. **Staging drill done (2026-10-22):** all steps passed on local staging (`docs/moderation-runbook.md` §Drill log). One display bug was fixed. **Both drill gaps fixed (2026-10-22, `7873e99`):** a suspended account with the right password now gets 403 `ACCOUNT_SUSPENDED` and an "Appeal on the Support page" link (a wrong password is still a plain 401), and each report shows `HANDLED BY`. Checked on staging by suspending and reinstating dave. **Remaining gaps fixed (2026-10-22, staff console):** reports have a CLAIM step (409 `REPORT_CLAIMED` for a second moderator, 30-minute expiry, audited admin override), and every action, including `reinstate_user`, is recorded in the report history and the `staff_actions` audit log. Repeat on the production stack before invites, including the Cloudflare purge.
 
 Automated Meta documentation and device verification remain unavailable on the current Linux host because `metavr` does not publish a `linux-x64` binary. Physical Quest verification remains a release gate. This document does not claim current Meta Horizon Store compliance requirements.
 
@@ -381,7 +381,7 @@ Do not use this procedure for a blank database.
 - [ ] Confirm the old social tables exist and `alembic_version` does not.
 - [ ] Back up `data/echo.db`.
 - [ ] Run `.venv/bin/python -m alembic stamp 20260910_0001`.
-- [ ] Run `make migrate` and confirm the final revision is **`20261022_0016`**.
+- [ ] Run `make migrate` and confirm the final revision is **`20261022_0017`**.
 
 ## Suggested production environment
 
@@ -458,6 +458,7 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - [x] Moderator report queue and moderation actions.
 - [x] Password reset and the initial account-deletion flow.
 - [x] Database-backed authentication throttling and trusted-proxy opt-in.
+- [x] Staff console on `/moderation` (2026-10-22, schema `20261022_0017`). It adds USERS, CONTENT and AUDIT tabs, report claims, an immutable `staff_actions` audit log, direct suspend, sign-out and reinstate, roles stored in the database with the env vars as bootstrap, content remove and restore, admin credit adjustments, and admin account deletion. API: `server/routers/admin.py`. Runbook: `docs/moderation-runbook.md` §Staff console.
 - [x] Avatar upload dimension protection.
 - [x] Backend profile/safety integration tests.
 - [x] Frontend Saved-link regression tests.
@@ -474,6 +475,16 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - [x] Prod-env fixes (2026-09-20): `load_dotenv(override=False)`, immersive-preview behind auth, rewards IP floor removal.
 
 ## Latest recorded automated verification
+
+**2026-10-22 staff console (local staging, schema `20261022_0017`):**
+
+- `make test`: backend **605 passed, 7 skipped**; vitest **461 passed** (39 files); `npm run build` clean.
+- `scripts/verify_staging.cjs` **25/25** on the rebuilt image.
+- Admin API drive over HTTPS: **39/39**. It covered search, direct suspend (dave's sign-in got 403 `ACCOUNT_SUSPENDED`), reinstate, comment remove and restore, post removal (media 404), +50/−50 credits to bob, report claim (409 for the second moderator) and audit rows for every step.
+- Headless Chrome UI pass as alice (admin) and bob (moderator via the console role change), desktop 1440 px and iPhone 375 px: **48/48**. Checks: STAFF entry in the account menu, tab visibility per role, user detail actions per role, the sign-out dialog end to end, CONTENT and AUDIT rows, claimed report rows, no horizontal scroll, no console errors.
+- Fixed during the pass: `.sx-pk-dialog` was transparent outside the Pack page because `--pk-panel` is scoped to `.sx-pk`. This also affected the report dialog on profiles. Audit rows no longer repeat the report id.
+- Staging runs with `SX_LOGIN_RATE_LIMIT=0` so scripted runs can sign in repeatedly. Production refuses to boot with it unless `SX_PUBLIC_URL` is a localhost URL.
+- Seen, not fixed: `POST /api/image/upload` answers 500 (PIL `UnidentifiedImageError`, `server/routers/image.py:81`) for a non-image file instead of 4xx.
 
 **2026-10-22 follow-ups (health, moderation drill gaps, feed CPU; local staging):**
 
@@ -555,7 +566,7 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - Recommendation concurrency regression tests: **passing** — `test_concurrent_page_materialization_replays_winner` + `test_concurrent_affinity_upsert_dedupes` (4 passed, ~1.5s, SQLite fixtures; Postgres re-run is a listed gate above). The 2026-09-12 "failed with HTTP 500s" record below is **historical** — the fix (winner-replay on `uq_recommendation_request_session_page`) landed and is dual-dialect.
 - Staged-upload/job ownership tests: **passing** (`tests/test_cloud_routes.py` — owner-private staging, owned job status/download). Publication-path ownership was open at audit time — **fixed 2026-09-20** (see verification entry above).
 - `.venv` recreated (CPython 3.14.6); the 2026-09-12 ".venv absent" note is resolved.
-- Current schema head: `20261022_0016` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
+- Current schema head: `20261022_0017` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
 - Build fixes landed 2026-09-19: `.dockerignore` rewritten (`.venv/` typo fixed; `data/` + `logs/` + model caches excluded — previously baked the dev DB into the image); `vapoursynth==78` scoped off Linux (no manylinux wheel — previously broke `docker build`).
 - WebXR engine: 43/43 node tests, vite build clean (see `docs/threejs-vr-implementation-plan.md` §7).
 

@@ -753,8 +753,40 @@ class Report(Base):
     evidence_ciphertext = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # A moderator's claim tells others they are working on it; it lapses after
+    # server.routers.account_safety.CLAIM_TTL so an abandoned report is not stuck.
+    claimed_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_reports_status_created", "status", "created_at"),)
+
+
+class StaffAction(Base):
+    """Append-only audit row for every action a moderator or admin takes."""
+
+    __tablename__ = "staff_actions"
+
+    id = Column(String(36), primary_key=True, default=uuid4_string)
+    actor_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(40), nullable=False, index=True)
+    target_type = Column(String(16), nullable=False)
+    target_id = Column(String(64), nullable=False)
+    report_id = Column(String(36), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
+    reason = Column(String(500), nullable=False, default="")
+    details = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    __table_args__ = (Index("ix_staff_actions_target", "target_type", "target_id"),)
+
+
+@event.listens_for(StaffAction, "before_update")
+def _staff_action_no_update(_mapper, _connection, _target):
+    raise ValueError("Staff actions are immutable")
+
+
+@event.listens_for(StaffAction, "before_delete")
+def _staff_action_no_delete(_mapper, _connection, _target):
+    raise ValueError("Staff actions are immutable")
 
 
 class SupportRequest(Base):

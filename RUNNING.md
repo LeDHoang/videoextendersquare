@@ -124,6 +124,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_SHUTDOWN_DRAIN_S` | `15` | Shutdown drain: queued jobs are cancelled and refunded, running ones get this long |
 | `SX_SUPPORT_EMAIL` | operator inbox | Notified per `/support` request (no body). Unset: log line only |
 | `SX_REGISTRATION_ENABLED` / `SX_REGISTRATION_ALLOWLIST` | `0` / invited emails | Invite-only beta |
+| `SX_ADMIN_USERS` / `SX_MODERATOR_USERS` | operator / _(empty)_ | Bootstrap only: sign-in raises a listed account to that role and never lowers it. Roles are stored in the database. Demote in `/moderation` → USERS, after removing the account from the list |
 | `SX_MAX_VIDEO_UPLOAD_MB` / `SX_MAX_IMAGE_UPLOAD_MB` | `95` / `50` | Upload size caps (95 MB stays under Cloudflare's 100 MB request limit) |
 | `SX_UPLOAD_HOURLY_MAX` | `30` | Uploads per user per hour |
 | `SX_VIDEO_WORKERS` / `SX_IMAGE_WORKERS` | `1` / `2` | Job concurrency |
@@ -163,6 +164,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_EVENT_DAILY_CAP` | Contributions one actor can add to one post per UTC day when the event has no impression | `5` |
 | `SX_EMAIL_VERIFY_TTL_MIN` | Lifetime of the sign-up verification link in minutes; the account exists only after it is used | `1440` |
 | `SX_TURNSTILE_SITE_KEY` / `SX_TURNSTILE_SECRET` | Cloudflare Turnstile for sign-up. The site key goes to the SPA, the secret stays on the server. With the secret unset the check is skipped and a warning is logged at boot | empty |
+| `SX_LOGIN_RATE_LIMIT` | `0` lifts the sign-in limits (20 per IP, 10 per account, per 15 min) for scripted runs. Production refuses to boot with `0` unless `SX_PUBLIC_URL` is a localhost URL | `1` |
 | `SX_MOD_SPIKE_MIN` | Smallest count the moderation Overview flags as a spike (at least 3x the previous window) | `10` |
 | `SX_REGISTRATION_ENABLED` | `0` closes public registration (invite-only); `SX_REGISTRATION_ALLOWLIST` emails can still register | `1` |
 | `SX_REGISTRATION_ALLOWLIST` | Comma-separated invite emails honored while registration is closed (case-insensitive) | empty (fully closed) |

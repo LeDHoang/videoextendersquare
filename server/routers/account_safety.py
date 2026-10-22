@@ -6,10 +6,10 @@ import logging
 import os
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
@@ -62,6 +62,7 @@ from server.social.models import (
     ReelPack,
     ReelPackSave,
     Report,
+    StaffAction,
     SupportRequest,
     User,
     UserBlock,
@@ -69,10 +70,20 @@ from server.social.models import (
 )
 from server.social.safety import recompute_follow_counts, remove_relationships
 from server.social.services import post_media_files
+from server.social.staff import (
+    REMOVE_ACTION,
+    record_action,
+    reinstate_user,
+    remove_target,
+    suspend_user,
+    target_owner,
+)
 
 router = APIRouter(tags=["account-safety"])
 logger = logging.getLogger(__name__)
 REPORT_REASONS = {"spam", "harassment", "hate", "sexual", "violence", "impersonation", "privacy", "other"}
+# A claim lapses after this, so a report a moderator walked away from is not stuck.
+CLAIM_TTL = timedelta(minutes=30)
 
 
 def fail(status: int, code: str, message: str, field: str | None = None):
@@ -108,6 +119,8 @@ class ReportCreateRequest(BaseModel):
 class ModerationRequest(BaseModel):
     action: Literal["dismiss", "resolve", "remove_content", "suspend_user", "reinstate_user"]
     resolution: str = ""
+    # Admins may act on a report another moderator has claimed; the override is audited.
+    force: bool = False
 
 
 def get_active_user(db: Session, username: str) -> User:
@@ -117,9 +130,38 @@ def get_active_user(db: Session, username: str) -> User:
     return user
 
 
+def claim_holder(report: Report) -> str | None:
+    """The id of the moderator holding a live claim on an open report, else None."""
+    if report.status != "open" or not report.claimed_by_id or not report.claimed_at:
+        return None
+    claimed_at = report.claimed_at
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+    return report.claimed_by_id if claimed_at > utcnow() - CLAIM_TTL else None
+
+
+def report_history(db: Session, report_id: str) -> list[dict]:
+    rows = db.query(StaffAction).filter(StaffAction.report_id == report_id).order_by(
+        StaffAction.created_at.asc(), StaffAction.id.asc()
+    ).all()
+    history = []
+    for row in rows:
+        actor = db.get(User, row.actor_id) if row.actor_id else None
+        history.append({
+            "action": row.action,
+            "actor": actor.username if actor else None,
+            "reason": row.reason,
+            "details": row.details or {},
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        })
+    return history
+
+
 def serialize_report(db: Session, report: Report) -> dict:
     reporter = db.get(User, report.reporter_id) if report.reporter_id else None
     moderator = db.get(User, report.moderator_id) if report.moderator_id else None
+    holder_id = claim_holder(report)
+    holder = db.get(User, holder_id) if holder_id else None
     target = {}
     if report.target_type == "user":
         user = db.get(User, report.target_id)
@@ -165,6 +207,9 @@ def serialize_report(db: Session, report: Report) -> dict:
         "created_at": report.created_at.isoformat() if report.created_at else None,
         "reviewed_at": report.reviewed_at.isoformat() if report.reviewed_at else None,
         "handled_by": moderator.username if moderator else None,
+        "claimed_by": holder.username if holder else None,
+        "claimed_at": report.claimed_at.isoformat() if holder and report.claimed_at else None,
+        "history": report_history(db, report.id),
     }
 
 
@@ -528,6 +573,74 @@ def moderation_stats(
     }
 
 
+def get_report(db: Session, report_id: str) -> Report:
+    report = db.get(Report, report_id)
+    if not report:
+        fail(404, "REPORT_NOT_FOUND", "Report not found.")
+    return report
+
+
+def claimed_conflict(db: Session, holder_id: str):
+    holder = db.get(User, holder_id)
+    raise HTTPException(status_code=409, detail={
+        "code": "REPORT_CLAIMED",
+        "message": f"@{holder.username if holder else 'another moderator'} is working on this report.",
+        "claimed_by": holder.username if holder else None,
+    })
+
+
+@router.post("/api/moderation/reports/{report_id}/claim")
+def claim_report(
+    report_id: str,
+    context: AuthContext = Depends(require_moderator_csrf),
+    db: Session = Depends(get_db),
+):
+    report = get_report(db, report_id)
+    if report.status != "open":
+        fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
+    now = utcnow()
+    # Compare-and-swap: take the claim only while it is free, stale, or already ours.
+    claimed = db.query(Report).filter(
+        Report.id == report.id,
+        Report.status == "open",
+        or_(
+            Report.claimed_by_id.is_(None),
+            Report.claimed_at.is_(None),
+            Report.claimed_at <= now - CLAIM_TTL,
+            Report.claimed_by_id == context.user.id,
+        ),
+    ).update({Report.claimed_by_id: context.user.id, Report.claimed_at: now}, synchronize_session=False)
+    if not claimed:
+        db.rollback()
+        db.refresh(report)
+        holder_id = claim_holder(report)
+        if not holder_id:
+            fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
+        claimed_conflict(db, holder_id)
+    record_action(db, context.user, "report.claim", "report", report.id, report_id=report.id)
+    db.commit()
+    db.refresh(report)
+    return {"report": serialize_report(db, report)}
+
+
+@router.delete("/api/moderation/reports/{report_id}/claim")
+def release_report(
+    report_id: str,
+    context: AuthContext = Depends(require_moderator_csrf),
+    db: Session = Depends(get_db),
+):
+    report = get_report(db, report_id)
+    holder_id = claim_holder(report)
+    if holder_id and holder_id != context.user.id and context.user.role != "admin":
+        claimed_conflict(db, holder_id)
+    if report.claimed_by_id:
+        report.claimed_by_id = None
+        report.claimed_at = None
+        record_action(db, context.user, "report.release", "report", report.id, report_id=report.id)
+        db.commit()
+    return {"report": serialize_report(db, report)}
+
+
 @router.patch("/api/moderation/reports/{report_id}")
 def moderate_report(
     report_id: str,
@@ -535,125 +648,71 @@ def moderate_report(
     context: AuthContext = Depends(require_moderator_csrf),
     db: Session = Depends(get_db),
 ):
-    report = db.get(Report, report_id)
-    if not report:
-        fail(404, "REPORT_NOT_FOUND", "Report not found.")
+    report = get_report(db, report_id)
     if req.action == "reinstate_user":
         return reinstate_reported_user(db, report, req, context)
     if report.status != "open":
         fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
     if req.action == "remove_content" and report.target_type == "user":
         fail(422, "INVALID_MODERATION_ACTION", "User reports do not have removable content.")
+    holder_id = claim_holder(report)
+    forced_from = None
+    if holder_id and holder_id != context.user.id:
+        if not (req.force and context.user.role == "admin"):
+            claimed_conflict(db, holder_id)
+        holder = db.get(User, holder_id)
+        forced_from = holder.username if holder else holder_id
 
-    target_user = None
+    target_type, target_id = report.target_type, report.target_id
+    target_user = target_owner(db, target_type, target_id)
+    resolution = (req.resolution.strip() or req.action.replace("_", " "))[:500]
+    # Compare-and-swap: when two moderators act at once, only the first changes the report.
+    reviewed = db.query(Report).filter(Report.id == report.id, Report.status == "open").update({
+        Report.status: "dismissed" if req.action == "dismiss" else "resolved",
+        Report.resolution: resolution,
+        Report.moderator_id: context.user.id,
+        Report.reviewed_at: utcnow(),
+    }, synchronize_session=False)
+    if not reviewed:
+        fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
+    db.expire(report)
+
     media_files = []
-    if report.target_type == "user":
-        target_user = db.get(User, report.target_id)
-    elif report.target_type == "post":
-        post = db.get(Post, report.target_id)
-        target_user = db.get(User, post.owner_id) if post else None
-        if req.action == "remove_content" and post and post.deleted_at is None:
-            media_files = post_media_files([post])
-            post.status = "deleted"
-            post.deleted_at = utcnow()
-            if target_user:
-                target_user.post_count = max(0, int(target_user.post_count or 0) - 1)
-    elif report.target_type == "pack":
-        pack = db.get(ReelPack, report.target_id)
-        target_user = db.get(User, pack.owner_id) if pack else None
-        if req.action == "remove_content" and pack and pack.deleted_at is None:
-            pack.status = "deleted"
-            pack.deleted_at = utcnow()
-    elif report.target_type == "comment":
-        comment = db.get(Comment, report.target_id)
-        target_user = db.get(User, comment.author_id) if comment else None
-        if req.action == "remove_content" and comment and comment.deleted_at is None:
-            comment.deleted_at = utcnow()
-            post = db.get(Post, comment.post_id)
-            if post:
-                post.comment_count = max(0, int(post.comment_count or 0) - 1)
-    elif report.target_type == "message":
-        message = db.get(DirectMessage, report.target_id)
-        target_user = db.get(User, message.sender_id) if message else None
-        if req.action == "remove_content" and message and message.deleted_at is None:
-            message.deleted_at = utcnow()
-            conversation = db.get(Conversation, message.conversation_id)
-            if conversation:
-                conversation.updated_at = utcnow()
-                member_ids = db.query(ConversationMember.user_id).filter(
-                    ConversationMember.conversation_id == conversation.id,
-                ).all()
-                for (recipient_id,) in member_ids:
-                    db.add(MessageEvent(
-                        recipient_id=recipient_id,
-                        conversation_id=conversation.id,
-                        message_id=message.id,
-                        event_type="message.deleted",
-                    ))
-
-    if req.action == "suspend_user":
+    audit = (f"report.{req.action}", "report", report.id)
+    if req.action == "remove_content":
+        _removed, media_files = remove_target(db, target_type, target_id)
+        audit = (REMOVE_ACTION, target_type, target_id)
+    elif req.action == "suspend_user":
         if not target_user:
             fail(404, "REPORT_TARGET_NOT_FOUND", "The reported user no longer exists.")
-        if target_user.role == "admin":
-            fail(403, "ADMIN_PROTECTED", "Administrators cannot be suspended here.")
-        if target_user.id == context.user.id:
-            fail(422, "SELF_SUSPENSION", "You cannot suspend your own account.")
-        if context.user.role != "admin" and target_user.role == "moderator":
-            fail(403, "MODERATOR_PROTECTED", "Only an administrator can suspend a moderator.")
-        # A deleted account stays deleted: "suspended" would make it appealable
-        # and show its hidden DMs again.
-        if target_user.status != "deleted":
-            target_user.status = "suspended"
-        db.query(AuthSession).filter(
-            AuthSession.user_id == target_user.id,
-            AuthSession.revoked_at.is_(None),
-        ).update({AuthSession.revoked_at: utcnow()}, synchronize_session=False)
-
-    report.status = "dismissed" if req.action == "dismiss" else "resolved"
-    report.resolution = (req.resolution.strip() or req.action.replace("_", " "))[:500]
-    report.moderator_id = context.user.id
-    report.reviewed_at = utcnow()
+        suspend_user(db, context.user, target_user)
+        audit = ("user.suspend", "user", target_user.id)
+    record_action(
+        db, context.user, *audit,
+        reason=resolution,
+        report_id=report.id,
+        details={"forced_claim_of": forced_from} if forced_from else None,
+    )
     db.commit()
     media_store.delete_paths(media_files)
     return {"report": serialize_report(db, report)}
 
 
 def reinstate_reported_user(db: Session, report: Report, req: ModerationRequest, context: AuthContext) -> dict:
-    """Undo a suspension after an appeal. Admin-only; works on reviewed reports too.
-
-    Only ``suspended`` accounts go back to ``active``; deleted accounts are
-    anonymized and are never restored.
-    """
+    """Undo a suspension after an appeal. Admin-only; works on reviewed reports too."""
     if context.user.role != "admin":
         fail(403, "ADMIN_REQUIRED", "Only an administrator can reinstate an account.")
-    target_user = None
-    if report.target_type == "user":
-        target_user = db.get(User, report.target_id)
-    elif report.target_type == "post":
-        post = db.get(Post, report.target_id)
-        target_user = db.get(User, post.owner_id) if post else None
-    elif report.target_type == "pack":
-        pack = db.get(ReelPack, report.target_id)
-        target_user = db.get(User, pack.owner_id) if pack else None
-    elif report.target_type == "comment":
-        comment = db.get(Comment, report.target_id)
-        target_user = db.get(User, comment.author_id) if comment else None
-    elif report.target_type == "message":
-        message = db.get(DirectMessage, report.target_id)
-        target_user = db.get(User, message.sender_id) if message else None
+    target_user = target_owner(db, report.target_type, report.target_id)
     if not target_user:
         fail(404, "REPORT_TARGET_NOT_FOUND", "The reported user no longer exists.")
-    if target_user.status == "deleted":
-        fail(409, "ACCOUNT_DELETED", "Deleted accounts cannot be reinstated.")
-    if target_user.status != "suspended":
-        fail(409, "ACCOUNT_NOT_SUSPENDED", "This account is not suspended.")
-    target_user.status = "active"
+    reinstate_user(target_user)
     note = (req.resolution.strip() or "reinstated user")[:500]
     if report.status == "open":
         report.status = "resolved"
         report.reviewed_at = utcnow()
         report.moderator_id = context.user.id
     report.resolution = (f"{report.resolution} | {note}" if report.resolution else note)[:500]
+    record_action(db, context.user, "user.reinstate", "user", target_user.id, reason=note, report_id=report.id)
     db.commit()
     logger.info("Admin %s reinstated user %s via report %s", context.user.id, target_user.id, report.id)
     return {"report": serialize_report(db, report)}
@@ -670,8 +729,14 @@ def delete_account(
     if not verify_password(context.user.password_hash, req.current_password):
         fail(400, "INVALID_PASSWORD", "Current password is incorrect.", "current_password")
     rate_limiter.check(db, f"delete-account:{context.user.id}", 3, 24 * 60 * 60)
+    erase_account(db, context.user)
+    response = JSONResponse({"ok": True})
+    clear_auth_cookies(response)
+    return response
 
-    user = context.user
+
+def erase_account(db: Session, user: User) -> None:
+    """Anonymize an account and remove its content, then commit. Ledger rows are kept as legal records."""
     old_avatar = user.avatar_path
     now = utcnow()
 
@@ -777,7 +842,3 @@ def delete_account(
             (Path("data/avatars") / old_avatar).unlink(missing_ok=True)
         except OSError:
             pass
-
-    response = JSONResponse({"ok": True})
-    clear_auth_cookies(response)
-    return response

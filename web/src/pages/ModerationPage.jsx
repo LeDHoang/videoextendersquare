@@ -4,13 +4,23 @@ import { api } from '../api/client.js';
 import { Button, Pills } from '../components/ui/controls.jsx';
 import { EmptyState, Hero, Mono, Section, SpecRow } from '../components/ui/primitives.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
+import AuditPanel from '../components/moderation/AuditPanel.jsx';
+import ContentPanel from '../components/moderation/ContentPanel.jsx';
+import UserDetail from '../components/moderation/UserDetail.jsx';
+import UsersPanel from '../components/moderation/UsersPanel.jsx';
+import { when } from '../components/moderation/usePagedList.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 
 const TABS = [
   { value: 'overview', label: 'OVERVIEW' },
   { value: 'reports', label: 'REPORTS' },
   { value: 'support', label: 'SUPPORT' },
+  { value: 'users', label: 'USERS' },
+  { value: 'content', label: 'CONTENT' },
 ];
+const ADMIN_TABS = [...TABS, { value: 'audit', label: 'AUDIT' }];
+// Tabs backed by the report / support queue loader; the others load their own data.
+const QUEUE_TABS = ['overview', 'reports', 'support'];
 const WINDOW_OPTIONS = [
   { value: '24h', label: 'LAST 24 H' },
   { value: '7d', label: 'LAST 7 D' },
@@ -116,8 +126,11 @@ function OpsPanel({ ops }) {
 export default function ModerationPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isAdmin = user?.role === 'admin';
+  const tabs = isAdmin ? ADMIN_TABS : TABS;
   const tabParam = searchParams.get('tab');
-  const tab = tabParam === 'support' || tabParam === 'overview' ? tabParam : 'reports';
+  const tab = tabs.some((option) => option.value === tabParam) ? tabParam : 'reports';
+  const openUserId = tab === 'users' ? searchParams.get('user') : null;
   const [status, setStatus] = useState('open');
   const [statsWindow, setStatsWindow] = useState('24h');
   const [stats, setStats] = useState(null);
@@ -135,6 +148,7 @@ export default function ModerationPage() {
 
   const load = useCallback(async () => {
     setError('');
+    if (!QUEUE_TABS.includes(tab)) return;
     if (tab === 'overview') {
       try {
         // Operations numbers are extra: a failure there never hides the moderation overview.
@@ -169,13 +183,13 @@ export default function ModerationPage() {
   if (!user) return <Navigate to={'/login?next=' + encodeURIComponent('/moderation')} replace />;
   if (!user.can_moderate) return <EmptyState title="ACCESS DENIED" text="Moderator access is required." />;
 
-  const isAdmin = user.role === 'admin';
   const setNote = (id) => (value) => setNotes((current) => ({ ...current, [id]: value }));
   const switchTab = (value) => {
     setStatus('open');
     setNotes({});
     setSearchParams(value === 'reports' ? {} : { tab: value }, { replace: true });
   };
+  const openUser = (id) => setSearchParams({ tab: 'users', user: id });
   const replaceOrDrop = (updated) => {
     setItems((current) => (status === 'all' || updated.status === status
       ? current.map((item) => (item.id === updated.id ? updated : item))
@@ -194,11 +208,21 @@ export default function ModerationPage() {
     }
   };
 
+  const claimedByOther = (report) => Boolean(report.claimed_by) && report.claimed_by !== user.username;
+
   const actOnReport = (report, action) => run(report.id, async () => {
     const resolution = (notes[report.id] || '').trim() || action.replace('_', ' ');
-    const result = await api.patch('/api/moderation/reports/' + encodeURIComponent(report.id), { action, resolution });
+    const body = { action, resolution };
+    // Only an admin may act over another moderator's live claim; the server audits the override.
+    if (isAdmin && claimedByOther(report)) body.force = true;
+    const result = await api.patch('/api/moderation/reports/' + encodeURIComponent(report.id), body);
     replaceOrDrop(result.report);
     setNote(report.id)('');
+  });
+
+  const claimReport = (report, release) => run(report.id, async () => {
+    const path = '/api/moderation/reports/' + encodeURIComponent(report.id) + '/claim';
+    replaceOrDrop((await (release ? api.delete(path) : api.post(path, {}))).report);
   });
 
   const updateRequest = (request, nextStatus) => run(request.id, async () => {
@@ -213,6 +237,10 @@ export default function ModerationPage() {
     replaceOrDrop(result.request);
   });
 
+  const reportUserId = (report) => (report.target_type === 'user'
+    ? report.target_id
+    : report.target?.owner_id || report.target?.author_id || report.target?.sender_id || null);
+
   const renderReport = (report, index) => (
     <Section key={report.id} num={index + 1} title={report.target_type.toUpperCase() + ' · ' + report.reason.toUpperCase()} active note={report.created_at || ''}>
       <div className="sx-moderation-report">
@@ -223,10 +251,28 @@ export default function ModerationPage() {
         {report.details ? <p>{report.details}</p> : null}
         {report.resolution ? <Mono>RESOLUTION: {report.resolution}</Mono> : null}
         {report.handled_by ? <Mono>HANDLED BY: @{report.handled_by}</Mono> : null}
+        {report.claimed_by ? (
+          <Mono>
+            CLAIMED BY: @{report.claimed_by} · {when(report.claimed_at)}
+            {isAdmin && claimedByOther(report) ? ' · YOUR ACTION OVERRIDES THIS CLAIM AND IS LOGGED' : ''}
+          </Mono>
+        ) : null}
+        {report.history?.length ? (
+          <ul className="sx-staff-list" aria-label="Report history">
+            {report.history.map((row, rowIndex) => (
+              <li key={rowIndex}><Mono>{when(row.created_at)} · @{row.actor || 'deleted'} · {row.action.toUpperCase()}{row.reason ? ' · ' + row.reason : ''}</Mono></li>
+            ))}
+          </ul>
+        ) : null}
         {report.status === 'open' || isAdmin ? (
           <NoteField id={'note-' + report.id} value={notes[report.id] || ''} onChange={setNote(report.id)} placeholder="Optional · defaults to the action name" />
         ) : null}
         <div className="sx-profile-actions">
+          {report.status === 'open' && !report.claimed_by ? <Button disabled={busy === report.id} onClick={() => claimReport(report, false)}>CLAIM</Button> : null}
+          {report.status === 'open' && report.claimed_by && (!claimedByOther(report) || isAdmin)
+            ? <Button disabled={busy === report.id} onClick={() => claimReport(report, true)}>RELEASE</Button>
+            : null}
+          {reportUserId(report) ? <Button onClick={() => openUser(reportUserId(report))}>OPEN USER</Button> : null}
           {report.status === 'open' ? (
             <>
               <Button disabled={busy === report.id} onClick={() => actOnReport(report, 'dismiss')}>DISMISS</Button>
@@ -264,19 +310,31 @@ export default function ModerationPage() {
     </Section>
   );
 
-  const kickers = { support: 'SUPPORT INBOX · APPEALS AND REQUESTS', overview: 'OPERATIONS · TRENDS AND SPIKES', reports: 'USER REPORTS · BETA SAFETY QUEUE' };
+  const kickers = {
+    support: 'SUPPORT INBOX · APPEALS AND REQUESTS',
+    overview: 'OPERATIONS · TRENDS AND SPIKES',
+    reports: 'USER REPORTS · BETA SAFETY QUEUE',
+    users: 'ACCOUNTS · SEARCH AND ACT',
+    content: 'POSTS, REEL PACKS AND COMMENTS',
+    audit: 'STAFF ACTIONS · ADMIN ONLY',
+  };
   const emptyText = tab === 'support' ? 'There are no support requests here.' : 'There are no reports here.';
   return (
     <div>
       <Hero title="MODERATION" kicker={kickers[tab]} />
       <div className="sx-moderation-tabs">
-        <Pills options={TABS} value={tab} onChange={switchTab} ariaLabel="Moderation queue" />
-        {tab === 'overview'
-          ? <Pills options={WINDOW_OPTIONS} value={statsWindow} onChange={setStatsWindow} ariaLabel="Time window" />
-          : <Pills options={STATUS_FILTERS[tab]} value={status} onChange={setStatus} ariaLabel="Status filter" />}
+        <Pills options={tabs} value={tab} onChange={switchTab} ariaLabel="Moderation queue" />
+        {tab === 'overview' ? <Pills options={WINDOW_OPTIONS} value={statsWindow} onChange={setStatsWindow} ariaLabel="Time window" /> : null}
+        {STATUS_FILTERS[tab] ? <Pills options={STATUS_FILTERS[tab]} value={status} onChange={setStatus} ariaLabel="Status filter" /> : null}
       </div>
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
-      {tab === 'overview' ? (
+      {tab === 'users' ? (
+        openUserId
+          ? <UserDetail userId={openUserId} viewer={user} onBack={() => setSearchParams({ tab: 'users' })} />
+          : <UsersPanel onOpen={openUser} />
+      ) : tab === 'content' ? <ContentPanel viewer={user} onOpenUser={openUser} />
+        : tab === 'audit' ? <AuditPanel onOpenUser={openUser} />
+        : tab === 'overview' ? (
         stats ? (
           <>
             <OverviewPanel stats={stats} windowKey={statsWindow} />

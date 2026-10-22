@@ -19,7 +19,7 @@ GOOD_ENV = {
 
 
 def _apply(monkeypatch, env):
-    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS"]:
+    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS", "SX_LOGIN_RATE_LIMIT"]:
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -76,6 +76,17 @@ def test_rejects_local_dev_origins(monkeypatch):
     _apply(monkeypatch, {**GOOD_ENV, "SX_DEV_ORIGINS": "https://app.example.com,http://localhost:5173"})
     errors = settings.production_config_errors()
     assert len(errors) == 1 and "localhost" in errors[0]
+
+
+def test_login_rate_limit_can_be_lifted_only_for_a_localhost_stack(monkeypatch):
+    _apply(monkeypatch, {**GOOD_ENV, "SX_LOGIN_RATE_LIMIT": "0"})
+    assert not settings.login_rate_limit_enabled()
+    errors = settings.production_config_errors()
+    assert len(errors) == 1 and "SX_LOGIN_RATE_LIMIT" in errors[0]
+    monkeypatch.setenv("SX_PUBLIC_URL", "https://localhost:8443")
+    assert settings.production_config_errors() == []
+    monkeypatch.delenv("SX_LOGIN_RATE_LIMIT")
+    assert settings.login_rate_limit_enabled()
 
 
 def test_env_int_falls_back_and_clamps(monkeypatch):
