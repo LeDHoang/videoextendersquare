@@ -143,7 +143,7 @@ The review also found that fal is retiring the Ray-2 reframe endpoint on 2026-10
   - Video MAKE 3D needs a GPU worker. Either run it per job on serverless GPU, or move it onto the planned L40S at the hybrid trigger above.
   - Image-only MAKE 3D could run on CPX32 if wanted. It needs torch (about 1 GB of image size) and a split of the flag by kind, and it takes one 3-CPU job slot for about 6 s.
   - Also open before enabling it anywhere:
-    - Memory: the worker holds the whole clip's depth-resolution frames, about 0.8 MB per frame, so a 60 fps 60 s clip is about 2.9 GB.
+    - Memory: depth and render now go one shot at a time. With a stub depth model the worker peaked at 1.42 GB RSS on a 30 s clip (2.04 GB before) and 1.70 GB on a 60 s clip. A single long shot is still held whole inside the depth model, about 1 MB per frame.
     - The checkpoint download has no SHA-256 pin.
     - HDR (PQ/HLG) sources are not tone-mapped.
 - **fal repricing (2026-10-04):** hourly GPU rental prices rose. That affects only the L40S/self-host comparison. No change to per-second model API prices was reported. The source is a single third-party capture.

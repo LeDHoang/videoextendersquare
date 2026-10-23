@@ -155,6 +155,26 @@ def test_split_shots(cuts, expected):
     assert sw.split_shots(cuts, 100) == expected
 
 
+def test_split_shots_takes_extra_cuts():
+    assert sw.split_shots({}, 100, extra_cuts=[40]) == [(0, 40), (40, 100)]
+    assert sw.split_shots({70: 0.9}, 100, extra_cuts=[40, 0, 100]) == [(0, 40), (40, 70), (70, 100)]
+
+
+def _hists(colours):
+    return [sw.colour_histogram(np.full((32, 32, 3), c, np.uint8)) for c in colours]
+
+
+def test_histogram_cuts_finds_a_dark_cut():
+    # Two dark shots of different hue: ffmpeg's luma-heavy scene score misses these.
+    assert sw.histogram_cuts(_hists([(30, 10, 10)] * 40 + [(10, 10, 40)] * 40)) == [40]
+
+
+def test_histogram_cuts_skips_a_flash_and_strobing():
+    dark, bright = (30, 10, 10), (240, 240, 240)
+    assert sw.histogram_cuts(_hists([dark] * 40 + [bright] * 2 + [dark] * 40)) == []
+    assert sw.histogram_cuts(_hists([dark, bright] * 40)) == []
+
+
 def test_shot_range_and_normalize_ignore_nan():
     raw = np.linspace(0, 10, 4 * 40 * 40, dtype=np.float32).reshape(4, 40, 40)
     raw[0, 0, 0] = np.nan

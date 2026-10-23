@@ -2,12 +2,14 @@
 
 W8T recipe (validated against Owl3D in the owdl3d-reword study, ledger §4.14):
   1. Decode frames at depth working resolution (rawvideo pipe, one output
-     frame per coded frame) and score scene cuts with ffmpeg's scene filter.
-  2. Run Video-Depth-Anything-Small once per shot, so its temporal window
-     never spans a cut (vendored in pipeline/third_party; lazy torch import;
-     device cuda > mps > cpu; checkpoint from Hugging Face on first use).
-     Each shot is normalized to nearness in [0, 1] by its 2nd..98th percentile.
-  3. Re-decode at render size and, per frame: grow near depth with a 5x5
+     frame per coded frame) and find scene cuts: ffmpeg's scene score, plus
+     colour-histogram jumps for cuts between dark shots.
+  2. Per shot, re-decode at depth resolution and run Video-Depth-Anything-Small,
+     so its temporal window never spans a cut (vendored in pipeline/third_party;
+     lazy torch import; device cuda > mps > cpu; checkpoint from Hugging Face on
+     first use). Each shot is normalized to nearness in [0, 1] by its
+     2nd..98th percentile.
+  3. Decode the same shot at render size and, per frame: grow near depth with a 5x5
      dilate at depth resolution, upsample bilinearly, forward-splat the left
      view into the right eye (softmax weights favour near pixels), fill
      disocclusions with the nearest valid pixel. All parallax is behind the
@@ -20,6 +22,7 @@ The render steps are numpy + OpenCV only (no torch), so they run on any CPU
 and in CI. No cloud calls, no temp frame files: frames stream through pipes.
 """
 
+import itertools
 import json
 import math
 import os
@@ -42,6 +45,9 @@ NEAR_IMPORTANCE = 20.0      # softmax splat weight exp(20 * nearness): nearer pi
 EYE_CAP = 2048              # px per eye; the VR player's stereo canvas (VR_STEREO_EYE_CAP)
 MAX_VIDEO_SECONDS = 60      # a whole shot's depth is held in memory
 SCENE_THRESHOLD = 0.4       # ffmpeg scene score that starts a new shot
+HIST_CUT = 0.5              # colour-histogram jump that also starts one (dark cuts ffmpeg rates low)...
+HIST_CUT_RATIO = 3.0        # ...when it is this many times the local median jump (strobing stays high)
+HIST_CUT_WINDOW = 15        # frames either side for that median
 MIN_SHOT_FRAMES = 12        # shorter shots merge into a neighbour (flashes, false cuts)
 RENDER_REPORT_EVERY = 30    # frames between progress reports (cancel checks)
 
@@ -259,12 +265,50 @@ def eye_geometry(width: int, height: int, strength: float = 1.0) -> tuple[int, i
     return rw, rh, crop + crop % 2
 
 
+def colour_histogram(rgb: np.ndarray) -> np.ndarray:
+    """16x8x8 HSV histogram of an RGB frame, normalized, for histogram_cuts."""
+    import cv2
+
+    hist = cv2.calcHist([cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)], [0, 1, 2], None,
+                        [16, 8, 8], [0, 180, 0, 256, 0, 256])
+    return cv2.normalize(hist, hist).flatten()
+
+
+def histogram_cuts(hists: list) -> list[int]:
+    """Frames that start a new shot by colour: the histogram distance to the
+    previous frame reaches HIST_CUT and HIST_CUT_RATIO x the median distance
+    within HIST_CUT_WINDOW frames, the new colours are still there two frames
+    on, and they were not there three frames back (so neither a 1-2 frame
+    flash nor its end counts). Catches cuts between dark shots, which
+    ffmpeg's scene score rates well under SCENE_THRESHOLD."""
+    import cv2
+
+    def dist(a, b):
+        return cv2.compareHist(hists[a], hists[b], cv2.HISTCMP_BHATTACHARYYA)
+
+    n = len(hists)
+    d = np.zeros(n)
+    for i in range(1, n):
+        d[i] = dist(i - 1, i)
+    cuts = []
+    for i in range(1, n):
+        around = np.concatenate([d[max(1, i - HIST_CUT_WINDOW):i], d[i + 1:i + 1 + HIST_CUT_WINDOW]])
+        if (d[i] >= HIST_CUT and around.size and d[i] > HIST_CUT_RATIO * np.median(around)
+                and dist(i - 1, min(i + 2, n - 1)) >= HIST_CUT
+                and dist(max(i - 3, 0), i) >= HIST_CUT / 2):
+            cuts.append(i)
+    return cuts
+
+
 def split_shots(scores: dict[int, float], n_frames: int,
-                threshold: float = SCENE_THRESHOLD, min_frames: int = MIN_SHOT_FRAMES) -> list[tuple[int, int]]:
+                threshold: float = SCENE_THRESHOLD, min_frames: int = MIN_SHOT_FRAMES,
+                extra_cuts=()) -> list[tuple[int, int]]:
     """[start, end) frame ranges, cut where the scene score reaches
-    *threshold*. A shot shorter than *min_frames* merges into the one before
-    it (the first shot into the next)."""
-    bounds = [0] + [i for i in range(1, n_frames) if scores.get(i, 0.0) >= threshold] + [n_frames]
+    *threshold* or at *extra_cuts* (histogram_cuts). A shot shorter than
+    *min_frames* merges into the one before it (the first shot into the next)."""
+    cuts = {i for i in range(1, n_frames) if scores.get(i, 0.0) >= threshold}
+    cuts.update(i for i in extra_cuts if 0 < i < n_frames)
+    bounds = [0] + sorted(cuts) + [n_frames]
     merged: list[list[int]] = []
     for a, b in zip(bounds, bounds[1:]):
         if merged and (b - a < min_frames or merged[-1][1] - merged[-1][0] < min_frames):
@@ -381,9 +425,9 @@ def process_video_spatial(
 ) -> tuple[str, dict]:
     """Convert one monocular video to a side-by-side stereo H.264 MP4.
 
-    Returns (output_path, metrics). Holds the whole clip's depth-resolution
-    frames (about 0.8 MB each at 518 px) and the current shot's fp16 nearness
-    maps; full-size frames stream through pipes."""
+    Returns (output_path, metrics). Depth and render go one shot at a time,
+    so memory holds one shot's depth-resolution frames (about 0.8 MB each at
+    518 px) and fp16 nearness maps; full-size frames stream through pipes."""
     import cv2
 
     def log(msg):
@@ -399,31 +443,25 @@ def process_video_spatial(
         raise SpatializeError(f"Video is {info['duration']:.0f}s; 3D conversion takes up to {max_seconds:.0f}s")
     log(f"Analyzing source: {os.path.basename(video_path)} ({width}x{height}, {info['duration']:.1f}s)...")
 
-    # Pass 1: depth-resolution frames and scene scores, then depth per shot.
+    # Pass 1: scene scores and colour histograms at depth resolution -> shots.
     dw, dh = _scaled_size(width, height, depth_max_dim)
     tmp_dir = tempfile.mkdtemp(prefix="spatial-")
     try:
         scene_file = os.path.join(tmp_dir, "scenes.txt")
-        frames = list(_decode(video_path, dw, dh, info["matrix"],
-                              f",select='gte(scene\\,0)',metadata=print:key=lavfi.scene_score:file='{scene_file}'"))
+        hists = [colour_histogram(f) for f in _decode(
+            video_path, dw, dh, info["matrix"],
+            f",select='gte(scene\\,0)',metadata=print:key=lavfi.scene_score:file='{scene_file}'")]
         scores = _read_scene_scores(scene_file) if os.path.exists(scene_file) else {}
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    if not frames:
+    if not hists:
         raise SpatializeError("Decoder produced no frames")
-    n_frames = len(frames)
-    shots = split_shots(scores, n_frames)
-    near = np.empty((n_frames, dh, dw), np.float16)
-    device = "?"
-    for k, (a, b) in enumerate(shots, 1):
-        log(f"Estimating depth (shot {k}/{len(shots)}, {b - a} frames)...")
-        raw, device = _depth_video(frames[a:b], info["fps"])
-        frames[a:b] = [None] * (b - a)
-        near[a:b] = normalize_depth(raw, *shot_range(raw))
-        del raw
-    del frames
+    n_frames = len(hists)
+    shots = split_shots(scores, n_frames, extra_cuts=histogram_cuts(hists))
+    del hists
 
-    # Pass 2: render-size frames -> right eye -> crop -> hstack -> encode.
+    # Pass 2, per shot: depth-size frames -> depth; render-size frames ->
+    # right eye -> crop -> hstack -> encode.
     rw, rh, crop = eye_geometry(width, height, strength)
     eye_w, eye_h = rw - 2 * crop, rh - 2 * crop
     if half_sbs:
@@ -444,23 +482,37 @@ def process_video_spatial(
             "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
             "-movflags", "+faststart", output_path]
 
-    log(f"Rendering 3D: 0/{n_frames} frames...")
     encoded = 0
+    device = "?"
     ok = False
+    depth_frames = _decode(video_path, dw, dh, info["matrix"])
+    render_frames = _decode(video_path, rw, rh, info["matrix"])
     with tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)
         try:
-            for i, frame in enumerate(_decode(video_path, rw, rh, info["matrix"])):
-                d = condition_depth(near[min(i, n_frames - 1)], rw, rh)
-                right = render_right_eye(frame, d, strength)[crop:rh - crop, crop:rw - crop]
-                left = frame[crop:rh - crop, crop:rw - crop]
-                if half_sbs:
-                    left = cv2.resize(left, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
-                    right = cv2.resize(right, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
-                proc.stdin.write(np.concatenate([left, right], axis=1).tobytes())
-                encoded += 1
-                if encoded % RENDER_REPORT_EVERY == 0:
-                    log(f"Rendering 3D: {encoded}/{n_frames} frames...")
+            for k, (a, b) in enumerate(shots, 1):
+                log(f"Estimating depth (shot {k}/{len(shots)}, {b - a} frames)...")
+                shot = list(itertools.islice(depth_frames, b - a))
+                if len(shot) != b - a:
+                    raise SpatializeError("Decoder returned fewer frames on the second pass")
+                raw, device = _depth_video(shot, info["fps"])
+                del shot
+                near = normalize_depth(raw, *shot_range(raw)).astype(np.float16)
+                del raw
+                log(f"Rendering 3D: {encoded}/{n_frames} frames...")
+                # A short last read keeps the source's own frame count.
+                for i, frame in enumerate(itertools.islice(render_frames, b - a)):
+                    d = condition_depth(near[i], rw, rh)
+                    right = render_right_eye(frame, d, strength)[crop:rh - crop, crop:rw - crop]
+                    left = frame[crop:rh - crop, crop:rw - crop]
+                    if half_sbs:
+                        left = cv2.resize(left, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
+                        right = cv2.resize(right, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
+                    proc.stdin.write(np.concatenate([left, right], axis=1).tobytes())
+                    encoded += 1
+                    if encoded % RENDER_REPORT_EVERY == 0:
+                        log(f"Rendering 3D: {encoded}/{n_frames} frames...")
+                del near
             proc.stdin.close()
             rc = proc.wait(timeout=600)
             if rc != 0:
@@ -472,6 +524,8 @@ def process_video_spatial(
             err.seek(0)
             raise SpatializeError(f"Encoder died early: {err.read()[-500:].decode(errors='replace')}")
         finally:
+            depth_frames.close()
+            render_frames.close()
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
