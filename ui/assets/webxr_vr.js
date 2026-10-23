@@ -57,6 +57,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let previewAnimId = null;
   let previewCanvas = null;
   let previewCameraMode = 'headset'; // 'headset' | 'orbit'
+  // Desktop preview only (startPreview {hiFi:true}): MSAA + mipmapped panels.
+  // XR sessions never set it, so the headset keeps the legacy sampling.
+  let previewHiFi = false;
   let sceneMode = 'reels'; // 'reels' | 'earth'
   let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
   let isCurved = true;
@@ -921,6 +924,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     return tex;
   }
 
+  // UI panel textures: legacy linear sampling, except in desktop hi-fi
+  // preview, where panels minified into a laptop window shimmer without mips.
+  function applyPanelSampling(tex) {
+    return previewHiFi ? applyEarthTileSampling(tex) : applyLinearSampling(tex);
+  }
+
   // ─── Preview sizing & camera ──────────────────────────────────────
   // Mirrors the old raw-WebGL resizePreviewCanvas(): keeps the drawing
   // buffer in sync with CSS layout every frame instead of freezing the
@@ -970,21 +979,39 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the tilted top edge still clears the sphere (see dock test).
   const EARTH_DOCK_POS = { x: 0, y: 0.20, z: -0.85 };
 
+  // Layout tuning for the /reels/immersive-preview sliders. Defaults are the
+  // shipped constants; stopPreview and every XR session reset to them, so
+  // the headset only ever sees values that were pasted back into the code.
+  function defaultLayoutTuning() {
+    return {
+      screenScale: DEFAULT_SCALE,
+      screenDistance: -DEFAULT_POS.z,
+      screenHeight: DEFAULT_POS.y,
+      dockWidth: 0.82,
+      dockGap: DOCK_GAP,
+      panelSideGap: PANEL_SIDE_GAP,
+      panelFwdOffset: PANEL_FWD_OFFSET,
+      commentsScale: CPANEL_SCALE_FACTOR,
+      guideScale: GUIDE_SCALE_FACTOR,
+    };
+  }
+  let layoutTuning = defaultLayoutTuning();
+
   // Target world sizes (meters) for a given screen base size.
   function dockTargetSize(base) {
-    const w = base * 0.82;
+    const w = base * layoutTuning.dockWidth;
     return { w, h: w * (384 / 1024) };
   }
   function commentsPanelTargetSize(base) {
     const ui = getUICanvas();
     const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (680 / 560);
-    const w = base * CPANEL_SCALE_FACTOR;
+    const w = base * layoutTuning.commentsScale;
     return { w, h: w * aspect };
   }
   function guideTargetSize(base) {
     const ui = getUICanvas();
     const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
-    const w = base * GUIDE_SCALE_FACTOR;
+    const w = base * layoutTuning.guideScale;
     return { w, h: w * aspect };
   }
 
@@ -994,7 +1021,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // UI derived screen-relative at live screenScale. (The v8.4 tandem rig was
   // reverted per owner request.)
   function getLockedAnchor() {
-    return { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+    return { x: DEFAULT_POS.x, y: layoutTuning.screenHeight, z: -layoutTuning.screenDistance };
   }
 
   function ensureScreenQuat() {
@@ -1108,9 +1135,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Legacy-exact: the transport panel stays fixed and level in the room
       // at the default screen spot while the locked screen follows the gaze.
       const a = getLockedAnchor();
-      pos = { x: a.x, y: a.y - DEFAULT_SCALE / 2 - DOCK_GAP, z: a.z };
+      pos = { x: a.x, y: a.y - layoutTuning.screenScale / 2 - layoutTuning.dockGap, z: a.z };
     } else {
-      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - DOCK_GAP, z: 0 });
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
     const hx = (headPos && Number(headPos.x)) || 0;
@@ -1132,19 +1159,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   // spot sized at DEFAULT_SCALE; unlocked = screen-relative at live scale
   // (upstream getCommentsPanelCenter/Size + getGuideCenter verbatim).
   function getCommentsPanelLayout() {
-    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x - base / 2 - size.w / 2 - PANEL_SIDE_GAP,
+        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + PANEL_FWD_OFFSET,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: -base / 2 - size.w / 2 - PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+        x: -base / 2 - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
@@ -1152,19 +1179,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function getGuidePanelLayout() {
-    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = guideTargetSize(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x + base / 2 + size.w / 2 + PANEL_SIDE_GAP,
+        x: a.x + base / 2 + size.w / 2 + layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + PANEL_FWD_OFFSET,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: base / 2 + size.w / 2 + PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+        x: base / 2 + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
@@ -1277,7 +1304,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       controlsMesh.rotation.set(pose.pitch, pose.yaw, 0);
     }
     // Legacy-exact dock sizing: earth 1.2, locked DEFAULT_SCALE, else live.
-    const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? DEFAULT_SCALE : screenScale);
+    const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? layoutTuning.screenScale : screenScale);
     const size = dockTargetSize(base);
     try { controlsMesh.scale.set(size.w / 1.6, size.h / 0.6, 1); } catch (e) {}
     // Side panels keep their stations but face the viewer too.
@@ -5253,7 +5280,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const fullStack = useFullStack();
       const opts = fullStack
         ? { canvas, alpha: true, antialias: true, powerPreference: 'high-performance' }
-        : { canvas, alpha: false, antialias: false, powerPreference: 'high-performance' };
+        : { canvas, alpha: false, antialias: previewHiFi, powerPreference: 'high-performance' };
       lastRendererOpts = { alpha: !!opts.alpha, antialias: !!opts.antialias };
       if (context) opts.context = context;
       renderer = new THREE.WebGLRenderer(opts);
@@ -5365,7 +5392,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       overlayCtx = overlayCanvas.getContext('2d');
     }
     if (!overlayTexture && overlayCanvas && debugFlags.overlay) {
-      overlayTexture = applyLinearSampling(new THREE.CanvasTexture(overlayCanvas));
+      overlayTexture = applyPanelSampling(new THREE.CanvasTexture(overlayCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) overlayTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!overlayMesh && overlayTexture && debugFlags.overlay) {
@@ -5395,7 +5422,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       controlsCtx = controlsCanvas.getContext('2d');
     }
     if (!controlsTexture && controlsCanvas) {
-      controlsTexture = applyLinearSampling(new THREE.CanvasTexture(controlsCanvas));
+      controlsTexture = applyPanelSampling(new THREE.CanvasTexture(controlsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) controlsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!controlsMesh && controlsTexture) {
@@ -5423,7 +5450,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       commentsCtx = commentsCanvas.getContext('2d');
     }
     if (!commentsTexture && commentsCanvas) {
-      commentsTexture = applyLinearSampling(new THREE.CanvasTexture(commentsCanvas));
+      commentsTexture = applyPanelSampling(new THREE.CanvasTexture(commentsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) commentsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!commentsMesh && commentsTexture) {
@@ -5451,7 +5478,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       guideCtx = guideCanvas.getContext('2d');
     }
     if (!guideTexture && guideCanvas && debugFlags.guide) {
-      guideTexture = applyLinearSampling(new THREE.CanvasTexture(guideCanvas));
+      guideTexture = applyPanelSampling(new THREE.CanvasTexture(guideCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) guideTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!guideMesh && guideTexture && debugFlags.guide) {
@@ -5763,7 +5790,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       }
       if (!earthPreviewTexture && earthPreviewCanvas && THREE) {
-        earthPreviewTexture = applyLinearSampling(new THREE.CanvasTexture(earthPreviewCanvas));
+        earthPreviewTexture = applyPanelSampling(new THREE.CanvasTexture(earthPreviewCanvas));
         try { if (THREE.SRGBColorSpace !== undefined) earthPreviewTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       }
       if (!earthPreviewMesh && earthPreviewTexture) {
@@ -7388,6 +7415,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     previewCanvas = canvas;
     previewCameraMode = opts.cameraMode === 'orbit' ? 'orbit' : 'headset';
+    previewHiFi = !!opts.hiFi;
     stereoMode = !!opts.stereo;
     if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
     controlsVisible = opts.showControls !== false;
@@ -7465,6 +7493,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     screenPos = { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
     screenScale = DEFAULT_SCALE;
     screenDistance = -DEFAULT_POS.z;
+    layoutTuning = defaultLayoutTuning();
+    previewHiFi = false;
     lockToViewer = false;
     cPanelTab = 'all';
     cPanelScrollY = 0;
@@ -7515,6 +7545,43 @@ window.WebXRVR = window.WebXRVR || (function () {
     applyPreviewCamera();
     emitPreviewState();
     return previewCameraMode;
+  }
+
+  function getLayoutTuning() {
+    return { ...layoutTuning };
+  }
+
+  // Preview-only: an XR session keeps the shipped layout. Screen size and
+  // distance go through the same clamps as the in-headset scale gestures.
+  function setLayoutTuning(patch) {
+    if (xrSession || !patch) return getLayoutTuning();
+    const next = { ...layoutTuning };
+    for (const key of Object.keys(next)) {
+      const value = Number(patch[key]);
+      if (patch[key] !== undefined && Number.isFinite(value)) next[key] = value;
+    }
+    next.screenScale = clampScreenScale(next.screenScale);
+    next.screenDistance = clampScreenDistance(next.screenDistance);
+    layoutTuning = next;
+    screenScale = next.screenScale;
+    screenDistance = next.screenDistance;
+    screenPos = { x: DEFAULT_POS.x, y: next.screenHeight, z: -next.screenDistance };
+    commitScreenTransform();
+    layoutControlsDock();
+    return getLayoutTuning();
+  }
+
+  function resetLayoutTuning() {
+    return setLayoutTuning(defaultLayoutTuning());
+  }
+
+  // Vertical FOV of the desktop preview camera (three.js fov is vertical).
+  function setPreviewFov(degrees) {
+    const fov = Number(degrees);
+    if (xrSession || !camera || !Number.isFinite(fov)) return camera ? camera.fov : null;
+    camera.fov = Math.max(30, Math.min(120, fov));
+    camera.updateProjectionMatrix();
+    return camera.fov;
   }
 
   async function requestPreviewFullscreen(target) {
@@ -9125,6 +9192,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     screenScale = DEFAULT_SCALE;
     screenDistance = -DEFAULT_POS.z;
+    layoutTuning = defaultLayoutTuning();
     isInitialPoseSet = false;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
@@ -10007,6 +10075,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     stopPreview,
     resetPreview,
     setPreviewCameraMode,
+    setPreviewFov,
+    getLayoutTuning,
+    setLayoutTuning,
+    resetLayoutTuning,
     setPreviewStereo,
     setReducedMotion,
     setSceneMode,
@@ -10104,6 +10176,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       commentsRegionFromUV,
       overlayCommentFromUV,
       refreshOverlayTexture,
+      getRendererOpts() { return lastRendererOpts; },
       getTextureFilterInfo() {
         const describe = (tex) => tex ? {
           minFilter: tex.minFilter,

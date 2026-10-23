@@ -2468,6 +2468,65 @@ test('canvas textures use legacy linear sampling without mipmaps', () => {
   renderer.stopPreview();
 });
 
+test('hi-fi preview mipmaps the UI panels with MSAA and stopPreview restores legacy', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { hiFi: true });
+  const THREE = renderer.getThree();
+  const filters = renderer.__test.getTextureFilterInfo();
+  for (const name of ['controls', 'comments', 'overlay', 'guide']) {
+    assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);
+    assert.equal(filters[name].generateMipmaps, true, `${name} mipmaps`);
+  }
+  assert.equal(filters.video.generateMipmaps, false, 'video keeps legacy sampling');
+  assert.equal(renderer.__test.getRendererOpts().antialias, true);
+  renderer.stopPreview();
+
+  renderer.startPreview(makePreviewCanvas(gl));
+  assert.equal(renderer.__test.getTextureFilterInfo().controls.generateMipmaps, false);
+  assert.equal(renderer.__test.getRendererOpts().antialias, false);
+  renderer.stopPreview();
+});
+
+test('layout tuning starts at the shipped constants and stopPreview resets it', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  assert.deepEqual({ ...renderer.getLayoutTuning() }, {
+    screenScale: 4,
+    screenDistance: 2.24,
+    screenHeight: 1.52,
+    dockWidth: 0.82,
+    dockGap: 0.08,
+    panelSideGap: 0.384,
+    panelFwdOffset: -0.15,
+    commentsScale: 0.432,
+    guideScale: 0.4212,
+  });
+  const before = api.getCommentsPanelLayout();
+  const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });
+  closeTo(api.dockTargetSize(4).w, 2.8);
+  assert.equal(tuned.screenScale, 10, 'screen size uses the gesture clamp');
+  assert.equal('bogus' in tuned, false);
+  assert.equal(api.getScreenState().scale, 10);
+  assert.ok(api.getCommentsPanelLayout().center.x < before.center.x, 'bigger screen + gap push the panel left');
+
+  renderer.stopPreview();
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
+  assert.equal(api.getScreenState().scale, 4);
+});
+
+test('an XR session ignores preview layout tuning', async () => {
+  const { renderer } = await enterLiveSession();
+  assert.equal(renderer.isPresenting(), true, 'precondition: live session bound');
+  renderer.setLayoutTuning({ dockWidth: 0.5 });
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
+  assert.equal(renderer.__test.dockTargetSize(4).w, 3.28);
+});
+
 test('domoverlay flag omits the overlay layer from session options', async () => {
   const renderer = loadRenderer();
   renderer.init(null, {});

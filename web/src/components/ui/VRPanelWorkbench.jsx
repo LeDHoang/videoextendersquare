@@ -1,0 +1,375 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+// Side-effect import: the UMD module assigns window.VRUICanvas, and Vite
+// re-runs it on every save, so panel edits show up without a reload.
+import '../../../../ui/assets/vr_ui_canvas.js';
+import controllerPng from '../../../../ui/assets/quest_controller.png';
+import { Segmented, ToggleRow } from './controls.jsx';
+
+// Captured now: ReelsPlayer later re-injects its own copy onto window.
+const UI = typeof window !== 'undefined' ? window.VRUICanvas : null;
+if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
+  window.QUEST_CONTROLLER_B64 = controllerPng;
+}
+
+const DURATION = 42;
+const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD'];
+const SIZES = UI ? {
+  DOCK: { w: UI.CONTROLS_W, h: UI.CONTROLS_H },
+  COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
+  OVERLAY: { w: UI.OVERLAY_W, h: UI.OVERLAY_H },
+  GUIDE: { w: UI.GUIDE_W, h: UI.GUIDE_H },
+  'EARTH CARD': { w: UI.EARTH_PREVIEW_W, h: UI.EARTH_PREVIEW_H },
+} : {};
+const IDLE_HOVER = { DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '' };
+const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
+const CURVES = { DOME: 1, 'SQ CURVE': 2, FLAT: 0 };
+const CURVE_ORDER = ['DOME', 'SQ CURVE', 'FLAT'];
+const PLAYLIST = [
+  { title: 'Neon rain over the Shibuya crossing at midnight' },
+  { title: 'Ha Long Bay sunrise' },
+  { title: 'Reykjavik northern lights, full sky' },
+];
+const EARTH_STATUS = {
+  tier: 'CITY',
+  tierColor: '#3b82f6',
+  zoomPct: 240,
+  scaleCaption: '5 KM',
+  mapStatus: 'LIVE TILES',
+  mapOffline: false,
+  location: 'HANOI',
+  northUp: true,
+  canOpenFeed: true,
+};
+const EARTH_LOCATION = { name: 'Hanoi', slug: 'hanoi', heat: 0.72, active_reel_count: 18 };
+const COMMENT_TEMPLATES = [
+  ['mika_tokyo', '#ff3b1f', 'The lantern reflections here are unreal'],
+  ['dev ray', '#3b82f6', 'Is this shot on a 360 rig or stitched from a phone? The parallax on the left side is wild.'],
+  ['lina', '#22c55e', 'Saving this one for the weekend trip planning, thank you!'],
+  ['oskar_b', '#f2c744', 'Audio drops out for a second around the bridge'],
+  ['quest_owner_2026', '#a855f7', 'Watching this in the headset with the dome curve is the best way to see it'],
+  ['nam', '#ef4444', 'Hà Nội mùa thu đẹp quá'],
+];
+
+function makeComments(count) {
+  return Array.from({ length: count }, (_, i) => {
+    const [author, color, text] = COMMENT_TEMPLATES[i % COMMENT_TEMPLATES.length];
+    return {
+      id: `c${i + 1}`,
+      author_name: author,
+      avatar_color: color,
+      text,
+      // Every third comment is general (no timestamp); the rest pop up on the screen.
+      timestamp: i % 3 === 2 ? null : (1 + i * 3.5) % DURATION,
+    };
+  });
+}
+
+let posterCache = null;
+function getPosters() {
+  if (!posterCache) {
+    posterCache = ['#ff3b1f', '#3b82f6', '#22c55e'].map((color) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 270;
+      canvas.height = 480;
+      const g = canvas.getContext('2d');
+      const grad = g.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, '#050608');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, canvas.width, canvas.height);
+      return canvas;
+    });
+  }
+  return posterCache;
+}
+
+function filterByTab(comments, tab) {
+  if (tab === 'sync') return comments.filter((c) => c.timestamp !== null);
+  if (tab === 'general') return comments.filter((c) => c.timestamp === null);
+  return comments;
+}
+
+function mockSource(mock, s) {
+  return { paused: !mock.playing, muted: mock.muted, currentTime: s.time, duration: DURATION, kind: KINDS[mock.kind] };
+}
+
+function dockOptions(mock, s) {
+  return {
+    source: mockSource(mock, s),
+    itemState: { available: true },
+    sceneMode: mock.dock === 'EARTH' ? 'earth' : 'reels',
+    packMode: mock.dock === 'PACK',
+  };
+}
+
+function drawPanel(key, ctx, mock, comments, s, now) {
+  if (key === 'DOCK') {
+    UI.renderControlsCanvas(ctx, {
+      ...dockOptions(mock, s),
+      packContext: mock.dock === 'PACK' ? { title: 'TOKYO AFTER DARK', queueOpen: false } : null,
+      playlist: PLAYLIST,
+      idx: s.idx,
+      item: PLAYLIST[s.idx],
+      comments,
+      hoveredButton: s.hover.DOCK,
+      pressedButton: s.pressed,
+      isCurved: mock.curve !== 'FLAT',
+      curvatureMode: CURVES[mock.curve],
+      lockToViewer: mock.lock,
+      autoNext: mock.autoNext,
+      earth: mock.dock === 'EARTH' ? EARTH_STATUS : null,
+      notificationText: s.note,
+      notificationUntil: s.noteUntil,
+      stereo: mock.stereo.toLowerCase(),
+    });
+  } else if (key === 'COMMENTS') {
+    UI.renderCommentsPanelCanvas(ctx, {
+      comments,
+      cPanelTab: s.tab,
+      cPanelScrollY: s.scroll,
+      cPanelHover: s.hover.COMMENTS,
+      cPanelHighlightId: s.highlight,
+      user: null,
+      currentTime: s.time,
+    });
+  } else if (key === 'OVERLAY') {
+    s.overlayRegions = UI.renderOverlayCanvas(ctx, {
+      comments,
+      currentTime: s.time,
+      overlayHoverId: s.hover.OVERLAY,
+    }) || [];
+  } else if (key === 'GUIDE') {
+    UI.renderGuideCanvas(ctx);
+  } else if (key === 'EARTH CARD') {
+    const ready = mock.card === 'READY';
+    ctx.clearRect(0, 0, SIZES[key].w, SIZES[key].h);
+    UI.renderEarthPreviewCanvas(ctx, {
+      location: EARTH_LOCATION,
+      earthPreviewStatus: mock.card === 'EMPTY' ? 'idle' : mock.card.toLowerCase(),
+      earthPreviewItems: mock.card === 'EMPTY' ? [] : PLAYLIST,
+      earthPreviewIndex: Math.floor(now / 4000) % PLAYLIST.length,
+      earthPreviewPosters: ready ? getPosters() : [],
+      earthPreviewHover: s.hover['EARTH CARD'],
+      reducedMotion: false,
+      time: now,
+    });
+  }
+}
+
+// Flat, pixel-exact view of the in-headset canvas panels with mock reel
+// state. Draws with the same vr_ui_canvas.js renderers and hit tests the
+// engine uploads as textures, so what you tune here is what the Quest shows.
+export default function VRPanelWorkbench() {
+  const [mock, setMock] = useState({
+    panel: 'ALL',
+    dock: 'REELS',
+    kind: 'VIDEO',
+    playing: false,
+    muted: true,
+    curve: 'DOME',
+    stereo: 'MONO',
+    lock: true,
+    autoNext: true,
+    comments: '6',
+    card: 'READY',
+    res: '2× CRISP',
+    zoom: '75%',
+  });
+  const [lastAction, setLastAction] = useState('—');
+  const comments = useMemo(() => makeComments(Number(mock.comments)), [mock.comments]);
+  const live = useRef({ mock, comments });
+  live.current = { mock, comments };
+  const interact = useRef({
+    time: 3,
+    idx: 0,
+    hover: { ...IDLE_HOVER },
+    pressed: -1,
+    tab: 'all',
+    scroll: 0,
+    highlight: null,
+    note: '',
+    noteUntil: 0,
+    overlayRegions: [],
+  });
+  const canvases = useRef({});
+  const stageRef = useRef(null);
+
+  const set = (key) => (value) => setMock((m) => ({ ...m, [key]: value }));
+
+  const scrollComments = (delta) => {
+    const s = interact.current;
+    const listH = UI.CP_LIST_BOTTOM - UI.CP_LIST_TOP;
+    const contentH = filterByTab(live.current.comments, s.tab).length * (UI.CP_ITEM_H + UI.CP_ITEM_GAP);
+    s.scroll = Math.max(0, Math.min(Math.max(0, contentH - listH), s.scroll + delta));
+  };
+
+  useEffect(() => {
+    let frame = 0;
+    let last = performance.now();
+    let lastError = '';
+    const tick = (now) => {
+      frame = requestAnimationFrame(tick);
+      const { mock: m, comments: list } = live.current;
+      const s = interact.current;
+      if (m.playing) s.time = (s.time + (now - last) / 1000) % DURATION;
+      last = now;
+      for (const [key, canvas] of Object.entries(canvases.current)) {
+        const ctx = canvas.getContext('2d');
+        const k = canvas.width / SIZES[key].w;
+        ctx.setTransform(k, 0, 0, k, 0, 0);
+        try {
+          drawPanel(key, ctx, m, list, s, now);
+        } catch (error) {
+          const message = `${key}: ${error?.stack || error}`;
+          if (message !== lastError) console.error('[VR workbench]', message);
+          lastError = message;
+        }
+      }
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  // Native listener: React's wheel handler is passive and cannot stop the page scroll.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    const onWheel = (event) => {
+      if (event.target.dataset?.panel !== 'COMMENTS') return;
+      event.preventDefault();
+      scrollComments(event.deltaY);
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!UI) return null;
+
+  const toNative = (event, key) => {
+    const el = event.currentTarget;
+    return [
+      event.nativeEvent.offsetX * (SIZES[key].w / el.clientWidth),
+      event.nativeEvent.offsetY * (SIZES[key].h / el.clientHeight),
+    ];
+  };
+
+  const hitTest = (key, x, y) => {
+    const s = interact.current;
+    const { mock: m, comments: list } = live.current;
+    if (key === 'DOCK') return UI.resolveControlsHit(x, y, dockOptions(m, s));
+    if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll });
+    if (key === 'OVERLAY') return UI.resolveOverlayCommentAt(x, y, s.overlayRegions);
+    if (key === 'EARTH CARD') return UI.resolveEarthPreviewHit(x, y);
+    return null;
+  };
+
+  const clampTime = (t) => Math.max(0, Math.min(DURATION, t));
+
+  const act = (key, hit, x) => {
+    const s = interact.current;
+    if (key === 'DOCK') {
+      const btn = UI.CTRL_BUTTONS[hit];
+      if (!btn) return;
+      const a = btn.action;
+      if (a === 'play') setMock((m) => ({ ...m, playing: !m.playing }));
+      else if (a === 'mute') setMock((m) => ({ ...m, muted: !m.muted }));
+      else if (a === 'lock') setMock((m) => ({ ...m, lock: !m.lock }));
+      else if (a === 'mode') setMock((m) => ({ ...m, autoNext: !m.autoNext }));
+      else if (a === 'curve') setMock((m) => ({ ...m, curve: CURVE_ORDER[(CURVE_ORDER.indexOf(m.curve) + 1) % CURVE_ORDER.length] }));
+      else if (a === 'earth') setMock((m) => ({ ...m, dock: m.dock === 'EARTH' ? 'REELS' : 'EARTH' }));
+      else if (a === 'prev' || a === 'next') {
+        s.idx = (s.idx + (a === 'next' ? 1 : PLAYLIST.length - 1)) % PLAYLIST.length;
+        s.time = 0;
+      } else if (a === 'rew' || a === 'fwd') s.time = clampTime(s.time + (a === 'fwd' ? 5 : -5));
+      else if (a === 'seek') s.time = clampTime(((x - btn.x) / btn.w) * DURATION);
+      else {
+        s.note = `${btn.label} TAPPED`;
+        s.noteUntil = performance.now() + 2200;
+      }
+      setLastAction(`DOCK › ${a}`);
+    } else if (key === 'COMMENTS' && hit) {
+      if (hit.startsWith('tab:')) {
+        s.tab = hit.slice(4);
+        s.scroll = 0;
+      } else if (hit === 'scrollup' || hit === 'scrolldown') {
+        scrollComments((hit === 'scrollup' ? -1 : 1) * (UI.CP_ITEM_H + UI.CP_ITEM_GAP));
+      } else if (hit.startsWith('seek:')) {
+        const c = live.current.comments.find((item) => item.id === hit.slice(5));
+        if (c) {
+          s.time = c.timestamp;
+          s.highlight = c.id;
+        }
+      }
+      setLastAction(`COMMENTS › ${hit}`);
+    } else if (key === 'OVERLAY' && hit) {
+      setLastAction(`OVERLAY › ${hit}`);
+    } else if (key === 'EARTH CARD' && hit) {
+      setLastAction(`EARTH CARD › ${hit}`);
+    }
+  };
+
+  const pointerProps = (key) => ({
+    onPointerMove: (event) => {
+      const [x, y] = toNative(event, key);
+      interact.current.hover[key] = hitTest(key, x, y) ?? IDLE_HOVER[key];
+    },
+    onPointerLeave: () => {
+      interact.current.hover[key] = IDLE_HOVER[key];
+      interact.current.pressed = -1;
+    },
+    onPointerDown: (event) => {
+      if (key === 'DOCK') interact.current.pressed = hitTest(key, ...toNative(event, key));
+    },
+    onPointerUp: () => { interact.current.pressed = -1; },
+    onClick: (event) => {
+      const [x, y] = toNative(event, key);
+      act(key, hitTest(key, x, y), x);
+    },
+  });
+
+  const res = mock.res.startsWith('2') ? 2 : 1;
+  const zoom = parseInt(mock.zoom, 10) / 100;
+  const shown = mock.panel === 'ALL' ? PANEL_KEYS : [mock.panel];
+
+  return (
+    <div className="sx-vr-workbench">
+      <div className="sx-immersive-preview-toolbar" aria-label="Panel workbench controls">
+        <Segmented ariaLabel="Panel" options={['ALL', ...PANEL_KEYS]} value={mock.panel} onChange={set('panel')} />
+        <Segmented ariaLabel="Render resolution" options={['1× TEXTURE', '2× CRISP']} value={mock.res} onChange={set('res')} />
+        <Segmented ariaLabel="Zoom" options={['50%', '75%', '100%', '150%']} value={mock.zoom} onChange={set('zoom')} />
+      </div>
+      <div className="sx-immersive-preview-toolbar" aria-label="Mock reel state">
+        <Segmented ariaLabel="Dock variant" options={['REELS', 'PACK', 'EARTH']} value={mock.dock} onChange={set('dock')} />
+        <Segmented ariaLabel="Source kind" options={Object.keys(KINDS)} value={mock.kind} onChange={set('kind')} />
+        <Segmented ariaLabel="Curvature" options={CURVE_ORDER} value={mock.curve} onChange={set('curve')} />
+        <Segmented ariaLabel="Stereo" options={['MONO', 'SBS', 'TB']} value={mock.stereo} onChange={set('stereo')} />
+        <Segmented ariaLabel="Comment count" options={['0', '3', '6', '12']} value={mock.comments} onChange={set('comments')} />
+        <Segmented ariaLabel="Earth card" options={['READY', 'LOADING', 'ERROR', 'EMPTY']} value={mock.card} onChange={set('card')} />
+        <ToggleRow label="PLAYING" checked={mock.playing} onChange={set('playing')} />
+        <ToggleRow label="MUTED" checked={mock.muted} onChange={set('muted')} />
+        <ToggleRow label="LOCKED" checked={mock.lock} onChange={set('lock')} />
+        <ToggleRow label="AUTO NEXT" checked={mock.autoNext} onChange={set('autoNext')} />
+      </div>
+      <div className="sx-vr-workbench-readout">LAST ACTION: <strong>{lastAction}</strong></div>
+      <div className="sx-vr-workbench-stage" ref={stageRef}>
+        {shown.map((key) => (
+          <figure key={key} className="sx-vr-workbench-panel">
+            <canvas
+              ref={(el) => {
+                if (el) canvases.current[key] = el;
+                else delete canvases.current[key];
+              }}
+              data-panel={key}
+              className={`sx-vr-workbench-canvas${key === 'OVERLAY' ? ' sx-vr-workbench-canvas--overlay' : ''}`}
+              width={SIZES[key].w * res}
+              height={SIZES[key].h * res}
+              style={{ width: SIZES[key].w * zoom, height: SIZES[key].h * zoom }}
+              {...pointerProps(key)}
+            />
+            <figcaption>{key} · {SIZES[key].w}×{SIZES[key].h} PX</figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}

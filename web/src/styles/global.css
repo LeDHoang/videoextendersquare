@@ -7609,6 +7609,98 @@ button.sx-dash-tile:focus-visible { background: var(--sx-surface-2); }
   }
 }
 
+/* Layout sliders under the 3D preview (preview-only engine tuning). */
+.sx-immersive-tuning {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sx-4);
+  margin: var(--sx-4) 0;
+  padding: var(--sx-3);
+  border: 1px solid var(--sx-rule);
+  background: var(--sx-surface-2);
+}
+
+.sx-immersive-tuning-sliders {
+  display: grid;
+  gap: var(--sx-2);
+}
+
+.sx-immersive-tuning-row {
+  display: grid;
+  grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) 4.5rem;
+  align-items: center;
+  gap: var(--sx-3);
+  font: 700 11px/1.2 var(--sx-font-mono);
+  letter-spacing: 0.04em;
+}
+
+.sx-immersive-tuning-row input { width: 100%; accent-color: var(--sx-accent); }
+.sx-immersive-tuning-row output { text-align: right; font-variant-numeric: tabular-nums; }
+
+.sx-immersive-tuning-out {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sx-3);
+  min-width: 0;
+}
+
+.sx-immersive-tuning-out pre {
+  margin: 0;
+  padding: var(--sx-3);
+  overflow-x: auto;
+  border: 1px solid var(--sx-rule);
+  background: #050608;
+  font: 12px/1.6 var(--sx-font-mono);
+}
+
+@media (max-width: 960px) {
+  .sx-immersive-tuning { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Flat VR panel workbench: the in-headset canvas panels at native pixels. */
+.sx-vr-workbench .sx-immersive-preview-toolbar { margin: 0 0 var(--sx-2); }
+
+.sx-vr-workbench-readout {
+  margin: var(--sx-3) 0;
+  font: 700 11px/1.2 var(--sx-font-mono);
+  letter-spacing: 0.04em;
+}
+
+.sx-vr-workbench-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sx-4);
+  padding: var(--sx-4);
+  overflow-x: auto;
+  border: 1px solid var(--sx-rule-strong);
+  background: #020612;
+}
+
+.sx-vr-workbench-panel {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sx-2);
+}
+
+.sx-vr-workbench-panel figcaption {
+  font: 700 10px/1 var(--sx-font-mono);
+  letter-spacing: 0.06em;
+  color: var(--sx-ink-3);
+}
+
+.sx-vr-workbench-canvas {
+  display: block;
+  max-width: none;
+  cursor: pointer;
+}
+
+/* The overlay is transparent in-headset; stand in for the reel behind it. */
+.sx-vr-workbench-canvas--overlay {
+  background: linear-gradient(160deg, #3a2a52 0%, #17324a 45%, #0b1016 100%);
+}
+
 /* ─── Explore chrome (Explore / Tag / Location pages) ─────────
    Header row, telemetry strip, chip row and toolbar shared by the three
    explore-style pages. Components live in components/explore/ExploreChrome.jsx. */
