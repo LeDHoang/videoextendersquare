@@ -104,6 +104,43 @@ Per-eye meshes already give true stereo.
   - scene UI such as comments, controls and glow cannot be depth-mixed over it without hole-punching;
   - it bypasses the existing black-flash and first-frame fixes.
 
+## MAKE 3D — 2D-to-3D conversion
+
+Branch: `feat/convert-to-3d` (cut from `3dreels`). A signed-in user turns a square 2D upload or a finished extend render into a full SBS post. It is free, runs on this server, and is off unless `SX_STEREO_CONVERT_ENABLED` is set **and** the packages in `requirements-3d.txt` are installed. `/api/config` reports both as `features.stereo_convert`.
+
+- **Recipe (W8T, validated against Owl3D in the `owdl3d-reword` study, ledger §4.14).** `pipeline/spatial_worker.py`:
+  - Depth comes from Video-Depth-Anything-Small (`vits`, Apache-2.0 code and weights). The code is vendored in `pipeline/third_party/video_depth_anything/` (see its `VENDORED.md`). The checkpoint downloads from Hugging Face on first use into `.models/`, relative to the server's working directory.
+  - Shots split at an ffmpeg scene score ≥ 0.4. Shots under 12 frames merge into a neighbour. Depth runs once per shot, so the 32-frame window never spans a cut. Each shot is normalized by its own 2nd–98th percentile.
+  - Per frame: a 5×5 dilate of near depth, bilinear upsampling, a forward softmax splat (weight `exp(20·near)`) and a nearest-valid hole fill.
+  - Far content shifts right by 1.3867% of the eye width (behind the screen). The nearest content shifts left by 0.6% (`POP_OUT`, slightly in front of it), and the screen plane sits at about 70% nearness.
+  - **Why pop-out (2026-10-23).** W8T itself keeps everything behind the screen, with the nearest content on the screen plane. On the Quest 3S that read as comfortable but too weak. Disparity measured on the outputs used the full 1.4% budget, so it was not a bug.
+    - In a headset A/B on a 3840² clip, three variants were compared: W8T as is, pop-out, and pop-out with a near-weighted curve (γ 1.6). Pop-out was preferred.
+    - Pop-out widens the per-frame disparity spread by about 50% (0.99 → 1.52% of the eye). The far end stays the same.
+  - **Resolution matters more than depth here.** On a 720² source the A/B variants looked the same, because the eye was only 700 px. Quest 3S shows about 20 px per degree, so the default screen of about 84° needs about 1700 px per eye to look sharp.
+  - The render steps are numpy + OpenCV only, so CI tests them without torch.
+- **Device.** cuda > mps > cpu. fp32 everywhere except CUDA, because fp16 gives all-NaN depth on MPS. One depth pass runs at a time per process, and the model is loaded once per process.
+- **Output.** `eye_geometry` crops the parallax edge strip, an even `ceil(0.013867·W)` px, from all four sides of both eyes. The eye stays square, and each eye is capped at 2048 px (`VR_STEREO_EYE_CAP`). A 1080² source gives a 1048² eye, 2096×1048 SBS.
+  - **Video:** H.264 (libx264 crf 20 superfast, yuv420p, bt709 tags, faststart), source audio copied, one output frame per source frame. It is already within the stereo cap, so publish makes no `-preview.mp4`.
+  - **Image:** EXIF-transposed, then written as JPEG q95.
+- **API.** `POST /api/stereo/convert` takes `{kind: "image"|"video", stage_id | job_id}`. It needs a signed-in user plus CSRF and origin checks.
+  - It returns an ordinary image/video job, so progress, cancel, result and download use `/api/{kind}/jobs/{id}`. The job takes a queue slot. The limit is 10 converts per user per hour.
+  - Errors: 404 when the flag is off; 503 `STEREO_CONVERT_UNAVAILABLE` when the packages are missing; 400 `WRONG_KIND`, `UNREADABLE_SOURCE`, `NOT_SQUARE`, `TOO_SMALL` (under 68×68) or `SOURCE_TOO_LONG` (over 60 s); the usual 403/429/503 for ownership, rate limit and a full queue.
+- **Publish.** The result carries `stereo_layout: "sbs"`. Publish sends the convert `job_id` with that layout (`uploads._check_stereo_pointer`); any other layout is 422. The post then goes through the normal stereo path above (mono rendition, poster, explore preview), with `source="converted"`.
+- **Upload Studio.** MAKE 3D is a third path for an already-square upload, next to SHARE DIRECTLY and EXTEND ANYWAY. It also appears once an extend render finishes. Either way it adds a MAKE 3D section with its own job runner, and the post summary reads `3D SIDE-BY-SIDE · MAKE 3D`.
+- **Limits.**
+  - Only square sources, a single image (no slideshows), and sources that are not already stereo.
+  - Videos up to 60 s, since a whole clip's depth-resolution frames are held in memory.
+  - Strength is fixed at 1.0 for users. Admin `/api/reels/spatialize` keeps its 0–2 strength and now shares the 60 s cap and the H.264 output.
+  - HDR (PQ/HLG) sources are not tone-mapped. Untagged sources are read as bt709.
+  - Image depth uses a single-frame pass (T=1). It correlates 0.95–0.99 with the 32-frame padded path and is about 40× faster on CPU.
+- **On-device check (Quest 3S, 2026-10-23).** Three MAKE 3D posts (square video, square image, extend render) were checked in VR on the isolated stack (backend :8011, Vite :5176, `adb reverse`).
+  - All three play the full SBS file with `textureStereo: sbs` on the 4096×2048 canvas. The left-eye mesh is on layer 1 at offset (0,0) and the right-eye mesh on layer 2 at (0.5,0). Both are visible, there are no render errors, and it renders at about 90 fps.
+  - The Metacam capture shows one undoubled image with the `3D SBS` badge.
+  - A person in the headset rated the depth comfortable but weaker than wanted.
+  - **Capture note.** On this OS build `adb exec-out screencap` returns only the passthrough camera while an immersive session runs, so it cannot prove per-eye pixels. Use the meta-vr Metacam screenshot (composited view) together with `__test.getStereoState()`.
+  - **Allow prompt.** The "Allow … immersive experiences?" prompt no longer accepts injected adb taps, so a person has to press Allow once per origin.
+- **Server.** Production keeps `SX_STEREO_CONVERT_ENABLED=0` and the Docker image has no torch. See the VPS decision in `docs/to-beta.md` (AI inference).
+
 ## Limits / not supported
 
 - **Not supported:**
@@ -112,7 +149,7 @@ Per-eye meshes already give true stereo.
   - Apple MV-HEVC spatial video;
   - 180°/360° projections.
 - **Stereo publish restrictions:**
-  - It must use the as-is path (`stage_id`). Extended (`job_id`) outputs are always mono.
+  - It must use the as-is path (`stage_id`) or a MAKE 3D job (`job_id`) in that job's layout (`sbs`). Extended (`job_id`) outputs are always mono.
   - Every slide in a stereo slideshow must share the same layout geometry.
 - **The layout cannot be edited after publish.**
 - **Square eyes only (product decision, 2026-10-18).** 3D stays limited to full SBS/TB with square eyes (an exact 2:1 or 1:2 frame). Non-square SBS such as 3840×1080 (16:9 per eye) stays mono and gets no 3D toggle.

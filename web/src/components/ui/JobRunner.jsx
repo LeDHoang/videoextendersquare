@@ -50,7 +50,17 @@ function CancelJobButton({ jobId, kind }) {
 // onSettled(job) fires once on any terminal state (complete, failed, cancelled).
 // showMedia={false} keeps the status + downloads but leaves the rendered
 // media to the caller (the Upload Studio shows it on its stage).
-export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMedia = true }) {
+// doneLabel / downloadLabel name a job that is not a 4K square render.
+export default function JobRunner({
+  jobId,
+  name,
+  kind,
+  onDone,
+  onSettled,
+  showMedia = true,
+  doneLabel = '✓ 4K SQUARE COMPLETE',
+  downloadLabel = '↓ DOWNLOAD 4K MASTER',
+}) {
   const { job, error } = useSSE(`/api/${kind}/jobs/${jobId}/stream`);
   const doneRef = useRef(false);
   const settledRef = useRef(false);
@@ -98,7 +108,7 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
           <span className="sx-job-name" title={name}>
             {name}
           </span>
-          <span className="sx-job-status sx-done">✓ 4K SQUARE COMPLETE</span>
+          <span className="sx-job-status sx-done">{doneLabel}</span>
         </div>
 
         {!showMedia ? null : kind === 'image' ? (
@@ -127,7 +137,7 @@ export default function JobRunner({ jobId, name, kind, onDone, onSettled, showMe
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 12 }}>
           <a className="sx-download" href={job.result.download_url} download>
-            <Emoji text="↓ DOWNLOAD 4K MASTER" />
+            <Emoji text={downloadLabel} />
           </a>
           {job.result.preview_url && job.result.preview_url !== job.result.download_url ? (
             <a

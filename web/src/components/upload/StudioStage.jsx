@@ -201,12 +201,14 @@ export default function StudioStage({
   }, [resultUrl, selected?.key]);
 
   const showExtended = view === 'extended' && resultUrl;
+  // A MAKE 3D result is a side-by-side pair; the stage shows its left eye.
+  const resultStereo = result?.stereo_layout || null;
   // 3D stereo uploads show their left eye filling the square, as 2D views will.
   const stereoEye = stereo && geometry ? stereoEyeSize(stereo, geometry.width, geometry.height) : null;
   const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
-    ? `EXTENDED MASTER (${MASTER_SIDE}×${MASTER_SIDE})`
+    ? resultStereo ? `3D ${STEREO_LABELS[resultStereo]} · LEFT EYE` : `EXTENDED MASTER (${MASTER_SIDE}×${MASTER_SIDE})`
     : stereoEye
       ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
       : isSlideshow
@@ -228,7 +230,7 @@ export default function StudioStage({
                 disabled={option === 'extended' && !resultUrl}
                 onClick={() => setView(option)}
               >
-                {option.toUpperCase()}
+                {option === 'extended' && resultStereo ? '3D' : option.toUpperCase()}
               </button>
             ))}
           </div>
@@ -259,7 +261,14 @@ export default function StudioStage({
 
           {selected && showExtended ? (
             kind === 'video' ? (
-              <StageVideo src={resultUrl} label={`Rendered square video for ${selected.name}`} onElement={setVideoEl} className="sx-studio-fill" />
+              <StageVideo
+                src={resultUrl}
+                label={resultStereo ? `Left eye of the 3D result for ${selected.name}` : `Rendered square video for ${selected.name}`}
+                onElement={setVideoEl}
+                className={resultStereo ? `sx-studio-fill sx-stereo-${resultStereo}` : 'sx-studio-fill'}
+              />
+            ) : resultStereo ? (
+              <img className={`sx-studio-fill sx-stereo-${resultStereo}`} src={resultUrl} alt={`3D result for ${selected.name} (left eye)`} />
             ) : (
               <img className="sx-studio-fill" src={resultUrl} alt={`Rendered square result for ${selected.name}`} />
             )
@@ -308,7 +317,7 @@ export default function StudioStage({
           {selected && !showExtended && extendPath && upscaleOnly && geometry && !geometry.square ? (
             <span className="sx-studio-flag sx-warn">UPSCALE ONLY · STRETCHED TO 1:1</span>
           ) : null}
-          {showExtended && kind === 'video' && !result.preview_url ? (
+          {showExtended && kind === 'video' && !result.preview_url && !resultStereo ? (
             <span className="sx-studio-flag sx-warn">HEVC MASTER — BROWSER PREVIEW NEEDS AN H.264 PROXY</span>
           ) : null}
 
@@ -342,7 +351,7 @@ export default function StudioStage({
           <StageTransport
             video={videoEl}
             trim={showExtended ? null : trim}
-            status={showExtended ? (result.preview_url ? 'H.264 PROXY' : 'HEVC MASTER') : 'SOURCE'}
+            status={showExtended ? (resultStereo ? '3D H.264' : result.preview_url ? 'H.264 PROXY' : 'HEVC MASTER') : 'SOURCE'}
           />
         ) : null}
 
