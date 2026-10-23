@@ -77,12 +77,12 @@ def test_real_image_depth_puts_a_disc_in_front_of_the_floor(tmp_path):
         pair = np.asarray(sbs.convert("L")).astype(float)
     assert w == 2 * h and metrics["engine"].startswith("W8T (vits")
 
-    # Rows through the disc: the disc (near) barely moves, the floor beside it (far) does.
+    # Rows through the disc: the disc (near) moves least, the floor beside it (far) moves right.
     left, right, rows = pair[:, : w // 2], pair[:, w // 2:], slice(175, 225)
     disc_shift = _horizontal_shift(left, right, rows, slice(120, 190))
     floor_shift = min(_horizontal_shift(left, right, rows, slice(0, 96)),
                       _horizontal_shift(left, right, rows, slice(212, 308)))
-    assert 0 <= disc_shift and disc_shift + 2 <= floor_shift  # all behind the screen, disc nearest
+    assert 0 < floor_shift and disc_shift + 2 <= floor_shift  # floor behind the screen, disc nearest
 
 
 @real_depth

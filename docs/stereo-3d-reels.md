@@ -112,7 +112,11 @@ Branch: `feat/convert-to-3d` (cut from `3dreels`). A signed-in user turns a squa
   - Depth comes from Video-Depth-Anything-Small (`vits`, Apache-2.0 code and weights). The code is vendored in `pipeline/third_party/video_depth_anything/` (see its `VENDORED.md`). The checkpoint downloads from Hugging Face on first use into `.models/`, relative to the server's working directory.
   - Shots split at an ffmpeg scene score ≥ 0.4. Shots under 12 frames merge into a neighbour. Depth runs once per shot, so the 32-frame window never spans a cut. Each shot is normalized by its own 2nd–98th percentile.
   - Per frame: a 5×5 dilate of near depth, bilinear upsampling, a forward softmax splat (weight `exp(20·near)`) and a nearest-valid hole fill.
-  - All parallax is behind the screen. Far content shifts right by 1.3867% of the eye width; the nearest content does not move.
+  - Far content shifts right by 1.3867% of the eye width (behind the screen). The nearest content shifts left by 0.6% (`POP_OUT`, slightly in front of it), and the screen plane sits at about 70% nearness.
+  - **Why pop-out (2026-10-23).** W8T itself keeps everything behind the screen, with the nearest content on the screen plane. On the Quest 3S that read as comfortable but too weak. Disparity measured on the outputs used the full 1.4% budget, so it was not a bug.
+    - In a headset A/B on a 3840² clip, three variants were compared: W8T as is, pop-out, and pop-out with a near-weighted curve (γ 1.6). Pop-out was preferred.
+    - Pop-out widens the per-frame disparity spread by about 50% (0.99 → 1.52% of the eye). The far end stays the same.
+  - **Resolution matters more than depth here.** On a 720² source the A/B variants looked the same, because the eye was only 700 px. Quest 3S shows about 20 px per degree, so the default screen of about 84° needs about 1700 px per eye to look sharp.
   - The render steps are numpy + OpenCV only, so CI tests them without torch.
 - **Device.** cuda > mps > cpu. fp32 everywhere except CUDA, because fp16 gives all-NaN depth on MPS. One depth pass runs at a time per process, and the model is loaded once per process.
 - **Output.** `eye_geometry` crops the parallax edge strip, an even `ceil(0.013867·W)` px, from all four sides of both eyes. The eye stays square, and each eye is capped at 2048 px (`VR_STEREO_EYE_CAP`). A 1080² source gives a 1048² eye, 2096×1048 SBS.

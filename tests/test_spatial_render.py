@@ -19,18 +19,18 @@ def exact_strength(width: int, shift_px: int) -> float:
     return shift_px / (sw.MAX_SHIFT * width)
 
 
-def test_far_content_shifts_right_and_nearest_stays_put():
+def test_far_content_shifts_right_and_screen_plane_stays_put():
     left = texture(40, 120)
     s = exact_strength(120, 3)
     far = sw.render_right_eye(left, np.zeros((40, 120), np.float32), s)
     assert np.abs(far[:, 3:].astype(int) - left[:, :-3]).max() <= 1
-    near = sw.render_right_eye(left, np.ones((40, 120), np.float32), s)
-    assert np.array_equal(near, left)
+    plane = np.full((40, 120), sw.MAX_SHIFT / (sw.MAX_SHIFT + sw.POP_OUT), np.float32)
+    assert np.abs(sw.render_right_eye(left, plane, s).astype(int) - left).max() <= 1
 
 
-def test_render_never_shifts_left(monkeypatch):
-    """All parallax is behind the screen: every source pixel moves right, by
-    at most the far-plane budget, or not at all."""
+def test_render_shift_stays_within_budget(monkeypatch):
+    """Far pixels move right by at most the far-plane budget, the nearest
+    left by at most the pop-out budget."""
     seen = {}
     real = sw.softsplat
 
@@ -41,8 +41,9 @@ def test_render_never_shifts_left(monkeypatch):
     monkeypatch.setattr(sw, "softsplat", spy)
     near = np.random.default_rng(0).random((30, 90)).astype(np.float32)
     sw.render_right_eye(texture(30, 90), near, 2.0)
-    assert seen["fx"].min() >= 0
+    assert seen["fx"].min() >= -sw.POP_OUT * 90 * 2.0 - 1e-9
     assert seen["fx"].max() <= sw.MAX_SHIFT * 90 * 2.0 + 1e-9
+    assert sw.POP_OUT <= sw.MAX_SHIFT  # eye_geometry's crop covers both edge strips
 
 
 def test_softsplat_only_moves_pixels_right():
@@ -62,8 +63,8 @@ def test_nearer_surface_wins_where_both_land():
     near = np.zeros((32, 100), np.float32)
     near[:, 40:61] = 1.0
     right = sw.render_right_eye(left, near, exact_strength(100, 3))
-    # Background from columns 37..39 lands on 40..42, under the near block.
-    assert (right[:, 40:61] == 255).all()
+    # The block moves left by 1.3 px; background from columns 37..39 lands under it.
+    assert (right[:, 40:59] == 255).all()
     assert np.abs(right[:, 64:].astype(int) - left[:, 61:-3]).max() <= 1
 
 
