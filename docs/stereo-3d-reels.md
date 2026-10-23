@@ -129,6 +129,12 @@ Branch: `feat/convert-to-3d` (cut from `3dreels`). A signed-in user turns a squa
   - Strength is fixed at 1.0 for users. Admin `/api/reels/spatialize` keeps its 0–2 strength and now shares the 60 s cap and the H.264 output.
   - HDR (PQ/HLG) sources are not tone-mapped. Untagged sources are read as bt709.
   - Image depth uses a single-frame pass (T=1). It correlates 0.95–0.99 with the 32-frame padded path and is about 40× faster on CPU.
+- **On-device check (Quest 3S, 2026-10-23).** Three MAKE 3D posts (square video, square image, extend render) were checked in VR on the isolated stack (backend :8011, Vite :5176, `adb reverse`).
+  - All three play the full SBS file with `textureStereo: sbs` on the 4096×2048 canvas. The left-eye mesh is on layer 1 at offset (0,0) and the right-eye mesh on layer 2 at (0.5,0). Both are visible, there are no render errors, and it renders at about 90 fps.
+  - The Metacam capture shows one undoubled image with the `3D SBS` badge.
+  - A person in the headset rated the depth comfortable but weaker than wanted.
+  - **Capture note.** On this OS build `adb exec-out screencap` returns only the passthrough camera while an immersive session runs, so it cannot prove per-eye pixels. Use the meta-vr Metacam screenshot (composited view) together with `__test.getStereoState()`.
+  - **Allow prompt.** The "Allow … immersive experiences?" prompt no longer accepts injected adb taps, so a person has to press Allow once per origin.
 - **Server.** Production keeps `SX_STEREO_CONVERT_ENABLED=0` and the Docker image has no torch. See the VPS decision in `docs/to-beta.md` (AI inference).
 
 ## Limits / not supported
