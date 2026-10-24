@@ -111,7 +111,7 @@
   ];
 
   // Dock header chip shown while a stereo reel is drawn per eye.
-  const STEREO_CHIP = { x: 384, y: 8, w: 64, h: 32 };
+  const STEREO_CHIP = { x: 456, y: 8, w: 64, h: 32 };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -726,7 +726,7 @@
     // 3. Header: ECHO mark + wordmark, then the current title.
     drawIcon(ctx, 'logo', 38, 24, 26, T.ink, T.accent, T.surface);
     ctx.fillStyle = T.ink;
-    ctx.font = `800 15px ${TOKENS.font.mono}`;
+    ctx.font = `900 16.5px ${TOKENS.font.brand}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('ECHO', 58, 24);
@@ -736,20 +736,22 @@
       : dockItemTitle(item);
     if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
     ctx.fillStyle = T.ink2;
-    ctx.font = `12px ${TOKENS.font.mono}`;
+    ctx.font = `13.2px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
 
     // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
     if (stereo === 'sbs' || stereo === 'tb') {
+      // Sits flush against the comment pill; packs step left of the index pill.
+      const chipX = packMode ? STEREO_CHIP.x - 72 : STEREO_CHIP.x;
       ctx.fillStyle = T.accent;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
-      else ctx.rect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h);
+      if (ctx.roundRect) ctx.roundRect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
+      else ctx.rect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h);
       ctx.fill();
       ctx.fillStyle = T.onAccent;
-      ctx.font = `bold 11px ${TOKENS.font.mono}`;
+      ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
-      ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', STEREO_CHIP.x + STEREO_CHIP.w / 2, 24);
+      ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', chipX + STEREO_CHIP.w / 2, 24);
       ctx.textAlign = 'left';
     }
 
@@ -760,7 +762,7 @@
     headerPill(commentBtn, isCommentHover);
     drawIcon(ctx, 'comment', commentBtn.x + 20, 24, 16, isCommentHover ? T.ink : T.ink2);
     ctx.fillStyle = isCommentHover ? T.ink : T.ink2;
-    ctx.font = `bold 12px ${TOKENS.font.mono}`;
+    ctx.font = `bold 13.2px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
 
@@ -780,7 +782,7 @@
     headerPill(earthButton, earthActive);
     drawIcon(ctx, packMode ? 'more' : 'location', earthButton.x + 18, 24, 16, earthActive ? T.ink : T.ink2);
     ctx.fillStyle = earthActive ? T.ink : T.ink2;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
+    ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
     ctx.fillText(
       packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
       earthButton.x + 18 + (earthButton.w - 18) / 2,
