@@ -1474,7 +1474,7 @@ test('dock UV hits resolve to the expected transport action', () => {
     getCurrentItemState: () => ({ available: true }),
   });
   renderer.startPreview(makePreviewCanvas(gl));
-  // Play button center on the 1024x384 dock canvas (x 360-440, y 76-156).
+  // Play button on the 1024x384 dock canvas (x 364-436, y 60-132).
   const play = renderer.__test.controlIndexFromUV({ x: 400 / 1024, y: 1 - 116 / 384 });
   assert.ok(play >= 0);
   renderer.__test.executeControl('play');
@@ -2503,11 +2503,11 @@ test('dock canvas shrinks to fit its live controls and keeps their physical size
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.__runScheduledFrame(16);
   const api = renderer.__test;
-  // Video reels: controls span x 24-776, y 13-346, plus a 24px margin.
-  assert.deepEqual([...api.getTextureFilterInfo().controls.size], [1600, 740]);
+  // Video reels: controls span x 24-776, y 8-236, plus a 24px margin.
+  assert.deepEqual([...api.getTextureFilterInfo().controls.size], [1600, 520]);
   const info = api.getSceneInfo();
   const base = info.screenState.scale;
-  const fitted = api.dockTargetSize(base, 800, 370);
+  const fitted = api.dockTargetSize(base, 800, 260);
   closeTo(info.dock.scale[0], fitted.w / 1.6);
   closeTo(info.dock.scale[1], fitted.h / 0.6);
   closeTo(fitted.w / 800, api.dockTargetSize(base).w / 1024); // same metres per px
@@ -2517,8 +2517,8 @@ test('dock canvas shrinks to fit its live controls and keeps their physical size
   const [x, y, z] = info.dock.pos;
   closeTo(Math.hypot(x - center.x, y - center.y, z - center.z), (api.dockTargetSize(base).h - fitted.h) / 2);
   assert.ok(y > center.y, 'moved up');
-  // Play button center (x 360-440, y 76-156) on the fitted 800x370 canvas.
-  const play = api.controlIndexFromUV({ x: 400 / 800, y: 1 - 116 / 370 });
+  // Play button center (x 364-436, y 60-132) on the fitted 800x260 canvas.
+  const play = api.controlIndexFromUV({ x: 400 / 800, y: 1 - 96 / 260 });
   assert.ok(play >= 0, 'play resolves on the fitted canvas');
   renderer.stopPreview();
 });

@@ -43,57 +43,58 @@
   // Button definitions for the UI controls panel (WebXR HUD Media Control Dock)
   const CTRL_BUTTONS = [
     // Left secondary column (Pills)
-    { label: 'AUTO',  action: 'mode',  x: 24,  y: 66,  w: 156, h: 44 },
-    { label: 'DOME',  action: 'curve', x: 24,  y: 120, w: 156, h: 44 },
+    { label: 'AUTO',  action: 'mode',  x: 24,  y: 56,  w: 156, h: 36 },
+    { label: 'DOME',  action: 'curve', x: 24,  y: 100, w: 156, h: 36 },
 
     // Center primary transport controls
-    { label: '◀◀',   action: 'rew',   x: 228, y: 92,  w: 48,  h: 48 },
-    { label: '⏮',    action: 'prev',  x: 290, y: 88,  w: 56,  h: 56 },
-    { label: '▶',     action: 'play',  x: 360, y: 76,  w: 80,  h: 80 },
-    { label: '⏭',    action: 'next',  x: 454, y: 88,  w: 56,  h: 56 },
-    { label: '▶▶',   action: 'fwd',   x: 524, y: 92,  w: 48,  h: 48 },
+    { label: 'REW',   action: 'rew',   x: 244, y: 74,  w: 44,  h: 44 },
+    { label: 'PREV',  action: 'prev',  x: 300, y: 70,  w: 52,  h: 52 },
+    { label: 'PLAY',  action: 'play',  x: 364, y: 60,  w: 72,  h: 72 },
+    { label: 'NEXT',  action: 'next',  x: 448, y: 70,  w: 52,  h: 52 },
+    { label: 'FWD',   action: 'fwd',   x: 512, y: 74,  w: 44,  h: 44 },
 
     // Right secondary column (Pills)
-    { label: 'LOCK',  action: 'lock',  x: 620, y: 66,  w: 156, h: 44 },
-    { label: 'AUDIO', action: 'mute',  x: 620, y: 120, w: 156, h: 44 },
+    { label: 'LOCK',  action: 'lock',  x: 620, y: 56,  w: 156, h: 36 },
+    { label: 'AUDIO', action: 'mute',  x: 620, y: 100, w: 156, h: 36 },
 
     // Header comment pill → toggles the VR comments panel
-    { label: '💬',    action: 'comments', x: 476, y: 13, w: 64, h: 22 },
+    { label: 'COMMENTS', action: 'comments', x: 528, y: 8, w: 72, h: 32 },
 
     // Open Earth activity mode, or restore All Locations after a location feed.
-    { label: 'EARTH MAP', action: 'earth', x: 622, y: 8, w: 114, h: 32 },
+    { label: 'EARTH MAP', action: 'earth', x: 608, y: 8, w: 128, h: 32 },
 
     // Header exit button
-    { label: '✕',     action: 'exit',  x: 746, y: 13,  w: 30,  h: 22 },
+    { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
 
     // Existing reel actions remain available in both feed and pack playback.
-    { label: 'LIKE',       action: 'like',       x: 24,  y: 184, w: 112, h: 42 },
-    { label: 'SAVE REEL',  action: 'save_reel',  x: 144, y: 184, w: 112, h: 42 },
-    { label: 'SHARE REEL', action: 'share_reel', x: 264, y: 184, w: 112, h: 42 },
-    { label: 'FOLLOW',     action: 'follow',     x: 384, y: 184, w: 112, h: 42 },
-    { label: 'PROFILE',    action: 'profile',    x: 504, y: 184, w: 112, h: 42 },
-    { label: 'REPORT',     action: 'report',     x: 624, y: 184, w: 152, h: 42 },
+    // Icon tiles on one row; it ends above the Earth action row (y 238).
+    { label: 'LIKE',    action: 'like',       x: 24,  y: 188, w: 87, h: 48 },
+    { label: 'SAVE',    action: 'save_reel',  x: 119, y: 188, w: 87, h: 48 },
+    { label: 'SHARE',   action: 'share_reel', x: 214, y: 188, w: 87, h: 48 },
+    { label: 'FOLLOW',  action: 'follow',     x: 309, y: 188, w: 87, h: 48 },
+    { label: 'PROFILE', action: 'profile',    x: 404, y: 188, w: 87, h: 48 },
+    { label: 'REPORT',  action: 'report',     x: 499, y: 188, w: 87, h: 48 },
 
     // Pack-level actions are intentionally separate from reel-level actions.
-    { label: 'SAVE PACK',  action: 'save_pack',  x: 218, y: 238, w: 174, h: 42 },
-    { label: 'SHARE PACK', action: 'share_pack', x: 408, y: 238, w: 174, h: 42 },
+    { label: 'SAVE PACK',  action: 'save_pack',  x: 594, y: 188, w: 87, h: 48 },
+    { label: 'SHARE PACK', action: 'share_pack', x: 689, y: 188, w: 87, h: 48 },
 
-    // Feed-mode collection shortcut (opens the SAVE TO card).
-    { label: 'COLLECT',    action: 'collect',    x: 24,  y: 238, w: 174, h: 42 },
+    // Feed-mode collection shortcut (opens the SAVE TO card); takes both pack slots.
+    { label: 'COLLECT',    action: 'collect',    x: 594, y: 188, w: 182, h: 48 },
 
-    // Earth-mode zoom map controls (docs/earth-zoom-map-plan.md Z1): share
-    // the pack/collect row slots; visible + hittable only in earth scene mode.
+    // Earth-mode zoom map controls (docs/earth-zoom-map-plan.md Z1): their own
+    // row in the Earth dock; visible + hittable only in earth scene mode.
     { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 238, w: 174, h: 42 },
     { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 238, w: 174, h: 42 },
     { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 238, w: 174, h: 42 },
     { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 238, w: 174, h: 42 },
 
-    // Bottom progress scrub track
-    { label: 'TRACK', action: 'seek',  x: 24,  y: 314, w: 752, h: 32 },
+    // Progress scrub track under the transport (times sit either side)
+    { label: 'TRACK', action: 'seek',  x: 84,  y: 148, w: 632, h: 28 },
   ];
 
   // Dock header chip shown while a stereo reel is drawn per eye.
-  const STEREO_CHIP = { x: 404, y: 13, w: 64, h: 22 };
+  const STEREO_CHIP = { x: 384, y: 8, w: 64, h: 32 };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -153,6 +154,168 @@
       ctx.stroke();
     }
     ctx.lineWidth = prevW;
+  }
+
+  // ECHO icon set, ported from web/src/components/icons/svg (24-unit grid) so
+  // the dock matches the 2D reels page. Each op: [svg path, 's'troke|'f'ill,
+  // paint ('i' ink, 'a' accent, 'k' dark core), lineWidth, alpha].
+  const ring = (cx, cy, r) => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
+  const DOCK_ICONS = {
+    // ECHO "Echo Glass" mark, at rest: web/src/components/icons/svg/echo-glass.svg at half scale.
+    logo: [
+      ['M4.5 2L19.5 2L21.5 4L12 12.5L2.5 4ZM4.5 22L19.5 22L21.5 20L12 11.5L2.5 20Z', 's', 'i', 1.7],
+      ['M6.9 5.2L17.1 5.2L18.46 6.56L12 12.34L5.54 6.56ZM6.9 18.8L17.1 18.8L18.46 17.44L12 11.66L5.54 17.44Z', 's', 'i', 0.9, 0.5],
+      ['M8.7 7.6L15.3 7.6L16.18 8.48L12 12.22L7.82 8.48ZM8.7 16.4L15.3 16.4L16.18 15.52L12 11.78L7.82 15.52Z', 's', 'i', 0.65, 0.28],
+      ['M6 12L9 8.75H15L18 12L15 15.25H9Z', 's', 'k', 1.6],
+      ['M6 12L9 8.75H15L18 12L15 15.25H9Z', 'f', 'i'],
+      ['M12 8.75L15.25 12L12 15.25L8.75 12Z', 'f', 'a'],
+      ['M12 10.5L13.5 12L12 13.5L10.5 12Z', 'f', 'k'],
+      ['M12.7 10.2H13.5V11H12.7Z', 'f', 'i'],
+    ],
+    like: [
+      ['M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z', 's', 'i', 1.6],
+      ['M5.5 11.5H18.5M12 8.5V18.5', 's', 'i', 1.2, 0.25],
+      ['M12 9.8L15.2 13L12 16.2L8.8 13Z', 'f', 'a'],
+      [ring(12, 13, 0.9), 'f', 'i'],
+    ],
+    comment: [
+      ['M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z', 's', 'i', 1.5],
+      [ring(17, 7, 2), 'f', 'a'],
+    ],
+    share: [
+      [ring(6, 12, 2.5), 'f', 'k'],
+      [ring(6, 12, 2.5), 's', 'i', 1.5],
+      [ring(6, 12, 0.75), 'f', 'i'],
+      ['M18 3.5L20.5 6L18 8.5L15.5 6ZM18 15.5L20.5 18L18 20.5L15.5 18Z', 'f', 'a'],
+      ['M8.5 10.8L15.5 7.2M8.5 13.2L15.5 16.8', 's', 'i', 1.6],
+      ['M12 8L13.5 11M12 16L13.5 13', 's', 'a', 1.2, 0.8],
+    ],
+    save: [
+      ['M5.5 3.5H18.5V19.5L12 15L5.5 19.5V3.5Z', 's', 'i', 1.6],
+      ['M7.5 7.5H16.5', 's', 'i', 1.2, 0.25],
+      ['M12 4.5V13.5', 's', 'a', 1.8],
+      ['M12 7L14.5 9.5L12 12L9.5 9.5Z', 'f', 'a'],
+      [ring(12, 9.5, 0.75), 'f', 'i'],
+    ],
+    // save.svg bookmark with a vermilion add cross (pick a collection).
+    collect: [
+      ['M3.5 5.5H15.5V20.5L9.5 16.5L3.5 20.5V5.5Z', 's', 'i', 1.6],
+      ['M9.5 8.5V13.5', 's', 'a', 1.8],
+      ['M19.5 2.5V8.5M16.5 5.5H22.5', 's', 'a', 1.8],
+    ],
+    follow: [
+      ['M7.5 4L10.5 2.2L13.5 4V7.5L10.5 9.3L7.5 7.5Z', 'f', 'k'],
+      ['M7.5 4L10.5 2.2L13.5 4V7.5L10.5 9.3L7.5 7.5Z', 's', 'i', 1.5],
+      [ring(10.5, 5.7, 0.8), 'f', 'i'],
+      ['M4 19.5V17L7 13.5H14L17 17V19.5', 's', 'i', 1.6],
+      ['M6.5 17H14.5', 's', 'i', 1.2, 0.3],
+      ['M19.5 8V14M16.5 11H22.5', 's', 'a', 1.8],
+    ],
+    // follow.svg silhouette, centred, without the add cross.
+    profile: [
+      ['M9 4.5L12 2.7L15 4.5V8L12 9.8L9 8Z', 'f', 'k'],
+      ['M9 4.5L12 2.7L15 4.5V8L12 9.8L9 8Z', 's', 'i', 1.5],
+      [ring(12, 6.2, 0.8), 'f', 'a'],
+      ['M5.5 20V17.5L8.5 14H15.5L18.5 17.5V20', 's', 'i', 1.6],
+      ['M8 17.5H16', 's', 'a', 1.4],
+    ],
+    report: [
+      ['M12 2.5L21 18L18.5 21.5H5.5L3 18Z', 's', 'i', 1.6],
+      ['M6.5 18.5H17.5', 's', 'i', 1, 0.3],
+      ['M12 7.5V13.5', 's', 'a', 2],
+      ['M12 15L13.5 16.5L12 18L10.5 16.5Z', 'f', 'a'],
+    ],
+    location: [
+      ['M12 3.5L18 9.5L12 19.5L6 9.5Z', 's', 'i', 1.6],
+      [ring(12, 9.5, 2.2), 'f', 'a'],
+      [ring(12, 9.5, 0.8), 'f', 'i'],
+      ['M8 21H16', 's', 'a', 1.8],
+    ],
+    more: [
+      ['M2.5 12H21.5', 's', 'i', 1, 0.25],
+      ['M6 9.8L8.2 12L6 14.2L3.8 12ZM18 9.8L20.2 12L18 14.2L15.8 12Z', 's', 'i', 1.4],
+      ['M12 9L15 12L12 15L9 12Z', 'f', 'a'],
+    ],
+    'mode-auto': [
+      ['M13 5L18 10L13 15', 's', 'a', 1.5],
+      ['M6 10H18', 's', 'i', 1.5],
+      ['M21 5V15', 's', 'a', 1.5],
+      ['M3 19H21', 's', 'i', 1, 0.4],
+    ],
+    'mode-loop': [
+      ['M17 1L19 3L17 5M7 23L5 21L7 19', 's', 'a', 1.5],
+      ['M19 3V11C19 12.66 17.66 14 16 14H5M5 21V13C5 11.34 6.34 10 8 10H19', 's', 'i', 1.5],
+    ],
+    'sound-audio': [
+      ['M11 5L6 9H3V15H6L11 19V5Z', 's', 'i', 1.5],
+      ['M15 9C16.1 9 17 9.9 17 11V13C17 14.1 16.1 15 15 15', 's', 'i', 1.5],
+      ['M19 7C20.66 7 22 8.34 22 10V14C22 15.66 20.66 17 19 17', 's', 'a', 1.5],
+    ],
+    'sound-mute': [
+      ['M11 5L6 9H3V15H6L11 19V5Z', 's', 'i', 1.5],
+      ['M17 9L21 15M21 9L17 15', 's', 'a', 1.5],
+    ],
+    // Feed is vertical in 2D, so prev/next are the up/down arrows there too.
+    prev: [
+      ['M12 5V19M12 5L7 10M12 5L17 10', 's', 'i', 1.5],
+      ['M5 3H19', 's', 'a', 1.5],
+    ],
+    next: [
+      ['M12 19V5M12 19L7 14M12 19L17 14', 's', 'i', 1.5],
+      ['M5 21H19', 's', 'a', 1.5],
+    ],
+    rew: [
+      ['M11.5 6L5.5 12L11.5 18M18.5 6L12.5 12L18.5 18', 's', 'i', 1.6],
+      ['M3 6V18', 's', 'a', 1.6],
+    ],
+    fwd: [
+      ['M12.5 6L18.5 12L12.5 18M5.5 6L11.5 12L5.5 18', 's', 'i', 1.6],
+      ['M21 6V18', 's', 'a', 1.6],
+    ],
+    exit: [
+      ['M6 6L18 18M18 6L6 18', 's', 'i', 1.8],
+    ],
+  };
+  const DOCK_ICON_PATHS = {};
+
+  // Draws a DOCK_ICONS entry centred on (cx, cy). Runtimes without Path2D
+  // (the node test harness) skip the artwork; layout and labels still draw.
+  function drawIcon(ctx, name, cx, cy, size, ink, accent, core) {
+    const ops = DOCK_ICONS[name];
+    if (!ops || typeof Path2D !== 'function' || !ctx.save) return;
+    ctx.save();
+    ctx.translate(cx - size / 2, cy - size / 2);
+    ctx.scale(size / 24, size / 24);
+    ctx.lineJoin = 'bevel';
+    ctx.lineCap = 'square';
+    for (const [d, mode, paint, width, alpha] of ops) {
+      const color = paint === 'a' ? (accent || TOKENS.hex.accent) : (paint === 'k' ? (core || TOKENS.hex.surface) : ink);
+      const path = DOCK_ICON_PATHS[d] || (DOCK_ICON_PATHS[d] = new Path2D(d));
+      ctx.globalAlpha = alpha == null ? 1 : alpha;
+      if (mode === 'f') {
+        ctx.fillStyle = color;
+        ctx.fill(path);
+      } else {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.stroke(path);
+      }
+    }
+    ctx.restore();
+  }
+
+  // Chamfered button outline: the bevelled corner of the ECHO icon set.
+  function chamferPath(ctx, x, y, w, h, c) {
+    ctx.beginPath();
+    ctx.moveTo(x + c, y);
+    ctx.lineTo(x + w - c, y);
+    ctx.lineTo(x + w, y + c);
+    ctx.lineTo(x + w, y + h - c);
+    ctx.lineTo(x + w - c, y + h);
+    ctx.lineTo(x + c, y + h);
+    ctx.lineTo(x, y + h - c);
+    ctx.lineTo(x, y + c);
+    ctx.closePath();
   }
 
   function wrapTextLines(ctx, text, maxW, maxLines) {
@@ -336,19 +499,18 @@
     ctx.strokeStyle = T.accent;
     ctx.lineWidth = 1;
     ctx.stroke();
+    drawIcon(ctx, 'location', eb.x + 18, eb.y + eb.h / 2, 16, T.ink);
     ctx.fillStyle = T.ink;
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
-    ctx.fillText('EARTH MAP', eb.x + eb.w / 2, eb.y + eb.h / 2);
+    ctx.fillText('EARTH MAP', eb.x + 18 + (eb.w - 18) / 2, eb.y + eb.h / 2);
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
     previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radius);
     ctx.fillStyle = T.surface;
     ctx.fill();
     ctx.strokeStyle = T.accent;
     ctx.stroke();
-    ctx.fillStyle = T.accent;
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('✕', xb.x + xb.w / 2, xb.y + xb.h / 2);
+    drawIcon(ctx, 'exit', xb.x + xb.w / 2, xb.y + xb.h / 2, 14, T.accent);
 
     // Readout tiles
     const tiles = [
@@ -489,31 +651,54 @@
     else ctx.rect(0, 0, size.w, size.h);
     ctx.stroke();
 
-    // 3. Top Telemetry Header
-    ctx.fillStyle = TOKENS.hex.accent;
-    ctx.fillRect(24, 14, 4, 20);
+    const T = TOKENS.hex;
 
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
+    // Square header pill (all header controls share one 32 px height).
+    const headerPill = (b, active) => {
+      ctx.fillStyle = active ? T.surface3 : T.surface2;
+      ctx.strokeStyle = active ? T.accent : T.rule;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(b.x, b.y, b.w, b.h, TOKENS.radius);
+      else ctx.rect(b.x, b.y, b.w, b.h);
+      ctx.fill();
+      ctx.stroke();
+    };
+    // Chamfered body button; returns the ink for its icon and caption.
+    const bodyButton = (b, isHover, isPressed, lit) => {
+      chamferPath(ctx, b.x, b.y, b.w, b.h, 6);
+      ctx.fillStyle = isPressed ? T.bg : ((isHover || lit) ? T.surface3 : T.surface2);
+      ctx.fill();
+      ctx.strokeStyle = (isHover || lit) ? T.accent : T.rule;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      return (isHover || lit) ? T.ink : T.ink2;
+    };
+
+    // 3. Header: ECHO mark + wordmark, then the current title.
+    drawIcon(ctx, 'logo', 38, 24, 26, T.ink, T.accent, T.surface);
+    ctx.fillStyle = T.ink;
+    ctx.font = `800 15px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(packMode ? 'REEL PACK' : '4K VR REELS', 36, 24);
+    ctx.fillText('ECHO', 58, 24);
 
     let dispName = packMode && packContext
       ? (packContext.title || 'UNTITLED PACK')
       : dockItemTitle(item);
     if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
-    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.fillStyle = T.ink2;
     ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
 
     // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
     if (stereo === 'sbs' || stereo === 'tb') {
-      ctx.fillStyle = TOKENS.hex.accent;
+      ctx.fillStyle = T.accent;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
       else ctx.rect(STEREO_CHIP.x, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h);
       ctx.fill();
-      ctx.fillStyle = TOKENS.hex.onAccent;
+      ctx.fillStyle = T.onAccent;
       ctx.font = `bold 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', STEREO_CHIP.x + STEREO_CHIP.w / 2, 24);
@@ -522,70 +707,50 @@
 
     // Comment pill
     const commentBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'comments');
+    const commentBtn = CTRL_BUTTONS[commentBtnIdx];
     const isCommentHover = (hoveredButton === commentBtnIdx);
-    ctx.fillStyle = isCommentHover ? TOKENS.hex.surface3 : TOKENS.hex.surface;
-    ctx.strokeStyle = isCommentHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(476, 13, 64, 22, TOKENS.radius);
-    else ctx.rect(476, 13, 64, 22);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = isCommentHover ? TOKENS.hex.ink : TOKENS.hex.ink2;
-    ctx.font = `11px ${TOKENS.font.mono}`;
+    headerPill(commentBtn, isCommentHover);
+    drawIcon(ctx, 'comment', commentBtn.x + 20, 24, 16, isCommentHover ? T.ink : T.ink2);
+    ctx.fillStyle = isCommentHover ? T.ink : T.ink2;
+    ctx.font = `bold 12px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
-    drawGlyph(ctx, 'chat', 494, 24, 11, ctx.fillStyle);
-    ctx.fillText(String(comments.length || 0), 516, 24);
+    ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
 
-    // Index pill
-    ctx.fillStyle = TOKENS.hex.surface;
-    ctx.strokeStyle = TOKENS.hex.ruleStrong;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(548, 13, 72, 22, TOKENS.radius);
-    else ctx.rect(548, 13, 72, 22);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.ink2;
-    ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, 584, 24);
+    // Index pill: packs only; the reels feed is an endless scroll.
+    if (packMode) {
+      const indexPill = { x: commentBtn.x - 72, y: 8, w: 64, h: 32 };
+      headerPill(indexPill, false);
+      ctx.fillStyle = T.ink2;
+      ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, indexPill.x + indexPill.w / 2, 24);
+    }
 
-    // Earth button
+    // Earth button (QUEUE in pack mode)
     const earthBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
     const earthButton = CTRL_BUTTONS[earthBtnIdx];
     const isEarthHover = (hoveredButton === earthBtnIdx);
     const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
-    ctx.fillStyle = earthActive ? TOKENS.hex.surface3 : TOKENS.hex.surface;
-    ctx.strokeStyle = earthActive ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(earthButton.x, earthButton.y, earthButton.w, earthButton.h, TOKENS.radius);
-    else ctx.rect(earthButton.x, earthButton.y, earthButton.w, earthButton.h);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = earthActive ? TOKENS.hex.ink : TOKENS.hex.ink2;
+    headerPill(earthButton, earthActive);
+    drawIcon(ctx, packMode ? 'more' : 'location', earthButton.x + 18, 24, 16, earthActive ? T.ink : T.ink2);
+    ctx.fillStyle = earthActive ? T.ink : T.ink2;
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
-    ctx.textAlign = 'center';
     ctx.fillText(
       packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
-      earthButton.x + earthButton.w / 2,
-      earthButton.y + earthButton.h / 2
+      earthButton.x + 18 + (earthButton.w - 18) / 2,
+      24
     );
 
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
     const exitBtn = CTRL_BUTTONS[exitBtnIdx];
-    ctx.fillStyle = TOKENS.hex.surface;
-    ctx.strokeStyle = TOKENS.hex.accent;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h, TOKENS.radius);
-    else ctx.rect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.accent;
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('✕', exitBtn.x + exitBtn.w / 2, exitBtn.y + exitBtn.h / 2);
+    headerPill(exitBtn, hoveredButton === exitBtnIdx);
+    drawIcon(ctx, 'exit', exitBtn.x + exitBtn.w / 2, 24, 14, T.accent);
 
-    // Transport buttons (upstream v5.2 pill styles: left-column mode/curve pills
-    // carry a left label + right icon; right-column lock/mute pills show an
-    // active accent while engaged).
+    // Body controls: mode/curve pills left, transport centre, lock/audio pills
+    // right, then a row of icon tiles for reel and pack actions.
+    const ACTION_ICON = {
+      like: 'like', save_reel: 'save', share_reel: 'share', follow: 'follow',
+      profile: 'profile', report: 'report', save_pack: 'save', share_pack: 'share',
+    };
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek') continue;
@@ -593,136 +758,110 @@
 
       const isHover = (hoveredButton === i);
       const isPressed = (pressedButton === i);
+      const cy = btn.y + btn.h / 2;
 
-      // Left column pills (AUTO / DOME)
-      if (btn.action === 'mode' || btn.action === 'curve') {
-        ctx.fillStyle = isPressed ? TOKENS.hex.bg : (isHover ? TOKENS.hex.surface3 : TOKENS.hex.surface);
-        ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
-        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = `bold 11px ${TOKENS.font.mono}`;
-        ctx.fillStyle = isHover ? TOKENS.hex.ink : TOKENS.hex.ink2;
+      // Side pills: icon, then the live state label.
+      if (btn.action === 'mode' || btn.action === 'curve' || btn.action === 'lock' || btn.action === 'mute') {
+        const lit = btn.action === 'lock' && lockToViewer;
+        const ink = bodyButton(btn, isHover, isPressed, lit);
+        let label, icon = null, glyph = null;
+        if (btn.action === 'mode') {
+          label = packMode ? 'AUTHORED' : (autoNext ? 'AUTO' : 'LOOP');
+          icon = (packMode || autoNext) ? 'mode-auto' : 'mode-loop';
+        } else if (btn.action === 'curve') {
+          label = curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT');
+          glyph = 'globe';
+        } else if (btn.action === 'lock') {
+          label = lockToViewer ? 'LOCK' : 'FREE';
+          glyph = lockToViewer ? 'lock' : 'unlock';
+        } else {
+          label = isMuted ? 'MUTED' : 'AUDIO';
+          icon = isMuted ? 'sound-mute' : 'sound-audio';
+        }
+        if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
+        else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, (isHover || lit) ? T.accent : T.ink2);
+        ctx.fillStyle = ink;
+        ctx.font = `bold 12px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        const label = btn.action === 'mode'
-          ? (packMode ? 'AUTHORED' : (autoNext ? 'AUTO' : 'LOOP'))
-          : (curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT'));
-        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
+        ctx.fillText(label, btn.x + 46, cy);
+        continue;
+      }
 
-        ctx.font = '15px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ink2;
-        if (btn.action === 'mode') {
-          ctx.fillText(packMode ? '≡' : '⟳', btn.x + btn.w - 14, btn.y + btn.h / 2);
+      // Primary play/pause: solid vermilion, chamfered like play.svg.
+      if (btn.action === 'play') {
+        chamferPath(ctx, btn.x, btn.y, btn.w, btn.h, 10);
+        ctx.fillStyle = (isPressed || isHover) ? T.accentHi : T.accent;
+        ctx.fill();
+        const cx = btn.x + btn.w / 2;
+        ctx.fillStyle = T.onAccent;
+        ctx.beginPath();
+        if (isPaused) {
+          ctx.moveTo(cx - 8, cy - 13); ctx.lineTo(cx + 13, cy); ctx.lineTo(cx - 8, cy + 13);
+          ctx.closePath();
+          ctx.fill();
         } else {
-          drawGlyph(ctx, 'globe', btn.x + btn.w - 22, btn.y + btn.h / 2, 14, ctx.fillStyle);
+          ctx.fillRect(cx - 10, cy - 12, 6, 24);
+          ctx.fillRect(cx + 4, cy - 12, 6, 24);
         }
         continue;
       }
 
-      // Right column pills (LOCK / AUDIO)
-      if (btn.action === 'lock' || btn.action === 'mute') {
-        const isLockActive = (btn.action === 'lock' && lockToViewer);
-        ctx.fillStyle = isPressed ? TOKENS.hex.bg : ((isLockActive || isHover) ? TOKENS.hex.surface3 : TOKENS.hex.surface);
-        ctx.strokeStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
-        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = `bold 11px ${TOKENS.font.mono}`;
-        ctx.fillStyle = (isLockActive || isHover) ? TOKENS.hex.ink : TOKENS.hex.ink2;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        const label = btn.action === 'lock'
-          ? (lockToViewer ? 'LOCK' : 'FREE')
-          : (isMuted ? 'MUTED' : 'AUDIO');
-        ctx.fillText(label, btn.x + 14, btn.y + btn.h / 2);
-
-        ctx.font = '15px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = (isLockActive || isHover) ? TOKENS.hex.accent : TOKENS.hex.ink2;
-        const glyph = btn.action === 'lock'
-          ? (lockToViewer ? 'lock' : 'unlock')
-          : (isMuted ? 'mute' : 'audio');
-        drawGlyph(ctx, glyph, btn.x + btn.w - 22, btn.y + btn.h / 2, 14, ctx.fillStyle);
+      // Secondary transport (rew, prev, next, fwd)
+      if (btn.action === 'rew' || btn.action === 'prev' || btn.action === 'next' || btn.action === 'fwd') {
+        bodyButton(btn, isHover, isPressed, false);
+        drawIcon(ctx, btn.action, btn.x + btn.w / 2, cy, btn.w >= 52 ? 26 : 22, T.ink);
         continue;
       }
 
-      // Center secondary buttons (rew, prev, next, fwd)
-      if (btn.action !== 'play') {
-        ctx.fillStyle = isPressed ? TOKENS.hex.bg : (isHover ? TOKENS.hex.surface3 : TOKENS.hex.surface);
-        ctx.strokeStyle = isHover ? TOKENS.hex.accent : TOKENS.hex.ruleStrong;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
-        else ctx.rect(btn.x, btn.y, btn.w, btn.h);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = isHover ? TOKENS.hex.ink : TOKENS.hex.ink;
-        ctx.font = (btn.action === 'prev' || btn.action === 'next') ? 'bold 18px sans-serif' : 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        let lbl = btn.label;
-        if (btn.action === 'rew') lbl = '◀◀';
-        if (btn.action === 'fwd') lbl = '▶▶';
-        if (btn.action === 'prev') lbl = '⏮';
-        if (btn.action === 'next') lbl = '⏭';
-        ctx.fillText(lbl, btn.x + btn.w / 2, btn.y + btn.h / 2);
-        continue;
-      }
-
-      // Center primary play/pause glow button
-      ctx.fillStyle = isPressed ? TOKENS.hex.accentHi : TOKENS.hex.accent;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
-      else ctx.rect(btn.x, btn.y, btn.w, btn.h);
-      ctx.fill();
-
-      ctx.fillStyle = TOKENS.hex.onAccent;
-      ctx.font = 'bold 30px sans-serif';
-      ctx.textAlign = 'center';
+      // Action tiles: icon over a mono caption; COLLECT spans two slots with
+      // the caption beside the icon. Liked / saved / followed tiles stay lit.
+      const lit = (btn.action === 'like' && itemState.liked) ||
+        (btn.action === 'save_reel' && itemState.saved) ||
+        (btn.action === 'follow' && itemState.following);
+      const ink = bodyButton(btn, isHover, isPressed, lit);
+      ctx.font = `bold 10px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
-      ctx.fillText(isPaused ? '▶' : '⏸', btn.x + btn.w / 2, btn.y + btn.h / 2);
+      if (btn.action === 'collect') {
+        drawIcon(ctx, 'collect', btn.x + btn.w / 2 - 34, cy, 22, ink);
+        ctx.font = `bold 12px ${TOKENS.font.mono}`;
+        ctx.fillStyle = ink;
+        ctx.textAlign = 'left';
+        ctx.fillText(btn.label, btn.x + btn.w / 2 - 16, cy);
+        continue;
+      }
+      drawIcon(ctx, ACTION_ICON[btn.action], btn.x + btn.w / 2, btn.y + 18, 22, ink);
+      ctx.fillStyle = lit ? T.accentHi : ink;
+      ctx.textAlign = 'center';
+      ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + 38);
     }
 
-    // Scrubber track
+    // Reel | pack divider on the action row
+    if (isControlVisible('save_pack', source, itemState, packMode, sceneMode) &&
+        isControlVisible('like', source, itemState, packMode, sceneMode)) {
+      ctx.fillStyle = T.ruleStrong;
+      ctx.fillRect(589, 196, 1, 32);
+    }
+
+    // Scrubber track with the times either side
     const trackBtn = CTRL_BUTTONS.find((b) => b.action === 'seek');
-    if (trackBtn) {
-      ctx.fillStyle = TOKENS.hex.surface2;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8, TOKENS.radius);
-      else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w, 8);
-      ctx.fill();
+    if (trackBtn && isControlVisible('seek', source, itemState, packMode, sceneMode)) {
+      const ty = trackBtn.y + trackBtn.h / 2;
+      ctx.fillStyle = T.surface3;
+      ctx.fillRect(trackBtn.x, ty - 3, trackBtn.w, 6);
+      ctx.fillStyle = T.accent;
+      ctx.fillRect(trackBtn.x, ty - 3, trackBtn.w * progress, 6);
+      // Square scrubber thumb
+      ctx.fillStyle = T.ink;
+      ctx.fillRect(trackBtn.x + trackBtn.w * progress - 3, ty - 9, 6, 18);
 
-      // Filled progress
-      ctx.fillStyle = TOKENS.hex.accent;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8, TOKENS.radius);
-      else ctx.rect(trackBtn.x, trackBtn.y + 12, trackBtn.w * progress, 8);
-      ctx.fill();
-
-      // Scrubber thumb
-      ctx.fillStyle = TOKENS.hex.ink;
-      ctx.beginPath();
-      ctx.arc(trackBtn.x + trackBtn.w * progress, trackBtn.y + 16, 8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Time texts
-      ctx.fillStyle = TOKENS.hex.ink3;
-      ctx.font = `11px ${TOKENS.font.mono}`;
+      ctx.fillStyle = T.ink3;
+      ctx.font = `12px ${TOKENS.font.mono}`;
+      ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      ctx.fillText(formatTime(currentTime), trackBtn.x, trackBtn.y + 32);
+      ctx.fillText(formatTime(currentTime), 24, ty);
       ctx.textAlign = 'right';
-      ctx.fillText(formatTime(duration), trackBtn.x + trackBtn.w, trackBtn.y + 32);
+      ctx.fillText(formatTime(duration), 776, ty);
     }
 
     // Transient notice (set by showNotification); drawn last so it sits over the controls.
