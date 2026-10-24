@@ -221,6 +221,31 @@
     return true;
   }
 
+  // Earth mode hit-allowlist: the mode toggle, exit, and the zoom-map
+  // actions (Z1). Everything else stays decorative behind the globe.
+  function isDockControlLive(action, options) {
+    const { source = {}, itemState = {}, sceneMode = 'reels', packMode = false } = options;
+    if (sceneMode === 'earth' && action !== 'earth' && action !== 'exit' && !isEarthAction(action)) return false;
+    return isControlVisible(action, source, itemState, packMode, sceneMode);
+  }
+
+  // Dock canvas size fitted to the live controls plus a margin, so the panel
+  // has no dead space (e.g. images and Earth drop the seek row). The canvas
+  // never exceeds CONTROLS_W x CONTROLS_H.
+  const DOCK_MARGIN = 24;
+  function controlsCanvasSize(options = {}) {
+    let right = 0, bottom = 0;
+    for (const btn of CTRL_BUTTONS) {
+      if (!isDockControlLive(btn.action, options)) continue;
+      right = Math.max(right, btn.x + btn.w);
+      bottom = Math.max(bottom, btn.y + btn.h);
+    }
+    return {
+      w: Math.min(CONTROLS_W, right + DOCK_MARGIN),
+      h: Math.min(CONTROLS_H, bottom + DOCK_MARGIN),
+    };
+  }
+
   function truncatePreviewText(value, limit) {
     const text = String(value || '');
     return text.length > limit ? text.slice(0, Math.max(1, limit - 1)) + '…' : text;
@@ -245,7 +270,9 @@
   // ─── Earth Atlas dock ──────────────────────────────────────────────
   // In Earth mode the reels transport (inert behind the globe) is replaced by a
   // purpose-built panel: realm / scale / map-status readouts, a zoom meter and
-  // the four map actions, all in the holo-cyan language of the globe itself.
+  // the four map actions, drawn in the same ECHO language as the reels dock
+  // (flat surface, square corners, rule borders, vermilion for primary/active).
+  // The realm swatch keeps the globe's tier colour as data.
   // Hit rectangles are unchanged (CTRL_BUTTONS); only the drawing differs.
   const EARTH_ICON = {
     earth_open_feed(ctx, cx, cy, c) {
@@ -278,120 +305,120 @@
       pressedButton = -1,
       earth = {},
     } = options;
-    const hasGrad = canGradient(ctx);
-    const accent = earth.tierColor || '#39D7FF';
-    previewRoundRect(ctx, 0, 0, CONTROLS_W, CONTROLS_H, 10);
-    if (hasGrad) {
-      const g = ctx.createLinearGradient(0, 0, 0, CONTROLS_H);
-      g.addColorStop(0, 'rgba(10,24,42,0.97)');
-      g.addColorStop(1, 'rgba(4,9,20,0.98)');
-      ctx.fillStyle = g;
-    } else ctx.fillStyle = 'rgba(8,16,30,0.97)';
+    const T = TOKENS.hex;
+    const size = controlsCanvasSize(options);
+
+    // Container + border (reels dock parity)
+    previewRoundRect(ctx, 0, 0, size.w, size.h, TOKENS.radius);
+    ctx.fillStyle = T.surface;
     ctx.fill();
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = T.accent;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // Header
-    ctx.fillStyle = accent;
+    ctx.fillStyle = T.accent;
     ctx.fillRect(24, 14, 4, 20);
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('EARTH ATLAS', 36, 24);
-    ctx.fillStyle = '#9FB6CE';
+    ctx.fillStyle = T.ink;
     ctx.font = `12px ${TOKENS.font.mono}`;
-    ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 168, 24);
+    ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 144, 24);
 
-    // Mode toggle (active) + exit
+    // Mode toggle (active while in Earth) + exit
     const eIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
     const eb = CTRL_BUTTONS[eIdx];
-    previewRoundRect(ctx, eb.x, eb.y, eb.w, eb.h, 8);
-    ctx.fillStyle = hoveredButton === eIdx ? '#0E5A80' : '#093D5B';
+    previewRoundRect(ctx, eb.x, eb.y, eb.w, eb.h, TOKENS.radius);
+    ctx.fillStyle = T.surface3;
     ctx.fill();
-    ctx.strokeStyle = '#55E7FF';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = T.accent;
+    ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.fillStyle = T.ink;
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText('EARTH MAP', eb.x + eb.w / 2, eb.y + eb.h / 2);
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
-    previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, 6);
-    ctx.fillStyle = TOKENS.hex.surface;
+    previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radius);
+    ctx.fillStyle = T.surface;
     ctx.fill();
-    ctx.strokeStyle = TOKENS.hex.accent;
+    ctx.strokeStyle = T.accent;
     ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.accent;
+    ctx.fillStyle = T.accent;
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('✕', xb.x + xb.w / 2, xb.y + xb.h / 2);
 
     // Readout tiles
     const tiles = [
-      { k: 'REALM', v: earth.tier || 'ORBIT', c: accent },
-      { k: 'SCALE', v: earth.scaleCaption || '—', c: '#E8F6FF' },
-      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? '#FF7A59' : '#7CF0C9' },
+      { k: 'REALM', v: earth.tier || 'ORBIT', c: T.ink, swatch: earth.tierColor || T.accent },
+      { k: 'SCALE', v: earth.scaleCaption || '—', c: T.ink },
+      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? T.accent : T.ink },
     ];
     const tw = 236, th = 96, ty = 70;
     for (let i = 0; i < tiles.length; i++) {
       const tx = 24 + i * (tw + 22);
-      previewRoundRect(ctx, tx, ty, tw, th, 14);
-      ctx.fillStyle = 'rgba(57,215,255,0.07)';
+      previewRoundRect(ctx, tx, ty, tw, th, TOKENS.radius);
+      ctx.fillStyle = T.surface2;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(110,160,200,0.35)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = T.rule;
+      ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = '#7F93AD';
+      let kx = tx + 18;
+      if (tiles[i].swatch) {
+        ctx.fillStyle = tiles[i].swatch;
+        ctx.fillRect(kx, ty + 20, 8, 8);
+        kx += 16;
+      }
+      ctx.fillStyle = T.ink3;
       ctx.font = `bold 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
-      ctx.fillText(tiles[i].k, tx + 20, ty + 24);
+      ctx.fillText(tiles[i].k, kx, ty + 24);
       ctx.fillStyle = tiles[i].c;
       ctx.font = `800 30px ${TOKENS.font.sans}`;
-      ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 20, ty + 62);
+      ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 18, ty + 62);
     }
-    // Zoom meter
+    // Zoom meter (scrubber-style track, vermilion fill)
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
-    ctx.fillStyle = '#7F93AD';
+    ctx.fillStyle = T.ink3;
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.fillText('ZOOM', 24, 190);
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#E8F6FF';
+    ctx.fillStyle = T.ink;
     ctx.fillText(Math.round(zp * 100) + '%', 776, 190);
-    previewRoundRect(ctx, 80, 184, 640, 12, 6);
-    ctx.fillStyle = 'rgba(160,190,220,0.16)';
+    previewRoundRect(ctx, 80, 186, 640, 8, TOKENS.radius);
+    ctx.fillStyle = T.surface2;
     ctx.fill();
     if (zp > 0.005) {
-      previewRoundRect(ctx, 80, 184, Math.max(12, 640 * zp), 12, 6);
-      if (hasGrad) {
-        const zg = ctx.createLinearGradient(80, 0, 720, 0);
-        zg.addColorStop(0, '#39D7FF');
-        zg.addColorStop(0.4, '#4FE3C1');
-        zg.addColorStop(0.7, '#FFC857');
-        zg.addColorStop(1, '#FF8A5B');
-        ctx.fillStyle = zg;
-      } else ctx.fillStyle = accent;
+      previewRoundRect(ctx, 80, 186, Math.max(8, 640 * zp), 8, TOKENS.radius);
+      ctx.fillStyle = T.accent;
       ctx.fill();
     }
 
-    // Action row
+    // Action row: OPEN FEED is the primary (vermilion, like play); the map
+    // actions are secondary buttons; NORTH UP shows engaged like LOCK.
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
       if (!isEarthAction(btn.action)) continue;
       const hover = hoveredButton === i, pressed = pressedButton === i;
       const feed = btn.action === 'earth_open_feed';
       const live = feed ? !!earth.canOpenFeed : true;
-      const tone = feed ? '#FFB11F' : '#55E7FF';
       const lit = btn.action === 'earth_north_up' && earth.northUp;
-      previewRoundRect(ctx, btn.x, btn.y, btn.w, btn.h, 10);
-      ctx.fillStyle = pressed ? 'rgba(4,10,20,0.95)' : (hover || lit ? 'rgba(57,215,255,0.20)' : 'rgba(57,215,255,0.07)');
-      if (feed && live) ctx.fillStyle = hover ? 'rgba(255,177,31,0.30)' : 'rgba(255,177,31,0.14)';
+      const primary = feed && live;
+      previewRoundRect(ctx, btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
+      if (primary) ctx.fillStyle = (pressed || hover) ? T.accentHi : T.accent;
+      else ctx.fillStyle = pressed ? T.bg : ((hover && live) || lit ? T.surface3 : T.surface);
       ctx.fill();
-      ctx.strokeStyle = live ? tone : 'rgba(110,140,170,0.4)';
-      ctx.lineWidth = hover || lit ? 2.5 : 1.5;
-      ctx.stroke();
-      const ink = live ? (hover ? TOKENS.hex.ink : tone) : '#6F8BA6';
-      EARTH_ICON[btn.action](ctx, btn.x + 26, btn.y + btn.h / 2, ink);
+      if (!primary) {
+        ctx.strokeStyle = live && (hover || lit) ? T.accent : (live ? T.ruleStrong : T.rule);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      const ink = primary ? T.onAccent : (!live ? T.inkMuted : T.ink);
+      const iconInk = primary ? T.onAccent : (!live ? T.inkMuted : ((hover || lit) ? T.accent : T.ink2));
+      EARTH_ICON[btn.action](ctx, btn.x + 26, btn.y + btn.h / 2, iconInk);
       ctx.fillStyle = ink;
       ctx.font = `bold 13px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
@@ -445,19 +472,21 @@
       return;
     }
 
+    const size = controlsCanvasSize(options);
+
     // 1. Dark Glass Container Background
     ctx.fillStyle = TOKENS.hex.surface;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, TOKENS.radius);
-    else ctx.rect(0, 0, CONTROLS_W, CONTROLS_H);
+    if (ctx.roundRect) ctx.roundRect(0, 0, size.w, size.h, TOKENS.radius);
+    else ctx.rect(0, 0, size.w, size.h);
     ctx.fill();
 
     // 2. Vermilion Glow Outer Border
     ctx.strokeStyle = TOKENS.hex.accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CONTROLS_W, CONTROLS_H, TOKENS.radius);
-    else ctx.rect(0, 0, CONTROLS_W, CONTROLS_H);
+    if (ctx.roundRect) ctx.roundRect(0, 0, size.w, size.h, TOKENS.radius);
+    else ctx.rect(0, 0, size.w, size.h);
     ctx.stroke();
 
     // 3. Top Telemetry Header
@@ -699,10 +728,10 @@
     // Transient notice (set by showNotification); drawn last so it sits over the controls.
     const nowMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
     if (notificationText && notificationUntil > nowMs) {
-      const stripW = Math.min(CONTROLS_W - 48, 560);
-      const stripX = (CONTROLS_W - stripW) / 2;
+      const stripW = Math.min(size.w - 48, 560);
+      const stripX = (size.w - stripW) / 2;
       const stripH = 36;
-      const stripY = CONTROLS_H - stripH - 12;
+      const stripY = size.h - stripH - 12;
       ctx.fillStyle = TOKENS.hex.surface2;
       ctx.fillRect(stripX, stripY, stripW, stripH);
       ctx.fillStyle = TOKENS.hex.accent;
@@ -719,13 +748,9 @@
 
   // ─── Resolve Controls Hit ──────────────────────────────────────────
   function resolveControlsHit(canvasX, canvasY, options = {}) {
-    const { source = {}, itemState = {}, sceneMode = 'reels', packMode = false } = options;
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
-      // Earth mode hit-allowlist: the mode toggle, exit, and the zoom-map
-      // actions (Z1). Everything else stays decorative behind the globe.
-      if (sceneMode === 'earth' && btn.action !== 'earth' && btn.action !== 'exit' && !isEarthAction(btn.action)) continue;
-      if (!isControlVisible(btn.action, source, itemState, packMode, sceneMode)) continue;
+      if (!isDockControlLive(btn.action, options)) continue;
       if (canvasX >= btn.x && canvasX <= btn.x + btn.w &&
           canvasY >= btn.y && canvasY <= btn.y + btn.h) {
         return i;
@@ -1410,7 +1435,7 @@
   }
 
   // ─── Render Earth Preview ───────────────────────────────────────────
-  // Holo Atlas card: LIVE header, heat meter, one large hero window (poster, or
+  // Location card (ECHO language, matching the comments panel): LIVE header, heat meter, one large hero window (poster, or
   // live video when a decoder frame exists) that plays through the location's
   // reels back to back with story-style segment progress, and an explicit
   // call-to-action. Every state (loading / idle / error) is drawn
@@ -1458,24 +1483,19 @@
     ctx.save();
     previewRoundRect(ctx, x, y, w, h, r);
     ctx.clip();
-    if (canGradient(ctx)) {
-      const g = ctx.createLinearGradient(x, y, x + w, y + h);
-      g.addColorStop(0, '#0B1A2E');
-      g.addColorStop(1, '#050B16');
-      ctx.fillStyle = g;
-    } else ctx.fillStyle = '#071221';
+    ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(x, y, w, h);
     if (phase >= 0 && canGradient(ctx)) {
       // Loading shimmer: a soft diagonal band sweeping across the slot.
       const bx = x - w * 0.4 + ((phase % 1400) / 1400) * w * 1.8;
       const sg = ctx.createLinearGradient(bx, y, bx + w * 0.35, y + h * 0.2);
-      sg.addColorStop(0, 'rgba(85,231,255,0)');
-      sg.addColorStop(0.5, 'rgba(85,231,255,0.16)');
-      sg.addColorStop(1, 'rgba(85,231,255,0)');
+      sg.addColorStop(0, 'rgba(242,243,245,0)');
+      sg.addColorStop(0.5, 'rgba(242,243,245,0.07)');
+      sg.addColorStop(1, 'rgba(242,243,245,0)');
       ctx.fillStyle = sg;
       ctx.fillRect(x, y, w, h);
     } else {
-      ctx.strokeStyle = 'rgba(85,231,255,0.10)';
+      ctx.strokeStyle = TOKENS.hex.rule;
       ctx.lineWidth = 1;
       for (let yy = y + 8; yy < y + h; yy += 14) {
         ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke();
@@ -1483,7 +1503,7 @@
     }
     ctx.restore();
     if (label) {
-      ctx.fillStyle = '#6F8BA6';
+      ctx.fillStyle = TOKENS.hex.inkMuted;
       ctx.font = `700 15px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1506,71 +1526,59 @@
     } = options;
     if (!location) return;
     const W = EARTH_PREVIEW_W, H = EARTH_PREVIEW_H;
+    const T = TOKENS.hex;
     const hasGrad = canGradient(ctx);
     const items = Array.isArray(earthPreviewItems) ? earthPreviewItems.slice(0, 3) : [];
     const active = items.length ? Math.max(0, Math.min(items.length - 1, Number(earthPreviewIndex) || 0)) : 0;
     const heat = Math.max(0, Math.min(1, Number(location.heat) || 0));
 
     ctx.clearRect(0, 0, W, H);
-    // Glass body
-    previewRoundRect(ctx, 4, 4, W - 8, H - 8, 30);
-    if (hasGrad) {
-      const g = ctx.createLinearGradient(0, 0, 0, H);
-      g.addColorStop(0, 'rgba(14,32,54,0.97)');
-      g.addColorStop(1, 'rgba(4,10,22,0.98)');
-      ctx.fillStyle = g;
-    } else ctx.fillStyle = 'rgba(8,30,48,0.98)';
+    // Panel body (comments-panel parity: flat glass, rule border, accent top bar)
+    previewRoundRect(ctx, 0, 0, W, H, TOKENS.radius);
+    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
     ctx.fill();
-    if (hasGrad) {
-      const rg = ctx.createLinearGradient(0, 0, W, H);
-      rg.addColorStop(0, '#55E7FF');
-      rg.addColorStop(0.5, 'rgba(70,110,150,0.8)');
-      rg.addColorStop(1, '#FFB11F');
-      ctx.strokeStyle = rg;
-    } else ctx.strokeStyle = '#55E7FF';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = T.ruleStrong;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
+    ctx.fillStyle = T.accent;
+    ctx.fillRect(0, 0, W, 3);
 
     // Header: LIVE chip + window label
     const pulse = reducedMotion ? 1 : 0.55 + 0.45 * Math.sin(time * 0.006);
-    previewRoundRect(ctx, 28, 26, 78, 28, 14);
-    ctx.fillStyle = 'rgba(255,70,50,0.16)';
+    previewRoundRect(ctx, 28, 26, 78, 28, TOKENS.radius);
+    ctx.fillStyle = T.surface2;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,110,90,0.9)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = T.accent;
+    ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.fillStyle = 'rgba(255,90,70,' + pulse.toFixed(3) + ')';
-    ctx.beginPath(); ctx.arc(46, 40, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#FFD9D2';
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = T.accent;
+    ctx.fillRect(41, 35, 10, 10);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = T.ink;
     ctx.font = `800 14px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('LIVE', 58, 41);
-    ctx.fillStyle = '#7FA2BA';
+    ctx.fillStyle = T.ink3;
     ctx.font = `700 13px ${TOKENS.font.mono}`;
     ctx.textAlign = 'right';
     ctx.fillText('TRENDING · 7 DAYS', W - 30, 41);
 
     // Location name + heat meter
-    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.fillStyle = T.ink;
     ctx.font = `800 34px ${TOKENS.font.sans}`;
     ctx.textAlign = 'left';
     ctx.fillText(truncatePreviewText(location.name || location.slug, 22), 28, 84);
-    ctx.fillStyle = '#9FD8E6';
+    ctx.fillStyle = T.ink2;
     ctx.font = `700 14px ${TOKENS.font.mono}`;
     ctx.fillText(Math.round(heat * 100) + '% HEAT  ·  ' + (Number(location.active_reel_count) || 0) + ' ACTIVE', 28, 118);
-    previewRoundRect(ctx, 300, 112, 184, 10, 5);
-    ctx.fillStyle = 'rgba(160,190,220,0.16)';
+    previewRoundRect(ctx, 300, 113, 184, 8, TOKENS.radius);
+    ctx.fillStyle = T.surface3;
     ctx.fill();
     if (heat > 0.01) {
-      previewRoundRect(ctx, 300, 112, Math.max(10, 184 * heat), 10, 5);
-      if (hasGrad) {
-        const hg = ctx.createLinearGradient(300, 0, 484, 0);
-        hg.addColorStop(0, '#39D7FF');
-        hg.addColorStop(0.55, '#FFC857');
-        hg.addColorStop(1, '#FF5A3C');
-        ctx.fillStyle = hg;
-      } else ctx.fillStyle = '#FFC857';
+      previewRoundRect(ctx, 300, 113, Math.max(8, 184 * heat), 8, TOKENS.radius);
+      ctx.fillStyle = T.accent;
       ctx.fill();
     }
 
@@ -1578,17 +1586,17 @@
     const hx = 28, hy = 144, hw = W - 56, hh = 508;
     const videoLive = previewVideo && previewVideo.readyState >= 2;
     const poster = posterReady(earthPreviewPosters[active]) ? earthPreviewPosters[active] : null;
-    if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, 22);
-    else if (poster) drawCoverRounded(ctx, poster, hx, hy, hw, hh, 22);
+    if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, TOKENS.radius);
+    else if (poster) drawCoverRounded(ctx, poster, hx, hy, hw, hh, TOKENS.radius);
     else {
       const loading = earthPreviewStatus === 'loading' || (items.length > 0 && earthPreviewStatus === 'ready');
-      drawPreviewPlaceholder(ctx, hx, hy, hw, hh, 22, loading && !reducedMotion ? time : -1,
+      drawPreviewPlaceholder(ctx, hx, hy, hw, hh, TOKENS.radius, loading && !reducedMotion ? time : -1,
         earthPreviewStatus === 'error' ? 'PREVIEW UNAVAILABLE'
           : (earthPreviewStatus === 'idle' && !items.length ? 'NO RECENT REELS YET' : ''));
     }
     if (items.length) {
       ctx.save();
-      previewRoundRect(ctx, hx, hy, hw, hh, 22);
+      previewRoundRect(ctx, hx, hy, hw, hh, TOKENS.radius);
       ctx.clip();
       if (hasGrad) {
         const vg = ctx.createLinearGradient(0, hy + hh * 0.5, 0, hy + hh);
@@ -1599,15 +1607,12 @@
       }
       ctx.restore();
       if (!videoLive) {
-        // Play medallion: only while the card is a still (poster/loading);
-        // once the clip is decoding it gets out of the way.
+        // Play tile (the dock's vermilion play button): only while the card
+        // is a still (poster/loading); once the clip is decoding it gets out of the way.
         const cx = hx + hw / 2, cy = hy + hh / 2 - 14;
-        ctx.fillStyle = 'rgba(4,14,28,0.55)';
-        ctx.beginPath(); ctx.arc(cx, cy, 36, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'rgba(190,245,255,0.9)';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-        ctx.fillStyle = '#EFFCFF';
+        ctx.fillStyle = T.accent;
+        ctx.fillRect(cx - 36, cy - 36, 72, 72);
+        ctx.fillStyle = T.onAccent;
         ctx.beginPath();
         ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
         ctx.closePath(); ctx.fill();
@@ -1621,42 +1626,43 @@
       for (let i = 0; i < items.length; i++) {
         const sx = hx + 20 + i * (segW + segGap);
         ctx.fillStyle = 'rgba(255,255,255,0.28)';
-        previewRoundRect(ctx, sx, segY, segW, segH, 2);
+        previewRoundRect(ctx, sx, segY, segW, segH, TOKENS.radius);
         ctx.fill();
         const frac = i < active ? 1 : (i === active ? liveFrac : 0);
         if (frac > 0) {
-          ctx.fillStyle = '#55E7FF';
-          previewRoundRect(ctx, sx, segY, Math.max(segH, segW * frac), segH, 2);
+          ctx.fillStyle = T.accent;
+          previewRoundRect(ctx, sx, segY, Math.max(segH, segW * frac), segH, TOKENS.radius);
           ctx.fill();
         }
       }
       // Item caption + counter
       const cur = items[active] || {};
-      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.fillStyle = T.ink;
       ctx.font = `800 22px ${TOKENS.font.sans}`;
       ctx.textAlign = 'left';
       ctx.fillText(truncatePreviewText(cur.title || cur.filename || 'Untitled reel', 30), hx + 20, hy + hh - 32);
-      previewRoundRect(ctx, hx + hw - 78, hy + 28, 62, 28, 14);
-      ctx.fillStyle = 'rgba(4,14,28,0.72)';
+      previewRoundRect(ctx, hx + hw - 78, hy + 28, 62, 28, TOKENS.radius);
+      ctx.fillStyle = 'rgba(8,9,10,0.78)';
       ctx.fill();
-      ctx.fillStyle = '#BFF5FF';
+      ctx.fillStyle = T.ink;
       ctx.font = `800 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 43);
     }
 
-    // Button: open the feed (amber, live only with reels). Hover brightens it.
+    // Button: open the feed (vermilion primary, live only with reels). Hover brightens it.
     for (const b of EARTH_PREVIEW_BUTTONS) {
       const hot = earthPreviewHover === b.action;
       const live = b.action !== 'feed' || items.length > 0;
-      const rgb = b.action === 'feed' ? '255,177,31' : '85,231,255';
-      previewRoundRect(ctx, b.x, b.y, b.w, b.h, 20);
-      ctx.fillStyle = live ? 'rgba(' + rgb + ',' + (hot ? 0.34 : 0.14) + ')' : 'rgba(110,140,170,0.10)';
+      previewRoundRect(ctx, b.x, b.y, b.w, b.h, TOKENS.radius);
+      ctx.fillStyle = live ? (hot ? T.accentHi : T.accent) : T.surface2;
       ctx.fill();
-      ctx.strokeStyle = live ? 'rgba(' + rgb + ',' + (hot ? 1 : 0.85) + ')' : 'rgba(110,140,170,0.4)';
-      ctx.lineWidth = hot ? 2.5 : 1.5;
-      ctx.stroke();
-      ctx.fillStyle = !live ? '#6F8BA6' : (b.action === 'feed' ? (hot ? '#FFF1D6' : '#FFD58A') : (hot ? '#F2FDFF' : '#A9F0FF'));
+      if (!live) {
+        ctx.strokeStyle = T.rule;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.fillStyle = live ? T.onAccent : T.inkMuted;
       ctx.font = `800 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(b.label, b.x + b.w / 2, b.y + 21);
@@ -1713,6 +1719,7 @@
   return {
     CONTROLS_W,
     CONTROLS_H,
+    controlsCanvasSize,
     GUIDE_W,
     GUIDE_H,
     CPANEL_W,

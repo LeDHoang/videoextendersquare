@@ -868,6 +868,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let controlsCanvas = null;
   let controlsCtx = null;
   let controlsTexture = null;
+  // Logical (pre-UI_PANEL_RES) dock canvas size; shrinks to fit the live
+  // controls (VRUICanvas.controlsCanvasSize).
+  let controlsLogicalW = 1024;
+  let controlsLogicalH = 384;
   let commentsCanvas = null;
   let commentsCtx = null;
   let commentsTexture = null;
@@ -928,6 +932,20 @@ window.WebXRVR = window.WebXRVR || (function () {
   // preview, where panels minified into a laptop window shimmer without mips.
   function applyPanelSampling(tex) {
     return previewHiFi ? applyEarthTileSampling(tex) : applyLinearSampling(tex);
+  }
+
+  // Dock / comments / guide / earth-card canvases are rastered at
+  // UI_PANEL_RES× their logical layout (drawing code keeps logical px via
+  // setTransform) and always mipmapped, so text stays sharp in-headset
+  // without enlarging the panels. The 1024² overlay stays 1×.
+  const UI_PANEL_RES = 2;
+  function createPanelCanvas(w, h) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w * UI_PANEL_RES;
+    canvas.height = h * UI_PANEL_RES;
+    const ctx = canvas.getContext('2d');
+    if (ctx && ctx.setTransform) ctx.setTransform(UI_PANEL_RES, 0, 0, UI_PANEL_RES, 0, 0);
+    return { canvas, ctx };
   }
 
   // ─── Preview sizing & camera ──────────────────────────────────────
@@ -997,10 +1015,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   let layoutTuning = defaultLayoutTuning();
 
-  // Target world sizes (meters) for a given screen base size.
-  function dockTargetSize(base) {
-    const w = base * layoutTuning.dockWidth;
-    return { w, h: w * (384 / 1024) };
+  // Target world sizes (meters) for a given screen base size. dockWidth sizes
+  // the full 1024x384 dock; a smaller fitted canvas keeps the same metres per
+  // canvas pixel so the controls stay the same physical size.
+  function dockTargetSize(base, canvasW = 1024, canvasH = 384) {
+    const mpp = base * layoutTuning.dockWidth / 1024;
+    return { w: mpp * canvasW, h: mpp * canvasH };
   }
   function commentsPanelTargetSize(base) {
     const ui = getUICanvas();
@@ -1305,8 +1325,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     // Legacy-exact dock sizing: earth 1.2, locked DEFAULT_SCALE, else live.
     const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? layoutTuning.screenScale : screenScale);
-    const size = dockTargetSize(base);
+    const size = dockTargetSize(base, controlsLogicalW, controlsLogicalH);
     try { controlsMesh.scale.set(size.w / 1.6, size.h / 0.6, 1); } catch (e) {}
+    // Keep the top edge where the full-height dock had it (same gap below the
+    // screen) when the fitted canvas is shorter.
+    const lift = (dockTargetSize(base).h - size.h) / 2;
+    if (lift > 0) {
+      try { controlsMesh.position.add(new THREE.Vector3(0, lift, 0).applyQuaternion(controlsMesh.quaternion)); } catch (e) {}
+    }
     // Side panels keep their stations but face the viewer too.
     layoutCommentsPanel(headPos);
     layoutGuidePanel(headPos);
@@ -2317,51 +2343,38 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (ctx.setTransform) { const k = (earthLabelCanvas && earthLabelCanvas.width / 640) || 1; ctx.setTransform(k, 0, 0, k, 0, 0); }
     ctx.clearRect(0, 0, EARTH_LABEL_LOGICAL_W, EARTH_LABEL_LOGICAL_H);
     const tierIdx = earthTierIndex(o.scale);
-    const tier = o.offline ? { name: 'OFFLINE', color: '#FF7A59' } : EARTH_TIERS[tierIdx];
-    const accent = o.featured ? '#FFB11F' : tier.color;
-    const hasGrad = !!ctx.createLinearGradient;
-    // Glass body
-    earthRoundRect(ctx, 2, 2, 636, EARTH_LABEL_LOGICAL_H - 4, 20);
-    if (hasGrad) {
-      const g = ctx.createLinearGradient(0, 2, 0, EARTH_LABEL_LOGICAL_H - 2);
-      g.addColorStop(0, 'rgba(18,34,58,0.95)');
-      g.addColorStop(1, 'rgba(5,10,22,0.97)');
-      ctx.fillStyle = g;
-    } else ctx.fillStyle = 'rgba(8,16,30,0.96)';
+    // ECHO panel language (dock / comments parity): flat glass, square
+    // corners, rule border, vermilion top bar. Tier colours stay as data only
+    // (chip swatch + realm ladder), matching the globe's heat ramp.
+    const accent = echoHex('accent', '#ff3b1f');
+    const ink = echoHex('ink', '#f2f3f5'), ink2 = echoHex('ink2', '#a4abb3'), ink3 = echoHex('ink3', '#8e959e');
+    const inkMuted = echoHex('inkMuted', '#646b74');
+    const rule = echoHex('rule', '#24282d'), ruleStrong = echoHex('ruleStrong', '#3a4047');
+    const surface = echoHex('surface', '#101214'), surface2 = echoHex('surface2', '#16191c'), surface3 = echoHex('surface3', '#1d2126');
+    const tier = o.offline ? { name: 'OFFLINE', color: accent } : EARTH_TIERS[tierIdx];
+    // Panel body
+    earthRoundRect(ctx, 1, 1, 638, EARTH_LABEL_LOGICAL_H - 2, 0);
+    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
     ctx.fill();
-    // Rim: accent on the left fading to slate on the right
-    if (hasGrad) {
-      const rg = ctx.createLinearGradient(0, 0, 640, 0);
-      rg.addColorStop(0, accent);
-      rg.addColorStop(0.55, 'rgba(70,100,134,0.75)');
-      rg.addColorStop(1, 'rgba(58,80,107,0.55)');
-      ctx.strokeStyle = rg;
-    } else ctx.strokeStyle = accent;
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = ruleStrong;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-    // Top specular line
-    if (hasGrad) {
-      const sg = ctx.createLinearGradient(20, 0, 620, 0);
-      sg.addColorStop(0, 'rgba(255,255,255,0)');
-      sg.addColorStop(0.5, 'rgba(190,235,255,0.35)');
-      sg.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.strokeStyle = sg;
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(24, 4.5); ctx.lineTo(616, 4.5); ctx.stroke();
-    }
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 0, EARTH_LABEL_LOGICAL_W, 3);
     ctx.textBaseline = 'middle';
     // Tier chip
     ctx.font = '700 12px "JetBrains Mono", monospace';
     const chipText = tier.name;
     const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
-    earthRoundRect(ctx, 18, 14, chipW, 26, 13);
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    earthRoundRect(ctx, 18, 14, chipW, 26, 0);
+    ctx.fillStyle = surface2;
     ctx.fill();
-    ctx.strokeStyle = tier.color;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = ruleStrong;
+    ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = tier.color;
-    ctx.beginPath(); ctx.arc(32, 27, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(28, 23, 8, 8);
+    ctx.fillStyle = ink;
     ctx.textAlign = 'left';
     ctx.fillText(chipText, 44, 28);
     // Title (the zoom share is carried by the gauge, not repeated in text)
@@ -2369,7 +2382,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const titleX = 18 + chipW + 14;
     const titleMax = 540 - titleX;
     let fs = 25;
-    ctx.fillStyle = '#F7FAFC';
+    ctx.fillStyle = ink;
     ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
     while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
       fs -= 1;
@@ -2380,44 +2393,44 @@ window.WebXRVR = window.WebXRVR || (function () {
     const gx = 592, gy = 34, gr = 20;
     ctx.lineWidth = 5;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(160,190,220,0.18)';
+    ctx.strokeStyle = surface3;
     ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
     const frac = Math.max(0, Math.min(1, (Number(o.zoomPct) || 0) / 100));
     if (frac > 0.005) {
-      ctx.strokeStyle = tier.color;
+      ctx.strokeStyle = accent;
       ctx.beginPath(); ctx.arc(gx, gy, gr, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
     }
     ctx.lineCap = 'butt';
-    ctx.fillStyle = '#F7FAFC';
+    ctx.fillStyle = ink;
     ctx.font = '700 13px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
     // Detail line
     ctx.textAlign = 'left';
-    ctx.fillStyle = o.offline ? '#FFB199' : '#B8C6D9';
+    ctx.fillStyle = o.offline ? echoHex('accentHi', '#ff5c42') : ink2;
     ctx.font = '700 15px "JetBrains Mono", monospace';
     ctx.fillText(o.detail, 20, 61);
     // Divider
-    ctx.fillStyle = 'rgba(140,175,210,0.16)';
+    ctx.fillStyle = rule;
     ctx.fillRect(20, 76, 600, 1);
     // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
     if (o.zoomed) {
-      ctx.fillStyle = '#7F93AD';
+      ctx.fillStyle = ink3;
       ctx.font = '700 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
       ctx.fillText('SCALE', 20, 94);
       drawEarthScaleBar(ctx, o.scaleBar);
     } else if (o.hint) {
-      ctx.fillStyle = '#7F93AD';
+      ctx.fillStyle = ink3;
       ctx.font = '700 11px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
       ctx.fillText(o.hint, 20, 94);
     }
     // Action row: trigger hint (zoomed) left, RESET ROTATION button right.
-    ctx.fillStyle = 'rgba(140,175,210,0.16)';
+    ctx.fillStyle = rule;
     ctx.fillRect(20, 106, 600, 1);
     if (o.zoomed && o.hint) {
-      ctx.fillStyle = accent;
+      ctx.fillStyle = o.featured ? accent : ink2;
       ctx.font = '700 11px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
       ctx.fillText(o.hint, 20, 127);
@@ -2425,13 +2438,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     {
       const b = EARTH_LABEL_RESET_RECT;
       const on = !!o.resetEnabled, hot = on && !!o.resetHot;
-      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 14);
-      ctx.fillStyle = on ? (hot ? 'rgba(85,231,255,0.34)' : 'rgba(85,231,255,0.12)') : 'rgba(110,140,170,0.08)';
+      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 0);
+      ctx.fillStyle = on ? (hot ? surface3 : surface) : surface2;
       ctx.fill();
-      ctx.strokeStyle = on ? (hot ? '#BFF5FF' : 'rgba(85,231,255,0.85)') : 'rgba(110,140,170,0.35)';
-      ctx.lineWidth = hot ? 2.5 : 1.5;
+      ctx.strokeStyle = on ? (hot ? accent : ruleStrong) : rule;
+      ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = on ? (hot ? '#F2FDFF' : '#A9F0FF') : '#5F7891';
+      ctx.fillStyle = on ? ink : inkMuted;
       ctx.font = '800 12px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
@@ -2440,18 +2453,18 @@ window.WebXRVR = window.WebXRVR || (function () {
     const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
     for (let i = 0; i < EARTH_TIERS.length; i++) {
       const sx = ladderX + i * (segW + segGap);
-      ctx.fillStyle = 'rgba(160,190,220,0.16)';
-      earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
+      ctx.fillStyle = surface3;
+      earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
       if (i <= tierIdx) {
         ctx.fillStyle = EARTH_TIERS[i].color;
-        earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
+        earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
       }
     }
     // Tile streaming progress hairline along the bottom edge
     if (o.streaming >= 0) {
-      ctx.fillStyle = 'rgba(160,190,220,0.16)';
+      ctx.fillStyle = surface3;
       ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, 596, 2);
-      ctx.fillStyle = tier.color;
+      ctx.fillStyle = accent;
       ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, Math.max(4, 596 * o.streaming), 2);
     }
   }
@@ -4294,14 +4307,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // callers, tests, and future miss branches.
     if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
     const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
-    ctx.strokeStyle = '#E8F6FF';
+    ctx.strokeStyle = echoHex('ink', '#f2f3f5');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(left, 94); ctx.lineTo(right, 94);
     ctx.moveTo(left, 89); ctx.lineTo(left, 99);
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
-    ctx.fillStyle = '#E8F6FF';
+    ctx.fillStyle = echoHex('ink', '#f2f3f5');
     ctx.font = '700 15px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
@@ -5416,13 +5429,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Controls Dock Mesh
     const ui = getUICanvas();
     if (!controlsCanvas && typeof document !== 'undefined') {
-      controlsCanvas = document.createElement('canvas');
-      controlsCanvas.width = ui ? ui.CONTROLS_W : 1024;
-      controlsCanvas.height = ui ? ui.CONTROLS_H : 384;
-      controlsCtx = controlsCanvas.getContext('2d');
+      controlsLogicalW = ui ? ui.CONTROLS_W : 1024;
+      controlsLogicalH = ui ? ui.CONTROLS_H : 384;
+      ({ canvas: controlsCanvas, ctx: controlsCtx } = createPanelCanvas(controlsLogicalW, controlsLogicalH));
     }
     if (!controlsTexture && controlsCanvas) {
-      controlsTexture = applyPanelSampling(new THREE.CanvasTexture(controlsCanvas));
+      controlsTexture = applyEarthTileSampling(new THREE.CanvasTexture(controlsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) controlsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!controlsMesh && controlsTexture) {
@@ -5444,13 +5456,11 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     // Comments Panel Mesh
     if (!commentsCanvas && typeof document !== 'undefined') {
-      commentsCanvas = document.createElement('canvas');
-      commentsCanvas.width = ui ? ui.CPANEL_W : 560;
-      commentsCanvas.height = ui ? ui.CPANEL_H : 680;
-      commentsCtx = commentsCanvas.getContext('2d');
+      ({ canvas: commentsCanvas, ctx: commentsCtx } = createPanelCanvas(
+        ui ? ui.CPANEL_W : 560, ui ? ui.CPANEL_H : 680));
     }
     if (!commentsTexture && commentsCanvas) {
-      commentsTexture = applyPanelSampling(new THREE.CanvasTexture(commentsCanvas));
+      commentsTexture = applyEarthTileSampling(new THREE.CanvasTexture(commentsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) commentsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!commentsMesh && commentsTexture) {
@@ -5472,13 +5482,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Controller guide mesh (upstream guide panel, RIGHT of the player).
     // ?guide=0 skips it entirely.
     if (!guideCanvas && typeof document !== 'undefined' && debugFlags.guide) {
-      guideCanvas = document.createElement('canvas');
-      guideCanvas.width = uiOverlay ? uiOverlay.GUIDE_W : 440;
-      guideCanvas.height = uiOverlay ? uiOverlay.GUIDE_H : 760;
-      guideCtx = guideCanvas.getContext('2d');
+      ({ canvas: guideCanvas, ctx: guideCtx } = createPanelCanvas(
+        uiOverlay ? uiOverlay.GUIDE_W : 440, uiOverlay ? uiOverlay.GUIDE_H : 760));
     }
     if (!guideTexture && guideCanvas && debugFlags.guide) {
-      guideTexture = applyPanelSampling(new THREE.CanvasTexture(guideCanvas));
+      guideTexture = applyEarthTileSampling(new THREE.CanvasTexture(guideCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) guideTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!guideMesh && guideTexture && debugFlags.guide) {
@@ -5779,18 +5787,15 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       if (!earthPreviewCanvas && typeof document !== 'undefined') {
         try {
-          earthPreviewCanvas = document.createElement('canvas');
           // 512×716 keeps the 0.5 × 0.7 m billboard texel-square (no stretch).
-          earthPreviewCanvas.width = 512;
-          earthPreviewCanvas.height = 716;
-          earthPreviewCtx = earthPreviewCanvas.getContext('2d');
+          ({ canvas: earthPreviewCanvas, ctx: earthPreviewCtx } = createPanelCanvas(512, 716));
         } catch (e) {
           earthPreviewCanvas = null;
           earthPreviewCtx = null;
         }
       }
       if (!earthPreviewTexture && earthPreviewCanvas && THREE) {
-        earthPreviewTexture = applyPanelSampling(new THREE.CanvasTexture(earthPreviewCanvas));
+        earthPreviewTexture = applyEarthTileSampling(new THREE.CanvasTexture(earthPreviewCanvas));
         try { if (THREE.SRGBColorSpace !== undefined) earthPreviewTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       }
       if (!earthPreviewMesh && earthPreviewTexture) {
@@ -6406,6 +6411,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (controlsCtx && !(debugFlags.dockfreeze && dockFreezePainted)) {
       const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
       const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
+      resizeControlsCanvas(ui.controlsCanvasSize({
+        source, itemState, sceneMode, packMode: isPackExperience(),
+      }));
       ui.renderControlsCanvas(controlsCtx, {
         source,
         itemState,
@@ -6745,14 +6753,29 @@ window.WebXRVR = window.WebXRVR || (function () {
     return { ray, hit: null, controlIndex, panelDesc };
   }
 
+  // Resizes the dock canvas to the fitted logical size. The texture is
+  // disposed so three reallocates its (immutable) GPU storage at the new size,
+  // and the mesh is rescaled to keep the controls' physical size.
+  function resizeControlsCanvas(size) {
+    if (!controlsCanvas || !size) return;
+    if (size.w === controlsLogicalW && size.h === controlsLogicalH) return;
+    controlsLogicalW = size.w;
+    controlsLogicalH = size.h;
+    controlsCanvas.width = size.w * UI_PANEL_RES;
+    controlsCanvas.height = size.h * UI_PANEL_RES;
+    if (controlsCtx && controlsCtx.setTransform) controlsCtx.setTransform(UI_PANEL_RES, 0, 0, UI_PANEL_RES, 0, 0);
+    if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} }
+    layoutControlsDock();
+  }
+
   // Maps a controls-dock UV hit to a button index (shared by preview
   // hover, XR hover, and XR select handling).
   function controlIndexFromUV(uv) {
     if (!uv) return -1;
     const ui = getUICanvas();
     if (!ui) return -1;
-    const w = controlsCanvas ? controlsCanvas.width : 1024;
-    const h = controlsCanvas ? controlsCanvas.height : 384;
+    const w = controlsLogicalW;
+    const h = controlsLogicalH;
     const cx = uv.x * w;
     const cy = (1 - uv.y) * h;
     const source = getVisualSource();
@@ -6841,8 +6864,8 @@ window.WebXRVR = window.WebXRVR || (function () {
             try {
               const ui = getUICanvas();
               if (hits[0].uv && ui && typeof ui.resolveCommentsPanelRegion === 'function') {
-                const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
-                const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+                const w = ui.CPANEL_W;
+                const h = ui.CPANEL_H;
                 lastCommentsCanvasX = hits[0].uv.x * w;
                 lastCommentsCanvasY = (1 - hits[0].uv.y) * h;
                 const comments = callbacks.getComments ? callbacks.getComments() : [];
@@ -8878,8 +8901,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!uv || !ui || typeof ui.resolveCommentsPanelRegion !== 'function') return '';
     try {
-      const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
-      const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+      const w = ui.CPANEL_W;
+      const h = ui.CPANEL_H;
       lastCommentsCanvasX = uv.x * w;
       lastCommentsCanvasY = (1 - uv.y) * h;
       const comments = callbacks.getComments ? callbacks.getComments() : [];
@@ -10182,6 +10205,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           minFilter: tex.minFilter,
           magFilter: tex.magFilter,
           generateMipmaps: !!tex.generateMipmaps,
+          size: tex.image && tex.image.width ? [tex.image.width, tex.image.height] : null,
         } : null;
         return {
           video: describe(videoTexture),
@@ -10189,6 +10213,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           comments: describe(commentsTexture),
           overlay: describe(overlayTexture),
           guide: describe(guideTexture),
+          earthPreview: describe(earthPreviewTexture),
         };
       },
       getScreenState() {
@@ -10414,6 +10439,7 @@ window.WebXRVR = window.WebXRVR || (function () {
             info.dock = {
               pos: [controlsMesh.position.x, controlsMesh.position.y, controlsMesh.position.z],
               rot: [controlsMesh.rotation.x, controlsMesh.rotation.y, controlsMesh.rotation.z],
+              scale: [controlsMesh.scale.x, controlsMesh.scale.y],
             };
           }
           info.glow = {

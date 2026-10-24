@@ -138,3 +138,23 @@ test('North Up does not bypass existing unavailable-reel and static-card action 
     assert.equal(hitAction(api, 689, 259, options), null);
   }
 });
+
+test('dock canvas size fits the live controls per mode', () => {
+  const api = loadCanvas();
+  const video = { kind: 'video' };
+  const size = (options) => ({ ...api.controlsCanvasSize(options) });
+  assert.deepEqual(size({ source: video, itemState: { available: true } }), { w: 800, h: 370 });
+  assert.deepEqual(size({ source: video, packMode: true }), { w: 800, h: 370 });
+  assert.deepEqual(size({ source: { kind: 'image' } }), { w: 800, h: 304 });
+  assert.deepEqual(size({ source: { kind: 'static-card' } }), { w: 800, h: 304 });
+  assert.deepEqual(size({ source: video, sceneMode: 'earth' }), { w: 800, h: 304 });
+  for (const options of [
+    { source: video },
+    { source: { kind: 'image' } },
+    { source: video, sceneMode: 'earth', earth: {} },
+  ]) {
+    const { w, h } = api.controlsCanvasSize(options);
+    const { rectangles } = recordRender(api, options);
+    assert.deepEqual({ ...rectangles[0] }, { x: 0, y: 0, w, h }, 'container drawn at the fitted size');
+  }
+});

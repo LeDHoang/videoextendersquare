@@ -14,7 +14,6 @@ if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
 const DURATION = 42;
 const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD'];
 const SIZES = UI ? {
-  DOCK: { w: UI.CONTROLS_W, h: UI.CONTROLS_H },
   COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
   OVERLAY: { w: UI.OVERLAY_W, h: UI.OVERLAY_H },
   GUIDE: { w: UI.GUIDE_W, h: UI.GUIDE_H },
@@ -100,6 +99,11 @@ function dockOptions(mock, s) {
     sceneMode: mock.dock === 'EARTH' ? 'earth' : 'reels',
     packMode: mock.dock === 'PACK',
   };
+}
+
+// The dock canvas shrinks to fit its live controls, as in the engine.
+function panelSize(key, mock) {
+  return key === 'DOCK' ? UI.controlsCanvasSize(dockOptions(mock, { time: 0 })) : SIZES[key];
 }
 
 function drawPanel(key, ctx, mock, comments, s, now) {
@@ -215,7 +219,7 @@ export default function VRPanelWorkbench() {
       last = now;
       for (const [key, canvas] of Object.entries(canvases.current)) {
         const ctx = canvas.getContext('2d');
-        const k = canvas.width / SIZES[key].w;
+        const k = canvas.width / panelSize(key, m).w;
         ctx.setTransform(k, 0, 0, k, 0, 0);
         try {
           drawPanel(key, ctx, m, list, s, now);
@@ -247,9 +251,10 @@ export default function VRPanelWorkbench() {
 
   const toNative = (event, key) => {
     const el = event.currentTarget;
+    const size = panelSize(key, live.current.mock);
     return [
-      event.nativeEvent.offsetX * (SIZES[key].w / el.clientWidth),
-      event.nativeEvent.offsetY * (SIZES[key].h / el.clientHeight),
+      event.nativeEvent.offsetX * (size.w / el.clientWidth),
+      event.nativeEvent.offsetY * (size.h / el.clientHeight),
     ];
   };
 
@@ -352,7 +357,7 @@ export default function VRPanelWorkbench() {
       </div>
       <div className="sx-vr-workbench-readout">LAST ACTION: <strong>{lastAction}</strong></div>
       <div className="sx-vr-workbench-stage" ref={stageRef}>
-        {shown.map((key) => (
+        {shown.map((key) => [key, panelSize(key, mock)]).map(([key, size]) => (
           <figure key={key} className="sx-vr-workbench-panel">
             <canvas
               ref={(el) => {
@@ -361,12 +366,12 @@ export default function VRPanelWorkbench() {
               }}
               data-panel={key}
               className={`sx-vr-workbench-canvas${key === 'OVERLAY' ? ' sx-vr-workbench-canvas--overlay' : ''}`}
-              width={SIZES[key].w * res}
-              height={SIZES[key].h * res}
-              style={{ width: SIZES[key].w * zoom, height: SIZES[key].h * zoom }}
+              width={size.w * res}
+              height={size.h * res}
+              style={{ width: size.w * zoom, height: size.h * zoom }}
               {...pointerProps(key)}
             />
-            <figcaption>{key} · {SIZES[key].w}×{SIZES[key].h} PX</figcaption>
+            <figcaption>{key} · {size.w}×{size.h} PX</figcaption>
           </figure>
         ))}
       </div>

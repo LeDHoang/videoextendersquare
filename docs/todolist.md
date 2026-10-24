@@ -38,6 +38,12 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
   - Pin the checkpoint's SHA-256.
   - Handle or refuse HDR sources.
   - Decide whether image-only MAKE 3D ships on the VPS first.
+- [ ] Quest check of the VR UI panel changes (2026-10-24; verified only in the desktop 3D preview, the flat panel workbench and the test suites). On a Quest 3 or 3S:
+  - **2× panels:** the dock, comments, guide and Earth label text is crisp at normal viewing distance, with no shimmer when moving the head. Frame pacing does not drop with the larger textures.
+  - **Earth view redesign:** the Earth label card, scale bar and Earth dock match the ECHO look of the reels dock (square corners, vermilion accents). Check readability at every zoom band, and that GLOBE RESET, OPEN FEED, ZOOM OUT and NORTH UP all still work.
+  - **Fitted dock:** the dock has no empty strip on the right or bottom. It sits centred under the screen with the same gap as before. Buttons are the same physical size as before.
+  - **Dock resize:** the dock changes height when switching between a video (800×370) and an image or static card (800×304), and when entering or leaving Earth (800×304). The resize shows no flicker, black frame or stale texture.
+  - **Dock aim:** laser hover and trigger presses land on the right button in every dock (reels, pack, image, static card, Earth). This includes buttons near the edges: exit, LOCK and AUDIO, NORTH UP and the seek bar ends. Check both locked and unlocked modes, and in unlocked mode after grip-dragging the screen.
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
 
 ## VR Reels recommended execution order

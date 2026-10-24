@@ -2453,18 +2453,73 @@ test('overlay fade repaints while visible, bounded at the UI interval', () => {
   renderer.stopPreview();
 });
 
-test('canvas textures use legacy linear sampling without mipmaps', () => {
+test('video and overlay textures use legacy linear sampling without mipmaps', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
   renderer.init(null, {});
   renderer.startPreview(makePreviewCanvas(gl));
   const THREE = renderer.getThree();
   const filters = renderer.__test.getTextureFilterInfo();
-  for (const [name, f] of Object.entries(filters)) {
+  for (const name of ['video', 'overlay']) {
+    const f = filters[name];
     assert.ok(f, `${name} texture exists`);
     assert.equal(f.minFilter, THREE.LinearFilter, `${name} minFilter`);
     assert.equal(f.generateMipmaps, false, `${name} no mipmaps`);
   }
+  renderer.stopPreview();
+});
+
+test('UI panels raster at 2x their logical size, always mipmapped, and hit-test in logical px', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const THREE = renderer.getThree();
+  const filters = renderer.__test.getTextureFilterInfo();
+  const sizes = { controls: [2048, 768], comments: [1120, 1360], guide: [880, 1520] };
+  for (const [name, size] of Object.entries(sizes)) {
+    assert.deepEqual([...filters[name].size], size, `${name} canvas 2x`);
+    assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);
+    assert.equal(filters[name].generateMipmaps, true, `${name} mipmaps`);
+  }
+  assert.deepEqual([...filters.overlay.size], [1024, 1024], 'overlay stays 1x');
+  // Logical-px hit mapping is unchanged by the 2x backing store.
+  const play = renderer.__test.controlIndexFromUV({ x: 400 / 1024, y: 1 - 116 / 384 });
+  assert.ok(play >= 0, 'dock hit resolves in logical px');
+  renderer.stopPreview();
+});
+
+test('dock canvas shrinks to fit its live controls and keeps their physical size', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    getVisualSource: () => ({
+      kind: 'video', element: { readyState: 4 }, ready: true, paused: false,
+      muted: true, currentTime: 1, duration: 10, version: 'v1',
+    }),
+    isPackMode: () => false,
+    getCurrentItemState: () => ({ available: true }),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  const api = renderer.__test;
+  // Video reels: controls span x 24-776, y 13-346, plus a 24px margin.
+  assert.deepEqual([...api.getTextureFilterInfo().controls.size], [1600, 740]);
+  const info = api.getSceneInfo();
+  const base = info.screenState.scale;
+  const fitted = api.dockTargetSize(base, 800, 370);
+  closeTo(info.dock.scale[0], fitted.w / 1.6);
+  closeTo(info.dock.scale[1], fitted.h / 0.6);
+  closeTo(fitted.w / 800, api.dockTargetSize(base).w / 1024); // same metres per px
+  // Top edge stays where the full-height dock had it: the center moves up
+  // the (tilted) panel by half the height difference.
+  const center = api.computeDockPose(null).pos;
+  const [x, y, z] = info.dock.pos;
+  closeTo(Math.hypot(x - center.x, y - center.y, z - center.z), (api.dockTargetSize(base).h - fitted.h) / 2);
+  assert.ok(y > center.y, 'moved up');
+  // Play button center (x 360-440, y 76-156) on the fitted 800x370 canvas.
+  const play = api.controlIndexFromUV({ x: 400 / 800, y: 1 - 116 / 370 });
+  assert.ok(play >= 0, 'play resolves on the fitted canvas');
   renderer.stopPreview();
 });
 
@@ -2484,7 +2539,7 @@ test('hi-fi preview mipmaps the UI panels with MSAA and stopPreview restores leg
   renderer.stopPreview();
 
   renderer.startPreview(makePreviewCanvas(gl));
-  assert.equal(renderer.__test.getTextureFilterInfo().controls.generateMipmaps, false);
+  assert.equal(renderer.__test.getTextureFilterInfo().overlay.generateMipmaps, false);
   assert.equal(renderer.__test.getRendererOpts().antialias, false);
   renderer.stopPreview();
 });
@@ -4797,7 +4852,7 @@ test('Preview card posters are same-origin loads with a capped cache and tolerat
 });
 
 test('Preview billboard texture matches the 1:1.4 plane so text is never stretched', () => {
-  assert.match(rendererSource, /earthPreviewCanvas\.width = 512;\s*earthPreviewCanvas\.height = 716;/);
+  assert.match(rendererSource, /earthPreviewCtx \} = createPanelCanvas\(512, 716\)/);
   assert.match(rendererSource, /new THREE\.PlaneGeometry\(0\.5, 0\.7\)/);
   const ui = loadUICanvasStandalone();
   closeTo(ui.EARTH_PREVIEW_W / ui.EARTH_PREVIEW_H, 0.5 / 0.7, 0.002);
