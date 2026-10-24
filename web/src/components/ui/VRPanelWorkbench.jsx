@@ -12,14 +12,15 @@ if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
 }
 
 const DURATION = 42;
-const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD'];
+const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD', 'EARTH LABEL'];
 const SIZES = UI ? {
   COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
   OVERLAY: { w: UI.OVERLAY_W, h: UI.OVERLAY_H },
   GUIDE: { w: UI.GUIDE_W, h: UI.GUIDE_H },
   'EARTH CARD': { w: UI.EARTH_PREVIEW_W, h: UI.EARTH_PREVIEW_H },
+  'EARTH LABEL': { w: UI.EARTH_LABEL_W, h: UI.EARTH_LABEL_H },
 } : {};
-const IDLE_HOVER = { DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '' };
+const IDLE_HOVER = { DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '' };
 const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
 const CURVES = { DOME: 1, 'SQ CURVE': 2, FLAT: 0 };
 const CURVE_ORDER = ['DOME', 'SQ CURVE', 'FLAT'];
@@ -67,6 +68,13 @@ const EARTH_STATUS = {
   location: 'HANOI',
   northUp: true,
   canOpenFeed: true,
+};
+// Globe zoom stops for the breadcrumb: render scale, zoom share, scale bar.
+const EARTH_ZOOMS = {
+  GLOBE: { scale: 1, pct: 0, bar: null },
+  REGION: { scale: 8, pct: 35, bar: { pixels: 140, caption: '500 KM' } },
+  CITY: { scale: 60, pct: 72, bar: { pixels: 120, caption: '5 KM' } },
+  STREET: { scale: 400, pct: 100, bar: { pixels: 90, caption: '200 M' } },
 };
 const EARTH_LOCATION = { name: 'Hanoi', slug: 'hanoi', heat: 0.72, active_reel_count: 18 };
 const COMMENT_TEMPLATES = [
@@ -180,6 +188,26 @@ function drawPanel(key, ctx, mock, comments, s, now) {
     }) || [];
   } else if (key === 'GUIDE') {
     UI.renderGuideCanvas(ctx);
+  } else if (key === 'EARTH LABEL') {
+    const z = EARTH_ZOOMS[mock.earthZoom];
+    const zoomed = z.scale > 1;
+    const featured = mock.earthPlace;
+    const title = featured ? (zoomed ? `WORLD › Hanoi · ${z.pct}%` : 'Hanoi') : (zoomed ? `WORLD · ${z.pct}%` : 'EARTH ACTIVITY');
+    const hint = featured ? (z.scale >= 24 ? 'TRIGGER  ▸  OPEN FEED' : 'TRIGGER  ▸  ZOOM IN') : (zoomed ? '' : 'DRAG TO ROTATE  ·  TRIGGER TO ZOOM');
+    UI.renderEarthLabelCanvas(ctx, {
+      title,
+      detail: mock.earthOffline ? 'MAP OFFLINE · TILES PAUSED' : (featured ? '72% HEAT · 18 ACTIVE' : '24 ZONES'),
+      zoomed,
+      zoomPct: z.pct,
+      featured,
+      offline: mock.earthOffline,
+      scaleBar: z.bar,
+      scale: z.scale,
+      streaming: zoomed ? 0.6 : -1,
+      hint,
+      resetEnabled: zoomed || featured,
+      resetHot: s.hover['EARTH LABEL'] === 'face',
+    });
   } else if (key === 'EARTH CARD') {
     const ready = mock.card === 'READY';
     ctx.clearRect(0, 0, SIZES[key].w, SIZES[key].h);
@@ -214,6 +242,9 @@ export default function VRPanelWorkbench() {
     card: 'READY',
     res: '2× CRISP',
     zoom: '75%',
+    earthZoom: 'CITY',
+    earthPlace: true,
+    earthOffline: false,
   });
   const [lastAction, setLastAction] = useState('—');
   const comments = useMemo(() => makeComments(Number(mock.comments)), [mock.comments]);
@@ -302,6 +333,7 @@ export default function VRPanelWorkbench() {
     if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll, ...commentsItem(s) });
     if (key === 'OVERLAY') return UI.resolveOverlayCommentAt(x, y, s.overlayRegions);
     if (key === 'EARTH CARD') return UI.resolveEarthPreviewHit(x, y);
+    if (key === 'EARTH LABEL') return UI.resolveEarthLabelHit(x, y);
     return null;
   };
 
@@ -349,6 +381,8 @@ export default function VRPanelWorkbench() {
       setLastAction(`OVERLAY › ${hit}`);
     } else if (key === 'EARTH CARD' && hit) {
       setLastAction(`EARTH CARD › ${hit}`);
+    } else if (key === 'EARTH LABEL' && hit) {
+      setLastAction(`EARTH LABEL › ${hit}`);
     }
   };
 
@@ -389,6 +423,9 @@ export default function VRPanelWorkbench() {
         <Segmented ariaLabel="Stereo" options={['MONO', 'SBS', 'TB']} value={mock.stereo} onChange={set('stereo')} />
         <Segmented ariaLabel="Comment count" options={['0', '3', '6', '12']} value={mock.comments} onChange={set('comments')} />
         <Segmented ariaLabel="Earth card" options={['READY', 'LOADING', 'ERROR', 'EMPTY']} value={mock.card} onChange={set('card')} />
+        <Segmented ariaLabel="Earth zoom" options={Object.keys(EARTH_ZOOMS)} value={mock.earthZoom} onChange={set('earthZoom')} />
+        <ToggleRow label="EARTH PLACE" checked={mock.earthPlace} onChange={set('earthPlace')} />
+        <ToggleRow label="MAP OFFLINE" checked={mock.earthOffline} onChange={set('earthOffline')} />
         <ToggleRow label="PLAYING" checked={mock.playing} onChange={set('playing')} />
         <ToggleRow label="MUTED" checked={mock.muted} onChange={set('muted')} />
         <ToggleRow label="LOCKED" checked={mock.lock} onChange={set('lock')} />

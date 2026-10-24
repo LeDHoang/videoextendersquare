@@ -1816,6 +1816,182 @@
     ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, (tableY + tableH + GUIDE_H) / 2);
   }
 
+  // ─── Earth HUD: breadcrumb panel ────────────────────────────────────
+  // Drawn into 3D billboards by webxr_vr.js (it scales the context to its
+  // texture size) and by the Flat Panels workbench. Logical sizes below.
+  const EARTH_LABEL_W = 640;
+  const EARTH_LABEL_H = 148;
+  const EARTH_LABEL_RESET_RECT = { x: 444, y: 112, w: 176, h: 28 };
+  // Zoom realms; names + colours follow the globe heat ramp. webxr_vr.js keeps
+  // the same list for its zoom logic (a test pins them together).
+  const EARTH_TIERS = [
+    { name: 'ORBIT', max: 3, color: '#39D7FF' },
+    { name: 'REGION', max: 24, color: '#4FE3C1' },
+    { name: 'CITY', max: 200, color: '#FFC857' },
+    { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+  ];
+  function earthTierIndex(scale) {
+    const s = Math.max(1, Number(scale) || 1);
+    for (let i = 0; i < EARTH_TIERS.length; i++) if (s < EARTH_TIERS[i].max) return i;
+    return EARTH_TIERS.length - 1;
+  }
+  function earthRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+  function drawEarthScaleBar(ctx, bar) {
+    // A missing or UNAVAILABLE bar draws nothing (no stale ruler).
+    if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
+    const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
+    ctx.strokeStyle = TOKENS.hex.ink;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(left, 94); ctx.lineTo(right, 94);
+    ctx.moveTo(left, 89); ctx.lineTo(left, 99);
+    ctx.moveTo(right, 89); ctx.lineTo(right, 99);
+    ctx.stroke();
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(bar.caption, 325, 94);
+  }
+  function resolveEarthLabelHit(x, y) {
+    const b = EARTH_LABEL_RESET_RECT;
+    return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h ? 'face' : null;
+  }
+
+  function renderEarthLabelCanvas(ctx, o) {
+    if (!ctx) return;
+    // Logical space is 640×148; the caller scales the context to its texture.
+    ctx.clearRect(0, 0, EARTH_LABEL_W, EARTH_LABEL_H);
+    const tierIdx = earthTierIndex(o.scale);
+    // ECHO panel language (dock / comments parity): flat glass, square
+    // corners, rule border, vermilion top bar. Tier colours stay as data only
+    // (chip swatch + realm ladder), matching the globe's heat ramp.
+    const accent = TOKENS.hex.accent;
+    const ink = TOKENS.hex.ink, ink2 = TOKENS.hex.ink2, ink3 = TOKENS.hex.ink3;
+    const inkMuted = TOKENS.hex.inkMuted;
+    const rule = TOKENS.hex.rule, ruleStrong = TOKENS.hex.ruleStrong;
+    const surface = TOKENS.hex.surface, surface2 = TOKENS.hex.surface2, surface3 = TOKENS.hex.surface3;
+    const tier = o.offline ? { name: 'OFFLINE', color: accent } : EARTH_TIERS[tierIdx];
+    // Panel body
+    earthRoundRect(ctx, 1, 1, 638, EARTH_LABEL_H - 2, 0);
+    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
+    ctx.fill();
+    ctx.strokeStyle = ruleStrong;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 0, EARTH_LABEL_W, 3);
+    ctx.textBaseline = 'middle';
+    // Tier chip
+    ctx.font = '700 12px "JetBrains Mono", monospace';
+    const chipText = tier.name;
+    const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
+    earthRoundRect(ctx, 18, 14, chipW, 26, 0);
+    ctx.fillStyle = surface2;
+    ctx.fill();
+    ctx.strokeStyle = ruleStrong;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = tier.color;
+    ctx.fillRect(28, 23, 8, 8);
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'left';
+    ctx.fillText(chipText, 44, 28);
+    // Title (the zoom share is carried by the gauge, not repeated in text)
+    const titleText = o.zoomed ? String(o.title).replace(/\s·\s\d+%$/, '') : String(o.title);
+    const titleX = 18 + chipW + 14;
+    const titleMax = 540 - titleX;
+    let fs = 25;
+    ctx.fillStyle = ink;
+    ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+    while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
+      fs -= 1;
+      ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+    }
+    ctx.fillText(titleText, titleX, 28);
+    // Zoom gauge (right)
+    const gx = 592, gy = 34, gr = 20;
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = surface3;
+    ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
+    const frac = Math.max(0, Math.min(1, (Number(o.zoomPct) || 0) / 100));
+    if (frac > 0.005) {
+      ctx.strokeStyle = accent;
+      ctx.beginPath(); ctx.arc(gx, gy, gr, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.fillStyle = ink;
+    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
+    // Detail line
+    ctx.textAlign = 'left';
+    ctx.fillStyle = o.offline ? TOKENS.hex.accentHi : ink2;
+    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.fillText(o.detail, 20, 61);
+    // Divider
+    ctx.fillStyle = rule;
+    ctx.fillRect(20, 76, 600, 1);
+    // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
+    if (o.zoomed) {
+      ctx.fillStyle = ink3;
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('SCALE', 20, 94);
+      drawEarthScaleBar(ctx, o.scaleBar);
+    } else if (o.hint) {
+      ctx.fillStyle = ink3;
+      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.hint, 20, 94);
+    }
+    // Action row: trigger hint (zoomed) left, RESET ROTATION button right.
+    ctx.fillStyle = rule;
+    ctx.fillRect(20, 106, 600, 1);
+    if (o.zoomed && o.hint) {
+      ctx.fillStyle = o.featured ? accent : ink2;
+      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.hint, 20, 127);
+    }
+    {
+      const b = EARTH_LABEL_RESET_RECT;
+      const on = !!o.resetEnabled, hot = on && !!o.resetHot;
+      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 0);
+      ctx.fillStyle = on ? (hot ? surface3 : surface) : surface2;
+      ctx.fill();
+      ctx.strokeStyle = on ? (hot ? accent : ruleStrong) : rule;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = on ? ink : inkMuted;
+      ctx.font = '800 12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
+    }
+    // Realm ladder: four segments, filled through the current realm
+    const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
+    for (let i = 0; i < EARTH_TIERS.length; i++) {
+      const sx = ladderX + i * (segW + segGap);
+      ctx.fillStyle = surface3;
+      earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
+      if (i <= tierIdx) {
+        ctx.fillStyle = EARTH_TIERS[i].color;
+        earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
+      }
+    }
+    // Tile streaming progress hairline along the bottom edge
+    if (o.streaming >= 0) {
+      ctx.fillStyle = surface3;
+      ctx.fillRect(22, EARTH_LABEL_H - 6, 596, 2);
+      ctx.fillStyle = accent;
+      ctx.fillRect(22, EARTH_LABEL_H - 6, Math.max(4, 596 * o.streaming), 2);
+    }
+  }
+
   // ─── Render Earth Preview ───────────────────────────────────────────
   // Location card (ECHO language, matching the comments panel): LIVE header, heat meter, one large hero window (poster, or
   // live video when a decoder frame exists) that plays through the location's
@@ -2133,6 +2309,14 @@
     renderEarthPreviewCanvas,
     resolveEarthPreviewHit,
     EARTH_PREVIEW_BUTTONS,
+    EARTH_LABEL_W,
+    EARTH_LABEL_H,
+    EARTH_LABEL_RESET_RECT,
+    EARTH_TIERS,
+    earthTierIndex,
+    drawEarthScaleBar,
+    renderEarthLabelCanvas,
+    resolveEarthLabelHit,
     TOKENS,
   };
 });

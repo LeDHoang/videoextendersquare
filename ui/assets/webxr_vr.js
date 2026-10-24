@@ -126,7 +126,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
-    horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
     xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
   };
@@ -152,7 +151,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('earthstyle', 'raw')) debugFlags.earthstyle = 'raw';
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
-      if (has('horizonhud', '1')) debugFlags.horizonhud = true;
       if (has('xrdiag', '1')) debugFlags.xrdiag = true;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
       if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
@@ -374,26 +372,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthAtmosphereMesh = null;
   let earthTileLodLevels = [];
 
-  // Step 6.3: street-table horizon bezel + interactive north compass badge.
-  // A lightweight ring around the active tile ring gives the tangent table a
-  // finished model edge; clicking/lasering the compass badge swings the map
-  // back to true north via the existing resetEarthNorthUp pose (≤0.5°).
-  let earthBezelMesh = null;
-  let earthCompassMesh = null;
-  let earthCompassCanvas = null;
-  let earthCompassCtx = null;
-  let earthCompassTexture = null;
-  function earthBezelRadius() {
-    try {
-      const S = Math.max(1, earthZoom);
-      if (!(S > 1.02) || !earthFocus) return 0;
-      // Frames the comfortable tabletop patch (≈0.8 m), not the multi-metre planet.
-      return Math.min(0.8, earthVisibleRadius(S) * 0.24);
-    } catch (e) { return 0; }
-  }
-  function earthBezelVisible() {
-    return !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && earthBezelMesh);
-  }
   // Map bearing as the viewer sees it: the clockwise angle (rad) from screen-up
   // to geographic north, measured in the plane perpendicular to the line of
   // sight (head → focus anchor). 0 means the map is north-up on screen — which is
@@ -425,244 +403,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       return Math.atan2(nr, nu);
     } catch (e) { return 0; }
   }
-  const EARTH_BEZEL_INNER = 0.86, EARTH_BEZEL_OUTER = 1.08;
-  // Surveyor's bezel: static 1024² texture (ticks every 5°, majors every 15°,
-  // N/E/S/W lettering, soft inner glow). Drawn once; orientation is applied by
-  // rotating the mesh to true north each frame.
-  function drawEarthBezelTexture(canvas) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-    const C = 512, rOuter = 512, rIn = rOuter * EARTH_BEZEL_INNER / EARTH_BEZEL_OUTER;
-    ctx.clearRect(0, 0, 1024, 1024);
-    if (ctx.createRadialGradient) {
-      const g = ctx.createRadialGradient(C, C, rIn - 6, C, C, rOuter);
-      g.addColorStop(0, 'rgba(57,215,255,0.00)');
-      g.addColorStop(0.18, 'rgba(57,215,255,0.20)');
-      g.addColorStop(1, 'rgba(10,40,70,0.0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(C, C, rOuter, 0, Math.PI * 2); ctx.arc(C, C, rIn - 6, 0, Math.PI * 2, true); ctx.fill();
-    }
-    ctx.strokeStyle = 'rgba(120,235,255,0.95)';
-    ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(C, C, rIn, 0, Math.PI * 2); ctx.stroke();
-    for (let deg = 0; deg < 360; deg += 5) {
-      const major = deg % 15 === 0, card = deg % 90 === 0;
-      const len = card ? 56 : (major ? 34 : 18);
-      const a = (deg - 90) * Math.PI / 180;
-      ctx.strokeStyle = card ? '#FFC857' : (major ? 'rgba(190,245,255,0.95)' : 'rgba(120,205,235,0.65)');
-      ctx.lineWidth = card ? 7 : (major ? 4 : 2.5);
-      ctx.beginPath();
-      ctx.moveTo(C + Math.cos(a) * (rIn + 6), C + Math.sin(a) * (rIn + 6));
-      ctx.lineTo(C + Math.cos(a) * (rIn + 6 + len), C + Math.sin(a) * (rIn + 6 + len));
-      ctx.stroke();
-    }
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const letters = [['N', 0, '#FFC857', 54], ['E', 90, '#DFF8FF', 40], ['S', 180, '#DFF8FF', 40], ['W', 270, '#DFF8FF', 40]];
-    for (const [ch, deg, color, size] of letters) {
-      const a = (deg - 90) * Math.PI / 180;
-      const r = rIn + 102;
-      ctx.fillStyle = color;
-      ctx.font = '800 ' + size + 'px Archivo, sans-serif';
-      ctx.fillText(ch, C + Math.cos(a) * r, C + Math.sin(a) * r);
-    }
-    return true;
-  }
-  function ensureEarthBezel() {
-    if (!THREE || !scene || !earthGroup || !debugFlags.horizonhud) return;
-    try {
-      if (!earthBezelMesh && typeof document !== 'undefined') {
-        const bezelCanvas = document.createElement('canvas');
-        bezelCanvas.width = 1024;
-        bezelCanvas.height = 1024;
-        let bezelTexture = null;
-        try {
-          if (drawEarthBezelTexture(bezelCanvas)) {
-            bezelTexture = new THREE.CanvasTexture(bezelCanvas);
-            try { if (THREE.SRGBColorSpace !== undefined) bezelTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-            applyLinearSampling(bezelTexture);
-          }
-        } catch (e) { bezelTexture = null; }
-        const geo = new THREE.RingGeometry(EARTH_BEZEL_INNER, EARTH_BEZEL_OUTER, 128);
-        const mat = new THREE.MeshBasicMaterial({
-          color: bezelTexture ? 0xffffff : 0x39d7ff, map: bezelTexture, transparent: true, opacity: 0.9,
-          side: THREE.DoubleSide, depthWrite: false,
-        });
-        earthBezelMesh = new THREE.Mesh(geo, mat);
-        earthBezelMesh.renderOrder = 5;
-        earthBezelMesh.frustumCulled = false;
-        earthBezelMesh.visible = false;
-        scene.add(earthBezelMesh);
-      }
-      if (!earthCompassCanvas && typeof document !== 'undefined') {
-        earthCompassCanvas = document.createElement('canvas');
-        earthCompassCanvas.width = 256;
-        earthCompassCanvas.height = 256;
-        earthCompassCtx = earthCompassCanvas.getContext('2d');
-      }
-      if (!earthCompassTexture && earthCompassCanvas && THREE) {
-        earthCompassTexture = new THREE.CanvasTexture(earthCompassCanvas);
-        try { if (THREE.SRGBColorSpace !== undefined) earthCompassTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-      }
-      if (!earthCompassMesh && earthCompassTexture) {
-        const mat = new THREE.MeshBasicMaterial({
-          map: earthCompassTexture, transparent: true,
-          depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-        });
-        earthCompassMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), mat);
-        earthCompassMesh.renderOrder = 101;
-        earthCompassMesh.frustumCulled = false;
-        earthCompassMesh.visible = false;
-        earthCompassMesh.userData.compassBadge = true;
-        scene.add(earthCompassMesh);
-      }
-    } catch (e) {}
-  }
-  // Live compass dial: the card rotates so N always points at true north
-  // relative to the viewer; ring glows cyan while the map is locked north-up.
-  let earthCompassKey = '';
-  function refreshEarthCompassCanvas(relBearing) {
-    if (!earthCompassCtx || !earthCompassCanvas) return;
-    try {
-      const rel = Number.isFinite(relBearing) ? relBearing : 0;
-      const deg = Math.round(rel * 180 / Math.PI);
-      const aligned = Math.abs(((deg % 360) + 540) % 360 - 180) < 3;
-      const key = deg + '|' + (earthNorthUp ? 1 : 0) + '|' + (aligned ? 1 : 0);
-      if (key === earthCompassKey) return;
-      earthCompassKey = key;
-      const ctx = earthCompassCtx;
-      ctx.setTransform && ctx.setTransform(2, 0, 0, 2, 0, 0);
-      ctx.clearRect(0, 0, 128, 128);
-      const accent = (earthNorthUp || aligned) ? '#39D7FF' : '#FFB11F';
-      if (ctx.createRadialGradient) {
-        const g = ctx.createRadialGradient(64, 56, 6, 64, 64, 62);
-        g.addColorStop(0, 'rgba(22,44,72,0.96)');
-        g.addColorStop(1, 'rgba(5,10,22,0.97)');
-        ctx.fillStyle = g;
-      } else ctx.fillStyle = 'rgba(7,12,24,0.95)';
-      ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.save();
-      ctx.translate(64, 64);
-      ctx.rotate(rel);
-      for (let d = 0; d < 360; d += 15) {
-        const a = d * Math.PI / 180;
-        const long = d % 90 === 0;
-        ctx.strokeStyle = long ? '#DFF8FF' : 'rgba(140,190,220,0.6)';
-        ctx.lineWidth = long ? 2 : 1;
-        ctx.beginPath();
-        ctx.moveTo(Math.sin(a) * 52, -Math.cos(a) * 52);
-        ctx.lineTo(Math.sin(a) * (long ? 44 : 47), -Math.cos(a) * (long ? 44 : 47));
-        ctx.stroke();
-      }
-      // North needle (amber) + south tail
-      ctx.fillStyle = '#FFB11F';
-      ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(8, 0); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = 'rgba(190,215,235,0.55)';
-      ctx.beginPath(); ctx.moveTo(0, 36); ctx.lineTo(7, 0); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#F7FAFC';
-      ctx.font = '800 15px Archivo, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('N', 0, -30 + 0);
-      ctx.restore();
-      ctx.fillStyle = '#0B1626';
-      ctx.beginPath(); ctx.arc(64, 64, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
-      // Fixed lubber marker (view-up) at the top edge
-      ctx.fillStyle = accent;
-      ctx.beginPath(); ctx.moveTo(64, 2); ctx.lineTo(71, 12); ctx.lineTo(57, 12); ctx.closePath(); ctx.fill();
-      if (earthCompassTexture) earthCompassTexture.needsUpdate = true;
-    } catch (e) {}
-  }
-  function updateEarthBezel() {
-    if (!earthBezelMesh || !earthCompassMesh) return;
-    try {
-      const head = getHeadPosition();
-      const center = earthLiveCenter();
-      const radius = earthBezelRadius();
-      const show = !!(debugFlags.horizonhud && sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && radius > 0);
-      earthBezelMesh.visible = show;
-      earthCompassMesh.visible = show;
-      if (!show) return;
-      const rel = earthMapBearing();
-      // Bezel lies IN the map's tangent plane at the focus (a convex planet falls
-      // away beneath it, so it reads as a floating surveyor's plate): local
-      // +X = east, +Y = true north (texture top), +Z = outward normal.
-      const anchor = earthZoomAnchor || { x: center.x, y: center.y, z: center.z };
-      const basis = earthGeographicBasis(earthFocus.lat, earthFocus.lon);
-      const nW = qRotate(earthQuat, basis.normal);
-      const northW = qRotate(earthQuat, basis.north);
-      const eastW = vNorm(vCross(northW, nW));
-      const lift = 0.012;
-      earthBezelMesh.position.set(anchor.x + nW.x * lift, anchor.y + nW.y * lift, anchor.z + nW.z * lift);
-      earthBezelMesh.scale.setScalar(Math.max(0.05, radius));
-      try {
-        const bq = qFromBasis(eastW, northW, nW);
-        earthBezelMesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
-      } catch (e2) { earthBezelMesh.lookAt(anchor.x + nW.x, anchor.y + nW.y, anchor.z + nW.z); }
-      if (earthBezelMesh.material) {
-        earthBezelMesh.material.opacity = reducedMotion ? 0.9 : 0.8 + 0.1 * Math.sin(Date.now() * 0.002);
-      }
-      // Compass dial rides beside the breadcrumb (camera-plane left of it), so
-      // it is always on-screen, never overlaps the label, and stays pointable.
-      refreshEarthCompassCanvas(rel);
-      const lbl = earthLabelMesh && earthLabelMesh.visible ? earthLabelMesh : null;
-      const ls = lbl ? (lbl.scale.x || 1) : 1;
-      const gazeFwd = earthHeadForward(), fovHalf = earthViewHalfFov();
-      if (lbl) {
-        let fx = head.x - lbl.position.x, fy = head.y - lbl.position.y, fz = head.z - lbl.position.z;
-        const fl = Math.hypot(fx, fy, fz) || 1;
-        fx /= fl; fz /= fl;
-        let rx = fz, rz = -fx;
-        const rl = Math.hypot(rx, rz) || 1;
-        rx /= rl; rz /= rl;
-        const off = EARTH_LABEL_HALF_W * ls + 0.14 * ls;
-        // Candidate slots beside the breadcrumb, in preference order: left,
-        // right, above-left, below-left. Take the first that is fully in view
-        // and clear of the reel card; else fall back to the least-bad (left).
-        const upx = 0, upy = 1;
-        const slots = [
-          { x: -rx * off, y: 0, z: -rz * off },
-          { x: rx * off, y: 0, z: rz * off },
-          { x: -rx * 0.33 * ls, y: upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
-          { x: -rx * 0.33 * ls, y: -upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
-        ];
-        let chosen = null;
-        for (const sl of slots) {
-          const cand = { x: lbl.position.x + sl.x, y: lbl.position.y + sl.y, z: lbl.position.z + sl.z };
-          const cc = earthGazeClamp(cand, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
-          if (cc.clamped) continue;
-          if (earthPreviewMesh && earthRectOverlapsPanel(cand, 0.1 * ls, 0.1 * ls, earthPreviewMesh, 0.25, 0.35, gazeFwd, 0.02)) continue;
-          let blocked = false;
-          for (const k of earthHudKeeps) {
-            const ca = earthViewAngles(cand, head, gazeFwd), ka = earthViewAngles(k, head, gazeFwd);
-            const rA = Math.atan(0.1 * ls / ca.d) + Math.atan(k.r / ka.d);
-            if (Math.abs(ca.yaw - ka.yaw) < rA && Math.abs(ca.pitch - ka.pitch) < rA) { blocked = true; break; }
-          }
-          if (blocked) continue;
-          chosen = cand;
-          break;
-        }
-        if (!chosen) chosen = { x: lbl.position.x + slots[0].x, y: lbl.position.y, z: lbl.position.z + slots[0].z };
-        earthCompassMesh.position.set(chosen.x, chosen.y, chosen.z);
-      } else {
-        earthCompassMesh.position.set(anchor.x, anchor.y + 0.16, anchor.z - radius - 0.1);
-      }
-      earthCompassMesh.scale.setScalar(ls);
-      {
-        const cw = earthGazeClamp(earthCompassMesh.position, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
-        if (cw.clamped) earthCompassMesh.position.set(cw.x, cw.y, cw.z);
-        // Never sit on the breadcrumb: slide down-left out of it if they meet.
-        if (lbl) earthSeparatePanel(earthCompassMesh, 0.1, 0.1, lbl, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, gazeFwd, head, fovHalf, 'left');
-      }
-      earthCompassMesh.lookAt(head.x, head.y, head.z);
-      earthCompassMesh.userData.worldRadius = 0.14 * ls;
-    } catch (e) {}
-  }
-
   // Notification State
   let notificationText = '';
   let notificationUntil = 0;
@@ -2340,134 +2080,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     else ctx.rect(x, y, w, h);
   }
   function drawEarthLabelPanel(ctx, o) {
-    // Logical space is 640×148; the canvas is 2× for crisp text in-headset.
+    // The canvas is 2× the 640×148 logical layout (crisp in-headset).
     if (ctx.setTransform) { const k = (earthLabelCanvas && earthLabelCanvas.width / 640) || 1; ctx.setTransform(k, 0, 0, k, 0, 0); }
-    ctx.clearRect(0, 0, EARTH_LABEL_LOGICAL_W, EARTH_LABEL_LOGICAL_H);
-    const tierIdx = earthTierIndex(o.scale);
-    // ECHO panel language (dock / comments parity): flat glass, square
-    // corners, rule border, vermilion top bar. Tier colours stay as data only
-    // (chip swatch + realm ladder), matching the globe's heat ramp.
-    const accent = echoHex('accent', '#ff3b1f');
-    const ink = echoHex('ink', '#f2f3f5'), ink2 = echoHex('ink2', '#a4abb3'), ink3 = echoHex('ink3', '#8e959e');
-    const inkMuted = echoHex('inkMuted', '#646b74');
-    const rule = echoHex('rule', '#24282d'), ruleStrong = echoHex('ruleStrong', '#3a4047');
-    const surface = echoHex('surface', '#101214'), surface2 = echoHex('surface2', '#16191c'), surface3 = echoHex('surface3', '#1d2126');
-    const tier = o.offline ? { name: 'OFFLINE', color: accent } : EARTH_TIERS[tierIdx];
-    // Panel body
-    earthRoundRect(ctx, 1, 1, 638, EARTH_LABEL_LOGICAL_H - 2, 0);
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
-    ctx.fill();
-    ctx.strokeStyle = ruleStrong;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = accent;
-    ctx.fillRect(0, 0, EARTH_LABEL_LOGICAL_W, 3);
-    ctx.textBaseline = 'middle';
-    // Tier chip
-    ctx.font = '700 12px "JetBrains Mono", monospace';
-    const chipText = tier.name;
-    const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
-    earthRoundRect(ctx, 18, 14, chipW, 26, 0);
-    ctx.fillStyle = surface2;
-    ctx.fill();
-    ctx.strokeStyle = ruleStrong;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = tier.color;
-    ctx.fillRect(28, 23, 8, 8);
-    ctx.fillStyle = ink;
-    ctx.textAlign = 'left';
-    ctx.fillText(chipText, 44, 28);
-    // Title (the zoom share is carried by the gauge, not repeated in text)
-    const titleText = o.zoomed ? String(o.title).replace(/\s·\s\d+%$/, '') : String(o.title);
-    const titleX = 18 + chipW + 14;
-    const titleMax = 540 - titleX;
-    let fs = 25;
-    ctx.fillStyle = ink;
-    ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
-    while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
-      fs -= 1;
-      ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
-    }
-    ctx.fillText(titleText, titleX, 28);
-    // Zoom gauge (right)
-    const gx = 592, gy = 34, gr = 20;
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = surface3;
-    ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
-    const frac = Math.max(0, Math.min(1, (Number(o.zoomPct) || 0) / 100));
-    if (frac > 0.005) {
-      ctx.strokeStyle = accent;
-      ctx.beginPath(); ctx.arc(gx, gy, gr, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
-    }
-    ctx.lineCap = 'butt';
-    ctx.fillStyle = ink;
-    ctx.font = '700 13px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
-    // Detail line
-    ctx.textAlign = 'left';
-    ctx.fillStyle = o.offline ? echoHex('accentHi', '#ff5c42') : ink2;
-    ctx.font = '700 15px "JetBrains Mono", monospace';
-    ctx.fillText(o.detail, 20, 61);
-    // Divider
-    ctx.fillStyle = rule;
-    ctx.fillRect(20, 76, 600, 1);
-    // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
-    if (o.zoomed) {
-      ctx.fillStyle = ink3;
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('SCALE', 20, 94);
-      drawEarthScaleBar(ctx, o.scaleBar);
-    } else if (o.hint) {
-      ctx.fillStyle = ink3;
-      ctx.font = '700 11px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(o.hint, 20, 94);
-    }
-    // Action row: trigger hint (zoomed) left, RESET ROTATION button right.
-    ctx.fillStyle = rule;
-    ctx.fillRect(20, 106, 600, 1);
-    if (o.zoomed && o.hint) {
-      ctx.fillStyle = o.featured ? accent : ink2;
-      ctx.font = '700 11px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(o.hint, 20, 127);
-    }
-    {
-      const b = EARTH_LABEL_RESET_RECT;
-      const on = !!o.resetEnabled, hot = on && !!o.resetHot;
-      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 0);
-      ctx.fillStyle = on ? (hot ? surface3 : surface) : surface2;
-      ctx.fill();
-      ctx.strokeStyle = on ? (hot ? accent : ruleStrong) : rule;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = on ? ink : inkMuted;
-      ctx.font = '800 12px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
-    }
-    // Realm ladder: four segments, filled through the current realm
-    const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
-    for (let i = 0; i < EARTH_TIERS.length; i++) {
-      const sx = ladderX + i * (segW + segGap);
-      ctx.fillStyle = surface3;
-      earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
-      if (i <= tierIdx) {
-        ctx.fillStyle = EARTH_TIERS[i].color;
-        earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
-      }
-    }
-    // Tile streaming progress hairline along the bottom edge
-    if (o.streaming >= 0) {
-      ctx.fillStyle = surface3;
-      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, 596, 2);
-      ctx.fillStyle = accent;
-      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, Math.max(4, 596 * o.streaming), 2);
-    }
+    const ui = getUICanvas();
+    if (ui && ui.renderEarthLabelCanvas) ui.renderEarthLabelCanvas(ctx, o);
   }
 
   function refreshEarthLabel() {
@@ -2707,7 +2323,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Gaze-safe HUD placement ────────────────────────────────────────────
-  // Label / preview / compass are positioned from world anchors (so they sit
+  // Label / preview are positioned from world anchors (so they sit
   // naturally by the globe) but must never leave the viewer's field of view
   // when they move around. After the anchored placement, each panel's centre is
   // clamped — in head-relative yaw/pitch, at its own distance — so the WHOLE
@@ -3130,8 +2746,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     refreshEarthTexture();
     refreshEarthLabel();
     updateEarthTiles(time);
-    ensureEarthBezel();
-    updateEarthBezel();
     tickEarthPreviewDwell(); // desktop pointer rests send no hover updates
     updateEarthPreviewBillboard(time);
   }
@@ -5734,7 +5348,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // NOTE: do NOT set renderOrder on this THREE.Group. Group.renderOrder is a
       // *group sort order* that outranks every child's own renderOrder, so a value
       // here drew the whole tile layer AFTER the scene-rooted HUD (label, preview
-      // card, bezel, compass) and buried them under the map at any zoom with tiles.
+      // card) and buried them under the map at any zoom with tiles.
       // Tile meshes carry their own renderOrder (1 coarse / 2 fine).
       earthTileGroup.frustumCulled = false;
       earthMesh.add(earthTileGroup);
@@ -6828,23 +6442,10 @@ window.WebXRVR = window.WebXRVR || (function () {
           raycaster.set(origin, direction);
         }
         if (hovering < 0 && !carded && earthMesh && earthGroup && earthGroup.visible !== false) {
-          let compassed = false;
-          if (earthCompassMesh && earthCompassMesh.visible) {
-            try {
-              const hits = raycaster.intersectObject(earthCompassMesh, false);
-              if (hits.length > 0) {
-                dist = hits[0].distance;
-                hovering = -3; // compass badge hover (own highlight channel)
-                compassed = true;
-              }
-            } catch (e) {}
-          }
-          if (!compassed) {
-            const hit = hitTestEarth(origin, direction);
-            if (hit.hit) {
-              dist = hit.dist;
-              hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
-            }
+          const hit = hitTestEarth(origin, direction);
+          if (hit.hit) {
+            dist = hit.dist;
+            hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
           }
         }
       } else {
@@ -6899,7 +6500,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         } catch (e) {}
       }
     } catch (e) {}
-    const isHover = hovering >= 0 || overScreen || hovering === -2 || hovering === -3;
+    const isHover = hovering >= 0 || overScreen || hovering === -2;
     dist = Math.max(0.2, Math.min(30, dist));
     try {
       laserPositions[0] = origin.x;
@@ -7722,11 +7323,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Label/preview are scene-rooted (Z1 zoom), so they gate explicitly.
     if (earthLabelMesh) earthLabelMesh.visible = isEarth;
     if (earthPreviewMesh && !isEarth) earthPreviewMesh.visible = false;
-    // The street bezel ring and compass dial are scene-rooted too: only the
-    // Earth dressing pass re-shows them, so every other mode must hide them.
     if (!isEarth) {
-      if (earthBezelMesh) earthBezelMesh.visible = false;
-      if (earthCompassMesh) earthCompassMesh.visible = false;
       earthHudSlide.label = null;
       earthHudSlide.preview = null;
       earthHudLastT = -1;
@@ -7906,8 +7503,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // cheap). Returns the zone index or -1. Previously only the desktop
   // path resolved zones — the XR laser collapsed everything to "globe",
   // so hover highlight + previews never fired on Quest.
-  // Step 6.3: the compass badge is hoverable too — a laser over the badge
-  // reports 'compass' so the preview button highlight path can surface it.
   // Ray → floating earth panels (reel card, WORLD › location panel):
   // { panel: 'card'|'label', region, distance } for the nearest one hit
   // (region '' off the buttons), else null. Panels sit in front of the
@@ -8041,20 +7636,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthRecentHover = { index: recent.index, at: recent.at, used: true };
       }
       return panelHit.panel === 'card' ? 'preview' : 'label';
-    }
-    if (earthCompassMesh && earthCompassMesh.visible) {
-      try {
-        const c = earthCompassMesh.position;
-        const r = Number(earthCompassMesh.userData.worldRadius) || 0.16;
-        const ox = origin.x - c.x, oy = origin.y - c.y, oz = origin.z - c.z;
-        const dx = direction.x, dy = direction.y, dz = direction.z;
-        const a = dx * dx + dy * dy + dz * dz;
-        if (a > 1e-12) {
-          const t = Math.max(0, -(ox * dx + oy * dy + oz * dz) / a);
-          const px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
-          if (Math.sqrt(px * px + py * py + pz * pz) <= r && t < 10) return 'compass';
-        }
-      } catch (e) {}
     }
     let hit = null;
     try {
@@ -8949,18 +8530,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   // XR trigger on the globe = GRAB (same drag machine as the mouse): hold the
   // trigger and sweep the controller to turn the planet under the laser; a
   // clean press-release is still a tap (zoom / select), dispatched by
-  // endEarthDrag. Dock buttons and the compass keep their own click path.
+  // endEarthDrag. Dock buttons keep their own click path.
   let earthXrGrabActive = false; // WebXR order: selectstart → select → selectend
-  function earthCompassUnderRay(origin, direction) {
-    try {
-      if (!earthCompassMesh || !earthCompassMesh.visible || !raycaster) return false;
-      raycaster.set(origin, direction);
-      return raycaster.intersectObject(earthCompassMesh, false).length > 0;
-    } catch (e) { return false; }
-  }
   function onVRSelectStart(ev) {
     if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
-        !earthCompassUnderRay(activeRayOrigin, activeRayDir) &&
         !earthHudPanelHit(activeRayOrigin, activeRayDir)) {
       const hit = hitTestEarth(activeRayOrigin, activeRayDir);
       if (hit.hit) {
@@ -9030,21 +8603,6 @@ window.WebXRVR = window.WebXRVR || (function () {
           handled = true;
         }
         raycaster.set(rayOrigin, rayDir);
-        // Step 6.3: compass badge click → true-north pose (400 ms slerp is
-        // inside resetEarthNorthUp's instant pose; the eased feel comes from
-        // the zoom-frame smoothing, not a second animation machine).
-        if (!handled && earthCompassMesh && earthCompassMesh.visible) {
-          try {
-            const hits = raycaster.intersectObject(earthCompassMesh, false);
-            if (hits.length > 0) {
-              if (resetEarthNorthUp()) {
-                showNotification('NORTH UP');
-                pulseInput(ev.data);
-                handled = true;
-              }
-            }
-          } catch (e) {}
-        }
         if (!handled) {
           const hit = hitTestEarth(rayOrigin, rayDir);
           if (hit.hit) {
@@ -9686,12 +9244,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastEarthLabelKey = '';
     lastEarthPreviewUpdate = -1;
     pinSharedGeo = null;
-    earthBezelMesh = null;
-    earthCompassMesh = null;
-    earthCompassCanvas = null;
-    earthCompassCtx = null;
-    earthCompassTexture = null;
-    earthCompassKey = '';
     laserPositions = null;
     reticleTexture = null;
     previewHoverRay = null;
@@ -10206,7 +9758,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'xrdiag']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -10773,13 +10325,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthPreviewPosterImages,
       earthTileSourceIsLight,
       EARTH_TIERS,
-      earthBezelState() {
-        return {
-          visible: !!(earthBezelMesh && earthBezelMesh.visible && earthCompassMesh && earthCompassMesh.visible),
-          radius: earthBezelRadius(),
-          northUp: !!earthNorthUp,
-        };
-      },
       earthTilePrefetchStats() {
         let ready = 0;
         try {

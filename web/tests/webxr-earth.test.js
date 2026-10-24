@@ -4699,48 +4699,6 @@ test('Step 6.2: preview accompaniment freezes under reduced motion', () => {
   renderer.stopPreview();
 });
 
-test('Step 6.3: street bezel + compass appear at street zoom and hide at globe', () => {
-  const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
-  renderer.init(null, {});
-  renderer.startPreview(makePreviewCanvas(gl));
-  const api = renderer.__test;
-  renderer.setSceneMode('earth');
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  renderer.__runScheduledFrame(64);
-  let bezel = api.earthBezelState();
-  assert.equal(bezel.visible, true, 'bezel + compass show at street zoom');
-  assert.ok(bezel.radius > 0.3 && bezel.radius < 3, `bezel radius sane, got ${bezel.radius}`);
-  api.setEarthZoom(1);
-  renderer.__runScheduledFrame(96);
-  bezel = api.earthBezelState();
-  assert.equal(bezel.visible, false, 'bezel hides back at globe scale');
-  renderer.stopPreview();
-});
-
-test('Step 6.3: compass laser hover reports the badge without moving the globe', () => {
-  const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
-  renderer.init(null, {});
-  renderer.startPreview(makePreviewCanvas(gl));
-  const api = renderer.__test;
-  renderer.setSceneMode('earth');
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  const scene = api.getScene();
-  const badge = scene.children.find((child) => child && child.userData && child.userData.compassBadge);
-  assert.ok(badge, 'compass badge exists in the scene');
-  badge.visible = true;
-  badge.position.set(0, 1.3, -1.15);
-  badge.userData.worldRadius = 0.5;
-  const hovered = api.updateEarthHoverFromRay({ x: 0, y: 1.3, z: 0 }, { x: 0, y: 0, z: -1 });
-  assert.equal(hovered, 'compass', 'laser over the badge reports compass');
-  renderer.stopPreview();
-});
-
 test('Heat/cone coincidence survives a street→globe zoom-out', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -4785,7 +4743,7 @@ test('Heat/cone coincidence survives a street→globe zoom-out', () => {
 test('HUD regression: the tile Group never carries a renderOrder (it would outrank the HUD)', () => {
   // THREE.Group.renderOrder is a group sort order that beats every child's own
   // renderOrder; a value on the tile group drew the whole map OVER the label,
-  // preview card, bezel and compass at every zoom with tiles.
+  // preview card at every zoom with tiles.
   assert.doesNotMatch(rendererSource, /earthTileGroup\.renderOrder\s*=/);
   const { renderer, api } = topdownHarness();
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
@@ -5013,30 +4971,6 @@ test('panel separation lifts the preview off the breadcrumb and keeps it in view
 
 // ─── Mode-exit cleanup and keep-out zones ───────────────────────────────
 
-test('leaving Earth mode hides the bezel ring and compass dial (they are scene-rooted)', () => {
-  const { renderer, api } = topdownHarness();
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  renderer.__runScheduledFrame(64);
-  assert.equal(api.earthBezelState().visible, true, 'precondition: street zoom shows them');
-  const scene = api.getScene();
-  const compass = scene.children.find((c) => c && c.userData && c.userData.compassBadge);
-  assert.equal(compass.visible, true);
-  renderer.setSceneMode('reels'); // e.g. after opening a location's reels
-  assert.equal(api.earthBezelState().visible, false);
-  assert.equal(compass.visible, false, 'compass hidden in reels');
-  // A reels frame must not resurrect them.
-  renderer.__runScheduledFrame(96);
-  assert.equal(compass.visible, false);
-  assert.equal(api.earthBezelState().visible, false);
-  // Re-entering Earth starts clean at the globe (no bezel at orbit scale).
-  renderer.setSceneMode('earth');
-  renderer.__runScheduledFrame(128);
-  assert.equal(api.earthBezelState().visible, false);
-  renderer.stopPreview();
-});
-
 test('keep-out zones push a panel off the focused pin: up first, sideways if the view refuses', () => {
   const { renderer, api } = topdownHarness();
   const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
@@ -5073,7 +5007,7 @@ test('the live breadcrumb never covers the zoom anchor or the hovered pin', () =
   const keeps = api.earthHudKeepOuts();
   assert.ok(keeps.length >= 1, 'anchor / pin keep-outs exist');
   const scene = api.getScene();
-  const label = scene.children.find((c) => c && c.renderOrder === 100 && !(c.userData && c.userData.compassBadge));
+  const label = scene.children.find((c) => c && c.renderOrder === 100);
   const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
   for (const k of keeps) {
     const a = api.earthViewAngles(label.position, head, fwd), b = api.earthViewAngles(k, head, fwd);
@@ -5203,14 +5137,14 @@ test('zoomed stick nudge moves the content the way the stick points, on screen',
   renderer.stopPreview();
 });
 
-test('the street bezel ring and compass dial are off by default (?horizonhud=1 restores them)', () => {
+test('no bezel ring or compass dial exists in the Earth scene', () => {
   const { renderer, api } = topdownHarness();
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
   renderer.__runScheduledFrame(32);
   renderer.__runScheduledFrame(64);
-  assert.equal(api.earthBezelState().visible, false);
   const scene = api.getScene();
-  assert.equal(scene.children.some((c) => c && c.userData && c.userData.compassBadge), false, 'no compass mesh is even created');
+  assert.equal(scene.children.some((c) => c && c.userData && c.userData.compassBadge), false);
+  assert.doesNotMatch(rendererSource, /earthBezelMesh|earthCompassMesh/);
   renderer.stopPreview();
 });
 
@@ -5864,4 +5798,23 @@ test('Enter posts once; Escape and an empty field post nothing', async () => {
   act('add'); input.value = '   ';
   input.blur();
   assert.equal(posted.length, 1);
+});
+
+test('shared earth HUD renderers: tiers stay in sync with the engine and every renderer paints', () => {
+  const { renderer, api } = topdownHarness();
+  const ui = loadUICanvasStandalone();
+  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.color}`);
+  assert.equal(tiers(ui.EARTH_TIERS).join(","), tiers(api.EARTH_TIERS).join(","));
+  for (const s of [1, 3, 24, 200, 16384]) assert.equal(ui.earthTierIndex(s), api.earthTierIndex(s));
+  const label = makeRecordingCtx();
+  ui.renderEarthLabelCanvas(label.ctx, {
+    title: 'WORLD › Hanoi · 72%', detail: '72% HEAT · 18 ACTIVE', zoomed: true, zoomPct: 72, featured: true,
+    offline: false, scaleBar: { pixels: 120, caption: '5 KM' }, scale: 60, streaming: 0.5,
+    hint: 'TRIGGER  ▸  OPEN FEED', resetEnabled: true, resetHot: false,
+  });
+  assert.ok(label.texts.some((t) => t.includes('RESET ROTATION')), 'label paints the reset button');
+  assert.ok(label.texts.some((t) => t.startsWith('WORLD › Hanoi')), 'label paints the title');
+  assert.equal(ui.resolveEarthLabelHit(ui.EARTH_LABEL_RESET_RECT.x + 1, ui.EARTH_LABEL_RESET_RECT.y + 1), 'face');
+  assert.equal(ui.resolveEarthLabelHit(0, 0), null);
+  renderer.stopPreview();
 });
