@@ -23,10 +23,39 @@ const IDLE_HOVER = { DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '' };
 const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
 const CURVES = { DOME: 1, 'SQ CURVE': 2, FLAT: 0 };
 const CURVE_ORDER = ['DOME', 'SQ CURVE', 'FLAT'];
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
 const PLAYLIST = [
-  { title: 'Neon rain over the Shibuya crossing at midnight' },
-  { title: 'Ha Long Bay sunrise' },
-  { title: 'Reykjavik northern lights, full sky' },
+  {
+    title: 'Neon rain over the Shibuya crossing at midnight',
+    caption: 'Shot handheld from the Starbucks window as the lights changed. Full 3D in the headset.',
+    creator: { username: 'echo_archive', display_name: 'echo_archive' },
+    created_at: daysAgo(64),
+    tags: ['tokyo', 'night', 'rain'],
+    location: { city: 'Tokyo', country: 'Japan' },
+    duration_ms: 15000,
+    likes: 1840,
+    views: 42200,
+  },
+  {
+    title: 'Ha Long Bay sunrise',
+    creator: { username: 'nam', display_name: 'Nam Tran' },
+    created_at: daysAgo(3),
+    tags: ['vietnam'],
+    location: { city: 'Ha Long', country: 'Vietnam' },
+    duration_ms: 42000,
+    likes: 312,
+    views: 5100,
+  },
+  {
+    title: 'Reykjavik northern lights, full sky',
+    caption: 'Aurora over the harbour.',
+    creator: { username: 'lina', display_name: 'lina' },
+    created_at: daysAgo(400),
+    location: { display_name: 'Reykjavik' },
+    media_type: 'image',
+    likes: 98000,
+    views: 1250000,
+  },
 ];
 const EARTH_STATUS = {
   tier: 'CITY',
@@ -59,6 +88,8 @@ function makeComments(count) {
       text,
       // Every third comment is general (no timestamp); the rest pop up on the screen.
       timestamp: i % 3 === 2 ? null : (1 + i * 3.5) % DURATION,
+      likes: (i * 7) % 12,
+      liked_by_me: i === 1,
     };
   });
 }
@@ -83,7 +114,6 @@ function getPosters() {
 }
 
 function filterByTab(comments, tab) {
-  if (tab === 'sync') return comments.filter((c) => c.timestamp !== null);
   if (tab === 'general') return comments.filter((c) => c.timestamp === null);
   return comments;
 }
@@ -99,6 +129,11 @@ function dockOptions(mock, s) {
     sceneMode: mock.dock === 'EARTH' ? 'earth' : 'reels',
     packMode: mock.dock === 'PACK',
   };
+}
+
+// Current reel + follow state for the comments panel creator block.
+function commentsItem(s) {
+  return { item: PLAYLIST[s.idx], itemState: { available: true, following: s.following } };
 }
 
 // The dock canvas shrinks to fit its live controls, as in the engine.
@@ -135,6 +170,7 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       cPanelHighlightId: s.highlight,
       user: null,
       currentTime: s.time,
+      ...commentsItem(s),
     });
   } else if (key === 'OVERLAY') {
     s.overlayRegions = UI.renderOverlayCanvas(ctx, {
@@ -189,6 +225,7 @@ export default function VRPanelWorkbench() {
     hover: { ...IDLE_HOVER },
     pressed: -1,
     tab: 'all',
+    following: false,
     scroll: 0,
     highlight: null,
     note: '',
@@ -262,7 +299,7 @@ export default function VRPanelWorkbench() {
     const s = interact.current;
     const { mock: m, comments: list } = live.current;
     if (key === 'DOCK') return UI.resolveControlsHit(x, y, dockOptions(m, s));
-    if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll });
+    if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll, ...commentsItem(s) });
     if (key === 'OVERLAY') return UI.resolveOverlayCommentAt(x, y, s.overlayRegions);
     if (key === 'EARTH CARD') return UI.resolveEarthPreviewHit(x, y);
     return null;
@@ -296,6 +333,8 @@ export default function VRPanelWorkbench() {
       if (hit.startsWith('tab:')) {
         s.tab = hit.slice(4);
         s.scroll = 0;
+      } else if (hit === 'follow') {
+        s.following = !s.following;
       } else if (hit === 'scrollup' || hit === 'scrolldown') {
         scrollComments((hit === 'scrollup' ? -1 : 1) * (UI.CP_ITEM_H + UI.CP_ITEM_GAP));
       } else if (hit.startsWith('seek:')) {

@@ -1024,7 +1024,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function commentsPanelTargetSize(base) {
     const ui = getUICanvas();
-    const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (680 / 560);
+    const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (920 / 560);
     const w = base * layoutTuning.commentsScale;
     return { w, h: w * aspect };
   }
@@ -5457,7 +5457,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Comments Panel Mesh
     if (!commentsCanvas && typeof document !== 'undefined') {
       ({ canvas: commentsCanvas, ctx: commentsCtx } = createPanelCanvas(
-        ui ? ui.CPANEL_W : 560, ui ? ui.CPANEL_H : 680));
+        ui ? ui.CPANEL_W : 560, ui ? ui.CPANEL_H : 920));
     }
     if (!commentsTexture && commentsCanvas) {
       commentsTexture = applyEarthTileSampling(new THREE.CanvasTexture(commentsCanvas));
@@ -6275,9 +6275,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!ui || ui.CP_LIST_TOP === undefined) return;
     let filtered = comments;
-    if (cPanelTab === 'sync') {
-      filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    } else if (cPanelTab === 'general') {
+    if (cPanelTab === 'general') {
       filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
     }
     const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
@@ -6474,6 +6472,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         cPanelHighlightId,
         user: callbacks.getCurrentUser ? callbacks.getCurrentUser() : null,
         currentTime: source.currentTime,
+        ...commentsPanelItem(),
       });
       if (commentsTexture) {
         commentsTexture.needsUpdate = true;
@@ -6871,7 +6870,7 @@ window.WebXRVR = window.WebXRVR || (function () {
                 const comments = callbacks.getComments ? callbacks.getComments() : [];
                 cPanelHover = ui.resolveCommentsPanelRegion(
                   lastCommentsCanvasX, lastCommentsCanvasY,
-                  { comments, cPanelTab, cPanelScrollY }) || '';
+                  { comments, cPanelTab, cPanelScrollY, ...commentsPanelItem() }) || '';
               }
             } catch (e) {}
           }
@@ -8907,8 +8906,19 @@ window.WebXRVR = window.WebXRVR || (function () {
       lastCommentsCanvasY = (1 - uv.y) * h;
       const comments = callbacks.getComments ? callbacks.getComments() : [];
       return ui.resolveCommentsPanelRegion(lastCommentsCanvasX, lastCommentsCanvasY,
-        { comments, cPanelTab, cPanelScrollY }) || '';
+        { comments, cPanelTab, cPanelScrollY, ...commentsPanelItem() }) || '';
     } catch (e) { return ''; }
+  }
+
+  // Current reel + its follow state for the comments panel creator block.
+  function commentsPanelItem() {
+    const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
+    const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
+    }
+    return { item: playlist[idx] || null, itemState };
   }
 
   // Screen UV → pop-up overlay comment id (shared XR/preview).
@@ -9932,6 +9942,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (desc.indexOf('profile:') === 0) {
       const username = desc.slice(8);
       if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
+      return true;
+    }
+    if (desc === 'follow') {
+      if (callbacks.onFollow) callbacks.onFollow();
+      vrLastUiUploadT = -1;
+      return true;
+    }
+    if (desc === 'creator') {
+      if (callbacks.onOpenCurrentProfile) callbacks.onOpenCurrentProfile();
       return true;
     }
     if (desc === 'account') {

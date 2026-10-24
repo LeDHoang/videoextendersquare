@@ -2257,9 +2257,10 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   closeTo(lockedGuide.center.z, -2.58);
 });
 
-test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
+test('comment panel actions drive the time-sync toggle, scroll, like, seek, follow, and close', () => {
   const liked = [];
   const sought = [];
+  const opened = [];
   const renderer = loadRenderer();
   const comments = [
     { id: 'c1', author_name: 'ann', text: 'first', timestamp: 1 },
@@ -2267,28 +2268,31 @@ test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
     { id: 'c3', author_name: 'cat', text: 'third', timestamp: null },
     { id: 'c4', author_name: 'dan', text: 'fourth', timestamp: 4 },
     { id: 'c5', author_name: 'eve', text: 'fifth', timestamp: null },
+    { id: 'c6', author_name: 'fay', text: 'sixth', timestamp: 6 },
   ];
   renderer.init(null, {
     getComments: () => comments,
     onLikeComment: (id) => liked.push(id),
     onSeekTo: (t) => sought.push(t),
+    onFollow: () => opened.push('follow'),
+    onOpenCurrentProfile: () => opened.push('creator'),
   });
   const api = renderer.__test;
   api.toggleCommentsPanel();
   assert.equal(api.getScreenState().commentsPanelVisible, true);
-  // Tabs switch the filter and reset the scroll.
-  assert.equal(api.executeCommentAction('tab:sync'), true);
-  assert.equal(api.getScreenState().cPanelTab, 'sync');
-  // Scroll bounds follow the filtered list (3 sync × 112 − 520 = −184 → 0).
-  api.refreshPanelScrollBounds(comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined));
+  // Time-sync toggle off: general comments only, scroll reset.
+  assert.equal(api.executeCommentAction('tab:general'), true);
+  assert.equal(api.getScreenState().cPanelTab, 'general');
+  // Scroll bounds follow the filtered list (2 general × 92 − 496 < 0 → 0).
+  api.refreshPanelScrollBounds(comments);
   assert.equal(api.executeCommentAction('scrolldown'), true);
   assert.equal(api.getScreenState().cPanelScrollY, 0);
-  // All tab: 5 × 112 − 520 = 40 max scroll.
+  // Toggle on: every comment, 6 × 92 − 496 = 56 max scroll.
   assert.equal(api.executeCommentAction('tab:all'), true);
   api.refreshPanelScrollBounds(comments);
-  assert.equal(api.getScreenState().cPanelMaxScroll, 40);
+  assert.equal(api.getScreenState().cPanelMaxScroll, 56);
   assert.equal(api.executeCommentAction('scrolldown'), true);
-  assert.equal(api.getScreenState().cPanelScrollY, 40);
+  assert.equal(api.getScreenState().cPanelScrollY, 56);
   assert.equal(api.executeCommentAction('scrollup'), true);
   assert.equal(api.getScreenState().cPanelScrollY, 0);
   // Item actions route to host callbacks.
@@ -2296,6 +2300,10 @@ test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
   assert.deepEqual(liked, ['c2']);
   assert.equal(api.executeCommentAction('seek:c4'), true);
   assert.deepEqual(sought, [4]);
+  // Creator block: FOLLOW and the creator name.
+  assert.equal(api.executeCommentAction('follow'), true);
+  assert.equal(api.executeCommentAction('creator'), true);
+  assert.deepEqual(opened, ['follow', 'creator']);
   assert.equal(api.executeCommentAction('panel'), true);
   assert.equal(api.executeCommentAction('bogus'), false);
   // Close hides the panel.
@@ -2476,7 +2484,7 @@ test('UI panels raster at 2x their logical size, always mipmapped, and hit-test 
   renderer.startPreview(makePreviewCanvas(gl));
   const THREE = renderer.getThree();
   const filters = renderer.__test.getTextureFilterInfo();
-  const sizes = { controls: [2048, 768], comments: [1120, 1360], guide: [880, 2248] };
+  const sizes = { controls: [2048, 768], comments: [1120, 1840], guide: [880, 2248] };
   for (const [name, size] of Object.entries(sizes)) {
     assert.deepEqual([...filters[name].size], size, `${name} canvas 2x`);
     assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);

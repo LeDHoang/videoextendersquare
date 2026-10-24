@@ -16,7 +16,7 @@
   const GUIDE_W = 440;
   const GUIDE_H = 1124;
   const CPANEL_W = 560;
-  const CPANEL_H = 680;
+  const CPANEL_H = 920;
   const OVERLAY_W = 1024;
   const OVERLAY_H = 1024;
   const EARTH_PREVIEW_W = 512;
@@ -29,16 +29,33 @@
   ];
 
   // Panel layout metrics
-  const CP_HEADER_H = 48;
+  // Creator block (avatar, title, caption, chips, stats) above the comments header.
+  const CP_INFO_H = 256;
+  const CP_HEADER_H = 56;
   const CP_FOOTER_H = 112;
-  const CP_LIST_TOP = CP_HEADER_H;
+  const CP_LIST_TOP = CP_INFO_H + CP_HEADER_H;
   const CP_LIST_BOTTOM = CPANEL_H - CP_FOOTER_H;
-  const CP_LIST_X = 0;
-  const CP_LIST_W = 520;
-  const CP_SCROLL_X = 524;
-  const CP_SCROLL_W = 32;
-  const CP_ITEM_H = 104;
+  // Cards span x 20-540, flush with the creator block; the (undrawn) scroll
+  // hit strip lives in the right padding.
+  const CP_LIST_X = 10;
+  const CP_LIST_W = 540;
+  const CP_SCROLL_X = 544;
+  const CP_SCROLL_W = 16;
+  const CP_ITEM_H = 84;
   const CP_ITEM_GAP = 8;
+  // Close sits top-right, to the right of FOLLOW.
+  const CP_CLOSE_BTN = { x: 504, y: 26, w: 36, h: 36 };
+  const CP_STATS_Y = 198;
+  // One time-sync toggle replaces the ALL / SYNC / GENERAL tabs.
+  const CP_SYNC_BTN = { x: 504, y: CP_INFO_H + 12, w: 36, h: 32 };
+  // Comment name advance (700 11px JetBrains Mono, 0.6em per glyph).
+  const CP_NAME_CHAR_W = 6.6;
+
+  // FOLLOW hugs its label (same 700 11px mono), right-aligned 8px left of close.
+  function cpFollowBtn(following) {
+    const w = 46 + Math.ceil((following ? 'FOLLOWING' : 'FOLLOW').length * CP_NAME_CHAR_W);
+    return { x: CP_CLOSE_BTN.x - 8 - w, y: 26, w, h: 36 };
+  }
 
   // Button definitions for the UI controls panel (WebXR HUD Media Control Dock)
   const CTRL_BUTTONS = [
@@ -101,6 +118,27 @@
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60);
     return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  // Compact engagement counts (1250 -> "1.2K"); mirrors fmtCount in reels.html.
+  function fmtCount(n) {
+    n = Number(n) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(n);
+  }
+
+  // Post age ("2MO AGO"); mirrors relativeAge in reels.html.
+  function relativeAge(iso) {
+    const t = Date.parse(iso);
+    if (!isFinite(t)) return '';
+    const seconds = Math.max(0, (Date.now() - t) / 1000);
+    if (seconds < 60) return 'JUST NOW';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'M AGO';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'H AGO';
+    if (seconds < 86400 * 30) return Math.floor(seconds / 86400) + 'D AGO';
+    if (seconds < 86400 * 365) return Math.floor(seconds / (86400 * 30)) + 'MO AGO';
+    return Math.floor(seconds / (86400 * 365)) + 'Y AGO';
   }
 
   function getInitials(name) {
@@ -224,6 +262,16 @@
       ['M6.5 18.5H17.5', 's', 'i', 1, 0.3],
       ['M12 7.5V13.5', 's', 'a', 2],
       ['M12 15L13.5 16.5L12 18L10.5 16.5Z', 'f', 'a'],
+    ],
+    timesync: [
+      ['M12 1.5V4', 's', 'a', 1.8],
+      ['M10 1.5H14', 's', 'a', 1.5],
+      ['M17.5 3.5L19.5 5.5', 's', 'i', 1.4],
+      ['M8 4H16L21 9V17L16 22H8L3 17V9Z', 's', 'i', 1.6],
+      ['M12 5.5V7M12 19V20.5M4.5 13H6M18 13H19.5', 's', 'i', 1, 0.4],
+      ['M12 13V8M12 13L16.5 10', 's', 'a', 1.8],
+      ['M12 11.2L13.8 13L12 14.8L10.2 13Z', 'f', 'a'],
+      [ring(12, 13, 0.65), 'f', 'i'],
     ],
     location: [
       ['M12 3.5L18 9.5L12 19.5L6 9.5Z', 's', 'i', 1.6],
@@ -899,17 +947,47 @@
   }
 
   // ─── Resolve Comments Region ────────────────────────────────────────
-  function resolveCommentsPanelRegion(canvasX, canvasY, options = {}) {
-    const { comments = [], cPanelTab = 'all', cPanelScrollY = 0 } = options;
-    let filtered = comments;
-    if (cPanelTab === 'sync') filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    else if (cPanelTab === 'general') filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+  // Creator of the reel shown in the panel's creator block (null when unavailable).
+  function cpCreator(item) {
+    return item && item.available !== false ? (item.creator || null) : null;
+  }
+  // FOLLOW shows for a creator with a handle unless the page hides it (own post).
+  function cpFollowVisible(item, itemState) {
+    const creator = cpCreator(item);
+    return !!(creator && creator.username && (itemState || {}).canFollow !== false);
+  }
+  function filterPanelComments(comments, cPanelTab) {
+    if (cPanelTab !== 'general') return comments;
+    return comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+  }
+  // Comment head row, shared by render and hit test: the time pill follows the
+  // name; general comments get no pill.
+  function cpCommentHead(c, itemX, y) {
+    let name = c.author_name || 'Anonymous';
+    if (name.length > 16) name = name.slice(0, 15) + '…';
+    const nameEnd = itemX + 56 + Math.ceil(name.length * CP_NAME_CHAR_W);
+    const hasTime = c.timestamp !== null && c.timestamp !== undefined;
+    const time = hasTime ? formatTime(c.timestamp) : '';
+    const pill = hasTime ? { x: nameEnd + 10, y: y + 9, w: 36 + time.length * 6, h: 22 } : null;
+    return { name, nameEnd, time, pill };
+  }
 
-    if (canvasY < CP_HEADER_H) {
-      if (canvasX >= 296 && canvasX < 344 && canvasY >= 16 && canvasY < 46) return 'tab:all';
-      if (canvasX >= 352 && canvasX < 416 && canvasY >= 16 && canvasY < 46) return 'tab:sync';
-      if (canvasX >= 424 && canvasX < 502 && canvasY >= 16 && canvasY < 46) return 'tab:general';
-      if (canvasX >= 522 && canvasX < 548 && canvasY >= 16 && canvasY < 46) return 'close';
+  function resolveCommentsPanelRegion(canvasX, canvasY, options = {}) {
+    const { comments = [], cPanelTab = 'all', cPanelScrollY = 0, item = null, itemState = {} } = options;
+    const filtered = filterPanelComments(comments, cPanelTab);
+    const inBox = (b) => canvasX >= b.x && canvasX < b.x + b.w && canvasY >= b.y && canvasY < b.y + b.h;
+
+    if (canvasY < CP_INFO_H) {
+      if (inBox(CP_CLOSE_BTN)) return 'close';
+      if (cpFollowVisible(item, itemState) && inBox(cpFollowBtn(!!itemState.following))) return 'follow';
+      const creator = cpCreator(item);
+      if (creator && creator.username && canvasX >= 20 && canvasX < 400 && canvasY >= 20 && canvasY < 68) return 'creator';
+      return 'panel';
+    }
+
+    if (canvasY < CP_LIST_TOP) {
+      // Time-sync toggle: on lists every comment, off lists general only.
+      if (inBox(CP_SYNC_BTN)) return cPanelTab === 'general' ? 'tab:all' : 'tab:general';
       return 'panel';
     }
 
@@ -932,17 +1010,170 @@
       const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
       const itemX = CP_LIST_X + 10;
       const itemW = CP_LIST_W - 20;
-      if (canvasY >= y + 8 && canvasY < y + 36) {
-        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-        if (canvasX >= itemX + 8 && canvasX < itemX + 174) return 'profile:' + (c.author_name || '');
-        if (hasTime && canvasX >= itemX + 180 && canvasX < itemX + 280) return 'seek:' + c.id;
-        if (canvasX >= itemX + itemW - 46 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
+      if (canvasY >= y + 4 && canvasY < y + 36) {
+        const head = cpCommentHead(c, itemX, y);
+        if (canvasX >= itemX + 8 && canvasX < head.nameEnd + 4) return 'profile:' + (c.author_name || '');
+        if (head.pill && canvasX >= head.pill.x && canvasX < head.pill.x + head.pill.w) return 'seek:' + c.id;
+        if (canvasX >= itemX + itemW - 74 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
       }
     }
     return 'list';
   }
 
   // ─── Render Comments Panel ──────────────────────────────────────────
+  // Creator block, mirroring the 2D docked column: avatar, name, handle + age,
+  // FOLLOW, title, caption, chips (tags, place, specs) and the stats row.
+  function renderCommentsPanelInfo(ctx, item, itemState, comments, cPanelHover) {
+    const accent = TOKENS.hex.accent;
+    const unavailable = !item || item.available === false;
+    const creator = cpCreator(item);
+    const following = !!itemState.following;
+    const showFollow = cpFollowVisible(item, itemState);
+
+    ctx.fillStyle = TOKENS.hex.bg;
+    ctx.fillRect(0, 3, CPANEL_W, CP_INFO_H - 3);
+
+    // Avatar
+    ctx.fillStyle = '#121417';
+    ctx.fillRect(20, 20, 48, 48);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(20, 20, 48, 48);
+    if (creator) {
+      ctx.fillStyle = accent;
+      ctx.font = `800 20px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(creator.display_name || creator.username || '?').slice(0, 1).toUpperCase(), 44, 45);
+    }
+
+    // Name + "@handle · AGE"
+    const textW = (showFollow ? cpFollowBtn(following).x : CP_CLOSE_BTN.x) - 88;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    if (creator && creator.username) {
+      ctx.fillStyle = cPanelHover === 'creator' ? TOKENS.hex.ink : accent;
+      ctx.font = `700 16px ${TOKENS.font.mono}`;
+      ctx.fillText(wrapTextLines(ctx, creator.display_name || creator.username, textW, 1)[0] || '', 80, 34);
+    }
+    const age = unavailable ? '' : relativeAge(item.created_at);
+    const handle = creator && creator.username ? '@' + creator.username : '';
+    ctx.fillStyle = TOKENS.hex.ink3;
+    ctx.font = `600 11px ${TOKENS.font.mono}`;
+    ctx.fillText(wrapTextLines(ctx, [handle, age].filter(Boolean).join(' · '), textW, 1)[0] || '', 80, 56);
+
+    // FOLLOW / FOLLOWING
+    if (showFollow) {
+      const b = cpFollowBtn(following);
+      const hover = cPanelHover === 'follow';
+      const tone = following ? TOKENS.hex.infoHi : accent;
+      ctx.fillStyle = hover ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = following ? TOKENS.hex.infoHi : (hover ? accent : TOKENS.hex.ruleStrong);
+      ctx.lineWidth = following ? 2 : 1;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      // 12px pad, 18px icon, 8px gap, label, 12px pad.
+      drawIcon(ctx, 'follow', b.x + 21, b.y + b.h / 2, 18, following ? TOKENS.hex.infoHi : TOKENS.hex.ink, accent, TOKENS.hex.surface2);
+      ctx.fillStyle = tone;
+      ctx.font = `700 11px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(following ? 'FOLLOWING' : 'FOLLOW', b.x + 38, b.y + b.h / 2 + 1);
+    }
+
+    // Title + caption
+    let y = 84;
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = `800 15px ${TOKENS.font.sans}`;
+    const title = unavailable ? 'Reel unavailable' : (item.title || item.filename || '');
+    wrapTextLines(ctx, String(title).toUpperCase(), CPANEL_W - 40, 2).forEach((line) => {
+      ctx.fillText(line, 20, y);
+      y += 20;
+    });
+    const caption = unavailable ? '' : String(item.caption || '').trim();
+    if (caption) {
+      y += 4;
+      ctx.fillStyle = TOKENS.hex.ink2;
+      ctx.font = `400 12px ${TOKENS.font.sans}`;
+      wrapTextLines(ctx, caption, CPANEL_W - 40, 2).forEach((line) => {
+        ctx.fillText(line, 20, y);
+        y += 16;
+      });
+    }
+
+    // Chips: #tags, place, then specs (3D layout, duration). One row; extras drop.
+    const chips = [];
+    if (!unavailable) {
+      (item.tags || []).forEach((tag) => {
+        const label = String(tag).replace(/^#/, '');
+        if (label) chips.push({ kind: 'tag', text: '#' + label });
+      });
+      const location = item.location || {};
+      const place = [location.city, location.country].filter(Boolean).join(', ') || location.display_name || '';
+      if (place) chips.push({ kind: 'place', text: place });
+      const stereo = item.stereo_layout;
+      if (Number(item.width) > 0 && Number(item.height) > 0 && (stereo === 'sbs' || stereo === 'tb')) {
+        chips.push({ kind: 'spec', key: '3D', text: stereo === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM' });
+      }
+      const durationMs = Number(item.duration_ms);
+      if (durationMs > 0 && item.media_type !== 'image') chips.push({ kind: 'spec', key: 'DUR', text: formatTime(durationMs / 1000) });
+    }
+    if (chips.length) {
+      const chipY = y + 8;
+      let x = 20;
+      ctx.font = `600 10px ${TOKENS.font.mono}`;
+      ctx.textBaseline = 'middle';
+      for (const chip of chips) {
+        const keyW = chip.key ? ctx.measureText(chip.key + ' ').width : 0;
+        const w = Math.ceil(keyW + ctx.measureText(chip.text).width) + 16;
+        if (x + w > CPANEL_W - 20) break;
+        ctx.fillStyle = '#121417';
+        ctx.fillRect(x, chipY, w, 22);
+        ctx.strokeStyle = chip.kind === 'tag' ? 'rgba(255, 59, 31, 0.3)' : TOKENS.hex.rule;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, chipY, w, 22);
+        if (chip.key) {
+          ctx.fillStyle = TOKENS.hex.ink3;
+          ctx.font = `700 10px ${TOKENS.font.mono}`;
+          ctx.fillText(chip.key, x + 8, chipY + 11);
+          ctx.font = `600 10px ${TOKENS.font.mono}`;
+        }
+        ctx.fillStyle = chip.kind === 'tag' ? accent : (chip.kind === 'spec' ? TOKENS.hex.ink : TOKENS.hex.ink2);
+        ctx.fillText(chip.text, x + 8 + keyW, chipY + 11);
+        x += w + 6;
+      }
+    }
+
+    // Stats row
+    const stats = [
+      ['LIKES', unavailable ? '0' : fmtCount(item.likes)],
+      ['COMMENTS', unavailable ? '0' : fmtCount(comments.length)],
+      ['VIEWS', unavailable ? '0' : fmtCount(item.views)],
+    ];
+    const statsW = CPANEL_W - 40;
+    const cellW = statsW / stats.length;
+    ctx.fillStyle = '#121417';
+    ctx.fillRect(20, CP_STATS_Y, statsW, 46);
+    ctx.strokeStyle = TOKENS.hex.rule;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(20, CP_STATS_Y, statsW, 46);
+    ctx.fillStyle = TOKENS.hex.rule;
+    for (let i = 1; i < stats.length; i++) ctx.fillRect(20 + cellW * i, CP_STATS_Y, 1, 46);
+    ctx.textAlign = 'center';
+    stats.forEach(([label, value], i) => {
+      const cx = 20 + cellW * i + cellW / 2;
+      ctx.fillStyle = TOKENS.hex.ink3;
+      ctx.font = `600 9px ${TOKENS.font.mono}`;
+      ctx.fillText(label, cx, CP_STATS_Y + 15);
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `800 15px ${TOKENS.font.sans}`;
+      ctx.fillText(value, cx, CP_STATS_Y + 32);
+    });
+
+    ctx.fillStyle = TOKENS.hex.rule;
+    ctx.fillRect(0, CP_INFO_H - 1, CPANEL_W, 1);
+  }
+
   function renderCommentsPanelCanvas(ctx, options = {}) {
     if (!ctx) return;
     const {
@@ -953,11 +1184,11 @@
       cPanelHighlightId = null,
       user = null,
       currentTime = 0,
+      item = null,
+      itemState = {},
     } = options;
-
-    let filtered = comments;
-    if (cPanelTab === 'sync') filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    else if (cPanelTab === 'general') filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+    const hover = cPanelHover || '';
+    const filtered = filterPanelComments(comments, cPanelTab);
 
     const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
     const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
@@ -978,53 +1209,49 @@
     ctx.fillStyle = accent;
     ctx.fillRect(0, 0, CPANEL_W, 3);
 
+    renderCommentsPanelInfo(ctx, item, itemState || {}, comments, hover);
+
     // Header
+    const headY = CP_INFO_H + CP_HEADER_H / 2;
     ctx.fillStyle = '#0d0e0f';
-    ctx.fillRect(0, 3, CPANEL_W, CP_HEADER_H - 3);
+    ctx.fillRect(0, CP_INFO_H, CPANEL_W, CP_HEADER_H);
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
-    drawGlyph(ctx, 'chat', 24, 33, 12, accent);
+    drawGlyph(ctx, 'chat', 24, headY, 12, accent);
     ctx.font = `700 11px ${TOKENS.font.mono}`;
-    ctx.fillText('COMMENTS', 40, 33);
+    ctx.fillText('COMMENTS', 40, headY);
     ctx.fillStyle = TOKENS.hex.accentHi;
     const titleW = ctx.measureText('COMMENTS').width;
-    ctx.fillText('(' + comments.length + ')', 40 + titleW + 10, 33);
+    ctx.fillText('(' + comments.length + ')', 40 + titleW + 10, headY);
 
-    const tabs = [
-      { key: 'all', label: 'ALL', x: 296, w: 48 },
-      { key: 'sync', label: 'SYNC', x: 352, w: 64 },
-      { key: 'general', label: 'GENERAL', x: 424, w: 78 },
-    ];
-    tabs.forEach((tab) => {
-      const active = cPanelTab === tab.key;
-      const hover = cPanelHover === ('tab:' + tab.key);
-      ctx.fillStyle = active ? accent : (hover ? TOKENS.hex.surface3 : TOKENS.hex.surface2);
-      ctx.strokeStyle = active ? accent : (hover ? accent : TOKENS.hex.ruleStrong);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(tab.x, 16, tab.w, 30, TOKENS.radius);
-      else ctx.rect(tab.x, 16, tab.w, 30);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = active ? TOKENS.hex.onAccent : (hover ? TOKENS.hex.ink : TOKENS.hex.accent);
-      ctx.font = `bold 9px ${TOKENS.font.mono}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(tab.label, tab.x + tab.w / 2, 31);
-    });
+    // Time-sync toggle: lit while synced comments are included (default).
+    const syncOn = cPanelTab !== 'general';
+    const syncHover = hover.indexOf('tab:') === 0;
+    const sb = CP_SYNC_BTN;
+    ctx.fillStyle = syncHover ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
+    ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+    ctx.strokeStyle = syncOn || syncHover ? accent : TOKENS.hex.ruleStrong;
+    ctx.lineWidth = syncOn ? 1.5 : 1;
+    ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
+    drawIcon(ctx, 'timesync', sb.x + sb.w / 2, sb.y + sb.h / 2, 20,
+      syncOn ? TOKENS.hex.ink : TOKENS.hex.inkMuted, syncOn ? accent : TOKENS.hex.inkMuted, TOKENS.hex.surface2);
 
     // Close button
-    ctx.fillStyle = cPanelHover === 'close' ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
-    ctx.strokeStyle = cPanelHover === 'close' ? accent : TOKENS.hex.ruleStrong;
+    const cb = CP_CLOSE_BTN;
+    ctx.fillStyle = hover === 'close' ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
+    ctx.strokeStyle = hover === 'close' ? accent : TOKENS.hex.ruleStrong;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(522, 16, 26, 30, TOKENS.radius);
-    else ctx.rect(522, 16, 26, 30);
+    if (ctx.roundRect) ctx.roundRect(cb.x, cb.y, cb.w, cb.h, TOKENS.radius);
+    else ctx.rect(cb.x, cb.y, cb.w, cb.h);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = cPanelHover === 'close' ? TOKENS.hex.ink : accent;
+    ctx.fillStyle = hover === 'close' ? TOKENS.hex.ink : accent;
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('✕', 535, 31);
+    ctx.textAlign = 'center';
+    ctx.fillText('✕', cb.x + cb.w / 2, cb.y + cb.h / 2);
 
     // List items
     ctx.save();
@@ -1074,30 +1301,38 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(getInitials(c.author_name), itemX + 28, y + 33);
 
-        // Author name
+        // Author name, then the time pill right after it (none for general)
+        const head = cpCommentHead(c, itemX, y);
         ctx.fillStyle = border;
         ctx.font = `700 11px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        let name = c.author_name || 'Anonymous';
-        if (name.length > 16) name = name.slice(0, 15) + '…';
-        ctx.fillText(name, itemX + 56, y + 14);
-
-        // Time pill
-        const hasTime = c.timestamp !== null && c.timestamp !== undefined;
-        const pillX = itemX + 180;
-        ctx.fillStyle = TOKENS.hex.surface3;
-        ctx.strokeStyle = accent;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(pillX, y + 10, 100, 24, TOKENS.radius);
-        else ctx.rect(pillX, y + 10, 100, 24);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = accent;
-        ctx.font = `700 10px ${TOKENS.font.mono}`;
-        ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(hasTime ? formatTime(c.timestamp) : 'GENERAL', pillX + 50, y + 23);
+        ctx.fillText(head.name, itemX + 56, y + 20);
+
+        if (head.pill) {
+          const p = head.pill;
+          ctx.fillStyle = hover === 'seek:' + c.id ? accent : TOKENS.hex.surface3;
+          ctx.strokeStyle = accent;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(p.x, p.y, p.w, p.h, TOKENS.radius);
+          else ctx.rect(p.x, p.y, p.w, p.h);
+          ctx.fill();
+          ctx.stroke();
+          drawIcon(ctx, 'timesync', p.x + 15, p.y + p.h / 2, 14, TOKENS.hex.ink, accent, TOKENS.hex.surface3);
+          ctx.fillStyle = hover === 'seek:' + c.id ? TOKENS.hex.ink : TOKENS.hex.accentHi;
+          ctx.font = `700 10px ${TOKENS.font.mono}`;
+          ctx.fillText(head.time, p.x + 28, p.y + p.h / 2 + 1);
+        }
+
+        // Like: heart + count
+        const liked = !!c.liked_by_me;
+        const likeHover = hover === 'like:' + c.id;
+        const likeTone = liked ? accent : TOKENS.hex.ink;
+        drawIcon(ctx, 'like', itemX + itemW - 56, y + 20, 24, likeHover && !liked ? accent : likeTone, accent, '#121315');
+        ctx.fillStyle = likeTone;
+        ctx.font = `700 12px ${TOKENS.font.mono}`;
+        ctx.textAlign = 'left';
+        ctx.fillText(fmtCount(c.likes), itemX + itemW - 40, y + 21);
 
         // Text
         ctx.fillStyle = TOKENS.hex.ink;
@@ -1106,7 +1341,7 @@
         ctx.textBaseline = 'top';
         const lines = wrapTextLines(ctx, c.text || '', itemW - 70, 2);
         lines.forEach((line, li) => {
-          ctx.fillText(line, itemX + 56, y + 48 + li * 18);
+          ctx.fillText(line, itemX + 56, y + 36 + li * 18);
         });
       });
     }

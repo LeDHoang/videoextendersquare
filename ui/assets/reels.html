@@ -361,7 +361,7 @@
 
   /* Keyboard focus rings for the controls that had none. */
   .edge-chevron:focus-visible,
-  .drawer-tab:focus-visible,
+  .drawer-sync-filter:focus-visible,
   .drawer-close-btn:focus-visible,
   .comment-name:focus-visible,
   .comment-time-btn:focus-visible,
@@ -1068,36 +1068,27 @@
     gap: 8px;
     margin-left: auto;
   }
-  .drawer-tabs { display: flex; gap: 6px; align-items: center; }
-  .drawer-tab {
+  /* One-button filter: on = all comments, off = general only. */
+  .drawer-sync-filter {
+    width: 32px; height: 32px;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 32px;
+    justify-content: center;
+    padding: 0;
     background: var(--sx-surface-3);
     border: 1px solid var(--sx-rule-strong);
-    color: var(--sx-accent);
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 0 14px;
     border-radius: 0;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-    line-height: 1;
     box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .drawer-tab .material-symbols-outlined { font-size: 14px; line-height: 1; }
-  .drawer-tab svg { width: 14px; height: 14px; display: block; }
-  .drawer-tab:hover { background: var(--sx-surface-3); border-color: var(--sx-accent); }
-  .drawer-tab.active {
-    background: var(--sx-accent);
-    color: var(--sx-on-accent);
+  .drawer-sync-filter svg { width: 18px; height: 18px; display: block; opacity: 0.4; filter: grayscale(1); transition: opacity 0.15s ease, filter 0.15s ease; }
+  .drawer-sync-filter:hover { border-color: var(--sx-accent); }
+  .drawer-sync-filter[aria-pressed="true"] {
     border-color: var(--sx-accent);
     box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 28%, transparent);
   }
+  .drawer-sync-filter[aria-pressed="true"] svg { opacity: 1; filter: none; }
   .drawer-close-btn {
     width: 32px; height: 32px;
     display: inline-flex;
@@ -1175,7 +1166,7 @@
     color: var(--avatar-border, var(--sx-accent));
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .comment-time-btn, .comment-time-gen {
+  .comment-time-btn {
     display: inline-flex; align-items: center; gap: 4px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px; font-weight: 700;
@@ -1183,8 +1174,6 @@
     border-radius: 0;
     white-space: nowrap;
     flex-shrink: 0;
-  }
-  .comment-time-btn {
     background: var(--sx-surface-3);
     border: 1px solid var(--sx-accent);
     color: var(--sx-accent-hi);
@@ -1196,11 +1185,6 @@
   .sync-time-toggle svg { width: 13px; height: 13px; display: block; }
   .sync-time-icon { display: inline-flex; line-height: 1; }
   .comment-time-btn:hover { background: var(--sx-accent); border-color: var(--sx-accent); color: var(--sx-on-accent); }
-  .comment-time-gen {
-    background: var(--sx-surface-3);
-    border: 1px solid var(--sx-accent);
-    color: var(--sx-accent-hi);
-  }
   .comment-msg {
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
     font-size: 15px; line-height: 22px;
@@ -1563,13 +1547,6 @@
     .drawer-header {
       padding: 10px 12px;
       gap: 8px;
-    }
-    .drawer-tabs {
-      flex-wrap: wrap;
-    }
-    .drawer-tab {
-      padding: 0 8px;
-      font-size: 10px;
     }
     .comment-input-wrap {
       min-width: 0;
@@ -2410,11 +2387,7 @@
         <h2 class="drawer-title" id="drawerTitle">COMMENTS <span class="drawer-title-count">(0)</span></h2>
       </div>
       <div class="drawer-header-right">
-        <div class="drawer-tabs" role="tablist" aria-label="Comment filter">
-          <button type="button" class="drawer-tab active" data-tab="all" id="tabAll" role="tab" aria-selected="true">ALL</button>
-          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync" role="tab" aria-selected="false">__ICON_TIMESYNC__ TIME-SYNC</button>
-          <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral" role="tab" aria-selected="false"><span class="material-symbols-outlined">forum</span> GENERAL</button>
-        </div>
+        <button type="button" class="drawer-sync-filter" id="syncFilterBtn" aria-pressed="true" title="Time-synced comments shown (tap for general only)" aria-label="Include time-synced comments">__ICON_TIMESYNC__</button>
         <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)" aria-label="Close comments"><span class="material-symbols-outlined">close</span></button>
       </div>
     </div>
@@ -2663,9 +2636,7 @@
     const drawerTitle = document.getElementById('drawerTitle');
     const closeDrawerBtn = document.getElementById('closeDrawerBtn');
     const commentsList = document.getElementById('commentsList');
-    const tabAll = document.getElementById('tabAll');
-    const tabSync = document.getElementById('tabSync');
-    const tabGeneral = document.getElementById('tabGeneral');
+    const syncFilterBtn = document.getElementById('syncFilterBtn');
     const accountBtn = document.getElementById('accountBtn');
     const accountAvatar = document.getElementById('accountAvatar');
     const accountName = document.getElementById('accountName');
@@ -5198,7 +5169,7 @@
     function openDrawerToComment(commentId) {
       if (!commentId) return;
       toggleDrawer(true);
-      setActiveTab('all');
+      setSyncFilter(true);
       // Wait for the drawer slide-up (0.34s) so scroll offsets are correct.
       // The docked column does not slide so it can scroll straight away.
       setTimeout(() => {
@@ -5215,20 +5186,15 @@
       }, isDocked ? 0 : 380);
     }
 
-    // ── Active tab control helpers ──
-    function setActiveTab(key) {
-      const map = { all: tabAll, sync: tabSync, general: tabGeneral };
-      const activeEl = map[key] || tabAll;
-      [tabAll, tabSync, tabGeneral].forEach((t) => {
-        if (!t) return;
-        t.classList.remove('active');
-        t.setAttribute('aria-selected', 'false');
-      });
-      if (activeEl) {
-        activeEl.classList.add('active');
-        activeEl.setAttribute('aria-selected', 'true');
+    // ── Time-sync filter: on shows every comment, off shows general only ──
+    function setSyncFilter(on) {
+      activeTab = on ? 'all' : 'general';
+      if (syncFilterBtn) {
+        syncFilterBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        syncFilterBtn.title = on
+          ? 'Time-synced comments shown (tap for general only)'
+          : 'General comments only (tap to include time-synced)';
       }
-      activeTab = (activeEl && activeEl.getAttribute('data-tab')) || 'all';
       renderDrawerComments();
     }
 
@@ -5251,9 +5217,7 @@
       if (sideComms) sideComms.textContent = fmtCount(comments.length);
 
       let filtered = comments;
-      if (activeTab === 'sync') {
-        filtered = comments.filter((comment) => comment.timestamp !== null && comment.timestamp !== undefined);
-      } else if (activeTab === 'general') {
+      if (activeTab === 'general') {
         filtered = comments.filter((comment) => comment.timestamp === null || comment.timestamp === undefined);
       }
 
@@ -5261,7 +5225,7 @@
       if (!filtered.length) {
         const empty = document.createElement('div');
         empty.className = 'comment-empty';
-        const qualifier = activeTab === 'sync' ? 'time-synced ' : activeTab === 'general' ? 'general ' : '';
+        const qualifier = activeTab === 'general' ? 'general ' : '';
         empty.append(
           document.createTextNode('No ' + qualifier + 'comments yet.'),
           document.createElement('br'),
@@ -5313,17 +5277,11 @@
               showFlash('⏱ ' + formatTime(timestamp));
             }
           });
-        } else {
-          timeControl = document.createElement('span');
-          timeControl.className = 'comment-time-gen';
-          const icon = document.createElement('span');
-          icon.className = 'material-symbols-outlined';
-          icon.style.fontSize = '12px';
-          icon.textContent = 'forum';
-          timeControl.append(icon, document.createTextNode(' GENERAL'));
         }
 
-        left.append(avatar, name, timeControl);
+        // General comments carry no chip: no time pill means general.
+        left.append(avatar, name);
+        if (timeControl) left.append(timeControl);
 
         const actions = document.createElement('div');
         actions.className = 'comment-actions';
@@ -5397,11 +5355,7 @@
       updateTwitchTicker();
     }
 
-    // Tab button listeners
-    [tabAll, tabSync, tabGeneral].forEach((tab) => {
-      if (!tab) return;
-      tab.addEventListener('click', () => setActiveTab(tab.getAttribute('data-tab')));
-    });
+    if (syncFilterBtn) syncFilterBtn.addEventListener('click', () => setSyncFilter(activeTab === 'general'));
 
     if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));
     if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
@@ -7004,7 +6958,10 @@
         onReportReel: function() { return reportTarget('post', videoData[idx] && videoData[idx].post_id); },
         getCurrentItemState: function() {
           const item = videoData[idx] || {};
-          return { liked: !!item._liked, saved: !!item._saved, following: !!item._following, available: item.available !== false };
+          return {
+            liked: !!item._liked, saved: !!item._saved, following: !!item._following, available: item.available !== false,
+            canFollow: !!(followPill && !followPill.hidden),
+          };
         },
         onUnmute: function() {
           isMuted = false;
