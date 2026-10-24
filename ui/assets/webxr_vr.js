@@ -705,6 +705,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // VR comment keyboard (DOM overlay) state
   let domOverlayRoot = null;
   let domOverlayInput = null;
+  let vrKeyboardOpen = false;
   let pendingSyncTime = null;
 
   // Telemetry & Render Stats
@@ -10027,57 +10028,61 @@ window.WebXRVR = window.WebXRVR || (function () {
       showNotification('KEYBOARD DISABLED (?domoverlay=0)');
       return;
     }
-    // v8.16: the minimal session (v8.15 default) doesn't request the
-    // dom-overlay layer, so focusing the input would summon no keyboard —
-    // fail explicitly instead of stranding the user on an invisible field.
-    // ?xrfull=1 restores the layer.
-    let overlayGranted = false;
+    // Quest Browser 26.1+ summons the system keyboard for any focused DOM
+    // text input during an immersive session (XRSession.isSystemKeyboardSupported),
+    // so the minimal session needs no dom-overlay layer. The legacy dom-overlay
+    // layer (?xrfull=1) is the fallback for older browsers.
+    let keyboardAvailable = false;
     try {
-      overlayGranted = !!(xrSession && xrSession.enabledFeatures &&
-        xrSession.enabledFeatures.includes('dom-overlay'));
-    } catch (e) { overlayGranted = false; }
-    if (!overlayGranted) {
-      showNotification('KEYBOARD NEEDS FULL SESSION (?xrfull=1)');
+      keyboardAvailable = !!(xrSession && (xrSession.isSystemKeyboardSupported ||
+        (xrSession.enabledFeatures && xrSession.enabledFeatures.includes('dom-overlay'))));
+    } catch (e) { keyboardAvailable = false; }
+    if (!keyboardAvailable) {
+      showNotification('KEYBOARD NEEDS QUEST BROWSER 26.1+');
       return;
     }
     initDomOverlay();
     if (!domOverlayInput) return;
+    // A field still focused/open (keyboard dismissed by a path that never
+    // blurred it) would make focus() a no-op: send what it holds, blur, reopen.
+    if (vrKeyboardOpen || (typeof document !== 'undefined' && document.activeElement === domOverlayInput)) {
+      closeVrKeyboard(true);
+    }
     const source = getVisualSource();
     pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
     domOverlayInput.value = '';
     domOverlayInput.style.display = 'block';
+    vrKeyboardOpen = true;
     try { domOverlayInput.focus(); } catch (e) {}
   }
 
-  function closeVrKeyboard() {
+  // Closes the field; post=true sends whatever was typed. Idempotent: the
+  // blur fired by hiding the field must not post a second time.
+  function closeVrKeyboard(post) {
+    const wasOpen = vrKeyboardOpen;
+    vrKeyboardOpen = false;
+    const text = post && wasOpen && domOverlayInput ? domOverlayInput.value.trim() : '';
     if (domOverlayInput) {
       domOverlayInput.style.display = 'none';
       try { domOverlayInput.blur(); } catch (e) {}
     }
+    if (text && callbacks.onPostComment) callbacks.onPostComment(text, pendingSyncTime);
   }
 
   function onCommentInputKeydown(e) {
     if (e.key === 'Enter') {
       if (e.preventDefault) e.preventDefault();
-      const text = domOverlayInput ? domOverlayInput.value.trim() : '';
-      closeVrKeyboard();
-      if (text && callbacks.onPostComment) {
-        callbacks.onPostComment(text, pendingSyncTime);
-      }
+      closeVrKeyboard(true);
     } else if (e.key === 'Escape') {
       if (e.preventDefault) e.preventDefault();
-      closeVrKeyboard();
+      closeVrKeyboard(false);
     }
   }
 
+  // The system keyboard raises no key events (Quest Browser): its Done key,
+  // dismiss button or an outside click just blur the field. Blur sends.
   function onCommentInputBlur() {
-    setTimeout(() => {
-      try {
-        if (domOverlayInput && document.activeElement !== domOverlayInput) {
-          domOverlayInput.style.display = 'none';
-        }
-      } catch (e) {}
-    }, 150);
+    closeVrKeyboard(true);
   }
 
   // v8.4 video upload path A/B ('subimage' default | 'respec' forces full

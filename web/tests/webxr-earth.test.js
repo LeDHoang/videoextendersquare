@@ -148,7 +148,7 @@ function loadRenderer(options = {}) {
   window.self = window;
   const mockDocument = {
     documentElement: { classList: { add() {}, remove() {} } },
-    body: { classList: { add() {}, remove() {} } },
+    body: { classList: { add() {}, remove() {} }, appendChild() {} },
     getElementById() { return null; },
     addEventListener() {},
     removeEventListener() {},
@@ -5797,4 +5797,71 @@ test('the split preview renders an SBS source per eye without errors', () => {
   assert.equal(state.screenMaterialVisible, true);
   assert.equal(state.left.visible, false);
   renderer.stopPreview();
+});
+
+// ── Quest system keyboard for VR comments ───────────────────────────
+function makeKeyboardInput() {
+  const handlers = {};
+  return {
+    style: {}, value: '', handlers, focused: 0, blurred: 0,
+    setAttribute() {},
+    appendChild() {},
+    addEventListener(type, fn) { handlers[type] = fn; },
+    focus() { this.focused += 1; },
+    blur() { this.blurred += 1; if (handlers.blur) handlers.blur(); },
+  };
+}
+
+async function enterKeyboardSession(sessionExtra) {
+  const input = makeKeyboardInput();
+  const posted = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    globals: { XRWebGLLayer: class { constructor() { this.framebuffer = null; } } },
+    createElement: (kind) => (kind === 'input' ? input : kind === 'div' ? { style: {}, appendChild() {} } : null),
+  });
+  renderer.init(null, {
+    onPostComment: (text, t) => posted.push({ text, t }),
+    getVisualSource: () => ({ kind: 'video', element: {}, currentTime: 12.34 }),
+  });
+  const session = makeLiveXrSession(sessionExtra);
+  await renderer.enterVR({ xr: { requestSession: async () => session } });
+  return { renderer, input, posted };
+}
+
+test('ADD opens the Quest system keyboard on a minimal session (isSystemKeyboardSupported)', async () => {
+  const { renderer, input } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  assert.equal(renderer.__test.executeCommentAction('add'), true);
+  assert.equal(input.style.display, 'block');
+  assert.equal(input.focused, 1, 'focus() summons the system keyboard');
+});
+
+test('ADD without any keyboard support shows a notice and never focuses the field', async () => {
+  const { renderer, input } = await enterKeyboardSession({ isSystemKeyboardSupported: false });
+  renderer.__test.executeCommentAction('add');
+  assert.equal(input.focused, 0);
+});
+
+test('keyboard Done (blur) posts the typed comment once, synced to the playhead', async () => {
+  const { renderer, input, posted } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  renderer.__test.executeCommentAction('add');
+  input.value = '  great reel  ';
+  input.blur(); // Done / dismiss: the system keyboard raises no key events
+  input.blur(); // a second blur must not double-post
+  assert.deepEqual(posted, [{ text: 'great reel', t: 12.3 }]);
+  assert.equal(input.style.display, 'none');
+});
+
+test('Enter posts once; Escape and an empty field post nothing', async () => {
+  const { renderer, input, posted } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  const act = renderer.__test.executeCommentAction;
+  act('add'); input.value = 'hi';
+  input.handlers.keydown({ key: 'Enter' });
+  assert.equal(posted.length, 1, 'Enter posts exactly once despite the blur it causes');
+  act('add'); input.value = 'nope';
+  input.handlers.keydown({ key: 'Escape' });
+  act('add'); input.value = '   ';
+  input.blur();
+  assert.equal(posted.length, 1);
 });
