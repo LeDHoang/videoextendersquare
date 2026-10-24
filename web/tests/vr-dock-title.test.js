@@ -61,7 +61,8 @@ test('controller guide explains Left/Right for both reels and image posts', () =
   api.renderGuideCanvas(ctx);
   const title = labels.find(({ text }) => text === 'THUMBSTICK');
   assert.ok(title, 'thumbstick card drawn');
-  const lines = labels.filter(({ x, y }) => x === title.x && y > title.y && y < title.y + 78).map(({ text }) => text);
+  // Table row: the actions sit right of the control name, first line level with it.
+  const lines = labels.filter(({ x, y }) => x > title.x && y >= title.y && y < title.y + 60).map(({ text }) => text);
   assert.deepEqual(lines, ['Up/Down → Next/Prev Reel', 'Reels: Left/Right → Seek ±5s', 'Images: Left/Right → Prev/Next']);
 });
 

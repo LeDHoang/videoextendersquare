@@ -1124,9 +1124,9 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
-  closeTo(comments.center.z, -2.39);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
+  closeTo(comments.center.z, -2.58);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -2244,8 +2244,8 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
   // Legacy-exact: locked mode anchors both to the room spot tracking the
   // default screen (NOT the live screenDistance).
   api.setScreenState({ locked: true, distance: 3.0 });
@@ -2253,8 +2253,8 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  closeTo(lockedComments.center.z, -2.39);
-  closeTo(lockedGuide.center.z, -2.39);
+  closeTo(lockedComments.center.z, -2.58);
+  closeTo(lockedGuide.center.z, -2.58);
 });
 
 test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
@@ -2331,7 +2331,7 @@ test('popup overlay regions resolve to the clicked comment', () => {
 
 test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   const ui = loadUICanvasStandalone();
-  assert.equal(ui.GUIDE_H, 760);
+  assert.equal(ui.GUIDE_H, 1124);
   // Recording ctx captures fillText(text, x, y) joined with spaces.
   const firstToken = (texts, label) => texts.some((t) => t.split(' ')[0] === label);
   const loop = makeRecordingCtx();
@@ -2476,7 +2476,7 @@ test('UI panels raster at 2x their logical size, always mipmapped, and hit-test 
   renderer.startPreview(makePreviewCanvas(gl));
   const THREE = renderer.getThree();
   const filters = renderer.__test.getTextureFilterInfo();
-  const sizes = { controls: [2048, 768], comments: [1120, 1360], guide: [880, 1520] };
+  const sizes = { controls: [2048, 768], comments: [1120, 1360], guide: [880, 2248] };
   for (const [name, size] of Object.entries(sizes)) {
     assert.deepEqual([...filters[name].size], size, `${name} canvas 2x`);
     assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);
@@ -2556,10 +2556,10 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     screenHeight: 1.52,
     dockWidth: 0.82,
     dockGap: 0.08,
-    panelSideGap: 0.384,
-    panelFwdOffset: -0.15,
+    panelSideGap: 0.445,
+    panelFwdOffset: -0.34,
     commentsScale: 0.432,
-    guideScale: 0.4212,
+    guideScale: 0.314,
   });
   const before = api.getCommentsPanelLayout();
   const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });

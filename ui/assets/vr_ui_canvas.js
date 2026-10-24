@@ -14,7 +14,7 @@
   const CONTROLS_W = 1024;
   const CONTROLS_H = 384;
   const GUIDE_W = 440;
-  const GUIDE_H = 760;
+  const GUIDE_H = 1124;
   const CPANEL_W = 560;
   const CPANEL_H = 680;
   const OVERLAY_W = 1024;
@@ -1143,10 +1143,10 @@
   }
 
   // ─── Render Controller Guide Panel ────────────────────────────────────
-  // Upstream v5.2 renderGuideCanvas verbatim: the Quest controller PHOTO
-  // (`window.QUEST_CONTROLLER_B64`, injected by the backend from
-  // `ui/assets/quest_controller_img.js`) with the vector drawing as the
-  // fallback. Card text updated to the v8.3 control mapping.
+  // ECHO-styled guide (2026-10-24 redesign of the upstream v5.2 panel): the
+  // Quest controller PHOTO (`window.QUEST_CONTROLLER_B64`, injected by the
+  // backend from `ui/assets/quest_controller_img.js`) with the vector drawing
+  // as the fallback, above a control table using the v8.3 control mapping.
   let guidePhoto = null;
   let guidePhotoState = 'idle'; // 'idle' | 'loading' | 'ready' | 'missing'
   let guideArtworkDirty = false;
@@ -1301,137 +1301,143 @@
     ctx.restore();
   }
 
+  // The photo's own content (callouts + controller) without its baked frame
+  // and corner marks, as fractions of the 542x900 source.
+  const GUIDE_PHOTO_CROP = { x: 47 / 542, y: 82 / 900, w: 448 / 542, h: 698 / 900 };
+
   function renderGuideCanvas(ctx) {
     if (!ctx) return;
     ensureGuidePhoto();
 
+    const accent = TOKENS.hex.accent;
     ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
 
-    // Dark Glass Container Background
-    ctx.fillStyle = 'rgba(8, 9, 10, 0.94)';
+    // Container (ECHO, matching the comments panel)
+    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, TOKENS.radius);
     else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
     ctx.fill();
-
-    // Signature Red Glow Border
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, TOKENS.radius);
-    else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 0, GUIDE_W, 3);
 
-    // Header Badge
-    ctx.fillStyle = TOKENS.hex.accent;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(16, 14, 140, 24, TOKENS.radius);
-    else ctx.rect(16, 14, 140, 24);
-    ctx.fill();
-
-    ctx.fillStyle = TOKENS.hex.onAccent;
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
+    // Header
+    const headerH = 52;
+    ctx.fillStyle = '#0d0e0f';
+    ctx.fillRect(0, 3, GUIDE_W, headerH - 3);
+    ctx.fillStyle = TOKENS.hex.rule;
+    ctx.fillRect(0, headerH - 1, GUIDE_W, 1);
+    ctx.fillStyle = accent;
+    ctx.fillRect(20, 23, 8, 8);
     ctx.textBaseline = 'middle';
-    ctx.fillText('CONTROLLER GUIDE', 86, 26);
-
-    ctx.fillStyle = 'rgba(255, 59, 31, 0.85)';
-    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = TOKENS.hex.ink;
+    ctx.font = `700 14px ${TOKENS.font.mono}`;
+    ctx.fillText('CONTROLLER GUIDE', 38, 28);
     ctx.textAlign = 'right';
-    ctx.fillText('META QUEST 3', GUIDE_W - 16, 26);
+    ctx.fillStyle = TOKENS.hex.ink3;
+    ctx.font = `600 11px ${TOKENS.font.mono}`;
+    ctx.fillText('META QUEST 3', GUIDE_W - 20, 28);
 
-    // ── TOP SECTION: Centered Controller Graphic ──
-    // Photo when loaded (upstream: 210 px wide slot), vector fallback.
+    // Controller photo, cropped to its content (vector drawing as fallback)
+    const photoW = GUIDE_W - 32;
+    const photoH = 636;
+    const photoY = headerH + 10;
     if (guidePhotoState === 'ready' && guidePhoto) {
       try {
-        const imgW = 210;
-        const natW = guidePhoto.naturalWidth || guidePhoto.width || imgW;
-        const natH = guidePhoto.naturalHeight || guidePhoto.height || imgW;
-        const imgH = natW > 0 ? imgW * (natH / natW) : imgW;
-        const imgX = (GUIDE_W - imgW) / 2;
-        ctx.drawImage(guidePhoto, imgX, 46, imgW, imgH);
+        const natW = guidePhoto.naturalWidth || guidePhoto.width;
+        const natH = guidePhoto.naturalHeight || guidePhoto.height;
+        const sx = natW * GUIDE_PHOTO_CROP.x;
+        const sy = natH * GUIDE_PHOTO_CROP.y;
+        const sw = natW * GUIDE_PHOTO_CROP.w;
+        const sh = natH * GUIDE_PHOTO_CROP.h;
+        const dh = Math.min(photoH, photoW * (sh / sw));
+        const dx = (GUIDE_W - photoW) / 2;
+        ctx.drawImage(guidePhoto, sx, sy, sw, sh, dx, photoY, photoW, dh);
+        // Fade the photo's edges into the panel so it floats instead of
+        // reading as a box (its top-left has a lighter glow).
+        const fade = (x0, y0, x1, y1, rx, ry, rw, rh) => {
+          const g = ctx.createLinearGradient(x0, y0, x1, y1);
+          g.addColorStop(0, 'rgba(13, 14, 15, 1)');
+          g.addColorStop(1, 'rgba(13, 14, 15, 0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(rx, ry, rw, rh);
+        };
+        fade(0, photoY, 0, photoY + 16, dx, photoY, photoW, 16);
+        fade(dx, 0, dx + 10, 0, dx, photoY, 10, dh);
+        fade(dx + photoW, 0, dx + photoW - 6, 0, dx + photoW - 6, photoY, 6, dh);
+        fade(0, photoY + dh, 0, photoY + dh - 6, dx, photoY + dh - 6, photoW, 6);
       } catch (e) {
-        drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
+        drawQuestController(ctx, GUIDE_W / 2, photoY + 194, 2.6);
       }
     } else {
-      drawQuestController(ctx, GUIDE_W / 2, 210, 1.8);
+      drawQuestController(ctx, GUIDE_W / 2, photoY + 194, 2.6);
     }
 
-    // Divider Line
-    ctx.strokeStyle = 'rgba(255, 59, 31, 0.25)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(20, 405);
-    ctx.lineTo(GUIDE_W - 20, 405);
-    ctx.stroke();
-
-    // ── BOTTOM SECTION: 2-Column Cards Grid ──
-    const accentColor = TOKENS.hex.accent;
-    const dimText = 'rgba(242, 243, 245, 0.85)';
+    // Control table: control name | what it does
     const cards = [
       { title: 'THUMBSTICK', desc: 'Up/Down → Next/Prev Reel|Reels: Left/Right → Seek ±5s|Images: Left/Right → Prev/Next' },
       { title: 'A BUTTON', desc: 'Toggle Play / Pause|In-VR Video Control' },
       { title: 'B BUTTON', desc: 'Toggle Guide & Controls|Show/Hide Overlay' },
       { title: 'INDEX TRIGGER', desc: 'Laser Aim & Click|Tap Video → Play/Pause' },
-      { title: 'SIDE GRIP (Hold)', desc: '6DOF Drag & Reposition|Only when UNLOCKED' },
+      { title: 'SIDE GRIP', tag: 'HOLD', desc: '6DOF Drag & Reposition|Only when UNLOCKED' },
       { title: 'GRIP + STICK', desc: '↕ Zoom Screen In / Out|↔ Screen Closer / Further' },
     ];
-    const colW = 198;
-    const cardH = 88;
-    const gapX = 12;
-    const gapY = 10;
-    const startX = 16;
-    const startY = 418;
+    const tableX = 16;
+    const tableW = GUIDE_W - 32;
+    const keyW = 136;
+    const padY = 10;
+    const lineH = 20;
+    const tableY = photoY + photoH + 10;
+    const rowH = (card) => padY * 2 + card.desc.split('|').length * lineH;
+    const tableH = cards.reduce((sum, card) => sum + rowH(card), 0);
+    ctx.fillStyle = TOKENS.hex.surface;
+    ctx.fillRect(tableX, tableY, tableW, tableH);
+    ctx.fillStyle = TOKENS.hex.surface2;
+    ctx.fillRect(tableX, tableY, keyW, tableH);
 
+    let y = tableY;
     cards.forEach((card, i) => {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const cx = startX + col * (colW + gapX);
-      const cy = startY + row * (cardH + gapY);
+      const h = rowH(card);
+      const lineY = (li) => y + padY + lineH / 2 + li * lineH;
+      if (i > 0) {
+        ctx.fillStyle = TOKENS.hex.rule;
+        ctx.fillRect(tableX, y, tableW, 1);
+      }
+      ctx.fillStyle = accent;
+      ctx.fillRect(tableX, y, 3, h);
 
-      // Card background
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, TOKENS.radius);
-      else ctx.rect(cx, cy, colW, cardH);
-      ctx.fill();
-
-      // Left accent bar
-      ctx.fillStyle = accentColor;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, 3, cardH, TOKENS.radius);
-      else ctx.rect(cx, cy, 3, cardH);
-      ctx.fill();
-
-      // Card border
-      ctx.strokeStyle = 'rgba(255, 59, 31, 0.18)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(cx, cy, colW, cardH, TOKENS.radius);
-      else ctx.rect(cx, cy, colW, cardH);
-      ctx.stroke();
-
-      // Title
-      ctx.fillStyle = accentColor;
-      ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(card.title, cx + 10, cy + 10);
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = TOKENS.hex.accentHi;
+      ctx.font = `700 13px ${TOKENS.font.mono}`;
+      ctx.fillText(card.title, tableX + 14, lineY(0));
+      if (card.tag) {
+        ctx.fillStyle = TOKENS.hex.ink3;
+        ctx.font = `600 10px ${TOKENS.font.mono}`;
+        ctx.fillText(card.tag, tableX + 14, lineY(1));
+      }
 
-      // Desc lines
-      ctx.fillStyle = dimText;
-      ctx.font = '10px sans-serif';
-      const lines = card.desc.split('|');
-      lines.forEach((line, li) => {
-        ctx.fillText(line, cx + 10, cy + 30 + li * 16);
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `16px ${TOKENS.font.sans}`;
+      card.desc.split('|').forEach((line, li) => {
+        ctx.fillText(line, tableX + keyW + 12, lineY(li));
       });
+      y += h;
     });
+    ctx.strokeStyle = TOKENS.hex.rule;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(tableX + 0.5, tableY + 0.5, tableW - 1, tableH - 1);
 
     // Footer hint
-    ctx.fillStyle = TOKENS.hex.ink3;
-    ctx.font = '10px sans-serif';
+    ctx.fillStyle = TOKENS.hex.ink2;
+    ctx.font = `600 12px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
-    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, GUIDE_H - 14);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, (tableY + tableH + GUIDE_H) / 2);
   }
 
   // ─── Render Earth Preview ───────────────────────────────────────────

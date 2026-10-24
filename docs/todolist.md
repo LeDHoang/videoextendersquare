@@ -44,6 +44,7 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
   - **Fitted dock:** the dock has no empty strip on the right or bottom. It sits centred under the screen with the same gap as before. Buttons are the same physical size as before.
   - **Dock resize:** the dock changes height when switching between a video (800×370) and an image or static card (800×304), and when entering or leaving Earth (800×304). The resize shows no flicker, black frame or stale texture.
   - **Dock aim:** laser hover and trigger presses land on the right button in every dock (reels, pack, image, static card, Earth). This includes buttons near the edges: exit, LOCK and AUDIO, NORTH UP and the seek bar ends. Check both locked and unlocked modes, and in unlocked mode after grip-dragging the screen.
+  - **Controller guide redesign:** the guide (now 440×1124) shows a header, the cropped controller photo at full panel width with readable callouts and no visible box edge, and a control table with all six controls. The table text is readable from the normal seat without leaning in. The taller panel does not clip or overlap the screen edge in locked or unlocked mode, and B still shows and hides it with the dock.
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
 
 ## VR Reels recommended execution order

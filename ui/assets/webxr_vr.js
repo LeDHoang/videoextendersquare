@@ -85,10 +85,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const CONTROLS_AUTO_HIDE_MS = 5000;
   // Side-panel layout (upstream factors): side gap from the screen edge and
   // the slight forward (viewer-side) offset, in screen-local meters.
-  const PANEL_SIDE_GAP = 0.384;
-  const PANEL_FWD_OFFSET = -0.15;
+  const PANEL_SIDE_GAP = 0.445;
+  const PANEL_FWD_OFFSET = -0.34;
   const CPANEL_SCALE_FACTOR = 0.432;
-  const GUIDE_SCALE_FACTOR = 0.4212;
+  const GUIDE_SCALE_FACTOR = 0.314;
 
   // v8.4 video upload path A/B: 'subimage' (three same-size updates, default)
   // vs 'respec' (force full texImage2D re-spec per upload, legacy behavior).
@@ -1030,7 +1030,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function guideTargetSize(base) {
     const ui = getUICanvas();
-    const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+    const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
     const w = base * layoutTuning.guideScale;
     return { w, h: w * aspect };
   }
@@ -1305,7 +1305,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     guideMesh.position.set(layout.center.x, layout.center.y, layout.center.z);
     try {
       const ui = getUICanvas();
-      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
       guideMesh.scale.set(layout.w, layout.h / aspect, 1);
     } catch (e) {}
     faceViewerLevel(guideMesh, headPos);
@@ -5483,14 +5483,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // ?guide=0 skips it entirely.
     if (!guideCanvas && typeof document !== 'undefined' && debugFlags.guide) {
       ({ canvas: guideCanvas, ctx: guideCtx } = createPanelCanvas(
-        uiOverlay ? uiOverlay.GUIDE_W : 440, uiOverlay ? uiOverlay.GUIDE_H : 760));
+        uiOverlay ? uiOverlay.GUIDE_W : 440, uiOverlay ? uiOverlay.GUIDE_H : 1124));
     }
     if (!guideTexture && guideCanvas && debugFlags.guide) {
       guideTexture = applyEarthTileSampling(new THREE.CanvasTexture(guideCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) guideTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!guideMesh && guideTexture && debugFlags.guide) {
-      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
       const gGeo = new THREE.PlaneGeometry(1, aspect);
       const gMat = new THREE.MeshBasicMaterial({
         map: guideTexture,
