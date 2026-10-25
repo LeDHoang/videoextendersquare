@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.23-20261016-exit-vr-awaits-end';
+  const VR_VERSION = 'v8.24-20261025-direct-video-default';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -121,9 +121,15 @@ window.WebXRVR = window.WebXRVR || (function () {
   // three r186 forces alpha:true on the XR layer regardless, so antialias
   // (MSAA resolve on the XR layer) is the isolated variable. ?xrfull=1
   // restores the entire legacy stack (session + renderer).
+  // v8.24: the direct VideoTexture is the default in the preview AND the XR
+  // loop (before, the XR loop ignored ?vrtex=video and always used the 2048²
+  // canvas proxy, halving 3840² masters and capping uploads at 30/s).
+  // ?vrtex=canvas restores the canvas proxy. ?vrfov=<0..1> sets XR fixed
+  // foveation before the session starts (three's default is 1 = maximum).
   const debugFlags = {
     lock: true, overlay: true, guide: true, glow: true,
-    dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
+    dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: true,
+    fov: null,       // XR fixed foveation override (?vrfov=0..1); null keeps three's default
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
@@ -145,6 +151,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('glowprobe', '0')) debugFlags.glowprobe = false;
       if (has('domoverlay', '0')) debugFlags.domoverlay = false;
       if (has('vrtex', 'video')) debugFlags.vrtex = true;
+      if (has('vrtex', 'canvas')) debugFlags.vrtex = false;
+      const fov = q.match(/(?:\?|&)vrfov=([0-9.]+)(?:&|$)/);
+      if (fov && Number.isFinite(Number(fov[1]))) debugFlags.fov = Math.max(0, Math.min(1, Number(fov[1])));
       if (has('xrminimal', '1')) debugFlags.xrminimal = true;
       if (has('xrfull', '1')) debugFlags.xrfull = true;
       if (has('earthmap', '0')) debugFlags.earthmap = false;
@@ -5834,6 +5843,34 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastUploadedSource = '__cleared__';
   }
 
+  // Per-frame screen texture update, shared by the preview and XR loops.
+  function updateVisualTexture(source) {
+    if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
+      // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
+      // the current frame per render. Telemetry counts decoded frames.
+      if (updateDirectVideoBinding(source, false)) {
+        const vf = decodedFrameCount(source.element);
+        if (vf >= 0 && vf !== lastVideoFrameCount) {
+          renderStats.videoUploads += 1;
+          lastVideoFrameCount = vf;
+        }
+        lastVideoTime = Number(source.currentTime) || 0;
+        hasDisplayedVisual = true;
+      } else {
+        // Fresh element below HAVE_FUTURE_DATA or source not ready: hold
+        // the previous map (v8.9 semantics), count the wait.
+        renderStats.transNotReady += 1;
+      }
+    } else if (source && source.ready === false) {
+      // Frames spent waiting for data (buffering/seeking at transitions):
+      // counted so on-device telemetry attributes stalls to buffering.
+      if (source.element) renderStats.transNotReady += 1;
+      clearPendingTexture();
+    } else {
+      uploadVideoFrame();
+    }
+  }
+
   // Samples the playing video at 8x8 and steers the ambient glow color
   // (upstream updateAmbilightColor: average, enhance, lerp 0.08/frame).
   function updateGlowColor(time, intervalMs) {
@@ -6175,31 +6212,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     applySceneVisibility();
 
     if (sceneMode === 'reels') {
-      const source = getVisualSource();
-      if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
-        // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
-        // the current frame per render. Telemetry counts decoded frames.
-        if (updateDirectVideoBinding(source, false)) {
-          const vf = decodedFrameCount(source.element);
-          if (vf >= 0 && vf !== lastVideoFrameCount) {
-            renderStats.videoUploads += 1;
-            lastVideoFrameCount = vf;
-          }
-          lastVideoTime = Number(source.currentTime) || 0;
-          hasDisplayedVisual = true;
-        } else {
-          // Fresh element below HAVE_FUTURE_DATA or source not ready: hold
-          // the previous map (v8.9 semantics), count the wait.
-          renderStats.transNotReady += 1;
-        }
-      } else if (source && source.ready === false) {
-        // Frames spent waiting for data (buffering/seeking at transitions):
-        // counted so on-device telemetry attributes stalls to buffering.
-        if (source.element) renderStats.transNotReady += 1;
-        clearPendingTexture();
-      } else {
-        uploadVideoFrame();
-      }
+      updateVisualTexture(getVisualSource());
       updateGlowColor(time, 120);
       applyGlowColor();
       refreshOverlayTexture(time);
@@ -8981,6 +8994,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {
         try { renderer.xr.setReferenceSpaceType('local'); } catch (e2) {}
       }
+      // ?vrfov= override; three applies it to the layer setSession creates.
+      if (debugFlags.fov !== null && typeof renderer.xr.setFoveation === 'function') {
+        try { renderer.xr.setFoveation(debugFlags.fov); } catch (e) {}
+      }
 
       try {
         await renderer.xr.setSession(session);
@@ -9031,13 +9048,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       renderer.setAnimationLoop((time, frame) => {
         applySceneVisibility();
         if (sceneMode === 'reels') {
-          const source = getVisualSource();
-          if (source && source.ready === false) {
-            if (source.element) renderStats.transNotReady += 1;
-            clearPendingTexture();
-          } else {
-            uploadVideoFrame();
-          }
+          updateVisualTexture(getVisualSource());
           updateGlowColor(time, 800);
           applyGlowColor();
           // Head lock: the screen follows the gaze every frame
@@ -9884,6 +9895,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           screenShowsLeftEye: !!(eyeTextures && screenMesh && screenMesh.material.map === eyeTextures.L),
           screenMaterialVisible: !!(screenMesh && screenMesh.material && screenMesh.material.visible),
           screenVisible: !!(screenMesh && screenMesh.visible),
+          eyesAreVideo: !!(eyeTextures && eyeTextures.L.isVideoTexture && eyeTextures.R.isVideoTexture),
           left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
           right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
         };
@@ -9997,8 +10009,12 @@ window.WebXRVR = window.WebXRVR || (function () {
                 : -1,
               hasMap: !!(screenMesh.material && screenMesh.material.map),
               mapSize: (screenMesh.material && screenMesh.material.map && screenMesh.material.map.image)
-                ? [screenMesh.material.map.image.width, screenMesh.material.map.image.height]
+                ? (screenMesh.material.map.isVideoTexture
+                  ? [screenMesh.material.map.image.videoWidth, screenMesh.material.map.image.videoHeight]
+                  : [screenMesh.material.map.image.width, screenMesh.material.map.image.height])
                 : null,
+              directVideo: !!(directVideoTexture && screenMesh.material &&
+                screenMesh.material.map === monoScreenMap(directVideoTexture)),
               stereo: textureStereo,
               eyeMeshes: !!(eyeMeshL && eyeMeshL.visible && eyeMeshR && eyeMeshR.visible),
             };
@@ -10106,8 +10122,12 @@ window.WebXRVR = window.WebXRVR || (function () {
           };
           // Mean brightness of the 2048^2 proxy canvas (16x16 downsample).
           // Distinguishes "proxy never painted" from "texture/mesh path broken".
+          // Not meaningful while the direct video texture is bound.
           try {
-            if (vrProxyCanvas && typeof document !== 'undefined' && document.createElement) {
+            if (directVideoTexture && screenMesh && screenMesh.material &&
+                screenMesh.material.map === monoScreenMap(directVideoTexture)) {
+              info.proxyMean = 'direct';
+            } else if (vrProxyCanvas && typeof document !== 'undefined' && document.createElement) {
               const probe = document.createElement('canvas');
               probe.width = 16;
               probe.height = 16;

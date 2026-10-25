@@ -169,6 +169,7 @@ function loadRenderer(options = {}) {
     window,
     self: window,
     document: mockDocument,
+    ...(options.search !== undefined ? { location: { search: options.search, hostname: 'example.test', pathname: '/reels' } } : {}),
     navigator: { userAgent: 'NodeTest' },
     console: options.console || { log() {}, warn() {}, error() {} },
     performance: { now: options.now || (() => 0) },
@@ -379,7 +380,7 @@ test('desktop preview starts without navigator.xr and cleans up GPU resources', 
 test('Reels frames skip Earth draws and Earth frames pause video texture uploads', () => {
   const counters = { deleted: 0 };
   const gl = makeMockGl(counters);
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const canvas = makePreviewCanvas(gl);
   const video = {
     paused: false,
@@ -892,7 +893,7 @@ test('a pending image source holds the prior reel texture before it becomes read
   renderer.stopPreview();
 });
 
-test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static sources', () => {
+test('videos bind a direct VideoTexture by default and static sources rebind the canvas', () => {
   const counters = { deleted: 0, textureSources: [] };
   const gl = makeMockGl(counters);
   const makeVideo = (tag, w, h, frames) => ({
@@ -901,8 +902,8 @@ test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static
     currentTime: 1,
     duration: 10,
     muted: true,
-    width: w,
-    height: h,
+    videoWidth: w,
+    videoHeight: h,
     getVideoPlaybackQuality: () => ({ totalVideoFrames: frames }),
     addEventListener() {},
     removeEventListener() {},
@@ -922,7 +923,7 @@ test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static
     getPlaylist: () => [],
     getCurrentIndex: () => 0,
   });
-  renderer.__test.setDebugFlags({ vrtex: true });
+  assert.equal(renderer.__test.getDebugFlags().vrtex, true);
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.__runScheduledFrame(16);
   // Direct texture bound: native video dims, not the 2048 proxy canvas.
@@ -999,7 +1000,7 @@ test('restarting preview after stop rebuilds textures instead of rendering black
     pause() { this.paused = true; },
     play() { this.paused = false; return Promise.resolve(); },
   };
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   renderer.init(videoElement, {
     getPlaylist: () => [],
     getCurrentIndex: () => 0,
@@ -1192,7 +1193,7 @@ test('dockfreeze stops dock texture re-uploads after the first paint', () => {
 
 test('transition counters attribute source changes, clears, and buffering', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const video = {
     paused: true, readyState: 1, currentTime: 0, duration: 10, muted: true,
     addEventListener() {}, removeEventListener() {},
@@ -2686,7 +2687,7 @@ test('reel switches hold the last frame instead of flashing black', () => {
 
 test('video uploads gate on decoded frames, not wall-clock time', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   let decoded = 10;
   const video = {
     paused: false, readyState: 4, currentTime: 1.0, duration: 10, muted: true,
@@ -2715,7 +2716,7 @@ test('video uploads gate on decoded frames, not wall-clock time', () => {
 
 test('fresh visuals wait for forward-buffered data, steady visuals do not', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const video = {
     paused: false, readyState: 2, currentTime: 0, duration: 10, muted: true,
     src: 'a', currentSrc: 'a', addEventListener() {}, removeEventListener() {},
@@ -5550,7 +5551,8 @@ function stereoHarness(initialSource) {
   const counters = { deleted: 0, textureSources: [] };
   const gl = makeMockGl(counters);
   let source = initialSource;
-  const renderer = loadRenderer({ gl });
+  // The stereo proxy tests exercise the canvas path (?vrtex=canvas).
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   renderer.init(initialSource.element, {
     getVisualSource: () => source,
     getPlaylist: () => [],
@@ -5698,6 +5700,96 @@ test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
   frame();
   assert.equal(api.getStereoState().canvas.join(','), '3072,1536');
   renderer.stopPreview();
+});
+
+// ─── Direct VideoTexture default (v8.24) ────────────────────────────────
+
+function directHarness(initialSource) {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  let source = initialSource;
+  const renderer = loadRenderer({ gl, search: '' });
+  renderer.init(initialSource.element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  let t = 16;
+  const frame = () => { renderer.__runScheduledFrame(t); t += 16; };
+  const setSource = (next) => { source = next; renderer.onVideoChange(); };
+  return { renderer, api: renderer.__test, frame, setSource };
+}
+
+test('the XR render loop goes through the shared texture update (direct path reachable in VR)', () => {
+  // Regression guard: v8.13-v8.23 XR frames called uploadVideoFrame()
+  // directly, so ?vrtex=video never reached the headset.
+  const loop = rendererSource.slice(rendererSource.indexOf('renderer.setAnimationLoop((time, frame) => {'));
+  const reels = loop.slice(0, loop.indexOf('updateGlowColor(time, 800)'));
+  assert.match(reels, /updateVisualTexture\(getVisualSource\(\)\)/);
+  assert.doesNotMatch(reels, /uploadVideoFrame\(/);
+});
+
+test('a mono video in XR shows through the direct texture at native size and survives curvature changes', () => {
+  const { renderer, api, frame } = directHarness(stereoVideo('mono-direct', 'mono', 3840, 3840));
+  api.setXrSessionForTest({});
+  frame();
+  let screen = api.getSceneInfo().screen;
+  assert.equal(screen.directVideo, true);
+  assert.equal(screen.mapSize.join(','), '3840,3840');
+  for (const mode of ['dome', 'curved', 'flat']) {
+    renderer.setCurvatureMode(mode);
+    frame();
+    screen = api.getSceneInfo().screen;
+    assert.equal(screen.directVideo, true, `direct map kept in ${mode}`);
+  }
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('SBS and top-bottom videos in XR split the direct texture into per-eye video views', () => {
+  for (const [layout, repeat] of [['sbs', [0.5, 1]], ['tb', [1, 0.5]]]) {
+    const { renderer, api, frame } = directHarness(stereoVideo('direct-' + layout, layout));
+    api.setXrSessionForTest({});
+    frame();
+    const state = api.getStereoState();
+    assert.equal(state.textureStereo, layout);
+    assert.equal(state.eyesAreVideo, true, `${layout} eyes clone the VideoTexture`);
+    assert.equal(state.canvas, null, `${layout} never allocates the stereo proxy`);
+    assert.equal(state.left.visible && state.right.visible, true);
+    assert.deepEqual([...state.left.repeat], repeat);
+    assert.equal(state.screenMaterialVisible, false);
+    api.setXrSessionForTest(null);
+    renderer.stopPreview();
+  }
+});
+
+test('images keep the canvas proxy while videos use the direct texture', () => {
+  const image = {
+    kind: 'image', element: { complete: true, naturalWidth: 1080, naturalHeight: 1080 },
+    ready: true, paused: true, currentTime: 0, duration: 8, version: 'img-1',
+  };
+  const { renderer, api, frame, setSource } = directHarness(image);
+  frame();
+  assert.equal(api.getSceneInfo().screen.directVideo, false);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  setSource(stereoVideo('vid-after-img', 'mono', 2160, 2160));
+  frame();
+  assert.equal(api.getSceneInfo().screen.directVideo, true);
+  renderer.stopPreview();
+});
+
+test('?vrtex=canvas opts out of the direct texture; ?vrfov sets foveation', () => {
+  const canvas = loadRenderer({ search: '?vrtex=canvas&vrfov=0.5' });
+  canvas.init(null, {});
+  assert.equal(canvas.__test.getDebugFlags().vrtex, false);
+  assert.equal(canvas.__test.getDebugFlags().fov, 0.5);
+  const defaults = loadRenderer({ search: '' });
+  defaults.init(null, {});
+  assert.equal(defaults.__test.getDebugFlags().vrtex, true);
+  assert.equal(defaults.__test.getDebugFlags().fov, null);
+  const clamped = loadRenderer({ search: '?vrfov=3' });
+  clamped.init(null, {});
+  assert.equal(clamped.__test.getDebugFlags().fov, 1);
 });
 
 test('preview split-screen and the content stereo layout are independent', () => {
