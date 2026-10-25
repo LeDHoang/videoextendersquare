@@ -5792,6 +5792,21 @@ test('?vrtex=canvas opts out of the direct texture; ?vrfov sets foveation', () =
   assert.equal(clamped.__test.getDebugFlags().fov, 1);
 });
 
+test('?vrfbs sets the XR framebuffer scale; default 1.5, clamped to 0.5..2', () => {
+  const defaults = loadRenderer({ search: '' });
+  defaults.init(null, {});
+  assert.equal(defaults.__test.getDebugFlags().fbs, 1.5);
+  const native = loadRenderer({ search: '?vrfbs=1' });
+  native.init(null, {});
+  assert.equal(native.__test.getDebugFlags().fbs, 1);
+  const high = loadRenderer({ search: '?vrfbs=4' });
+  high.init(null, {});
+  assert.equal(high.__test.getDebugFlags().fbs, 2);
+  const low = loadRenderer({ search: '?vrfbs=0.1' });
+  low.init(null, {});
+  assert.equal(low.__test.getDebugFlags().fbs, 0.5);
+});
+
 test('preview split-screen and the content stereo layout are independent', () => {
   const gl = makeMockGl({ deleted: 0, textureSources: [] });
   const renderer = loadRenderer({ gl });

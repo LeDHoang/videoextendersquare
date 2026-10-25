@@ -249,6 +249,9 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 | `s1-fov0` | v8.24, direct, `?vrfov=0` | 177 (425) | 34.2 | 18 | 318 | 82 | 0 |
 | `s2-preload` | v8.25 + preload fix | 108 (153) | 34.1 | 24 | 265 | 79 | 0 |
 | `s4-cache` | v8.25 + Cache-Control | 69 (69), 1 switch | 32.2 | 7 | 105 | 87 | 0 |
+| `s6-fbs1` | v8.25, `?vrfbs=1` | 72 (118) | 33.9 | 12 | 148 | 83 | 0 |
+| `s6-fbs12` | v8.25, `?vrfbs=1.2` | 80 (101) | 28.7 | 6 | 72 | 88 | 0 |
+| `s6-fbs15` | v8.25, `?vrfbs=1.5` | 68 (68), 1 switch | 31.8 | 7 | 97 | 88 | 0 |
 
 **Step 1: direct texture.**
 - In the headset the direct path binds the full source: mono 3840×3840 and SBS 4096×2048, with the eye textures as `VideoTexture` clones.
@@ -264,7 +267,7 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - No foveation level changed frame pacing beyond noise. fov 0 was no worse than three's default of 1 (dtMax p90 34.2 vs 56.2; stale 318 vs 300).
 - VrApi shows `GPU%≈0.23` while a reel plays, so the GPU has plenty of headroom.
 - The default is now **0** (off), so the periphery renders at full resolution. `?vrfov=` overrides it.
-- Possible follow-up, not on this branch: given the GPU headroom, `setFramebufferScaleFactor` above 1 could sharpen the eye buffer itself.
+- Given the GPU headroom, `setFramebufferScaleFactor` above 1 was tried next (step 6).
 
 **Step 2: preload.**
 - `preloadNext` now warms the next reel once the active reel fires `playing`, or after 1.5 s if it never starts. Each switch cancels the pending warm-up and clears the preloader, so rapid flicks still open no background transfers.
@@ -301,6 +304,14 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - The rule needs the panel under about 1340 px, so at the default size it always picks the master. The proxy would only play if a viewer shrank the panel to about scale 3.2 or below.
 - Only 1 of 24 dev feed items had a fresh preview to offer. Existing previews also have a higher bitrate than the masters (median 36 Mbps; step 3 caps new ones at 12 Mbps).
 - The plan's rule was to keep this step only if `switchMs` dropped with no visible softness. With no case where it changes playback, it was reverted. YouTube's rule pays off on its flat theatre screen; our panel fills the view.
+
+**Step 6: framebuffer scale.**
+- New flag `?vrfbs=<0.5..2>`, passed to `renderer.xr.setFramebufferScaleFactor` before `setSession`. three hands it to `XRWebGLBinding.createProjectionLayer` as `scaleFactor`.
+- Measured projection layer size in the headset: 3360×1760 at 1 (1680×1760 per eye, below the ~1832×1920 panel), 5040×2640 at 1.5. A request for 2 is clamped to 5040×2640, so 1.5 is the Quest 3S maximum.
+- Pacing at 1.2 and 1.5 was within noise of 1 (table above). VrApi GPU% median/p90 went from 0.21/0.35 at 1, to 0.24/0.41 at 1.2, and 0.28/0.42 at 1.5.
+- Fixed-frame comparison (Flat, paused, same item, page reloaded per scale): edge energy rose 7.7% on an image post (2048² canvas) and 12% on a 1080×778 video (direct texture). Mean brightness was unchanged. The difference is visible on fine window grids.
+- The higher scale also cuts the minification the step 1 note warns about by 1.5×. At the default layout the Flat panel spans about 2370 eye-buffer px instead of 1578 (step 5), so a 3840² master is minified about 1.6× rather than 2.4×.
+- The default is now **1.5**. `?vrfbs=1` restores the native size.
 
 ## Unknowns and how to resolve them
 

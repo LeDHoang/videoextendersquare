@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.25-20261025-foveation-off';
+  const VR_VERSION = 'v8.26-20261025-framebuffer-scale';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -129,10 +129,15 @@ window.WebXRVR = window.WebXRVR || (function () {
   // default of 1 (maximum) renders the periphery of a Dome-filled view at
   // reduced resolution, and the Quest 3S A/B showed no frame-pacing cost for
   // 0 with the GPU ~23% busy (docs/vr-playback-reverse-engineering.md §5).
+  // v8.26: ?vrfbs=<0.5..2> sets the XR framebuffer scale before the session
+  // starts. The default is 1.5: at 1 the eye buffer (1680×1760) is below the
+  // 3S panel (~1832×1920 per eye); the 3S clamps the layer at 1.5 (2520×2640
+  // per eye). Pacing matched 1 and GPU went from ~21% to ~28% busy.
   const debugFlags = {
     lock: true, overlay: true, guide: true, glow: true,
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: true,
     fov: 0,          // XR fixed foveation (?vrfov=0..1); 0 = off
+    fbs: 1.5,        // XR framebuffer scale factor (?vrfbs=0.5..2); 1 = native
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
@@ -157,6 +162,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('vrtex', 'canvas')) debugFlags.vrtex = false;
       const fov = q.match(/(?:\?|&)vrfov=([0-9.]+)(?:&|$)/);
       if (fov && Number.isFinite(Number(fov[1]))) debugFlags.fov = Math.max(0, Math.min(1, Number(fov[1])));
+      const fbs = q.match(/(?:\?|&)vrfbs=([0-9.]+)(?:&|$)/);
+      if (fbs && Number(fbs[1]) > 0) debugFlags.fbs = Math.max(0.5, Math.min(2, Number(fbs[1])));
       if (has('xrminimal', '1')) debugFlags.xrminimal = true;
       if (has('xrfull', '1')) debugFlags.xrfull = true;
       if (has('earthmap', '0')) debugFlags.earthmap = false;
@@ -9000,6 +9007,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Fixed foveation (?vrfov=); three applies it to the layer setSession creates.
       if (typeof renderer.xr.setFoveation === 'function') {
         try { renderer.xr.setFoveation(debugFlags.fov); } catch (e) {}
+      }
+      // Eye-buffer resolution (?vrfbs=); three passes it to the projection layer.
+      if (typeof renderer.xr.setFramebufferScaleFactor === 'function') {
+        try { renderer.xr.setFramebufferScaleFactor(debugFlags.fbs); } catch (e) {}
       }
 
       try {
