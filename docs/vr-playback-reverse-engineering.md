@@ -313,6 +313,33 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - The higher scale also cuts the minification the step 1 note warns about by 1.5×. At the default layout the Flat panel spans about 2370 eye-buffer px instead of 1578 (step 5), so a 3840² master is minified about 1.6× rather than 2.4×.
 - The default is now **1.5**. `?vrfbs=1` restores the native size.
 
+**Review of the branch against §1–4.**
+
+| Report recommendation | Status on the branch |
+| --- | --- |
+| 1. Zero-copy | Done: direct `VideoTexture` at full source resolution (step 1). Foveation off and framebuffer scale 1.5 add eye-buffer sharpness (steps 1 and 6). Media layers parked. |
+| 2. Small start buffer, preload | Next reel warmed after `playing` (step 2). Every AUTO switch was a preloader hit, at 68–118 ms. idx+2 skipped. |
+| 3. Rendition by on-screen size | Measured and reverted (step 5): the panel fills the view, so the master always wins. |
+| 4. Bitrate caps | Done for stream copy, libx265 and previews (step 3). `hevc_videotoolbox` was checked separately: a 10 s 3840² re-encode of a 56 Mbps source averaged 18.1 Mbps, with the worst one-second window at 19.6 Mbps. |
+| 5. Playa stall logic | Not built (see below). |
+| 6. Serving | Done: `Cache-Control` on dev `/media` (step 4). |
+
+Found and fixed in the review:
+- **Cold first switch after entering VR on a mono reel.** The VR button empties the preloader so that it does not compete with XR start-up.
+  - Stereo reels re-warm when `syncStereoSource` swaps the source. A mono reel keeps its source, and that branch returned without re-warming, so the first switch in VR was always cold.
+  - The same branch also left the next reel's stereo variant in the preloader after leaving VR.
+  - Now it calls `preloadNext` unless the preloader already holds the next reel's current variant. Covered by `reels-stereo.test.js`.
+  - In the headset, VR entry and auto-advance still work. The current dev feed has no video followed by another video, so the re-warm itself was verified only in the harness.
+  - Not covered: an image post as the next item is not re-warmed on the VR switch. Its warm-up is a browser cache fetch, so the cost is small.
+
+Open, with recommendations:
+- **The rest of `switchMs` is decoder start-up.** Preloader hits take 68–118 ms; Playa shows a local first frame in about 41 ms. The bytes are already local, so what remains is creating the decoder for the new `src`. YouTube avoids this by reusing its decoder.
+  - The web equivalent is to promote the warmed preloader element to the active one: swap the two `<video>` elements instead of reassigning `src`.
+  - That needs every listener and the engine's direct texture rebound to the new element, so it is a separate change.
+- **No stall handling.** Neither page handles `waiting` or `stalled`; the browser's default buffering applies. On local and R2 serving no stall was seen in these runs.
+  - Before building Playa's rebuffer targets, count `waiting` events and their duration in the `?xrdiag=1` payload to see whether stalls happen in real use.
+- **Sampling.** The screen texture uses `LinearFilter` without mipmaps, like YouTube's OES path. Step 6 cut the minification of a 3840² master from about 2.4× to 1.6×, which lowers the shimmer risk. Mipmaps for a per-frame video texture would cost a mip generation every frame.
+
 ## Unknowns and how to resolve them
 
 | Unknown | Why it is still open | How to get it |

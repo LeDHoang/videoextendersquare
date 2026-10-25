@@ -3117,6 +3117,13 @@
       const nextUrl = blobFor(idx, playUrl) || playUrl;
       if (video.getAttribute('src') === nextUrl) {
         applyEntryStereo(playback);
+        // The VR button empties the preloader, and the next reel's variant
+        // follows the VR state: re-warm unless it already holds the right one.
+        const next = videoData[idx + 1];
+        if (preloadVideo && next && next.available !== false && next.media_type !== 'static' && !isImageItem(next)) {
+          const nextPlay = playbackUrlFor(next, next);
+          if (preloadVideo.getAttribute('src') !== (blobFor(idx + 1, nextPlay) || nextPlay)) preloadNext(idx);
+        }
         return;
       }
       const resumeAt = typeof resumeOverride === 'number' ? resumeOverride : (video.currentTime || 0);
