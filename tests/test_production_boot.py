@@ -62,3 +62,22 @@ def test_sentry_scrubs_credentials():
     assert scrubbed["request"]["headers"]["Cookie"] == "[filtered]"
     assert scrubbed["request"]["headers"]["X-CSRF-Token"] == "[filtered]"
     assert scrubbed["request"]["headers"]["Accept"] == "*/*"
+
+
+def test_dev_media_is_cacheable_and_keeps_range_support(monkeypatch, tmp_path):
+    """Dev /media sends the same Cache-Control as R2 uploads, so the reels
+    preloader's bytes are reused by the next load; Range still answers 206."""
+    from server import media_store
+
+    monkeypatch.delenv("SX_ENV", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "clip.mp4").write_bytes(b"0123456789" * 100)
+    client = TestClient(app_module.create_app())
+    full = client.get("/media/clip.mp4")
+    assert full.status_code == 200
+    assert full.headers["cache-control"] == media_store.CACHE_CONTROL
+    part = client.get("/media/clip.mp4", headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206
+    assert part.headers["cache-control"] == media_store.CACHE_CONTROL
+    assert part.content == (b"0123456789" * 10)

@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 # production secrets passed via the environment (docker -e / secret manager).
 load_dotenv(override=False)
 
+from server.media_store import CACHE_CONTROL  # noqa: E402
 from server.observability import RequestIDMiddleware, configure_logging, current_request_id  # noqa: E402
 from server.settings import env_int, is_production, production_config_errors  # noqa: E402
 
@@ -243,6 +244,17 @@ async def lifespan(app: FastAPI):
         await _drain_workers()
 
 
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles with the same Cache-Control R2 uploads carry. Not immutable:
+    previews and stereo proxies are rebuilt in place under the same URL, and
+    the ETag still revalidates them."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = CACHE_CONTROL
+        return response
+
+
 def mount_spa(app: FastAPI, static_dir: Path) -> None:
     """Serve the built React app from *static_dir*, if it exists.
 
@@ -323,7 +335,7 @@ def create_app() -> FastAPI:
         # inside the Reels/Compare iframes works. Never in production: output/
         # holds unpublished uploads, logs and test folders. Published media is
         # served from R2 (SX_MEDIA_BASE_URL) there.
-        app.mount("/media", StaticFiles(directory=output_dir), name="media")
+        app.mount("/media", CachedStaticFiles(directory=output_dir), name="media")
 
     avatar_dir = Path("data/avatars").resolve()
     avatar_dir.mkdir(parents=True, exist_ok=True)

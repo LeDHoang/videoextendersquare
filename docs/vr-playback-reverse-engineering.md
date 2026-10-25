@@ -248,6 +248,7 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 | `s1-fov05` | v8.24, direct, `?vrfov=0.5` | 97 (402) | 38.7 | 18 | 298 | 80 | 0 |
 | `s1-fov0` | v8.24, direct, `?vrfov=0` | 177 (425) | 34.2 | 18 | 318 | 82 | 0 |
 | `s2-preload` | v8.25 + preload fix | 108 (153) | 34.1 | 24 | 265 | 79 | 0 |
+| `s4-cache` | v8.25 + Cache-Control | 69 (69), 1 switch | 32.2 | 7 | 105 | 87 | 0 |
 
 **Step 1: direct texture.**
 - In the headset the direct path binds the full source: mono 3840×3840 and SBS 4096×2048, with the eye textures as `VideoTexture` clones.
@@ -280,6 +281,11 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - The 2D-only left-eye rendition (`-mono`) is not capped. VR never plays it.
 - Read-only survey of `output/`: 15 of 68 masters are over 26 Mbps, 8 of them square 3840² HEVC that the old gate stream-copied (max 54 Mbps). The 31 existing previews have a median of 36 Mbps and a max of 70 Mbps.
 - Existing files were not re-encoded. The caps apply to new uploads, so no Quest run was needed for this step.
+
+**Step 4: cache headers on dev `/media`.**
+- Dev `/media` now sends `Cache-Control: public, max-age=86400`, the same value R2 uploads carry. It is not `immutable`, because previews and stereo proxies are rebuilt in place; the ETag still revalidates them.
+- The live dev server returns the header on both the 200 and the 206 (Range) response.
+- `s4-cache` (2 min, AUTO): the first reel was long, so the run has a single switch, a 69 ms preloader hit. Pacing was within noise (dtMax p90 32.2, FPS min 87) with 0 decoder errors. The effect on revisits (prev) was not measured separately.
 
 ## Unknowns and how to resolve them
 
