@@ -273,6 +273,14 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - No decoder errors with the second 4K decoder warm, and pacing within noise.
 - The planned idx+2 range fetch was not added. idx+1 already hits every switch in AUTO, so idx+2 would only help rapid flicks.
 
+**Step 3: bitrate caps.** Every file VR plays now has a bounded bitrate.
+- Stream copy: a square HEVC master is copied only when ffprobe reports `format.bit_rate` ≤ 26 Mbps. Above that, or when the bitrate is unknown, it is re-encoded.
+- The libx265 fallback is now capped CRF: `-crf 20 -x265-params vbv-maxrate=26000:vbv-bufsize=48000`. A 2 s test encode came out at 26.2 Mbps.
+- The H.264 preview (`make_web_preview`) gets `-maxrate 12M -bufsize 24M` for mono and `20M/40M` for stereo proxies. On a 6 s test window the mono preview dropped from 20.0 to 13.9 Mbps; the excess is the VBV start-up burst.
+- The 2D-only left-eye rendition (`-mono`) is not capped. VR never plays it.
+- Read-only survey of `output/`: 15 of 68 masters are over 26 Mbps, 8 of them square 3840² HEVC that the old gate stream-copied (max 54 Mbps). The 31 existing previews have a median of 36 Mbps and a max of 70 Mbps.
+- Existing files were not re-encoded. The caps apply to new uploads, so no Quest run was needed for this step.
+
 ## Unknowns and how to resolve them
 
 | Unknown | Why it is still open | How to get it |

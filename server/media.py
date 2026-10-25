@@ -292,6 +292,9 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
     else:
         target_h = min(height or 2160, 2160)
         vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
+    # Capped CRF: a 2160 mono proxy peaks at 12 Mbps; a stereo proxy (up to
+    # 2048 px per eye, ~1.8x the pixels) at 20 Mbps.
+    rate_args = ["-maxrate", "20M", "-bufsize", "40M"] if stereo else ["-maxrate", "12M", "-bufsize", "24M"]
 
     # Hidden temp file + rename: stereo_paths serves any non-empty proxy, and
     # stereo proxies are built in the background after publish.
@@ -300,7 +303,7 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
         *vf_args,
-        "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
+        "-c:v", "libx264", "-crf", "20", "-preset", "superfast", *rate_args,
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
         "-f", "mp4", str(part),

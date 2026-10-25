@@ -293,6 +293,18 @@ def get_video_codec(video_path):
     except Exception:
         return "unknown"
 
+def get_video_bitrate(video_path):
+    """Return the container's overall bit rate in bits/s via ffprobe, or None."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=bit_rate",
+             "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
 def log_pipeline_execution(item_name, kind, input_path, output_path, metrics, params=None):
     """
     Appends execution metrics, input/output paths, timing breakdown,
