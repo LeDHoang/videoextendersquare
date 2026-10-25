@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.24-20261025-direct-video-default';
+  const VR_VERSION = 'v8.25-20261025-foveation-off';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -125,11 +125,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   // loop (before, the XR loop ignored ?vrtex=video and always used the 2048²
   // canvas proxy, halving 3840² masters and capping uploads at 30/s).
   // ?vrtex=canvas restores the canvas proxy. ?vrfov=<0..1> sets XR fixed
-  // foveation before the session starts (three's default is 1 = maximum).
+  // foveation before the session starts. The default is 0 (off): three's
+  // default of 1 (maximum) renders the periphery of a Dome-filled view at
+  // reduced resolution, and the Quest 3S A/B showed no frame-pacing cost for
+  // 0 with the GPU ~23% busy (docs/vr-playback-reverse-engineering.md §5).
   const debugFlags = {
     lock: true, overlay: true, guide: true, glow: true,
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: true,
-    fov: null,       // XR fixed foveation override (?vrfov=0..1); null keeps three's default
+    fov: 0,          // XR fixed foveation (?vrfov=0..1); 0 = off
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
@@ -8994,8 +8997,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {
         try { renderer.xr.setReferenceSpaceType('local'); } catch (e2) {}
       }
-      // ?vrfov= override; three applies it to the layer setSession creates.
-      if (debugFlags.fov !== null && typeof renderer.xr.setFoveation === 'function') {
+      // Fixed foveation (?vrfov=); three applies it to the layer setSession creates.
+      if (typeof renderer.xr.setFoveation === 'function') {
         try { renderer.xr.setFoveation(debugFlags.fov); } catch (e) {}
       }
 

@@ -231,6 +231,39 @@ Recommendations, in order of expected impact:
 6. **Serving.** A single keep-alive stream with large reads is what Playa does. Starlette `StaticFiles` with Range support already fits.
    - Add `Cache-Control: public, max-age=86400` on dev `/media` (R2 already sends it), so preloaded bytes are reused. Not `immutable`: file names are not content-addressed and derived files are rebuilt in place.
 
+## 5. Results on the `vr-rea-playback` branch (Quest 3S, 90 Hz)
+
+Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-capture.cjs` (`reports/quest-squares-<UTC>-<label>/`).
+- `switchMs` is load start to the first decoded frame of the new reel. With 4–5 switches per run it is noisy, and each run plays different reels.
+- `dtMax` is the worst frame gap per second (diag, 1 Hz).
+- Stale is the sum of the VrApi `Stale=` counts in logcat.
+- Run-to-run noise is large: the same canvas path scored 49 ms and 31.7 ms dtMax p90 in two runs.
+
+| Label | Build / flags | switchMs median (max) | dtMax p90 | rows > 25 ms | Stale total | FPS min | Decoder errors |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `baseline` | v8.23, canvas proxy | 105 (124) | 49.0 | 23 | 342 | 79 | 0 |
+| `s1-direct` | v8.24, direct (default) | 193 (339) | 43.6 | 20 | 386 | 81 | 0 |
+| `s1-canvas` | v8.24, `?vrtex=canvas` | 196 (199) | 31.7 | 18 | 253 | 83 | 0 |
+| `s1-fov1` | v8.24, direct, `?vrfov=1` | 121 (372) | 56.2 | 23 | 300 | 80 | 0 |
+| `s1-fov05` | v8.24, direct, `?vrfov=0.5` | 97 (402) | 38.7 | 18 | 298 | 80 | 0 |
+| `s1-fov0` | v8.24, direct, `?vrfov=0` | 177 (425) | 34.2 | 18 | 318 | 82 | 0 |
+
+**Step 1: direct texture.**
+- In the headset the direct path binds the full source: mono 3840×3840 and SBS 4096×2048, with the eye textures as `VideoTexture` clones.
+- Verified in headset screenshots: Dome, the comments overlay and image posts (still on the canvas).
+- Frame pacing is within run-to-run noise of the canvas path.
+- `switchMs` does not depend on the texture path. It is measured on the `<video>` element.
+- Not yet compared at a fixed paused frame: direct vs canvas sharpness. The headset was resting pitched down, so the video was out of view.
+- Both paths sample with `LinearFilter` and no mipmaps. A 3840² texture on a panel about 700 px wide is minified about 5×, so fine detail may shimmer. Step 5 (picking a smaller rendition for small panels) is the planned mitigation.
+
+**Step 1: foveation.**
+- The flag reaches the compositor layer. In the headset the session's `XRProjectionLayer.fixedFoveation` reads 1 with `?vrfov=1` and 0 by default; its texture is 3360×1760.
+- VrApi's `Fov=` logcat field stays 0 in every run, so it does not report WebXR layer foveation.
+- No foveation level changed frame pacing beyond noise. fov 0 was no worse than three's default of 1 (dtMax p90 34.2 vs 56.2; stale 318 vs 300).
+- VrApi shows `GPU%≈0.23` while a reel plays, so the GPU has plenty of headroom.
+- The default is now **0** (off), so the periphery renders at full resolution. `?vrfov=` overrides it.
+- Possible follow-up, not on this branch: given the GPU headroom, `setFramebufferScaleFactor` above 1 could sharpen the eye buffer itself.
+
 ## Unknowns and how to resolve them
 
 | Unknown | Why it is still open | How to get it |

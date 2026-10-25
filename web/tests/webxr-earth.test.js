@@ -5786,7 +5786,7 @@ test('?vrtex=canvas opts out of the direct texture; ?vrfov sets foveation', () =
   const defaults = loadRenderer({ search: '' });
   defaults.init(null, {});
   assert.equal(defaults.__test.getDebugFlags().vrtex, true);
-  assert.equal(defaults.__test.getDebugFlags().fov, null);
+  assert.equal(defaults.__test.getDebugFlags().fov, 0);
   const clamped = loadRenderer({ search: '?vrfov=3' });
   clamped.init(null, {});
   assert.equal(clamped.__test.getDebugFlags().fov, 1);
