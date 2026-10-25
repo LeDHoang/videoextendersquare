@@ -5818,3 +5818,22 @@ test('shared earth HUD renderers: tiers stay in sync with the engine and every r
   assert.equal(ui.resolveEarthLabelHit(0, 0), null);
   renderer.stopPreview();
 });
+
+test('dock LIKE, SAVE and COLLECT outlines light up when the reel is liked or saved', () => {
+  const ui = loadUICanvasStandalone();
+  const outlines = (itemState) => {
+    const { ctx } = makeRecordingCtx();
+    const strokes = [];
+    const stroke = ctx.stroke;
+    ctx.stroke = (...a) => { strokes.push(String(ctx.strokeStyle)); return stroke && stroke.apply(ctx, a); };
+    ui.renderControlsCanvas(ctx, dockRenderOptions({ itemState: { available: true, ...itemState } }));
+    return strokes.join('|');
+  };
+  const base = outlines({});
+  assert.notEqual(outlines({ liked: true }), base, 'liked lights LIKE');
+  assert.notEqual(outlines({ saved: true }), base, 'saved lights SAVE / COLLECT');
+  // saved lights both SAVE and COLLECT; liked only LIKE.
+  const accentCount = (s) => s.split('|').filter((c) => c === ui.TOKENS.hex.accent).length;
+  assert.equal(accentCount(outlines({ saved: true })) - accentCount(base), 2);
+  assert.equal(accentCount(outlines({ liked: true })) - accentCount(base), 1);
+});

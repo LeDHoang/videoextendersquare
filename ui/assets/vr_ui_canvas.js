@@ -163,11 +163,6 @@
       ctx.lineTo(cx - h * 0.6, cy + h * 0.95); ctx.lineTo(cx - h * 0.6, cy + h * 0.45);
       ctx.lineTo(cx - h, cy + h * 0.45); ctx.closePath();
       ctx.stroke();
-    } else if (name === 'globe') {
-      ctx.arc(cx, cy, h, 0, Math.PI * 2);
-      ctx.moveTo(cx - h, cy); ctx.lineTo(cx + h, cy);
-      ctx.moveTo(cx, cy - h); ctx.lineTo(cx, cy + h);
-      ctx.stroke();
     } else if (name === 'lock' || name === 'unlock') {
       ctx.fillRect(cx - h * 0.8, cy - h * 0.1, size * 0.8, h * 1.1);
       ctx.beginPath();
@@ -293,6 +288,25 @@
     'mode-loop': [
       ['M17 1L19 3L17 5M7 23L5 21L7 19', 's', 'a', 1.5],
       ['M19 3V11C19 12.66 17.66 14 16 14H5M5 21V13C5 11.34 6.34 10 8 10H19', 's', 'i', 1.5],
+    ],
+    // Display mode, seen from above: screen edge in ink, viewer diamond in accent.
+    'display-flat': [
+      ['M12 17L4 7M12 17L20 7', 's', 'i', 1, 0.35],
+      ['M4 7H20', 's', 'i', 1.5],
+      ['M4 4V10M20 4V10', 's', 'a', 1.5],
+      ['M12 16L14 18L12 20L10 18Z', 'f', 'a'],
+    ],
+    'display-sq-curve': [
+      ['M12 17L4 9M12 17L20 9', 's', 'i', 1, 0.35],
+      ['M4 9L7 6H17L20 9', 's', 'i', 1.5],
+      ['M4 7V11M20 7V11', 's', 'a', 1.5],
+      ['M12 16L14 18L12 20L10 18Z', 'f', 'a'],
+    ],
+    'display-dome': [
+      ['M12 17L4 13M12 17L20 13', 's', 'i', 1, 0.35],
+      ['M4 13L5.5 8.5L9 5.5H15L18.5 8.5L20 13', 's', 'i', 1.5],
+      ['M4 11V15M20 11V15', 's', 'a', 1.5],
+      ['M12 16L14 18L12 20L10 18Z', 'f', 'a'],
     ],
     'sound-audio': [
       ['M11 5L6 9H3V15H6L11 19V5Z', 's', 'i', 1.5],
@@ -820,7 +834,7 @@
           icon = (packMode || autoNext) ? 'mode-auto' : 'mode-loop';
         } else if (btn.action === 'curve') {
           label = curvatureMode === 1 ? 'DOME' : (curvatureMode === 2 ? 'SQ CURVE' : 'FLAT');
-          glyph = 'globe';
+          icon = curvatureMode === 1 ? 'display-dome' : (curvatureMode === 2 ? 'display-sq-curve' : 'display-flat');
         } else if (btn.action === 'lock') {
           label = lockToViewer ? 'LOCK' : 'FREE';
           glyph = lockToViewer ? 'lock' : 'unlock';
@@ -865,9 +879,9 @@
       }
 
       // Action tiles: icon over a mono caption; COLLECT spans two slots with
-      // the caption beside the icon. Liked / saved / followed tiles stay lit.
+      // the caption beside the icon. Liked / saved (SAVE and COLLECT) / followed tiles stay lit.
       const lit = (btn.action === 'like' && itemState.liked) ||
-        (btn.action === 'save_reel' && itemState.saved) ||
+        ((btn.action === 'save_reel' || btn.action === 'collect') && itemState.saved) ||
         (btn.action === 'follow' && itemState.following);
       const ink = bodyButton(btn, isHover, isPressed, lit);
       ctx.font = `bold 10px ${TOKENS.font.mono}`;
@@ -875,7 +889,7 @@
       if (btn.action === 'collect') {
         drawIcon(ctx, 'collect', btn.x + btn.w / 2 - 34, cy, 22, ink);
         ctx.font = `bold 12px ${TOKENS.font.mono}`;
-        ctx.fillStyle = ink;
+        ctx.fillStyle = lit ? T.accentHi : ink;
         ctx.textAlign = 'left';
         ctx.fillText(btn.label, btn.x + btn.w / 2 - 16, cy);
         continue;

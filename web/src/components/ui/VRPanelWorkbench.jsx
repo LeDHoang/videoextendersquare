@@ -133,7 +133,7 @@ function mockSource(mock, s) {
 function dockOptions(mock, s) {
   return {
     source: mockSource(mock, s),
-    itemState: { available: true },
+    itemState: { available: true, liked: s.liked, saved: s.saved, following: s.following },
     sceneMode: mock.dock === 'EARTH' ? 'earth' : 'reels',
     packMode: mock.dock === 'PACK',
   };
@@ -165,8 +165,6 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       lockToViewer: mock.lock,
       autoNext: mock.autoNext,
       earth: mock.dock === 'EARTH' ? EARTH_STATUS : null,
-      notificationText: s.note,
-      notificationUntil: s.noteUntil,
       stereo: mock.stereo.toLowerCase(),
     });
   } else if (key === 'COMMENTS') {
@@ -257,10 +255,10 @@ export default function VRPanelWorkbench() {
     pressed: -1,
     tab: 'all',
     following: false,
+    liked: false,
+    saved: false,
     scroll: 0,
     highlight: null,
-    note: '',
-    noteUntil: 0,
     overlayRegions: [],
   });
   const canvases = useRef({});
@@ -356,10 +354,9 @@ export default function VRPanelWorkbench() {
         s.time = 0;
       } else if (a === 'rew' || a === 'fwd') s.time = clampTime(s.time + (a === 'fwd' ? 5 : -5));
       else if (a === 'seek') s.time = clampTime(((x - btn.x) / btn.w) * DURATION);
-      else {
-        s.note = `${btn.label} TAPPED`;
-        s.noteUntil = performance.now() + 2200;
-      }
+      else if (a === 'like') s.liked = !s.liked;
+      else if (a === 'save_reel' || a === 'collect') s.saved = !s.saved;
+      else if (a === 'follow') s.following = !s.following;
       setLastAction(`DOCK › ${a}`);
     } else if (key === 'COMMENTS' && hit) {
       if (hit.startsWith('tab:')) {
