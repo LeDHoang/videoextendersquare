@@ -313,6 +313,28 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - The higher scale also cuts the minification the step 1 note warns about by 1.5×. At the default layout the Flat panel spans about 2370 eye-buffer px instead of 1578 (step 5), so a 3840² master is minified about 1.6× rather than 2.4×.
 - The default is now **1.5**. `?vrfbs=1` restores the native size.
 
+**Cold first frame (v8.26, in VR).**
+- Method:
+  - While presenting, a fresh muted `<video>` in the page loads one URL and plays it, with the player paused.
+  - Time runs from setting `src` to the first `requestVideoFrameCallback`.
+  - Cold loads add a unique query string to every URL, because `Network.clearBrowserCache` did not empty the media cache (repeats reached metadata in about 5 ms).
+  - The headset reaches the dev server through `adb reverse` over USB, not Wi-Fi.
+- 6 files, 4 cold loads each and 3 warm repeats each:
+
+  | File | Size, bitrate | Cold median (ms) | Warm median (ms) |
+  | --- | --- | --- | --- |
+  | Feed reel (H.264) | 1080×778 | 98 | 62 |
+  | 3840² HEVC, 5 s | 11 Mbps | 70 | 51 |
+  | 3840² HEVC, 15 s | 8 Mbps | 90 | 49 |
+  | 3840² HEVC, 15 s | 11 Mbps | 67 | 52 |
+  | 3840² HEVC, 9 s | 36 Mbps (over the cap) | 120 | 60 |
+  | 3840² HEVC, 7 s | 52 Mbps (over the cap) | 120 | 61 |
+  | **All** | | **96 (58–156)** | **55 (45–74)** |
+
+- Masters within the bitrate cap start in about 70 ms cold. The two old masters over the cap take about 120 ms, which is the gap the step 3 caps close for new uploads.
+- Warm (bytes local), the element still needs about 50–60 ms, against Playa's 41 ms. That remainder is decoder start-up.
+- Compared with YouTube's 666–761 ms (`loadVideo` to `onPlaying`), ours is about 7× faster. But YouTube's number includes a CDN round trip over Wi-Fi and its server-side ABR request, while ours is a USB link to a local server. Over Wi-Fi or R2 our cold time will be higher; it was not measured.
+
 **Review of the branch against §1–4.**
 
 | Report recommendation | Status on the branch |
