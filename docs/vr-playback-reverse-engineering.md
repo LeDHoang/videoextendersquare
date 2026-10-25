@@ -247,6 +247,7 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 | `s1-fov1` | v8.24, direct, `?vrfov=1` | 121 (372) | 56.2 | 23 | 300 | 80 | 0 |
 | `s1-fov05` | v8.24, direct, `?vrfov=0.5` | 97 (402) | 38.7 | 18 | 298 | 80 | 0 |
 | `s1-fov0` | v8.24, direct, `?vrfov=0` | 177 (425) | 34.2 | 18 | 318 | 82 | 0 |
+| `s2-preload` | v8.25 + preload fix | 108 (153) | 34.1 | 24 | 265 | 79 | 0 |
 
 **Step 1: direct texture.**
 - In the headset the direct path binds the full source: mono 3840×3840 and SBS 4096×2048, with the eye textures as `VideoTexture` clones.
@@ -263,6 +264,14 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - VrApi shows `GPU%≈0.23` while a reel plays, so the GPU has plenty of headroom.
 - The default is now **0** (off), so the periphery renders at full resolution. `?vrfov=` overrides it.
 - Possible follow-up, not on this branch: given the GPU headroom, `setFramebufferScaleFactor` above 1 could sharpen the eye buffer itself.
+
+**Step 2: preload.**
+- `preloadNext` now warms the next reel once the active reel fires `playing`, or after 1.5 s if it never starts. Each switch cancels the pending warm-up and clears the preloader, so rapid flicks still open no background transfers.
+- In the headset the preloader reached `readyState` 4 with 2 s buffered. Entering VR still clears the preloader on purpose, so the first reel after entry has nothing warmed.
+- All 5 switches in `s2-preload` were preloader hits (0 before). The median was 108 ms with a max of 153.
+- The same reels in `s1-direct` took 339, 221, 193 and 156 ms. Now they take 108, 118, 62 and 153 ms.
+- No decoder errors with the second 4K decoder warm, and pacing within noise.
+- The planned idx+2 range fetch was not added. idx+1 already hits every switch in AUTO, so idx+2 would only help rapid flicks.
 
 ## Unknowns and how to resolve them
 

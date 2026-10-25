@@ -2653,10 +2653,6 @@
     const blobSourceMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
-    // v8.9: background transfers started during rapid prev/next flight
-    // contend with the active reel over the USB tunnel — preloadNext backs
-    // off while the user is flying through the playlist.
-    let lastSwitchTime = 0;
 
     function isImageItem(item) {
       return !!item && item.media_type === 'image';
@@ -5468,17 +5464,40 @@
       });
     }
 
+    // <reels-preload>
+    // Warm the next reel once the active one is playing, or after 1.5 s if
+    // it never starts, so the background transfer doesn't fight the active
+    // load for tunnel bandwidth. Every call (each switch) cancels the
+    // pending warm-up and clears the preloader, so flying through reels
+    // opens no background transfers.
+    const PRELOAD_DELAY_MS = 1500;
+    let preloadTimer = null;
+    let preloadOnPlaying = null;
+    function cancelPendingPreload() {
+      if (preloadTimer) clearTimeout(preloadTimer);
+      if (preloadOnPlaying) video.removeEventListener('playing', preloadOnPlaying);
+      preloadTimer = null;
+      preloadOnPlaying = null;
+    }
+
     function preloadNext(currentIndex) {
-      if (!videoData || videoData.length <= 1) {
-        clearPreloadVideo();
+      cancelPendingPreload();
+      clearPreloadVideo();
+      if (!videoData || videoData.length <= 1) return;
+      const run = function () {
+        cancelPendingPreload();
+        if (idx === currentIndex) warmNext(currentIndex);
+      };
+      if (!isImageItem(videoData[currentIndex]) && !video.paused && video.readyState >= 3) {
+        run();
         return;
       }
-      if (Date.now() - lastSwitchTime < 1500) {
-        // Flying through reels: don't open new background transfers while
-        // the active load is still fighting for tunnel bandwidth.
-        clearPreloadVideo();
-        return;
-      }
+      preloadOnPlaying = run;
+      video.addEventListener('playing', preloadOnPlaying);
+      preloadTimer = setTimeout(run, PRELOAD_DELAY_MS);
+    }
+
+    function warmNext(currentIndex) {
       const nextIdx = currentIndex + 1;
       const nextItem = videoData[nextIdx];
       if (!nextItem || nextItem.available === false || nextItem.media_type === 'static') {
@@ -5503,6 +5522,7 @@
         preloadVideo.load();
       }
     }
+    // </reels-preload>
 
     // Render an image post: its images on screen in turn, no timeline,
     // the post's dwell (15s default) split across the images.
@@ -5912,7 +5932,6 @@
 
     // Navigation
     async function nextVideo(reason) {
-      lastSwitchTime = Date.now();
       finishViewTracking(reason || 'manual_next');
       if (isPackMode && PackState) {
         if (packUnavailableTimer) {
@@ -5940,7 +5959,6 @@
       }
     }
     function prevVideo() {
-      lastSwitchTime = Date.now();
       if (isPackMode && PackState) {
         if (packUnavailableTimer) {
           clearTimeout(packUnavailableTimer);
