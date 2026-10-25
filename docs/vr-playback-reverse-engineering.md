@@ -255,7 +255,7 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - Verified in headset screenshots: Dome, the comments overlay and image posts (still on the canvas).
 - Frame pacing is within run-to-run noise of the canvas path.
 - `switchMs` does not depend on the texture path. It is measured on the `<video>` element.
-- Not yet compared at a fixed paused frame: direct vs canvas sharpness. The headset was resting pitched down, so the video was out of view.
+- Fixed-frame comparison (headset level, Flat, a 3840² master paused at 1.0 s, path switched at runtime): colours match (mean absolute difference 0.86/255). The direct path has 7.5% more edge energy, but the difference is barely visible. This master is itself upscaled from 1080p; a native 4K source would show more. A 1080×778 reel showed +4%.
 - Both paths sample with `LinearFilter` and no mipmaps. A 3840² texture on a panel about 700 px wide is minified about 5×, so fine detail may shimmer. Step 5 (picking a smaller rendition for small panels) is the planned mitigation.
 
 **Step 1: foveation.**
@@ -286,6 +286,21 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 - Dev `/media` now sends `Cache-Control: public, max-age=86400`, the same value R2 uploads carry. It is not `immutable`, because previews and stereo proxies are rebuilt in place; the ETag still revalidates them.
 - The live dev server returns the header on both the 200 and the 206 (Range) response.
 - `s4-cache` (2 min, AUTO): the first reel was long, so the run has a single switch, a 69 ms preloader hit. Pacing was within noise (dtMax p90 32.2, FPS min 87) with 0 decoder errors. The effect on revisits (prev) was not measured separately.
+
+**Step 5: rendition by on-screen size. Built, measured, reverted.**
+- Built: the payload offered `proxy_url` (`<stem>-preview.mp4`) for mono HEVC masters, `WebXRVR.getProjectedScreenPx()` projected the panel's bounding box through the left-eye XR camera, and `playbackFor` played the proxy when `1.5 × px < 2160`, with a 150 px hysteresis band.
+- Measured in the headset at the default layout (`screenScale` 4 m at 2.24 m, about 83°):
+
+  | Mode | Panel size (px) |
+  | --- | --- |
+  | Dome | 2259 |
+  | SQ Curve | 2134 |
+  | Flat | 1578 |
+
+  The eye viewport is about 1680×1760. A Flat screencap confirms the panel fills the whole visible lens area.
+- The rule needs the panel under about 1340 px, so at the default size it always picks the master. The proxy would only play if a viewer shrank the panel to about scale 3.2 or below.
+- Only 1 of 24 dev feed items had a fresh preview to offer. Existing previews also have a higher bitrate than the masters (median 36 Mbps; step 3 caps new ones at 12 Mbps).
+- The plan's rule was to keep this step only if `switchMs` dropped with no visible softness. With no case where it changes playback, it was reverted. YouTube's rule pays off on its flat theatre screen; our panel fills the view.
 
 ## Unknowns and how to resolve them
 
