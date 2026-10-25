@@ -93,3 +93,16 @@ test('setDebugFlags can toggle the opt-in for tests and probes', () => {
   runFrames(engine);
   assert.ok(posts.length >= 1);
 });
+
+test('diag payload carries the last reel switch timing', () => {
+  const { engine, posts } = loadEngine('?xrdiag=1');
+  runFrames(engine);
+  assert.equal(posts[0].body.switchMs, null);
+  engine.noteSwitchTiming(412.6, 'http://localhost:8000/media/out/reel-a.mp4?x=1', true);
+  for (const t of [4400, 5500]) engine.__test.postXRDiag(t);
+  const last = posts[posts.length - 1].body;
+  assert.equal(last.switchMs, 413);
+  assert.equal(last.switchSrc, 'reel-a.mp4');
+  assert.equal(last.switchFromCache, true);
+  assert.equal(typeof last.flags.vrtex, 'boolean');
+});

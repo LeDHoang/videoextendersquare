@@ -6703,6 +6703,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     return (renderStats[k] || 0) - (xrDiagBases[k] || 0);
   }
 
+  // Last reel switch: load start to first decoded frame, reported by the host
+  // page (docs/vr-playback-reverse-engineering.md, step 0.5 baseline).
+  let lastSwitchTiming = null;
+  function noteSwitchTiming(ms, src, fromCache) {
+    lastSwitchTiming = {
+      ms: Math.round(Number(ms) || 0),
+      src: String(src || '').split('?')[0].split('/').pop().slice(-80),
+      fromCache: !!fromCache,
+    };
+  }
+
   function postXRDiag(time) {
     // Debug-only: never sends anything unless ?xrdiag=1 opted in.
     if (!debugFlags.xrdiag) return;
@@ -6752,6 +6763,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         uploadMode: videoUploadMode,
         locked: lockToViewer,
         flags: { ...debugFlags },
+        switchMs: lastSwitchTiming ? lastSwitchTiming.ms : null,
+        switchSrc: lastSwitchTiming ? lastSwitchTiming.src : null,
+        switchFromCache: lastSwitchTiming ? lastSwitchTiming.fromCache : null,
       };
       xrDiagFrames = 0;
       xrDiagMaxDt = 0;
@@ -9659,6 +9673,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       console.log('[WebXRVR] Initialised', VR_VERSION);
     },
     setVideoUploadMode,
+    noteSwitchTiming,
 
     async isSupported() {
       const xr = getXR();

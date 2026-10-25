@@ -5535,6 +5535,26 @@
       if (isPackMode) schedulePackProgress();
     }
 
+    // Switch latency: load start to the first decoded frame of the new src,
+    // reported to the VR engine's ?xrdiag=1 telemetry. A cache hit is a blob
+    // URL or a src the hidden preloader had already warmed.
+    let switchToken = 0;
+    function noteSwitchStart(src) {
+      const token = ++switchToken;
+      const startMs = performance.now();
+      const fromCache = String(src).startsWith('blob:') ||
+        !!(preloadVideo && preloadVideo.src && preloadVideo.src === video.src);
+      const done = function () {
+        if (token !== switchToken) return;
+        switchToken++;
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.noteSwitchTiming) {
+          WebXRVR.noteSwitchTiming(performance.now() - startMs, video.currentSrc || video.src, fromCache);
+        }
+      };
+      if (typeof video.requestVideoFrameCallback === 'function') video.requestVideoFrameCallback(done);
+      else video.addEventListener('playing', done, { once: true });
+    }
+
     function loadVideo(index, options) {
       const loadOptions = options || {};
       if (collectOpen) closeCollectOverlay();
@@ -5617,6 +5637,7 @@
       const itemUrl = blobFor(idx, playUrl) || playUrl;
       applyEntryStereo(playback);
       video.src = itemUrl;
+      noteSwitchStart(itemUrl);
       video.muted = isMuted;
       const requestedTime = Number(loadOptions.seekTo);
       if (Number.isFinite(requestedTime) && requestedTime > 0) {
