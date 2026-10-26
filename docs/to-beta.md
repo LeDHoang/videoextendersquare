@@ -1,6 +1,6 @@
 # Beta Launch Checklist
 
-Last updated: 2026-10-22 (follow-ups verified: healthz off the threadpool, suspended sign-in tells the user to appeal, queue shows the acting moderator, `/api/feed` viewer state batched per page; load, abuse and queue runs on local staging; browser matrix on Chrome, Firefox and emulated phones; moderation drill; in-app ops metrics and watchdog alerts; earlier: 4K publish blocker fixed locally: video encodes moved to a background job, publish 107 s → 2.3 s; first CI run green; free local staging stack (`docs/local-staging.md`) run: production boot, SeaweedFS-for-R2 publish/delete, Caddy edge CORS/Range, backup + restore drill passed; inline 4K publish took 107 s, over the 100 s Cloudflare timeout (fixed 2026-10-21); P0 workstreams merged and ticked off; local Docker build + image assertions green, remaining live checks listed under "Not yet verified"; deploy stack: `compose.yaml`, `deploy/`, CI, deploy/backup/manual-check runbooks; Reel Pack flags decided ON; infrastructure verdicts revised: R2 media at launch, PostgreSQL day one, SEA/Asia + US region design, Ray-2 deprecation and Ray 3.2 migration; stale-entry pass; latest engineering entries 2026-10-16; audit round 2 + planned-feature scope inventory 2026-09-19)
+Last updated: 2026-10-27 (Sentry traces, logs and metrics on, backup cron monitor; 2026-10-26: beta cost table re-checked online: Hetzner IPv4 fee, UptimeRobot free-plan limit, Stripe international-card fees; earlier 2026-10-22: follow-ups verified: healthz off the threadpool, suspended sign-in tells the user to appeal, queue shows the acting moderator, `/api/feed` viewer state batched per page; load, abuse and queue runs on local staging; browser matrix on Chrome, Firefox and emulated phones; moderation drill; in-app ops metrics and watchdog alerts; earlier: 4K publish blocker fixed locally: video encodes moved to a background job, publish 107 s → 2.3 s; first CI run green; free local staging stack (`docs/local-staging.md`) run: production boot, SeaweedFS-for-R2 publish/delete, Caddy edge CORS/Range, backup + restore drill passed; inline 4K publish took 107 s, over the 100 s Cloudflare timeout (fixed 2026-10-21); P0 workstreams merged and ticked off; local Docker build + image assertions green, remaining live checks listed under "Not yet verified"; deploy stack: `compose.yaml`, `deploy/`, CI, deploy/backup/manual-check runbooks; Reel Pack flags decided ON; infrastructure verdicts revised: R2 media at launch, PostgreSQL day one, SEA/Asia + US region design, Ray-2 deprecation and Ray 3.2 migration; stale-entry pass; latest engineering entries 2026-10-16; audit round 2 + planned-feature scope inventory 2026-09-19)
 
 Status: **Blocked for public beta.** Complete every item in "Public beta release blockers" before opening registration or exposing the deployment publicly. An invite-only beta must still protect paid processing endpoints and private user media.
 
@@ -18,11 +18,25 @@ The review also found that fal is retiring the Ray-2 reframe endpoint on 2026-10
 
 **One-line version:** *One VPS (Singapore by default) + co-located PostgreSQL + Cloudflare R2 media + Stripe (gated) + fal.ai at launch. Add a second region when the minority region measurably hurts. Add one L40S when fal spend crosses ~$500/mo. Move to Fly.io multi-machine when one box isn't enough.*
 
-**Beta fixed cost (estimate):**
-- Hetzner SIN CPX32: €48.99/mo.
-- R2: ~$0–2/mo; the free tier covers early beta.
-- Database dumps in R2: cents per month.
-- Total: ≈ €50–55/mo plus metered fal usage.
+**Beta cost (estimate, prices checked 2026-10-26):**
+
+| Item | Service | Cost |
+|---|---|---|
+| Domain | Cloudflare Registrar `.com` | ~$10.46/yr, sold at cost. The figure comes from a price tracker; confirm it in the dashboard. |
+| DNS, Tunnel, Turnstile, cache rules | Cloudflare Free | $0 |
+| Media bucket + database dumps | Cloudflare R2 | Free up to 10 GB-month, 1M Class A and 10M Class B ops/month. After that, $0.015/GB-month, $4.50/M Class A, $0.36/M Class B. $0 egress. Beta ≈ $0–2/mo. |
+| Server | Hetzner SIN CPX32 | €48.99/mo ($57.99), not including IPv4. Primary IPv4 adds €0.50/mo, so ≈ €49.49/mo. The IPv4 docs page is old; confirm the price in the Hetzner Console. |
+| Verification email | Resend Free | $0 for 3,000/mo, 100/day, 3 domains. Pro is $20/mo. |
+| Errors, traces, logs, metrics | Sentry Developer | $0 for 5k errors, 5M spans, 5 GB logs, 5 GB metrics, 1 cron monitor, 1 uptime monitor and 1 user. Profiling is not included. Team is $29/mo. |
+| Uptime check on `/api/readyz` | UptimeRobot | The Free plan (50 monitors, 5-min checks) is labelled "hobby and non-profit". Solo is $9–10/mo if commercial use needs it. |
+| Backup cron alerts | healthchecks.io Hobbyist | $0 for 20 checks |
+| Secret escrow | Bitwarden Free | $0 |
+| Restore drill | Temporary Hetzner box | < €1, billed hourly |
+| AI jobs | fal.ai | Metered. Ray 3.2 reframe costs $0.06/$0.12/$0.36 per started source second at 540p/720p/1080p. |
+| Payments (gated off) | Stripe | No monthly fee. 2.9% + 30¢ per US card, +1.5% for international cards, +1% for currency conversion. |
+
+- One-time: ≈ $15–20 (domain, fal test jobs, restore drill).
+- Monthly: ≈ €50–52/mo plus metered fal usage, +$9–10/mo if UptimeRobot Solo is needed.
 
 ### Hosting — single VPS first, managed platform later
 - **Launch:** run the existing multi-stage `Dockerfile` via `compose.yaml` (app + `postgres:16`) on one VPS. One machine is *correct* here: jobs and staged-upload registries are process-local (`server/jobs.py` `_jobs`, the `STAGED_UPLOADS` dicts in `server/routers/image.py`/`video.py`, `/tmp` staging). One instance satisfies that constraint without a premature shared queue.
@@ -172,6 +186,18 @@ The blockers below are unchanged and still gate public beta. The verdicts pick *
 - [fal Ray 3.2 reframe](https://fal.ai/models/luma/agent/ray/v3.2/reframe)
 - [fal Ray 3.2 reframe API](https://fal.ai/models/luma/agent/ray/v3.2/reframe/api)
 - [fal GPU repricing capture](https://www.usagepricing.com/blueprint/activity/fal-ai-2026-10-04-gpu-fleet-repricing)
+
+**Beta cost table sources (checked 2026-10-26):**
+- [Hetzner IP pricing](https://docs.hetzner.com/general/infrastructure-and-availability/ipv4-pricing/)
+- [Cloudflare Registrar](https://www.cloudflare.com/products/registrar/)
+- [Cloudflare .com price tracker](https://domainoffer.net/tld/com/cloudflare)
+- [Turnstile plans](https://developers.cloudflare.com/turnstile/plans/)
+- [Resend pricing](https://resend.com/pricing)
+- [Sentry pricing](https://sentry.io/pricing/)
+- [UptimeRobot pricing](https://uptimerobot.com/pricing/)
+- [healthchecks.io pricing](https://healthchecks.io/pricing/)
+- [Bitwarden pricing](https://bitwarden.com/pricing/)
+- [Stripe pricing](https://stripe.com/pricing)
 
 ## Beta feature scope — planned but missing features (2026-09-19)
 

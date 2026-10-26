@@ -12,6 +12,21 @@ Related docs:
 
 Complete each item once per environment. Tick it in your own copy of this list.
 
+**Production progress (2026-10-27).** The domain is not bought yet, so every step that needs `<domain>` is still open.
+- Done:
+  - Cloudflare account, with a payment method on file (R2 requires one).
+  - R2 public bucket `publicmedia` and the private backup bucket, both with location hint `apac`. `r2.dev` is not enabled.
+  - Two Account API tokens, each with Object Read & Write scoped to one bucket. The app token's four `R2_*` values are in `.env`. A list/put/get/delete test with the app's client (`server/media_store.py`) passed.
+  - Tunnel created and its token in `TUNNEL_TOKEN`. The token decodes, and its account matches `R2_ACCOUNT_ID`. The dashboard shows "Waiting for your Tunnel to connect" until cloudflared runs on the VPS.
+  - fal account, with a spend limit and prepaid credit. `FAL_KEY` is in `.env`.
+  - Sentry project `ledhoang/videoextendersquare-server`, with its DSN in `SENTRY_DSN`. The "Server watchdog: ALERT / Low disk space" alert rule emails on a new issue, and a test event delivered the email. A smoke test confirmed that traces, logs and metrics arrive, and that outbound query strings are stripped.
+- Waiting for the domain:
+  - the Tunnel public hostname;
+  - the `media.<domain>` custom domain and `SX_MEDIA_BASE_URL`;
+  - CORS, the Transform Rule, the Cache Rules and SSL/TLS.
+- Waiting for the VPS: the rclone remote for the backup token and `BACKUP_SENTRY_CRON_URL` (`docs/backup-restore-runbook.md`).
+- Not confirmed: the 30-day lifecycle rule on the backup bucket.
+
 ### Cloudflare
 
 - [ ] **Tunnel.** Go to Zero Trust → Networks → Tunnels and create a tunnel. Copy its connector token into `TUNNEL_TOKEN` in `.env`.
