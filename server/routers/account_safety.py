@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, or_
+from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
 
 from server.social.auth import (
@@ -565,6 +565,7 @@ def moderation_stats(
 ):
     """Operations overview: each metric for the last 24 h and 7 d against the period before it."""
     del context
+    from server.metrics import alert_limits
     from server.routers.health import disk_status
 
     now = utcnow()
@@ -626,8 +627,55 @@ def moderation_stats(
         "spike_floor": floor,
         "open_reports": db.query(func.count(Report.id)).filter(Report.status == "open").scalar(),
         "open_support_requests": db.query(func.count(SupportRequest.id)).filter(SupportRequest.status == "open").scalar(),
+        "queue_limits": {key: alert_limits()[key] for key in ("open_reports", "open_support_requests")},
         "windows": windows,
         "disk": disk_status(),
+    }
+
+
+HOURLY_SPAN_H = 14 * 24
+
+
+@router.get("/api/moderation/stats/hourly")
+def moderation_stats_hourly(
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    """The stats metrics per UTC hour for the last 14 days, oldest first; the last hour is still running.
+
+    Fourteen days cover the 7-day window and the 7 days before it. Buckets follow hour boundaries,
+    so their sums can differ slightly from the rolling windows in /api/moderation/stats.
+    """
+    del context
+    end = utcnow().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    start = end - timedelta(hours=HOURLY_SPAN_H)
+
+    def hourly(column, *filters, amount=None):
+        counts = [0] * HOURLY_SPAN_H
+        rows = db.query(column, literal(1) if amount is None else amount).filter(column >= start, *filters)
+        for created_at, value in rows:
+            if created_at.tzinfo is None:  # SQLite hands back naive UTC
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            index = int((created_at - start).total_seconds() // 3600)
+            if 0 <= index < HOURLY_SPAN_H:
+                counts[index] += int(value or 0)
+        return counts
+
+    return {
+        "start": start.isoformat(),
+        "hours": HOURLY_SPAN_H,
+        "series": {
+            "reports": hourly(Report.created_at),
+            "support_requests": hourly(SupportRequest.created_at),
+            "posts": hourly(Post.created_at),
+            "signups": hourly(User.created_at, User.status == "active"),
+            "unverified": hourly(User.created_at, User.status == "pending"),
+            "messages": hourly(DirectMessage.created_at),
+            "credits_captured": hourly(
+                CreditLedgerEntry.created_at, CreditLedgerEntry.entry_type == "capture",
+                amount=-CreditLedgerEntry.delta_reserved,
+            ),
+        },
     }
 
 

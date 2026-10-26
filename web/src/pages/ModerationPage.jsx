@@ -73,6 +73,7 @@ export default function ModerationPage() {
   const [statsWindow, setStatsWindow] = useState('24h');
   const [stats, setStats] = useState(null);
   const [ops, setOps] = useState(null);
+  const [hourly, setHourly] = useState(null);
   const loadOps = user?.role === 'admin';
   // Rows carry the tab and filter they were loaded for, so a tab switch never renders
   // report rows with the support renderer (or the reverse) before the reload lands.
@@ -90,13 +91,15 @@ export default function ModerationPage() {
     if (!QUEUE_TABS.includes(tab)) return;
     if (tab === 'overview') {
       try {
-        // Operations numbers are extra: a failure there never hides the moderation overview.
-        const [nextStats, nextOps] = await Promise.all([
+        // Operations numbers and hourly counts are extra: a failure there never hides the moderation overview.
+        const [nextStats, nextOps, nextHourly] = await Promise.all([
           api.get('/api/moderation/stats'),
           loadOps ? api.get('/api/ops/metrics').catch(() => null) : null,
+          api.get('/api/moderation/stats/hourly').catch(() => null),
         ]);
         setStats(nextStats);
         setOps(nextOps);
+        setHourly(nextHourly);
       } catch (requestError) {
         setError(requestError.message || 'Could not load the overview.');
       }
@@ -294,7 +297,7 @@ export default function ModerationPage() {
         : tab === 'overview' ? (
         stats ? (
           <>
-            <OverviewPanel stats={stats} windowKey={statsWindow} onOpenTab={switchTab} />
+            <OverviewPanel stats={stats} hourly={hourly} ops={ops} windowKey={statsWindow} onOpenTab={switchTab} />
             {ops ? <OpsPanel ops={ops} /> : null}
           </>
         ) : error ? null : <SectionSkeleton label="Loading overview" />

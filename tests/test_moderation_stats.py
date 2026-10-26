@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from argon2 import PasswordHasher
 from fastapi import FastAPI
@@ -131,3 +131,40 @@ def test_top_senders_rank_by_volume(app):
     body = sign_in(app, "the_mod").get("/api/moderation/stats").json()
     senders = body["windows"]["24h"]["messages"]["top_senders"]
     assert [(row["username"], row["sent"]) for row in senders] == [("loud", 3), ("quiet", 1)]
+
+
+def test_stats_carry_the_queue_backlog_limits(app, monkeypatch):
+    monkeypatch.setenv("SX_ALERT_OPEN_REPORTS", "7")
+    add_user(app, "the_mod", role="moderator")
+    body = sign_in(app, "the_mod").get("/api/moderation/stats").json()
+    assert body["queue_limits"] == {"open_reports": 7, "open_support_requests": 10}
+
+
+def test_hourly_stats_bucket_each_metric_by_hour(app):
+    add_user(app, "the_mod", role="moderator")
+    add_user(app, "waiting", status="pending", age=timedelta(hours=3))
+    reporter = add_user(app, "reporter", age=timedelta(days=20))
+    now = utcnow()
+    times = [now - timedelta(minutes=1), now - timedelta(hours=5), now - timedelta(hours=5), now - timedelta(days=15)]
+    with app.state.testing_session() as db:
+        for created_at in times:
+            db.add(Report(reporter_id=reporter, target_type="user", target_id="x", reason="spam", created_at=created_at))
+        db.commit()
+    client = sign_in(app, "the_mod")
+    assert TestClient(app).get("/api/moderation/stats/hourly").status_code == 401
+    body = client.get("/api/moderation/stats/hourly").json()
+    assert body["hours"] == 336
+    start = datetime.fromisoformat(body["start"])
+    expected = [0] * 336
+    # The report from 15 days ago is outside the span.
+    for created_at in times[:3]:
+        expected[int((created_at - start).total_seconds() // 3600)] += 1
+    assert body["series"]["reports"] == expected
+    assert sum(body["series"]["unverified"]) == 1
+    assert sum(body["series"]["signups"]) == 1
+    assert set(body["series"]) == {"reports", "support_requests", "posts", "signups", "unverified", "messages", "credits_captured"}
+
+
+def test_hourly_stats_require_a_moderator(app):
+    add_user(app, "plain_user")
+    assert sign_in(app, "plain_user").get("/api/moderation/stats/hourly").status_code == 403
