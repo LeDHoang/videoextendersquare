@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.26-20261025-framebuffer-scale';
+  const VR_VERSION = 'v8.27-20261025-stall-telemetry';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -6737,10 +6737,44 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
   }
 
+  // Mid-play stalls of the active video: a 'waiting' after playback started
+  // (not while seeking), timed until it plays again or the source changes.
+  // Startup waits are switchMs. Bound only while ?xrdiag=1 is on.
+  let stallEl = null;
+  let stallStart = -1;
+  let stallCount = 0;
+  let stallMs = 0;
+  let stallPosted = { count: 0, ms: 0 };
+  function stallNow() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+  function onStallWaiting() {
+    if (!stallEl || stallStart >= 0 || stallEl.seeking || !(Number(stallEl.currentTime) > 0)) return;
+    stallStart = stallNow();
+    stallCount += 1;
+  }
+  function onStallEnd() {
+    if (stallStart < 0) return;
+    stallMs += stallNow() - stallStart;
+    stallStart = -1;
+  }
+  function trackStalls(el) {
+    if (el === stallEl) return;
+    const events = { waiting: onStallWaiting, playing: onStallEnd, emptied: onStallEnd };
+    if (stallEl && stallEl.removeEventListener) {
+      for (const k in events) stallEl.removeEventListener(k, events[k]);
+    }
+    onStallEnd();
+    stallEl = el && el.addEventListener ? el : null;
+    if (stallEl) for (const k in events) stallEl.addEventListener(k, events[k]);
+  }
+
   function postXRDiag(time) {
     // Debug-only: never sends anything unless ?xrdiag=1 opted in.
     if (!debugFlags.xrdiag) return;
     try {
+      try {
+        const vs = getVisualSource();
+        trackStalls(vs && vs.kind === 'video' ? vs.element : null);
+      } catch (e) {}
       if (xrDiagLastT >= 0) {
         const dt = time - xrDiagLastT;
         xrDiagFrames += 1;
@@ -6790,6 +6824,12 @@ window.WebXRVR = window.WebXRVR || (function () {
         switchSrc: lastSwitchTiming ? lastSwitchTiming.src : null,
         switchFromCache: lastSwitchTiming ? lastSwitchTiming.fromCache : null,
       };
+      // Stalls since the last post; an ongoing stall counts up to now.
+      const stallTotal = stallMs + (stallStart >= 0 ? stallNow() - stallStart : 0);
+      payload.stalls = stallCount - stallPosted.count;
+      payload.stallMs = Math.round(stallTotal - stallPosted.ms);
+      payload.stalling = stallStart >= 0;
+      stallPosted = { count: stallCount, ms: stallTotal };
       xrDiagFrames = 0;
       xrDiagMaxDt = 0;
       resetXRDiag();

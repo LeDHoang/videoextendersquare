@@ -343,7 +343,7 @@ Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-c
 | 2. Small start buffer, preload | Next reel warmed after `playing` (step 2). Every AUTO switch was a preloader hit, at 68–118 ms. idx+2 skipped. |
 | 3. Rendition by on-screen size | Measured and reverted (step 5): the panel fills the view, so the master always wins. |
 | 4. Bitrate caps | Done for stream copy, libx265 and previews (step 3). `hevc_videotoolbox` was checked separately: a 10 s 3840² re-encode of a 56 Mbps source averaged 18.1 Mbps, with the worst one-second window at 19.6 Mbps. |
-| 5. Playa stall logic | Not built (see below). |
+| 5. Playa stall logic | Not built. Stalls are now counted in the diagnostics (v8.27); none in normal runs (see below). |
 | 6. Serving | Done: `Cache-Control` on dev `/media` (step 4). |
 
 Found and fixed in the review:
@@ -354,12 +354,36 @@ Found and fixed in the review:
   - In the headset, VR entry and auto-advance still work. The current dev feed has no video followed by another video, so the re-warm itself was verified only in the harness.
   - Not covered: an image post as the next item is not re-warmed on the VR switch. Its warm-up is a browser cache fetch, so the cost is small.
 
+### Element swap: measured, not built
+
+YouTube reuses its decoder across items. The closest web equivalent is to promote the warmed preloader `<video>` to the active one instead of reassigning the active element's `src`. Before refactoring the roughly 110 references to the active element, a probe in the headset (in VR, Quest Browser) timed `play()` to the first `requestVideoFrameCallback` frame for four cases. Each case ran on the same files with warm bytes, against four masters from 1080² to 3840².
+
+| Case | First frame after `play()` |
+| --- | --- |
+| Fresh `src` on an idle element (what we do today) | 43–64 ms (91–133 ms on the first try of a file) |
+| Preloaded element, paused, never played (`readyState` 4) | 252–263 ms, every time |
+| Preloaded element primed with `play()`/`pause()` once | 45–90 ms |
+| Element that was playing moments before (hot decoder) | about 20 ms |
+
+- A paused preloaded element is about 200 ms *slower* than a fresh `src`. Quest Browser suspends the idle media pipeline, and resuming it takes about 250 ms. The result was the same visible or hidden, and with any file size.
+- Priming the preloader with one `play()`/`pause()` only brings it back to the fresh-`src` time.
+- The 20 ms case needs the preloader to keep decoding, which means a second 3840² HEVC decoder running all the time. That costs power and decoder headroom for a gain of about 30 ms.
+- **Decision:** not built. Today's warm `src` reassignment is already the fastest cheap option on this browser.
+
+### Stall telemetry (v8.27)
+
+`?xrdiag=1` now reports mid-play stalls of the active video: `stalls` (count since the last post), `stallMs` (time stalled since the last post, an ongoing stall counted up to now) and `stalling`.
+- A stall is a `waiting` event after playback started and not during a seek. It ends at `playing`, or when the source changes (`emptied`). Start-up waits are already `switchMs`.
+
+| Run | Stalls | Stalled time | FPS |
+| --- | --- | --- | --- |
+| Forced: 13 Mbps reel, cache-busted, CDP throttle 2.5 Mbps, 75 s | 4 | 18.5 s | median 91, min 90 |
+| Normal AUTO, local serving, three runs of 1–2 min (110 diag rows) | 0 | 0 | median 90, min 79–85 |
+
+- The forced run confirms the counter in the headset; rendering held 90 FPS while the video waited.
+- **Playa-style rebuffering is not worth building yet.** Normal serving produced no stalls. The dev feed has only two videos among ten image posts, so these runs cover few video seconds. Re-check with this payload on R2 over Wi-Fi or a slow link before deciding.
+
 Open, with recommendations:
-- **The rest of `switchMs` is decoder start-up.** Preloader hits take 68–118 ms; Playa shows a local first frame in about 41 ms. The bytes are already local, so what remains is creating the decoder for the new `src`. YouTube avoids this by reusing its decoder.
-  - The web equivalent is to promote the warmed preloader element to the active one: swap the two `<video>` elements instead of reassigning `src`.
-  - That needs every listener and the engine's direct texture rebound to the new element, so it is a separate change.
-- **No stall handling.** Neither page handles `waiting` or `stalled`; the browser's default buffering applies. On local and R2 serving no stall was seen in these runs.
-  - Before building Playa's rebuffer targets, count `waiting` events and their duration in the `?xrdiag=1` payload to see whether stalls happen in real use.
 - **Sampling.** The screen texture uses `LinearFilter` without mipmaps, like YouTube's OES path. Step 6 cut the minification of a 3840² master from about 2.4× to 1.6×, which lowers the shimmer risk. Mipmaps for a per-frame video texture would cost a mip generation every frame.
 
 ## Unknowns and how to resolve them
