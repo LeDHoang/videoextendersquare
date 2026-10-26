@@ -406,8 +406,8 @@ Both builds ran the same script in one session, with the headset still on the de
 - **Latency:** about 8 ms faster at the median and 40 ms better at the tail. The tail is what the preloader removes; the median is bounded by decoder start-up (see "Element swap" above).
 - **UI text:** the dock labels are clearly sharper (edge energy +13.7% on the dock crop). Old `SHARE`/`FOLLOW` labels are smeared; on the branch they are crisp. That comes from framebuffer scale 1.5 with foveation off.
 - **Video:** on this 1080×778 reel the two frames look alike. The old canvas path shows slightly blockier edges, so edge energy is 15% *higher* on the old frame; that is aliasing, not detail. A 3840² master gains from the direct texture (step 1: +7.5% edge energy) and from the eye buffer (step 6: +12%).
-- **Pacing:** within noise. The branch had one 484 ms frame gap during one of the eight image dwells, with none in the old run. It was not reproduced, so its cause is unknown: possibly the warm-up of the next reel starting a second decoder.
-- **Side finding:** the 2 s luma clip (3840² HEVC, 24 fps) in LOOP mode gave dtMax p90 67 ms and 7 stale frames/s in an earlier run. Looping a very short clip hitches at each restart.
+- **Pacing:** within noise. The branch had one 484 ms frame gap during one of the eight image dwells, with none in the old run. 46 later warm-ups did not reproduce it, and the preloader is ruled out as the cause (see "Two hitches after the A/B" below).
+- **Side finding:** the 2 s luma clip (3840² HEVC, 24 fps) in LOOP mode gave dtMax p90 67 ms and 7 stale frames/s in an earlier run. The cause is the glow colour probe, not the loop restart. v8.28 fixes it (see below).
 
 Against the reference players (numbers from §1–3; they were not re-run here):
 - **PlayaVR** shows a local first frame in about 41 ms. Ours is 71–88 ms from key press. The gap is decoder start-up, which the web `<video>` does not let us avoid cheaply.
@@ -416,6 +416,39 @@ Against the reference players (numbers from §1–3; they were not re-run here):
 
 Open, with recommendations:
 - **Sampling.** The screen texture uses `LinearFilter` without mipmaps, like YouTube's OES path. Step 6 cut the minification of a 3840² master from about 2.4× to 1.6×, which lowers the shimmer risk. Mipmaps for a per-frame video texture would cost a mip generation every frame.
+
+### Two hitches after the A/B (v8.28)
+
+Method: an in-page probe wraps `XRSession.requestAnimationFrame` and logs every XR frame gap over 30 ms. A `longtask` PerformanceObserver and the media and image events are logged on the same clock. It ran in the headset over CDP; the capture tool ran for the diag and VrApi numbers.
+
+**Luma loop stutter: cause found and fixed (v8.28).**
+- The XR loop samples the glow colour every 800 ms. It drew the video into an 8×8 `willReadFrequently` (software) canvas and called `getImageData`. On a 3840² HEVC frame that `drawImage` reads back the whole frame. It measured 51–58 ms of main thread per sample (43–78 ms in a second check), so the headset dropped about 5 frames every 800 ms.
+- The loop restart is not the cause. The page loops by seeking on `ended`; the seek takes 26–36 ms, and the direct `VideoTexture` stays bound (same element). In 14 loops per 30 s run, 1 of 36 gaps fell within 150 ms of a seek, and it was at the probe's 800 ms beat. With `?glowprobe=0` there were 0 gaps over 14 loops. Hold-last-frame is not involved either: `updateDirectVideoBinding` returns early for an already-bound element, so a loop never reaches the readiness hold.
+- Fix: `createImageBitmap(video, crop, {resizeWidth: 8, resizeHeight: 8})` scales on the GPU, then the 8×8 bitmap is read back. A probe that is still running skips the next sample. Stereo still averages the left eye only. Browsers without `createImageBitmap` keep the old path. Measured directly, the new probe takes 1–2 ms async plus 5–15 ms to read the 8×8 bitmap, with no long tasks. The glow colour still follows the video in the headset.
+
+| Luma 2 s clip, LOOP, 30 s | v8.27 | `?glowprobe=0` | v8.28 |
+| --- | --- | --- | --- |
+| XR frame gaps > 30 ms | 35–36 | 0 | 0–2 (max 50 ms) |
+| Missed frames/s (probe) | 5.6–5.9 | 0 | 0–0.2 |
+| Long tasks | 36, median 61–63 ms | 0 | 0 |
+| XR frames/s | 83.8–84.2 | 89.8 | 89.4–89.6 |
+
+Capture of the same clip (`analyze.py`), the earlier v8.27 run against a 45 s v8.28 run:
+- dtMax p90 67.1 ms (31 rows > 25 ms) became 19.5 ms (0 rows).
+- xrFrames/s median went from 87 to 90.
+- VrApi stale/s median went from 7 to 4 (p90 11 to 5).
+- Video frames/s went from 19 to 21. The clip is 24 fps, so the earlier "19 uploads/s" was the frame rate minus drops, not an upload limit.
+
+The probe hit every high-resolution video, not only short loops. Its cost scales with frame size, which is why the 1080×778 punk reel did not show it.
+
+**484 ms image-dwell gap: not reproduced, cause unknown.**
+- Warm-up ruled out. Image→punk dwell cycles were run with the preloader warming punk every time (`loadstart` through `canplaythrough` on `#preloadVideo`, a second decoder producing its first frame):
+  - 15 cycles from the image before punk, without the capture tool: 0 gaps over 40 ms, 0 long tasks.
+  - 31 warm-ups on the same image (`…061215-fb17a3.png`) and the same reel as the A/B, with the capture tool: 0 gaps, 0 long tasks.
+- Large PNG decode ruled out for this post. Its slides are 1080×608, 0.75–1.1 MB, and the slide change at +4 s in each dwell showed no gap.
+- Capture tool not shown to be the cause. `ovrgpuprofiler -t` sampled about every 19 s, and its last sample before the gap finished more than 2 s before the gap's diag window. It also ran through the 31-warm-up run with no gap. The capture's logcat has 3–9 s silences every ~10 s in every run, so logcat cannot place the gap.
+- Still open: a one-off system event such as tracking cameras stopping (logcat shows camera stops 3–5 s earlier) or a GC pause. A trace was not taken because the gap could not be triggered. If it returns, the probe above names the frame and its long task.
+- Related finding, not fixed: on other image posts, some slide changes cost 85–100 ms of main thread (a long task at the slide's `load`). This happened on 3 of 12 changes to the same 1080×495 slide. The likely cause is a synchronous image decode in `drawImage` into the proxy canvas. Awaiting `img.decode()` before the swap may remove it. This is not tested.
 
 ## Unknowns and how to resolve them
 

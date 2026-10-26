@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.27-20261025-stall-telemetry';
+  const VR_VERSION = 'v8.28-20261026-glow-probe-gpu-scale';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -565,6 +565,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let glowAlphaTexture = null;
   let glowProbeCanvas = null;
   let glowProbeCtx = null;
+  let glowProbePending = false;
   // Ambient glow color state (upstream updateAmbilightColor semantics:
   // 8x8 video probe, enhance, lerp toward target).
   let glowColor = [0.10, 0.24, 0.62];
@@ -5896,6 +5897,25 @@ window.WebXRVR = window.WebXRVR || (function () {
       const layout = sourceStereoLayout(source);
       const vw = Number(source.element.videoWidth) || 0;
       const vh = Number(source.element.videoHeight) || 0;
+      if (typeof createImageBitmap === 'function' && vw > 0 && vh > 0) {
+        // v8.28: scale to 8x8 on the GPU and read back only that. Drawing
+        // the video into the software probe canvas read back the whole
+        // frame: 51–58 ms of main thread per sample on 3840² HEVC (Quest
+        // 3S), a ~5-frame hitch every 800 ms. Stereo: left eye only.
+        if (glowProbePending) return;
+        glowProbePending = true;
+        createImageBitmap(source.element, 0, 0,
+          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh,
+          { resizeWidth: 8, resizeHeight: 8, resizeQuality: 'low' })
+          .then((bmp) => {
+            glowProbeCtx.drawImage(bmp, 0, 0);
+            try { bmp.close(); } catch (e) {}
+            setGlowTargetFromProbe();
+          })
+          .catch(() => {})
+          .then(() => { glowProbePending = false; });
+        return;
+      }
       if (layout !== 'mono' && vw > 0 && vh > 0) {
         // Stereo: average the left eye only.
         glowProbeCtx.drawImage(source.element, 0, 0,
@@ -5903,16 +5923,21 @@ window.WebXRVR = window.WebXRVR || (function () {
       } else {
         glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
       }
-      const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
-      let r = 0, g = 0, b = 0;
-      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-      const n = (d.length / 4) * 255;
-      glowTarget = [
-        Math.min(1, (r / n) * 1.35 + 0.03),
-        Math.min(1, (g / n) * 1.35 + 0.05),
-        Math.min(1, (b / n) * 1.45 + 0.09),
-      ];
+      setGlowTargetFromProbe();
     } catch (e) {}
+  }
+
+  // Average the 8x8 probe canvas into the glow target (enhanced).
+  function setGlowTargetFromProbe() {
+    const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    const n = (d.length / 4) * 255;
+    glowTarget = [
+      Math.min(1, (r / n) * 1.35 + 0.03),
+      Math.min(1, (g / n) * 1.35 + 0.05),
+      Math.min(1, (b / n) * 1.45 + 0.09),
+    ];
   }
 
   function applyGlowColor() {

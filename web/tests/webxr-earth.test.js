@@ -1171,6 +1171,60 @@ test('bisection flags gate lock, overlay, guide, and glow', () => {
   assert.equal(api.lockApplies(), true);
 });
 
+test('glow probe scales the video to 8x8 on the GPU, never draws the full frame (v8.28)', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  // Every 2d context records what is drawn into it and reads back pure red.
+  const draws = [];
+  const createElement = (kind) => {
+    if (kind !== 'canvas') return null;
+    const c = makePreviewCanvas(gl);
+    const ctx = makeCanvas2dContext();
+    ctx.drawImage = (src) => { draws.push(src); };
+    ctx.getImageData = (x, y, w, h) => ({
+      data: Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i % 4 === 0 || i % 4 === 3 ? 255 : 0)),
+    });
+    c.getContext = (k) => (k === '2d' ? ctx : gl);
+    return c;
+  };
+  const bitmapCalls = [];
+  const bitmaps = [];
+  const createImageBitmap = (src, sx, sy, sw, sh, opts) => {
+    const bmp = { closed: false, close() { this.closed = true; } };
+    bitmapCalls.push({ src, sw, sh, opts });
+    bitmaps.push(bmp);
+    return Promise.resolve(bmp);
+  };
+  const video = { videoWidth: 3840, videoHeight: 3840, readyState: 4, paused: false, addEventListener() {}, removeEventListener() {} };
+  const renderer = loadRenderer({ gl, createElement, globals: { createImageBitmap } });
+  renderer.init(video, {
+    getVisualSource: () => ({ kind: 'video', element: video, ready: true, paused: false, muted: true, currentTime: 1, duration: 2, version: 'v' }),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const before = renderer.__test.getSceneInfo().glow.color;
+  renderer.__runScheduledFrame(200);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bitmapCalls.length, 1);
+  assert.equal(bitmapCalls[0].src, video);
+  assert.equal(bitmapCalls[0].sw, 3840);
+  assert.equal(bitmapCalls[0].opts.resizeWidth, 8);
+  assert.equal(bitmapCalls[0].opts.resizeHeight, 8);
+  assert.ok(!draws.includes(video), 'the full video frame never goes through drawImage');
+  assert.ok(draws.includes(bitmaps[0]), 'the 8x8 bitmap is read back');
+  assert.equal(bitmaps[0].closed, true);
+  for (let t = 216; t < 300; t += 16) renderer.__runScheduledFrame(t);
+  const after = renderer.__test.getSceneInfo().glow.color;
+  assert.ok(after[0] > before[0] && after[2] < before[2], 'glow steers toward the sampled red');
+
+  // Stereo SBS samples the left eye only.
+  renderer.setSourceStereo('sbs');
+  renderer.__runScheduledFrame(400);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bitmapCalls.length, 2);
+  assert.equal(bitmapCalls[1].sw, 1920);
+  assert.equal(bitmapCalls[1].sh, 3840);
+  renderer.stopPreview();
+});
+
 test('dockfreeze stops dock texture re-uploads after the first paint', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
