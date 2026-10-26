@@ -3043,6 +3043,39 @@
       return creator && creator.username ? '@' + creator.username : 'ECHO CREATOR';
     }
 
+    // <reels-vr-image-bitmap>
+    // VR draws image posts from an ImageBitmap decoded off the main thread.
+    // Drawing the <img> into the proxy canvas decoded it, and converted its
+    // ICC profile, synchronously at the texture upload: 80 ms on a 1080x495
+    // PNG with a 26 KB profile. img.decode() and createImageBitmap(img) still
+    // block the main thread for that long; createImageBitmap(blob) does not.
+    // Until the bitmap is ready the engine keeps the last frame.
+    let vrImageBitmap = { url: '', bitmap: null, failed: false };
+    function vrImageSource(image) {
+      const url = image ? image.getAttribute('src') : '';
+      const fallback = { element: image, ready: !!(image && image.complete && image.naturalWidth) };
+      if (!url || typeof createImageBitmap !== 'function' || typeof fetch !== 'function') return fallback;
+      if (vrImageBitmap.url !== url) {
+        if (vrImageBitmap.bitmap) vrImageBitmap.bitmap.close();
+        const entry = (vrImageBitmap = { url, bitmap: null, failed: false });
+        fetch(url)
+          .then((response) => {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.blob();
+          })
+          .then((blob) => createImageBitmap(blob))
+          .then((bitmap) => {
+            if (vrImageBitmap === entry) entry.bitmap = bitmap;
+            else bitmap.close();
+          })
+          .catch(() => { entry.failed = true; });
+      }
+      if (vrImageBitmap.bitmap) return { element: vrImageBitmap.bitmap, ready: true };
+      if (vrImageBitmap.failed) return fallback;
+      return { element: image, ready: false };
+    }
+    // </reels-vr-image-bitmap>
+
     function currentVisualSource() {
       const item = videoData[idx] || null;
       if (collectOpen) {
@@ -3070,10 +3103,11 @@
         };
       }
       if (isImageItem(item)) {
+        const vrImage = vrImageSource(reelsImage);
         return {
           kind: 'image',
-          element: reelsImage,
-          ready: !!(reelsImage && reelsImage.complete && reelsImage.naturalWidth),
+          element: vrImage.element,
+          ready: vrImage.ready,
           paused: !imageTimer,
           muted: true,
           currentTime: imageElapsedNow() / 1000,

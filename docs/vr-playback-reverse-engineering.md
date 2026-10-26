@@ -448,7 +448,32 @@ The probe hit every high-resolution video, not only short loops. Its cost scales
 - Large PNG decode ruled out for this post. Its slides are 1080×608, 0.75–1.1 MB, and the slide change at +4 s in each dwell showed no gap.
 - Capture tool not shown to be the cause. `ovrgpuprofiler -t` sampled about every 19 s, and its last sample before the gap finished more than 2 s before the gap's diag window. It also ran through the 31-warm-up run with no gap. The capture's logcat has 3–9 s silences every ~10 s in every run, so logcat cannot place the gap.
 - Still open: a one-off system event such as tracking cameras stopping (logcat shows camera stops 3–5 s earlier) or a GC pause. A trace was not taken because the gap could not be triggered. If it returns, the probe above names the frame and its long task.
-- Related finding, not fixed: on other image posts, some slide changes cost 85–100 ms of main thread (a long task at the slide's `load`). This happened on 3 of 12 changes to the same 1080×495 slide. The likely cause is a synchronous image decode in `drawImage` into the proxy canvas. Awaiting `img.decode()` before the swap may remove it. This is not tested.
+
+**Image slide-change long task: cause found and fixed.**
+- Reproduced in the headset. A probe stepped `#slideNextBtn` every 1.5 s on multi-image posts and timed every `drawImage` of `#reelsImage` and every GL texture upload. Over 72 changes on 6 posts, the 1080×495 slide (`…ff9f82.png`, and the identical file `…89e627.png`) loaded 9 times. 2 of those loads gave an 88 ms long task and a 90–98 ms XR frame gap, starting 1 ms after the slide's `load`. The other 7 were fast, which fits a hit in Chrome's decoded-image cache and the earlier 3 of 12.
+- Attribution, from the timings rather than a Perfetto trace: `drawImage` into the proxy canvas took 0–0.3 ms, because it only records the draw. The cost lands in the canvas `texSubImage2D` (81–82 ms), where Chrome rasterizes the canvas and decodes the PNG on the main thread. Other slides cost 13–30 ms in the same call.
+- Why this slide: it carries a 26 KB `iCCP` ICC profile. Most uploads carry a 284 B one; 10 files in `output/uploads` carry the 26 KB one. The file size is not the reason: it is 0.53 MB against 0.8–1.2 MB for fast slides. Without colour conversion the off-thread decode takes 14–16 ms instead of 73–84 ms, so the profile conversion is most of the cost.
+- `img.decode()` does not help. Measured directly on the slow PNG with a fresh URL, then drawn into a 2048² canvas and uploaded:
+
+| Path | Main-thread block | Upload |
+| --- | --- | --- |
+| `<img>` as now | — | 76–82 ms |
+| `await img.decode()` first | — | 75–85 ms |
+| `createImageBitmap(img)` | 70–85 ms in the call | 0.4–1 ms |
+| `createImageBitmap(blob)` | ≤ 7 ms (decode on a worker, resolves in 73–84 ms) | 0.5–1 ms |
+
+- Fix (`reels.html`, `vrImageSource`): for image posts the VR source is an `ImageBitmap` from `createImageBitmap(await (await fetch(src)).blob())`. The fetch hits the cache the `<img>` already filled. Until the bitmap is ready the source reports `ready: false`, so the engine keeps the last frame. If the fetch or decode fails, VR draws the `<img>` as before. The old bitmap is closed on a slide change, and a late bitmap for a slide already left is dropped. The bitmap is pixel-identical to the `<img>` (max difference 0 on a 64×32 sample), so the ICC conversion is kept. The engine is unchanged; the 2D page still shows the `<img>`.
+
+| Slide changes, 1.5 s per slide | Before | After |
+| --- | --- | --- |
+| Changes (posts) | 72 (6) | 72 (6) and 96 (8) |
+| Loads of the 1080×495 ICC slide | 9 (2 slow) | 4 and 4 |
+| XR frame gaps > 40 ms | 4 (90, 98, 40, 42 ms) | 0 and 0 |
+| Long tasks | 2 × 88 ms | 0 and 0 |
+| Slide uploads > 4 ms | 20 of 78 (12–82 ms) | 0 and 0 (of 105 in the second run) |
+| `load` to slide drawn in VR | 0–1 ms | 15–49 ms; ~105 ms for the ICC slide |
+
+The slide now appears in VR a few frames after `load` instead of freezing the headset for those frames. A headset screenshot after the fix showed the current slide. Stereo image posts and the SQ Curve and Flat modes were not re-run; they draw through the same `drawImage` call. `make test` passes, with a new `web/tests/reels-vr-image-bitmap.test.js`.
 
 ## Unknowns and how to resolve them
 
