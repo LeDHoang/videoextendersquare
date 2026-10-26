@@ -26,7 +26,9 @@ What a full restore needs, and where each piece lives:
    ```bash
    BACKUP_REMOTE=r2-backup:<backup-bucket>
    BACKUP_PING_URL=https://hc-ping.com/<uuid>   # optional
+   BACKUP_SENTRY_CRON_URL=https://o<org-id>.ingest.us.sentry.io/api/<project-id>/cron/echo-backup/<dsn-public-key>/   # optional
    ```
+   The Sentry values come from `SENTRY_DSN` (`https://<dsn-public-key>@o<org-id>.ingest.us.sentry.io/<project-id>`). The first run creates the `echo-backup` monitor for a 03:15 UTC daily schedule, so the host clock must be on UTC (`timedatectl`). Sentry opens an issue, and emails you, when a run fails or is missed.
 3. Cron (`crontab -e` as the deploy user, who must be in the `docker` group):
    ```cron
    15 3 * * * cd /opt/echo && deploy/backup.sh >> "$HOME/echo-backup.log" 2>&1

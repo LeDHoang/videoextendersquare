@@ -76,7 +76,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   In Sentry, add an alert rule that notifies you on every new issue whose message starts with `ALERT ` or `Low disk space`.
   The same DSN also sends traces (`SENTRY_TRACES_SAMPLE_RATE`, default 0.2; health checks are skipped), INFO+ logs, and the watchdog counters as metrics. All of these fit in the free Developer plan. Profiling is not included in that plan, so it stays off.
   After the domain is live, add a Sentry uptime monitor on `https://<domain>/api/readyz` (the free plan includes one). It can replace UptimeRobot.
-- [ ] **Backups.** Optionally add a healthchecks.io check, and set `BACKUP_PING_URL` for `deploy/backup.sh`.
+- [ ] **Backups.** Set `BACKUP_SENTRY_CRON_URL` for `deploy/backup.sh`, which creates a Sentry cron monitor on the first run. A healthchecks.io check (`BACKUP_PING_URL`) also works.
 
 ### Secret escrow
 

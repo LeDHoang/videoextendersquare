@@ -11,6 +11,8 @@
 # Configuration (env, or the file named by BACKUP_ENV_FILE):
 #   BACKUP_REMOTE    rclone destination, e.g. r2-backup:echo-backups (required)
 #   BACKUP_PING_URL  optional healthchecks.io-style URL; "/fail" is appended on error
+#   BACKUP_SENTRY_CRON_URL  optional Sentry Crons check-in URL; the first
+#                    check-in creates the monitor (daily 03:15 UTC, as above)
 #   COMPOSE_DIR      directory holding compose.yaml (default: repo root)
 set -euo pipefail
 
@@ -23,12 +25,21 @@ fi
 : "${BACKUP_REMOTE:?set BACKUP_REMOTE (rclone remote:bucket for the private backup bucket)}"
 COMPOSE_DIR="${COMPOSE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BACKUP_PING_URL="${BACKUP_PING_URL:-}"
+BACKUP_SENTRY_CRON_URL="${BACKUP_SENTRY_CRON_URL:-}"
 
 ping() {
     [[ -n "$BACKUP_PING_URL" ]] || return 0
     curl -fsS -m 10 --retry 3 -o /dev/null "${BACKUP_PING_URL}$1" || true
 }
-trap 'ping /fail' ERR
+
+# Sentry Crons: in_progress / ok / error. A missed run alerts from Sentry's side.
+checkin() {
+    [[ -n "$BACKUP_SENTRY_CRON_URL" ]] || return 0
+    curl -fsS -m 10 --retry 3 -o /dev/null -X POST "$BACKUP_SENTRY_CRON_URL" \
+        -H 'Content-Type: application/json' \
+        --data "{\"status\": \"$1\", \"monitor_config\": {\"schedule\": {\"type\": \"crontab\", \"value\": \"15 3 * * *\"}, \"timezone\": \"UTC\", \"checkin_margin\": 30, \"max_runtime\": 120}}" || true
+}
+trap 'ping /fail; checkin error' ERR
 
 cd "$COMPOSE_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -44,6 +55,7 @@ publish() {
 }
 
 ping /start
+checkin in_progress
 
 # Database: custom format so pg_restore can --clean / pick objects.
 db_name="echo-${stamp}.dump"
@@ -58,4 +70,5 @@ docker compose exec -T app sh -c 'mkdir -p /app/data/avatars && tar -C /app/data
 publish "$avatars_name"
 
 ping ""
+checkin ok
 echo "backup: done ${stamp}"
