@@ -473,7 +473,12 @@ The probe hit every high-resolution video, not only short loops. Its cost scales
 | Slide uploads > 4 ms | 20 of 78 (12–82 ms) | 0 and 0 (of 105 in the second run) |
 | `load` to slide drawn in VR | 0–1 ms | 15–49 ms; ~105 ms for the ICC slide |
 
-The slide now appears in VR a few frames after `load` instead of freezing the headset for those frames. A headset screenshot after the fix showed the current slide. Stereo image posts and the SQ Curve and Flat modes were not re-run; they draw through the same `drawImage` call. `make test` passes, with a new `web/tests/reels-vr-image-bitmap.test.js`.
+The slide now appears in VR a few frames after `load` instead of freezing the headset for those frames. A headset screenshot after the fix showed the current slide.
+
+Modes and stereo, after the fix:
+- Flat, SQ Curve and Dome: 12 slide changes on 2 posts in each mode. All three had 0 XR gaps, 0 long tasks and no upload over 4 ms. Every slide was drawn from the bitmap, never the `<img>`, 22–53 ms after `load` (98 ms twice). Headset screenshots in SQ Curve and Dome showed the current slide.
+- Top-bottom stereo image (`tb-test-still-image-…e59edd.png`, 2048×4096, the only stereo image post): the VR source switched to the stereo file, and its bitmap was drawn whole into the 2048×4096 stereo proxy. Measured on that file alone, the `<img>` upload took 105–111 ms of main thread. The bitmap path took 4.1–4.6 ms, after a 110–118 ms decode on a worker (main-thread gap ≤ 7 ms).
+- VR entry has 4–5 long tasks of 52–203 ms on both a mono and the stereo image post. They are session start-up, not the slide: the stereo bitmap draw fell between them. `make test` passes, with a new `web/tests/reels-vr-image-bitmap.test.js`.
 
 ## Unknowns and how to resolve them
 
