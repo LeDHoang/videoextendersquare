@@ -12,9 +12,9 @@ W8T recipe (validated against Owl3D in the owdl3d-reword study, ledger §4.14):
   3. Decode the same shot at render size and, per frame: grow near depth with a 5x5
      dilate at depth resolution, upsample bilinearly, forward-splat the left
      view into the right eye (softmax weights favour near pixels), fill
-     disocclusions with the nearest valid pixel. Far content shifts right by
-     MAX_SHIFT of the width (behind the screen) and the nearest content left
-     by POP_OUT (slightly in front of it).
+     disocclusions by mirroring the background beside them. Far content
+     shifts right by MAX_SHIFT of the width (behind the screen) and the
+     nearest content sits on the screen plane (POP_OUT 0).
   4. Crop the parallax edge strip from all four sides of both eyes, hstack and
      pipe into libx264 (bt709, faststart), with the source audio and timing.
 
@@ -41,7 +41,7 @@ MODEL_DIR = os.path.join(".models")
 DEPTH_ENCODER = "vits"  # Video-Depth-Anything-Small: Apache-2.0 code and weights (vitb/vitl are not)
 
 MAX_SHIFT = 0.013867        # far-plane parallax as a fraction of the eye width (W8T)
-POP_OUT = 0.006             # crossed parallax of the nearest content (chosen over W8T's 0 in a Quest A/B)
+POP_OUT = 0.0               # crossed parallax of the nearest content (0.006 streaked subject edges; Quest A/B 2026-10-26)
 NEAR_IMPORTANCE = 20.0      # softmax splat weight exp(20 * nearness): nearer pixels win overlaps
 EYE_CAP = 2048              # px per eye; the VR player's stereo canvas (VR_STEREO_EYE_CAP)
 MAX_VIDEO_SECONDS = 60      # a whole shot's depth is held in memory
@@ -235,6 +235,33 @@ def nearest_fill(out: np.ndarray) -> np.ndarray:
     return res
 
 
+def background_fill(out: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Fill each horizontal NaN run from its farther side (lower warped
+    nearness *z*), mirroring the background strip beyond that edge into the
+    run, so the fill copies background texture instead of stretching one
+    pixel. Runs touching the frame edge, and mirrored pixels that are holes
+    themselves, fall back to the edge pixel or nearest_fill."""
+    H, W = z.shape
+    hole = np.isnan(out[..., 0])
+    if not hole.any():
+        return out
+    xs = np.broadcast_to(np.arange(W), (H, W))
+    left = np.maximum.accumulate(np.where(hole, -1, xs), axis=1)  # last valid at or before x
+    right = np.minimum.accumulate(np.where(hole, W, xs)[:, ::-1], axis=1)[:, ::-1]  # first at or after
+    hy, hx = np.nonzero(hole)
+    l, r = left[hy, hx], right[hy, hx]
+    zl = np.where(l >= 0, z[hy, np.clip(l, 0, W - 1)], np.inf)
+    zr = np.where(r < W, z[hy, np.clip(r, 0, W - 1)], np.inf)
+    use_r = zr <= zl
+    edge = np.where(use_r, r, l)
+    src = np.clip(np.where(use_r, 2 * r - 1 - hx, 2 * l + 1 - hx), 0, W - 1)
+    src = np.where(hole[hy, src], edge, src)
+    ok = np.isfinite(np.minimum(zl, zr))
+    res = out.copy()
+    res[hy[ok], hx[ok]] = out[hy[ok], src[ok]]
+    return nearest_fill(res)
+
+
 def render_right_eye(left: np.ndarray, near: np.ndarray, strength: float = 1.0) -> np.ndarray:
     """Right-eye view of *left* (H,W,3 uint8) given nearness (H,W) in [0, 1].
 
@@ -243,8 +270,10 @@ def render_right_eye(left: np.ndarray, near: np.ndarray, strength: float = 1.0) 
     of it. The screen plane sits at nearness MAX_SHIFT / (MAX_SHIFT + POP_OUT)."""
     W = left.shape[1]
     fx = (W * strength) * (MAX_SHIFT - (MAX_SHIFT + POP_OUT) * near)
-    out, _ = softsplat(left, fx, NEAR_IMPORTANCE * near)
-    return np.clip(np.round(nearest_fill(out)), 0, 255).astype(np.uint8)
+    importance = NEAR_IMPORTANCE * near
+    out, _ = softsplat(left, fx, importance)
+    z, _ = softsplat(np.repeat(near[..., None], 3, axis=2), fx, importance)
+    return np.clip(np.round(background_fill(out, z[..., 0])), 0, 255).astype(np.uint8)
 
 
 def _even(x: float) -> int:

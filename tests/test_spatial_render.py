@@ -83,6 +83,23 @@ def test_softsplat_marks_disocclusions_and_fill_closes_them():
     assert np.array_equal(filled[:, 31], filled[:, 29])  # nearest valid pixel is the block edge
 
 
+def test_background_fill_mirrors_the_far_side_of_a_hole():
+    left = texture(16, 50)
+    left[:, 20:30] = 255  # near block
+    near = np.zeros((16, 50), np.float32)
+    near[:, 20:30] = 1.0
+    fx = sw.MAX_SHIFT * 50 * exact_strength(50, 4) * (1.0 - near)
+    out, _ = sw.softsplat(left, fx, sw.NEAR_IMPORTANCE * near)
+    z, _ = sw.softsplat(np.repeat(near[..., None], 3, axis=2), fx, sw.NEAR_IMPORTANCE * near)
+    filled = sw.background_fill(out, z[..., 0])
+    assert not np.isnan(filled).any()
+    # The hole behind the block (columns 30..33) mirrors the background at 34..37, not the block.
+    assert np.array_equal(filled[:, 30:34], out[:, 34:38][:, ::-1])
+    assert (filled[:, 30:34] != 255).any()
+    # The frame-edge strip has background on one side only and mirrors it too.
+    assert np.array_equal(filled[:, 0:4], out[:, 4:8][:, ::-1])
+
+
 def test_render_has_no_holes_on_random_depth():
     rng = np.random.default_rng(5)
     near = rng.random((48, 48)).astype(np.float32)
