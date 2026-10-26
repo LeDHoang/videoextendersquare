@@ -50,6 +50,12 @@ HIST_CUT = 0.5              # colour-histogram jump that also starts one (dark c
 HIST_CUT_RATIO = 3.0        # ...when it is this many times the local median jump (strobing stays high)
 HIST_CUT_WINDOW = 15        # frames either side for that median
 MIN_SHOT_FRAMES = 12        # shorter shots merge into a neighbour (flashes, false cuts)
+VIDEO_ENCODERS = {
+    "h264": ["-c:v", "libx264", "-crf", "20", "-preset", "superfast"],
+    # CRF 18 matches libx264 CRF 20 (50.4 dB vs the lossless render) at ~47% of the bytes
+    "hevc": ["-c:v", "libx265", "-crf", "18", "-preset", "medium", "-tag:v", "hvc1",
+             "-x265-params", "log-level=error"],
+}
 RENDER_REPORT_EVERY = 30    # frames between progress reports (cancel checks)
 
 _INFER_LOCK = threading.Lock()  # one depth pass at a time per process (MPS / VRAM)
@@ -454,8 +460,10 @@ def process_video_spatial(
     half_sbs: bool = False,
     depth_max_dim: int = 518,
     max_seconds: float | None = MAX_VIDEO_SECONDS,
+    codec: str = "h264",
 ) -> tuple[str, dict]:
-    """Convert one monocular video to a side-by-side stereo H.264 MP4.
+    """Convert one monocular video to a side-by-side stereo MP4 (H.264, or HEVC
+    with codec="hevc": about half the bytes at the same quality, measured 2026-10-26).
 
     Returns (output_path, metrics). Depth and render go one shot at a time,
     so memory holds one shot's depth-resolution frames (about 0.8 MB each at
@@ -504,6 +512,8 @@ def process_video_spatial(
     vf = f"setpts=PTS+{info['offset']:.6f}/TB," if info["offset"] > 0 else ""
     vf += ("scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
            "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv")
+    if codec not in VIDEO_ENCODERS:
+        raise SpatializeError(f"Unknown codec {codec!r}; use one of {sorted(VIDEO_ENCODERS)}")
     cmd = ["ffmpeg", "-y", "-v", "error", "-nostdin",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{out_w}x{out_h}", "-r", info["rate"],
            "-i", "-", "-i", video_path, "-map", "0:v:0"]
@@ -511,8 +521,7 @@ def process_video_spatial(
         audio = ["copy"] if info["audio"] in ("aac", "mp3") else ["aac", "-b:a", "192k"]
         cmd += ["-map", "1:a:0", "-c:a", *audio]
     cmd += ["-vf", vf, "-fps_mode", "passthrough",
-            "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
-            "-movflags", "+faststart", output_path]
+            *VIDEO_ENCODERS[codec], "-movflags", "+faststart", output_path]
 
     encoded = 0
     device = "?"
