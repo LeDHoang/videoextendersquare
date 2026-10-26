@@ -11,7 +11,7 @@ numpy>=2,<3
 vapoursynth==78; sys_platform != "linux"
 fastapi>=0.115
 uvicorn[standard]>=0.30
-python-multipart>=0.0.9
+python-multipart>=0.0.32
 sse-starlette>=2.0
 SQLAlchemy>=2.0,<3
 alembic>=1.13,<2
