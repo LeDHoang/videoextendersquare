@@ -54,14 +54,38 @@ def test_sentry_scrubs_credentials():
     event = {
         "request": {
             "cookies": {"echo_session": "secret"},
-            "headers": {"Cookie": "echo_session=secret", "X-CSRF-Token": "t", "Accept": "*/*"},
+            "headers": {
+                "Cookie": "echo_session=secret",
+                "X-CSRF-Token": "t",
+                "Cf-Connecting-Ip": "203.0.113.7",
+                "Accept": "*/*",
+            },
         }
     }
     scrubbed = app_module._sentry_before_send(event, None)
     assert "cookies" not in scrubbed["request"]
     assert scrubbed["request"]["headers"]["Cookie"] == "[filtered]"
     assert scrubbed["request"]["headers"]["X-CSRF-Token"] == "[filtered]"
+    assert scrubbed["request"]["headers"]["Cf-Connecting-Ip"] == "[filtered]"
     assert scrubbed["request"]["headers"]["Accept"] == "*/*"
+
+
+def test_sentry_drops_query_strings():
+    event = {
+        "request": {"url": "https://x/api/users/search", "query_string": "q=alice"},
+        "spans": [{"data": {"url": "https://tenor.googleapis.com/v2/search", "http.query": "q=cat&key=k"}}],
+    }
+    scrubbed = app_module._sentry_before_send(event, None)
+    assert "query_string" not in scrubbed["request"]
+    assert scrubbed["spans"][0]["data"] == {"url": "https://tenor.googleapis.com/v2/search"}
+    crumb = app_module._sentry_before_breadcrumb({"data": {"url": "u", "http.query": "key=k"}}, None)
+    assert crumb["data"] == {"url": "u"}
+
+
+def test_sentry_skips_health_checks(monkeypatch):
+    monkeypatch.delenv("SENTRY_TRACES_SAMPLE_RATE", raising=False)
+    assert app_module._sentry_traces_sampler({"asgi_scope": {"path": "/api/readyz"}}) == 0
+    assert app_module._sentry_traces_sampler({"asgi_scope": {"path": "/api/feed"}}) == 0.2
 
 
 def test_dev_media_is_cacheable_and_keeps_range_support(monkeypatch, tmp_path):

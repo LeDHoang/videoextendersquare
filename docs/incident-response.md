@@ -57,6 +57,7 @@ failure counters and disk. The numbers are per process and reset on restart.
 
 Search logs by request ID: a Sentry event's `request_id` tag matches the
 `X-Request-ID` header and the `request_id` field in the app's JSON logs.
+For a slow or failing request, the event's trace in Sentry shows its spans (DB queries, outbound HTTP calls) and the logs it wrote.
 
 ```bash
 docker compose logs app | grep '<request-id>'

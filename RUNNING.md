@@ -130,6 +130,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `R2_ENDPOINT_URL` | _(unset)_ | S3 endpoint override; local staging points it at SeaweedFS. Unset means `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `SX_ENV_FILE`, `SX_APP_PORT` | _(unset)_ | Compose only: env file for the app (default `.env`) and its loopback port (default `8000`). Local staging uses `.env.staging` and `8001` |
 | `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.2` | Share of requests traced in Sentry; `/api/healthz` and `/api/readyz` are never traced |
 | `SX_ALERT_5XX_RATE` / `SX_ALERT_P95_MS` | `0.05` / `2000` | Watchdog thresholds over the last 5 min (need at least 20 requests). Crossings are error logs, so Sentry events |
 | `SX_ALERT_FAILURES` | `3` | Failed jobs plus failed derived encodes in 5 min before an alert |
 | `SX_ALERT_OPEN_REPORTS` / `SX_ALERT_OPEN_SUPPORT` | `20` / `10` | Open reports / open support requests waiting before an alert; the Overview turns those checks red at the same numbers |

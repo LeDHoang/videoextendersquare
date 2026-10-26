@@ -24,6 +24,8 @@ import threading
 import time
 from collections import Counter, deque
 
+import sentry_sdk
+
 from server.settings import env_int
 
 logger = logging.getLogger("sx.alerts")
@@ -61,6 +63,8 @@ def incr(name: str) -> None:
     with _lock:
         _events.setdefault(name, deque(maxlen=10_000)).append(now)
         _totals[name] += 1
+    # Mirrored to Sentry application metrics (a no-op without SENTRY_DSN).
+    sentry_sdk.metrics.count(name, 1)
 
 
 def _percentile(values: list[float], fraction: float) -> float | None:

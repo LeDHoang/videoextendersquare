@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 load_dotenv(override=False)
 
 from server.media_store import CACHE_CONTROL  # noqa: E402
+from server.metrics import env_float  # noqa: E402
 from server.observability import RequestIDMiddleware, configure_logging, current_request_id  # noqa: E402
 from server.settings import env_int, is_production, production_config_errors  # noqa: E402
 
@@ -36,7 +37,16 @@ logger = logging.getLogger("server.app")
 _CLEANUP_INTERVAL_S = 15 * 60
 
 
-_SCRUBBED_HEADERS = {"cookie", "authorization", "x-csrf-token", "set-cookie"}
+# cf-connecting-ip / true-client-ip carry the visitor's IP behind Cloudflare;
+# the SDK's own PII filter only knows x-forwarded-for and x-real-ip.
+_SCRUBBED_HEADERS = {
+    "cookie",
+    "authorization",
+    "x-csrf-token",
+    "set-cookie",
+    "cf-connecting-ip",
+    "true-client-ip",
+}
 
 
 def _sentry_before_send(event, hint):
@@ -49,16 +59,37 @@ def _sentry_before_send(event, hint):
             event["tags"] = {"request_id": request_id}
     request = event.get("request") or {}
     request.pop("cookies", None)
+    # Query strings carry search terms (users, GIFs) that are not ours to ship.
+    request.pop("query_string", None)
     headers = request.get("headers")
     if isinstance(headers, dict):
         for name in list(headers):
             if name.lower() in _SCRUBBED_HEADERS:
                 headers[name] = "[filtered]"
+    # Outbound HTTP spans record the raw query: the Tenor search sends its API
+    # key and the user's search terms there.
+    for span in event.get("spans") or ():
+        (span.get("data") or {}).pop("http.query", None)
     return event
 
 
+def _sentry_before_breadcrumb(crumb, hint):
+    (crumb.get("data") or {}).pop("http.query", None)
+    return crumb
+
+
+_UNTRACED_PATHS = {"/api/healthz", "/api/readyz"}
+
+
+def _sentry_traces_sampler(context) -> float:
+    scope = context.get("asgi_scope") or {}
+    if scope.get("path") in _UNTRACED_PATHS:
+        return 0
+    return env_float("SENTRY_TRACES_SAMPLE_RATE", 0.2)
+
+
 def _init_sentry() -> None:
-    """Error tracking, active only when SENTRY_DSN is set (backend only, no PII)."""
+    """Errors, traces, logs and metrics, active only when SENTRY_DSN is set (backend only, no PII)."""
     dsn = os.environ.get("SENTRY_DSN", "").strip()
     if not dsn:
         return
@@ -69,9 +100,12 @@ def _init_sentry() -> None:
         environment=os.environ.get("SX_ENV", "development"),
         release=os.environ.get("GIT_SHA") or None,
         send_default_pii=False,
-        traces_sample_rate=0,
+        traces_sampler=_sentry_traces_sampler,
+        enable_logs=True,
         max_request_body_size="never",
         before_send=_sentry_before_send,
+        before_send_transaction=_sentry_before_send,
+        before_breadcrumb=_sentry_before_breadcrumb,
     )
 
 

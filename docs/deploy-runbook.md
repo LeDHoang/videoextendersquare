@@ -74,6 +74,8 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [ ] **Sentry.** Create a project and set `SENTRY_DSN`. Releases are tagged with `GIT_SHA`, which is passed as a build arg.
   The in-app watchdog (`SX_ALERT_*`) and the low-disk check log errors, and Sentry turns those into events.
   In Sentry, add an alert rule that notifies you on every new issue whose message starts with `ALERT ` or `Low disk space`.
+  The same DSN also sends traces (`SENTRY_TRACES_SAMPLE_RATE`, default 0.2; health checks are skipped), INFO+ logs, and the watchdog counters as metrics. All of these fit in the free Developer plan. Profiling is not included in that plan, so it stays off.
+  After the domain is live, add a Sentry uptime monitor on `https://<domain>/api/readyz` (the free plan includes one). It can replace UptimeRobot.
 - [ ] **Backups.** Optionally add a healthchecks.io check, and set `BACKUP_PING_URL` for `deploy/backup.sh`.
 
 ### Secret escrow
