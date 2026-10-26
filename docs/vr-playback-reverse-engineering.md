@@ -383,6 +383,37 @@ YouTube reuses its decoder across items. The closest web equivalent is to promot
 - The forced run confirms the counter in the headset; rendering held 90 FPS while the video waited.
 - **Playa-style rebuffering is not worth building yet.** Normal serving produced no stalls. The dev feed has only two videos among ten image posts, so these runs cover few video seconds. Re-check with this payload on R2 over Wi-Fi or a slow link before deciding.
 
+### Final A/B: old (v8.23) vs branch (v8.27), same scripted run
+
+Both builds ran the same script in one session, with the headset still on the desk.
+- The old build was `ui/assets/webxr_vr.js` and `reels.html` from `4b85b7e`, with step 0.5 telemetry and old behaviour; the files were restored afterwards. The server stayed on the branch, so the old run already had `Cache-Control` on `/media`.
+- Script: LOOP mode, then 8 cycles. Each cycle dwells 4 s on an image post, presses `n` to reach the punk reel (1080×778 H.264, 13 Mbps), plays it 6 s, and presses `p` to go back.
+- The latency is the key press to the first `requestVideoFrameCallback` frame, measured in the page. Bytes are warm in both builds.
+- Then the reel is paused at 10 s in Flat and the eye buffer screencapped.
+
+| Metric | Old v8.23 | Branch v8.27 |
+| --- | --- | --- |
+| Key press to first frame, 8 switches | median 86.5, mean 97, max 127 ms | median 78.5, mean 78.5, max 88 ms |
+| Preloader hits | 0 of 8 | 8 of 8 |
+| Engine `switchMs` median (p90) | 101 (123) | 75 (84) |
+| Eye buffer (projection layer) | 3360×1760, foveation 1 | 5040×2640, foveation 0 |
+| Video texture | 2048² canvas proxy, video rows median 37 uploads/s | full source size, direct, median 59 uploads/s |
+| xrFrames/s median (min) | 91 (88) | 90 (82) |
+| dtMax p90; rows > 25 ms | 29.0 ms; 5 | 27.1 ms; 6 |
+| VrApi stale/s median; FPS min | 3; 84 | 3; 80 |
+| Decoder errors, stalls | 0, (not reported) | 0, 0 |
+
+- **Latency:** about 8 ms faster at the median and 40 ms better at the tail. The tail is what the preloader removes; the median is bounded by decoder start-up (see "Element swap" above).
+- **UI text:** the dock labels are clearly sharper (edge energy +13.7% on the dock crop). Old `SHARE`/`FOLLOW` labels are smeared; on the branch they are crisp. That comes from framebuffer scale 1.5 with foveation off.
+- **Video:** on this 1080×778 reel the two frames look alike. The old canvas path shows slightly blockier edges, so edge energy is 15% *higher* on the old frame; that is aliasing, not detail. A 3840² master gains from the direct texture (step 1: +7.5% edge energy) and from the eye buffer (step 6: +12%).
+- **Pacing:** within noise. The branch had one 484 ms frame gap during one of the eight image dwells, with none in the old run. It was not reproduced, so its cause is unknown: possibly the warm-up of the next reel starting a second decoder.
+- **Side finding:** the 2 s luma clip (3840² HEVC, 24 fps) in LOOP mode gave dtMax p90 67 ms and 7 stale frames/s in an earlier run. Looping a very short clip hitches at each restart.
+
+Against the reference players (numbers from §1–3; they were not re-run here):
+- **PlayaVR** shows a local first frame in about 41 ms. Ours is 71–88 ms from key press. The gap is decoder start-up, which the web `<video>` does not let us avoid cheaply.
+- **YouTube VR** takes 666–761 ms from `loadVideo` to `onPlaying` over Wi-Fi with a CDN round trip, and its decoder switch itself is 37–45 ms. Our USB-to-local numbers are not directly comparable with its network path.
+- Quality path: like both native players for normal playback, we now sample the decoded frame straight into the eye buffer with no CPU copy. Neither uses a compositor layer for normal video (§3), so the eye-buffer size is the shared ceiling; ours is now the Quest 3S maximum for WebXR.
+
 Open, with recommendations:
 - **Sampling.** The screen texture uses `LinearFilter` without mipmaps, like YouTube's OES path. Step 6 cut the minification of a 3840² master from about 2.4× to 1.6×, which lowers the shimmer risk. Mipmaps for a per-frame video texture would cost a mip generation every frame.
 
