@@ -41,7 +41,7 @@ describe('PrivacyPage', () => {
     renderPrivacy();
     const providers = screen.getByRole('heading', { level: 2, name: /^4\./ }).closest('section');
     const names = Array.from(providers.querySelectorAll('li > strong')).map((n) => n.textContent);
-    for (const name of ['fal.ai', 'Cloudflare', 'Hetzner', 'Sentry']) {
+    for (const name of ['fal.ai', 'Cloudflare', 'OVHcloud', 'Sentry']) {
       expect(names.some((n) => n.includes(name))).toBe(true);
     }
     expect(providers).toHaveTextContent(/Cloudflare Tunnel carries all traffic/);

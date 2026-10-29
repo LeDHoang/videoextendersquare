@@ -39,7 +39,7 @@ failure counters and disk. The numbers are per process and reset on restart.
    If the public URL fails but loopback works, the problem is the Tunnel or
    Cloudflare (`docker compose logs cloudflared`, the Cloudflare status page).
 2. **Note the start time** and what changed last: a deploy (`git log -1`), a
-   config change, an env value, or a provider outage (Cloudflare, Hetzner, fal.ai).
+   config change, an env value, or a provider outage (Cloudflare, OVHcloud, fal.ai).
 3. **Stop the bleeding** before finding the root cause:
    - bad deploy: roll back (below);
    - fal.ai spend runaway: revoke or rotate `FAL_KEY` in the fal dashboard, set
