@@ -183,6 +183,9 @@ export default function ReelsPage() {
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
   const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
   const initialIndex = deepPostId ? 0 : (deepIndex >= 0 ? deepIndex : 0);
+  // Without a ?play= deep link the player's params do not depend on the list,
+  // so it starts loading alongside /api/reels instead of after it.
+  const playerEarly = !deepPlay && feedScope !== 'following' && debouncedSearch === search;
   const playerParams = {
     folder,
     codec: codecParam,
@@ -441,12 +444,12 @@ export default function ReelsPage() {
       ) : null}
 
       {/* Player Mount */}
-      {data === null ? (
+      {data === null && !playerEarly ? (
         <>
           <ControlRailSkeleton label="Loading reels controls" />
           <ReelsPlayerSkeleton label="Loading reels" />
         </>
-      ) : !videos.length ? (
+      ) : data !== null && !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
