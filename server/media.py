@@ -253,6 +253,52 @@ def probe_media_info(src: str) -> dict | None:
     }
 
 
+def _moov_after_mdat(path: Path) -> bool:
+    """True when an MP4/MOV stores its index (moov) after the media data."""
+    try:
+        with open(path, "rb") as f:
+            while True:
+                head = f.read(8)
+                if len(head) < 8:
+                    return False
+                size, kind = int.from_bytes(head[:4], "big"), head[4:8]
+                if kind == b"moov":
+                    return False
+                if kind == b"mdat":
+                    return True
+                if size == 1:
+                    size = int.from_bytes(f.read(8), "big") - 8
+                elif size < 8:
+                    return False
+                f.seek(size - 8, 1)
+    except OSError:
+        return False
+
+
+def make_faststart(path: str | Path, ext: str) -> None:
+    """Move an MP4/MOV's index to the front so playback starts without
+    fetching the file's tail first. A stream copy: no frame is re-encoded.
+    Best effort; the file is left as it was when the remux fails."""
+    fmt = {"mp4": "mp4", "m4v": "mp4", "mov": "mov"}.get(ext.lower())
+    path = Path(path)
+    if not fmt or not _moov_after_mdat(path):
+        return
+    out = path.with_name(path.name + ".faststart")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error", "-i", str(path),
+        "-map", "0", "-map_metadata", "0", "-c", "copy",
+        "-movflags", "+faststart", "-f", fmt, str(out),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=300, creationflags=_NO_WINDOW)
+        if p.returncode == 0 and out.stat().st_size > 0:
+            os.replace(out, path)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        out.unlink(missing_ok=True)
+
+
 def has_web_preview(src: str) -> bool:
     if get_video_codec(src) in {"h264", "avc1"}:
         return True

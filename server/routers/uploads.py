@@ -475,6 +475,8 @@ def publish_upload(
             part = target.with_name(f".{target.name}.part")
             try:
                 shutil.copy2(source, part)
+                if req.kind == "video":
+                    SM.make_faststart(part, src_ext)
                 media_store.commit(part, target)
             finally:
                 part.unlink(missing_ok=True)
