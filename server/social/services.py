@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import re
+import stat
 import uuid
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -400,7 +401,8 @@ def _image_entry(media_path: str, width: int | None, height: int | None, layout:
         if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
             source = media_service.mono_sibling_path(str(source))
         poster = Path(media_service.explore_poster_path(str(source)))
-        if poster.is_file() and poster.stat().st_size > 0 and poster.stat().st_mtime >= source.stat().st_mtime:
+        poster_stat = poster.stat()  # one stat; a missing poster raises and keeps the fallback
+        if stat.S_ISREG(poster_stat.st_mode) and poster_stat.st_size > 0 and poster_stat.st_mtime >= source.stat().st_mtime:
             poster_url = _output_url(poster) or poster_url
     except (OSError, ValueError):
         pass
