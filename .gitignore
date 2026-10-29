@@ -53,12 +53,6 @@ ComfyUI
 # Build caches
 .vite/
 
-# Untracked local assets (runtime uses ui/assets/quest_controller_img.js only;
-# full.png duplicates docs/images/, b64.txt duplicates quest_controller_img.js)
-ui/assets/quest_controller_full.png
-ui/assets/quest_controller_b64.txt
-ui/assets/quest_controller.png
-
 # Design-tool exports (regenerated locally)
 .stitch/
 
