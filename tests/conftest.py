@@ -37,3 +37,12 @@ def _isolate_global_session_local(monkeypatch, _fallback_session_factory):
 def _expose_email_tokens(monkeypatch):
     """Let tests read verification/reset tokens from API responses (dev switch)."""
     monkeypatch.setenv("SX_PASSWORD_RESET_EXPOSE_TOKEN", "1")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Rate-limit counts live in process memory; each test starts with none,
+    as each test used to start with an empty rate-limit table."""
+    from server.social.auth import rate_limiter
+
+    rate_limiter.reset()
