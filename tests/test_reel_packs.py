@@ -961,3 +961,24 @@ def test_pack_owner_controls_are_private_to_the_owner(app):
         # A stale revision is rejected instead of silently overwriting.
         stale = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
         assert stale.status_code == 409, stale.text
+
+
+def test_player_endpoints_inline_every_script_placeholder(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_inline_owner", "pack-inline-owner@example.com")
+        register(viewer_client, "pack_inline_viewer", "pack-inline-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Inline pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        inline = "\n".join(viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()["scripts"])
+        page = viewer_client.get("/api/reels/player", params={"pack_id": pack["id"]}).text
+        for source in (inline, page):
+            assert re.findall(r"__[A-Z_]+_JS__", source) == []
+            # The VR shell modules ride along with the engine.
+            assert "root.VRShellCanvas = factory()" in source
+            assert "root.VRShell = factory()" in source

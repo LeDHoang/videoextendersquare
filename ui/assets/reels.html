@@ -2485,6 +2485,8 @@
 <script>__REELS_PACK_STATE_JS__</script>
 <script>__THREE_JS__</script>
 <script>__VR_UI_CANVAS_JS__</script>
+<script>__VR_SHELL_CANVAS_JS__</script>
+<script>__VR_SHELL_JS__</script>
 <script>__WEBXR_VR_JS__</script>
 <script>
   (function () {
@@ -4346,7 +4348,20 @@
       }
     }
 
+    // <vr-shell-nav> While presenting, the in-VR shell takes the route so the
+    // XR session survives; it hands off to 2D itself for routes it cannot show.
+    function openInVrShell(path) {
+      try {
+        return typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting() &&
+          !!WebXRVR.shell && WebXRVR.shell.open(path);
+      } catch (e) {
+        return false;
+      }
+    }
+    // </vr-shell-nav>
+
     async function dispatchNavigation(path) {
+      if (openInVrShell(path)) return;
       if (isPackMode) {
         pauseCurrentPlayback();
         await persistPackProgress(true);
@@ -4370,6 +4385,11 @@
       };
       try { sessionStorage.setItem('echo:pending-action', JSON.stringify(pending)); } catch (e) {}
       const next = returnPathForItem(item);
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting() && WebXRVR.shell &&
+            WebXRVR.shell.handoff('/login?next=' + encodeURIComponent(next), 'SIGN IN ON 2D',
+              'Sign in on the 2D site to continue.')) return;
+      } catch (e) {}
       await leaveImmersiveModes();
       const event = new CustomEvent('echo:auth-required', {
         detail: { next: next, action: pending.kind || 'interact' },
@@ -6971,8 +6991,15 @@
         onToggleMute: toggleSound,
         getVisualSource: currentVisualSource,
         // 3D posts switch between their 2D rendition and stereo file.
-        onEnterVR: () => syncStereoSource(),
-        onExitVR: () => syncStereoSource(),
+        onEnterVR: () => {
+          syncStereoSource();
+          window.dispatchEvent(new CustomEvent('echo:vr-enter'));
+        },
+        onExitVR: () => {
+          syncStereoSource();
+          window.dispatchEvent(new CustomEvent('echo:vr-exit'));
+        },
+        onShellHandoff: function(path) { dispatchNavigation(path); },
         onPreviewStereo: () => syncStereoSource(),
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {

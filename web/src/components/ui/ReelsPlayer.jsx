@@ -32,6 +32,35 @@ export default function ReelsPlayer({
   const start = Math.max(0, initialIndex | 0);
   const sig = JSON.stringify({ ...params, start, viewer: user?.id || null });
   const previewSig = JSON.stringify(previewOptions || {});
+  // A refetch re-injects the player and ends XR, so while presenting a sig
+  // change (e.g. viewer refresh) waits until the session exits.
+  const vrActiveRef = useRef(false);
+  const sigRef = useRef(sig);
+  sigRef.current = sig;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const [liveSig, setLiveSig] = useState(sig);
+
+  useEffect(() => {
+    if (!vrActiveRef.current) setLiveSig(sig);
+  }, [sig]);
+
+  useEffect(() => {
+    const onEnter = () => { vrActiveRef.current = true; };
+    const onExit = () => {
+      vrActiveRef.current = false;
+      setLiveSig(sigRef.current);
+    };
+    window.addEventListener('echo:vr-enter', onEnter);
+    window.addEventListener('echo:vr-exit', onExit);
+    // Data bridge for the in-VR shell; getters read refs so they never go stale.
+    window.__echoVrBridge = { api, getUser: () => userRef.current };
+    return () => {
+      window.removeEventListener('echo:vr-enter', onEnter);
+      window.removeEventListener('echo:vr-exit', onExit);
+      window.__echoVrBridge = null;
+    };
+  }, []);
 
   useEffect(() => {
     const onNavigate = (event) => {
@@ -98,7 +127,7 @@ export default function ReelsPlayer({
     return () => {
       alive = false;
     };
-  }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [liveSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (typeof window !== 'undefined' && typeof window.__sxReelsCleanup === 'function') {

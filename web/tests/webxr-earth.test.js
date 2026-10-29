@@ -7,6 +7,8 @@ const threeSource = readFileSync(new URL('../../ui/assets/three.min.js', import.
 const threeR186BuildSource = readFileSync(new URL('../node_modules/three/build/three.module.js', import.meta.url), 'utf8');
 const uiCanvasSource = readFileSync(new URL('../../ui/assets/vr_ui_canvas.js', import.meta.url), 'utf8');
 const rendererSource = readFileSync(new URL('../../ui/assets/webxr_vr.js', import.meta.url), 'utf8');
+const shellCanvasSource = readFileSync(new URL('../../ui/assets/vr_shell_canvas.js', import.meta.url), 'utf8');
+const shellSource = readFileSync(new URL('../../ui/assets/vr_shell.js', import.meta.url), 'utf8');
 
 function makeCanvas2dContext() {
   const gradient = { addColorStop() {} };
@@ -189,6 +191,10 @@ function loadRenderer(options = {}) {
   });
   vm.runInContext(threeSource, context, { filename: 'three.min.js' });
   vm.runInContext(uiCanvasSource, context, { filename: 'vr_ui_canvas.js' });
+  if (options.withShell) {
+    vm.runInContext(shellCanvasSource, context, { filename: 'vr_shell_canvas.js' });
+    vm.runInContext(shellSource, context, { filename: 'vr_shell.js' });
+  }
   vm.runInContext(rendererSource, context, { filename: 'webxr_vr.js' });
   window.WebXRVR.__runScheduledFrame = (time) => {
     const callback = scheduledFrame;
@@ -5675,4 +5681,85 @@ test('the split preview renders an SBS source per eye without errors', () => {
   assert.equal(state.screenMaterialVisible, true);
   assert.equal(state.left.visible, false);
   renderer.stopPreview();
+});
+
+test('VR shell: in-VR navigation keeps the XR session live; session end closes it', async () => {
+  const { renderer, session } = await enterLiveSession({ withShell: true });
+  assert.equal(renderer.shell.open('/explore'), true);
+  assert.equal(renderer.isPresenting(), true);
+  assert.equal(session.ended, 0, 'opening a section never ends XR');
+  assert.equal(renderer.shell.section(), 'explore');
+  assert.equal(renderer.getPreviewState().shell, 'explore');
+  renderer.shell.open('/upload');
+  assert.equal(renderer.shell.section(), 'handoff');
+  assert.equal(session.ended, 0, 'the handoff card waits for confirmation');
+  session.fire('end');
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: handoff confirm exits XR, then asks the host to navigate', async () => {
+  const navigated = [];
+  const { renderer, session } = await enterLiveSession({ withShell: true });
+  renderer.init(null, { onShellHandoff: (p) => navigated.push(p) });
+  renderer.shell.handoff('/login?next=%2Freels');
+  const state = renderer.shell.getRenderState();
+  assert.equal(state.handoff.path, '/login?next=%2Freels');
+  // The same path a laser select on the confirm button takes.
+  assert.equal(renderer.__test.activateShellHit({ action: { action: 'handoff-confirm' } }), true);
+  assert.equal(session.ended, 1, 'confirm ends XR');
+  assert.deepEqual(navigated, [], 'navigation waits for the session to end');
+  session.fire('end');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([...navigated], ['/login?next=%2Freels']);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: facade reports false without the shell modules', () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
+  renderer.init(null, {});
+  assert.equal(renderer.shell.open('/explore'), false);
+  assert.equal(renderer.shell.handoff('/login'), false);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, withShell: true });
+  let toggles = 0;
+  const video = {
+    paused: false, readyState: 4, currentTime: 1, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+    requestVideoFrameCallback() { return 1; }, cancelVideoFrameCallback() {},
+    pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); },
+  };
+  renderer.init(video, {
+    getPlaylist: () => [], getCurrentIndex: () => 0,
+    onTogglePlay: () => { toggles += 1; video.paused = !video.paused; },
+  });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  const uploads = () => renderer.getPreviewState().renderStats.panelUploads;
+  renderer.__runScheduledFrame(16);
+  renderer.__runScheduledFrame(200);
+  renderer.__runScheduledFrame(400);
+  const idleClosed = uploads();
+  renderer.__runScheduledFrame(600);
+  renderer.__runScheduledFrame(800);
+  assert.equal(uploads(), idleClosed, 'idle nav bar does not re-upload');
+
+  renderer.shell.open('/explore');
+  assert.equal(video.paused, true, 'opening over a playing reel pauses it');
+  renderer.__runScheduledFrame(1000);
+  const afterOpen = uploads();
+  assert.ok(afterOpen > idleClosed, 'open paints the panels');
+  renderer.__runScheduledFrame(1200);
+  renderer.__runScheduledFrame(1400);
+  assert.equal(uploads(), afterOpen, 'idle open shell uploads nothing');
+
+  renderer.shell.close();
+  assert.equal(video.paused, false, 'closing resumes what was playing');
+  assert.equal(toggles, 2);
+  renderer.shell.open('/wallet');
+  renderer.stopPreview();
+  assert.equal(renderer.shell.isOpen(), false, 'teardown drops the shell');
+  assert.equal(renderer.getPreviewState().shell, null);
 });

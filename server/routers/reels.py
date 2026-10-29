@@ -2791,6 +2791,10 @@ def reels_player(
     vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
     if vr_ui_js.exists():
         html = html.replace("__VR_UI_CANVAS_JS__", vr_ui_js.read_text(encoding="utf-8"))
+    for placeholder, name in (("__VR_SHELL_CANVAS_JS__", "vr_shell_canvas.js"), ("__VR_SHELL_JS__", "vr_shell.js")):
+        shell_js = ASSETS_DIR / name
+        if shell_js.exists():
+            html = html.replace(placeholder, shell_js.read_text(encoding="utf-8"))
     vr_js = ASSETS_DIR / "webxr_vr.js"
     if vr_js.exists():
         html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
@@ -3014,6 +3018,8 @@ def reels_player_inline(
     pack_state_js = ASSETS_DIR / "reels_pack_state.js"
     three_js = ASSETS_DIR / "three.min.js"
     vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
+    vr_shell_canvas_js = ASSETS_DIR / "vr_shell_canvas.js"
+    vr_shell_js = ASSETS_DIR / "vr_shell.js"
     vr_js = ASSETS_DIR / "webxr_vr.js"
 
     scripts: list[str] = []
@@ -3037,6 +3043,12 @@ def reels_player_inline(
         elif stripped.startswith("__VR_UI_CANVAS_JS__"):
             if vr_ui_js.exists():
                 scripts.append(vr_ui_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__VR_SHELL_CANVAS_JS__"):
+            if vr_shell_canvas_js.exists():
+                scripts.append(vr_shell_canvas_js.read_text(encoding="utf-8"))
+        elif stripped.startswith("__VR_SHELL_JS__"):
+            if vr_shell_js.exists():
+                scripts.append(vr_shell_js.read_text(encoding="utf-8"))
         elif stripped.startswith("__WEBXR_VR_JS__"):
             if vr_js.exists():
                 scripts.append(vr_js.read_text(encoding="utf-8"))

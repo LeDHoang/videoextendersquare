@@ -1283,6 +1283,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Side panels keep their stations but face the viewer too.
     layoutCommentsPanel(headPos);
     layoutGuidePanel(headPos);
+    layoutShellNav(headPos);
   }
 
   // Applies headset yaw/pitch or orbit spherical position to the camera.
@@ -5441,6 +5442,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       scene.add(commentsMesh);
       layoutCommentsPanel(getHeadPosition());
     }
+    createShellMeshes();
 
     // Controller guide mesh (upstream guide panel, RIGHT of the player).
     // ?guide=0 skips it entirely.
@@ -6445,7 +6447,261 @@ window.WebXRVR = window.WebXRVR || (function () {
         renderStats.panelUploads += 1;
       }
     }
+    updateShellTextures();
   }
+
+  // <vr-shell-glue>
+  // In-VR shell: a curved main panel and a nav bar that let the viewer browse
+  // the site without ending the XR session. Routing/state live in
+  // vr_shell.js (window.VRShell), drawing in vr_shell_canvas.js
+  // (window.VRShellCanvas); this block only owns meshes, rays and visibility.
+  const SHELL_MAIN_RADIUS = 2.2;
+  const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
+  const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
+  let shell = null;
+  let shellWasOpen = false;
+  let shellResumePlayback = false;
+  let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
+  let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
+  let shellPainted = { version: -1, mainHover: null, navHover: null };
+  let shellHover = { panel: '', key: '' };
+  let shellNavYaw = null;
+
+  function getShellCanvas() {
+    return (typeof window !== 'undefined' && window.VRShellCanvas) || null;
+  }
+
+  function ensureShell() {
+    if (shell) return shell;
+    const core = typeof window !== 'undefined' && window.VRShell;
+    if (!core || !getShellCanvas()) return null;
+    shell = core.create({
+      exitAndNavigate: shellHandoff,
+      getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
+    });
+    shell.onDirty(onShellDirty);
+    return shell;
+  }
+
+  function isShellOpen() { return !!(shell && shell.isOpen()); }
+
+  function onShellDirty() {
+    const open = shell.isOpen();
+    if (open && !shellWasOpen) {
+      // Covering the reel pauses it; closing resumes only what was playing.
+      const source = getVisualSource();
+      shellResumePlayback = sceneMode === 'reels' && !source.paused &&
+        (source.kind === 'video' || source.kind === 'image');
+      if (shellResumePlayback && callbacks.onTogglePlay) {
+        try { callbacks.onTogglePlay(); } catch (e) {}
+      }
+      layoutShellMain(getHeadPosition());
+    } else if (!open && shellWasOpen) {
+      const resume = shellResumePlayback;
+      shellResumePlayback = false;
+      if (resume && getVisualSource().paused && callbacks.onTogglePlay) {
+        try { callbacks.onTogglePlay(); } catch (e) {}
+      }
+    }
+    shellWasOpen = open;
+    applySceneVisibility();
+    vrLastUiUploadT = -1;
+    emitPreviewState();
+  }
+
+  // "Exit VR & open": leave XR first so the host's navigation is not intercepted.
+  function shellHandoff(path) {
+    shellResumePlayback = false;
+    Promise.resolve(exitVR()).then(() => {
+      if (callbacks.onShellHandoff) {
+        try { callbacks.onShellHandoff(path); } catch (e) {}
+      }
+    });
+  }
+
+  function makeShellPanel(w, h, cw, ch, segments, order) {
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const texture = applyLinearSampling(new THREE.CanvasTexture(canvas));
+    try { if (THREE.SRGBColorSpace !== undefined) texture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    const geo = new THREE.PlaneGeometry(w, h, segments, 1);
+    if (segments > 1) {
+      // Bend around the viewer (UVs untouched, so hit math stays planar).
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const a = pos.getX(i) / SHELL_MAIN_RADIUS;
+        pos.setX(i, SHELL_MAIN_RADIUS * Math.sin(a));
+        pos.setZ(i, SHELL_MAIN_RADIUS * (1 - Math.cos(a)));
+      }
+      pos.needsUpdate = true;
+    }
+    const mat = new THREE.MeshBasicMaterial({
+      map: texture, transparent: true, depthTest: false, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = order;
+    mesh.visible = false;
+    scene.add(mesh);
+    return { canvas, ctx: canvas.getContext('2d'), texture, mesh };
+  }
+
+  function createShellMeshes() {
+    const sc = getShellCanvas();
+    if (!sc || !ensureShell() || !scene || !THREE || typeof document === 'undefined') return;
+    if (!shellMainMesh) {
+      const p = makeShellPanel(SHELL_MAIN_SIZE.w, SHELL_MAIN_SIZE.h, sc.MAIN_W, sc.MAIN_H, 24, 6);
+      shellMainCanvas = p.canvas; shellMainCtx = p.ctx; shellMainTexture = p.texture; shellMainMesh = p.mesh;
+    }
+    if (!shellNavMesh) {
+      const p = makeShellPanel(SHELL_NAV_SIZE.w, SHELL_NAV_SIZE.h, sc.NAV_W, sc.NAV_H, 1, 6);
+      shellNavCanvas = p.canvas; shellNavCtx = p.ctx; shellNavTexture = p.texture; shellNavMesh = p.mesh;
+    }
+    shellPainted = { version: -1, mainHover: null, navHover: null };
+    shellNavYaw = null;
+  }
+
+  function headYaw() {
+    try {
+      if (camera && THREE) {
+        const v = new THREE.Vector3();
+        camera.getWorldDirection(v);
+        if (Math.hypot(v.x, v.z) > 1e-4) return Math.atan2(-v.x, -v.z);
+      }
+    } catch (e) {}
+    return 0;
+  }
+
+  // Posed once per open, level, at the bend radius straight ahead.
+  function layoutShellMain(headPos) {
+    if (!shellMainMesh) return;
+    const yaw = headYaw();
+    shellMainMesh.position.set(
+      headPos.x - Math.sin(yaw) * SHELL_MAIN_RADIUS,
+      headPos.y - 0.15,
+      headPos.z - Math.cos(yaw) * SHELL_MAIN_RADIUS
+    );
+    faceViewerLevel(shellMainMesh, headPos, 0);
+  }
+
+  // The nav bar sits low and re-centres only when the head turns well away.
+  function layoutShellNav(headPos) {
+    if (!shellNavMesh) return;
+    const yaw = headYaw();
+    if (shellNavYaw !== null && Math.abs(Math.atan2(Math.sin(yaw - shellNavYaw), Math.cos(yaw - shellNavYaw))) < 0.9) return;
+    shellNavYaw = yaw;
+    shellNavMesh.position.set(headPos.x - Math.sin(yaw) * 1.1, headPos.y - 0.8, headPos.z - Math.cos(yaw) * 1.1);
+    faceViewerLevel(shellNavMesh, headPos);
+  }
+
+  function applyShellVisibility() {
+    const pointerActive = !!(xrSession || previewRunning);
+    if (shellNavMesh) shellNavMesh.visible = pointerActive;
+    const open = pointerActive && isShellOpen();
+    if (shellMainMesh) shellMainMesh.visible = open;
+    if (!open) return;
+    // The open shell replaces the reel screen and every reel-side panel.
+    [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh]
+      .forEach((m) => { if (m) m.visible = false; });
+  }
+
+  // Ray pre-pass shared by the laser, XR select and the preview mouse.
+  // Returns { panel, distance, action } for a hit on a visible shell panel.
+  function shellRaycast(origin, direction) {
+    const sc = getShellCanvas();
+    let found = null;
+    if (sc && raycaster && shell) {
+      const targets = [];
+      if (shellMainMesh && shellMainMesh.visible) targets.push(shellMainMesh);
+      if (shellNavMesh && shellNavMesh.visible) targets.push(shellNavMesh);
+      if (targets.length) {
+        try {
+          raycaster.set(origin, direction);
+          const hits = raycaster.intersectObjects(targets, false);
+          const h = hits.find((x) => x.uv);
+          if (h) {
+            const main = h.object === shellMainMesh;
+            const cx = h.uv.x * (main ? sc.MAIN_W : sc.NAV_W);
+            const cy = (1 - h.uv.y) * (main ? sc.MAIN_H : sc.NAV_H);
+            const action = main ? sc.resolveMainHit(shell.getRenderState(), cx, cy) : sc.resolveNavHit(cx, cy);
+            found = { panel: main ? 'main' : 'nav', distance: h.distance, action };
+          }
+        } catch (e) {}
+      }
+    }
+    const key = found && sc ? sc.hoverKey(found.action) : '';
+    const panel = found ? found.panel : '';
+    if (key !== shellHover.key || panel !== shellHover.panel) {
+      shellHover = { panel, key };
+      vrLastUiUploadT = -1;
+    }
+    return found;
+  }
+
+  function activateShellHit(hit) {
+    if (!hit || !hit.action || !shell) return false;
+    return shell.handleHit(hit.action);
+  }
+
+  // Redraws only what changed (state version or hover), so an idle shell uploads nothing.
+  function updateShellTextures() {
+    const sc = getShellCanvas();
+    if (!sc || !shell) return;
+    const state = shell.getRenderState();
+    const mainHover = shellHover.panel === 'main' ? shellHover.key : '';
+    const navHover = shellHover.panel === 'nav' ? shellHover.key : '';
+    if (shellNavCtx && shellNavMesh && shellNavMesh.visible &&
+        (shellPainted.version !== state.version || shellPainted.navHover !== navHover)) {
+      sc.renderNavBar(shellNavCtx, state, navHover);
+      shellNavTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.navHover = navHover;
+    }
+    if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
+        (shellPainted.version !== state.version || shellPainted.mainHover !== mainHover)) {
+      sc.renderMainPanel(shellMainCtx, state, mainHover);
+      shellMainTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.mainHover = mainHover;
+    }
+    shellPainted.version = state.version;
+  }
+
+  // Session end or teardown: drop the shell without replaying a handoff.
+  function resetShell(resume) {
+    if (shell && shell.isOpen()) {
+      if (!resume) shellResumePlayback = false;
+      shell.close();
+    }
+    shellHover = { panel: '', key: '' };
+  }
+
+  function disposeShellMeshes() {
+    if (shellMainTexture) { try { shellMainTexture.dispose(); } catch (e) {} }
+    if (shellNavTexture) { try { shellNavTexture.dispose(); } catch (e) {} }
+    shellMainCanvas = shellMainCtx = shellMainTexture = shellMainMesh = null;
+    shellNavCanvas = shellNavCtx = shellNavTexture = shellNavMesh = null;
+    shellNavYaw = null;
+  }
+
+  const shellFacade = {
+    // false when the shell modules are not loaded (caller falls back to 2D).
+    open(path, opts) {
+      if (!ensureShell()) return false;
+      shell.open(path, opts);
+      return true;
+    },
+    handoff(path, title, message) {
+      if (!ensureShell()) return false;
+      shell.showHandoff(path, title, message);
+      return true;
+    },
+    close() { if (shell) shell.close(); },
+    isOpen: isShellOpen,
+    section() { return shell ? shell.section() : null; },
+    getRenderState() { return shell ? shell.getRenderState() : null; },
+  };
+  // </vr-shell-glue>
 
   // ─── Telemetry Event Dispatcher ─────────────────────────────────────
   function emitPreviewState() {
@@ -6463,6 +6719,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       xrCompat: xrCompatStatus,
       cameraMode: previewCameraMode,
       sceneMode,
+      shell: shell ? shell.section() : null,
       stereo: stereoMode,
       sourceStereo,
       textureStereo,
@@ -6680,6 +6937,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!ray) return null;
     // Cache for the persistent preview head-ray (Workstream D).
     previewHoverRay = { origin: ray.origin, direction: ray.direction };
+    const shellHit = shellRaycast(ray.origin, ray.direction);
+    if (shellHit) {
+      hoveredButton = -1;
+      return { ray, hit: null, controlIndex: -1, panelDesc: '', shell: shellHit };
+    }
     let controlIndex = -1;
     if (controlsVisible && controlsMesh && controlsMesh.visible !== false && controlsCanvas) {
       try {
@@ -6759,7 +7021,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     cPanelHover = '';
     try {
       raycaster.set(origin, direction);
-      if (sceneMode === 'earth') {
+      const shellHit = shellRaycast(origin, direction);
+      if (shellHit) {
+        dist = shellHit.distance;
+        hovering = -2; // shell panel hover (lit laser; highlight is drawn on the panel)
+      } else if (sceneMode === 'earth') {
         if (controlsVisible && controlsMesh && controlsMesh.visible !== false) {
           const hits = raycaster.intersectObject(controlsMesh, false);
           if (hits.length > 0) {
@@ -7141,6 +7407,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       const target = updatePreviewHover(event.clientX, event.clientY);
       const source = 'preview-pointer-' + (event.pointerId === undefined ? 'mouse' : event.pointerId);
       previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
+      if (target && target.shell) {
+        activateShellHit(target.shell);
+        previewPointer.control = true;
+        return;
+      }
       if (target && target.controlIndex >= 0) {
         executeControlButton(target.controlIndex);
         vrLastUiUploadT = -1;
@@ -7656,6 +7927,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
     if (reticleMesh) reticleMesh.visible = pointerActive;
+    applyShellVisibility();
   }
 
   function setPreviewStereo(enabled) {
@@ -8859,7 +9131,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function onVRSelectStart(ev) {
     if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
-        !earthCompassUnderRay(activeRayOrigin, activeRayDir) &&
+        !shellHover.panel && !earthCompassUnderRay(activeRayOrigin, activeRayDir) &&
         !earthHudPanelHit(activeRayOrigin, activeRayDir)) {
       const hit = hitTestEarth(activeRayOrigin, activeRayDir);
       if (hit.hit) {
@@ -8916,7 +9188,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (raycaster && scene && rayOrigin && rayDir) {
       raycaster.set(rayOrigin, rayDir);
 
-      if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
+      const shellHit = shellRaycast(rayOrigin, rayDir);
+      if (shellHit) {
+        if (activateShellHit(shellHit)) pulseInput(ev.data);
+        handled = true;
+      } else if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
         // The trigger gesture was owned by the grab machine (tap or drag) and
         // already dispatched — never double-fire zoom/select.
         handled = true;
@@ -9395,6 +9671,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     session.addEventListener('end', () => {
       try {
         xrSession = null;
+        resetShell(true);
         if (renderer) {
           try { renderer.setAnimationLoop(null); } catch (e) {}
         }
@@ -9493,7 +9770,8 @@ window.WebXRVR = window.WebXRVR || (function () {
               if (m) {
                 if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
                     m.map !== commentsTexture && m.map !== overlayTexture &&
-                    m.map !== guideTexture && m.map !== earthPreviewTexture) {
+                    m.map !== guideTexture && m.map !== earthPreviewTexture &&
+                    m.map !== shellMainTexture && m.map !== shellNavTexture) {
                   try { m.map.dispose(); } catch (e) {}
                 }
                 try { m.dispose(); } catch (e) {}
@@ -9509,6 +9787,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     screenMapBeforeDebug = null;
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
+    resetShell(false);
+    disposeShellMeshes();
+    shell = null;
+    shellWasOpen = false;
     if (overlayTexture) { try { overlayTexture.dispose(); } catch (e) {} overlayTexture = null; }
     if (guideTexture) { try { guideTexture.dispose(); } catch (e) {} guideTexture = null; }
     if (earthPreviewTexture) { try { earthPreviewTexture.dispose(); } catch (e) {} earthPreviewTexture = null; }
@@ -10002,6 +10284,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     enterVR,
     exitVR,
     isPresenting() { return !!xrSession; },
+    shell: shellFacade,
     isPreviewRunning() { return !!previewRunning; },
     startPreview,
     stopPreview,
@@ -10146,6 +10429,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       shouldAttemptXR,
       getXrCompatStatus() { return xrCompatStatus; },
+      activateShellHit,
       hasPreviewResume() { return !!previewResumeOpts; },
       getLastPointerError() { return lastPointerError; },
       // Test seam: engine ray for a client pixel (null when no preview).

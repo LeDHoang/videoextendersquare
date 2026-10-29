@@ -46,6 +46,9 @@ def _template() -> str:
     vr_ui_path = assets / "vr_ui_canvas.js"
     vr_ui_js = vr_ui_path.read_text(encoding="utf-8") if vr_ui_path.exists() else ""
     html = html.replace("__VR_UI_CANVAS_JS__", vr_ui_js)
+    for placeholder, name in (("__VR_SHELL_CANVAS_JS__", "vr_shell_canvas.js"), ("__VR_SHELL_JS__", "vr_shell.js")):
+        shell_path = assets / name
+        html = html.replace(placeholder, shell_path.read_text(encoding="utf-8") if shell_path.exists() else "")
     # Inline the WebXR VR module so it's available inside the Streamlit iframe
     vr_js_path = assets / "webxr_vr.js"
     vr_js = vr_js_path.read_text(encoding="utf-8") if vr_js_path.exists() else ""
