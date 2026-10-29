@@ -3058,7 +3058,10 @@
       if (vrImageBitmap.url !== url) {
         if (vrImageBitmap.bitmap) vrImageBitmap.bitmap.close();
         const entry = (vrImageBitmap = { url, bitmap: null, failed: false });
-        fetch(url)
+        // cache: 'reload' because the <img> fetched this URL without CORS, and
+        // R2 sends no Access-Control-Allow-Origin (or Vary: Origin) to a
+        // request without Origin. Reusing that cached copy fails the CORS check.
+        fetch(url, { cache: 'reload' })
           .then((response) => {
             if (!response.ok) throw new Error('HTTP ' + response.status);
             return response.blob();

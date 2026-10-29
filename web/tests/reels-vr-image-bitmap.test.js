@@ -18,11 +18,13 @@ function block(name) {
 // createImageBitmap under the test's control.
 function load({ fetchFails = false } = {}) {
   const fetched = [];
+  const fetchInits = [];
   const bitmaps = [];
   const context = {
     Error,
-    fetch(url) {
+    fetch(url, init) {
       fetched.push(url);
+      fetchInits.push(init);
       if (fetchFails) return Promise.resolve({ ok: false, status: 404 });
       return Promise.resolve({ ok: true, blob: () => Promise.resolve({ url }) });
     },
@@ -34,7 +36,7 @@ function load({ fetchFails = false } = {}) {
   };
   vm.createContext(context);
   vm.runInContext(`${block('reels-vr-image-bitmap')}\nthis.vrImageSource = vrImageSource;`, context);
-  return { vrImageSource: context.vrImageSource, fetched, bitmaps };
+  return { vrImageSource: context.vrImageSource, fetched, fetchInits, bitmaps };
 }
 
 const image = (src) => ({ complete: true, naturalWidth: 1080, getAttribute: () => src });
@@ -51,6 +53,12 @@ test('an image slide reaches VR as an off-thread bitmap; the last frame holds me
   assert.equal(ready.ready, true);
   assert.equal(ready.element.url, '/media/a.png');
   assert.deepEqual(fetched, ['/media/a.png'], 'one fetch per slide, not per frame');
+});
+
+test('the bitmap fetch skips the HTTP cache the non-CORS <img> filled', () => {
+  const { vrImageSource, fetchInits } = load();
+  vrImageSource(image('https://media.example/a.png'));
+  assert.equal(fetchInits[0].cache, 'reload');
 });
 
 test('a slide change swaps the bitmap and frees the old one', async () => {
