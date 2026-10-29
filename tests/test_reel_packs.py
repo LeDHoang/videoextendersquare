@@ -591,7 +591,7 @@ def test_pack_player_uses_db_fallback_when_scan_misses(app):
         # Items are embedded in the inline scripts as JSON; DB media_paths
         # like tests/pack-*.mp4 are not in output/ scan but must hydrate as
         # available via the DB fallback, not as unavailable tombstones.
-        scripts = " ".join(body.get("scripts") or [])
+        scripts = " ".join(s for s in body.get("scripts") or [] if isinstance(s, str))
         assert f'"pack_id": "{pack["id"]}"' in scripts or f'"pack_id":"{pack["id"]}"' in scripts
         assert '"available": true' in scripts or '"available":true' in scripts
         assert body["feed"]["pack"]["playable_count"] == 5
@@ -874,7 +874,7 @@ def test_collection_viewer_blocked_member_renders_tombstone(app):
         playback = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
         assert playback.status_code == 200
         body = playback.json()
-        scripts = " ".join(body.get("scripts") or [])
+        scripts = " ".join(s for s in body.get("scripts") or [] if isinstance(s, str))
         assert f"tests/pack-{member['id'][:5]}-0.mp4" not in scripts
         assert f"tests/pack-{owner['id'][:5]}-0.mp4" in scripts
         assert '"available": false' in scripts or '"available":false' in scripts

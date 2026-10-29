@@ -54,6 +54,21 @@ ICON_DIR = (
     / "web" / "src" / "components" / "icons" / "svg"
 )
 
+# Vendored player scripts (three.js, the VR renderer, controller art: ~2.2 MB).
+# The player template marks each with a placeholder <script>; the player
+# routes point it at /player-script/<file>?v=<hash> instead of inlining it,
+# so browsers fetch them once and reuse them on every later player load.
+PLAYER_SCRIPTS = {
+    "__QUEST_CONTROLLER_IMG_JS__": "quest_controller_img.js",
+    "__REELS_FEED_STATE_JS__": "reels_feed_state.js",
+    "__REELS_REWARDS_JS__": "reels_rewards.js",
+    "__REELS_PACK_STATE_JS__": "reels_pack_state.js",
+    "__THREE_JS__": "three.min.js",
+    "__VR_UI_CANVAS_JS__": "vr_ui_canvas.js",
+    "__WEBXR_VR_JS__": "webxr_vr.js",
+}
+_player_script_hashes: dict = {}
+
 # Tiny mtime-checked cache for icon snippets (14 one-KB files; re-read only
 # when something on disk actually changed).
 _icon_cache: dict = {"sigs": {}, "snippets": {}}
@@ -84,6 +99,21 @@ def _icon_snippets() -> dict[str, str]:
                 continue
         _icon_cache.update(sigs=sigs, snippets=snippets)
     return _icon_cache["snippets"]
+
+
+def _player_script_url(name: str) -> str | None:
+    """Versioned URL of a vendored player script, or None when it is missing.
+    The content hash is recomputed only when the file's mtime changes."""
+    path = ASSETS_DIR / name
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    cached = _player_script_hashes.get(name)
+    if not cached or cached[0] != mtime:
+        cached = (mtime, hashlib.sha256(path.read_bytes()).hexdigest()[:12])
+        _player_script_hashes[name] = cached
+    return f"/api/reels/player-script/{name}?v={cached[1]}"
 
 
 def _inject_icons(html: str) -> str:
@@ -2772,28 +2802,13 @@ def reels_player(
     html = nonce_request_html(request, html)
     html = _inject_icons(html)
 
-    img_js = ASSETS_DIR / "quest_controller_img.js"
-    if img_js.exists():
-        html = html.replace("__QUEST_CONTROLLER_IMG_JS__",
-                            img_js.read_text(encoding="utf-8"))
-    feed_state_js = ASSETS_DIR / "reels_feed_state.js"
-    if feed_state_js.exists():
-        html = html.replace("__REELS_FEED_STATE_JS__", feed_state_js.read_text(encoding="utf-8"))
-    rewards_js = ASSETS_DIR / "reels_rewards.js"
-    if rewards_js.exists():
-        html = html.replace("__REELS_REWARDS_JS__", rewards_js.read_text(encoding="utf-8"))
-    pack_state_js = ASSETS_DIR / "reels_pack_state.js"
-    if pack_state_js.exists():
-        html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js.read_text(encoding="utf-8"))
-    three_js = ASSETS_DIR / "three.min.js"
-    if three_js.exists():
-        html = html.replace("__THREE_JS__", three_js.read_text(encoding="utf-8"))
-    vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
-    if vr_ui_js.exists():
-        html = html.replace("__VR_UI_CANVAS_JS__", vr_ui_js.read_text(encoding="utf-8"))
-    vr_js = ASSETS_DIR / "webxr_vr.js"
-    if vr_js.exists():
-        html = html.replace("__WEBXR_VR_JS__", vr_js.read_text(encoding="utf-8"))
+    for placeholder, name in PLAYER_SCRIPTS.items():
+        url = _player_script_url(name)
+        html = re.sub(
+            rf"(<script\b[^>]*)>\s*{placeholder}\s*</script>",
+            (lambda m, url=url: f'{m.group(1)} src="{url}"></script>') if url else "",
+            html,
+        )
 
     html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
     html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
@@ -2934,6 +2949,23 @@ def vr_video_path_ab(
     )
 
 
+@router.get("/player-script/{name}")
+def reels_player_script(name: str, v: str = ""):
+    """One vendored player script. A request carrying the file's current hash
+    is cached for a year (a changed file gets a new URL); any other revalidates."""
+    if name not in PLAYER_SCRIPTS.values():
+        raise HTTPException(status_code=404, detail="Not found")
+    url = _player_script_url(name)
+    if url is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    current = url.endswith(f"?v={v}")
+    return FileResponse(
+        ASSETS_DIR / name,
+        media_type="text/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=31536000, immutable" if current else "no-cache"},
+    )
+
+
 @router.get("/player-inline")
 def reels_player_inline(
     request: Request,
@@ -3008,38 +3040,15 @@ def reels_player_inline(
     # and inline player JS get artwork from the one icons folder.
     html = _inject_icons(html)
 
-    img_js = ASSETS_DIR / "quest_controller_img.js"
-    feed_state_js = ASSETS_DIR / "reels_feed_state.js"
-    rewards_js = ASSETS_DIR / "reels_rewards.js"
-    pack_state_js = ASSETS_DIR / "reels_pack_state.js"
-    three_js = ASSETS_DIR / "three.min.js"
-    vr_ui_js = ASSETS_DIR / "vr_ui_canvas.js"
-    vr_js = ASSETS_DIR / "webxr_vr.js"
-
-    scripts: list[str] = []
+    # Inline template scripts come back as strings; vendored ones as
+    # {"src": url}, which the client loads (in order) from the browser cache.
+    scripts: list = []
     for tag in re.findall(r"<script>(.*?)</script>", html, re.S):
-        stripped = tag.strip()
-        if stripped.startswith("__QUEST_CONTROLLER_IMG_JS__"):
-            if img_js.exists():
-                scripts.append(img_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__REELS_FEED_STATE_JS__"):
-            if feed_state_js.exists():
-                scripts.append(feed_state_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__REELS_REWARDS_JS__"):
-            if rewards_js.exists():
-                scripts.append(rewards_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__REELS_PACK_STATE_JS__"):
-            if pack_state_js.exists():
-                scripts.append(pack_state_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__THREE_JS__"):
-            if three_js.exists():
-                scripts.append(three_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__VR_UI_CANVAS_JS__"):
-            if vr_ui_js.exists():
-                scripts.append(vr_ui_js.read_text(encoding="utf-8"))
-        elif stripped.startswith("__WEBXR_VR_JS__"):
-            if vr_js.exists():
-                scripts.append(vr_js.read_text(encoding="utf-8"))
+        name = PLAYER_SCRIPTS.get(tag.strip())
+        if name:
+            url = _player_script_url(name)
+            if url:
+                scripts.append({"src": url})
         else:
             scripts.append(
                 tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))

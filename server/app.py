@@ -11,6 +11,7 @@ Serves:
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -289,6 +290,20 @@ class CachedStaticFiles(StaticFiles):
         return response
 
 
+class HashedAssetFiles(StaticFiles):
+    """Vite build output. Content-hashed names (``index-CJh6BpX3.js``) never
+    change in place, so browsers and the edge may keep them for a year.
+    Unhashed files copied from ``web/public/assets`` keep ETag revalidation."""
+
+    _HASHED = re.compile(r"-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$")
+
+    def file_response(self, full_path, *args, **kwargs):
+        response = super().file_response(full_path, *args, **kwargs)
+        if self._HASHED.search(str(full_path)):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def mount_spa(app: FastAPI, static_dir: Path) -> None:
     """Serve the built React app from *static_dir*, if it exists.
 
@@ -302,7 +317,7 @@ def mount_spa(app: FastAPI, static_dir: Path) -> None:
 
     from server.security_headers import nonce_request_html
 
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="web-assets")
+    app.mount("/assets", HashedAssetFiles(directory=static_dir / "assets"), name="web-assets")
     html_cache: dict[Path, str] = {}
 
     def html_document(request: Request, file: Path) -> HTMLResponse:
