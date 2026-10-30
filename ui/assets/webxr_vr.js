@@ -1099,7 +1099,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Side panels keep their stations but face the viewer too.
     layoutCommentsPanel(headPos);
     layoutGuidePanel(headPos);
-    layoutShellNav(headPos);
+    layoutShellNav();
   }
 
   // Applies headset yaw/pitch or orbit spherical position to the camera.
@@ -6196,8 +6196,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellStick = { dir: 0, t: 0 };
   let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
-  let shellNavYaw = null;
-  let shellNavHeadY = 0;
   // Main-panel drag scroll with fling; shellMainY is the canvas y under the ray.
   let shellDrag = null;
   let shellMainY = null;
@@ -6338,8 +6336,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         try { callbacks.onTogglePlay(); } catch (e) {}
       }
       layoutShellMain(getHeadPosition());
-      shellNavYaw = null;
-      layoutShellNav(getHeadPosition());
     } else if (!open && shellWasOpen) {
       shellStick = { dir: 0, t: 0 };
       const resume = shellResumePlayback;
@@ -6349,6 +6345,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     shellWasOpen = open;
+    layoutShellNav();
     const kb = isShellKeyboardShown();
     if (kb && !shellKbWasShown) layoutShellKeyboard(getHeadPosition());
     shellKbWasShown = kb;
@@ -6410,7 +6407,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
     }
     shellPainted = { mainVersion: -1, navVersion: -1, kbVersion: -1, mainHover: null, navHover: null, kbHover: null };
-    shellNavYaw = null;
     shell.refreshUnread();
   }
 
@@ -6437,17 +6433,22 @@ window.WebXRVR = window.WebXRVR || (function () {
     faceViewerLevel(shellMainMesh, headPos, 0);
   }
 
-  // The nav bar sits low and re-centres only when the head turns well away
-  // or its height drifts (the first pose can predate real headset tracking).
-  function layoutShellNav(headPos) {
-    if (!shellNavMesh) return;
-    const yaw = headYaw();
-    if (shellNavYaw !== null && Math.abs(headPos.y - shellNavHeadY) < 0.25 &&
-      Math.abs(Math.atan2(Math.sin(yaw - shellNavYaw), Math.cos(yaw - shellNavYaw))) < 0.9) return;
-    shellNavYaw = yaw;
-    shellNavHeadY = headPos.y;
-    shellNavMesh.position.set(headPos.x - Math.sin(yaw) * 1.1, headPos.y - 0.8, headPos.z - Math.cos(yaw) * 1.1);
-    faceViewerLevel(shellNavMesh, headPos);
+  // The nav bar never shares space with the dock: closed, it is a strip just
+  // under the dock (same width and tilt); open, the dock is hidden and the
+  // bar sits under the main panel.
+  function layoutShellNav() {
+    if (!shellNavMesh || !THREE) return;
+    const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
+    if (!anchor) return;
+    const open = anchor === shellMainMesh;
+    // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
+    const k = open ? 1 : (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+    const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
+    const navH = SHELL_NAV_SIZE.h * k;
+    shellNavMesh.scale.set(k, k, 1);
+    shellNavMesh.quaternion.copy(anchor.quaternion);
+    shellNavMesh.position.copy(anchor.position)
+      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - navH * 0.25, 0).applyQuaternion(anchor.quaternion));
   }
 
   // Keyboard: below the main panel, closer, tilted up toward the viewer.
@@ -6572,7 +6573,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
     shellKbWasShown = false;
     shellImages.clear();
-    shellNavYaw = null;
   }
 
   const shellFacade = {

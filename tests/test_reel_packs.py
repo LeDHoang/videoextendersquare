@@ -975,10 +975,13 @@ def test_player_endpoints_inline_every_script_placeholder(app):
             f"/api/packs/{pack['id']}/publish",
             {"expected_revision": pack["revision"]},
         ).json()["pack"]
-        inline = "\n".join(viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()["scripts"])
+        entries = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()["scripts"]
+        inline = "\n".join(e for e in entries if isinstance(e, str))
         page = viewer_client.get("/api/reels/player", params={"pack_id": pack["id"]}).text
         for source in (inline, page):
             assert re.findall(r"__[A-Z_]+_JS__", source) == []
-            # The VR shell modules ride along with the engine.
-            assert "root.VRShellCanvas = factory()" in source
-            assert "root.VRShell = factory()" in source
+        # The VR shell modules are linked after the UI canvas and before the engine.
+        for srcs in ([e["src"] for e in entries if isinstance(e, dict)], re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', page)):
+            names = [s.split("?")[0].rsplit("/", 1)[-1] for s in srcs]
+            order = ["vr_ui_canvas.js", "vr_shell_canvas.js", "vr_shell.js", "webxr_vr.js"]
+            assert [n for n in names if n in order] == order

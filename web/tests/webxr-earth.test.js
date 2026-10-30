@@ -5947,20 +5947,25 @@ test('VR shell: ?vrshell=0 kill switch keeps navigation on 2D', () => {
   assert.equal(renderer.shell.isOpen(), false);
 });
 
-test('VR shell: nav bar re-poses to the real head height on open', async () => {
+test('VR shell: nav bar sits under the dock, or under the main panel when open', async () => {
   const { renderer } = await enterLiveSession({ withShell: true });
-  const api = renderer.__test;
-  const nav = api.getScene().children.find((m) => m && m.renderOrder === 6 &&
-    m.geometry && m.geometry.parameters && m.geometry.parameters.height === 0.16);
-  assert.ok(nav, 'nav bar mesh exists');
-  // First pose taken before tracking settled (default 1.6 m head)...
-  api.getCamera().position.y = 1.6;
+  const byHeight = (h) => renderer.__test.getScene().children.find((m) => m &&
+    m.geometry && m.geometry.parameters && m.geometry.parameters.height === h);
+  const nav = byHeight(0.16), dock = byHeight(0.6), main = byHeight(1.125);
+  assert.ok(nav && dock && main, 'nav, dock and main meshes exist');
+  // nav centre in the anchor's local frame, and its half height in the same units.
+  const local = (anchor) => {
+    anchor.updateMatrixWorld(true);
+    const p = anchor.worldToLocal(nav.position.clone());
+    return { x: p.x, y: p.y, half: (0.08 * nav.scale.y) / anchor.scale.y };
+  };
   renderer.shell.open('/explore');
+  let p = local(main);
+  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -1.125 / 2, `under the main panel (${p.y})`);
   renderer.shell.close();
-  // ...then the seated headset reports its real height.
-  api.getCamera().position.y = 0.92;
-  renderer.shell.open('/explore');
-  assert.ok(Math.abs(nav.position.y - (0.92 - 0.8)) < 1e-6, `nav follows head height (${nav.position.y})`);
+  p = local(dock);
+  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3, `under the dock (${p.y})`);
+  assert.ok(Math.abs(1.5 * nav.scale.x - 1.6 * dock.scale.x) < 1e-6, 'as wide as the dock');
 });
 
 test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {

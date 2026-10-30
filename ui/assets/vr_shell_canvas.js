@@ -30,20 +30,24 @@
     return (ui && ui.TOKENS) || FALLBACK;
   }
 
-  // Nav bar tabs, left to right. 'back' and 'reels' are shell actions, the rest open sections.
+  // Nav bar tabs, left to right, after the ECHO mark. 'back' and 'reels' are
+  // shell actions, the rest open sections. icon: a VRUICanvas dock icon.
   const NAV_ITEMS = [
-    { id: 'back', label: '‹ BACK' },
-    { id: 'reels', label: 'REELS' },
-    { id: 'explore', label: 'EXPLORE' },
-    { id: 'messages', label: 'MESSAGES' },
-    { id: 'wallet', label: 'CREDITS' },
-    { id: 'profile', label: 'PROFILE' },
+    { id: 'back', label: 'BACK', icon: 'back' },
+    { id: 'reels', label: 'REELS', icon: 'reels' },
+    { id: 'explore', label: 'EXPLORE', icon: 'compass' },
+    { id: 'messages', label: 'MESSAGES', icon: 'message' },
+    { id: 'wallet', label: 'CREDITS', icon: 'credits' },
+    { id: 'profile', label: 'PROFILE', icon: 'profile' },
   ];
   const NAV_PAD = 16;
+  const NAV_GAP = 12;
+  const NAV_BRAND_W = 216;
   function navRects() {
-    const w = (NAV_W - NAV_PAD * (NAV_ITEMS.length + 1)) / NAV_ITEMS.length;
+    const w = (NAV_W - NAV_BRAND_W - NAV_PAD - NAV_GAP * (NAV_ITEMS.length - 1)) / NAV_ITEMS.length;
     return NAV_ITEMS.map((item, i) => ({
-      id: item.id, label: item.label, x: NAV_PAD + i * (w + NAV_PAD), y: NAV_PAD, w, h: NAV_H - NAV_PAD * 2,
+      id: item.id, label: item.label, icon: item.icon,
+      x: NAV_BRAND_W + i * (w + NAV_GAP), y: NAV_PAD, w, h: NAV_H - NAV_PAD * 2,
     }));
   }
 
@@ -194,19 +198,49 @@
   }
 
   // state: VRShell getRenderState(); hover: nav item id or ''.
+  // Drawn as a strip of the reels dock: glass surface, vermilion rule,
+  // chamfered icon tiles with mono captions (VRUICanvas renderControlsCanvas).
   function renderNavBar(ctx, state, hover) {
     const t = tokens();
+    const T = t.hex;
+    const ui = typeof window !== 'undefined' && window.VRUICanvas;
     const s = state || {};
     ctx.clearRect(0, 0, NAV_W, NAV_H);
-    ctx.fillStyle = t.hex.bg;
-    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = T.surface;
     ctx.fillRect(0, 0, NAV_W, NAV_H);
-    ctx.globalAlpha = 1;
+    ctx.strokeStyle = T.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, NAV_W - 2, NAV_H - 2);
+    if (ui && ui.drawIcon) ui.drawIcon(ctx, 'logo', 60, NAV_H / 2, 52, T.ink, T.accent, T.surface);
+    ctx.fillStyle = T.ink;
+    ctx.font = '900 30px ' + (t.font.brand || t.font.display);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ECHO', 98, NAV_H / 2 + 1);
     navRects().forEach((r) => {
       const active = r.id === 'reels' ? !s.open : s.open && s.tab === r.id;
       const disabled = r.id === 'back' && !s.open;
-      drawButton(ctx, r, r.label, { active, hover: hover === r.id && !disabled, disabled, size: 38 });
-      if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 28, r.y + 24, s.unread);
+      const lit = active || (hover === r.id && !disabled);
+      if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, 12);
+      else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
+      ctx.globalAlpha = disabled ? 0.35 : 1;
+      ctx.fillStyle = lit ? T.surface3 : T.surface2;
+      ctx.fill();
+      ctx.strokeStyle = lit ? T.accent : T.rule;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      const ink = lit ? T.ink : T.ink2;
+      if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surface3 : T.surface2);
+      ctx.fillStyle = ink;
+      ctx.font = 'bold 18px ' + t.font.mono;
+      ctx.textAlign = 'center';
+      ctx.fillText(r.label, r.x + r.w / 2, r.y + r.h - 22);
+      if (active) {
+        ctx.fillStyle = T.accent;
+        ctx.fillRect(r.x + r.w / 2 - 24, r.y + r.h - 6, 48, 4);
+      }
+      ctx.globalAlpha = 1;
+      if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 30, r.y + 30, s.unread);
     });
   }
 
