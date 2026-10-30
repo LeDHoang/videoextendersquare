@@ -92,7 +92,7 @@ test('nav hits route to sections; profile needs a signed-in user', () => {
   assert.equal(s.getRenderState().tab, 'wallet');
   s.handleHit({ action: 'nav', arg: 'reels' });
   assert.equal(s.isOpen(), false);
-  assert.equal(s.handleHit({ action: 'nav', arg: 'back' }), true, 'back on a closed shell is a no-op');
+  assert.equal(s.handleHit({ action: 'nav', arg: 'back' }), false, 'no back tab');
   assert.equal(s.handleHit(null), false);
   assert.equal(s.handleHit({ action: 'nope' }), false);
 });
@@ -152,7 +152,7 @@ test('scroll is clamped to the grid rows', async () => {
   assert.equal(s.scroll(-1), false);
   assert.equal(s.scroll(1), true);
   s.scroll(10);
-  assert.equal(s.getRenderState().route.scroll, 3, 'ceil(23/5) - 2 rows');
+  assert.equal(s.getRenderState().route.scroll, 4, 'ceil(23/4) - 2 rows');
 });
 
 test('search field: focus, type, backspace, enter opens the search route', () => {
@@ -208,24 +208,43 @@ test('grid constants match the canvas module', () => {
   vm.runInNewContext(readFileSync(new URL('../../ui/assets/vr_shell_canvas.js', import.meta.url), 'utf8'), { window });
   assert.equal(loadShell().GRID_COLS, window.VRShellCanvas.GRID_COLS);
   assert.equal(loadShell().GRID_ROWS, window.VRShellCanvas.GRID_ROWS);
+  assert.equal(loadShell().PROFILE_COLS, window.VRShellCanvas.gridLayout({ section: 'profile' }).cols);
 });
 
-test('profile loads the author grid and the user card in parallel', async () => {
+test('profile loads the author grid, user card and highlights in parallel', async () => {
   const calls = [];
   const s = loadShell().create({
     request: (path, query) => {
       calls.push([path, { ...query }]);
-      return Promise.resolve(path === '/api/reels' ? { videos: [reel(1)] } : { user: { username: 'bo b', follower_count: 3 } });
+      if (path === '/api/reels') return Promise.resolve({ videos: Array.from({ length: 10 }, (_, i) => reel(i)) });
+      if (path.endsWith('/packs')) return Promise.resolve({ items: [{ id: 'a', status: 'published' }, { id: 'b', status: 'draft' }] });
+      return Promise.resolve({ user: { username: 'bo b', follower_count: 3 } });
     },
   });
   s.open('/profile/bo%20b');
   await tick();
-  assert.deepEqual(calls, [['/api/reels', { author: 'bo b', sort: 'newest' }], ['/api/users/bo%20b', {}]]);
+  assert.deepEqual(calls, [['/api/reels', { author: 'bo b', sort: 'newest' }], ['/api/users/bo%20b', {}],
+    ['/api/users/bo%20b/packs', {}]]);
   const route = s.getRenderState().route;
   assert.equal(route.status, 'ready');
   assert.equal(route.detail.follower_count, 3);
-  assert.equal(route.items.length, 1);
+  assert.equal(route.items.length, 10);
+  assert.deepEqual([...route.highlights.map((p) => p.id)], ['a'], 'published packs only');
   assert.equal(route.label, '@bo b');
+  s.scroll(10);
+  assert.equal(s.getRenderState().route.scroll, 2, 'ceil(10/3) - 2 rows');
+});
+
+test('a failed highlights fetch leaves the profile loaded', async () => {
+  const s = loadShell().create({
+    request: (path) => (path.endsWith('/packs') ? Promise.reject(new Error('nope'))
+      : Promise.resolve(path === '/api/reels' ? { videos: [reel(1)] } : { user: { username: 'bob' } })),
+  });
+  s.open('/profile/bob');
+  await tick();
+  const route = s.getRenderState().route;
+  assert.equal(route.status, 'ready');
+  assert.deepEqual([...route.highlights], []);
 });
 
 test('pack loads available items as the play queue and links the creator', async () => {

@@ -28,7 +28,7 @@ function recordingCtx() {
 test('nav rects tile the bar without overlap and resolve back to their item', () => {
   const sc = loadCanvas();
   const rects = sc.navRects();
-  assert.deepEqual([...rects.map((r) => r.id)], ['back', 'reels', 'explore', 'messages', 'wallet', 'profile']);
+  assert.deepEqual([...rects.map((r) => r.id)], ['reels', 'explore', 'messages', 'wallet', 'profile']);
   for (let i = 1; i < rects.length; i++) assert.ok(rects[i].x >= rects[i - 1].x + rects[i - 1].w);
   assert.ok(rects[rects.length - 1].x + rects[rects.length - 1].w <= sc.NAV_W);
   for (const r of rects) {
@@ -68,18 +68,23 @@ test('hoverKey matches the renderers hover argument', () => {
   assert.equal(sc.hoverKey({ action: 'close' }), 'close');
 });
 
-test('grid: search bar, scroll buttons and cards resolve with the scroll offset', () => {
+test('grid: search bar, scroll buttons and tiles resolve with the scroll offset', () => {
   const sc = loadCanvas();
-  const items = Array.from({ length: 12 }, (_, i) => ({ title: 't' + i }));
+  const items = Array.from({ length: 10 }, (_, i) => ({ title: 't' + i }));
   const route = { section: 'explore', items, scroll: 1, status: 'ready' };
+  const L = sc.gridLayout(route);
+  assert.equal(L.cols, sc.GRID_COLS);
   assert.equal(sc.resolveMainHit({ route }, 200, 200).action, 'search-focus');
-  const c = sc.cardRect(0);
-  assert.deepEqual({ ...sc.resolveMainHit({ route }, c.x + 10, c.y + 10) }, { action: 'play', arg: 5 });
-  const last = sc.cardRect(9);
+  const c = sc.tileRect(L, 0);
+  assert.ok(c.w > 400 && c.h > 400, `tiles are big (${c.w}x${c.h})`);
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, c.x + 10, c.y + 10) }, { action: 'play', arg: 4 });
+  const last = sc.tileRect(L, 6);
   assert.equal(sc.resolveMainHit({ route }, last.x + 10, last.y + 10), null, 'past the end');
   assert.deepEqual({ ...sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900) }, { action: 'scroll', arg: 1 });
-  const right = sc.cardRect(4);
-  assert.ok(right.x + right.w < sc.MAIN_W - 144, 'cards clear the scroll column');
+  const right = sc.tileRect(L, L.cols - 1);
+  assert.ok(right.x + right.w < sc.MAIN_W - 144, 'tiles clear the scroll column');
+  const bottom = sc.tileRect(L, L.cols * L.rows - 1);
+  assert.ok(bottom.y + bottom.h <= sc.MAIN_H - 40, 'tiles stay on the panel');
   const tag = { section: 'tag', items: [], related: [{ label: '#a', path: '/explore/tag/a' }] };
   assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'chip', arg: '/explore/tag/a' });
   assert.equal(sc.resolveMainHit({ route: { section: 'wallet' } }, c.x + 10, c.y + 10), null);
@@ -101,6 +106,25 @@ test('grid renders titles, statuses and uses the image getter', () => {
   assert.ok(rec.texts.includes('#x'));
   assert.equal(sc.thumbUrl({ media_type: 'image', url: '/i.jpg' }), '/i.jpg');
   assert.equal(sc.thumbUrl({ media_type: 'video', url: '/v.mp4' }), '');
+});
+
+test('tiles: creator and place pills open their pages, the rest plays', () => {
+  const sc = loadCanvas();
+  const item = { title: 'Night walk', creator: { username: 'amy' }, location: { city: 'Paris', country: 'France' },
+    likes: 1500, views: 20, comments_count: 2, liked_by_me: true, media_type: 'image', images: [{}, {}, {}], stereo_layout: 'sbs' };
+  const route = { section: 'explore', status: 'ready', items: [item] };
+  const r = sc.tileRect(sc.gridLayout(route), 0);
+  const creator = sc.resolveMainHit({ route }, r.x + 20, r.y + 20);
+  assert.deepEqual({ ...creator }, { action: 'chip', arg: '/profile/amy', hover: 'creator:0' });
+  assert.equal(sc.hoverKey(creator), 'creator:0');
+  const loc = sc.resolveMainHit({ route }, r.x + 20, r.y + 12 + 56 + 20);
+  assert.deepEqual({ ...loc }, { action: 'chip', arg: '/explore/location/paris--france', hover: 'loc:0' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, r.x + r.w / 2, r.y + r.h / 2) }, { action: 'play', arg: 0 });
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route }, 'creator:0');
+  for (const text of ['@amy', 'Paris, France', 'IMAGES · 3 · 3D', 'Night walk', '1.5K', '20', '2']) {
+    assert.ok(rec.texts.includes(text), text);
+  }
 });
 
 test('keyboard keys tile the canvas and resolve to their id', () => {
@@ -167,6 +191,37 @@ test('profile and pack detail rows resolve their buttons and draw counts', () =>
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route: pack }, '');
   assert.ok(rec.texts.includes('♥ 2') && rec.texts.includes('☆ 0'));
+});
+
+test('profile: hero column with bio, tags and counts beside highlights over a narrower grid', () => {
+  const sc = loadCanvas();
+  const detail = { username: 'bob', display_name: 'Bob', bio: 'Shooting cities at night', created_at: '2025-03-02T00:00:00Z',
+    top_tags: [{ name: 'Night', slug: 'night' }], follower_count: 10, following_count: 4, like_count: 2500, post_count: 3 };
+  const profile = { section: 'profile', status: 'ready', detail, items: Array.from({ length: 7 }, (_, i) => ({ title: 't' + i })) };
+  const plain = sc.gridLayout(profile);
+  assert.equal(plain.cols, 3);
+  assert.ok(plain.x > 568, 'grid sits right of the hero column');
+  const withHl = { ...profile, highlights: [{ id: 'p 1', title: 'Tokyo', reel_count: 4 }] };
+  const L = sc.gridLayout(withHl);
+  assert.ok(L.y > plain.y, 'highlights push the grid down');
+  const t = sc.tileRect(L, 0);
+  assert.deepEqual({ ...sc.resolveMainHit({ route: withHl }, t.x + t.w / 2, t.y + t.h / 2) }, { action: 'play', arg: 0 });
+  assert.deepEqual({ ...sc.resolveMainHit({ route: withHl }, plain.x + 20, 260) }, { action: 'chip', arg: '/packs/p%201' });
+  const [follow] = sc.detailButtons(withHl);
+  assert.ok(follow.x + follow.w <= plain.x, 'follow sits in the hero column');
+  assert.deepEqual({ ...sc.resolveMainHit({ route: withHl }, follow.x + 10, follow.y + 10) }, { action: 'follow' });
+  // Tag chips sit above the counts; find one by scanning the column.
+  let tag = null;
+  for (let y = 300; y < follow.y && !tag; y += 4) {
+    const hit = sc.resolveMainHit({ route: withHl }, 100, y);
+    if (hit && hit.action === 'chip') tag = hit;
+  }
+  assert.deepEqual({ ...tag }, { action: 'chip', arg: '/explore/tag/night' });
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: withHl }, '');
+  for (const text of ['Bob', '@bob', 'JOINED MAR 2025', 'Shooting cities at night', '#Night', '2.5K', 'LIKES', 'HIGHLIGHTED PACKS', 'Tokyo', '4']) {
+    assert.ok(rec.texts.includes(text), text);
+  }
 });
 
 test('inbox rows open threads, tabs switch boxes, share rows send', () => {

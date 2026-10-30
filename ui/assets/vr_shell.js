@@ -62,13 +62,18 @@
     return out('handoff');
   }
 
-  // Grid geometry shared with VRShellCanvas (cards per row, rows on screen).
-  const GRID_COLS = 5;
+  // Grid geometry shared with VRShellCanvas (tiles per row, rows on screen;
+  // the profile grid is narrower, beside its hero column).
+  const GRID_COLS = 4;
   const GRID_ROWS = 2;
+  const PROFILE_COLS = 3;
   // List sections (inbox, share sheet) and the thread scroll one row at a time.
   const LIST_ROWS = 6;
   const THREAD_ROWS = 6;
-  const PAGE = { messages: [1, LIST_ROWS], share: [1, LIST_ROWS], thread: [1, THREAD_ROWS], wallet: [1, LIST_ROWS] };
+  const PAGE = {
+    messages: [1, LIST_ROWS], share: [1, LIST_ROWS], thread: [1, THREAD_ROWS], wallet: [1, LIST_ROWS],
+    profile: [PROFILE_COLS, GRID_ROWS],
+  };
 
   function maxScroll(route) {
     const page = PAGE[route.section] || [GRID_COLS, GRID_ROWS];
@@ -150,10 +155,12 @@
         related: (r) => chips(r.related_locations, '/explore/location/'),
         label: (r) => (r.location && r.location.name) || route.arg,
       };
-      // Profile: the author's reels in player shape, plus the user card for the header.
+      // Profile: the author's reels in player shape, the user card for the hero
+      // column, and their packs for the highlights strip.
       case 'profile': return {
         path: '/api/reels', query: { author: route.arg, sort: 'newest' },
         detail: '/api/users/' + enc(route.arg),
+        highlights: '/api/users/' + enc(route.arg) + '/packs',
         detailOf: (r, det) => (det && det.user) || null,
         label: () => '@' + route.arg,
       };
@@ -308,17 +315,21 @@
       route.related = [];
       route.scroll = 0;
       route.detail = null;
+      route.highlights = [];
       route.label = src.label ? src.label({}) : '';
       if (!d.request) { route.status = 'error'; return; }
       route.status = 'loading';
       Promise.resolve().then(() => Promise.all([
         d.request(src.path, src.query),
         src.detail ? d.request(src.detail, {}) : null,
-      ])).then(([res, det]) => {
+        // Highlights are extra: a failed fetch leaves the strip empty, not the page.
+        src.highlights ? Promise.resolve().then(() => d.request(src.highlights, {})).catch(() => null) : null,
+      ])).then(([res, det, hl]) => {
         if (stack.indexOf(route) < 0) return;
         const r = res || {};
         route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
         route.detail = src.detailOf ? src.detailOf(r, det) : null;
+        route.highlights = ((hl && hl.items) || []).filter((p) => p.status === 'published');
         route.related = src.related ? src.related(r) : [];
         if (src.label) route.label = src.label(r);
         route.status = 'ready';
@@ -547,7 +558,6 @@
       if (!hit) return false;
       switch (hit.action) {
         case 'nav':
-          if (hit.arg === 'back') { if (isOpen()) back(); return true; }
           if (hit.arg === 'reels') { close(); return true; }
           if (hit.arg === 'profile') { open(profilePath()); return true; }
           if (NAV_PATHS[hit.arg]) { open(NAV_PATHS[hit.arg]); return true; }
@@ -665,5 +675,5 @@
     };
   }
 
-  return { parseRoute, create, createDragScroll, HANDOFF, GRID_COLS, GRID_ROWS, LIST_ROWS, THREAD_ROWS };
+  return { parseRoute, create, createDragScroll, HANDOFF, GRID_COLS, GRID_ROWS, PROFILE_COLS, LIST_ROWS, THREAD_ROWS };
 });

@@ -130,7 +130,13 @@ const SHELL_REELS = Array.from({ length: 23 }, (_, i) => ({
   ...PLAYLIST[i % PLAYLIST.length],
   id: `r${i + 1}`,
   poster_url: `mock:${i % 3}`,
+  comments_count: (i * 5) % 7,
+  liked_by_me: i % 4 === 0,
+  stereo_layout: i % 5 === 1 ? 'sbs' : undefined,
 }));
+const SHELL_PACKS = [
+  ['TOKYO AFTER DARK', 7], ['RAINY SEASON', 5], ['NORTHERN LIGHTS', 4], ['HA LONG MORNINGS', 6], ['ROOFTOPS', 3],
+].map(([title, n], i) => ({ id: `p${i + 1}`, title, status: 'published', reel_count: n, cover_url: `mock:${i % 3}` }));
 const SHELL_LINES = [
   'did you see the aurora reel?', 'yes!! the dome curve makes it', 'sending you the Tokyo pack',
   'thanks, watching now', 'the rain one is unreal in 3D', 'right? shot it handheld', 'weekend trip?',
@@ -177,9 +183,17 @@ function shellRequest(path, query) {
   if (path.startsWith('/api/reels/locations/')) {
     return { videos: SHELL_REELS.slice(5), location: { name: 'Tokyo' }, related_locations: [{ slug: 'osaka', name: 'Osaka' }] };
   }
+  if (/^\/api\/users\/[^/]+\/packs$/.test(path)) return { items: SHELL_PACKS };
   if ((m = /^\/api\/users\/(.+)$/.exec(path))) {
     const p = SHELL_PEOPLE.find((x) => x.username === decodeURIComponent(m[1])) || SHELL_PEOPLE[0];
-    return { user: { ...p, post_count: 9, follower_count: 12400, following_count: 310, is_following: false } };
+    return {
+      user: {
+        ...p, avatar_color: '#ff3b1f', created_at: daysAgo(420), website: 'https://mika.example/tokyo',
+        bio: 'Night walks through Tokyo in stereo 3D. Rain, neon and quiet backstreets, shot handheld on a 360 rig.',
+        top_tags: [{ name: 'tokyo', slug: 'tokyo' }, { name: 'night', slug: 'night' }, { name: 'rain', slug: 'rain' }],
+        post_count: 9, follower_count: 12400, following_count: 310, like_count: 86300, is_following: false,
+      },
+    };
   }
   if (path.startsWith('/api/packs/')) {
     return {

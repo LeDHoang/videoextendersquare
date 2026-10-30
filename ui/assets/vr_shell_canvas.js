@@ -30,10 +30,9 @@
     return (ui && ui.TOKENS) || FALLBACK;
   }
 
-  // Nav bar tabs, left to right, after the ECHO mark. 'back' and 'reels' are
-  // shell actions, the rest open sections. icon: a VRUICanvas dock icon.
+  // Nav bar tabs, left to right, after the ECHO mark. 'reels' closes the
+  // shell, the rest open sections. icon: a VRUICanvas dock icon.
   const NAV_ITEMS = [
-    { id: 'back', label: 'BACK', icon: 'back' },
     { id: 'reels', label: 'REELS', icon: 'reels' },
     { id: 'explore', label: 'EXPLORE', icon: 'compass' },
     { id: 'messages', label: 'MESSAGES', icon: 'message' },
@@ -59,14 +58,15 @@
     { action: 'handoff-cancel', label: 'STAY IN VR', x: MAIN_W / 2 + 20, y: 760, w: 500, h: 120 },
   ];
 
-  // Explore-style sections: a tool row (search bar or chips) above a scrolling card grid.
+  // Explore-style sections: a tool row (search bar or chips) above a scrolling tile grid.
   const GRID_SECTIONS = { explore: 1, search: 1, tag: 1, location: 1, profile: 1, pack: 1 };
-  const GRID_COLS = 5;
+  const GRID_COLS = 4;
   const GRID_ROWS = 2;
   const GRID_TOP = 280;
   const GRID_GAP = 24;
   const CARD_H = 400;
-  const CARD_W = (MAIN_W - 48 - 168 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+  const TILE_GAP = 8;
+  const TILE_C = 10;
   const SEARCH_BAR = { x: 48, y: 148, w: MAIN_W - 216, h: 104 };
   const CHIP_W = 290;
   const CHIP_MAX = 6;
@@ -114,26 +114,170 @@
     return { x: 48 + i * (QUICK_W + 16), y: QUICK_Y, w: QUICK_W, h: 84 };
   }
 
-  function cardRect(slot) {
-    const col = slot % GRID_COLS;
-    const row = Math.floor(slot / GRID_COLS);
-    return { x: 48 + col * (CARD_W + GRID_GAP), y: GRID_TOP + row * (CARD_H + GRID_GAP), w: CARD_W, h: CARD_H };
+  // Profile: a hero column (avatar, bio, tags, counts, follow) beside the
+  // highlighted packs strip over a 3-column tile grid.
+  const PROFILE_COL = { x: 48, y: 148, w: 520 };
+  const PROFILE_X = 600;
+  const PROFILE_COLS = 3;
+  const TAG_W = (PROFILE_COL.w - 24) / 3;
+  const HL_SIZE = 136;
+  const HL_GAP = 16;
+  const HL_MAX = 8;
+  const HL_COVER_Y = 192;
+  const HL_BOTTOM = 376;
+
+  // Tile area of a grid route: below the tool row, or right of the profile
+  // column (under the highlights strip when the profile has any).
+  function gridLayout(route) {
+    const bottom = GRID_TOP + CARD_H * 2 + GRID_GAP;
+    const right = MAIN_W - 168;
+    if (route && route.section === 'profile') {
+      const y = (route.highlights || []).length ? HL_BOTTOM + 16 : PROFILE_COL.y;
+      return { x: PROFILE_X, y, w: right - PROFILE_X, h: bottom - y, cols: PROFILE_COLS, rows: GRID_ROWS };
+    }
+    return { x: 48, y: GRID_TOP, w: right - 48, h: bottom - GRID_TOP, cols: GRID_COLS, rows: GRID_ROWS };
+  }
+
+  function tileRect(L, slot) {
+    const w = (L.w - TILE_GAP * (L.cols - 1)) / L.cols;
+    const h = (L.h - TILE_GAP * (L.rows - 1)) / L.rows;
+    return { x: L.x + (slot % L.cols) * (w + TILE_GAP), y: L.y + Math.floor(slot / L.cols) * (h + TILE_GAP), w, h };
+  }
+
+  // Scroll column beside a grid: the up and down halves of its height.
+  function gridScrollBtns(L) {
+    const h = (L.h - GRID_GAP) / 2;
+    return [
+      { arg: -1, label: '▲', x: MAIN_W - 144, y: L.y, w: 96, h },
+      { arg: 1, label: '▼', x: MAIN_W - 144, y: L.y + h + GRID_GAP, w: 96, h },
+    ];
+  }
+
+  // Hero column, bottom up: follow button, 2×2 counts, top tags; the bio gets the rest.
+  function profileLayout(route) {
+    const det = (route && route.detail) || {};
+    const c = PROFILE_COL;
+    let bottom = GRID_TOP + CARD_H * 2 + GRID_GAP;
+    const follow = det.is_me ? null : { x: c.x, y: bottom - 96, w: c.w, h: 96 };
+    if (follow) bottom = follow.y - 16;
+    const cellW = (c.w - 8) / 2;
+    const statsY = bottom - 88 * 2 - 8;
+    const stats = [0, 1, 2, 3].map((k) => ({ x: c.x + (k % 2) * (cellW + 8), y: statsY + Math.floor(k / 2) * 96, w: cellW, h: 88 }));
+    const tags = (det.top_tags || []).slice(0, 3).map((tag, k) => ({ x: c.x + k * (TAG_W + 12), y: statsY - 80, w: TAG_W, h: 56, tag }));
+    return { follow, stats, tags, bioTop: c.y + 184, bioBottom: (tags.length ? tags[0].y : statsY) - 24 };
+  }
+
+  function tagPath(tag) {
+    return '/explore/tag/' + encodeURIComponent(tag.slug || tag.name || '');
+  }
+
+  // Highlighted pack covers; the rect takes in the title under the cover.
+  function highlightRects(route) {
+    return (route.highlights || []).slice(0, HL_MAX).map((pack, k) => ({
+      x: PROFILE_X + k * (HL_SIZE + HL_GAP), y: HL_COVER_Y, w: HL_SIZE, h: HL_SIZE + 40, pack,
+      path: '/packs/' + encodeURIComponent(pack.id),
+    }));
+  }
+
+  // First cover member's poster or image, else the pack's own cover.
+  function packCover(pack) {
+    const first = ((pack && pack.cover_items) || []).map((e) => (e && e.post) || e)[0];
+    return thumbUrl(first) || (pack && pack.cover_url) || '';
+  }
+
+  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  function joinedLabel(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !isNaN(d.getTime()) ? 'JOINED ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() : '';
+  }
+
+  // Tile overlays use mono caps; its 0.6em advance gives pill widths from
+  // character counts, so one rect serves both drawing and hit testing.
+  const PILL_H = 48;
+  const PILL_FONT = 24;
+  function monoW(text, size) {
+    return Array.from(text).length * size * 0.6;
+  }
+  function clipChars(text, maxW, size) {
+    const chars = Array.from(text);
+    const n = Math.floor(maxW / (size * 0.6));
+    return chars.length <= n ? text : chars.slice(0, Math.max(1, n - 1)).join('') + '…';
+  }
+
+  // URL key of a reel's place, as the 2D explore tile builds it.
+  function locationKey(loc) {
+    const slug = (v) => String(v || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+    const city = slug(loc && loc.city);
+    if (!city) return '';
+    const country = slug(loc.country);
+    return city + (country ? '--' + country : '');
+  }
+
+  // IMAGE / IMAGES · n for image reels, 3D for stereo ones; videos get no badge.
+  function kindLabel(item) {
+    const parts = [];
+    if (item.media_type === 'image') {
+      const n = (item.images || []).length || 1;
+      parts.push(n > 1 ? 'IMAGES · ' + n : 'IMAGE');
+    }
+    if (item.stereo_layout === 'sbs' || item.stereo_layout === 'tb') parts.push('3D');
+    return parts.join(' · ');
+  }
+
+  // Overlay pills of a tile (2D ExploreTile): creator, then place, top-left; kind badge top-right.
+  function tilePills(r, item) {
+    const out = {};
+    const kind = kindLabel(item);
+    let right = r.x + r.w - 12;
+    if (kind) {
+      const w = monoW(kind, 22) + 28;
+      out.kind = { x: right - w, y: r.y + 12, w, h: 40, text: kind };
+      right = out.kind.x - 8;
+    }
+    let y = r.y + 12;
+    const user = (item.creator && item.creator.username) || item.author_name;
+    if (user) {
+      const text = clipChars('@' + user, right - r.x - 12 - 72, PILL_FONT);
+      out.creator = { x: r.x + 12, y, w: 72 + monoW(text, PILL_FONT), h: PILL_H, text, user };
+      y += PILL_H + 8;
+      right = r.x + r.w - 12;
+    }
+    const loc = item.location || {};
+    const key = locationKey(loc);
+    if (key) {
+      const text = clipChars([loc.city, loc.country].filter(Boolean).join(', '), right - r.x - 12 - 64, PILL_FONT);
+      out.loc = { x: r.x + 12, y, w: 64 + monoW(text, PILL_FONT), h: PILL_H, text, key };
+    }
+    return out;
+  }
+
+  // Creator and place pills open their pages; the rest of the tile plays.
+  function tileHit(r, item, i, x, y) {
+    const p = tilePills(r, item);
+    if (p.creator && inRect(p.creator, x, y)) {
+      return { action: 'chip', arg: '/profile/' + encodeURIComponent(p.creator.user), hover: 'creator:' + i };
+    }
+    if (p.loc && inRect(p.loc, x, y)) return { action: 'chip', arg: '/explore/location/' + p.loc.key, hover: 'loc:' + i };
+    return { action: 'play', arg: i };
   }
 
   function chipRect(i) {
     return { x: 48 + i * (CHIP_W + 16), y: SEARCH_BAR.y, w: CHIP_W, h: SEARCH_BAR.h };
   }
 
-  // Profile/pack action buttons, right-aligned in the tool row. Empty until the detail loads.
+  // Detail action buttons, right-aligned in the tool row (profile: under its
+  // hero column). Empty until the detail loads.
   const DETAIL_BTN_W = 260;
   function detailButtons(route) {
     const det = route && route.detail;
     if (!det) return [];
     const k = (n) => fmtCount(n);
+    if (route.section === 'profile') {
+      const f = profileLayout(route).follow;
+      return f ? [Object.assign({ action: 'follow', label: det.is_following ? 'FOLLOWING' : 'FOLLOW', primary: !det.is_following }, f)] : [];
+    }
     let btns = [];
-    if (route.section === 'profile' && !det.is_me) {
-      btns = [{ action: 'follow', label: det.is_following ? 'FOLLOWING' : 'FOLLOW', primary: !det.is_following }];
-    } else if (route.section === 'thread' && det.can_accept) {
+    if (route.section === 'thread' && det.can_accept) {
       const busy = !!(route.pending && route.pending.decide);
       btns = [
         { action: 'accept', label: 'ACCEPT', primary: true, disabled: busy },
@@ -326,11 +470,9 @@
     ctx.fillText('ECHO', 98, NAV_H / 2 + 1);
     navRects().forEach((r) => {
       const active = r.id === 'reels' ? !s.open : s.open && s.tab === r.id;
-      const disabled = r.id === 'back' && !s.open;
-      const lit = active || (hover === r.id && !disabled);
+      const lit = active || hover === r.id;
       if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, 12);
       else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
-      ctx.globalAlpha = disabled ? 0.35 : 1;
       ctx.fillStyle = lit ? T.surface3 : T.surface2;
       ctx.fill();
       ctx.strokeStyle = lit ? T.accent : T.rule;
@@ -346,7 +488,6 @@
         ctx.fillStyle = T.accent;
         ctx.fillRect(r.x + r.w / 2 - 24, r.y + r.h - 6, 48, 4);
       }
-      ctx.globalAlpha = 1;
       if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 30, r.y + 30, s.unread);
     });
   }
@@ -491,52 +632,143 @@
     }
   }
 
-  // Profile: avatar, name over @handle, counts. Pack: creator chip and counts. Buttons on the right.
+  // Pack: creator chip and counts, buttons on the right.
   function renderDetailRow(ctx, route, hover) {
     const t = tokens();
-    const T = t.hex;
     const det = route.detail;
     if (!det) return;
     const btns = detailButtons(route);
     const textRight = btns.length ? btns[0].x - 32 : SEARCH_BAR.x + SEARCH_BAR.w;
     let x = SEARCH_BAR.x;
     const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
-    let stats;
-    if (route.section === 'profile') {
-      drawAvatar(ctx, x + 48, cy, 48, det);
-      x += 128;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = T.ink;
-      ctx.font = '44px ' + t.font.display;
-      const name = truncate(ctx, det.display_name || det.username, 520);
-      ctx.fillText(name, x, cy - 16);
-      let nameW = ctx.measureText(name).width;
-      if (det.username) {
-        ctx.fillStyle = T.ink3;
-        ctx.font = '600 26px ' + t.font.mono;
-        const handle = truncate(ctx, '@' + det.username, 520);
-        ctx.fillText(handle, x, cy + 30);
-        nameW = Math.max(nameW, ctx.measureText(handle).width);
-      }
-      x += nameW + 64;
-      stats = [[fmtCount(det.post_count), 'POSTS'], [fmtCount(det.follower_count), 'FOLLOWERS'],
-        [fmtCount(det.following_count), 'FOLLOWING']];
-    } else {
-      const chip = (route.related || [])[0];
-      if (chip) {
-        ctx.font = '600 30px ' + t.font.mono;
-        drawButton(ctx, chipRect(0), truncate(ctx, chip.label, CHIP_W - 40), { hover: hover === 'chip:' + chip.path, size: 30, weight: 600 });
-        x += CHIP_W + 48;
-      }
-      stats = [[fmtCount(det.playable_count != null ? det.playable_count : (route.items || []).length), 'REELS'],
-        [fmtCount(det.views), 'VIEWS']];
+    const chip = (route.related || [])[0];
+    if (chip) {
+      ctx.font = '600 30px ' + t.font.mono;
+      drawButton(ctx, chipRect(0), truncate(ctx, chip.label, CHIP_W - 40), { hover: hover === 'chip:' + chip.path, size: 30, weight: 600 });
+      x += CHIP_W + 48;
     }
-    drawStats(ctx, x, cy, stats, textRight);
+    drawStats(ctx, x, cy, [[fmtCount(det.playable_count != null ? det.playable_count : (route.items || []).length), 'REELS'],
+      [fmtCount(det.views), 'VIEWS']], textRight);
     btns.forEach((b) => drawButton(ctx, b, b.label, {
       primary: b.primary, active: b.active, disabled: b.disabled,
       hover: !b.disabled && hover === (b.arg === undefined ? b.action : b.action + ':' + b.arg),
     }));
+  }
+
+  // Greedy word wrap to maxLines; a cut last line ends in an ellipsis.
+  function wrapLines(ctx, text, maxW, maxLines) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (let i = 0; i < words.length && maxLines > 0; i++) {
+      const test = cur ? cur + ' ' + words[i] : words[i];
+      if (!cur || ctx.measureText(test).width <= maxW) { cur = test; continue; }
+      if (lines.length === maxLines - 1) return lines.concat(truncate(ctx, cur + ' ' + words.slice(i).join(' '), maxW));
+      lines.push(cur);
+      cur = words[i];
+    }
+    if (cur && maxLines > 0) lines.push(truncate(ctx, cur, maxW));
+    return lines;
+  }
+
+  // 2D profile page in the panel: hero column (avatar, names, bio, tags,
+  // counts, follow) and the highlighted packs strip above the tile grid.
+  function renderProfile(ctx, route, hover, getImage) {
+    const t = tokens();
+    const T = t.hex;
+    const det = route.detail;
+    if (!det) return;
+    const c = PROFILE_COL;
+    const L = profileLayout(route);
+    const av = { x: c.x, y: c.y, w: 144, h: 144 };
+    drawAvatar(ctx, av.x + 72, av.y + 72, 72, det);
+    const img = det.avatar_url && getImage ? getImage(det.avatar_url) : null;
+    if (img) {
+      ctx.save();
+      shape(ctx, av, 18);
+      ctx.clip();
+      drawThumb(ctx, av, img, det);
+      ctx.restore();
+      tile(ctx, av, 18, null, det.avatar_color || T.accent, 3);
+    }
+    const nx = av.x + av.w + 28;
+    const nw = c.x + c.w - nx;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = T.ink;
+    ctx.font = '44px ' + t.font.display;
+    ctx.fillText(truncate(ctx, det.display_name || det.username || '', nw), nx, c.y + 40);
+    ctx.fillStyle = T.ink3;
+    ctx.font = '600 26px ' + t.font.mono;
+    ctx.fillText(truncate(ctx, '@' + (det.username || ''), nw), nx, c.y + 86);
+    const joined = joinedLabel(det.created_at);
+    if (joined) {
+      ctx.fillStyle = T.inkMuted;
+      ctx.font = '600 22px ' + t.font.mono;
+      ctx.fillText(joined, nx, c.y + 124);
+    }
+    const lineH = 42;
+    let y = L.bioTop;
+    ctx.font = '30px ' + t.font.sans;
+    ctx.fillStyle = T.ink2;
+    wrapLines(ctx, det.bio, c.w, Math.floor((L.bioBottom - y - (det.website ? 48 : 0)) / lineH)).forEach((line) => {
+      ctx.fillText(line, c.x, y + lineH / 2);
+      y += lineH;
+    });
+    if (det.website) {
+      ctx.fillStyle = T.accent;
+      ctx.font = '600 24px ' + t.font.mono;
+      ctx.fillText(truncate(ctx, String(det.website).replace(/^https?:\/\//, ''), c.w), c.x, y + 24);
+    }
+    L.tags.forEach((r) => {
+      ctx.font = '600 24px ' + t.font.mono;
+      drawButton(ctx, r, truncate(ctx, '#' + (r.tag.name || r.tag.slug), r.w - 24), {
+        hover: hover === 'chip:' + tagPath(r.tag), size: 24, weight: 600,
+      });
+    });
+    [[det.follower_count, 'FOLLOWERS'], [det.following_count, 'FOLLOWING'], [det.like_count, 'LIKES', true],
+      [det.post_count, 'POSTS']].forEach(([n, label, accent], k) => {
+      const r = L.stats[k];
+      tile(ctx, r, 10, ROW, T.rule, 2);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = accent ? T.accent : T.ink;
+      ctx.font = '700 40px ' + t.font.mono;
+      ctx.fillText(fmtCount(n), r.x + 24, r.y + 34);
+      ctx.fillStyle = T.ink3;
+      ctx.font = '600 20px ' + t.font.mono;
+      ctx.fillText(label, r.x + 24, r.y + 68);
+    });
+    detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, { primary: b.primary, hover: hover === b.action, size: 36 }));
+    const hl = highlightRects(route);
+    if (!hl.length) return;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = T.ink3;
+    ctx.font = '700 24px ' + t.font.mono;
+    ctx.fillText('HIGHLIGHTED PACKS', PROFILE_X, c.y + 18);
+    hl.forEach((r) => {
+      const lit = hover === 'chip:' + r.path;
+      const cover = { x: r.x, y: r.y, w: r.w, h: HL_SIZE };
+      const url = packCover(r.pack);
+      ctx.save();
+      shape(ctx, cover, TILE_C);
+      ctx.clip();
+      drawThumb(ctx, cover, url && getImage ? getImage(url) : null, { title: r.pack.title });
+      ctx.restore();
+      tile(ctx, cover, TILE_C, null, lit ? T.accent : T.rule, lit ? 4 : 2);
+      if (r.pack.reel_count) {
+        const n = String(r.pack.reel_count);
+        const bw = monoW(n, 20) + 20;
+        tile(ctx, { x: cover.x + cover.w - 8 - bw, y: cover.y + 8, w: bw, h: 32 }, 6, T.accent);
+        ctx.fillStyle = T.onAccent;
+        ctx.font = '800 20px ' + t.font.mono;
+        ctx.textAlign = 'center';
+        ctx.fillText(n, cover.x + cover.w - 8 - bw / 2, cover.y + 25);
+      }
+      ctx.textAlign = 'left';
+      ctx.fillStyle = lit ? T.ink : T.ink2;
+      ctx.font = '600 24px ' + t.font.sans;
+      ctx.fillText(truncate(ctx, r.pack.title || 'Untitled', r.w), r.x, r.y + HL_SIZE + 22);
+    });
   }
 
   function drawThumb(ctx, r, img, item) {
@@ -554,7 +786,7 @@
     }
     const initials = String((item && (item.title || item.author_name)) || '?').trim().slice(0, 2).toUpperCase();
     ctx.fillStyle = t.hex.inkMuted;
-    ctx.font = '96px ' + t.font.display;
+    ctx.font = Math.round(Math.min(96, r.h * 0.4)) + 'px ' + t.font.display;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(initials, r.x + r.w / 2, r.y + r.h / 2);
@@ -600,51 +832,128 @@
     });
   }
 
-  // Reel cards: chamfered tile, clipped thumb, title and @author under a rule that lights on hover.
-  function renderGrid(ctx, route, hover, getImage) {
+  // Open eye: the views glyph (no dock icon for it).
+  function drawEye(ctx, cx, cy, size, ink) {
+    const hw = size / 2;
+    ctx.save();
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - hw, cy);
+    ctx.quadraticCurveTo(cx, cy - size * 0.62, cx + hw, cy);
+    ctx.quadraticCurveTo(cx, cy + size * 0.62, cx - hw, cy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 2D ExploreTile in the panel: full-bleed thumb, creator and place pills
+  // top-left, kind badge top-right, title and like/view/comment counts at the foot.
+  function renderTile(ctx, r, item, i, hover, getImage) {
     const t = tokens();
     const T = t.hex;
-    const items = route.items || [];
-    if (route.status === 'loading') { drawStatus(ctx, 'Loading…', 680); return; }
-    if (route.status === 'error') { drawStatus(ctx, "Couldn't load this page", 680); return; }
-    if (!items.length) { drawStatus(ctx, 'Nothing here yet', 680); return; }
-    const first = (route.scroll || 0) * GRID_COLS;
-    for (let slot = 0; slot < GRID_COLS * GRID_ROWS; slot++) {
-      const i = first + slot;
-      const item = items[i];
-      if (!item) break;
-      const r = cardRect(slot);
-      const lit = hover === 'play:' + i;
-      const url = thumbUrl(item);
-      tile(ctx, r, 16, lit ? ROW_HOVER : ROW);
-      ctx.save();
-      shape(ctx, r, 16);
-      ctx.clip();
-      drawThumb(ctx, { x: r.x, y: r.y, w: r.w, h: 290 }, url && getImage ? getImage(url) : null, item);
-      ctx.restore();
-      ctx.fillStyle = lit ? T.accent : T.rule;
-      ctx.fillRect(r.x, r.y + 290, r.w, lit ? 4 : 2);
-      if (item.media_type === 'video') {
-        tile(ctx, { x: r.x + 16, y: r.y + 16, w: 56, h: 56 }, 8, 'rgba(8,9,10,0.82)', T.ruleStrong, 2);
-        ctx.fillStyle = T.accent;
-        ctx.beginPath();
-        ctx.moveTo(r.x + 37, r.y + 31);
-        ctx.lineTo(r.x + 37, r.y + 57);
-        ctx.lineTo(r.x + 58, r.y + 44);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
+    const lit = hover === 'play:' + i;
+    const url = thumbUrl(item);
+    ctx.save();
+    shape(ctx, r, TILE_C);
+    ctx.clip();
+    drawThumb(ctx, r, url && getImage ? getImage(url) : null, item);
+    ctx.restore();
+    const pill = (q, on) => tile(ctx, q, 8, 'rgba(8,9,10,0.86)', on ? T.accent : T.ruleStrong, 2);
+    const p = tilePills(r, item);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    if (p.kind) {
+      pill(p.kind, false);
       ctx.fillStyle = T.ink;
-      ctx.font = '600 32px ' + t.font.sans;
-      ctx.fillText(truncate(ctx, item.title || 'Untitled', r.w - 40), r.x + 20, r.y + 334);
-      ctx.fillStyle = T.ink3;
-      ctx.font = '600 26px ' + t.font.mono;
-      ctx.fillText(truncate(ctx, item.author_name ? '@' + item.author_name : '', r.w - 40), r.x + 20, r.y + 374);
-      tile(ctx, r, 16, null, lit ? T.accent : T.rule, lit ? 4 : 2);
+      ctx.font = '700 22px ' + t.font.mono;
+      ctx.fillText(p.kind.text, p.kind.x + 14, p.kind.y + p.kind.h / 2 + 1);
     }
-    renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, Math.ceil(items.length / GRID_COLS) - GRID_ROWS), hover);
+    if (p.creator) {
+      const c = p.creator;
+      const on = hover === 'creator:' + i;
+      const who = item.creator || {};
+      const cx = c.x + 28;
+      const cy = c.y + c.h / 2;
+      pill(c, on);
+      ctx.fillStyle = who.avatar_color || T.accent;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 17, 0, Math.PI * 2);
+      ctx.fill();
+      const img = who.avatar_url && getImage ? getImage(who.avatar_url) : null;
+      if (img) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, 17, 0, Math.PI * 2);
+        ctx.clip();
+        drawThumb(ctx, { x: cx - 17, y: cy - 17, w: 34, h: 34 }, img, item);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = T.onAccent;
+        ctx.font = '800 18px ' + t.font.mono;
+        ctx.textAlign = 'center';
+        ctx.fillText(c.user.charAt(0).toUpperCase(), cx, cy + 1);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = on ? T.accent : T.ink;
+      ctx.font = '800 ' + PILL_FONT + 'px ' + t.font.mono;
+      ctx.fillText(c.text, c.x + 56, cy + 1);
+    }
+    if (p.loc) {
+      const on = hover === 'loc:' + i;
+      pill(p.loc, on);
+      icon(ctx, 'location', p.loc.x + 24, p.loc.y + p.loc.h / 2, 28, on ? T.accent : T.ink);
+      ctx.fillStyle = on ? T.accent : T.ink;
+      ctx.font = '700 ' + PILL_FONT + 'px ' + t.font.mono;
+      ctx.fillText(p.loc.text, p.loc.x + 48, p.loc.y + p.loc.h / 2 + 1);
+    }
+    // Foot: counts pill, the title box above it.
+    const comments = item.comments_count != null ? item.comments_count : (item.comments || []).length;
+    const stats = [['like', fmtCount(item.likes), item.liked_by_me], ['eye', fmtCount(item.views)]];
+    if (comments > 0) stats.push(['comment', fmtCount(comments)]);
+    const sw = stats.reduce((w, s) => w + 36 + monoW(s[1], 22) + 16, 12);
+    const sr = { x: r.x + 12, y: r.y + r.h - 56, w: sw, h: 44 };
+    pill(sr, false);
+    ctx.font = '700 22px ' + t.font.mono;
+    let x = sr.x + 12;
+    stats.forEach(([name, n, on]) => {
+      const ink = on ? T.accent : T.ink;
+      if (name === 'eye') drawEye(ctx, x + 14, sr.y + 22, 26, ink);
+      else icon(ctx, name, x + 14, sr.y + 22, 28, ink);
+      ctx.fillStyle = ink;
+      ctx.fillText(n, x + 36, sr.y + 23);
+      x += 36 + monoW(n, 22) + 16;
+    });
+    if (item.title) {
+      ctx.font = '700 26px ' + t.font.sans;
+      const lines = wrapLines(ctx, item.title, r.w - 48, 2);
+      const tw = lines.reduce((w, l) => Math.max(w, ctx.measureText(l).width), 0);
+      const tb = { x: r.x + 12, y: sr.y - 8 - (lines.length * 32 + 16), w: Math.min(r.w - 24, tw + 24), h: lines.length * 32 + 16 };
+      tile(ctx, tb, 8, 'rgba(18,19,21,0.88)');
+      ctx.fillStyle = T.ink;
+      lines.forEach((line, k) => ctx.fillText(line, tb.x + 12, tb.y + 8 + 16 + k * 32));
+    }
+    tile(ctx, r, TILE_C, null, lit ? T.accent : T.rule, lit ? 4 : 2);
+  }
+
+  // Tile grid of a grid route, with its scroll rail.
+  function renderGrid(ctx, route, hover, getImage) {
+    const items = route.items || [];
+    const L = gridLayout(route);
+    const statusY = L.y + L.h / 2;
+    if (route.status === 'loading') { drawStatus(ctx, 'Loading…', statusY); return; }
+    if (route.status === 'error') { drawStatus(ctx, "Couldn't load this page", statusY); return; }
+    if (!items.length) { drawStatus(ctx, 'Nothing here yet', statusY); return; }
+    const first = (route.scroll || 0) * L.cols;
+    for (let slot = 0; slot < L.cols * L.rows; slot++) {
+      const item = items[first + slot];
+      if (!item) break;
+      renderTile(ctx, tileRect(L, slot), item, first + slot, hover, getImage);
+    }
+    renderScrollRail(ctx, route, gridScrollBtns(L), Math.max(0, Math.ceil(items.length / L.cols) - L.rows), hover);
   }
 
   // Square avatar tile: up to two initials in the user's colour.
@@ -961,7 +1270,8 @@
     if (section === 'wallet') { renderWallet(ctx, s, hover); return; }
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
     if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
-    else if (section === 'profile' || section === 'pack') renderDetailRow(ctx, route, hover);
+    else if (section === 'profile') renderProfile(ctx, route, hover, getImage);
+    else if (section === 'pack') renderDetailRow(ctx, route, hover);
     else renderChips(ctx, route.related, hover);
     renderGrid(ctx, route, hover, getImage);
   }
@@ -988,18 +1298,26 @@
       if (b) return b.disabled ? null : (b.arg === undefined ? { action: b.action } : { action: b.action, arg: b.arg });
       const chip = route.section === 'pack' && (route.related || [])[0];
       if (chip && inRect(chipRect(0), x, y)) return { action: 'chip', arg: chip.path };
+      if (route.section === 'profile') {
+        const tag = profileLayout(route).tags.find((r) => inRect(r, x, y));
+        if (tag) return { action: 'chip', arg: tagPath(tag.tag) };
+        const hl = highlightRects(route).find((r) => inRect(r, x, y));
+        if (hl) return { action: 'chip', arg: hl.path };
+      }
     } else {
       const related = (route.related || []).slice(0, CHIP_MAX);
       const i = related.findIndex((c, k) => inRect(chipRect(k), x, y));
       if (i >= 0) return { action: 'chip', arg: related[i].path };
     }
-    const sb = SCROLL_BTNS.find((r) => inRect(r, x, y));
+    const L = gridLayout(route);
+    const sb = gridScrollBtns(L).find((r) => inRect(r, x, y));
     if (sb) return { action: 'scroll', arg: sb.arg };
     const items = route.items || [];
-    for (let slot = 0; slot < GRID_COLS * GRID_ROWS; slot++) {
-      if (!inRect(cardRect(slot), x, y)) continue;
-      const i = (route.scroll || 0) * GRID_COLS + slot;
-      return i < items.length ? { action: 'play', arg: i } : null;
+    for (let slot = 0; slot < L.cols * L.rows; slot++) {
+      const r = tileRect(L, slot);
+      if (!inRect(r, x, y)) continue;
+      const i = (route.scroll || 0) * L.cols + slot;
+      return i < items.length ? tileHit(r, items[i], i, x, y) : null;
     }
     return null;
   }
@@ -1116,8 +1434,10 @@
   }
 
   // Hover key for a hit, matching the hover argument the renderers take.
+  // A hit may name its own (tile pills share the 'chip' action).
   function hoverKey(hit) {
     if (!hit) return '';
+    if (hit.hover) return hit.hover;
     if (hit.action === 'nav') return hit.arg;
     return hit.arg === undefined ? hit.action : hit.action + ':' + hit.arg;
   }
@@ -1137,7 +1457,8 @@
     KB_H,
     renderMainPanel,
     resolveMainHit,
-    cardRect,
+    gridLayout,
+    tileRect,
     detailButtons,
     thumbUrl,
     keyboardRects,
