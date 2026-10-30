@@ -6467,7 +6467,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
   let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
   let shellKbWasShown = false;
-  let shellPainted = { mainVersion: -1, navVersion: -1, mainHover: null, navHover: null, kbHover: null };
+  let shellPainted = { mainVersion: -1, navVersion: -1, kbVersion: -1, mainHover: null, navHover: null, kbHover: null };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
   const shellImages = new Map();
   let shellStick = { dir: 0, t: 0 };
@@ -6487,8 +6487,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       exitAndNavigate: shellHandoff,
       getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
       request: shellRequest,
-      send: (method, path) => (callbacks.shellSend
-        ? callbacks.shellSend(method, path) : Promise.reject(new Error('shell requests unavailable'))),
+      send: (method, path, body) => (callbacks.shellSend
+        ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
       playFeed(feed) {
         // The new feed autoplays; closing must not toggle it back to paused.
         shellResumePlayback = false;
@@ -6564,7 +6564,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!isShellKeyboardShown() || event.metaKey || event.ctrlKey || event.altKey) return false;
     const k = event.key;
     const map = { Backspace: 'backspace', Enter: 'enter', Escape: 'close', ' ': 'space' };
-    const key = map[k] || (typeof k === 'string' && k.length === 1 ? k.toLowerCase() : '');
+    const key = map[k] || (typeof k === 'string' && k.length === 1 ? k : '');
     if (!key || !shell.type(key)) return false;
     if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
     return true;
@@ -6650,8 +6650,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
       shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
     }
-    shellPainted = { mainVersion: -1, navVersion: -1, mainHover: null, navHover: null, kbHover: null };
+    shellPainted = { mainVersion: -1, navVersion: -1, kbVersion: -1, mainHover: null, navHover: null, kbHover: null };
     shellNavYaw = null;
+    shell.refreshUnread();
   }
 
   function headYaw() {
@@ -6723,7 +6724,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           const hits = raycaster.intersectObjects(targets, false);
           const h = hits.find((x) => x.uv);
           if (h && h.object === shellKbMesh) {
-            const action = sc.resolveKeyboardHit(h.uv.x * sc.KB_W, (1 - h.uv.y) * sc.KB_H);
+            const action = sc.resolveKeyboardHit(h.uv.x * sc.KB_W, (1 - h.uv.y) * sc.KB_H, shell.getRenderState().field);
             found = { panel: 'kb', distance: h.distance, action };
           } else if (h) {
             const main = h.object === shellMainMesh;
@@ -6757,11 +6758,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     const mainHover = shellHover.panel === 'main' ? shellHover.key : '';
     const navHover = shellHover.panel === 'nav' ? shellHover.key : '';
     const kbHover = shellHover.panel === 'kb' ? shellHover.key : '';
-    if (shellKbCtx && shellKbMesh && shellKbMesh.visible && shellPainted.kbHover !== kbHover) {
-      sc.renderKeyboard(shellKbCtx, kbHover);
+    if (shellKbCtx && shellKbMesh && shellKbMesh.visible &&
+        (shellPainted.kbHover !== kbHover || shellPainted.kbVersion !== state.version)) {
+      sc.renderKeyboard(shellKbCtx, kbHover, state.field);
       shellKbTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.kbHover = kbHover;
+      shellPainted.kbVersion = state.version;
     } else if (shellKbMesh && !shellKbMesh.visible) {
       shellPainted.kbHover = null;
     }
@@ -6822,6 +6825,19 @@ window.WebXRVR = window.WebXRVR || (function () {
     getRenderState() { return shell ? shell.getRenderState() : null; },
     scroll(delta) { return shell ? shell.scroll(delta) : false; },
     type(key) { return shell ? shell.type(key) : false; },
+    // Share sheet for a reel or pack ({kind, target_id, title}), by default the
+    // current reel; false without the shell.
+    share(opts) {
+      if (!ensureShell()) return false;
+      let o = opts;
+      if (!o) {
+        const list = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
+        const item = list[callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0] || {};
+        o = { kind: 'reel', target_id: item.post_id, title: item.title || item.filename || 'Shared reel' };
+      }
+      return !!shell.share(o);
+    },
+    refreshUnread() { if (shell) shell.refreshUnread(); },
   };
   // </vr-shell-glue>
 

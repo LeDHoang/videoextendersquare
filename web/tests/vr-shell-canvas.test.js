@@ -49,9 +49,9 @@ test('main panel: close button always hits, handoff buttons only on the card', (
 test('renderers draw the section title, handoff copy and nav labels', () => {
   const sc = loadCanvas();
   let rec = recordingCtx();
-  sc.renderMainPanel(rec.ctx, { route: { section: 'messages', path: '/messages', arg: '' } }, '');
-  assert.ok(rec.texts.includes('MESSAGES'));
-  assert.ok(rec.texts.includes('/messages'));
+  sc.renderMainPanel(rec.ctx, { route: { section: 'wallet', path: '/wallet', arg: '' } }, '');
+  assert.ok(rec.texts.includes('CREDITS'));
+  assert.ok(rec.texts.includes('/wallet'));
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { handoff: { title: 'FINISH ON 2D', message: 'm', path: '/upload' } }, 'handoff-confirm');
   assert.ok(rec.texts.includes('EXIT VR & OPEN'));
@@ -82,7 +82,7 @@ test('grid: search bar, scroll buttons and cards resolve with the scroll offset'
   assert.ok(right.x + right.w < sc.MAIN_W - 144, 'cards clear the scroll column');
   const tag = { section: 'tag', items: [], related: [{ label: '#a', path: '/explore/tag/a' }] };
   assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'chip', arg: '/explore/tag/a' });
-  assert.equal(sc.resolveMainHit({ route: { section: 'messages' } }, c.x + 10, c.y + 10), null);
+  assert.equal(sc.resolveMainHit({ route: { section: 'wallet' } }, c.x + 10, c.y + 10), null);
 });
 
 test('grid renders titles, statuses and uses the image getter', () => {
@@ -105,16 +105,27 @@ test('grid renders titles, statuses and uses the image getter', () => {
 
 test('keyboard keys tile the canvas and resolve to their id', () => {
   const sc = loadCanvas();
-  const keys = sc.keyboardRects();
-  assert.equal(keys.length, 26 + 4);
-  for (const k of keys) {
-    assert.ok(k.x >= 0 && k.y >= 0 && k.x + k.w <= sc.KB_W + 0.01 && k.y + k.h <= sc.KB_H + 0.01, k.id);
-    assert.deepEqual({ ...sc.resolveKeyboardHit(k.x + k.w / 2, k.y + k.h / 2) }, { action: 'key', arg: k.id });
+  for (const layout of ['alpha', 'symbols', 'emoji']) {
+    const field = { layout };
+    const keys = sc.keyboardRects(field);
+    assert.equal(keys.length, 33, layout);
+    assert.equal(new Set(keys.map((k) => k.id)).size, keys.length, layout + ' ids unique');
+    for (const k of keys) {
+      assert.ok(k.x >= 0 && k.y >= 0 && k.x + k.w <= sc.KB_W + 0.01 && k.y + k.h <= sc.KB_H + 0.01, k.id);
+      assert.deepEqual({ ...sc.resolveKeyboardHit(k.x + k.w / 2, k.y + k.h / 2, field) }, { action: 'key', arg: k.id });
+    }
   }
+  const ids = (f) => sc.keyboardRects(f).map((k) => k.id);
+  assert.ok(ids({ layout: 'alpha' }).includes('layout:symbols') && ids({ layout: 'alpha' }).includes('layout:emoji'));
+  assert.ok(ids({ layout: 'symbols' }).includes('layout:alpha') && ids({ layout: 'symbols' }).includes('@'));
+  assert.ok(ids({ layout: 'emoji' }).includes('👍'));
   assert.equal(sc.hoverKey({ action: 'key', arg: 'q' }), 'key:q');
-  const rec = recordingCtx();
+  let rec = recordingCtx();
   sc.renderKeyboard(rec.ctx, 'key:q');
-  assert.ok(rec.texts.includes('Q') && rec.texts.includes('ENTER'));
+  assert.ok(rec.texts.includes('q') && rec.texts.includes('ENTER') && !rec.texts.includes('Q'));
+  rec = recordingCtx();
+  sc.renderKeyboard(rec.ctx, '', { layout: 'alpha', shift: true });
+  assert.ok(rec.texts.includes('Q'));
 });
 
 test('profile and pack detail rows resolve their buttons and draw counts', () => {
@@ -138,4 +149,58 @@ test('profile and pack detail rows resolve their buttons and draw counts', () =>
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route: pack }, '');
   assert.ok(rec.texts.includes('♥ 2') && rec.texts.includes('☆ 0'));
+});
+
+test('inbox rows open threads, tabs switch boxes, share rows send', () => {
+  const sc = loadCanvas();
+  const conv = (id, extra) => ({ id, participant: { id: 'u' + id, username: 'amy' + id, display_name: 'Amy' }, ...extra });
+  const items = Array.from({ length: 8 }, (_, i) => conv('c' + i, { last_message: { kind: 'text', text: 'hi', sender_id: 'uc' + i } }));
+  items[0].unread_count = 3;
+  const route = { section: 'messages', box: 'inbox', status: 'ready', items, scroll: 1 };
+  const r0 = sc.listRowRect(0);
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, r0.x + 10, r0.y + 10) }, { action: 'chip', arg: '/messages/c1' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, 300, 200) }, { action: 'box', arg: 'inbox' });
+  const last = sc.listRowRect(sc.LIST_ROWS - 1);
+  assert.equal(sc.resolveMainHit({ route: { ...route, scroll: 3 } }, last.x + 10, last.y + 10), null, 'past the end');
+  let rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: { ...route, scroll: 0 }, unreadBox: { inbox: 3, requests: 1 } }, '');
+  assert.ok(rec.texts.includes('3 NEW'));
+  assert.ok(rec.texts.some((t) => t.startsWith('INBOX') && t.includes('3')));
+  assert.ok(rec.texts.includes('hi'));
+
+  const share = { section: 'share', status: 'ready', items: items.slice(0, 2), sent: { c1: 'sent' }, share: { kind: 'reel' } };
+  assert.deepEqual({ ...sc.resolveMainHit({ route: share }, r0.x + 10, r0.y + 10) }, { action: 'share-to', arg: 0 });
+  rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: share }, '');
+  assert.ok(rec.texts.includes('SEND') && rec.texts.includes('SENT ✓'));
+  assert.ok(rec.texts.includes('Send this reel to a chat'));
+});
+
+test('thread: bubbles, quick replies, compose and request buttons', () => {
+  const sc = loadCanvas();
+  const detail = { participant: { id: 'u2', username: 'bob' }, can_message: true };
+  const route = { section: 'thread', status: 'ready', label: '@bob', detail,
+    items: [{ id: 1, kind: 'text', text: 'yo', mine: false }, { id: 2, kind: 'reel', post: { title: 'Clip' }, mine: true }] };
+  const q = sc.quickRect(0);
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, q.x + 5, q.y + 5) }, { action: 'quick-reply', arg: sc.QUICK_REPLIES[0] });
+  const cb = sc.COMPOSE_BAR;
+  assert.equal(sc.resolveMainHit({ route }, cb.x + 10, cb.y + 10).action, 'compose-focus');
+  assert.equal(sc.resolveMainHit({ route }, sc.SEND_BTN.x + 10, sc.SEND_BTN.y + 10).action, 'compose-send');
+  const closed = { ...route, detail: { ...detail, can_message: false } };
+  assert.equal(sc.resolveMainHit({ route: closed }, cb.x + 10, cb.y + 10), null, 'no compose without can_message');
+  let rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route, field: { id: 'compose', focused: true, text: 'hel' } }, '');
+  assert.ok(rec.texts.includes('yo') && rec.texts.includes('▶ Clip') && rec.texts.includes('hel|'));
+
+  const req = { ...route, detail: { ...detail, can_accept: true, can_decline: true, is_request: true } };
+  const [accept, decline] = sc.detailButtons(req);
+  assert.equal(sc.resolveMainHit({ route: req }, accept.x + 5, accept.y + 5).action, 'accept');
+  assert.equal(sc.resolveMainHit({ route: req }, decline.x + 5, decline.y + 5).action, 'decline');
+});
+
+test('nav badge shows the unread count on messages', () => {
+  const sc = loadCanvas();
+  const rec = recordingCtx();
+  sc.renderNavBar(rec.ctx, { open: true, unread: 120 }, '');
+  assert.ok(rec.texts.includes('99+'));
 });

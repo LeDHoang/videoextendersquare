@@ -63,7 +63,7 @@ function loadActions({ presenting, packMode = false, signedIn = true, reportAnsw
     askReportDetails(targetType) { log.push('report-dialog'); return Promise.resolve(answers.shift() ?? null); },
   };
   vm.runInNewContext(
-    [block('reels-xr-dom-ui'), block('reels-share-reel'), block('reels-report')].join('\n'),
+    [block('vr-shell-nav'), block('reels-xr-dom-ui'), block('reels-share-reel'), block('reels-report')].join('\n'),
     context,
     { filename: 'reels.html' },
   );
@@ -201,4 +201,18 @@ test('the report <dialog> lists exactly the reasons the server accepts', () => {
   const values = [...dialog[0].matchAll(/<option value="([a-z]+)"/g)].map((m) => m[1]);
   assert.deepEqual(values, ['spam', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other']);
   assert.match(dialog[0], /<textarea[^>]*maxlength="500"/);
+});
+
+test('with the VR shell, share opens the in-VR sheet and stays in XR', async () => {
+  for (const [packMode, fn, kind, id] of [[false, 'shareCurrentReel', 'reel', 'post-1'], [true, 'shareCurrentPack', 'pack', 'pack-1']]) {
+    const { context, engine, log } = loadActions({ presenting: true, packMode });
+    const shared = [];
+    engine.shell = { share(opts) { shared.push(opts); return true; } };
+    await context[fn]();
+    assert.equal(engine.exits, 0, fn);
+    assert.equal(shared.length, 1);
+    assert.equal(shared[0].kind, kind);
+    assert.equal(shared[0].target_id, id);
+    assert.ok(!log.some((e) => e.startsWith('echo:share')), 'no DOM dialog');
+  }
 });

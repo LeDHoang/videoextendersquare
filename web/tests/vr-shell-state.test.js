@@ -293,3 +293,139 @@ test('pack like and save toggle their own flags', async () => {
   assert.equal(det.liked_by_me && det.saved_by_me, true);
   assert.deepEqual(sent, [['PUT', '/api/packs/pk/like'], ['PUT', '/api/packs/pk/save']]);
 });
+
+const CONVS = [
+  { id: 'c1', can_message: true, unread_count: 2, participant: { id: 'u-amy', username: 'amy' } },
+  { id: 'c2', can_message: false, participant: { id: 'u-bob', username: 'bob' } },
+];
+
+function messagingShell(send, user = { username: 'me' }) {
+  const asked = [];
+  const s = loadShell().create({
+    getUser: () => user,
+    send,
+    request: (path, query) => {
+      asked.push([path, { ...query }]);
+      if (path === '/api/messages/unread-count') return Promise.resolve({ unread_count: 3, inbox: 2, requests: 1 });
+      if (path.endsWith('/messages')) {
+        return Promise.resolve({
+          conversation: { id: 'c1', can_message: true, can_accept: true, can_decline: true, participant: { id: 'u-amy', username: 'amy' } },
+          messages: [{ id: 1, sender_id: 'u-amy', kind: 'text', text: 'hi' }, { id: 2, sender_id: 'u-me', kind: 'text', text: 'yo' }],
+        });
+      }
+      return Promise.resolve({ conversations: CONVS });
+    },
+  });
+  return { s, asked };
+}
+
+test('messages: inbox loads, box tab reloads requests, unread counts reach the nav', async () => {
+  const { s, asked } = messagingShell(() => Promise.resolve({}));
+  s.open('/messages');
+  await tick();
+  assert.equal(s.getRenderState().route.items.length, 2);
+  s.refreshUnread();
+  await tick(); await tick();
+  assert.equal(s.getRenderState().unread, 3);
+  assert.deepEqual({ ...s.getRenderState().unreadBox }, { inbox: 2, requests: 1 });
+  assert.equal(s.handleHit({ action: 'box', arg: 'requests' }), true);
+  await tick();
+  assert.deepEqual(asked.filter((a) => a[0] === '/api/messages/conversations').map((a) => a[1].box), ['inbox', 'requests']);
+});
+
+test('messages need a signed-in user', () => {
+  const { s } = messagingShell(() => Promise.resolve({}), null);
+  s.open('/messages/c1');
+  assert.equal(s.getRenderState().handoff.path, '/login');
+});
+
+test('thread: loads, marks read, scrolls to the newest message', async () => {
+  const sent = [];
+  const { s } = messagingShell((m, p, b) => { sent.push([m, p, b]); return Promise.resolve({}); });
+  s.open('/messages/c1');
+  await tick(); await tick();
+  const route = s.getRenderState().route;
+  assert.deepEqual(route.items.map((m) => m.mine), [false, true]);
+  assert.equal(route.label, '@amy');
+  assert.deepEqual(sent[0].slice(0, 2), ['POST', '/api/messages/conversations/c1/read']);
+});
+
+test('compose: typed text sends optimistically and settles on the server message', async () => {
+  const sent = [];
+  let finish;
+  const { s } = messagingShell((m, p, b) => {
+    sent.push([m, p, b]);
+    return p.endsWith('/messages') ? new Promise((r) => { finish = r; }) : Promise.resolve({});
+  });
+  s.open('/messages/c1');
+  await tick(); await tick();
+  assert.equal(s.handleHit({ action: 'compose-focus' }), true);
+  for (const k of ['shift', 'h', 'i', 'space', 'layout:emoji', '👋']) s.type(k);
+  assert.equal(s.getRenderState().field.text, 'Hi 👋');
+  assert.equal(s.getRenderState().field.layout, 'emoji');
+  s.type('enter');
+  let items = s.getRenderState().route.items;
+  assert.equal(items[2].text, 'Hi 👋');
+  assert.equal(items[2].pending, true);
+  assert.equal(s.getRenderState().field.text, '', 'field clears, stays focused');
+  assert.equal(s.getRenderState().field.focused, true);
+  await tick();
+  const post = sent.find((x) => x[1].endsWith('/messages'));
+  assert.equal(post[2].kind, 'text');
+  assert.equal(post[2].text, 'Hi 👋');
+  assert.ok(post[2].client_id.length >= 8 && post[2].client_id.length <= 64);
+  finish({ message: { id: 9, kind: 'text', text: 'Hi 👋' } });
+  await tick(); await tick();
+  items = s.getRenderState().route.items;
+  assert.equal(items[2].id, 9);
+  assert.equal(items[2].mine, true);
+});
+
+test('a failed send marks the bubble; quick replies send directly', async () => {
+  const { s } = messagingShell((m, p) => (p.endsWith('/messages') ? Promise.reject(new Error('x')) : Promise.resolve({})));
+  s.open('/messages/c1');
+  await tick(); await tick();
+  assert.equal(s.handleHit({ action: 'quick-reply', arg: 'Nice!' }), true);
+  await tick(); await tick();
+  const last = s.getRenderState().route.items.at(-1);
+  assert.equal(last.text, 'Nice!');
+  assert.equal(last.failed, true);
+  assert.equal(last.pending, false);
+});
+
+test('accept reloads the thread; decline leaves it', async () => {
+  const sent = [];
+  const { s } = messagingShell((m, p) => { sent.push(p); return Promise.resolve({}); });
+  s.open('/messages');
+  s.open('/messages/c1');
+  await tick(); await tick();
+  s.handleHit({ action: 'accept' });
+  await tick(); await tick();
+  assert.ok(sent.includes('/api/messages/conversations/c1/accept'));
+  assert.equal(s.section(), 'thread');
+  await tick();
+  s.handleHit({ action: 'decline' });
+  await tick(); await tick();
+  assert.ok(sent.includes('/api/messages/conversations/c1/decline'));
+  assert.equal(s.section(), 'messages');
+});
+
+test('share sheet lists chats you can message and sends to one', async () => {
+  const sent = [];
+  const { s } = messagingShell((m, p, b) => { sent.push([p, b]); return Promise.resolve({ succeeded: 1 }); });
+  assert.equal(s.share({ kind: 'reel', target_id: 'post-1', title: 'Clip' }).section, 'share');
+  await tick();
+  const route = s.getRenderState().route;
+  assert.deepEqual(route.items.map((c) => c.id), ['c1']);
+  assert.equal(route.label, 'Clip');
+  assert.equal(s.handleHit({ action: 'share-to', arg: 0 }), true);
+  assert.equal(s.getRenderState().route.sent.c1, 'sending');
+  assert.equal(s.handleHit({ action: 'share-to', arg: 0 }), false, 'no double send');
+  await tick(); await tick();
+  assert.equal(s.getRenderState().route.sent.c1, 'sent');
+  assert.equal(sent[0][0], '/api/messages/share-content');
+  assert.equal(sent[0][1].kind, 'reel');
+  assert.equal(sent[0][1].target_id, 'post-1');
+  assert.deepEqual([...sent[0][1].usernames], ['amy']);
+  assert.equal(s.share({ kind: 'nope', target_id: 'x' }), null);
+});

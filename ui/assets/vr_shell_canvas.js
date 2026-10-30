@@ -71,6 +71,45 @@
     { arg: 1, label: '▼', x: MAIN_W - 144, y: GRID_TOP + CARD_H + GRID_GAP, w: 96, h: CARD_H },
   ];
 
+  // Inbox and share sheet: one conversation per row beside the scroll column.
+  const LIST_ROWS = 6;
+  const LIST_GAP = 12;
+  const LIST_ROW_H = (CARD_H * 2 + GRID_GAP - LIST_GAP * (LIST_ROWS - 1)) / LIST_ROWS;
+  const BOX_TABS = [{ arg: 'inbox', label: 'INBOX' }, { arg: 'requests', label: 'REQUESTS' }];
+  const BOX_TAB_W = 400;
+
+  function listRowRect(slot) {
+    return { x: 48, y: GRID_TOP + slot * (LIST_ROW_H + LIST_GAP), w: MAIN_W - 48 - 168, h: LIST_ROW_H };
+  }
+
+  function boxTabRect(i) {
+    return { x: 48 + i * (BOX_TAB_W + 16), y: SEARCH_BAR.y, w: BOX_TAB_W, h: SEARCH_BAR.h };
+  }
+
+  // Thread: bubbles, quick replies, then the compose bar with SEND.
+  const THREAD_ROWS = 6;
+  const THREAD_ROW_H = 84;
+  const THREAD_GAP = 12;
+  const QUICK_REPLIES = ['👍', 'Nice!', 'Haha 😂', 'Love this', 'Thanks!'];
+  const QUICK_Y = GRID_TOP + THREAD_ROWS * (THREAD_ROW_H + THREAD_GAP) + 8;
+  const QUICK_W = 290;
+  const SEND_W = 280;
+  const COMPOSE_BAR = { x: 48, y: QUICK_Y + 84 + 24, w: SEARCH_BAR.w - SEND_W - 16, h: 104 };
+  const SEND_BTN = { x: COMPOSE_BAR.x + COMPOSE_BAR.w + 16, y: COMPOSE_BAR.y, w: SEND_W, h: COMPOSE_BAR.h };
+  const THREAD_SCROLL_H = (THREAD_ROWS * (THREAD_ROW_H + THREAD_GAP) - THREAD_GAP - GRID_GAP) / 2;
+  const THREAD_SCROLL = [
+    { arg: -1, label: '▲', x: MAIN_W - 144, y: GRID_TOP, w: 96, h: THREAD_SCROLL_H },
+    { arg: 1, label: '▼', x: MAIN_W - 144, y: GRID_TOP + THREAD_SCROLL_H + GRID_GAP, w: 96, h: THREAD_SCROLL_H },
+  ];
+
+  function threadRowRect(slot) {
+    return { x: 48, y: GRID_TOP + slot * (THREAD_ROW_H + THREAD_GAP), w: MAIN_W - 48 - 168, h: THREAD_ROW_H };
+  }
+
+  function quickRect(i) {
+    return { x: 48 + i * (QUICK_W + 16), y: QUICK_Y, w: QUICK_W, h: 84 };
+  }
+
   function cardRect(slot) {
     const col = slot % GRID_COLS;
     const row = Math.floor(slot / GRID_COLS);
@@ -90,6 +129,12 @@
     let btns = [];
     if (route.section === 'profile' && !det.is_me) {
       btns = [{ action: 'follow', label: det.is_following ? 'FOLLOWING' : 'FOLLOW', primary: !det.is_following }];
+    } else if (route.section === 'thread' && det.can_accept) {
+      const busy = !!(route.pending && route.pending.decide);
+      btns = [
+        { action: 'accept', label: 'ACCEPT', primary: true, disabled: busy },
+        { action: 'decline', label: 'DECLINE', disabled: busy || !det.can_decline },
+      ];
     } else if (route.section === 'pack') {
       btns = [
         { action: 'play', arg: 0, label: '▶ PLAY ALL', primary: true, disabled: !(route.items || []).length },
@@ -118,7 +163,7 @@
 
   const SECTION_TITLES = {
     explore: 'EXPLORE', search: 'SEARCH', tag: 'TAG', location: 'LOCATION', profile: 'PROFILE',
-    pack: 'PACK', messages: 'MESSAGES', thread: 'CHAT', wallet: 'CREDITS', rewards: 'REWARDS',
+    pack: 'PACK', messages: 'MESSAGES', thread: 'CHAT', share: 'SHARE', wallet: 'CREDITS', rewards: 'REWARDS',
   };
 
   function inRect(r, x, y) {
@@ -159,7 +204,21 @@
       const active = r.id === 'reels' ? !s.open : s.open && s.tab === r.id;
       const disabled = r.id === 'back' && !s.open;
       drawButton(ctx, r, r.label, { active, hover: hover === r.id && !disabled, disabled, size: 38 });
+      if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 28, r.y + 24, s.unread);
     });
+  }
+
+  function drawBadge(ctx, cx, cy, n) {
+    const t = tokens();
+    ctx.fillStyle = t.hex.accent;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = t.hex.onAccent;
+    ctx.font = '26px ' + t.font.display;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(n > 99 ? '99+' : String(n), cx, cy + 1);
   }
 
   function resolveNavHit(x, y) {
@@ -356,6 +415,203 @@
     });
   }
 
+  function drawAvatar(ctx, cx, cy, radius, user) {
+    const t = tokens();
+    const u = user || {};
+    ctx.fillStyle = u.avatar_color || t.hex.accent;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = t.hex.onAccent;
+    ctx.font = Math.round(radius * 0.95) + 'px ' + t.font.display;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(u.display_name || u.username || '?').slice(0, 1).toUpperCase(), cx, cy + 2);
+  }
+
+  // One-line summary of a message for the inbox row.
+  function messagePreview(m, participant) {
+    if (!m) return 'No messages yet';
+    let body = m.text || '';
+    if (m.deleted || m.kind === 'deleted') body = 'Message deleted';
+    else if (m.kind === 'reel') body = '▶ ' + ((m.post && m.post.title) || 'Shared a reel');
+    else if (m.kind === 'pack') body = '▦ ' + ((m.pack && m.pack.title) || 'Shared a pack');
+    else if (m.kind === 'gif') body = 'GIF';
+    return (participant && m.sender_id !== participant.id ? 'You: ' : '') + body;
+  }
+
+  // Avatar, name, a second line and an optional right-hand label.
+  function renderConversationRow(ctx, r, conv, sub, right, hover) {
+    const t = tokens();
+    const p = conv.participant || {};
+    ctx.fillStyle = hover ? t.hex.surface3 : t.hex.surface;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    drawAvatar(ctx, r.x + 24 + 44, r.y + r.h / 2, 44, p);
+    const x = r.x + 144;
+    const textW = r.w - 144 - 300;
+    ctx.fillStyle = t.hex.ink;
+    ctx.font = '40px ' + t.font.sans;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(truncate(ctx, (p.display_name || p.username || '?') + '  @' + (p.username || ''), textW), x, r.y + r.h * 0.34);
+    ctx.fillStyle = t.hex.ink2;
+    ctx.font = '30px ' + t.font.mono;
+    ctx.fillText(truncate(ctx, sub, textW), x, r.y + r.h * 0.7);
+    if (right) {
+      ctx.fillStyle = right.accent ? t.hex.accent : t.hex.ink2;
+      ctx.font = '34px ' + t.font.display;
+      ctx.textAlign = 'right';
+      ctx.fillText(right.label, r.x + r.w - 32, r.y + r.h / 2);
+    }
+    if (hover) {
+      ctx.strokeStyle = t.hex.accent;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(r.x + 3, r.y + 3, r.w - 6, r.h - 6);
+    }
+  }
+
+  function renderStatus(ctx, route, empty) {
+    const t = tokens();
+    let text = '';
+    if (route.status === 'loading') text = 'Loading…';
+    else if (route.status === 'error') text = "Couldn't load this page";
+    else if (!(route.items || []).length) text = empty;
+    if (text) centerText(ctx, text, 620, '52px ' + t.font.sans, t.hex.ink2);
+    return !!text;
+  }
+
+  function renderScrollButtons(ctx, route, btns, maxScroll, hover) {
+    btns.forEach((b) => {
+      const disabled = b.arg < 0 ? !route.scroll : (route.scroll || 0) >= maxScroll;
+      drawButton(ctx, b, b.label, { hover: !disabled && hover === 'scroll:' + b.arg, disabled, size: 48 });
+    });
+  }
+
+  // Inbox (route.box tabs) and the share sheet: scrolling conversation lists.
+  function renderConversationList(ctx, state, hover) {
+    const t = tokens();
+    const route = state.route;
+    const sharing = route.section === 'share';
+    if (sharing) {
+      ctx.fillStyle = t.hex.ink2;
+      ctx.font = '40px ' + t.font.sans;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const what = route.share && route.share.kind === 'pack' ? 'pack' : 'reel';
+      ctx.fillText(truncate(ctx, 'Send this ' + what + ' to a chat', SEARCH_BAR.w), SEARCH_BAR.x, SEARCH_BAR.y + SEARCH_BAR.h / 2);
+    } else {
+      const counts = state.unreadBox || {};
+      BOX_TABS.forEach((b, i) => drawButton(ctx, boxTabRect(i), b.label + (counts[b.arg] ? '  ' + counts[b.arg] : ''), {
+        active: (route.box || 'inbox') === b.arg, hover: hover === 'box:' + b.arg, size: 36,
+      }));
+    }
+    if (renderStatus(ctx, route, sharing ? 'No chats to share to yet' : (route.box === 'requests' ? 'No message requests' : 'No messages yet'))) return;
+    const items = route.items || [];
+    const first = route.scroll || 0;
+    for (let slot = 0; slot < LIST_ROWS; slot++) {
+      const conv = items[first + slot];
+      if (!conv) break;
+      const r = listRowRect(slot);
+      let right = null;
+      let sub = messagePreview(conv.last_message, conv.participant);
+      if (sharing) {
+        const sent = (route.sent || {})[conv.id];
+        right = { label: { sending: 'SENDING…', sent: 'SENT ✓', failed: 'RETRY' }[sent] || 'SEND', accent: sent !== 'sending' };
+        sub = '@' + ((conv.participant && conv.participant.username) || '');
+      } else if (conv.unread_count) {
+        right = { label: conv.unread_count + ' NEW', accent: true };
+      } else if (conv.is_request) {
+        right = { label: 'REQUEST' };
+      }
+      const key = sharing ? 'share-to:' + (first + slot) : 'chip:/messages/' + conv.id;
+      renderConversationRow(ctx, r, conv, sub, right, hover === key);
+    }
+    renderScrollButtons(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
+  }
+
+  function bubbleText(m) {
+    if (m.deleted || m.kind === 'deleted') return 'Message deleted';
+    if (m.kind === 'reel') return '▶ ' + ((m.post && m.post.title) || 'Shared reel');
+    if (m.kind === 'pack') return '▦ ' + ((m.pack && m.pack.title) || 'Shared pack');
+    if (m.kind === 'gif') return 'GIF';
+    return String(m.text || '') + (m.failed ? '  ⚠ not sent' : '');
+  }
+
+  function renderThread(ctx, state, hover) {
+    const t = tokens();
+    const route = state.route;
+    const det = route.detail;
+    const f = state.field || {};
+    if (det) {
+      const p = det.participant || {};
+      const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
+      drawAvatar(ctx, SEARCH_BAR.x + 52, cy, 52, p);
+      ctx.fillStyle = t.hex.ink;
+      ctx.font = '44px ' + t.font.sans;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const name = truncate(ctx, p.display_name || p.username || '', 640);
+      ctx.fillText(name, SEARCH_BAR.x + 136, cy);
+      const note = det.is_request ? 'wants to message you' : (det.state === 'pending' ? 'request sent' : '');
+      if (note) {
+        ctx.fillStyle = t.hex.ink2;
+        ctx.font = '32px ' + t.font.mono;
+        ctx.fillText(note, SEARCH_BAR.x + 136 + ctx.measureText(name).width + 40, cy + 2);
+      }
+      detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, {
+        primary: b.primary, disabled: b.disabled, size: 36, hover: !b.disabled && hover === b.action,
+      }));
+    }
+    if (!renderStatus(ctx, route, 'No messages yet. Say hi!')) {
+      const items = route.items || [];
+      const first = route.scroll || 0;
+      for (let slot = 0; slot < THREAD_ROWS; slot++) {
+        const m = items[first + slot];
+        if (!m) break;
+        const row = threadRowRect(slot);
+        ctx.font = '36px ' + t.font.sans;
+        const text = truncate(ctx, bubbleText(m), 1240);
+        const w = Math.min(row.w, ctx.measureText(text).width + 64);
+        const x = m.mine ? row.x + row.w - w : row.x;
+        ctx.globalAlpha = m.pending ? 0.6 : 1;
+        ctx.fillStyle = m.mine ? t.hex.accent : t.hex.surface2;
+        ctx.fillRect(x, row.y, w, row.h);
+        ctx.fillStyle = m.mine ? t.hex.onAccent : (m.deleted ? t.hex.inkMuted : t.hex.ink);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x + 32, row.y + row.h / 2 + 2);
+        ctx.globalAlpha = 1;
+      }
+      renderScrollButtons(ctx, route, THREAD_SCROLL, Math.max(0, items.length - THREAD_ROWS), hover);
+    }
+    const canMessage = !!(det && det.can_message);
+    if (canMessage) {
+      QUICK_REPLIES.forEach((q, i) => drawButton(ctx, quickRect(i), q, { hover: hover === 'quick-reply:' + q, size: 32 }));
+    }
+    const typing = f.focused && f.id === 'compose';
+    const r = COMPOSE_BAR;
+    ctx.fillStyle = t.hex.surface2;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = typing ? t.hex.accent : (hover === 'compose-focus' ? t.hex.ink : t.hex.rule);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
+    const draft = typing ? f.text + '|' : (route.draft || '');
+    let placeholder = 'Message ' + (route.label || '');
+    if (det && !canMessage) placeholder = det.state === 'pending' ? 'Waiting for them to accept' : "You can't reply in this chat";
+    ctx.fillStyle = draft ? t.hex.ink : t.hex.inkMuted;
+    ctx.font = '40px ' + t.font.sans;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    // Long drafts show their end, where typing happens.
+    let shown = draft || placeholder;
+    while (shown.length > 1 && ctx.measureText(shown).width > r.w - 64) shown = shown.slice(1);
+    ctx.fillText(shown, r.x + 32, r.y + r.h / 2);
+    drawButton(ctx, SEND_BTN, 'SEND', {
+      primary: canMessage && !!(typing ? f.text : route.draft), disabled: !canMessage,
+      hover: canMessage && hover === 'compose-send', size: 40,
+    });
+  }
+
   // Sections without a body yet show a labelled placeholder.
   function renderSectionBody(ctx, state) {
     const t = tokens();
@@ -389,6 +645,8 @@
     const route = s.route || {};
     const section = route.section;
     renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover);
+    if (section === 'messages' || section === 'share') { renderConversationList(ctx, s, hover); return; }
+    if (section === 'thread') { renderThread(ctx, s, hover); return; }
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
     if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
     else if (section === 'profile' || section === 'pack') renderDetailRow(ctx, route, hover);
@@ -403,6 +661,8 @@
       return b ? { action: b.action } : null;
     }
     const route = state && state.route;
+    if (route && (route.section === 'messages' || route.section === 'share')) return resolveListHit(route, x, y);
+    if (route && route.section === 'thread') return resolveThreadHit(route, x, y);
     if (!route || !GRID_SECTIONS[route.section]) return null;
     if (route.section === 'explore' || route.section === 'search') {
       if (inRect(SEARCH_BAR, x, y)) return { action: 'search-focus' };
@@ -427,47 +687,91 @@
     return null;
   }
 
+  function resolveListHit(route, x, y) {
+    if (route.section === 'messages') {
+      const tab = BOX_TABS.find((b, i) => inRect(boxTabRect(i), x, y));
+      if (tab) return { action: 'box', arg: tab.arg };
+    }
+    const sb = SCROLL_BTNS.find((r) => inRect(r, x, y));
+    if (sb) return { action: 'scroll', arg: sb.arg };
+    const items = route.items || [];
+    for (let slot = 0; slot < LIST_ROWS; slot++) {
+      if (!inRect(listRowRect(slot), x, y)) continue;
+      const i = (route.scroll || 0) + slot;
+      if (i >= items.length) return null;
+      return route.section === 'share' ? { action: 'share-to', arg: i } : { action: 'chip', arg: '/messages/' + items[i].id };
+    }
+    return null;
+  }
+
+  function resolveThreadHit(route, x, y) {
+    const det = route.detail;
+    const b = detailButtons(route).find((r) => inRect(r, x, y));
+    if (b) return b.disabled ? null : { action: b.action };
+    const sb = THREAD_SCROLL.find((r) => inRect(r, x, y));
+    if (sb) return { action: 'scroll', arg: sb.arg };
+    if (!det || !det.can_message) return null;
+    const q = QUICK_REPLIES.findIndex((label, i) => inRect(quickRect(i), x, y));
+    if (q >= 0) return { action: 'quick-reply', arg: QUICK_REPLIES[q] };
+    if (inRect(COMPOSE_BAR, x, y)) return { action: 'compose-focus' };
+    if (inRect(SEND_BTN, x, y)) return { action: 'compose-send' };
+    return null;
+  }
+
   // Laser keyboard (own panel, shown while a field is focused).
   const KB_W = 1280;
   const KB_H = 480;
   const KB_GAP = 12;
   const KB_KEY_W = (KB_W - KB_GAP * 11) / 10;
   const KB_KEY_H = (KB_H - KB_GAP * 5) / 4;
-  const KB_LABELS = { backspace: '⌫', space: 'SPACE', enter: 'ENTER', close: 'HIDE' };
+  const KB_LABELS = { backspace: '⌫', space: 'SPACE', enter: 'ENTER', close: 'HIDE', shift: '⇧' };
+  const KB_LAYOUTS = {
+    alpha: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+    symbols: ['1234567890', '@#$%&-+()', '!?,.\'":'],
+    emoji: ['😀😂😍🥰😎🤔😮😢😡👍', '👏🙏🔥💯🎉💜👀🙌😅', '🤩😴🤯🥳💀🌍✨'],
+  };
 
-  function keyboardRects() {
+  // Keys for the field's layout; letters show upper case while shift is on.
+  function keyboardRects(field) {
+    const f = field || {};
+    const layout = KB_LAYOUTS[f.layout] ? f.layout : 'alpha';
+    const rows = KB_LAYOUTS[layout].map((r) => Array.from(r));
     const out = [];
     const unit = KB_KEY_W + KB_GAP;
     const rowY = (r) => KB_GAP + r * (KB_KEY_H + KB_GAP);
-    const letters = (row, chars, x0) => chars.split('').forEach((c, i) => {
-      out.push({ id: c, label: c.toUpperCase(), x: x0 + i * unit, y: rowY(row), w: KB_KEY_W, h: KB_KEY_H });
-    });
-    letters(0, 'qwertyuiop', KB_GAP);
-    letters(1, 'asdfghjkl', KB_GAP + unit / 2);
-    letters(2, 'zxcvbnm', KB_GAP + unit / 2);
-    const bsX = KB_GAP + unit / 2 + 7 * unit;
-    out.push({ id: 'backspace', x: bsX, y: rowY(2), w: KB_W - KB_GAP - bsX, h: KB_KEY_H });
-    out.push({ id: 'close', x: KB_GAP, y: rowY(3), w: 2 * unit - KB_GAP, h: KB_KEY_H });
-    out.push({ id: 'space', x: KB_GAP + 2 * unit, y: rowY(3), w: 6 * unit - KB_GAP, h: KB_KEY_H });
-    out.push({ id: 'enter', x: KB_GAP + 8 * unit, y: rowY(3), w: KB_W - KB_GAP * 2 - 8 * unit, h: KB_KEY_H });
-    out.forEach((k) => { if (!k.label) k.label = KB_LABELS[k.id]; });
+    const key = (id, label, x, row, w) => out.push({ id, label, x, y: rowY(row), w, h: KB_KEY_H });
+    rows[0].forEach((c, i) => key(c, c, KB_GAP + i * unit, 0, KB_KEY_W));
+    rows[1].forEach((c, i) => key(c, c, KB_GAP + unit / 2 + i * unit, 1, KB_KEY_W));
+    key('shift', KB_LABELS.shift, KB_GAP, 2, 1.5 * unit - KB_GAP);
+    rows[2].forEach((c, i) => key(c, c, KB_GAP + 1.5 * unit + i * unit, 2, KB_KEY_W));
+    const bsX = KB_GAP + 1.5 * unit + rows[2].length * unit;
+    key('backspace', KB_LABELS.backspace, bsX, 2, KB_W - KB_GAP - bsX);
+    const symbolsKey = layout === 'symbols' ? ['layout:alpha', 'ABC'] : ['layout:symbols', '?123'];
+    const emojiKey = layout === 'emoji' ? ['layout:alpha', 'ABC'] : ['layout:emoji', '☺'];
+    let x = KB_GAP;
+    [['close', KB_LABELS.close, 1.5], [symbolsKey[0], symbolsKey[1], 1.5], [emojiKey[0], emojiKey[1], 1.5],
+      ['space', KB_LABELS.space, 3.5]].forEach(([id, label, u]) => { key(id, label, x, 3, u * unit - KB_GAP); x += u * unit; });
+    key('enter', KB_LABELS.enter, x, 3, KB_W - KB_GAP - x);
+    if (layout === 'alpha') out.forEach((k) => { if (k.id.length === 1) k.label = f.shift ? k.id.toUpperCase() : k.id; });
     return out;
   }
 
-  function renderKeyboard(ctx, hover) {
+  function renderKeyboard(ctx, hover, field) {
     const t = tokens();
+    const shift = !!(field && field.shift);
     ctx.clearRect(0, 0, KB_W, KB_H);
     ctx.fillStyle = t.hex.bg;
     ctx.globalAlpha = 0.94;
     ctx.fillRect(0, 0, KB_W, KB_H);
     ctx.globalAlpha = 1;
-    keyboardRects().forEach((k) => drawButton(ctx, k, k.label, {
-      primary: k.id === 'enter', hover: hover === 'key:' + k.id, size: k.id.length > 1 ? 36 : 48,
+    keyboardRects(field).forEach((k) => drawButton(ctx, k, k.label, {
+      primary: k.id === 'enter', active: k.id === 'shift' && shift,
+      hover: hover === 'key:' + k.id, size: Array.from(k.label).length > 1 ? 36 : 48,
     }));
   }
 
-  function resolveKeyboardHit(x, y) {
-    const k = keyboardRects().find((r) => inRect(r, x, y));
+  function resolveKeyboardHit(x, y, field) {
+    const k = keyboardRects(field).find((r) => inRect(r, x, y));
     return k ? { action: 'key', arg: k.id } : null;
   }
 
@@ -498,6 +802,13 @@
     thumbUrl,
     keyboardRects,
     renderKeyboard,
+    LIST_ROWS,
+    listRowRect,
+    threadRowRect,
+    quickRect,
+    COMPOSE_BAR,
+    SEND_BTN,
+    QUICK_REPLIES,
     resolveKeyboardHit,
     hoverKey,
   };

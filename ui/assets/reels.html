@@ -3770,6 +3770,7 @@
       pauseCurrentPlayback();
       await persistPackProgress(true);
       recordPackEvent('pack_share');
+      if (shareInVrShell('pack', packState.pack.id, packState.pack.title || 'Reel Pack')) return;
       await exitXrForDomUi();
       const detail = { kind: 'pack', id: packState.pack.id, pack_id: packState.pack.id, title: packState.pack.title || 'Reel Pack' };
       window.dispatchEvent(new CustomEvent('echo:share-pack', { detail }));
@@ -4358,6 +4359,16 @@
         return false;
       }
     }
+
+    // Share to a chat from the in-VR sheet instead of leaving XR for the DOM dialog.
+    function shareInVrShell(kind, id, title) {
+      try {
+        return typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting() &&
+          !!WebXRVR.shell && !!WebXRVR.shell.share && WebXRVR.shell.share({ kind: kind, target_id: id, title: title });
+      } catch (e) {
+        return false;
+      }
+    }
     // </vr-shell-nav>
 
     async function dispatchNavigation(path) {
@@ -4639,8 +4650,10 @@
         pauseCurrentPlayback();
         await persistPackProgress(true);
       }
-      // ReelShareDialog is DOM-only, in feed mode as well as pack mode.
-      await exitXrForDomUi();
+      // ReelShareDialog is DOM-only, in feed mode as well as pack mode; in VR
+      // the shell's share sheet replaces it.
+      const inShell = shareInVrShell('reel', item.post_id, item.title || item.filename || 'Shared reel');
+      if (!inShell) await exitXrForDomUi();
       requestJson('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4654,6 +4667,7 @@
           client_occurred_at: new Date().toISOString(),
         }),
       }).catch(() => {});
+      if (inShell) return;
       const detail = {
         post_id: item.post_id,
         title: item.title || item.filename || 'Shared reel',
@@ -7029,7 +7043,10 @@
           const sep = path.indexOf('?') >= 0 ? '&' : '?';
           return requestJson(path + sep + 'codec=' + encodeURIComponent(feedParams.codec || 'h264'));
         },
-        shellSend: function(method, path) { return requestJson(path, { method: method }); },
+        shellSend: function(method, path, body) {
+          return requestJson(path, body === undefined ? { method: method }
+            : { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        },
         onPreviewStereo: () => syncStereoSource(),
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {

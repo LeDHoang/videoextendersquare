@@ -40,7 +40,7 @@ const SHELL_PAGES = [
 function shellTab(section) {
   if (!section || section === 'handoff') return '';
   if (section === 'profile') return 'PROFILE';
-  if (section === 'messages' || section === 'thread') return 'MESSAGES';
+  if (section === 'messages' || section === 'thread' || section === 'share') return 'MESSAGES';
   if (section === 'wallet' || section === 'rewards') return 'WALLET';
   return 'EXPLORE';
 }
@@ -171,6 +171,9 @@ export default function ImmersivePreviewPage() {
             </Button>
           ))}
           <Button disabled={!previewState.shell} onClick={() => { renderer.shell.close(); syncState(); }}>CLOSE SHELL</Button>
+        </div>
+        <div className="sx-control-group">
+          <Button disabled={!renderer?.shell} onClick={() => { renderer.shell.share(); syncState(); }}>SHARE REEL</Button>
         </div>
         <ToggleRow
           label="SIDE-BY-SIDE STEREO"
