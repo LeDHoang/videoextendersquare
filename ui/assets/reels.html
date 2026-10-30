@@ -6100,6 +6100,29 @@
       }
     }
 
+    // In-VR shell grid → feed. Same swap as a location feed (restorable via
+    // restoreAllLocations), but the items are already loaded and there is no
+    // next page.
+    function replaceFeedForVr(feed) {
+      const items = feed && Array.isArray(feed.videoData) ? feed.videoData.filter(Boolean) : [];
+      if (!items.length) return false;
+      captureOriginalFeed();
+      abortFeedWork();
+      finishViewTracking('vr_shell_feed');
+      clearImageTimer();
+      clearBlobCache();
+      try { video.pause(); } catch (e) {}
+      videoData = items.slice();
+      feedCursor = null;
+      feedHasMore = false;
+      activeLocationFeed = { slug: '', name: String(feed.label || 'EXPLORE') };
+      idx = Math.max(0, Math.min(items.length - 1, Number(feed.startIndex) || 0));
+      preloadedCount = 0;
+      loadVideo(idx, { autoplay: true });
+      showFlash(String(activeLocationFeed.name).toUpperCase());
+      return true;
+    }
+
     async function restoreAllLocations() {
       if (!originalFeedSnapshot) return false;
       const snapshot = FeedState.restore(originalFeedSnapshot);
@@ -7000,6 +7023,12 @@
           window.dispatchEvent(new CustomEvent('echo:vr-exit'));
         },
         onShellHandoff: function(path) { dispatchNavigation(path); },
+        onShellPlayFeed: replaceFeedForVr,
+        shellRequest: function(path) {
+          // Grid reels play in this player, so ask for the codec it is using.
+          const sep = path.indexOf('?') >= 0 ? '&' : '?';
+          return requestJson(path + sep + 'codec=' + encodeURIComponent(feedParams.codec || 'h264'));
+        },
         onPreviewStereo: () => syncStereoSource(),
         isPackMode: function() { return isPackMode; },
         getPackContext: function() {

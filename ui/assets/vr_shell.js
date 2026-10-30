@@ -59,11 +59,43 @@
     return out('handoff');
   }
 
-  // deps: { exitAndNavigate(path), getUser() } — both optional.
+  // Grid geometry shared with VRShellCanvas (cards per row, rows on screen).
+  const GRID_COLS = 5;
+  const GRID_ROWS = 2;
+
+  function enc(s) { return encodeURIComponent(s); }
+  function chips(rows, base) {
+    return (Array.isArray(rows) ? rows : []).filter((r) => r && r.slug)
+      .map((r) => ({ label: String(r.name || r.slug), path: base + enc(r.slug) }));
+  }
+
+  // Data source for each grid section: request path + query, and how to read the reply.
+  function sourceFor(route) {
+    switch (route.section) {
+      case 'explore': return { path: '/api/reels', query: { sort: 'shuffle' } };
+      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'shuffle' } };
+      case 'tag': return {
+        path: '/api/reels/tags/' + enc(route.arg), query: {},
+        related: (r) => chips(r.related_tags, '/explore/tag/'),
+        label: () => '#' + route.arg,
+      };
+      case 'location': return {
+        path: '/api/reels/locations/' + enc(route.arg), query: {},
+        related: (r) => chips(r.related_locations, '/explore/location/'),
+        label: (r) => (r.location && r.location.name) || route.arg,
+      };
+      default: return null;
+    }
+  }
+
+  // deps (all optional): exitAndNavigate(path), getUser(), request(path, query) → Promise<json>,
+  // playFeed({ videoData, startIndex, label }).
   function create(deps) {
     const d = deps || {};
     let stack = [];
     let handoff = null;
+    // The one text field (search). focused shows the keyboard.
+    let field = { id: 'search', text: '', focused: false };
     let version = 0;
     const listeners = [];
 
@@ -77,6 +109,7 @@
     function close() {
       stack = [];
       handoff = null;
+      field.focused = false;
       dirty();
     }
 
@@ -98,13 +131,88 @@
         return route;
       }
       handoff = null;
+      field.focused = false;
       const cur = top();
-      if (!cur || cur.path !== route.path) stack.push(route);
+      if (!cur || cur.path !== route.path) { stack.push(route); load(route); }
       dirty();
       return route;
     }
 
+    // Fills route.items/related/status; a reply for a route no longer on the stack is dropped.
+    function load(route) {
+      const src = sourceFor(route);
+      if (!src) return;
+      route.items = [];
+      route.related = [];
+      route.scroll = 0;
+      route.label = src.label ? src.label({}) : '';
+      if (!d.request) { route.status = 'error'; return; }
+      route.status = 'loading';
+      Promise.resolve().then(() => d.request(src.path, src.query)).then((res) => {
+        if (stack.indexOf(route) < 0) return;
+        const r = res || {};
+        route.items = Array.isArray(r.videos) ? r.videos : [];
+        route.related = src.related ? src.related(r) : [];
+        if (src.label) route.label = src.label(r);
+        route.status = 'ready';
+        dirty();
+      }, () => {
+        if (stack.indexOf(route) < 0) return;
+        route.status = 'error';
+        dirty();
+      });
+    }
+
+    // delta in grid rows; clamped so the last row stays on screen.
+    function scroll(delta) {
+      const route = top();
+      if (handoff || !route || !route.items) return false;
+      const max = Math.max(0, Math.ceil(route.items.length / GRID_COLS) - GRID_ROWS);
+      const next = Math.max(0, Math.min(max, (route.scroll || 0) + (delta | 0)));
+      if (next === route.scroll) return false;
+      route.scroll = next;
+      dirty();
+      return true;
+    }
+
+    function focusField(focused) {
+      if (focused && !field.focused) {
+        const route = top();
+        field.text = route && route.section === 'search' ? route.arg : '';
+      }
+      field.focused = !!focused;
+      dirty();
+    }
+
+    // key: a character, or 'backspace' | 'space' | 'enter' | 'close'.
+    function type(key) {
+      if (!field.focused) return false;
+      if (key === 'close') { focusField(false); return true; }
+      if (key === 'enter') {
+        const q = field.text.trim();
+        field.focused = false;
+        if (q) open('/explore?q=' + enc(q)); else dirty();
+        return true;
+      }
+      if (key === 'backspace') field.text = field.text.slice(0, -1);
+      else if (key === 'space') field.text += ' ';
+      else if (typeof key === 'string' && key.length === 1) field.text = (field.text + key).slice(0, 80);
+      else return false;
+      dirty();
+      return true;
+    }
+
+    function play(index) {
+      const route = top();
+      const items = route && route.items;
+      if (!items || !items[index]) return false;
+      if (d.playFeed) d.playFeed({ videoData: items.slice(), startIndex: index, label: route.label || '' });
+      close();
+      return true;
+    }
+
     function back() {
+      field.focused = false;
       if (handoff) { handoff = null; if (!stack.length) close(); else dirty(); return; }
       stack.pop();
       if (!stack.length) close(); else dirty();
@@ -130,6 +238,19 @@
         case 'close':
           close();
           return true;
+        case 'play':
+          return play(hit.arg | 0);
+        case 'chip':
+          open(hit.arg);
+          return true;
+        case 'scroll':
+          scroll(hit.arg);
+          return true;
+        case 'search-focus':
+          focusField(true);
+          return true;
+        case 'key':
+          return type(hit.arg);
         case 'handoff-cancel':
           back();
           return true;
@@ -158,6 +279,7 @@
         handoff,
         depth: stack.length,
         tab: handoff ? '' : (route && SECTION_TAB[route.section]) || '',
+        field: { id: field.id, text: field.text, focused: field.focused && !handoff && !!route },
         version,
       };
     }
@@ -168,6 +290,11 @@
       close,
       showHandoff,
       handleHit,
+      scroll,
+      type,
+      focusField,
+      // Redraw without a state change (e.g. a thumbnail finished loading).
+      touch: dirty,
       isOpen,
       section() { return handoff ? 'handoff' : (top() ? top().section : null); },
       getRenderState,
@@ -179,5 +306,5 @@
     };
   }
 
-  return { parseRoute, create, HANDOFF };
+  return { parseRoute, create, HANDOFF, GRID_COLS, GRID_ROWS };
 });

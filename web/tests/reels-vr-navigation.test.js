@@ -48,3 +48,12 @@ test('the engine handoff callback navigates through dispatchNavigation', () => {
   assert.match(html, /new CustomEvent\('echo:vr-enter'\)/);
   assert.match(html, /new CustomEvent\('echo:vr-exit'\)/);
 });
+
+test('shell grids play through replaceFeedForVr, which keeps the original feed restorable', () => {
+  assert.match(html, /onShellPlayFeed: replaceFeedForVr,/);
+  assert.match(html, /shellRequest: function\(path\) \{/);
+  const body = html.slice(html.indexOf('function replaceFeedForVr(feed) {'), html.indexOf('async function restoreAllLocations()'));
+  assert.ok(body.indexOf('captureOriginalFeed()') < body.indexOf('videoData = items.slice()'));
+  assert.match(body, /feedHasMore = false;/);
+  assert.match(body, /activeLocationFeed = \{/);
+});

@@ -67,3 +67,52 @@ test('hoverKey matches the renderers hover argument', () => {
   assert.equal(sc.hoverKey({ action: 'nav', arg: 'explore' }), 'explore');
   assert.equal(sc.hoverKey({ action: 'close' }), 'close');
 });
+
+test('grid: search bar, scroll buttons and cards resolve with the scroll offset', () => {
+  const sc = loadCanvas();
+  const items = Array.from({ length: 12 }, (_, i) => ({ title: 't' + i }));
+  const route = { section: 'explore', items, scroll: 1, status: 'ready' };
+  assert.equal(sc.resolveMainHit({ route }, 200, 200).action, 'search-focus');
+  const c = sc.cardRect(0);
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, c.x + 10, c.y + 10) }, { action: 'play', arg: 5 });
+  const last = sc.cardRect(9);
+  assert.equal(sc.resolveMainHit({ route }, last.x + 10, last.y + 10), null, 'past the end');
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900) }, { action: 'scroll', arg: 1 });
+  const right = sc.cardRect(4);
+  assert.ok(right.x + right.w < sc.MAIN_W - 144, 'cards clear the scroll column');
+  const tag = { section: 'tag', items: [], related: [{ label: '#a', path: '/explore/tag/a' }] };
+  assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'chip', arg: '/explore/tag/a' });
+  assert.equal(sc.resolveMainHit({ route: { section: 'profile' } }, c.x + 10, c.y + 10), null);
+});
+
+test('grid renders titles, statuses and uses the image getter', () => {
+  const sc = loadCanvas();
+  const asked = [];
+  let rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: { section: 'search', arg: 'cats', status: 'ready',
+    items: [{ title: 'Hello', author_name: 'bob', poster_url: '/p.jpg', media_type: 'video' }] } }, '', (u) => { asked.push(u); return null; });
+  assert.ok(rec.texts.includes('Hello'));
+  assert.ok(rec.texts.includes('@bob'));
+  assert.ok(rec.texts.includes('cats'));
+  assert.deepEqual(asked, ['/p.jpg']);
+  rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: { section: 'tag', status: 'loading', label: '#x' } }, '');
+  assert.ok(rec.texts.includes('Loading…'));
+  assert.ok(rec.texts.includes('#x'));
+  assert.equal(sc.thumbUrl({ media_type: 'image', url: '/i.jpg' }), '/i.jpg');
+  assert.equal(sc.thumbUrl({ media_type: 'video', url: '/v.mp4' }), '');
+});
+
+test('keyboard keys tile the canvas and resolve to their id', () => {
+  const sc = loadCanvas();
+  const keys = sc.keyboardRects();
+  assert.equal(keys.length, 26 + 4);
+  for (const k of keys) {
+    assert.ok(k.x >= 0 && k.y >= 0 && k.x + k.w <= sc.KB_W + 0.01 && k.y + k.h <= sc.KB_H + 0.01, k.id);
+    assert.deepEqual({ ...sc.resolveKeyboardHit(k.x + k.w / 2, k.y + k.h / 2) }, { action: 'key', arg: k.id });
+  }
+  assert.equal(sc.hoverKey({ action: 'key', arg: 'q' }), 'key:q');
+  const rec = recordingCtx();
+  sc.renderKeyboard(rec.ctx, 'key:q');
+  assert.ok(rec.texts.includes('Q') && rec.texts.includes('ENTER'));
+});

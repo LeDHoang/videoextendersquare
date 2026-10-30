@@ -108,3 +108,89 @@ test('every state change bumps the version and notifies listeners', () => {
   assert.deepEqual(seen, [1, 2]);
   assert.equal(s.version, 3);
 });
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const reel = (n) => ({ post_id: 'p' + n, title: 't' + n });
+
+test('grid sections load from the API and drop stale replies', async () => {
+  const calls = [];
+  const replies = {};
+  const s = loadShell().create({
+    request: (path, query) => { calls.push([path, { ...query }]); return replies[path]; },
+  });
+  replies['/api/reels/tags/sun%20set'] = Promise.resolve({
+    videos: [reel(1)], related_tags: [{ name: 'Beach', slug: 'beach' }, { name: 'no slug' }],
+  });
+  s.open('/explore/tag/sun%20set');
+  assert.equal(s.getRenderState().route.status, 'loading');
+  await tick();
+  const route = s.getRenderState().route;
+  assert.equal(route.status, 'ready');
+  assert.equal(route.label, '#sun set');
+  assert.deepEqual([...route.related.map((c) => c.path)], ['/explore/tag/beach']);
+
+  replies['/api/reels'] = Promise.reject(new Error('x'));
+  s.open('/explore?q=cats');
+  await tick();
+  assert.deepEqual(calls[1], ['/api/reels', { search: 'cats', sort: 'shuffle' }]);
+  assert.equal(s.getRenderState().route.status, 'error');
+
+  let resolveLate;
+  replies['/api/reels/locations/paris'] = new Promise((r) => { resolveLate = r; });
+  s.open('/explore/location/paris');
+  s.back();
+  const v = s.version;
+  resolveLate({ videos: [reel(1)] });
+  await tick();
+  assert.equal(s.version, v, 'reply for a popped route does not redraw');
+});
+
+test('scroll is clamped to the grid rows', async () => {
+  const s = loadShell().create({ request: () => Promise.resolve({ videos: Array.from({ length: 23 }, (_, i) => reel(i)) }) });
+  s.open('/explore');
+  await tick();
+  assert.equal(s.scroll(-1), false);
+  assert.equal(s.scroll(1), true);
+  s.scroll(10);
+  assert.equal(s.getRenderState().route.scroll, 3, 'ceil(23/5) - 2 rows');
+});
+
+test('search field: focus, type, backspace, enter opens the search route', () => {
+  const s = loadShell().create({});
+  s.open('/explore');
+  assert.equal(s.type('a'), false, 'typing needs focus');
+  s.handleHit({ action: 'search-focus' });
+  assert.equal(s.getRenderState().field.focused, true);
+  for (const k of ['c', 'a', 't', 'x', 'backspace', 'space', 's']) s.handleHit({ action: 'key', arg: k });
+  assert.equal(s.getRenderState().field.text, 'cat s');
+  s.handleHit({ action: 'key', arg: 'enter' });
+  assert.equal(s.getRenderState().route.path, '/explore?q=cat%20s');
+  assert.equal(s.getRenderState().field.focused, false);
+  s.focusField(true);
+  assert.equal(s.getRenderState().field.text, 'cat s', 'search route seeds the field');
+  s.type('close');
+  assert.equal(s.getRenderState().field.focused, false);
+});
+
+test('play hands the grid to the player and closes the shell', async () => {
+  const played = [];
+  const s = loadShell().create({
+    request: () => Promise.resolve({ videos: [reel(1), reel(2)], location: { name: 'Paris' } }),
+    playFeed: (f) => played.push(f),
+  });
+  s.open('/explore/location/paris');
+  await tick();
+  assert.equal(s.handleHit({ action: 'play', arg: 5 }), false);
+  assert.equal(s.handleHit({ action: 'play', arg: 1 }), true);
+  assert.equal(played[0].startIndex, 1);
+  assert.equal(played[0].label, 'Paris');
+  assert.equal(played[0].videoData.length, 2);
+  assert.equal(s.isOpen(), false);
+});
+
+test('grid constants match the canvas module', () => {
+  const window = {};
+  vm.runInNewContext(readFileSync(new URL('../../ui/assets/vr_shell_canvas.js', import.meta.url), 'utf8'), { window });
+  assert.equal(loadShell().GRID_COLS, window.VRShellCanvas.GRID_COLS);
+  assert.equal(loadShell().GRID_ROWS, window.VRShellCanvas.GRID_ROWS);
+});

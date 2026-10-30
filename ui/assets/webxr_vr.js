@@ -6458,12 +6458,20 @@ window.WebXRVR = window.WebXRVR || (function () {
   const SHELL_MAIN_RADIUS = 2.2;
   const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
   const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
+  const SHELL_KB_SIZE = { w: 1.2, h: 0.45 };
+  const SHELL_IMAGE_CAP = 96;
   let shell = null;
   let shellWasOpen = false;
   let shellResumePlayback = false;
   let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
   let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
-  let shellPainted = { version: -1, mainHover: null, navHover: null };
+  let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
+  let shellKbWasShown = false;
+  let shellPainted = { mainVersion: -1, navVersion: -1, mainHover: null, navHover: null, kbHover: null };
+  // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
+  const shellImages = new Map();
+  let shellStick = { dir: 0, t: 0 };
+  let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
   let shellNavYaw = null;
 
@@ -6478,12 +6486,87 @@ window.WebXRVR = window.WebXRVR || (function () {
     shell = core.create({
       exitAndNavigate: shellHandoff,
       getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
+      request: shellRequest,
+      playFeed(feed) {
+        // The new feed autoplays; closing must not toggle it back to paused.
+        shellResumePlayback = false;
+        if (callbacks.onShellPlayFeed) {
+          try { callbacks.onShellPlayFeed(feed); } catch (e) {}
+        }
+      },
     });
     shell.onDirty(onShellDirty);
     return shell;
   }
 
   function isShellOpen() { return !!(shell && shell.isOpen()); }
+
+  function shellRequest(path, query) {
+    if (!callbacks.shellRequest) return Promise.reject(new Error('shell requests unavailable'));
+    const qs = Object.keys(query || {}).filter((k) => query[k] !== '' && query[k] != null)
+      .map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(query[k])).join('&');
+    return callbacks.shellRequest(qs ? path + '?' + qs : path);
+  }
+
+  function isShellKeyboardShown() {
+    if (!shell || !shell.isOpen()) return false;
+    const f = shell.getRenderState().field;
+    return !!(f && f.focused);
+  }
+
+  // LRU thumbnail cache; a finished load redraws the grid. Cross-origin
+  // images without CORS fail to load and fall back to initials.
+  function getShellImage(url) {
+    let entry = shellImages.get(url);
+    if (entry) {
+      shellImages.delete(url);
+      shellImages.set(url, entry);
+      return entry.ok ? entry.img : null;
+    }
+    if (typeof Image === 'undefined') return null;
+    const img = new Image();
+    entry = { img, ok: false };
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { entry.ok = true; if (shell && shellImages.get(url) === entry) shell.touch(); };
+    img.onerror = () => {};
+    img.src = url;
+    shellImages.set(url, entry);
+    while (shellImages.size > SHELL_IMAGE_CAP) shellImages.delete(shellImages.keys().next().value);
+    return null;
+  }
+
+  // Thumbstick Y scrolls the grid one row per flick, repeating while held.
+  function shellStickInput(sources, hasRightInput) {
+    const src = sources.find((x) => x && x.handedness === 'right' && x.gamepad) ||
+      (!hasRightInput ? sources.find((x) => x && x.gamepad) : null);
+    const axes = (src && src.gamepad && src.gamepad.axes) || [];
+    const y = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+    const dir = y > 0.6 ? 1 : (y < -0.6 ? -1 : 0);
+    const now = Date.now();
+    if (Math.abs(y) < 0.3) { shellStick = { dir: 0, t: 0 }; return; }
+    if (!dir || (dir === shellStick.dir && now - shellStick.t < 350)) return;
+    shellStick = { dir, t: now };
+    shell.scroll(dir);
+  }
+
+  // Preview wheel over the main panel: one row per notch, throttled.
+  function shellWheel(deltaY) {
+    const now = Date.now();
+    if (!deltaY || now - shellWheelT < 120) return;
+    shellWheelT = now;
+    shell.scroll(deltaY > 0 ? 1 : -1);
+  }
+
+  // Preview physical keys type into the focused field.
+  function shellKeyDown(event) {
+    if (!isShellKeyboardShown() || event.metaKey || event.ctrlKey || event.altKey) return false;
+    const k = event.key;
+    const map = { Backspace: 'backspace', Enter: 'enter', Escape: 'close', ' ': 'space' };
+    const key = map[k] || (typeof k === 'string' && k.length === 1 ? k.toLowerCase() : '');
+    if (!key || !shell.type(key)) return false;
+    if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+    return true;
+  }
 
   function onShellDirty() {
     const open = shell.isOpen();
@@ -6497,6 +6580,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       layoutShellMain(getHeadPosition());
     } else if (!open && shellWasOpen) {
+      shellStick = { dir: 0, t: 0 };
       const resume = shellResumePlayback;
       shellResumePlayback = false;
       if (resume && getVisualSource().paused && callbacks.onTogglePlay) {
@@ -6504,6 +6588,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     shellWasOpen = open;
+    const kb = isShellKeyboardShown();
+    if (kb && !shellKbWasShown) layoutShellKeyboard(getHeadPosition());
+    shellKbWasShown = kb;
     applySceneVisibility();
     vrLastUiUploadT = -1;
     emitPreviewState();
@@ -6557,7 +6644,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       const p = makeShellPanel(SHELL_NAV_SIZE.w, SHELL_NAV_SIZE.h, sc.NAV_W, sc.NAV_H, 1, 6);
       shellNavCanvas = p.canvas; shellNavCtx = p.ctx; shellNavTexture = p.texture; shellNavMesh = p.mesh;
     }
-    shellPainted = { version: -1, mainHover: null, navHover: null };
+    if (!shellKbMesh) {
+      const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
+      shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
+    }
+    shellPainted = { mainVersion: -1, navVersion: -1, mainHover: null, navHover: null, kbHover: null };
     shellNavYaw = null;
   }
 
@@ -6594,11 +6685,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     faceViewerLevel(shellNavMesh, headPos);
   }
 
+  // Keyboard: below the main panel, closer, tilted up toward the viewer.
+  function layoutShellKeyboard(headPos) {
+    if (!shellKbMesh) return;
+    const yaw = headYaw();
+    shellKbMesh.position.set(headPos.x - Math.sin(yaw) * 1.3, headPos.y - 0.55, headPos.z - Math.cos(yaw) * 1.3);
+    faceViewerLevel(shellKbMesh, headPos, -0.44);
+  }
+
   function applyShellVisibility() {
     const pointerActive = !!(xrSession || previewRunning);
     if (shellNavMesh) shellNavMesh.visible = pointerActive;
     const open = pointerActive && isShellOpen();
     if (shellMainMesh) shellMainMesh.visible = open;
+    if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
     if (!open) return;
     // The open shell replaces the reel screen and every reel-side panel.
     [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh]
@@ -6612,6 +6712,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     let found = null;
     if (sc && raycaster && shell) {
       const targets = [];
+      if (shellKbMesh && shellKbMesh.visible) targets.push(shellKbMesh);
       if (shellMainMesh && shellMainMesh.visible) targets.push(shellMainMesh);
       if (shellNavMesh && shellNavMesh.visible) targets.push(shellNavMesh);
       if (targets.length) {
@@ -6619,7 +6720,10 @@ window.WebXRVR = window.WebXRVR || (function () {
           raycaster.set(origin, direction);
           const hits = raycaster.intersectObjects(targets, false);
           const h = hits.find((x) => x.uv);
-          if (h) {
+          if (h && h.object === shellKbMesh) {
+            const action = sc.resolveKeyboardHit(h.uv.x * sc.KB_W, (1 - h.uv.y) * sc.KB_H);
+            found = { panel: 'kb', distance: h.distance, action };
+          } else if (h) {
             const main = h.object === shellMainMesh;
             const cx = h.uv.x * (main ? sc.MAIN_W : sc.NAV_W);
             const cy = (1 - h.uv.y) * (main ? sc.MAIN_H : sc.NAV_H);
@@ -6650,21 +6754,31 @@ window.WebXRVR = window.WebXRVR || (function () {
     const state = shell.getRenderState();
     const mainHover = shellHover.panel === 'main' ? shellHover.key : '';
     const navHover = shellHover.panel === 'nav' ? shellHover.key : '';
+    const kbHover = shellHover.panel === 'kb' ? shellHover.key : '';
+    if (shellKbCtx && shellKbMesh && shellKbMesh.visible && shellPainted.kbHover !== kbHover) {
+      sc.renderKeyboard(shellKbCtx, kbHover);
+      shellKbTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.kbHover = kbHover;
+    } else if (shellKbMesh && !shellKbMesh.visible) {
+      shellPainted.kbHover = null;
+    }
     if (shellNavCtx && shellNavMesh && shellNavMesh.visible &&
-        (shellPainted.version !== state.version || shellPainted.navHover !== navHover)) {
+        (shellPainted.navVersion !== state.version || shellPainted.navHover !== navHover)) {
       sc.renderNavBar(shellNavCtx, state, navHover);
       shellNavTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.navHover = navHover;
+      shellPainted.navVersion = state.version;
     }
     if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
-        (shellPainted.version !== state.version || shellPainted.mainHover !== mainHover)) {
-      sc.renderMainPanel(shellMainCtx, state, mainHover);
+        (shellPainted.mainVersion !== state.version || shellPainted.mainHover !== mainHover)) {
+      sc.renderMainPanel(shellMainCtx, state, mainHover, getShellImage);
       shellMainTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.mainHover = mainHover;
+      shellPainted.mainVersion = state.version;
     }
-    shellPainted.version = state.version;
   }
 
   // Session end or teardown: drop the shell without replaying a handoff.
@@ -6680,7 +6794,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (shellMainTexture) { try { shellMainTexture.dispose(); } catch (e) {} }
     if (shellNavTexture) { try { shellNavTexture.dispose(); } catch (e) {} }
     shellMainCanvas = shellMainCtx = shellMainTexture = shellMainMesh = null;
+    if (shellKbTexture) { try { shellKbTexture.dispose(); } catch (e) {} }
     shellNavCanvas = shellNavCtx = shellNavTexture = shellNavMesh = null;
+    shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
+    shellKbWasShown = false;
+    shellImages.clear();
     shellNavYaw = null;
   }
 
@@ -6700,6 +6818,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     isOpen: isShellOpen,
     section() { return shell ? shell.section() : null; },
     getRenderState() { return shell ? shell.getRenderState() : null; },
+    scroll(delta) { return shell ? shell.scroll(delta) : false; },
+    type(key) { return shell ? shell.type(key) : false; },
   };
   // </vr-shell-glue>
 
@@ -7560,6 +7680,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const onWheel = function (event) {
       try {
       if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+      if (shell && shellHover.panel === 'main') { shellWheel(event.deltaY || 0); return; }
       if (sceneMode === 'earth') {
         // Wheel Y = map zoom (Google-Maps convention), wheel X = yaw.
         if (event.deltaY) {
@@ -7587,7 +7708,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (sceneMode === 'earth') setEarthHoveredIndex(-1);
     };
     const onContextMenu = function (event) { if (event.preventDefault) event.preventDefault(); };
-    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu };
+    const onKeyDown = function (event) {
+      try { shellKeyDown(event); } catch (e) { capturePointerError('keydown', e); }
+    };
+    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu, onKeyDown };
     try { previewCanvas.style.touchAction = 'none'; } catch (e) {}
     previewCanvas.addEventListener('pointerdown', onPointerDown);
     previewCanvas.addEventListener('pointermove', onPointerMove);
@@ -7596,6 +7720,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewCanvas.addEventListener('pointerleave', onPointerLeave);
     previewCanvas.addEventListener('wheel', onWheel, { passive: false });
     previewCanvas.addEventListener('contextmenu', onContextMenu);
+    previewCanvas.addEventListener('keydown', onKeyDown);
   }
 
   function removePreviewListeners() {
@@ -7612,6 +7737,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       previewCanvas.removeEventListener('pointerleave', listeners.onPointerLeave);
       previewCanvas.removeEventListener('wheel', listeners.onWheel);
       previewCanvas.removeEventListener('contextmenu', listeners.onContextMenu);
+      previewCanvas.removeEventListener('keydown', listeners.onKeyDown);
     } catch (e) {}
     previewListeners = null;
   }
@@ -8867,6 +8993,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     ensureThree();
     const headPos = getHeadPosition();
     const hasRightInput = sources.some((s) => s && s.handedness === 'right');
+    // The open shell owns the stick (scrolling); the scene underneath stays put.
+    if (isShellOpen()) { shellStickInput(sources, hasRightInput); return; }
 
     if (sceneMode === 'earth') {
       for (const source of sources) {
