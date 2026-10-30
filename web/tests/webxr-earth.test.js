@@ -6125,3 +6125,45 @@ test('dock LIKE, SAVE and COLLECT outlines light up when the reel is liked or sa
   assert.equal(accentCount(outlines({ saved: true })) - accentCount(base), 2);
   assert.equal(accentCount(outlines({ liked: true })) - accentCount(base), 1);
 });
+
+test('grip on an Earth panel drags it along the laser and it stays put', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(makeVideoMock(), {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(16);
+  const head = { x: 0, y: 1.6, z: 0 };
+  const start = api.computeDockPose(head, 'earth').pos;
+  const grip = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, true, false, false, false, false]))]);
+  const open = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, false, false]))]);
+  const aim = (x, y, z) => {
+    const d = { x: x - head.x, y: y - head.y, z: z - head.z };
+    api.setActiveRay(head, d, 'right');
+  };
+  // Grip with the laser on the dock grabs it; swinging the laser right
+  // carries the dock with it.
+  aim(0, 0.25, -0.85);
+  api.processXRInput(null, grip);
+  aim(0.4, 0.25, -0.85);
+  api.processXRInput(null, grip);
+  const moved = api.computeDockPose(head, 'earth').pos;
+  assert.ok(moved.x > start.x + 0.2, `dock followed the laser: ${moved.x}`);
+  // Released, the dock keeps its new spot.
+  api.processXRInput(null, open);
+  renderer.__runScheduledFrame(32);
+  aim(-0.4, 0.25, -0.85);
+  api.processXRInput(null, open);
+  closeTo(api.computeDockPose(head, 'earth').pos.x, moved.x);
+  // A grip already held when the laser lands on the panel never grabs.
+  api.processXRInput(null, grip);
+  closeTo(api.computeDockPose(head, 'earth').pos.x, moved.x);
+  // Leaving Earth forgets the pin.
+  api.processXRInput(null, open);
+  renderer.setSceneMode('reels');
+  renderer.setSceneMode('earth');
+  const reset = api.computeDockPose(head, 'earth').pos;
+  assert.deepEqual([reset.x, reset.y, reset.z], [0, 0.20, -0.85]);
+  renderer.stopPreview();
+});

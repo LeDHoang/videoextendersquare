@@ -346,6 +346,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthGrabGeo = null;
   let earthGrabAnchor = null;
   let earthPointerZoom = null;
+  // Grip grab of an Earth panel (dock + nav, location label, place card): the
+  // panel rides the laser at its grab distance and stays where it is let go
+  // until Earth closes. earthPanelGrab = { key, dist, off }.
+  let earthPanelGrab = null;
+  let earthPanelPins = {};
   function earthTopdownActive() {
     return !!debugFlags.topdown && sceneMode === 'earth' &&
       !!earthFocus && earthZoomTarget >= EARTH_TOPDOWN_MIN_ZOOM;
@@ -913,7 +918,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const m = mode || sceneMode;
     let pos;
     if (m === 'earth') {
-      pos = { x: EARTH_DOCK_POS.x, y: EARTH_DOCK_POS.y, z: EARTH_DOCK_POS.z };
+      const pin = earthPanelPins.dock || EARTH_DOCK_POS;
+      pos = { x: pin.x, y: pin.y, z: pin.z };
     } else if (lockToViewer) {
       // Legacy-exact: the transport panel stays fixed and level in the room
       // at the default screen spot while the locked screen follows the gaze.
@@ -2723,6 +2729,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthPreviewMesh.lookAt(head.x, head.y, head.z);
       }
       earthHudGazeSafe(time);
+      applyEarthPanelPins();
     } catch (e) {}
     if (earthPinsGroup) {
       try {
@@ -7720,6 +7727,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     // keeps this module singleton across routes (upstream forced
     // sceneMode='reels' in cleanup for the same reason).
     sceneMode = 'reels';
+    earthPanelPins = {};
+    earthPanelGrab = null;
     previewCanvas = null;
     controlsVisible = true;
     commentsPanelVisible = false;
@@ -7882,6 +7891,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       openEarthPlayback();
     } else if (next !== 'earth' && prev === 'earth') {
       closeEarthPlayback();
+      earthPanelPins = {};
+      earthPanelGrab = null;
       // Re-entry always starts at the full globe (Z1): no stale deep zoom.
       resetEarthZoomImmediate();
     }
@@ -8123,6 +8134,72 @@ window.WebXRVR = window.WebXRVR || (function () {
   // { panel: 'card'|'label', region, distance } for the nearest one hit
   // (region '' off the buttons), else null. Panels sit in front of the
   // globe, so they take the pointer first.
+  // Nearest Earth panel under the ray for a grip grab: 'dock' (the nav bar
+  // docked under it moves with it), 'label' or 'card'.
+  function earthPanelGrabHit(origin, direction) {
+    if (!raycaster) return null;
+    const cands = [
+      ['dock', controlsMesh], ['dock', shellNavMesh],
+      ['label', earthLabelMesh], ['card', earthPreviewMesh],
+    ];
+    let best = null;
+    try {
+      raycaster.set(origin, direction);
+      for (const [key, mesh] of cands) {
+        if (!mesh || mesh.visible === false) continue;
+        const hits = raycaster.intersectObject(mesh, false);
+        if (hits.length && (!best || hits[0].distance < best.distance)) {
+          best = { key, distance: hits[0].distance, point: hits[0].point };
+        }
+      }
+    } catch (e) { return null; }
+    return best;
+  }
+
+  function applyEarthPanelPins() {
+    const head = getHeadPosition();
+    const place = (mesh, p) => {
+      if (!mesh || !p) return;
+      mesh.position.set(p.x, p.y, p.z);
+      mesh.lookAt(head.x, head.y, head.z);
+    };
+    place(earthLabelMesh, earthPanelPins.label);
+    place(earthPreviewMesh, earthPanelPins.card);
+  }
+
+  // Grip on the pointing controller while its laser is on an Earth panel
+  // grabs that panel. A grip already held (zooming) never starts a grab.
+  // Returns true while a grab owns the grip.
+  function updateEarthPanelGrab(gripPressed, wasPressed) {
+    if (!gripPressed || !activeRayOrigin || !activeRayDir) {
+      earthPanelGrab = null;
+      return false;
+    }
+    if (!earthPanelGrab) {
+      if (wasPressed) return false;
+      const hit = earthPanelGrabHit(activeRayOrigin, activeRayDir);
+      if (!hit) return false;
+      const base = hit.key === 'dock'
+        ? computeDockPose(getHeadPosition(), 'earth').pos
+        : (hit.key === 'label' ? earthLabelMesh : earthPreviewMesh).position;
+      earthPanelGrab = {
+        key: hit.key,
+        dist: hit.distance,
+        off: { x: base.x - hit.point.x, y: base.y - hit.point.y, z: base.z - hit.point.z },
+      };
+      pulseInput(activeRayInputSource, 0.3, 30);
+    }
+    const g = earthPanelGrab;
+    earthPanelPins[g.key] = {
+      x: activeRayOrigin.x + activeRayDir.x * g.dist + g.off.x,
+      y: activeRayOrigin.y + activeRayDir.y * g.dist + g.off.y,
+      z: activeRayOrigin.z + activeRayDir.z * g.dist + g.off.z,
+    };
+    if (g.key === 'dock') layoutControlsDock();
+    else applyEarthPanelPins();
+    return true;
+  }
+
   function earthHudPanelHit(origin, direction) {
     if (!raycaster || !origin || !direction) return null;
     let best = null;
@@ -8886,9 +8963,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (isShellOpen()) { shellStickInput(sources, hasRightInput); return; }
 
     if (sceneMode === 'earth') {
+      const grabSource = activeRayInputSource || pickPointerSource(sources);
+      const grabGp = grabSource && grabSource.gamepad;
+      const grabGrip = !!(grabGp && grabGp.buttons && grabGp.buttons.length > 1 && grabGp.buttons[1].pressed);
+      const panelGrabbed = updateEarthPanelGrab(grabGrip, prevBtnState.earthGrip);
+      prevBtnState.earthGrip = grabGrip;
       for (const source of sources) {
         const gp = source && source.gamepad;
         if (!gp) continue;
+        // The grabbing controller's stick stays out of zoom and rotation.
+        if (panelGrabbed && source === grabSource) continue;
         const axes = gp.axes || [];
         const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
         const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
