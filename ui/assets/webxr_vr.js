@@ -6487,6 +6487,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       exitAndNavigate: shellHandoff,
       getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
       request: shellRequest,
+      send: (method, path) => (callbacks.shellSend
+        ? callbacks.shellSend(method, path) : Promise.reject(new Error('shell requests unavailable'))),
       playFeed(feed) {
         // The new feed autoplays; closing must not toggle it back to paused.
         shellResumePlayback = false;

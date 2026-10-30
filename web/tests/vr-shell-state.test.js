@@ -194,3 +194,102 @@ test('grid constants match the canvas module', () => {
   assert.equal(loadShell().GRID_COLS, window.VRShellCanvas.GRID_COLS);
   assert.equal(loadShell().GRID_ROWS, window.VRShellCanvas.GRID_ROWS);
 });
+
+test('profile loads the author grid and the user card in parallel', async () => {
+  const calls = [];
+  const s = loadShell().create({
+    request: (path, query) => {
+      calls.push([path, { ...query }]);
+      return Promise.resolve(path === '/api/reels' ? { videos: [reel(1)] } : { user: { username: 'bo b', follower_count: 3 } });
+    },
+  });
+  s.open('/profile/bo%20b');
+  await tick();
+  assert.deepEqual(calls, [['/api/reels', { author: 'bo b', sort: 'newest' }], ['/api/users/bo%20b', {}]]);
+  const route = s.getRenderState().route;
+  assert.equal(route.status, 'ready');
+  assert.equal(route.detail.follower_count, 3);
+  assert.equal(route.items.length, 1);
+  assert.equal(route.label, '@bo b');
+});
+
+test('pack loads available items as the play queue and links the creator', async () => {
+  const played = [];
+  const s = loadShell().create({
+    request: () => Promise.resolve({ pack: {
+      id: 'pk', title: 'Trip', creator: { username: 'amy' },
+      items: [{ available: true, post: reel(1) }, { available: false, post: null }, { available: true, post: reel(2) }],
+    } }),
+    playFeed: (f) => played.push(f),
+  });
+  s.open('/packs/pk');
+  await tick();
+  const route = s.getRenderState().route;
+  assert.equal(route.label, 'Trip');
+  assert.deepEqual([...route.related.map((c) => c.path)], ['/profile/amy']);
+  s.handleHit({ action: 'play', arg: 0 });
+  assert.deepEqual([...played[0].videoData.map((v) => v.post_id)], ['p1', 'p2']);
+  assert.equal(played[0].label, 'Trip');
+});
+
+async function openProfile(send, user) {
+  const s = loadShell().create({
+    getUser: () => (user === undefined ? { username: 'me' } : user),
+    send,
+    request: (path) => Promise.resolve(path === '/api/reels' ? { videos: [] }
+      : { user: { username: 'bob', is_following: false, follower_count: 5 } }),
+  });
+  s.open('/profile/bob');
+  await tick();
+  return s;
+}
+
+test('follow is optimistic and settles on the server count', async () => {
+  const sent = [];
+  let finish;
+  const s = await openProfile((m, p) => { sent.push([m, p]); return new Promise((r) => { finish = r; }); });
+  assert.equal(s.handleHit({ action: 'follow' }), true);
+  let det = s.getRenderState().route.detail;
+  assert.equal(det.is_following, true);
+  assert.equal(det.follower_count, 6);
+  assert.equal(s.handleHit({ action: 'follow' }), false, 'second tap ignored while pending');
+  await tick();
+  finish({ following: true, follower_count: 9 });
+  await tick(); await tick();
+  det = s.getRenderState().route.detail;
+  assert.equal(det.follower_count, 9);
+  s.handleHit({ action: 'follow' });
+  await tick();
+  assert.deepEqual(sent, [['PUT', '/api/users/bob/follow'], ['DELETE', '/api/users/bob/follow']]);
+  assert.equal(s.getRenderState().route.detail.is_following, false);
+});
+
+test('a failed follow rolls back; signed-out viewers get the sign-in card', async () => {
+  const s = await openProfile(() => Promise.reject(new Error('403')));
+  s.handleHit({ action: 'follow' });
+  await tick(); await tick();
+  const det = s.getRenderState().route.detail;
+  assert.equal(det.is_following, false);
+  assert.equal(det.follower_count, 5);
+
+  const out = await openProfile(() => Promise.resolve({}), null);
+  out.handleHit({ action: 'follow' });
+  assert.equal(out.getRenderState().handoff.path, '/login');
+});
+
+test('pack like and save toggle their own flags', async () => {
+  const sent = [];
+  const s = loadShell().create({
+    getUser: () => ({ username: 'me' }),
+    send: (m, p) => { sent.push([m, p]); return Promise.resolve(p.endsWith('/like') ? { likes: 1 } : { saves: 1 }); },
+    request: () => Promise.resolve({ pack: { id: 'pk', items: [], likes: 0, saves: 0, liked_by_me: false, saved_by_me: false } }),
+  });
+  s.open('/packs/pk');
+  await tick();
+  s.handleHit({ action: 'pack-like' });
+  s.handleHit({ action: 'pack-save' });
+  await tick(); await tick();
+  const det = s.getRenderState().route.detail;
+  assert.equal(det.liked_by_me && det.saved_by_me, true);
+  assert.deepEqual(sent, [['PUT', '/api/packs/pk/like'], ['PUT', '/api/packs/pk/save']]);
+});

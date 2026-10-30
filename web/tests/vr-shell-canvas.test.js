@@ -49,9 +49,9 @@ test('main panel: close button always hits, handoff buttons only on the card', (
 test('renderers draw the section title, handoff copy and nav labels', () => {
   const sc = loadCanvas();
   let rec = recordingCtx();
-  sc.renderMainPanel(rec.ctx, { route: { section: 'profile', path: '/profile/bob', arg: 'bob' } }, '');
-  assert.ok(rec.texts.includes('PROFILE'));
-  assert.ok(rec.texts.includes('bob'));
+  sc.renderMainPanel(rec.ctx, { route: { section: 'messages', path: '/messages', arg: '' } }, '');
+  assert.ok(rec.texts.includes('MESSAGES'));
+  assert.ok(rec.texts.includes('/messages'));
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { handoff: { title: 'FINISH ON 2D', message: 'm', path: '/upload' } }, 'handoff-confirm');
   assert.ok(rec.texts.includes('EXIT VR & OPEN'));
@@ -82,7 +82,7 @@ test('grid: search bar, scroll buttons and cards resolve with the scroll offset'
   assert.ok(right.x + right.w < sc.MAIN_W - 144, 'cards clear the scroll column');
   const tag = { section: 'tag', items: [], related: [{ label: '#a', path: '/explore/tag/a' }] };
   assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'chip', arg: '/explore/tag/a' });
-  assert.equal(sc.resolveMainHit({ route: { section: 'profile' } }, c.x + 10, c.y + 10), null);
+  assert.equal(sc.resolveMainHit({ route: { section: 'messages' } }, c.x + 10, c.y + 10), null);
 });
 
 test('grid renders titles, statuses and uses the image getter', () => {
@@ -115,4 +115,27 @@ test('keyboard keys tile the canvas and resolve to their id', () => {
   const rec = recordingCtx();
   sc.renderKeyboard(rec.ctx, 'key:q');
   assert.ok(rec.texts.includes('Q') && rec.texts.includes('ENTER'));
+});
+
+test('profile and pack detail rows resolve their buttons and draw counts', () => {
+  const sc = loadCanvas();
+  const profile = { section: 'profile', items: [], detail: { username: 'bob', is_following: false, follower_count: 1200, post_count: 3 } };
+  const [follow] = sc.detailButtons(profile);
+  assert.deepEqual({ ...sc.resolveMainHit({ route: profile }, follow.x + 10, follow.y + 10) }, { action: 'follow' });
+  assert.equal(sc.detailButtons({ ...profile, detail: { is_me: true } }).length, 0, 'no follow on your own profile');
+  let rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: profile }, '');
+  assert.ok(rec.texts.includes('FOLLOW'));
+  assert.ok(rec.texts.some((t) => t.includes('1.2K FOLLOWERS')));
+
+  const pack = { section: 'pack', items: [{}], related: [{ label: '@amy', path: '/profile/amy' }],
+    detail: { likes: 2, saves: 0, liked_by_me: true, playable_count: 1 } };
+  const btns = sc.detailButtons(pack);
+  assert.deepEqual([...btns.map((b) => b.action)], ['play', 'pack-like', 'pack-save']);
+  assert.deepEqual({ ...sc.resolveMainHit({ route: pack }, btns[0].x + 10, btns[0].y + 10) }, { action: 'play', arg: 0 });
+  assert.deepEqual({ ...sc.resolveMainHit({ route: pack }, 100, 200) }, { action: 'chip', arg: '/profile/amy' });
+  assert.equal(sc.resolveMainHit({ route: { ...pack, items: [] } }, btns[0].x + 10, btns[0].y + 10), null, 'empty pack: play disabled');
+  rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route: pack }, '');
+  assert.ok(rec.texts.includes('♥ 2') && rec.texts.includes('☆ 0'));
 });

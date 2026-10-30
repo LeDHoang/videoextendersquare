@@ -56,7 +56,7 @@
   ];
 
   // Explore-style sections: a tool row (search bar or chips) above a scrolling card grid.
-  const GRID_SECTIONS = { explore: 1, search: 1, tag: 1, location: 1 };
+  const GRID_SECTIONS = { explore: 1, search: 1, tag: 1, location: 1, profile: 1, pack: 1 };
   const GRID_COLS = 5;
   const GRID_ROWS = 2;
   const GRID_TOP = 280;
@@ -79,6 +79,35 @@
 
   function chipRect(i) {
     return { x: 48 + i * (CHIP_W + 16), y: SEARCH_BAR.y, w: CHIP_W, h: SEARCH_BAR.h };
+  }
+
+  // Profile/pack action buttons, right-aligned in the tool row. Empty until the detail loads.
+  const DETAIL_BTN_W = 260;
+  function detailButtons(route) {
+    const det = route && route.detail;
+    if (!det) return [];
+    const k = (n) => fmtCount(n);
+    let btns = [];
+    if (route.section === 'profile' && !det.is_me) {
+      btns = [{ action: 'follow', label: det.is_following ? 'FOLLOWING' : 'FOLLOW', primary: !det.is_following }];
+    } else if (route.section === 'pack') {
+      btns = [
+        { action: 'play', arg: 0, label: '▶ PLAY ALL', primary: true, disabled: !(route.items || []).length },
+        { action: 'pack-like', label: (det.liked_by_me ? '♥ ' : '♡ ') + k(det.likes), active: !!det.liked_by_me },
+        { action: 'pack-save', label: (det.saved_by_me ? '★ ' : '☆ ') + k(det.saves), active: !!det.saved_by_me },
+      ];
+    }
+    const right = SEARCH_BAR.x + SEARCH_BAR.w;
+    return btns.map((b, i) => Object.assign(b, {
+      x: right - (btns.length - i) * (DETAIL_BTN_W + 16) + 16, y: SEARCH_BAR.y, w: DETAIL_BTN_W, h: SEARCH_BAR.h,
+    }));
+  }
+
+  function fmtCount(n) {
+    const v = Number(n) || 0;
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(v);
   }
 
   // Poster for videos, the image itself for image reels; '' draws the initials fallback.
@@ -214,6 +243,54 @@
     });
   }
 
+  // Profile: avatar initials, name and counts. Pack: creator chip and counts. Buttons on the right.
+  function renderDetailRow(ctx, route, hover) {
+    const t = tokens();
+    const det = route.detail;
+    if (!det) return;
+    const btns = detailButtons(route);
+    const textRight = btns.length ? btns[0].x - 32 : SEARCH_BAR.x + SEARCH_BAR.w;
+    let x = SEARCH_BAR.x;
+    const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
+    let stats;
+    if (route.section === 'profile') {
+      ctx.fillStyle = det.avatar_color || t.hex.accent;
+      ctx.beginPath();
+      ctx.arc(x + 52, cy, 52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = t.hex.onAccent;
+      ctx.font = '48px ' + t.font.display;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(det.display_name || det.username || '?').slice(0, 1).toUpperCase(), x + 52, cy + 2);
+      x += 136;
+      ctx.fillStyle = t.hex.ink;
+      ctx.font = '44px ' + t.font.sans;
+      ctx.textAlign = 'left';
+      ctx.fillText(truncate(ctx, det.display_name || det.username, 520), x, cy);
+      x += Math.min(520, ctx.measureText(det.display_name || det.username || '').width) + 40;
+      stats = fmtCount(det.post_count) + ' POSTS  ·  ' + fmtCount(det.follower_count) + ' FOLLOWERS  ·  '
+        + fmtCount(det.following_count) + ' FOLLOWING';
+    } else {
+      const chip = (route.related || [])[0];
+      if (chip) {
+        drawButton(ctx, chipRect(0), truncate(ctx, chip.label, CHIP_W - 40), { hover: hover === 'chip:' + chip.path, size: 32 });
+        x += CHIP_W + 40;
+      }
+      stats = fmtCount(det.playable_count != null ? det.playable_count : (route.items || []).length) + ' REELS  ·  '
+        + fmtCount(det.views) + ' VIEWS';
+    }
+    ctx.fillStyle = t.hex.ink2;
+    ctx.font = '32px ' + t.font.mono;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(truncate(ctx, stats, Math.max(0, textRight - x)), x, cy + 2);
+    btns.forEach((b) => drawButton(ctx, b, b.label, {
+      primary: b.primary, active: b.active, disabled: b.disabled, size: 36,
+      hover: !b.disabled && hover === (b.arg === undefined ? b.action : b.action + ':' + b.arg),
+    }));
+  }
+
   function drawThumb(ctx, r, img, item) {
     const t = tokens();
     ctx.fillStyle = t.hex.surface3;
@@ -314,6 +391,7 @@
     renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover);
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
     if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
+    else if (section === 'profile' || section === 'pack') renderDetailRow(ctx, route, hover);
     else renderChips(ctx, route.related, hover);
     renderGrid(ctx, route, hover, getImage);
   }
@@ -328,6 +406,11 @@
     if (!route || !GRID_SECTIONS[route.section]) return null;
     if (route.section === 'explore' || route.section === 'search') {
       if (inRect(SEARCH_BAR, x, y)) return { action: 'search-focus' };
+    } else if (route.section === 'profile' || route.section === 'pack') {
+      const b = detailButtons(route).find((r) => inRect(r, x, y));
+      if (b) return b.disabled ? null : (b.arg === undefined ? { action: b.action } : { action: b.action, arg: b.arg });
+      const chip = route.section === 'pack' && (route.related || [])[0];
+      if (chip && inRect(chipRect(0), x, y)) return { action: 'chip', arg: chip.path };
     } else {
       const related = (route.related || []).slice(0, CHIP_MAX);
       const i = related.findIndex((c, k) => inRect(chipRect(k), x, y));
@@ -411,6 +494,7 @@
     renderMainPanel,
     resolveMainHit,
     cardRect,
+    detailButtons,
     thumbUrl,
     keyboardRects,
     renderKeyboard,

@@ -84,12 +84,30 @@
         related: (r) => chips(r.related_locations, '/explore/location/'),
         label: (r) => (r.location && r.location.name) || route.arg,
       };
+      // Profile: the author's reels in player shape, plus the user card for the header.
+      case 'profile': return {
+        path: '/api/reels', query: { author: route.arg, sort: 'newest' },
+        detail: '/api/users/' + enc(route.arg),
+        detailOf: (r, det) => (det && det.user) || null,
+        label: () => '@' + route.arg,
+      };
+      // Pack: the detail reply carries the items; unavailable members are skipped.
+      case 'pack': return {
+        path: '/api/packs/' + enc(route.arg), query: {},
+        items: (r) => ((r.pack && r.pack.items) || []).filter((i) => i && i.available && i.post).map((i) => i.post),
+        detailOf: (r) => r.pack || null,
+        related: (r) => {
+          const c = r.pack && r.pack.creator;
+          return c && c.username ? [{ label: '@' + c.username, path: '/profile/' + enc(c.username) }] : [];
+        },
+        label: (r) => (r.pack && r.pack.title) || '',
+      };
       default: return null;
     }
   }
 
   // deps (all optional): exitAndNavigate(path), getUser(), request(path, query) → Promise<json>,
-  // playFeed({ videoData, startIndex, label }).
+  // send(method, path) → Promise<json>, playFeed({ videoData, startIndex, label }).
   function create(deps) {
     const d = deps || {};
     let stack = [];
@@ -145,13 +163,18 @@
       route.items = [];
       route.related = [];
       route.scroll = 0;
+      route.detail = null;
       route.label = src.label ? src.label({}) : '';
       if (!d.request) { route.status = 'error'; return; }
       route.status = 'loading';
-      Promise.resolve().then(() => d.request(src.path, src.query)).then((res) => {
+      Promise.resolve().then(() => Promise.all([
+        d.request(src.path, src.query),
+        src.detail ? d.request(src.detail, {}) : null,
+      ])).then(([res, det]) => {
         if (stack.indexOf(route) < 0) return;
         const r = res || {};
-        route.items = Array.isArray(r.videos) ? r.videos : [];
+        route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
+        route.detail = src.detailOf ? src.detailOf(r, det) : null;
         route.related = src.related ? src.related(r) : [];
         if (src.label) route.label = src.label(r);
         route.status = 'ready';
@@ -211,6 +234,42 @@
       return true;
     }
 
+    // Optimistic toggles on route.detail: flag field, count field, endpoint.
+    const TOGGLES = {
+      follow: { section: 'profile', flag: 'is_following', count: 'follower_count',
+        path: (det) => '/api/users/' + enc(det.username) + '/follow', reply: 'follower_count' },
+      'pack-like': { section: 'pack', flag: 'liked_by_me', count: 'likes',
+        path: (det) => '/api/packs/' + enc(det.id) + '/like', reply: 'likes' },
+      'pack-save': { section: 'pack', flag: 'saved_by_me', count: 'saves',
+        path: (det) => '/api/packs/' + enc(det.id) + '/save', reply: 'saves' },
+    };
+
+    // Flips the flag and count now; the reply settles the count, a failure rolls back.
+    function toggle(kind) {
+      const t = TOGGLES[kind];
+      const route = top();
+      const det = route && route.section === t.section && route.detail;
+      if (!det || det.is_me || (route.pending && route.pending[kind])) return false;
+      const u = d.getUser ? d.getUser() : null;
+      if (!u || !d.send) { showHandoff('/login', 'SIGN IN ON 2D', 'Sign in on the 2D site to follow, like and save.'); return true; }
+      const was = !!det[t.flag];
+      const count = det[t.count] | 0;
+      det[t.flag] = !was;
+      det[t.count] = Math.max(0, count + (was ? -1 : 1));
+      route.pending = Object.assign({}, route.pending, { [kind]: true });
+      dirty();
+      Promise.resolve().then(() => d.send(was ? 'DELETE' : 'PUT', t.path(det))).then((res) => {
+        if (res && typeof res[t.reply] === 'number') det[t.count] = res[t.reply];
+      }, () => {
+        det[t.flag] = was;
+        det[t.count] = count;
+      }).then(() => {
+        route.pending[kind] = false;
+        if (stack.indexOf(route) >= 0) dirty();
+      });
+      return true;
+    }
+
     function back() {
       field.focused = false;
       if (handoff) { handoff = null; if (!stack.length) close(); else dirty(); return; }
@@ -240,6 +299,10 @@
           return true;
         case 'play':
           return play(hit.arg | 0);
+        case 'follow':
+        case 'pack-like':
+        case 'pack-save':
+          return toggle(hit.action);
         case 'chip':
           open(hit.arg);
           return true;

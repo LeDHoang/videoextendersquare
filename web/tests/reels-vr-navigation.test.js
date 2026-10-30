@@ -57,3 +57,7 @@ test('shell grids play through replaceFeedForVr, which keeps the original feed r
   assert.match(body, /feedHasMore = false;/);
   assert.match(body, /activeLocationFeed = \{/);
 });
+
+test('shell writes go through requestJson so they carry the CSRF header', () => {
+  assert.match(html, /shellSend: function\(method, path\) \{ return requestJson\(path, \{ method: method \}\); \},/);
+});
