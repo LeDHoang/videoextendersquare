@@ -257,7 +257,7 @@ def reel_records(
             comments = (
                 db.query(Comment)
                 .join(User, User.id == Comment.author_id)
-                .options(joinedload(Comment.author), joinedload(Comment.post))
+                .options(joinedload(Comment.author))
                 .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None), User.status == "active")
                 .order_by(Comment.created_at.asc())
                 .all()
