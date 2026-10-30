@@ -65,6 +65,8 @@ PLAYER_SCRIPTS = {
     "__REELS_PACK_STATE_JS__": "reels_pack_state.js",
     "__THREE_JS__": "three.min.js",
     "__VR_UI_CANVAS_JS__": "vr_ui_canvas.js",
+    "__VR_SHELL_CANVAS_JS__": "vr_shell_canvas.js",
+    "__VR_SHELL_JS__": "vr_shell.js",
     "__WEBXR_VR_JS__": "webxr_vr.js",
 }
 _player_script_hashes: dict = {}

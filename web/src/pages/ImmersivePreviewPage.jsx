@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { Button, Segmented, ToggleRow } from '../components/ui/controls.jsx';
 import { AccentBlock, Hero, Mono, SpecRow } from '../components/ui/primitives.jsx';
+import { useAuth } from '../hooks/AuthContext.jsx';
 
 const VRPanelWorkbench = lazy(() => import('../components/ui/VRPanelWorkbench.jsx'));
 
@@ -12,6 +13,7 @@ const DEFAULT_STATE = {
   stereo: false,
   reducedMotion: false,
   sceneMode: 'reels',
+  shell: null,
   renderStats: { earthDrawCalls: 0, reelDrawCalls: 0, videoUploads: 0 },
 };
 
@@ -62,7 +64,24 @@ function isCurvatureActive(mode, target) {
   return (mode || 'dome') === target;
 }
 
+// VR shell pages to review on the flat preview without a headset.
+const SHELL_PAGES = [
+  ['EXPLORE', () => '/explore'],
+  ['PROFILE', (user) => '/profile/' + encodeURIComponent(user?.username || 'echo_archive')],
+  ['MESSAGES', () => '/messages'],
+  ['WALLET', () => '/wallet'],
+];
+
+function shellTab(section) {
+  if (!section || section === 'handoff') return '';
+  if (section === 'profile') return 'PROFILE';
+  if (section === 'messages' || section === 'thread' || section === 'share') return 'MESSAGES';
+  if (section === 'wallet' || section === 'rewards') return 'WALLET';
+  return 'EXPLORE';
+}
+
 export default function ImmersivePreviewPage() {
+  const { user } = useAuth();
   const [renderer, setRenderer] = useState(null);
   const [view, setView] = useState('3D SCENE');
   const [hiFi, setHiFi] = useState(true);
@@ -148,6 +167,7 @@ export default function ImmersivePreviewPage() {
           <span>CURVE: <strong>{formatCurvatureMode(previewState.curvatureMode)}</strong></span>
           <span>CAMERA: <strong>{(previewState.cameraMode || 'headset').toUpperCase()}</strong></span>
           <span>VIEW: <strong>{previewState.stereo ? 'STEREO' : 'MONO'}</strong></span>
+          <span>SHELL: <strong>{(previewState.shell || 'closed').toUpperCase()}</strong></span>
           <span>STATUS: <strong>{previewState.running ? 'LIVE' : 'LOADING'}</strong></span>
         </div>
       </Hero>
@@ -233,6 +253,29 @@ export default function ImmersivePreviewPage() {
                 ORBIT INSPECT
               </Button>
             </div>
+            <div className="sx-control-group" role="group" aria-label="VR shell pages">
+              {SHELL_PAGES.map(([label, path]) => (
+                <Button
+                  key={label}
+                  primary={shellTab(previewState.shell) === label}
+                  disabled={!renderer?.shell}
+                  onClick={() => { renderer.shell.open(path(user)); syncState(); }}
+                >
+                  {label}
+                </Button>
+              ))}
+              <Button disabled={!previewState.shell} onClick={() => { renderer.shell.close(); syncState(); }}>CLOSE SHELL</Button>
+            </div>
+            <div className="sx-control-group">
+              <Button disabled={!renderer?.shell} onClick={() => { renderer.shell.share(); syncState(); }}>SHARE REEL</Button>
+              {/* Sample reel-reward reply so the wallet's progress line can be reviewed. */}
+              <Button
+                disabled={!renderer?.shell}
+                onClick={() => { renderer.shell.noteReward({ progress: 7, remaining: 3 }); renderer.shell.open('/wallet'); syncState(); }}
+              >
+                REWARD PROGRESS
+              </Button>
+            </div>
             <ToggleRow
               label="SIDE-BY-SIDE STEREO"
               checked={previewState.stereo}
@@ -316,7 +359,8 @@ export default function ImmersivePreviewPage() {
               ['VIDEO UPLOADS', previewState.renderStats?.videoUploads ?? 0, 'PAUSED WHILE EARTH IS OPEN'],
             ]}
           />
-          <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
+          <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE (SHIFT-DRAG TO LOOK) · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
+          <Mono>SHELL: DRAG OR WHEEL THE MAIN PANEL TO SCROLL (FLICK TO FLING) · CLICK TO OPEN · ADD ?vrshell=0 TO THE URL TO DISABLE THE SHELL</Mono>
         </>
       ) : null}
     </div>

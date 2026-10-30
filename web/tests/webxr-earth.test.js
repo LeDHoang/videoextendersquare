@@ -7,6 +7,8 @@ const threeSource = readFileSync(new URL('../../ui/assets/three.min.js', import.
 const threeR186BuildSource = readFileSync(new URL('../node_modules/three/build/three.module.js', import.meta.url), 'utf8');
 const uiCanvasSource = readFileSync(new URL('../../ui/assets/vr_ui_canvas.js', import.meta.url), 'utf8');
 const rendererSource = readFileSync(new URL('../../ui/assets/webxr_vr.js', import.meta.url), 'utf8');
+const shellCanvasSource = readFileSync(new URL('../../ui/assets/vr_shell_canvas.js', import.meta.url), 'utf8');
+const shellSource = readFileSync(new URL('../../ui/assets/vr_shell.js', import.meta.url), 'utf8');
 
 function makeCanvas2dContext() {
   const gradient = { addColorStop() {} };
@@ -133,7 +135,7 @@ function loadRenderer(options = {}) {
     QUEST_CONTROLLER_B64: '',
     addEventListener() {},
     removeEventListener() {},
-    dispatchEvent() { return true; },
+    dispatchEvent(event) { if (options.onEvent) options.onEvent(event); return true; },
     matchMedia() { return { matches: false }; },
     requestAnimationFrame(callback) {
       scheduledFrame = callback;
@@ -190,6 +192,10 @@ function loadRenderer(options = {}) {
   });
   vm.runInContext(threeSource, context, { filename: 'three.min.js' });
   vm.runInContext(uiCanvasSource, context, { filename: 'vr_ui_canvas.js' });
+  if (options.withShell) {
+    vm.runInContext(shellCanvasSource, context, { filename: 'vr_shell_canvas.js' });
+    vm.runInContext(shellSource, context, { filename: 'vr_shell.js' });
+  }
   vm.runInContext(rendererSource, context, { filename: 'webxr_vr.js' });
   window.WebXRVR.__runScheduledFrame = (time) => {
     const callback = scheduledFrame;
@@ -282,10 +288,9 @@ test('heat zones scale with activity while pitch remains bounded', () => {
   assert.equal(state.visualStyle, 'holographic-zones');
 });
 
-test('the immersive control dock exposes a prominent Earth map action', () => {
+test('the dock keeps its earth slot only as the pack QUEUE toggle', () => {
   const button = loadRenderer().__test.getControlButton('earth');
-  assert.equal(button.label, 'EARTH MAP');
-  assert.ok(button.w >= 100);
+  assert.equal(button.label, 'QUEUE');
   assert.ok(button.h >= 30);
 });
 
@@ -2411,21 +2416,16 @@ test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   assert.ok(firstToken(free.texts, 'FREE'), `has FREE label: ${free.texts.join('|')}`);
 });
 
-test('dock Earth button reads ALL LOCATIONS while a location feed is active', () => {
+test('reels dock draws no Earth pill; packs keep their QUEUE pill', () => {
+  // Earth and the main feed are shell nav tabs under the dock.
   const ui = loadUICanvasStandalone();
   const plain = makeRecordingCtx();
   ui.renderControlsCanvas(plain.ctx, dockRenderOptions());
-  assert.ok(plain.texts.some((t) => t.split(' ')[0] === 'EARTH'), `has EARTH MAP: ${plain.texts.join('|')}`);
-  assert.ok(!plain.texts.some((t) => t.startsWith('ALL LOCATIONS')));
-  const filtered = makeRecordingCtx();
-  ui.renderControlsCanvas(filtered.ctx, dockRenderOptions({ locationFeedActive: true }));
-  assert.ok(filtered.texts.some((t) => t.startsWith('ALL LOCATIONS')), `has ALL LOCATIONS: ${filtered.texts.join('|')}`);
-  assert.ok(!filtered.texts.some((t) => t.startsWith('EARTH MAP')));
-  // Pack mode keeps its QUEUE label whatever the flag says.
+  assert.ok(!plain.texts.some((t) => t.startsWith('EARTH') || t.startsWith('ALL LOCATIONS') || t.startsWith('QUEUE')),
+    plain.texts.join('|'));
   const pack = makeRecordingCtx();
-  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true, locationFeedActive: true }));
+  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true }));
   assert.ok(pack.texts.some((t) => t.startsWith('QUEUE')));
-  assert.ok(!pack.texts.some((t) => t.startsWith('ALL LOCATIONS')));
 });
 
 test('guide panel renders the controller artwork without errors', () => {
@@ -5894,6 +5894,133 @@ test('the split preview renders an SBS source per eye without errors', () => {
   renderer.stopPreview();
 });
 
+test('VR shell: in-VR navigation keeps the XR session live; session end closes it', async () => {
+  const { renderer, session } = await enterLiveSession({ withShell: true });
+  assert.equal(renderer.shell.open('/explore'), true);
+  assert.equal(renderer.isPresenting(), true);
+  assert.equal(session.ended, 0, 'opening a section never ends XR');
+  assert.equal(renderer.shell.section(), 'explore');
+  assert.equal(renderer.getPreviewState().shell, 'explore');
+  renderer.shell.open('/upload');
+  assert.equal(renderer.shell.section(), 'handoff');
+  assert.equal(session.ended, 0, 'the handoff card waits for confirmation');
+  session.fire('end');
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: handoff confirm exits XR, then asks the host to navigate', async () => {
+  const navigated = [];
+  const { renderer, session } = await enterLiveSession({ withShell: true });
+  renderer.init(null, { onShellHandoff: (p) => navigated.push(p) });
+  renderer.shell.handoff('/login?next=%2Freels');
+  const state = renderer.shell.getRenderState();
+  assert.equal(state.handoff.path, '/login?next=%2Freels');
+  // The same path a laser select on the confirm button takes.
+  assert.equal(renderer.__test.activateShellHit({ action: { action: 'handoff-confirm' } }), true);
+  assert.equal(session.ended, 1, 'confirm ends XR');
+  assert.deepEqual(navigated, [], 'navigation waits for the session to end');
+  session.fire('end');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual([...navigated], ['/login?next=%2Freels']);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: facade reports false without the shell modules', () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
+  renderer.init(null, {});
+  assert.equal(renderer.shell.open('/explore'), false);
+  assert.equal(renderer.shell.handoff('/login'), false);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: ?vrshell=0 kill switch keeps navigation on 2D', () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }), withShell: true, globals: { location: { search: '?vrshell=0' } } });
+  renderer.init(null, {});
+  assert.equal(renderer.__test.getDebugFlags().vrshell, false);
+  assert.equal(renderer.shell.open('/explore'), false);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
+test('VR shell: nav bar sits under the dock, or under the main panel when open', async () => {
+  const { renderer } = await enterLiveSession({ withShell: true });
+  const byHeight = (h) => renderer.__test.getScene().children.find((m) => m &&
+    m.geometry && m.geometry.parameters && m.geometry.parameters.height === h);
+  const nav = byHeight(0.16), dock = byHeight(0.6), main = byHeight(1.125);
+  assert.ok(nav && dock && main, 'nav, dock and main meshes exist');
+  // nav centre in the anchor's local frame, and its half height in the same units.
+  const local = (anchor) => {
+    anchor.updateMatrixWorld(true);
+    const p = anchor.worldToLocal(nav.position.clone());
+    return { x: p.x, y: p.y, half: (0.08 * nav.scale.y) / anchor.scale.y };
+  };
+  renderer.shell.open('/explore');
+  let p = local(main);
+  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -1.125 / 2, `under the main panel (${p.y})`);
+  renderer.shell.close();
+  p = local(dock);
+  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3, `under the dock (${p.y})`);
+  assert.ok(Math.abs(1.5 * nav.scale.x - 1.6 * dock.scale.x) < 1e-6, 'as wide as the dock');
+});
+
+test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let previewEvents = 0;
+  const renderer = loadRenderer({
+    gl, withShell: true,
+    onEvent: (event) => { if (event.type === 'echo:webxr-preview-state') previewEvents += 1; },
+  });
+  let toggles = 0;
+  const video = {
+    paused: false, readyState: 4, currentTime: 1, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+    requestVideoFrameCallback() { return 1; }, cancelVideoFrameCallback() {},
+    pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); },
+  };
+  renderer.init(video, {
+    getPlaylist: () => [], getCurrentIndex: () => 0,
+    onTogglePlay: () => { toggles += 1; video.paused = !video.paused; },
+  });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  const uploads = () => renderer.getPreviewState().renderStats.panelUploads;
+  renderer.__runScheduledFrame(16);
+  renderer.__runScheduledFrame(200);
+  renderer.__runScheduledFrame(400);
+  const idleClosed = uploads();
+  renderer.__runScheduledFrame(600);
+  renderer.__runScheduledFrame(800);
+  assert.equal(uploads(), idleClosed, 'idle nav bar does not re-upload');
+
+  renderer.shell.open('/explore');
+  assert.equal(video.paused, true, 'opening over a playing reel pauses it');
+  renderer.__runScheduledFrame(1000);
+  const afterOpen = uploads();
+  assert.ok(afterOpen > idleClosed, 'open paints the panels');
+  renderer.__runScheduledFrame(1200);
+  renderer.__runScheduledFrame(1400);
+  assert.equal(uploads(), afterOpen, 'idle open shell uploads nothing');
+
+  renderer.__test.activateShellHit({ action: { action: 'search-focus' } });
+  renderer.__runScheduledFrame(1600);
+  const afterFocus = uploads();
+  assert.ok(afterFocus >= afterOpen + 2, 'focus repaints the main panel and paints the keyboard');
+  const eventsBeforeKey = previewEvents;
+  renderer.shell.type('a');
+  assert.equal(previewEvents, eventsBeforeKey, 'a keystroke emits no preview state');
+  renderer.__runScheduledFrame(1700);
+  assert.equal(uploads(), afterFocus + 1, 'a keystroke repaints only the keyboard');
+  renderer.__runScheduledFrame(2200);
+  assert.equal(uploads(), afterFocus + 2, 'the main panel catches up once typing pauses');
+  renderer.shell.type('close');
+
+  renderer.shell.close();
+  assert.equal(video.paused, false, 'closing resumes what was playing');
+  assert.equal(toggles, 2);
+  renderer.shell.open('/wallet');
+  renderer.stopPreview();
+  assert.equal(renderer.shell.isOpen(), false, 'teardown drops the shell');
+  assert.equal(renderer.getPreviewState().shell, null);
+});
+
 // ── Quest system keyboard for VR comments ───────────────────────────
 function makeKeyboardInput() {
   const handlers = {};
@@ -5997,4 +6124,46 @@ test('dock LIKE, SAVE and COLLECT outlines light up when the reel is liked or sa
   const accentCount = (s) => s.split('|').filter((c) => c === ui.TOKENS.hex.accent).length;
   assert.equal(accentCount(outlines({ saved: true })) - accentCount(base), 2);
   assert.equal(accentCount(outlines({ liked: true })) - accentCount(base), 1);
+});
+
+test('grip on an Earth panel drags it along the laser and it stays put', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(makeVideoMock(), {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  renderer.__runScheduledFrame(16);
+  const head = { x: 0, y: 1.6, z: 0 };
+  const start = api.computeDockPose(head, 'earth').pos;
+  const grip = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, true, false, false, false, false]))]);
+  const open = mockXRSession([rightSource(mockGamepad([0, 0, 0, 0], [false, false, false, false, false, false]))]);
+  const aim = (x, y, z) => {
+    const d = { x: x - head.x, y: y - head.y, z: z - head.z };
+    api.setActiveRay(head, d, 'right');
+  };
+  // Grip with the laser on the dock grabs it; swinging the laser right
+  // carries the dock with it.
+  aim(0, 0.31, -0.85);
+  api.processXRInput(null, grip);
+  aim(0.4, 0.31, -0.85);
+  api.processXRInput(null, grip);
+  const moved = api.computeDockPose(head, 'earth').pos;
+  assert.ok(moved.x > start.x + 0.2, `dock followed the laser: ${moved.x}`);
+  // Released, the dock keeps its new spot.
+  api.processXRInput(null, open);
+  renderer.__runScheduledFrame(32);
+  aim(-0.4, 0.31, -0.85);
+  api.processXRInput(null, open);
+  closeTo(api.computeDockPose(head, 'earth').pos.x, moved.x);
+  // A grip already held when the laser lands on the panel never grabs.
+  api.processXRInput(null, grip);
+  closeTo(api.computeDockPose(head, 'earth').pos.x, moved.x);
+  // Leaving Earth forgets the pin.
+  api.processXRInput(null, open);
+  renderer.setSceneMode('reels');
+  renderer.setSceneMode('earth');
+  const reset = api.computeDockPose(head, 'earth').pos;
+  assert.deepEqual([reset.x, reset.y, reset.z], [0, 0.20, -0.85]);
+  renderer.stopPreview();
 });

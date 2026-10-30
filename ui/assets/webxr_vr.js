@@ -142,6 +142,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
     xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
+    vrshell: true,   // in-VR site shell (?vrshell=0 → in-VR navigation leaves XR, pre-shell behaviour)
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -171,6 +172,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
       if (has('xrdiag', '1')) debugFlags.xrdiag = true;
+      if (has('vrshell', '0')) debugFlags.vrshell = false;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
       if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
     } catch (e) {}
@@ -344,6 +346,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthGrabGeo = null;
   let earthGrabAnchor = null;
   let earthPointerZoom = null;
+  // Grip grab of an Earth panel (dock + nav, location label, place card): the
+  // panel rides the laser at its grab distance and stays where it is let go
+  // until Earth closes. earthPanelGrab = { key, dist, off }.
+  let earthPanelGrab = null;
+  let earthPanelPins = {};
   function earthTopdownActive() {
     return !!debugFlags.topdown && sceneMode === 'earth' &&
       !!earthFocus && earthZoomTarget >= EARTH_TOPDOWN_MIN_ZOOM;
@@ -911,7 +918,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const m = mode || sceneMode;
     let pos;
     if (m === 'earth') {
-      pos = { x: EARTH_DOCK_POS.x, y: EARTH_DOCK_POS.y, z: EARTH_DOCK_POS.z };
+      const pin = earthPanelPins.dock || EARTH_DOCK_POS;
+      pos = { x: pin.x, y: pin.y, z: pin.z };
     } else if (lockToViewer) {
       // Legacy-exact: the transport panel stays fixed and level in the room
       // at the default screen spot while the locked screen follows the gaze.
@@ -1097,6 +1105,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Side panels keep their stations but face the viewer too.
     layoutCommentsPanel(headPos);
     layoutGuidePanel(headPos);
+    layoutShellNav();
   }
 
   // Applies headset yaw/pitch or orbit spherical position to the camera.
@@ -2293,7 +2302,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function updateEarthPreviewBillboard(time) {
     if (!earthPreviewMesh) return;
-    if (sceneMode !== 'earth') {
+    if (sceneMode !== 'earth' || isShellOpen()) {
       earthPreviewMesh.visible = false;
       if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
@@ -2720,6 +2729,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthPreviewMesh.lookAt(head.x, head.y, head.z);
       }
       earthHudGazeSafe(time);
+      applyEarthPanelPins();
     } catch (e) {}
     if (earthPinsGroup) {
       try {
@@ -5113,6 +5123,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       scene.add(commentsMesh);
       layoutCommentsPanel(getHeadPosition());
     }
+    createShellMeshes();
 
     // Controller guide mesh (upstream guide panel, RIGHT of the player).
     // ?guide=0 skips it entirely.
@@ -6115,7 +6126,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer,
         autoNext: getAutoNext(),
         sceneMode,
-        locationFeedActive: locationFeedActive(),
         earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
@@ -6166,7 +6176,487 @@ window.WebXRVR = window.WebXRVR || (function () {
         renderStats.panelUploads += 1;
       }
     }
+    updateShellTextures();
   }
+
+  // <vr-shell-glue>
+  // In-VR shell: a curved main panel and a nav bar that let the viewer browse
+  // the site without ending the XR session. Routing/state live in
+  // vr_shell.js (window.VRShell), drawing in vr_shell_canvas.js
+  // (window.VRShellCanvas); this block only owns meshes, rays and visibility.
+  const SHELL_MAIN_RADIUS = 2.2;
+  const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
+  const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
+  const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
+  const SHELL_IMAGE_CAP = 96;
+  const SHELL_TYPING_IDLE_MS = 400;
+  let shell = null;
+  let shellWasOpen = false;
+  let shellDirtyContent = -1;
+  let shellResumePlayback = false;
+  let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
+  let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
+  let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
+  let shellKbWasShown = false;
+  let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
+  // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
+  const shellImages = new Map();
+  let shellStick = { dir: 0, t: 0 };
+  let shellWheelT = 0;
+  let shellHover = { panel: '', key: '' };
+  // Main-panel drag scroll with fling; shellMainY is the canvas y under the ray.
+  let shellDrag = null;
+  let shellMainY = null;
+
+  function getShellCanvas() {
+    return (typeof window !== 'undefined' && window.VRShellCanvas) || null;
+  }
+
+  function ensureShell() {
+    if (shell) return shell;
+    const core = typeof window !== 'undefined' && window.VRShell;
+    if (!debugFlags.vrshell || !core || !getShellCanvas()) return null;
+    shellDrag = core.createDragScroll();
+    shell = core.create({
+      exitAndNavigate: shellHandoff,
+      getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
+      request: shellRequest,
+      send: (method, path, body) => (callbacks.shellSend
+        ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
+      getScene: () => sceneMode,
+      earthAvailable: () => !isPackExperience(),
+      // REELS from the open shell just returns to the feed; from the dock it
+      // is the main feed, so it also leaves a location feed.
+      setScene(mode, wasOpen) {
+        if (mode === 'reels' && !wasOpen && sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();
+        else setSceneMode(mode);
+      },
+      playFeed(feed) {
+        // The new feed autoplays; closing must not toggle it back to paused.
+        shellResumePlayback = false;
+        if (callbacks.onShellPlayFeed) {
+          try { callbacks.onShellPlayFeed(feed); } catch (e) {}
+        }
+      },
+    });
+    shell.onDirty(onShellDirty);
+    return shell;
+  }
+
+  function isShellOpen() { return !!(shell && shell.isOpen()); }
+
+  function shellRequest(path, query) {
+    if (!callbacks.shellRequest) return Promise.reject(new Error('shell requests unavailable'));
+    const qs = Object.keys(query || {}).filter((k) => query[k] !== '' && query[k] != null)
+      .map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(query[k])).join('&');
+    return callbacks.shellRequest(qs ? path + '?' + qs : path);
+  }
+
+  function isShellKeyboardShown() {
+    if (!shell || !shell.isOpen()) return false;
+    const f = shell.getRenderState().field;
+    return !!(f && f.focused);
+  }
+
+  // LRU thumbnail cache; a finished load redraws the grid. Cross-origin
+  // images without CORS fail to load and fall back to initials.
+  function getShellImage(url) {
+    let entry = shellImages.get(url);
+    if (entry) {
+      shellImages.delete(url);
+      shellImages.set(url, entry);
+      return entry.ok ? entry.img : null;
+    }
+    if (typeof Image === 'undefined') return null;
+    const img = new Image();
+    entry = { img, ok: false };
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { entry.ok = true; if (shell && shellImages.get(url) === entry) shell.touch(); };
+    img.onerror = () => {};
+    img.src = url;
+    shellImages.set(url, entry);
+    while (shellImages.size > SHELL_IMAGE_CAP) shellImages.delete(shellImages.keys().next().value);
+    return null;
+  }
+
+  // Thumbstick Y scrolls the grid one row per flick, repeating while held.
+  function shellStickInput(sources, hasRightInput) {
+    const src = sources.find((x) => x && x.handedness === 'right' && x.gamepad) ||
+      (!hasRightInput ? sources.find((x) => x && x.gamepad) : null);
+    const axes = (src && src.gamepad && src.gamepad.axes) || [];
+    const y = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
+    const dir = y > 0.6 ? 1 : (y < -0.6 ? -1 : 0);
+    const now = Date.now();
+    if (Math.abs(y) < 0.3) { shellStick = { dir: 0, t: 0 }; return; }
+    if (!dir || (dir === shellStick.dir && now - shellStick.t < 350)) return;
+    shellStick = { dir, t: now };
+    if (shell.scroll(dir)) pulseInput(src, 0.12, 20);
+  }
+
+  // Trigger/mouse press on the main panel starts a drag; nav and keyboard
+  // still click on press.
+  function beginShellDrag(hit) {
+    if (!shellDrag || !hit || hit.panel !== 'main' || shellMainY === null) return false;
+    shellDrag.begin(shellMainY, Date.now());
+    return true;
+  }
+
+  // Every frame: follow the drag, or coast after a fling. A step that hits
+  // the end of the list stops the fling.
+  function updateShellDrag() {
+    if (!shellDrag || !isShellOpen()) return;
+    const now = Date.now();
+    const n = shellDrag.active()
+      ? (shellMainY === null ? 0 : shellDrag.move(shellMainY, now))
+      : shellDrag.tick(now);
+    if (!n) return;
+    if (shell.scroll(n)) {
+      if (xrSession) pulseInput(activeRayInputSource, 0.1, 15);
+    } else if (!shellDrag.active()) {
+      shellDrag.stop();
+    }
+  }
+
+  // true when the gesture was a drag, so the release must not click.
+  function endShellDrag() {
+    return !!(shellDrag && shellDrag.active() && shellDrag.end(Date.now()));
+  }
+
+  // Preview wheel over the main panel: one row per notch, throttled.
+  function shellWheel(deltaY) {
+    const now = Date.now();
+    if (!deltaY || now - shellWheelT < 120) return;
+    shellWheelT = now;
+    shell.scroll(deltaY > 0 ? 1 : -1);
+  }
+
+  // Preview physical keys type into the focused field.
+  function shellKeyDown(event) {
+    if (!isShellKeyboardShown() || event.metaKey || event.ctrlKey || event.altKey) return false;
+    const k = event.key;
+    const map = { Backspace: 'backspace', Enter: 'enter', Escape: 'close', ' ': 'space' };
+    const key = map[k] || (typeof k === 'string' && k.length === 1 ? k : '');
+    if (!key || !shell.type(key)) return false;
+    if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+    return true;
+  }
+
+  function onShellDirty() {
+    // Keystrokes change only the keyboard texture, repainted on the next frame;
+    // layout, visibility and preview state stay as they were.
+    const content = shell.getRenderState().contentVersion;
+    if (content === shellDirtyContent) { vrLastUiUploadT = -1; return; }
+    shellDirtyContent = content;
+    const open = shell.isOpen();
+    if (open && !shellWasOpen) {
+      // Covering the reel pauses it; closing resumes only what was playing.
+      const source = getVisualSource();
+      shellResumePlayback = sceneMode === 'reels' && !source.paused &&
+        (source.kind === 'video' || source.kind === 'image');
+      if (shellResumePlayback && callbacks.onTogglePlay) {
+        try { callbacks.onTogglePlay(); } catch (e) {}
+      }
+      layoutShellMain(getHeadPosition());
+    } else if (!open && shellWasOpen) {
+      shellStick = { dir: 0, t: 0 };
+      const resume = shellResumePlayback;
+      shellResumePlayback = false;
+      if (resume && getVisualSource().paused && callbacks.onTogglePlay) {
+        try { callbacks.onTogglePlay(); } catch (e) {}
+      }
+    }
+    shellWasOpen = open;
+    layoutShellNav();
+    const kb = isShellKeyboardShown();
+    if (kb && !shellKbWasShown) layoutShellKeyboard(getHeadPosition());
+    shellKbWasShown = kb;
+    applySceneVisibility();
+    vrLastUiUploadT = -1;
+    emitPreviewState();
+  }
+
+  // "Exit VR & open": leave XR first so the host's navigation is not intercepted.
+  function shellHandoff(path) {
+    shellResumePlayback = false;
+    Promise.resolve(exitVR()).then(() => {
+      if (callbacks.onShellHandoff) {
+        try { callbacks.onShellHandoff(path); } catch (e) {}
+      }
+    });
+  }
+
+  function makeShellPanel(w, h, cw, ch, segments, order) {
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const texture = applyLinearSampling(new THREE.CanvasTexture(canvas));
+    try { if (THREE.SRGBColorSpace !== undefined) texture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    const geo = new THREE.PlaneGeometry(w, h, segments, 1);
+    if (segments > 1) {
+      // Bend around the viewer (UVs untouched, so hit math stays planar).
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const a = pos.getX(i) / SHELL_MAIN_RADIUS;
+        pos.setX(i, SHELL_MAIN_RADIUS * Math.sin(a));
+        pos.setZ(i, SHELL_MAIN_RADIUS * (1 - Math.cos(a)));
+      }
+      pos.needsUpdate = true;
+    }
+    const mat = new THREE.MeshBasicMaterial({
+      map: texture, transparent: true, depthTest: false, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = order;
+    mesh.visible = false;
+    scene.add(mesh);
+    return { canvas, ctx: canvas.getContext('2d'), texture, mesh };
+  }
+
+  function createShellMeshes() {
+    const sc = getShellCanvas();
+    if (!sc || !ensureShell() || !scene || !THREE || typeof document === 'undefined') return;
+    if (!shellMainMesh) {
+      const p = makeShellPanel(SHELL_MAIN_SIZE.w, SHELL_MAIN_SIZE.h, sc.MAIN_W, sc.MAIN_H, 24, 6);
+      shellMainCanvas = p.canvas; shellMainCtx = p.ctx; shellMainTexture = p.texture; shellMainMesh = p.mesh;
+    }
+    if (!shellNavMesh) {
+      const p = makeShellPanel(SHELL_NAV_SIZE.w, SHELL_NAV_SIZE.h, sc.NAV_W, sc.NAV_H, 1, 6);
+      shellNavCanvas = p.canvas; shellNavCtx = p.ctx; shellNavTexture = p.texture; shellNavMesh = p.mesh;
+    }
+    if (!shellKbMesh) {
+      const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
+      shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
+    }
+    shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
+    shell.refreshUnread();
+  }
+
+  function headYaw() {
+    try {
+      if (camera && THREE) {
+        const v = new THREE.Vector3();
+        camera.getWorldDirection(v);
+        if (Math.hypot(v.x, v.z) > 1e-4) return Math.atan2(-v.x, -v.z);
+      }
+    } catch (e) {}
+    return 0;
+  }
+
+  // Posed once per open, level, at the bend radius straight ahead.
+  function layoutShellMain(headPos) {
+    if (!shellMainMesh) return;
+    const yaw = headYaw();
+    shellMainMesh.position.set(
+      headPos.x - Math.sin(yaw) * SHELL_MAIN_RADIUS,
+      headPos.y - 0.15,
+      headPos.z - Math.cos(yaw) * SHELL_MAIN_RADIUS
+    );
+    faceViewerLevel(shellMainMesh, headPos, 0);
+  }
+
+  // The nav bar is one piece with the dock: closed, it hangs flush under it
+  // (same width and tilt, shared edge); open, the dock is hidden and the bar
+  // keeps that same size under the main panel.
+  let shellNavK = 1;
+  let shellNavDockDist = 0;
+  function layoutShellNav() {
+    if (!shellNavMesh || !THREE) return;
+    const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
+    if (!anchor) return;
+    const open = anchor === shellMainMesh;
+    const dist = anchor.position.distanceTo(getHeadPosition());
+    // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
+    if (!open) {
+      shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+      shellNavDockDist = dist;
+    }
+    // Open, the bar keeps the angular size it has under the dock, so it reads
+    // the same on every page even though the main panel sits further away.
+    const k = open && shellNavDockDist > 0 ? shellNavK * dist / shellNavDockDist : shellNavK;
+    const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
+    const navH = SHELL_NAV_SIZE.h * k;
+    const gap = open ? navH * 0.5 : 0;
+    shellNavMesh.scale.set(k, k, 1);
+    shellNavMesh.quaternion.copy(anchor.quaternion);
+    shellNavMesh.position.copy(anchor.position)
+      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+  }
+
+  // Keyboard: below the main panel, closer, tilted up toward the viewer.
+  function layoutShellKeyboard(headPos) {
+    if (!shellKbMesh) return;
+    const yaw = headYaw();
+    shellKbMesh.position.set(headPos.x - Math.sin(yaw) * 1.3, headPos.y - 0.55, headPos.z - Math.cos(yaw) * 1.3);
+    faceViewerLevel(shellKbMesh, headPos, -0.44);
+  }
+
+  function applyShellVisibility() {
+    const pointerActive = !!(xrSession || previewRunning);
+    if (shellNavMesh) shellNavMesh.visible = pointerActive;
+    const open = pointerActive && isShellOpen();
+    if (shellMainMesh) shellMainMesh.visible = open;
+    if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
+    if (!open) return;
+    // The open shell replaces the reel screen, every reel-side panel and the
+    // Earth location card / preview (they would float over the shell).
+    [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh,
+      earthLabelMesh, earthPreviewMesh]
+      .forEach((m) => { if (m) m.visible = false; });
+  }
+
+  // Ray pre-pass shared by the laser, XR select and the preview mouse.
+  // Returns { panel, distance, action } for a hit on a visible shell panel.
+  function shellRaycast(origin, direction) {
+    const sc = getShellCanvas();
+    let found = null;
+    if (sc && raycaster && shell) {
+      const targets = [];
+      if (shellKbMesh && shellKbMesh.visible) targets.push(shellKbMesh);
+      if (shellMainMesh && shellMainMesh.visible) targets.push(shellMainMesh);
+      if (shellNavMesh && shellNavMesh.visible) targets.push(shellNavMesh);
+      if (targets.length) {
+        try {
+          raycaster.set(origin, direction);
+          const hits = raycaster.intersectObjects(targets, false);
+          const h = hits.find((x) => x.uv);
+          if (h && h.object === shellKbMesh) {
+            const action = sc.resolveKeyboardHit(h.uv.x * sc.KB_W, (1 - h.uv.y) * sc.KB_H, shell.getRenderState().field);
+            found = { panel: 'kb', distance: h.distance, action };
+          } else if (h) {
+            const main = h.object === shellMainMesh;
+            const cx = h.uv.x * (main ? sc.MAIN_W : sc.NAV_W);
+            const cy = (1 - h.uv.y) * (main ? sc.MAIN_H : sc.NAV_H);
+            const action = main ? sc.resolveMainHit(shell.getRenderState(), cx, cy) : sc.resolveNavHit(cx, cy);
+            found = { panel: main ? 'main' : 'nav', distance: h.distance, action, y: cy };
+          }
+        } catch (e) {}
+      }
+    }
+    const key = found && sc ? sc.hoverKey(found.action) : '';
+    const panel = found ? found.panel : '';
+    shellMainY = panel === 'main' ? found.y : null;
+    if (key !== shellHover.key || panel !== shellHover.panel) {
+      // Light tick as the laser lands on a new shell control (XR only).
+      if (key && xrSession && !(shellDrag && shellDrag.moved() && shellDrag.active())) {
+        pulseInput(activeRayInputSource, 0.15, 25);
+      }
+      shellHover = { panel, key };
+      vrLastUiUploadT = -1;
+    }
+    return found;
+  }
+
+  function activateShellHit(hit) {
+    if (!hit || !hit.action || !shell) return false;
+    return shell.handleHit(hit.action);
+  }
+
+  // Redraws only what changed (state version or hover), so an idle shell uploads nothing.
+  // Keystrokes repaint only the keyboard, whose strip echoes the field; the main
+  // panel's copy of the field catches up once typing pauses.
+  function updateShellTextures() {
+    const sc = getShellCanvas();
+    if (!sc || !shell) return;
+    const state = shell.getRenderState();
+    if (shellPainted.seenVersion !== state.version) {
+      shellPainted.seenVersion = state.version;
+      shellPainted.seenAt = vrLastUiUploadT;
+    }
+    const mainHover = shellHover.panel === 'main' ? shellHover.key : '';
+    const navHover = shellHover.panel === 'nav' ? shellHover.key : '';
+    const kbHover = shellHover.panel === 'kb' ? shellHover.key : '';
+    const kbKeys = state.field.layout + ':' + !!state.field.shift;
+    if (shellKbCtx && shellKbMesh && shellKbMesh.visible &&
+        (shellPainted.kbHover !== kbHover || shellPainted.kbVersion !== state.version)) {
+      // The keys repaint on hover, layout or shift; otherwise only the strip's text changed.
+      if (shellPainted.kbHover !== kbHover || shellPainted.kbKeys !== kbKeys) {
+        sc.renderKeyboard(shellKbCtx, kbHover, state.field);
+      } else {
+        sc.renderKeyboardField(shellKbCtx, state.field);
+      }
+      shellKbTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.kbHover = kbHover;
+      shellPainted.kbKeys = kbKeys;
+      shellPainted.kbVersion = state.version;
+    } else if (shellKbMesh && !shellKbMesh.visible) {
+      shellPainted.kbHover = null;
+    }
+    if (shellNavCtx && shellNavMesh && shellNavMesh.visible &&
+        (shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
+      sc.renderNavBar(shellNavCtx, state, navHover);
+      shellNavTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.navHover = navHover;
+      shellPainted.navVersion = state.contentVersion;
+    }
+    if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
+        (shellPainted.mainContent !== state.contentVersion || shellPainted.mainHover !== mainHover ||
+          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS))) {
+      sc.renderMainPanel(shellMainCtx, state, mainHover, getShellImage);
+      shellMainTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellPainted.mainHover = mainHover;
+      shellPainted.mainVersion = state.version;
+      shellPainted.mainContent = state.contentVersion;
+    }
+  }
+
+  // Session end or teardown: drop the shell without replaying a handoff.
+  function resetShell(resume) {
+    if (shell && shell.isOpen()) {
+      if (!resume) shellResumePlayback = false;
+      shell.close();
+    }
+    if (shellDrag) shellDrag.stop();
+    shellHover = { panel: '', key: '' };
+  }
+
+  function disposeShellMeshes() {
+    if (shellMainTexture) { try { shellMainTexture.dispose(); } catch (e) {} }
+    if (shellNavTexture) { try { shellNavTexture.dispose(); } catch (e) {} }
+    shellMainCanvas = shellMainCtx = shellMainTexture = shellMainMesh = null;
+    if (shellKbTexture) { try { shellKbTexture.dispose(); } catch (e) {} }
+    shellNavCanvas = shellNavCtx = shellNavTexture = shellNavMesh = null;
+    shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
+    shellKbWasShown = false;
+    shellImages.clear();
+  }
+
+  const shellFacade = {
+    // false when the shell modules are not loaded (caller falls back to 2D).
+    open(path, opts) {
+      if (!ensureShell()) return false;
+      shell.open(path, opts);
+      return true;
+    },
+    handoff(path, title, message) {
+      if (!ensureShell()) return false;
+      shell.showHandoff(path, title, message);
+      return true;
+    },
+    close() { if (shell) shell.close(); },
+    isOpen: isShellOpen,
+    section() { return shell ? shell.section() : null; },
+    getRenderState() { return shell ? shell.getRenderState() : null; },
+    scroll(delta) { return shell ? shell.scroll(delta) : false; },
+    type(key) { return shell ? shell.type(key) : false; },
+    // Share sheet for a reel or pack ({kind, target_id, title}), by default the
+    // current reel; false without the shell.
+    share(opts) {
+      if (!ensureShell()) return false;
+      let o = opts;
+      if (!o) {
+        const list = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
+        const item = list[callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0] || {};
+        o = { kind: 'reel', target_id: item.post_id, title: item.title || item.filename || 'Shared reel' };
+      }
+      return !!shell.share(o);
+    },
+    refreshUnread() { if (shell) shell.refreshUnread(); },
+    noteReward(result) { if (shell) shell.noteReward(result); },
+  };
+  // </vr-shell-glue>
 
   // ─── Telemetry Event Dispatcher ─────────────────────────────────────
   function emitPreviewState() {
@@ -6184,6 +6674,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       xrCompat: xrCompatStatus,
       cameraMode: previewCameraMode,
       sceneMode,
+      shell: shell ? shell.section() : null,
       stereo: stereoMode,
       sourceStereo,
       textureStereo,
@@ -6265,6 +6756,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
 
+    updateShellDrag();
     // UI canvases redraw at ~10 Hz (old VR_UI_MIN_INTERVAL semantics);
     // every-frame 1024×384 redraws stall software GL.
     if (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= 100) {
@@ -6377,6 +6869,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!ray) return null;
     // Cache for the persistent preview head-ray (Workstream D).
     previewHoverRay = { origin: ray.origin, direction: ray.direction };
+    const shellHit = shellRaycast(ray.origin, ray.direction);
+    if (shellHit) {
+      hoveredButton = -1;
+      return { ray, hit: null, controlIndex: -1, panelDesc: '', shell: shellHit };
+    }
     let controlIndex = -1;
     if (controlsVisible && controlsMesh && controlsMesh.visible !== false && controlsCanvas) {
       try {
@@ -6471,7 +6968,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     cPanelHover = '';
     try {
       raycaster.set(origin, direction);
-      if (sceneMode === 'earth') {
+      const shellHit = shellRaycast(origin, direction);
+      if (shellHit) {
+        dist = shellHit.distance;
+        hovering = -2; // shell panel hover (lit laser; highlight is drawn on the panel)
+      } else if (sceneMode === 'earth') {
         if (controlsVisible && controlsMesh && controlsMesh.visible !== false) {
           const hits = raycaster.intersectObject(controlsMesh, false);
           if (hits.length > 0) {
@@ -6894,6 +7395,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       const target = updatePreviewHover(event.clientX, event.clientY);
       const source = 'preview-pointer-' + (event.pointerId === undefined ? 'mouse' : event.pointerId);
       previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
+      if (target && target.shell) {
+        previewPointer.control = true;
+        // Main panel clicks on release so a drag can scroll instead.
+        if (beginShellDrag(target.shell)) previewPointer.shellHit = target.shell;
+        else activateShellHit(target.shell);
+        return;
+      }
       if (target && target.controlIndex >= 0) {
         executeControlButton(target.controlIndex);
         vrLastUiUploadT = -1;
@@ -6919,7 +7427,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         vrLastUiUploadT = -1;
         return;
       }
-      if (sceneMode === 'earth' && target && target.hit) {
+      // Shift-drag looks around instead, so the dock below the globe stays
+      // reachable when a zoomed globe fills the view.
+      if (sceneMode === 'earth' && target && target.hit && !event.shiftKey) {
         beginEarthDrag(source, target.hit);
         previewPointer.earth = true;
       }
@@ -6949,8 +7459,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         return;
       }
-      if (sceneMode === 'earth') {
-        if (previewPointer.earth && target && target.hit && target.hit.hit && target.hit.local) {
+      if (sceneMode === 'earth' && previewPointer.earth) {
+        if (target && target.hit && target.hit.hit && target.hit.local) {
           updateEarthDrag(target.hit, previewPointer.source);
         }
         return;
@@ -6972,6 +7482,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       try {
       if (!previewPointer || previewPointer.id !== event.pointerId) return;
       const target = updatePreviewHover(event.clientX, event.clientY);
+      if (previewPointer.shellHit && !endShellDrag() && target && target.shell) {
+        activateShellHit(target.shell);
+      }
       if (sceneMode === 'earth' && previewPointer.earth) {
         endEarthDrag(previewPointer.source, target && target.hit);
       } else if (!previewPointer.control && target) {
@@ -7042,6 +7555,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const onWheel = function (event) {
       try {
       if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+      if (shell && shellHover.panel === 'main') { shellWheel(event.deltaY || 0); return; }
       if (sceneMode === 'earth') {
         // Wheel Y = map zoom (Google-Maps convention), wheel X = yaw.
         if (event.deltaY) {
@@ -7069,7 +7583,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (sceneMode === 'earth') setEarthHoveredIndex(-1);
     };
     const onContextMenu = function (event) { if (event.preventDefault) event.preventDefault(); };
-    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu };
+    const onKeyDown = function (event) {
+      try { shellKeyDown(event); } catch (e) { capturePointerError('keydown', e); }
+    };
+    previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu, onKeyDown };
     try { previewCanvas.style.touchAction = 'none'; } catch (e) {}
     previewCanvas.addEventListener('pointerdown', onPointerDown);
     previewCanvas.addEventListener('pointermove', onPointerMove);
@@ -7078,6 +7595,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewCanvas.addEventListener('pointerleave', onPointerLeave);
     previewCanvas.addEventListener('wheel', onWheel, { passive: false });
     previewCanvas.addEventListener('contextmenu', onContextMenu);
+    previewCanvas.addEventListener('keydown', onKeyDown);
   }
 
   function removePreviewListeners() {
@@ -7094,6 +7612,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       previewCanvas.removeEventListener('pointerleave', listeners.onPointerLeave);
       previewCanvas.removeEventListener('wheel', listeners.onWheel);
       previewCanvas.removeEventListener('contextmenu', listeners.onContextMenu);
+      previewCanvas.removeEventListener('keydown', listeners.onKeyDown);
     } catch (e) {}
     previewListeners = null;
   }
@@ -7208,6 +7727,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     // keeps this module singleton across routes (upstream forced
     // sceneMode='reels' in cleanup for the same reason).
     sceneMode = 'reels';
+    earthPanelPins = {};
+    earthPanelGrab = null;
     previewCanvas = null;
     controlsVisible = true;
     commentsPanelVisible = false;
@@ -7364,11 +7885,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     const next = mode === 'earth' && !isPackExperience() ? 'earth' : 'reels';
     const prev = sceneMode;
     sceneMode = next;
+    if (shell && prev !== next) shell.touch();
     applySceneVisibility();
     if (next === 'earth' && prev !== 'earth') {
       openEarthPlayback();
     } else if (next !== 'earth' && prev === 'earth') {
       closeEarthPlayback();
+      earthPanelPins = {};
+      earthPanelGrab = null;
       // Re-entry always starts at the full globe (Z1): no stale deep zoom.
       resetEarthZoomImmediate();
     }
@@ -7445,6 +7969,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
     if (reticleMesh) reticleMesh.visible = pointerActive;
+    applyShellVisibility();
   }
 
   function setPreviewStereo(enabled) {
@@ -7609,6 +8134,72 @@ window.WebXRVR = window.WebXRVR || (function () {
   // { panel: 'card'|'label', region, distance } for the nearest one hit
   // (region '' off the buttons), else null. Panels sit in front of the
   // globe, so they take the pointer first.
+  // Nearest Earth panel under the ray for a grip grab: 'dock' (the nav bar
+  // docked under it moves with it), 'label' or 'card'.
+  function earthPanelGrabHit(origin, direction) {
+    if (!raycaster) return null;
+    const cands = [
+      ['dock', controlsMesh], ['dock', shellNavMesh],
+      ['label', earthLabelMesh], ['card', earthPreviewMesh],
+    ];
+    let best = null;
+    try {
+      raycaster.set(origin, direction);
+      for (const [key, mesh] of cands) {
+        if (!mesh || mesh.visible === false) continue;
+        const hits = raycaster.intersectObject(mesh, false);
+        if (hits.length && (!best || hits[0].distance < best.distance)) {
+          best = { key, distance: hits[0].distance, point: hits[0].point };
+        }
+      }
+    } catch (e) { return null; }
+    return best;
+  }
+
+  function applyEarthPanelPins() {
+    const head = getHeadPosition();
+    const place = (mesh, p) => {
+      if (!mesh || !p) return;
+      mesh.position.set(p.x, p.y, p.z);
+      mesh.lookAt(head.x, head.y, head.z);
+    };
+    place(earthLabelMesh, earthPanelPins.label);
+    place(earthPreviewMesh, earthPanelPins.card);
+  }
+
+  // Grip on the pointing controller while its laser is on an Earth panel
+  // grabs that panel. A grip already held (zooming) never starts a grab.
+  // Returns true while a grab owns the grip.
+  function updateEarthPanelGrab(gripPressed, wasPressed) {
+    if (!gripPressed || !activeRayOrigin || !activeRayDir) {
+      earthPanelGrab = null;
+      return false;
+    }
+    if (!earthPanelGrab) {
+      if (wasPressed) return false;
+      const hit = earthPanelGrabHit(activeRayOrigin, activeRayDir);
+      if (!hit) return false;
+      const base = hit.key === 'dock'
+        ? computeDockPose(getHeadPosition(), 'earth').pos
+        : (hit.key === 'label' ? earthLabelMesh : earthPreviewMesh).position;
+      earthPanelGrab = {
+        key: hit.key,
+        dist: hit.distance,
+        off: { x: base.x - hit.point.x, y: base.y - hit.point.y, z: base.z - hit.point.z },
+      };
+      pulseInput(activeRayInputSource, 0.3, 30);
+    }
+    const g = earthPanelGrab;
+    earthPanelPins[g.key] = {
+      x: activeRayOrigin.x + activeRayDir.x * g.dist + g.off.x,
+      y: activeRayOrigin.y + activeRayDir.y * g.dist + g.off.y,
+      z: activeRayOrigin.z + activeRayDir.z * g.dist + g.off.z,
+    };
+    if (g.key === 'dock') layoutControlsDock();
+    else applyEarthPanelPins();
+    return true;
+  }
+
   function earthHudPanelHit(origin, direction) {
     if (!raycaster || !origin || !direction) return null;
     let best = null;
@@ -8368,11 +8959,20 @@ window.WebXRVR = window.WebXRVR || (function () {
     ensureThree();
     const headPos = getHeadPosition();
     const hasRightInput = sources.some((s) => s && s.handedness === 'right');
+    // The open shell owns the stick (scrolling); the scene underneath stays put.
+    if (isShellOpen()) { shellStickInput(sources, hasRightInput); return; }
 
     if (sceneMode === 'earth') {
+      const grabSource = activeRayInputSource || pickPointerSource(sources);
+      const grabGp = grabSource && grabSource.gamepad;
+      const grabGrip = !!(grabGp && grabGp.buttons && grabGp.buttons.length > 1 && grabGp.buttons[1].pressed);
+      const panelGrabbed = updateEarthPanelGrab(grabGrip, prevBtnState.earthGrip);
+      prevBtnState.earthGrip = grabGrip;
       for (const source of sources) {
         const gp = source && source.gamepad;
         if (!gp) continue;
+        // The grabbing controller's stick stays out of zoom and rotation.
+        if (panelGrabbed && source === grabSource) continue;
         const axes = gp.axes || [];
         const thumbX = axes.length >= 4 ? (axes[2] || 0) : (axes[0] || 0);
         const thumbY = axes.length >= 4 ? (axes[3] || 0) : (axes[1] || 0);
@@ -8636,6 +9236,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthXrGrabActive = false; // WebXR order: selectstart → select → selectend
   function onVRSelectStart(ev) {
     if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
+        !shellHover.panel &&
         !earthHudPanelHit(activeRayOrigin, activeRayDir)) {
       const hit = hitTestEarth(activeRayOrigin, activeRayDir);
       if (hit.hit) {
@@ -8644,6 +9245,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     pressedButton = hoveredButton;
+    // A new press stops any fling; on the main panel it starts a drag.
+    if (shellDrag) shellDrag.stop();
+    if (shellHover.panel === 'main' && activeRayOrigin && activeRayDir) {
+      beginShellDrag(shellRaycast(activeRayOrigin, activeRayDir));
+    }
     // Begin a trigger-drag scroll when pressing on the panel list/scrollbar.
     if (commentsPanelVisible && cPanelHover &&
         (cPanelHover === 'list' || cPanelHover === 'scrollbar')) {
@@ -8667,6 +9273,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     pressedButton = -1;
     cPanelDrag = false;
     cPanelDragMoved = false;
+    endShellDrag();
     emitPreviewState();
   }
 
@@ -8692,7 +9299,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (raycaster && scene && rayOrigin && rayDir) {
       raycaster.set(rayOrigin, rayDir);
 
-      if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
+      const shellHit = shellRaycast(rayOrigin, rayDir);
+      // 'select' fires before 'selectend': a drag on the main panel ends here
+      // and swallows the click.
+      const dragged = endShellDrag() || (shellDrag && shellDrag.moved());
+      if (shellHit) {
+        if (!dragged && activateShellHit(shellHit)) pulseInput(ev.data);
+        handled = true;
+      } else if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
         // The trigger gesture was owned by the grab machine (tap or drag) and
         // already dispatched — never double-fire zoom/select.
         handled = true;
@@ -9142,6 +9756,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         updateControllerLasers(frame);
         processXRInput(frame);
+        updateShellDrag();
         commitScreenTransform();
         layoutControlsDock();
         refreshOverlayTexture(time);
@@ -9159,6 +9774,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     session.addEventListener('end', () => {
       try {
         xrSession = null;
+        resetShell(true);
         if (renderer) {
           try { renderer.setAnimationLoop(null); } catch (e) {}
         }
@@ -9257,7 +9873,8 @@ window.WebXRVR = window.WebXRVR || (function () {
               if (m) {
                 if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
                     m.map !== commentsTexture && m.map !== overlayTexture &&
-                    m.map !== guideTexture && m.map !== earthPreviewTexture) {
+                    m.map !== guideTexture && m.map !== earthPreviewTexture &&
+                    m.map !== shellMainTexture && m.map !== shellNavTexture) {
                   try { m.map.dispose(); } catch (e) {}
                 }
                 try { m.dispose(); } catch (e) {}
@@ -9273,6 +9890,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     screenMapBeforeDebug = null;
     if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} controlsTexture = null; }
     if (commentsTexture) { try { commentsTexture.dispose(); } catch (e) {} commentsTexture = null; }
+    resetShell(false);
+    disposeShellMeshes();
+    shell = null;
+    shellWasOpen = false;
+    shellDirtyContent = -1;
     if (overlayTexture) { try { overlayTexture.dispose(); } catch (e) {} overlayTexture = null; }
     if (guideTexture) { try { guideTexture.dispose(); } catch (e) {} guideTexture = null; }
     if (earthPreviewTexture) { try { earthPreviewTexture.dispose(); } catch (e) {} earthPreviewTexture = null; }
@@ -9774,6 +10396,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     enterVR,
     exitVR,
     isPresenting() { return !!xrSession; },
+    shell: shellFacade,
     isPreviewRunning() { return !!previewRunning; },
     startPreview,
     stopPreview,
@@ -9863,7 +10486,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'xrdiag']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'xrdiag', 'vrshell']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -9925,6 +10548,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       shouldAttemptXR,
       getXrCompatStatus() { return xrCompatStatus; },
+      activateShellHit,
       hasPreviewResume() { return !!previewResumeOpts; },
       getLastPointerError() { return lastPointerError; },
       // Test seam: engine ray for a client pixel (null when no preview).

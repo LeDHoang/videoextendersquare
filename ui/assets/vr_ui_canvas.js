@@ -75,16 +75,17 @@
     { label: 'AUDIO', action: 'mute',  x: 620, y: 100, w: 156, h: 36 },
 
     // Header comment pill → toggles the VR comments panel
-    { label: 'COMMENTS', action: 'comments', x: 528, y: 8, w: 72, h: 32 },
+    { label: 'COMMENTS', action: 'comments', x: 664, y: 8, w: 72, h: 32 },
 
-    // Open Earth activity mode, or restore All Locations after a location feed.
-    { label: 'EARTH MAP', action: 'earth', x: 608, y: 8, w: 128, h: 32 },
+    // Pack queue toggle (packs only). Earth and the main feed live on the
+    // shell nav bar under the dock.
+    { label: 'QUEUE', action: 'earth', x: 584, y: 8, w: 72, h: 32 },
 
     // Header exit button
     { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
 
     // Existing reel actions remain available in both feed and pack playback.
-    // Icon tiles on one row; it ends above the Earth action row (y 238).
+    // Icon tiles on one row.
     { label: 'LIKE',    action: 'like',       x: 24,  y: 188, w: 87, h: 48 },
     { label: 'SAVE',    action: 'save_reel',  x: 119, y: 188, w: 87, h: 48 },
     { label: 'SHARE',   action: 'share_reel', x: 214, y: 188, w: 87, h: 48 },
@@ -101,17 +102,17 @@
 
     // Earth-mode zoom map controls (docs/earth-zoom-map-plan.md Z1): their own
     // row in the Earth dock; visible + hittable only in earth scene mode.
-    { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 238, w: 174, h: 42 },
-    { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 238, w: 174, h: 42 },
-    { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 238, w: 174, h: 42 },
-    { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 238, w: 174, h: 42 },
+    { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 96, w: 174, h: 36 },
+    { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 96, w: 174, h: 36 },
+    { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 96, w: 174, h: 36 },
+    { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 96, w: 174, h: 36 },
 
     // Progress scrub track under the transport (times sit either side)
     { label: 'TRACK', action: 'seek',  x: 84,  y: 148, w: 632, h: 28 },
   ];
 
   // Dock header chip shown while a stereo reel is drawn per eye.
-  const STEREO_CHIP = { x: 456, y: 8, w: 64, h: 32 };
+  const STEREO_CHIP = { x: 592, y: 8, w: 64, h: 32 };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -337,6 +338,40 @@
     exit: [
       ['M6 6L18 18M18 6L6 18', 's', 'i', 1.8],
     ],
+    // VR shell nav bar: back.svg, industrial-reels.svg, compass.svg, message.svg, credits.svg.
+    back: [
+      ['M10.5 5.5L4 12L10.5 18.5', 's', 'i', 1.8],
+      ['M5.5 12H20M20 9.5V14.5', 's', 'a', 1.7],
+      ['M13 9.5L15.5 12L13 14.5L10.5 12Z', 'f', 'a'],
+      [ring(13, 12, 0.7), 'f', 'i'],
+    ],
+    reels: [
+      ['M3 8L5 6H19L21 8V16L19 18H5L3 16V8Z', 's', 'i', 1.5],
+      ['M7 10H9V14H7V10ZM15 10H17V14H15V10Z', 'f', 'a'],
+      ['M10 18L12 16L14 18', 's', 'i', 1.5],
+    ],
+    compass: [
+      ['M12 2.5L18.7 5.3L21.5 12L18.7 18.7L12 21.5L5.3 18.7L2.5 12L5.3 5.3Z', 's', 'i', 1.6],
+      ['M12 3V7.5M12 16.5V21M3 12H7.5M16.5 12H21', 's', 'i', 1.2, 0.35],
+      ['M12 12L10.2 10.2L17.5 6.5L13.8 13.8Z', 'f', 'a'],
+      ['M12 12L13.8 13.8L6.5 17.5L10.2 10.2Z', 'f', 'i', 0, 0.85],
+      [ring(12, 12, 1.8), 'f', 'k'],
+      [ring(12, 12, 1.8), 's', 'a', 1.2],
+      [ring(12, 12, 0.65), 'f', 'i'],
+    ],
+    message: [
+      ['M3.5 6.5L12 13L20.5 6.5M3.5 6.5H20.5V18.5H3.5V6.5Z', 's', 'i', 1.6],
+      ['M3.5 18.5L9.5 13M20.5 18.5L14.5 13', 's', 'i', 1, 0.25],
+      ['M12 10.8L14.2 13L12 15.2L9.8 13Z', 'f', 'a'],
+      [ring(12, 13, 0.75), 'f', 'i'],
+      [ring(12, 4, 1), 'f', 'a'],
+    ],
+    credits: [
+      [ring(12, 12, 8.2), 's', 'i', 1.6],
+      [ring(12, 12, 5.4), 's', 'a', 1.4],
+      ['M12 8.2V15.8', 's', 'i', 1.6],
+      ['M9.6 10H14.4M9.6 14H14.4', 's', 'i', 1.2, 0.6],
+    ],
   };
   const DOCK_ICON_PATHS = {};
 
@@ -436,6 +471,7 @@
 
   function isControlVisible(action, source, itemState, isPackExp, sceneMode) {
     if (isEarthAction(action)) return sceneMode === 'earth';
+    if (action === 'earth') return !!isPackExp;
     if (isPackAction(action)) return !!isPackExp;
     if (action === 'collect') return !isPackExp && sceneMode !== 'earth';
     if (isReelAction(action)) return source.kind !== 'static-card' && (!itemState || itemState.available !== false);
@@ -552,20 +588,8 @@
     ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 144, 24);
 
-    // Mode toggle (active while in Earth) + exit
-    const eIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
-    const eb = CTRL_BUTTONS[eIdx];
-    previewRoundRect(ctx, eb.x, eb.y, eb.w, eb.h, TOKENS.radius);
-    ctx.fillStyle = T.surface3;
-    ctx.fill();
-    ctx.strokeStyle = T.accent;
+    // Exit (the way back to reels is the nav bar's REELS tab)
     ctx.lineWidth = 1;
-    ctx.stroke();
-    drawIcon(ctx, 'location', eb.x + 18, eb.y + eb.h / 2, 16, T.ink);
-    ctx.fillStyle = T.ink;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('EARTH MAP', eb.x + 18 + (eb.w - 18) / 2, eb.y + eb.h / 2);
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
     previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radius);
     ctx.fillStyle = T.surface;
@@ -574,51 +598,64 @@
     ctx.stroke();
     drawIcon(ctx, 'exit', xb.x + xb.w / 2, xb.y + xb.h / 2, 14, T.accent);
 
-    // Readout tiles
-    const tiles = [
-      { k: 'REALM', v: earth.tier || 'ORBIT', c: T.ink, swatch: earth.tierColor || T.accent },
-      { k: 'SCALE', v: earth.scaleCaption || '—', c: T.ink },
-      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? T.accent : T.ink },
-    ];
-    const tw = 236, th = 96, ty = 70;
-    for (let i = 0; i < tiles.length; i++) {
-      const tx = 24 + i * (tw + 22);
-      previewRoundRect(ctx, tx, ty, tw, th, TOKENS.radius);
-      ctx.fillStyle = T.surface2;
-      ctx.fill();
-      ctx.strokeStyle = T.rule;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      let kx = tx + 18;
-      if (tiles[i].swatch) {
-        ctx.fillStyle = tiles[i].swatch;
-        ctx.fillRect(kx, ty + 20, 8, 8);
-        kx += 16;
-      }
-      ctx.fillStyle = T.ink3;
-      ctx.font = `bold 11px ${TOKENS.font.mono}`;
-      ctx.textAlign = 'left';
-      ctx.fillText(tiles[i].k, kx, ty + 24);
-      ctx.fillStyle = tiles[i].c;
-      ctx.font = `800 30px ${TOKENS.font.sans}`;
-      ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 18, ty + 62);
-    }
-    // Zoom meter (scrubber-style track, vermilion fill)
+    // Readout strip: one compact row of realm / scale / map / zoom cells.
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
-    ctx.fillStyle = T.ink3;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
-    ctx.textAlign = 'left';
-    ctx.fillText('ZOOM', 24, 190);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = T.ink;
-    ctx.fillText(Math.round(zp * 100) + '%', 776, 190);
-    previewRoundRect(ctx, 80, 186, 640, 8, TOKENS.radius);
+    const cells = [
+      { k: 'REALM', v: earth.tier || 'ORBIT', c: T.ink, swatch: earth.tierColor || T.accent, w: 176 },
+      { k: 'SCALE', v: earth.scaleCaption || '—', c: T.ink, w: 176 },
+      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? T.accent : T.ink, w: 208 },
+      { k: 'ZOOM', zoom: true, w: 192 },
+    ];
+    const sy = 52, sh = 32, my = sy + sh / 2;
+    previewRoundRect(ctx, 24, sy, 752, sh, TOKENS.radius);
     ctx.fillStyle = T.surface2;
     ctx.fill();
-    if (zp > 0.005) {
-      previewRoundRect(ctx, 80, 186, Math.max(8, 640 * zp), 8, TOKENS.radius);
-      ctx.fillStyle = T.accent;
-      ctx.fill();
+    ctx.strokeStyle = T.rule;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    let cx = 24;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      if (i > 0) {
+        ctx.fillStyle = T.rule;
+        ctx.fillRect(cx, sy + 6, 1, sh - 12);
+      }
+      let kx = cx + 12;
+      if (cell.swatch) {
+        ctx.fillStyle = cell.swatch;
+        ctx.fillRect(kx, my - 4, 8, 8);
+        kx += 14;
+      }
+      ctx.fillStyle = T.ink3;
+      ctx.font = `bold 10px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(cell.k, kx, my);
+      const vx = kx + ctx.measureText(cell.k).width + 8;
+      const room = cx + cell.w - 12 - vx;
+      if (cell.zoom) {
+        // Zoom meter (scrubber-style track, vermilion fill) + percent.
+        ctx.fillStyle = T.ink;
+        ctx.textAlign = 'right';
+        ctx.fillText(Math.round(zp * 100) + '%', cx + cell.w - 12, my);
+        const tw = room - 40;
+        previewRoundRect(ctx, vx, my - 3, tw, 6, TOKENS.radius);
+        ctx.fillStyle = T.surface;
+        ctx.fill();
+        if (zp > 0.005) {
+          previewRoundRect(ctx, vx, my - 3, Math.max(6, tw * zp), 6, TOKENS.radius);
+          ctx.fillStyle = T.accent;
+          ctx.fill();
+        }
+      } else {
+        // Shrink long values (STREAMING 42%) to the cell instead of overflowing.
+        const v = String(cell.v).slice(0, 14);
+        ctx.fillStyle = cell.c;
+        ctx.font = `800 16px ${TOKENS.font.sans}`;
+        const vw = ctx.measureText(v).width;
+        if (vw > room) ctx.font = `800 ${Math.max(10, Math.floor(16 * room / vw))}px ${TOKENS.font.sans}`;
+        ctx.fillText(v, vx, my + 1);
+      }
+      cx += cell.w;
     }
 
     // Action row: OPEN FEED is the primary (vermilion, like play); the map
@@ -676,7 +713,6 @@
       lockToViewer = false,
       autoNext = true,
       sceneMode = 'reels',
-      locationFeedActive = false,
       notificationText = '',
       notificationUntil = 0,
       stereo = 'mono',
@@ -756,7 +792,7 @@
     // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
     if (stereo === 'sbs' || stereo === 'tb') {
       // Sits flush against the comment pill; packs step left of the index pill.
-      const chipX = packMode ? STEREO_CHIP.x - 72 : STEREO_CHIP.x;
+      const chipX = packMode ? STEREO_CHIP.x - 152 : STEREO_CHIP.x;
       ctx.fillStyle = T.accent;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
@@ -780,28 +816,23 @@
     ctx.textAlign = 'center';
     ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
 
-    // Index pill: packs only; the reels feed is an endless scroll.
+    // Packs only: index pill and queue toggle. The reels feed is an endless
+    // scroll, and Earth / all locations live on the nav bar's tabs.
     if (packMode) {
-      const indexPill = { x: commentBtn.x - 72, y: 8, w: 64, h: 32 };
+      const earthBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
+      const earthButton = CTRL_BUTTONS[earthBtnIdx];
+      const indexPill = { x: earthButton.x - 72, y: 8, w: 64, h: 32 };
       headerPill(indexPill, false);
       ctx.fillStyle = T.ink2;
       ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, indexPill.x + indexPill.w / 2, 24);
-    }
 
-    // Earth button (QUEUE in pack mode)
-    const earthBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
-    const earthButton = CTRL_BUTTONS[earthBtnIdx];
-    const isEarthHover = (hoveredButton === earthBtnIdx);
-    const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
-    headerPill(earthButton, earthActive);
-    drawIcon(ctx, packMode ? 'more' : 'location', earthButton.x + 18, 24, 16, earthActive ? T.ink : T.ink2);
-    ctx.fillStyle = earthActive ? T.ink : T.ink2;
-    ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
-    ctx.fillText(
-      packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
-      earthButton.x + 18 + (earthButton.w - 18) / 2,
-      24
-    );
+      const queueActive = hoveredButton === earthBtnIdx || !!(packContext && packContext.queueOpen);
+      headerPill(earthButton, queueActive);
+      drawIcon(ctx, 'more', earthButton.x + 16, 24, 16, queueActive ? T.ink : T.ink2);
+      ctx.fillStyle = queueActive ? T.ink : T.ink2;
+      ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
+      ctx.fillText('QUEUE', earthButton.x + 16 + (earthButton.w - 16) / 2, 24);
+    }
 
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
@@ -2331,6 +2362,8 @@
     drawEarthScaleBar,
     renderEarthLabelCanvas,
     resolveEarthLabelHit,
+    drawIcon,
+    chamferPath,
     TOKENS,
   };
 });

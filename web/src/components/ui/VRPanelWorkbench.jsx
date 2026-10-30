@@ -2,25 +2,38 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 // Side-effect import: the UMD module assigns window.VRUICanvas, and Vite
 // re-runs it on every save, so panel edits show up without a reload.
 import '../../../../ui/assets/vr_ui_canvas.js';
+import '../../../../ui/assets/vr_shell_canvas.js';
+import '../../../../ui/assets/vr_shell.js';
 import controllerPng from '../../../../ui/assets/quest_controller.png';
 import { Segmented, ToggleRow } from './controls.jsx';
 
 // Captured now: ReelsPlayer later re-injects its own copy onto window.
 const UI = typeof window !== 'undefined' ? window.VRUICanvas : null;
+const SC = typeof window !== 'undefined' ? window.VRShellCanvas : null;
+const VS = typeof window !== 'undefined' ? window.VRShell : null;
 if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
   window.QUEST_CONTROLLER_B64 = controllerPng;
 }
 
 const DURATION = 42;
-const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD', 'EARTH LABEL'];
+const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH DOCK', 'EARTH CARD', 'EARTH LABEL', 'SHELL NAV', 'SHELL MAIN', 'SHELL KEYBOARD'];
+const SHELL_KEYS = { 'SHELL NAV': 1, 'SHELL MAIN': 1, 'SHELL KEYBOARD': 1 };
 const SIZES = UI ? {
   COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
   OVERLAY: { w: UI.OVERLAY_W, h: UI.OVERLAY_H },
   GUIDE: { w: UI.GUIDE_W, h: UI.GUIDE_H },
   'EARTH CARD': { w: UI.EARTH_PREVIEW_W, h: UI.EARTH_PREVIEW_H },
   'EARTH LABEL': { w: UI.EARTH_LABEL_W, h: UI.EARTH_LABEL_H },
+  ...(SC ? {
+    'SHELL NAV': { w: SC.NAV_W, h: SC.NAV_H },
+    'SHELL MAIN': { w: SC.MAIN_W, h: SC.MAIN_H },
+    'SHELL KEYBOARD': { w: SC.KB_W, h: SC.KB_H },
+  } : {}),
 } : {};
-const IDLE_HOVER = { DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '' };
+const IDLE_HOVER = {
+  DOCK: -1, 'EARTH DOCK': -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '',
+  'SHELL NAV': '', 'SHELL MAIN': '', 'SHELL KEYBOARD': '',
+};
 const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
 const CURVES = { DOME: 1, 'SQ CURVE': 2, FLAT: 0 };
 const CURVE_ORDER = ['DOME', 'SQ CURVE', 'FLAT'];
@@ -58,17 +71,6 @@ const PLAYLIST = [
     views: 1250000,
   },
 ];
-const EARTH_STATUS = {
-  tier: 'CITY',
-  tierColor: '#3b82f6',
-  zoomPct: 240,
-  scaleCaption: '5 KM',
-  mapStatus: 'LIVE TILES',
-  mapOffline: false,
-  location: 'HANOI',
-  northUp: true,
-  canOpenFeed: true,
-};
 // Globe zoom stops for the breadcrumb: render scale, zoom share, scale bar.
 const EARTH_ZOOMS = {
   GLOBE: { scale: 1, pct: 0, bar: null },
@@ -76,6 +78,32 @@ const EARTH_ZOOMS = {
   CITY: { scale: 60, pct: 72, bar: { pixels: 120, caption: '5 KM' } },
   STREET: { scale: 400, pct: 100, bar: { pixels: 90, caption: '200 M' } },
 };
+// Engine EARTH_TIERS: the dock's tier tile name and colour by render scale.
+const EARTH_TIERS = [
+  { name: 'ORBIT', max: 3, color: '#39D7FF' },
+  { name: 'REGION', max: 24, color: '#4FE3C1' },
+  { name: 'CITY', max: 200, color: '#FFC857' },
+  { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+];
+// Mirrors the engine's earthDockStatus() for the Earth zoom / place / offline
+// controls; zoomed views stream at 60%, like the Earth label's streaming bar.
+function earthDockStatus(mock) {
+  const z = EARTH_ZOOMS[mock.earthZoom];
+  const zoomed = z.scale > 1;
+  const tier = EARTH_TIERS.find((t) => z.scale < t.max);
+  const offline = zoomed && mock.earthOffline;
+  return {
+    tier: tier.name,
+    tierColor: tier.color,
+    zoomPct: z.pct,
+    scaleCaption: z.bar ? z.bar.caption : '—',
+    mapStatus: offline ? 'OFFLINE' : (zoomed ? 'STREAMING 60%' : 'ORBITAL'),
+    mapOffline: offline,
+    location: mock.earthPlace ? 'HANOI' : (zoomed ? 'WORLD' : 'EARTH ACTIVITY'),
+    northUp: true,
+    canOpenFeed: !!mock.earthPlace,
+  };
+}
 const EARTH_LOCATION = { name: 'Hanoi', slug: 'hanoi', heat: 0.72, active_reel_count: 18 };
 const COMMENT_TEMPLATES = [
   ['mika_tokyo', '#ff3b1f', 'The lantern reflections here are unreal'],
@@ -100,6 +128,132 @@ function makeComments(count) {
       liked_by_me: i === 1,
     };
   });
+}
+
+// Mock API for the VR shell: same reply shapes as the server, served instantly.
+const SHELL_ME = { id: 'me', username: 'you', display_name: 'You' };
+const SHELL_PEOPLE = [
+  { id: 'u1', username: 'mika_tokyo', display_name: 'Mika' },
+  { id: 'u2', username: 'nam', display_name: 'Nam Tran' },
+  { id: 'u3', username: 'lina', display_name: 'lina' },
+  { id: 'u4', username: 'oskar_b', display_name: 'Oskar B' },
+  { id: 'u5', username: 'dev_ray', display_name: 'dev ray' },
+  { id: 'u6', username: 'quest_owner_2026', display_name: 'Quest owner' },
+  { id: 'u7', username: 'echo_archive', display_name: 'echo_archive' },
+];
+const SHELL_REELS = Array.from({ length: 23 }, (_, i) => ({
+  ...PLAYLIST[i % PLAYLIST.length],
+  id: `r${i + 1}`,
+  poster_url: `mock:${i % 3}`,
+  comments_count: (i * 5) % 7,
+  liked_by_me: i % 4 === 0,
+  stereo_layout: i % 5 === 1 ? 'sbs' : undefined,
+}));
+const SHELL_PACKS = [
+  ['TOKYO AFTER DARK', 7], ['RAINY SEASON', 5], ['NORTHERN LIGHTS', 4], ['HA LONG MORNINGS', 6], ['ROOFTOPS', 3],
+].map(([title, n], i) => ({ id: `p${i + 1}`, title, status: 'published', reel_count: n, cover_url: `mock:${i % 3}` }));
+const SHELL_LINES = [
+  'did you see the aurora reel?', 'yes!! the dome curve makes it', 'sending you the Tokyo pack',
+  'thanks, watching now', 'the rain one is unreal in 3D', 'right? shot it handheld', 'weekend trip?',
+];
+const SHELL_PAGES = {
+  EXPLORE: '/explore',
+  SEARCH: '/explore?q=tokyo',
+  TAG: '/explore/tag/night',
+  LOCATION: '/explore/location/tokyo',
+  PROFILE: '/profile/mika_tokyo',
+  PACK: '/packs/p1',
+  MESSAGES: '/messages',
+  CHAT: '/messages/c1',
+  CREDITS: '/wallet',
+  SHARE: 'share',
+  HANDOFF: '/upload',
+  CLOSED: '',
+};
+const SECTION_PAGE = {
+  explore: 'EXPLORE', search: 'SEARCH', tag: 'TAG', location: 'LOCATION', profile: 'PROFILE', pack: 'PACK',
+  messages: 'MESSAGES', thread: 'CHAT', wallet: 'CREDITS', share: 'SHARE', handoff: 'HANDOFF',
+};
+
+function shellConversations(box) {
+  const people = box === 'requests' ? SHELL_PEOPLE.slice(5) : SHELL_PEOPLE;
+  return people.map((p, i) => ({
+    id: `c${i + 1}`,
+    participant: p,
+    can_message: true,
+    is_request: box === 'requests',
+    unread_count: i < 2 ? 2 - i : 0,
+    last_message: i === 2
+      ? { kind: 'reel', post: SHELL_REELS[2], sender_id: 'me' }
+      : { kind: 'text', text: SHELL_LINES[i % SHELL_LINES.length], sender_id: i % 2 ? 'me' : p.id },
+  }));
+}
+
+function shellRequest(path, query) {
+  let m;
+  if (path === '/api/reels') return { videos: query.author ? SHELL_REELS.slice(0, 9) : SHELL_REELS };
+  if (path.startsWith('/api/reels/tags/')) {
+    return { videos: SHELL_REELS.slice(3), related_tags: [{ slug: 'rain', name: '#rain' }, { slug: 'tokyo', name: '#tokyo' }] };
+  }
+  if (path.startsWith('/api/reels/locations/')) {
+    return { videos: SHELL_REELS.slice(5), location: { name: 'Tokyo' }, related_locations: [{ slug: 'osaka', name: 'Osaka' }] };
+  }
+  if (/^\/api\/users\/[^/]+\/packs$/.test(path)) return { items: SHELL_PACKS };
+  if ((m = /^\/api\/users\/(.+)$/.exec(path))) {
+    const p = SHELL_PEOPLE.find((x) => x.username === decodeURIComponent(m[1])) || SHELL_PEOPLE[0];
+    return {
+      user: {
+        ...p, avatar_color: '#ff3b1f', created_at: daysAgo(420), website: 'https://mika.example/tokyo',
+        bio: 'Night walks through Tokyo in stereo 3D. Rain, neon and quiet backstreets, shot handheld on a 360 rig.',
+        top_tags: [{ name: 'tokyo', slug: 'tokyo' }, { name: 'night', slug: 'night' }, { name: 'rain', slug: 'rain' }],
+        post_count: 9, follower_count: 12400, following_count: 310, like_count: 86300, is_following: false,
+      },
+    };
+  }
+  if (path.startsWith('/api/packs/')) {
+    return {
+      pack: {
+        id: 'p1', title: 'TOKYO AFTER DARK', creator: SHELL_PEOPLE[6], views: 48200, likes: 912, saves: 140,
+        liked_by_me: false, saved_by_me: true, items: SHELL_REELS.slice(0, 7).map((post) => ({ available: true, post })),
+      },
+    };
+  }
+  if (path === '/api/messages/unread-count') return { unread_count: 3, inbox: 3, requests: 1 };
+  if (path === '/api/messages/conversations') return { conversations: shellConversations(query.box) };
+  if ((m = /^\/api\/messages\/conversations\/([^/]+)\/messages$/.exec(path))) {
+    const conv = shellConversations('inbox').find((c) => c.id === m[1]) || shellConversations('inbox')[0];
+    return {
+      conversation: conv,
+      messages: SHELL_LINES.map((text, i) => ({
+        id: `m${i + 1}`, kind: i === 2 ? 'pack' : 'text', text, pack: i === 2 ? { title: 'TOKYO AFTER DARK' } : undefined,
+        sender_id: i % 2 ? conv.participant.id : 'me', created_at: daysAgo((SHELL_LINES.length - i) / 24),
+      })),
+    };
+  }
+  if (path === '/api/billing/wallet') {
+    return { available_credits: 1240, reserved_credits: 60, lifetime_earned: 3200, lifetime_spent: 1960 };
+  }
+  if (path === '/api/billing/transactions') {
+    const sources = ['reel_reward', 'video_generation', 'credit_purchase', 'reel_reward', 'image_generation', 'refund'];
+    let balance = 1240;
+    return {
+      transactions: Array.from({ length: 14 }, (_, i) => {
+        const delta = [5, -40, 500, 5, -12, 40][i % 6];
+        const row = { id: `t${i}`, source: sources[i % 6], delta_available: delta, delta_reserved: 0, balance_available: balance, created_at: daysAgo(i * 0.7) };
+        balance -= delta;
+        return row;
+      }),
+    };
+  }
+  return {};
+}
+
+function shellSend(method, path, body) {
+  if (path === '/api/messages/share-content') return { succeeded: 1 };
+  if (/\/messages$/.test(path) && body && body.text) {
+    return { message: { id: body.client_id, kind: 'text', text: body.text, sender_id: 'me', created_at: new Date().toISOString() } };
+  }
+  return {};
 }
 
 let posterCache = null;
@@ -144,13 +298,23 @@ function commentsItem(s) {
   return { item: PLAYLIST[s.idx], itemState: { available: true, following: s.following } };
 }
 
+// EARTH DOCK is the dock as Earth mode shows it, whatever the dock variant.
+const isDock = (key) => key === 'DOCK' || key === 'EARTH DOCK';
+const dockMock = (key, mock) => (key === 'EARTH DOCK' ? { ...mock, dock: 'EARTH' } : mock);
+
 // The dock canvas shrinks to fit its live controls, as in the engine.
 function panelSize(key, mock) {
-  return key === 'DOCK' ? UI.controlsCanvasSize(dockOptions(mock, { time: 0 })) : SIZES[key];
+  return isDock(key) ? UI.controlsCanvasSize(dockOptions(dockMock(key, mock), { time: 0 })) : SIZES[key];
 }
 
 function drawPanel(key, ctx, mock, comments, s, now) {
-  if (key === 'DOCK') {
+  if (SHELL_KEYS[key]) {
+    const state = s.shell.getRenderState();
+    if (key === 'SHELL NAV') SC.renderNavBar(ctx, state, s.hover[key]);
+    else if (key === 'SHELL MAIN') SC.renderMainPanel(ctx, state, s.hover[key], (url) => getPosters()[Number(String(url).slice(5)) || 0]);
+    else SC.renderKeyboard(ctx, s.hover[key], state.field);
+  } else if (isDock(key)) {
+    mock = dockMock(key, mock);
     UI.renderControlsCanvas(ctx, {
       ...dockOptions(mock, s),
       packContext: mock.dock === 'PACK' ? { title: 'TOKYO AFTER DARK', queueOpen: false } : null,
@@ -158,13 +322,13 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       idx: s.idx,
       item: PLAYLIST[s.idx],
       comments,
-      hoveredButton: s.hover.DOCK,
-      pressedButton: s.pressed,
+      hoveredButton: s.hover[key],
+      pressedButton: s.pressedKey === key ? s.pressed : -1,
       isCurved: mock.curve !== 'FLAT',
       curvatureMode: CURVES[mock.curve],
       lockToViewer: mock.lock,
       autoNext: mock.autoNext,
-      earth: mock.dock === 'EARTH' ? EARTH_STATUS : null,
+      earth: mock.dock === 'EARTH' ? earthDockStatus(mock) : null,
       stereo: mock.stereo.toLowerCase(),
     });
   } else if (key === 'COMMENTS') {
@@ -245,6 +409,7 @@ export default function VRPanelWorkbench() {
     earthOffline: false,
   });
   const [lastAction, setLastAction] = useState('—');
+  const [shellPage, setShellPage] = useState('CLOSED');
   const comments = useMemo(() => makeComments(Number(mock.comments)), [mock.comments]);
   const live = useRef({ mock, comments });
   live.current = { mock, comments };
@@ -260,7 +425,22 @@ export default function VRPanelWorkbench() {
     scroll: 0,
     highlight: null,
     overlayRegions: [],
+    shell: null,
   });
+  if (!interact.current.shell && VS) {
+    interact.current.shell = VS.create({
+      getUser: () => SHELL_ME,
+      request: (path, query) => Promise.resolve(shellRequest(path, query || {})),
+      send: (method, path, body) => Promise.resolve(shellSend(method, path, body)),
+      exitAndNavigate: (path) => setLastAction(`SHELL › exit VR › ${path}`),
+      playFeed: ({ startIndex }) => setLastAction(`SHELL › play reel ${startIndex + 1}`),
+      // REELS / EARTH nav tabs drive the mock dock, as they drive sceneMode in VR.
+      getScene: () => (live.current.mock.dock === 'EARTH' ? 'earth' : 'reels'),
+      setScene: (mode) => setMock((m) => (m.dock === 'PACK' ? m : { ...m, dock: mode === 'earth' ? 'EARTH' : 'REELS' })),
+      earthAvailable: () => live.current.mock.dock !== 'PACK',
+    });
+    interact.current.shell.refreshUnread();
+  }
   const canvases = useRef({});
   const stageRef = useRef(null);
 
@@ -300,12 +480,24 @@ export default function VRPanelWorkbench() {
     return () => cancelAnimationFrame(frame);
   }, []);
 
+  useEffect(() => {
+    const shell = interact.current.shell;
+    if (!shell) return undefined;
+    return shell.onDirty(() => setShellPage(SECTION_PAGE[shell.section()] || 'CLOSED'));
+  }, []);
+
   // Native listener: React's wheel handler is passive and cannot stop the page scroll.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
     const onWheel = (event) => {
-      if (event.target.dataset?.panel !== 'COMMENTS') return;
+      const panel = event.target.dataset?.panel;
+      if (panel === 'SHELL MAIN') {
+        event.preventDefault();
+        interact.current.shell.scroll(event.deltaY > 0 ? 1 : -1);
+        return;
+      }
+      if (panel !== 'COMMENTS') return;
       event.preventDefault();
       scrollComments(event.deltaY);
     };
@@ -313,7 +505,22 @@ export default function VRPanelWorkbench() {
     return () => stage.removeEventListener('wheel', onWheel);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!UI) return null;
+  if (!UI || !SC || !VS) return null;
+
+  const openShellPage = (page) => {
+    const shell = interact.current.shell;
+    if (page === 'CLOSED') shell.close();
+    else if (page === 'SHARE') shell.share({ kind: 'reel', target_id: 'r1', title: PLAYLIST[0].title });
+    else shell.open(SHELL_PAGES[page]);
+    setShellPage(page);
+  };
+
+  const toggleKeyboard = (on) => {
+    const shell = interact.current.shell;
+    if (on && !shell.isOpen()) openShellPage('SEARCH');
+    shell.focusField(on, shell.section() === 'thread' ? 'compose' : 'search');
+    setLastAction(`SHELL › keyboard ${on ? 'on' : 'off'}`);
+  };
 
   const toNative = (event, key) => {
     const el = event.currentTarget;
@@ -327,7 +534,10 @@ export default function VRPanelWorkbench() {
   const hitTest = (key, x, y) => {
     const s = interact.current;
     const { mock: m, comments: list } = live.current;
-    if (key === 'DOCK') return UI.resolveControlsHit(x, y, dockOptions(m, s));
+    if (key === 'SHELL NAV') return SC.resolveNavHit(x, y);
+    if (key === 'SHELL MAIN') return SC.resolveMainHit(s.shell.getRenderState(), x, y);
+    if (key === 'SHELL KEYBOARD') return SC.resolveKeyboardHit(x, y, s.shell.getRenderState().field);
+    if (isDock(key)) return UI.resolveControlsHit(x, y, dockOptions(dockMock(key, m), s));
     if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll, ...commentsItem(s) });
     if (key === 'OVERLAY') return UI.resolveOverlayCommentAt(x, y, s.overlayRegions);
     if (key === 'EARTH CARD') return UI.resolveEarthPreviewHit(x, y);
@@ -339,7 +549,11 @@ export default function VRPanelWorkbench() {
 
   const act = (key, hit, x) => {
     const s = interact.current;
-    if (key === 'DOCK') {
+    if (SHELL_KEYS[key]) {
+      if (!hit) return;
+      const handled = s.shell.handleHit(hit);
+      setLastAction(`SHELL › ${hit.action}${hit.arg != null && hit.arg !== '' ? ` ${hit.arg}` : ''}${handled ? '' : ' (ignored)'}`);
+    } else if (isDock(key)) {
       const btn = UI.CTRL_BUTTONS[hit];
       if (!btn) return;
       const a = btn.action;
@@ -348,7 +562,6 @@ export default function VRPanelWorkbench() {
       else if (a === 'lock') setMock((m) => ({ ...m, lock: !m.lock }));
       else if (a === 'mode') setMock((m) => ({ ...m, autoNext: !m.autoNext }));
       else if (a === 'curve') setMock((m) => ({ ...m, curve: CURVE_ORDER[(CURVE_ORDER.indexOf(m.curve) + 1) % CURVE_ORDER.length] }));
-      else if (a === 'earth') setMock((m) => ({ ...m, dock: m.dock === 'EARTH' ? 'REELS' : 'EARTH' }));
       else if (a === 'prev' || a === 'next') {
         s.idx = (s.idx + (a === 'next' ? 1 : PLAYLIST.length - 1)) % PLAYLIST.length;
         s.time = 0;
@@ -357,7 +570,7 @@ export default function VRPanelWorkbench() {
       else if (a === 'like') s.liked = !s.liked;
       else if (a === 'save_reel' || a === 'collect') s.saved = !s.saved;
       else if (a === 'follow') s.following = !s.following;
-      setLastAction(`DOCK › ${a}`);
+      setLastAction(`${key} › ${a}`);
     } else if (key === 'COMMENTS' && hit) {
       if (hit.startsWith('tab:')) {
         s.tab = hit.slice(4);
@@ -386,14 +599,18 @@ export default function VRPanelWorkbench() {
   const pointerProps = (key) => ({
     onPointerMove: (event) => {
       const [x, y] = toNative(event, key);
-      interact.current.hover[key] = hitTest(key, x, y) ?? IDLE_HOVER[key];
+      const hit = hitTest(key, x, y);
+      interact.current.hover[key] = SHELL_KEYS[key] ? SC.hoverKey(hit) : (hit ?? IDLE_HOVER[key]);
     },
     onPointerLeave: () => {
       interact.current.hover[key] = IDLE_HOVER[key];
       interact.current.pressed = -1;
     },
     onPointerDown: (event) => {
-      if (key === 'DOCK') interact.current.pressed = hitTest(key, ...toNative(event, key));
+      if (isDock(key)) {
+        interact.current.pressed = hitTest(key, ...toNative(event, key));
+        interact.current.pressedKey = key;
+      }
     },
     onPointerUp: () => { interact.current.pressed = -1; },
     onClick: (event) => {
@@ -427,6 +644,14 @@ export default function VRPanelWorkbench() {
         <ToggleRow label="MUTED" checked={mock.muted} onChange={set('muted')} />
         <ToggleRow label="LOCKED" checked={mock.lock} onChange={set('lock')} />
         <ToggleRow label="AUTO NEXT" checked={mock.autoNext} onChange={set('autoNext')} />
+      </div>
+      <div className="sx-immersive-preview-toolbar" aria-label="Mock VR shell state">
+        <Segmented ariaLabel="Shell page" options={Object.keys(SHELL_PAGES)} value={shellPage} onChange={openShellPage} />
+        <ToggleRow
+          label="KEYBOARD"
+          checked={!!interact.current.shell.getRenderState().field.focused}
+          onChange={toggleKeyboard}
+        />
       </div>
       <div className="sx-vr-workbench-readout">LAST ACTION: <strong>{lastAction}</strong></div>
       <div className="sx-vr-workbench-stage" ref={stageRef}>

@@ -261,7 +261,7 @@ test('a mono reel re-warms the next reel on a VR switch unless the preloader hol
 test('VR entry swaps the source once, from the onEnterVR callback only', () => {
   const entry = html.slice(html.indexOf("showFlash('ENTERING IMMERSIVE VR')") - 400, html.indexOf("showFlash('ENTERING IMMERSIVE VR')") + 200);
   assert.ok(!entry.includes('syncStereoSource()'), 'no second swap after enterVR resolves');
-  assert.match(html, /onEnterVR: \(\) => syncStereoSource\(\),/);
+  assert.match(html, /onEnterVR: \(\) => \{\s*syncStereoSource\(\);/);
 });
 
 test('a stereo failure retries once, then stays on 2D with a notice', () => {

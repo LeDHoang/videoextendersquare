@@ -961,3 +961,27 @@ def test_pack_owner_controls_are_private_to_the_owner(app):
         # A stale revision is rejected instead of silently overwriting.
         stale = mutate(owner_client, "POST", f"/api/packs/{pack_id}/publish", {"expected_revision": revision})
         assert stale.status_code == 409, stale.text
+
+
+def test_player_endpoints_inline_every_script_placeholder(app):
+    with TestClient(app) as owner_client, TestClient(app) as viewer_client:
+        owner = register(owner_client, "pack_inline_owner", "pack-inline-owner@example.com")
+        register(viewer_client, "pack_inline_viewer", "pack-inline-viewer@example.com")
+        post_ids = create_posts(app, owner["id"], 5)
+        pack = create_pack(owner_client, post_ids, "Inline pack")
+        pack = mutate(
+            owner_client,
+            "POST",
+            f"/api/packs/{pack['id']}/publish",
+            {"expected_revision": pack["revision"]},
+        ).json()["pack"]
+        entries = viewer_client.get("/api/reels/player-inline", params={"pack_id": pack["id"]}).json()["scripts"]
+        inline = "\n".join(e for e in entries if isinstance(e, str))
+        page = viewer_client.get("/api/reels/player", params={"pack_id": pack["id"]}).text
+        for source in (inline, page):
+            assert re.findall(r"__[A-Z_]+_JS__", source) == []
+        # The VR shell modules are linked after the UI canvas and before the engine.
+        for srcs in ([e["src"] for e in entries if isinstance(e, dict)], re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', page)):
+            names = [s.split("?")[0].rsplit("/", 1)[-1] for s in srcs]
+            order = ["vr_ui_canvas.js", "vr_shell_canvas.js", "vr_shell.js", "webxr_vr.js"]
+            assert [n for n in names if n in order] == order
