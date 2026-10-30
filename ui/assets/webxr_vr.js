@@ -126,6 +126,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
     xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
+    vrshell: true,   // in-VR site shell (?vrshell=0 → in-VR navigation leaves XR, pre-shell behaviour)
   };
   // Full legacy stack iff explicitly requested (?xrfull=1) and not overridden
   // by explicit minimal (?xrminimal=1). Everything else runs the minimal
@@ -151,6 +152,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('topdown', '0')) debugFlags.topdown = false;
       if (has('horizonhud', '1')) debugFlags.horizonhud = true;
       if (has('xrdiag', '1')) debugFlags.xrdiag = true;
+      if (has('vrshell', '0')) debugFlags.vrshell = false;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
       if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
     } catch (e) {}
@@ -6474,6 +6476,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
   let shellNavYaw = null;
+  // Main-panel drag scroll with fling; shellMainY is the canvas y under the ray.
+  let shellDrag = null;
+  let shellMainY = null;
 
   function getShellCanvas() {
     return (typeof window !== 'undefined' && window.VRShellCanvas) || null;
@@ -6482,7 +6487,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   function ensureShell() {
     if (shell) return shell;
     const core = typeof window !== 'undefined' && window.VRShell;
-    if (!core || !getShellCanvas()) return null;
+    if (!debugFlags.vrshell || !core || !getShellCanvas()) return null;
+    shellDrag = core.createDragScroll();
     shell = core.create({
       exitAndNavigate: shellHandoff,
       getUser: () => (callbacks.getCurrentUser ? callbacks.getCurrentUser() : null),
@@ -6548,7 +6554,36 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (Math.abs(y) < 0.3) { shellStick = { dir: 0, t: 0 }; return; }
     if (!dir || (dir === shellStick.dir && now - shellStick.t < 350)) return;
     shellStick = { dir, t: now };
-    shell.scroll(dir);
+    if (shell.scroll(dir)) pulseInput(src, 0.12, 20);
+  }
+
+  // Trigger/mouse press on the main panel starts a drag; nav and keyboard
+  // still click on press.
+  function beginShellDrag(hit) {
+    if (!shellDrag || !hit || hit.panel !== 'main' || shellMainY === null) return false;
+    shellDrag.begin(shellMainY, Date.now());
+    return true;
+  }
+
+  // Every frame: follow the drag, or coast after a fling. A step that hits
+  // the end of the list stops the fling.
+  function updateShellDrag() {
+    if (!shellDrag || !isShellOpen()) return;
+    const now = Date.now();
+    const n = shellDrag.active()
+      ? (shellMainY === null ? 0 : shellDrag.move(shellMainY, now))
+      : shellDrag.tick(now);
+    if (!n) return;
+    if (shell.scroll(n)) {
+      if (xrSession) pulseInput(activeRayInputSource, 0.1, 15);
+    } else if (!shellDrag.active()) {
+      shellDrag.stop();
+    }
+  }
+
+  // true when the gesture was a drag, so the release must not click.
+  function endShellDrag() {
+    return !!(shellDrag && shellDrag.active() && shellDrag.end(Date.now()));
   }
 
   // Preview wheel over the main panel: one row per notch, throttled.
@@ -6731,14 +6766,19 @@ window.WebXRVR = window.WebXRVR || (function () {
             const cx = h.uv.x * (main ? sc.MAIN_W : sc.NAV_W);
             const cy = (1 - h.uv.y) * (main ? sc.MAIN_H : sc.NAV_H);
             const action = main ? sc.resolveMainHit(shell.getRenderState(), cx, cy) : sc.resolveNavHit(cx, cy);
-            found = { panel: main ? 'main' : 'nav', distance: h.distance, action };
+            found = { panel: main ? 'main' : 'nav', distance: h.distance, action, y: cy };
           }
         } catch (e) {}
       }
     }
     const key = found && sc ? sc.hoverKey(found.action) : '';
     const panel = found ? found.panel : '';
+    shellMainY = panel === 'main' ? found.y : null;
     if (key !== shellHover.key || panel !== shellHover.panel) {
+      // Light tick as the laser lands on a new shell control (XR only).
+      if (key && xrSession && !(shellDrag && shellDrag.moved() && shellDrag.active())) {
+        pulseInput(activeRayInputSource, 0.15, 25);
+      }
       shellHover = { panel, key };
       vrLastUiUploadT = -1;
     }
@@ -6792,6 +6832,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (!resume) shellResumePlayback = false;
       shell.close();
     }
+    if (shellDrag) shellDrag.stop();
     shellHover = { panel: '', key: '' };
   }
 
@@ -6964,6 +7005,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
 
+    updateShellDrag();
     // UI canvases redraw at ~10 Hz (old VR_UI_MIN_INTERVAL semantics);
     // every-frame 1024×384 redraws stall software GL.
     if (vrLastUiUploadT < 0 || (time - vrLastUiUploadT) >= 100) {
@@ -7547,8 +7589,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       const source = 'preview-pointer-' + (event.pointerId === undefined ? 'mouse' : event.pointerId);
       previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, source };
       if (target && target.shell) {
-        activateShellHit(target.shell);
         previewPointer.control = true;
+        // Main panel clicks on release so a drag can scroll instead.
+        if (beginShellDrag(target.shell)) previewPointer.shellHit = target.shell;
+        else activateShellHit(target.shell);
         return;
       }
       if (target && target.controlIndex >= 0) {
@@ -7629,6 +7673,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       try {
       if (!previewPointer || previewPointer.id !== event.pointerId) return;
       const target = updatePreviewHover(event.clientX, event.clientY);
+      if (previewPointer.shellHit && !endShellDrag() && target && target.shell) {
+        activateShellHit(target.shell);
+      }
       if (sceneMode === 'earth' && previewPointer.earth) {
         endEarthDrag(previewPointer.source, target && target.hit);
       } else if (!previewPointer.control && target) {
@@ -9287,6 +9334,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     pressedButton = hoveredButton;
+    // A new press stops any fling; on the main panel it starts a drag.
+    if (shellDrag) shellDrag.stop();
+    if (shellHover.panel === 'main' && activeRayOrigin && activeRayDir) {
+      beginShellDrag(shellRaycast(activeRayOrigin, activeRayDir));
+    }
     // Begin a trigger-drag scroll when pressing on the panel list/scrollbar.
     if (commentsPanelVisible && cPanelHover &&
         (cPanelHover === 'list' || cPanelHover === 'scrollbar')) {
@@ -9310,6 +9362,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     pressedButton = -1;
     cPanelDrag = false;
     cPanelDragMoved = false;
+    endShellDrag();
     emitPreviewState();
   }
 
@@ -9336,8 +9389,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       raycaster.set(rayOrigin, rayDir);
 
       const shellHit = shellRaycast(rayOrigin, rayDir);
+      // 'select' fires before 'selectend': a drag on the main panel ends here
+      // and swallows the click.
+      const dragged = endShellDrag() || (shellDrag && shellDrag.moved());
       if (shellHit) {
-        if (activateShellHit(shellHit)) pulseInput(ev.data);
+        if (!dragged && activateShellHit(shellHit)) pulseInput(ev.data);
         handled = true;
       } else if (sceneMode === 'earth' && earthMesh && earthXrGrabActive) {
         // The trigger gesture was owned by the grab machine (tap or drag) and
@@ -9801,6 +9857,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         updateControllerLasers(frame);
         processXRInput(frame);
+        updateShellDrag();
         commitScreenTransform();
         layoutControlsDock();
         refreshOverlayTexture(time);
@@ -10517,7 +10574,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag', 'vrshell']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';

@@ -75,6 +75,55 @@
     return Math.max(0, Math.ceil((route.items || []).length / page[0]) - page[1]);
   }
 
+  // Laser/mouse drag on the main panel: canvas px of drag become whole scroll
+  // steps (dragging up scrolls down). Under `threshold` px it stays a click.
+  // A release mid-motion keeps scrolling with the last velocity, decaying.
+  function createDragScroll(opts) {
+    const o = opts || {};
+    const step = o.step || 140;
+    const threshold = o.threshold || 12;
+    const friction = o.friction || 0.004; // velocity lost per ms
+    let start = null, last = null, acc = 0, vel = 0, moved = false, flingT = 0;
+    function take(d) {
+      acc += d;
+      const n = acc > 0 ? Math.floor(acc / step) : Math.ceil(acc / step);
+      acc -= n * step;
+      return n;
+    }
+    return {
+      begin(y, t) { start = y; last = { y, t }; acc = 0; vel = 0; moved = false; },
+      active() { return start !== null; },
+      moved() { return moved; },
+      move(y, t) {
+        if (start === null) return 0;
+        if (!moved && Math.abs(y - start) < threshold) return 0;
+        moved = true;
+        const dy = last.y - y;
+        vel = 0.7 * vel + 0.3 * (dy / Math.max(1, t - last.t));
+        last = { y, t };
+        return take(dy);
+      },
+      // true when the gesture was a drag (the caller skips the click).
+      end(t) {
+        if (start === null) return moved;
+        start = null;
+        if (!moved || t - last.t > 100) vel = 0;
+        flingT = t;
+        return moved;
+      },
+      tick(t) {
+        if (start !== null || !vel) return 0;
+        const dt = Math.max(0, t - flingT);
+        flingT = t;
+        const n = take(vel * dt);
+        vel *= Math.max(0, 1 - friction * dt);
+        if (Math.abs(vel) < 0.05) { vel = 0; acc = 0; }
+        return n;
+      },
+      stop() { start = null; vel = 0; acc = 0; moved = false; },
+    };
+  }
+
   function enc(s) { return encodeURIComponent(s); }
   function conversations(r) { return Array.isArray(r.conversations) ? r.conversations : []; }
   // 8-64 chars, as the messaging API requires; it dedupes retries of one send.
@@ -611,5 +660,5 @@
     };
   }
 
-  return { parseRoute, create, HANDOFF, GRID_COLS, GRID_ROWS, LIST_ROWS, THREAD_ROWS };
+  return { parseRoute, create, createDragScroll, HANDOFF, GRID_COLS, GRID_ROWS, LIST_ROWS, THREAD_ROWS };
 });

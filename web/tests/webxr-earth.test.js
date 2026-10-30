@@ -5722,6 +5722,14 @@ test('VR shell: facade reports false without the shell modules', () => {
   assert.equal(renderer.shell.isOpen(), false);
 });
 
+test('VR shell: ?vrshell=0 kill switch keeps navigation on 2D', () => {
+  const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }), withShell: true, globals: { location: { search: '?vrshell=0' } } });
+  renderer.init(null, {});
+  assert.equal(renderer.__test.getDebugFlags().vrshell, false);
+  assert.equal(renderer.shell.open('/explore'), false);
+  assert.equal(renderer.shell.isOpen(), false);
+});
+
 test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl, withShell: true });

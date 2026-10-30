@@ -484,3 +484,35 @@ test('noteReward keeps the progress line and reloads an open wallet on an award'
   s.noteReward(null);
   assert.equal(s.getRenderState().rewards.capped, true);
 });
+
+test('drag scroll: small moves stay clicks, drags step and fling decays to rest', () => {
+  const drag = loadShell().createDragScroll();
+  drag.begin(500, 0);
+  assert.equal(drag.move(492, 10), 0);
+  assert.equal(drag.moved(), false);
+  assert.equal(drag.end(20), false);
+
+  drag.begin(500, 0);
+  assert.equal(drag.move(400, 50), 0); // past the threshold, under one step
+  assert.equal(drag.move(340, 80), 1); // dragging up scrolls down
+  assert.equal(drag.end(90), true);
+  let flung = 0;
+  for (let t = 100; t < 3000; t += 16) flung += drag.tick(t);
+  assert.ok(flung > 0, 'fling keeps scrolling');
+  assert.equal(drag.tick(4000), 0, 'fling comes to rest');
+
+  drag.begin(500, 0);
+  drag.move(300, 20);
+  drag.stop();
+  assert.equal(drag.moved(), false);
+  assert.equal(drag.active(), false);
+  assert.equal(drag.tick(100), 0);
+});
+
+test('drag scroll: a pause before release cancels the fling', () => {
+  const drag = loadShell().createDragScroll();
+  drag.begin(500, 0);
+  drag.move(200, 30);
+  assert.equal(drag.end(400), true);
+  assert.equal(drag.tick(416), 0);
+});
