@@ -97,7 +97,7 @@ test('grid renders titles, statuses and uses the image getter', () => {
   assert.deepEqual(asked, ['/p.jpg']);
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route: { section: 'tag', status: 'loading', label: '#x' } }, '');
-  assert.ok(rec.texts.includes('Loading…'));
+  assert.ok(rec.texts.includes('LOADING…'));
   assert.ok(rec.texts.includes('#x'));
   assert.equal(sc.thumbUrl({ media_type: 'image', url: '/i.jpg' }), '/i.jpg');
   assert.equal(sc.thumbUrl({ media_type: 'video', url: '/v.mp4' }), '');
@@ -137,7 +137,7 @@ test('profile and pack detail rows resolve their buttons and draw counts', () =>
   let rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route: profile }, '');
   assert.ok(rec.texts.includes('FOLLOW'));
-  assert.ok(rec.texts.some((t) => t.includes('1.2K FOLLOWERS')));
+  assert.ok(rec.texts.includes('1.2K') && rec.texts.includes('FOLLOWERS'));
 
   const pack = { section: 'pack', items: [{}], related: [{ label: '@amy', path: '/profile/amy' }],
     detail: { likes: 2, saves: 0, liked_by_me: true, playable_count: 1 } };
@@ -165,7 +165,7 @@ test('inbox rows open threads, tabs switch boxes, share rows send', () => {
   let rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route: { ...route, scroll: 0 }, unreadBox: { inbox: 3, requests: 1 } }, '');
   assert.ok(rec.texts.includes('3 NEW'));
-  assert.ok(rec.texts.some((t) => t.startsWith('INBOX') && t.includes('3')));
+  assert.ok(rec.texts.includes('INBOX') && rec.texts.includes('3'));
   assert.ok(rec.texts.includes('hi'));
 
   const share = { section: 'share', status: 'ready', items: items.slice(0, 2), sent: { c1: 'sent' }, share: { kind: 'reel' } };
@@ -190,7 +190,7 @@ test('thread: bubbles, quick replies, compose and request buttons', () => {
   assert.equal(sc.resolveMainHit({ route: closed }, cb.x + 10, cb.y + 10), null, 'no compose without can_message');
   let rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route, field: { id: 'compose', focused: true, text: 'hel' } }, '');
-  assert.ok(rec.texts.includes('yo') && rec.texts.includes('▶ Clip') && rec.texts.includes('hel|'));
+  assert.ok(rec.texts.includes('yo') && rec.texts.includes('▶ Clip') && rec.texts.includes('hel'));
 
   const req = { ...route, detail: { ...detail, can_accept: true, can_decline: true, is_request: true } };
   const [accept, decline] = sc.detailButtons(req);
@@ -220,7 +220,7 @@ test('wallet: balance, reward progress, ledger rows and BUY', () => {
   for (const text of ['1,234', 'CREDITS', 'BUY CREDITS', 'REEL REWARD', '−35', '+1', '(reserved +20)', 'RESERVE', '2026-10-30']) {
     assert.ok(rec.texts.includes(text), text);
   }
-  assert.ok(rec.texts.some((t) => t.includes('7/10 to next credit')));
+  assert.ok(rec.texts.some((t) => t.includes('7/10 TO NEXT CREDIT')));
   const buy = sc.detailButtons(route)[0];
   assert.deepEqual({ ...sc.resolveMainHit({ route }, buy.x + 10, buy.y + 10) }, { action: 'buy' });
   assert.deepEqual({ ...sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900) }, { action: 'scroll', arg: 1 });
@@ -228,5 +228,5 @@ test('wallet: balance, reward progress, ledger rows and BUY', () => {
   assert.equal(sc.resolveMainHit({ route }, row.x + 10, row.y + 10), null, 'ledger rows are read-only');
   const empty = recordingCtx();
   sc.renderMainPanel(empty.ctx, { route: { section: 'wallet', items: [], status: 'ready' } }, '');
-  assert.ok(empty.texts.includes('No credit activity yet'));
+  assert.ok(empty.texts.includes('NO CREDIT ACTIVITY YET'));
 });

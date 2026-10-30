@@ -20,8 +20,8 @@
   // Fallbacks mirror VRUICanvas.TOKENS; the live tokens win when that module is loaded.
   const FALLBACK = {
     hex: { bg: '#08090a', surface: '#101214', surface2: '#16191c', surface3: '#1d2126', rule: '#24282d',
-      ruleStrong: '#3a4047', ink: '#f2f3f5', ink2: '#a4abb3', inkMuted: '#646b74', accent: '#ff3b1f',
-      onAccent: '#0a0a0a' },
+      ruleStrong: '#3a4047', ink: '#f2f3f5', ink2: '#a4abb3', ink3: '#8e959e', inkMuted: '#646b74', accent: '#ff3b1f',
+      accentHi: '#ff5c42', onAccent: '#0a0a0a' },
     font: { display: "'Archivo Black', Archivo, sans-serif", sans: 'Archivo, ui-sans-serif, system-ui, sans-serif',
       mono: "'JetBrains Mono', ui-monospace, Menlo, monospace" },
   };
@@ -171,30 +171,137 @@
     explore: 'EXPLORE', search: 'SEARCH', tag: 'TAG', location: 'LOCATION', profile: 'PROFILE',
     pack: 'PACK', messages: 'MESSAGES', thread: 'CHAT', share: 'SHARE', wallet: 'CREDITS', rewards: 'REWARDS',
   };
+  // Header icon per section (VRUICanvas dock icons).
+  const SECTION_ICONS = {
+    explore: 'compass', search: 'compass', tag: 'compass', location: 'location', profile: 'profile', pack: 'reels',
+    messages: 'message', thread: 'message', share: 'share', wallet: 'credits', rewards: 'credits',
+  };
+
+  // Comments/guide panel shades: header band, row, hovered row.
+  const BAND = '#0d0e0f';
+  const ROW = '#121315';
+  const ROW_HOVER = '#1c1d1f';
 
   function inRect(r, x, y) {
     return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   }
 
+  function uiKit() {
+    return typeof window !== 'undefined' && window.VRUICanvas;
+  }
+
+  // Chamfered outline (the dock tile shape); a plain rect when VRUICanvas is absent.
+  function shape(ctx, r, c) {
+    const ui = uiKit();
+    if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, c);
+    else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
+  }
+
+  function tile(ctx, r, c, fill, stroke, lineWidth) {
+    shape(ctx, r, c);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth || 2; ctx.stroke(); }
+  }
+
+  function icon(ctx, name, cx, cy, size, ink, core) {
+    const ui = uiKit();
+    const T = tokens().hex;
+    if (ui && ui.drawIcon) ui.drawIcon(ctx, name, cx, cy, size, ink, T.accent, core);
+    else { ctx.fillStyle = T.accent; ctx.fillRect(cx - 8, cy - 8, 16, 16); }
+  }
+
+  // Dock-style button: chamfered tile, accent rule when lit, mono caps label.
+  // opts: primary, active, hover, disabled, quiet (darker tile, dimmer label), size, font, weight.
   function drawButton(ctx, r, label, opts) {
     const t = tokens();
+    const T = t.hex;
     const o = opts || {};
-    ctx.fillStyle = o.primary ? t.hex.accent : (o.active ? t.hex.surface3 : t.hex.surface2);
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    if (o.hover) {
-      ctx.strokeStyle = t.hex.ink;
-      ctx.lineWidth = 4;
-      ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
+    const lit = !o.disabled && (o.hover || o.active);
+    let fill = lit ? T.surface3 : (o.quiet ? ROW : T.surface2);
+    let stroke = lit ? T.accent : T.rule;
+    if (o.primary) {
+      fill = o.hover ? (T.accentHi || T.accent) : T.accent;
+      stroke = o.hover ? T.ink : T.accent;
     }
+    ctx.globalAlpha = o.disabled ? 0.4 : 1;
+    tile(ctx, r, 12, fill, stroke, 2);
     if (o.active && !o.primary) {
-      ctx.fillStyle = t.hex.accent;
-      ctx.fillRect(r.x, r.y + r.h - 8, r.w, 8);
+      ctx.fillStyle = T.accent;
+      ctx.fillRect(r.x + r.w / 2 - 28, r.y + r.h - 10, 56, 4);
     }
-    ctx.fillStyle = o.primary ? t.hex.onAccent : (o.disabled ? t.hex.inkMuted : t.hex.ink);
-    ctx.font = (o.size || 40) + 'px ' + t.font.display;
+    ctx.fillStyle = o.primary ? T.onAccent : (o.quiet && !lit ? T.ink2 : T.ink);
+    ctx.font = (o.weight || 700) + ' ' + (o.size || 32) + 'px ' + (o.font || t.font.mono);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // Status pill, right edge at `right`: 'fill' (accent), 'accent' (accent outline) or muted outline.
+  function drawPill(ctx, right, cy, label, style) {
+    const t = tokens();
+    const T = t.hex;
+    ctx.font = '700 28px ' + t.font.mono;
+    const w = ctx.measureText(label).width + 48;
+    const fill = style === 'fill';
+    tile(ctx, { x: right - w, y: cy - 28, w, h: 56 }, 8, fill ? T.accent : T.bg, fill || style === 'accent' ? T.accent : T.ruleStrong, 2);
+    ctx.fillStyle = fill ? T.onAccent : (style === 'accent' ? T.accent : T.ink2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, right - w / 2, cy + 2);
+  }
+
+  // Mono route pill centred on cx.
+  function pathPill(ctx, cx, cy, path) {
+    const t = tokens();
+    const T = t.hex;
+    ctx.font = '600 30px ' + t.font.mono;
+    const w = ctx.measureText(path).width + 64;
+    tile(ctx, { x: cx - w / 2, y: cy - 32, w, h: 64 }, 10, T.bg, T.rule, 2);
+    ctx.fillStyle = T.ink2;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(path, cx, cy + 2);
+  }
+
+  // Loading/empty/error line: accent square marker and mono caps, as in the comments panel.
+  function drawStatus(ctx, text, y) {
+    const t = tokens();
+    const label = String(text).toUpperCase();
+    ctx.font = '700 40px ' + t.font.mono;
+    const x = MAIN_W / 2 - (ctx.measureText(label).width + 40) / 2;
+    ctx.fillStyle = t.hex.accent;
+    ctx.fillRect(x, y - 10, 20, 20);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + 40, y + 2);
+  }
+
+  // Text field: dark well, accent rule and caret while focused, mono caps placeholder.
+  // Long text shows its end, where typing happens.
+  function drawField(ctx, r, text, placeholder, focused, hover, lead) {
+    const t = tokens();
+    const T = t.hex;
+    tile(ctx, r, 12, T.bg, focused ? T.accent : (hover ? T.ink2 : T.ruleStrong), focused ? 3 : 2);
+    const x = r.x + (lead || 32);
+    const maxW = r.x + r.w - 40 - x;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    if (text || focused) {
+      ctx.font = '40px ' + t.font.sans;
+      let shown = String(text || '');
+      while (shown.length > 1 && ctx.measureText(shown).width > maxW - 24) shown = shown.slice(1);
+      ctx.fillStyle = T.ink;
+      ctx.fillText(shown, x, r.y + r.h / 2 + 2);
+      if (focused) {
+        ctx.fillStyle = T.accent;
+        ctx.fillRect(x + ctx.measureText(shown).width + 6, r.y + r.h / 2 - 24, 4, 48);
+      }
+    } else {
+      ctx.font = '600 30px ' + t.font.mono;
+      ctx.fillStyle = T.inkMuted;
+      ctx.fillText(truncate(ctx, String(placeholder).toUpperCase(), maxW), x, r.y + r.h / 2 + 2);
+    }
   }
 
   // state: VRShell getRenderState(); hover: nav item id or ''.
@@ -262,41 +369,58 @@
     return r ? { action: 'nav', arg: r.id } : null;
   }
 
-  function renderHeader(ctx, title, subtitle, hover) {
+  // Header band: accent top rule, icon tile, mono title / subtitle, close tile.
+  function renderHeader(ctx, title, subtitle, hover, iconName) {
     const t = tokens();
-    ctx.fillStyle = t.hex.surface;
+    const T = t.hex;
+    const cy = HEADER_H / 2 + 3;
+    ctx.fillStyle = BAND;
     ctx.fillRect(0, 0, MAIN_W, HEADER_H);
-    ctx.fillStyle = t.hex.accent;
-    ctx.fillRect(0, HEADER_H - 6, MAIN_W, 6);
-    ctx.fillStyle = t.hex.ink;
-    ctx.font = '64px ' + t.font.display;
+    ctx.fillStyle = T.accent;
+    ctx.fillRect(0, 0, MAIN_W, 6);
+    ctx.fillStyle = T.rule;
+    ctx.fillRect(0, HEADER_H - 2, MAIN_W, 2);
+    tile(ctx, { x: 40, y: cy - 38, w: 76, h: 76 }, 10, T.surface2, T.rule, 2);
+    icon(ctx, iconName || 'logo', 78, cy, 48, T.ink, T.surface2);
+    ctx.fillStyle = T.ink;
+    ctx.font = '700 44px ' + t.font.mono;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(title, 48, HEADER_H / 2);
+    ctx.fillText(title, 148, cy);
     if (subtitle) {
-      const titleW = ctx.measureText(title).width;
-      ctx.fillStyle = t.hex.ink2;
-      ctx.font = '36px ' + t.font.mono;
-      ctx.fillText(subtitle, 48 + titleW + 32, HEADER_H / 2 + 4);
+      const x = 148 + ctx.measureText(title).width + 28;
+      ctx.font = '600 34px ' + t.font.mono;
+      ctx.fillStyle = T.inkMuted;
+      ctx.fillText('/', x, cy);
+      ctx.fillStyle = T.ink2;
+      ctx.fillText(truncate(ctx, subtitle, CLOSE_BTN.x - x - 96), x + 44, cy);
     }
-    drawButton(ctx, CLOSE_BTN, '✕', { hover: hover === 'close', size: 48 });
+    const lit = hover === 'close';
+    tile(ctx, CLOSE_BTN, 12, lit ? T.surface3 : T.surface2, lit ? T.accent : T.ruleStrong, 2);
+    ctx.fillStyle = lit ? T.ink : T.accent;
+    ctx.font = '700 40px ' + t.font.mono;
+    ctx.textAlign = 'center';
+    ctx.fillText('✕', CLOSE_BTN.x + CLOSE_BTN.w / 2, CLOSE_BTN.y + CLOSE_BTN.h / 2 + 2);
   }
+
+  // Centred card around the handoff copy; the buttons sit on its lower edge.
+  const HANDOFF_CARD = { x: MAIN_W / 2 - 600, y: 200, w: 1200, h: 740 };
 
   function renderHandoffCard(ctx, handoff, hover) {
     const t = tokens();
-    ctx.fillStyle = t.hex.ink;
-    ctx.font = '80px ' + t.font.display;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(handoff.title || 'FINISH ON 2D', MAIN_W / 2, 360);
-    ctx.fillStyle = t.hex.ink2;
-    ctx.font = '44px ' + t.font.sans;
-    ctx.fillText(handoff.message || 'This page needs the 2D site.', MAIN_W / 2, 480);
-    ctx.fillStyle = t.hex.inkMuted;
-    ctx.font = '36px ' + t.font.mono;
-    ctx.fillText(handoff.path || '', MAIN_W / 2, 560);
+    const T = t.hex;
+    const c = HANDOFF_CARD;
+    tile(ctx, c, 24, ROW, T.ruleStrong, 2);
+    ctx.fillStyle = T.accent;
+    ctx.fillRect(c.x + 24, c.y, c.w - 48, 6);
+    tile(ctx, { x: MAIN_W / 2 - 60, y: 260, w: 120, h: 120 }, 16, T.surface2, T.accent, 2);
+    icon(ctx, 'exit', MAIN_W / 2, 320, 68, T.ink, T.surface2);
+    centerText(ctx, handoff.title || 'FINISH ON 2D', 460, '64px ' + t.font.display, T.ink);
+    ctx.font = '40px ' + t.font.sans;
+    centerText(ctx, truncate(ctx, handoff.message || 'This page needs the 2D site.', c.w - 120), 540, ctx.font, T.ink2);
+    if (handoff.path) pathPill(ctx, MAIN_W / 2, 636, handoff.path);
     HANDOFF_BTNS.forEach((b) => drawButton(ctx, b, b.label, {
-      primary: b.action === 'handoff-confirm', hover: hover === b.action, size: 44,
+      primary: b.action === 'handoff-confirm', hover: hover === b.action, size: 36,
     }));
   }
 
@@ -315,32 +439,62 @@
     ctx.fillText(text, MAIN_W / 2, y);
   }
 
+  // Search field with a magnifier glyph; shows the live query while typing.
   function renderSearchBar(ctx, route, field, hover) {
-    const t = tokens();
+    const T = tokens().hex;
     const f = field || {};
     const r = SEARCH_BAR;
-    ctx.fillStyle = t.hex.surface2;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = f.focused ? t.hex.accent : (hover === 'search-focus' ? t.hex.ink : t.hex.rule);
-    ctx.lineWidth = 4;
-    ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
-    const query = f.focused ? f.text + '|' : (route.section === 'search' ? route.arg : '');
-    ctx.fillStyle = query ? t.hex.ink : t.hex.inkMuted;
-    ctx.font = '44px ' + t.font.sans;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(truncate(ctx, query || '⌕  Search reels, tags, places', r.w - 64), r.x + 32, r.y + r.h / 2);
+    const text = f.focused ? f.text : (route.section === 'search' ? route.arg : '');
+    drawField(ctx, r, text, 'Search reels, tags, places', !!f.focused, hover === 'search-focus', 100);
+    const cx = r.x + 50;
+    const cy = r.y + r.h / 2;
+    ctx.strokeStyle = f.focused ? T.accent : T.ink2;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx - 4, cy - 4, 15, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + 7, cy + 7);
+    ctx.lineTo(cx + 19, cy + 19);
+    ctx.stroke();
   }
 
   function renderChips(ctx, related, hover) {
+    const t = tokens();
     (related || []).slice(0, CHIP_MAX).forEach((c, i) => {
-      drawButton(ctx, chipRect(i), truncate(ctx, c.label, CHIP_W - 40), { hover: hover === 'chip:' + c.path, size: 32 });
+      ctx.font = '600 30px ' + t.font.mono;
+      drawButton(ctx, chipRect(i), truncate(ctx, c.label, CHIP_W - 40), { hover: hover === 'chip:' + c.path, size: 30, weight: 600 });
     });
   }
 
-  // Profile: avatar initials, name and counts. Pack: creator chip and counts. Buttons on the right.
+  // Value-over-caption columns from x, split by thin rules; stops before maxX.
+  function drawStats(ctx, x, cy, stats, maxX) {
+    const t = tokens();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < stats.length; i++) {
+      ctx.font = '700 38px ' + t.font.mono;
+      const vw = ctx.measureText(stats[i][0]).width;
+      ctx.font = '600 22px ' + t.font.mono;
+      const w = Math.max(vw, ctx.measureText(stats[i][1]).width);
+      if (x + w > maxX) break;
+      if (i) {
+        ctx.fillStyle = t.hex.rule;
+        ctx.fillRect(x - 28, cy - 30, 2, 60);
+      }
+      ctx.fillStyle = t.hex.ink3;
+      ctx.fillText(stats[i][1], x, cy + 24);
+      ctx.font = '700 38px ' + t.font.mono;
+      ctx.fillStyle = t.hex.ink;
+      ctx.fillText(stats[i][0], x, cy - 12);
+      x += w + 56;
+    }
+  }
+
+  // Profile: avatar, name over @handle, counts. Pack: creator chip and counts. Buttons on the right.
   function renderDetailRow(ctx, route, hover) {
     const t = tokens();
+    const T = t.hex;
     const det = route.detail;
     if (!det) return;
     const btns = detailButtons(route);
@@ -349,39 +503,38 @@
     const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
     let stats;
     if (route.section === 'profile') {
-      ctx.fillStyle = det.avatar_color || t.hex.accent;
-      ctx.beginPath();
-      ctx.arc(x + 52, cy, 52, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = t.hex.onAccent;
-      ctx.font = '48px ' + t.font.display;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(det.display_name || det.username || '?').slice(0, 1).toUpperCase(), x + 52, cy + 2);
-      x += 136;
-      ctx.fillStyle = t.hex.ink;
-      ctx.font = '44px ' + t.font.sans;
+      drawAvatar(ctx, x + 48, cy, 48, det);
+      x += 128;
       ctx.textAlign = 'left';
-      ctx.fillText(truncate(ctx, det.display_name || det.username, 520), x, cy);
-      x += Math.min(520, ctx.measureText(det.display_name || det.username || '').width) + 40;
-      stats = fmtCount(det.post_count) + ' POSTS  ·  ' + fmtCount(det.follower_count) + ' FOLLOWERS  ·  '
-        + fmtCount(det.following_count) + ' FOLLOWING';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = T.ink;
+      ctx.font = '44px ' + t.font.display;
+      const name = truncate(ctx, det.display_name || det.username, 520);
+      ctx.fillText(name, x, cy - 16);
+      let nameW = ctx.measureText(name).width;
+      if (det.username) {
+        ctx.fillStyle = T.ink3;
+        ctx.font = '600 26px ' + t.font.mono;
+        const handle = truncate(ctx, '@' + det.username, 520);
+        ctx.fillText(handle, x, cy + 30);
+        nameW = Math.max(nameW, ctx.measureText(handle).width);
+      }
+      x += nameW + 64;
+      stats = [[fmtCount(det.post_count), 'POSTS'], [fmtCount(det.follower_count), 'FOLLOWERS'],
+        [fmtCount(det.following_count), 'FOLLOWING']];
     } else {
       const chip = (route.related || [])[0];
       if (chip) {
-        drawButton(ctx, chipRect(0), truncate(ctx, chip.label, CHIP_W - 40), { hover: hover === 'chip:' + chip.path, size: 32 });
-        x += CHIP_W + 40;
+        ctx.font = '600 30px ' + t.font.mono;
+        drawButton(ctx, chipRect(0), truncate(ctx, chip.label, CHIP_W - 40), { hover: hover === 'chip:' + chip.path, size: 30, weight: 600 });
+        x += CHIP_W + 48;
       }
-      stats = fmtCount(det.playable_count != null ? det.playable_count : (route.items || []).length) + ' REELS  ·  '
-        + fmtCount(det.views) + ' VIEWS';
+      stats = [[fmtCount(det.playable_count != null ? det.playable_count : (route.items || []).length), 'REELS'],
+        [fmtCount(det.views), 'VIEWS']];
     }
-    ctx.fillStyle = t.hex.ink2;
-    ctx.font = '32px ' + t.font.mono;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(truncate(ctx, stats, Math.max(0, textRight - x)), x, cy + 2);
+    drawStats(ctx, x, cy, stats, textRight);
     btns.forEach((b) => drawButton(ctx, b, b.label, {
-      primary: b.primary, active: b.active, disabled: b.disabled, size: 36,
+      primary: b.primary, active: b.active, disabled: b.disabled,
       hover: !b.disabled && hover === (b.arg === undefined ? b.action : b.action + ':' + b.arg),
     }));
   }
@@ -407,62 +560,105 @@
     ctx.fillText(initials, r.x + r.w / 2, r.y + r.h / 2);
   }
 
+  // Up/down chevron stroke.
+  function chevron(ctx, cx, cy, dir, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(cx - 18, cy - 9 * dir);
+    ctx.lineTo(cx, cy + 9 * dir);
+    ctx.lineTo(cx + 18, cy - 9 * dir);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Scroll column: arrow tiles at the outer ends of the two hit rects, a rule track with a thumb between.
+  function renderScrollRail(ctx, route, btns, maxScroll, hover) {
+    const T = tokens().hex;
+    const scroll = route.scroll || 0;
+    const up = btns[0];
+    const down = btns[1];
+    const trackX = up.x + up.w / 2 - 3;
+    const trackY = up.y + up.w + 20;
+    const trackH = down.y + down.h - down.w - 20 - trackY;
+    ctx.fillStyle = T.rule;
+    ctx.fillRect(trackX, trackY, 6, trackH);
+    if (maxScroll > 0) {
+      const len = Math.max(48, trackH / (maxScroll + 1));
+      ctx.fillStyle = T.accent;
+      ctx.fillRect(trackX, trackY + (trackH - len) * Math.min(1, scroll / maxScroll), 6, len);
+    }
+    btns.forEach((b) => {
+      const disabled = b.arg < 0 ? !scroll : scroll >= maxScroll;
+      const lit = !disabled && hover === 'scroll:' + b.arg;
+      const r = { x: b.x, y: b.arg < 0 ? b.y : b.y + b.h - b.w, w: b.w, h: b.w };
+      ctx.globalAlpha = disabled ? 0.35 : 1;
+      tile(ctx, r, 12, lit ? T.surface3 : T.surface2, lit ? T.accent : T.rule, 2);
+      chevron(ctx, r.x + r.w / 2, r.y + r.h / 2, b.arg < 0 ? -1 : 1, lit ? T.accent : T.ink);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // Reel cards: chamfered tile, clipped thumb, title and @author under a rule that lights on hover.
   function renderGrid(ctx, route, hover, getImage) {
     const t = tokens();
+    const T = t.hex;
     const items = route.items || [];
-    if (route.status === 'loading') { centerText(ctx, 'Loading…', 680, '52px ' + t.font.sans, t.hex.ink2); return; }
-    if (route.status === 'error') { centerText(ctx, "Couldn't load this page", 680, '52px ' + t.font.sans, t.hex.ink2); return; }
-    if (!items.length) { centerText(ctx, 'Nothing here yet', 680, '52px ' + t.font.sans, t.hex.ink2); return; }
+    if (route.status === 'loading') { drawStatus(ctx, 'Loading…', 680); return; }
+    if (route.status === 'error') { drawStatus(ctx, "Couldn't load this page", 680); return; }
+    if (!items.length) { drawStatus(ctx, 'Nothing here yet', 680); return; }
     const first = (route.scroll || 0) * GRID_COLS;
     for (let slot = 0; slot < GRID_COLS * GRID_ROWS; slot++) {
       const i = first + slot;
       const item = items[i];
       if (!item) break;
       const r = cardRect(slot);
+      const lit = hover === 'play:' + i;
       const url = thumbUrl(item);
+      tile(ctx, r, 16, lit ? ROW_HOVER : ROW);
+      ctx.save();
+      shape(ctx, r, 16);
+      ctx.clip();
       drawThumb(ctx, { x: r.x, y: r.y, w: r.w, h: 290 }, url && getImage ? getImage(url) : null, item);
+      ctx.restore();
+      ctx.fillStyle = lit ? T.accent : T.rule;
+      ctx.fillRect(r.x, r.y + 290, r.w, lit ? 4 : 2);
       if (item.media_type === 'video') {
-        ctx.fillStyle = t.hex.ink;
-        ctx.font = '40px ' + t.font.sans;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText('▶', r.x + 16, r.y + 14);
+        tile(ctx, { x: r.x + 16, y: r.y + 16, w: 56, h: 56 }, 8, 'rgba(8,9,10,0.82)', T.ruleStrong, 2);
+        ctx.fillStyle = T.accent;
+        ctx.beginPath();
+        ctx.moveTo(r.x + 37, r.y + 31);
+        ctx.lineTo(r.x + 37, r.y + 57);
+        ctx.lineTo(r.x + 58, r.y + 44);
+        ctx.closePath();
+        ctx.fill();
       }
-      ctx.fillStyle = t.hex.surface;
-      ctx.fillRect(r.x, r.y + 290, r.w, r.h - 290);
-      ctx.fillStyle = t.hex.ink;
-      ctx.font = '34px ' + t.font.sans;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(truncate(ctx, item.title || 'Untitled', r.w - 32), r.x + 16, r.y + 330);
-      ctx.fillStyle = t.hex.ink2;
-      ctx.font = '28px ' + t.font.mono;
-      ctx.fillText(truncate(ctx, item.author_name ? '@' + item.author_name : '', r.w - 32), r.x + 16, r.y + 372);
-      if (hover === 'play:' + i) {
-        ctx.strokeStyle = t.hex.accent;
-        ctx.lineWidth = 8;
-        ctx.strokeRect(r.x + 4, r.y + 4, r.w - 8, r.h - 8);
-      }
+      ctx.fillStyle = T.ink;
+      ctx.font = '600 32px ' + t.font.sans;
+      ctx.fillText(truncate(ctx, item.title || 'Untitled', r.w - 40), r.x + 20, r.y + 334);
+      ctx.fillStyle = T.ink3;
+      ctx.font = '600 26px ' + t.font.mono;
+      ctx.fillText(truncate(ctx, item.author_name ? '@' + item.author_name : '', r.w - 40), r.x + 20, r.y + 374);
+      tile(ctx, r, 16, null, lit ? T.accent : T.rule, lit ? 4 : 2);
     }
-    const maxScroll = Math.max(0, Math.ceil(items.length / GRID_COLS) - GRID_ROWS);
-    SCROLL_BTNS.forEach((b) => {
-      const disabled = b.arg < 0 ? !route.scroll : (route.scroll || 0) >= maxScroll;
-      drawButton(ctx, b, b.label, { hover: !disabled && hover === 'scroll:' + b.arg, disabled, size: 48 });
-    });
+    renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, Math.ceil(items.length / GRID_COLS) - GRID_ROWS), hover);
   }
 
-  function drawAvatar(ctx, cx, cy, radius, user) {
+  // Square avatar tile: up to two initials in the user's colour.
+  function drawAvatar(ctx, cx, cy, half, user) {
     const t = tokens();
     const u = user || {};
-    ctx.fillStyle = u.avatar_color || t.hex.accent;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = t.hex.onAccent;
-    ctx.font = Math.round(radius * 0.95) + 'px ' + t.font.display;
+    const color = u.avatar_color || t.hex.accent;
+    tile(ctx, { x: cx - half, y: cy - half, w: half * 2, h: half * 2 }, Math.round(half / 4), t.hex.surface2, color, 3);
+    const words = String(u.display_name || u.username || '?').trim().split(/\s+/);
+    ctx.fillStyle = color;
+    ctx.font = '700 ' + Math.round(half * 0.8) + 'px ' + t.font.mono;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(u.display_name || u.username || '?').slice(0, 1).toUpperCase(), cx, cy + 2);
+    ctx.fillText(words.slice(0, 2).map((w) => Array.from(w)[0] || '').join('').toUpperCase() || '?', cx, cy + 2);
   }
 
   // One-line summary of a message for the inbox row.
@@ -476,70 +672,68 @@
     return (participant && m.sender_id !== participant.id ? 'You: ' : '') + body;
   }
 
-  // Avatar, name, a second line and an optional right-hand label.
-  function renderConversationRow(ctx, r, conv, sub, right, hover) {
+  // Avatar-colour edge, square avatar, name and @handle over a preview line, status pill on the right.
+  function renderConversationRow(ctx, r, conv, sub, pill, hover) {
     const t = tokens();
+    const T = t.hex;
     const p = conv.participant || {};
-    ctx.fillStyle = hover ? t.hex.surface3 : t.hex.surface;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    drawAvatar(ctx, r.x + 24 + 44, r.y + r.h / 2, 44, p);
-    const x = r.x + 144;
-    const textW = r.w - 144 - 300;
-    ctx.fillStyle = t.hex.ink;
-    ctx.font = '40px ' + t.font.sans;
+    tile(ctx, r, 12, hover ? ROW_HOVER : ROW, hover ? T.accent : T.ruleStrong, hover ? 3 : 2);
+    ctx.fillStyle = p.avatar_color || T.accent;
+    ctx.fillRect(r.x, r.y + 14, 6, r.h - 28);
+    const cy = r.y + r.h / 2;
+    drawAvatar(ctx, r.x + 80, cy, 40, p);
+    const x = r.x + 152;
+    const textW = r.w - 152 - 360;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(truncate(ctx, (p.display_name || p.username || '?') + '  @' + (p.username || ''), textW), x, r.y + r.h * 0.34);
-    ctx.fillStyle = t.hex.ink2;
+    ctx.fillStyle = T.ink;
+    ctx.font = '600 38px ' + t.font.sans;
+    const name = truncate(ctx, p.display_name || p.username || '?', textW * 0.6);
+    ctx.fillText(name, x, cy - 22);
+    if (p.username) {
+      const nx = x + ctx.measureText(name).width + 20;
+      ctx.fillStyle = T.ink3;
+      ctx.font = '600 28px ' + t.font.mono;
+      ctx.fillText(truncate(ctx, '@' + p.username, x + textW - nx), nx, cy - 20);
+    }
+    ctx.fillStyle = T.ink2;
     ctx.font = '30px ' + t.font.mono;
-    ctx.fillText(truncate(ctx, sub, textW), x, r.y + r.h * 0.7);
-    if (right) {
-      ctx.fillStyle = right.accent ? t.hex.accent : t.hex.ink2;
-      ctx.font = '34px ' + t.font.display;
-      ctx.textAlign = 'right';
-      ctx.fillText(right.label, r.x + r.w - 32, r.y + r.h / 2);
-    }
-    if (hover) {
-      ctx.strokeStyle = t.hex.accent;
-      ctx.lineWidth = 6;
-      ctx.strokeRect(r.x + 3, r.y + 3, r.w - 6, r.h - 6);
-    }
+    ctx.fillText(truncate(ctx, sub, textW), x, cy + 26);
+    if (pill) drawPill(ctx, r.x + r.w - 32, cy, pill.label, pill.style);
   }
 
   function renderStatus(ctx, route, empty) {
-    const t = tokens();
     let text = '';
     if (route.status === 'loading') text = 'Loading…';
     else if (route.status === 'error') text = "Couldn't load this page";
     else if (!(route.items || []).length) text = empty;
-    if (text) centerText(ctx, text, 620, '52px ' + t.font.sans, t.hex.ink2);
+    if (text) drawStatus(ctx, text, 620);
     return !!text;
-  }
-
-  function renderScrollButtons(ctx, route, btns, maxScroll, hover) {
-    btns.forEach((b) => {
-      const disabled = b.arg < 0 ? !route.scroll : (route.scroll || 0) >= maxScroll;
-      drawButton(ctx, b, b.label, { hover: !disabled && hover === 'scroll:' + b.arg, disabled, size: 48 });
-    });
   }
 
   // Inbox (route.box tabs) and the share sheet: scrolling conversation lists.
   function renderConversationList(ctx, state, hover) {
     const t = tokens();
+    const T = t.hex;
     const route = state.route;
     const sharing = route.section === 'share';
     if (sharing) {
-      ctx.fillStyle = t.hex.ink2;
-      ctx.font = '40px ' + t.font.sans;
+      const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
+      tile(ctx, { x: SEARCH_BAR.x, y: cy - 40, w: 80, h: 80 }, 10, T.surface2, T.accent, 2);
+      icon(ctx, 'share', SEARCH_BAR.x + 40, cy, 48, T.ink, T.surface2);
+      ctx.fillStyle = T.ink;
+      ctx.font = '600 40px ' + t.font.sans;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       const what = route.share && route.share.kind === 'pack' ? 'pack' : 'reel';
-      ctx.fillText(truncate(ctx, 'Send this ' + what + ' to a chat', SEARCH_BAR.w), SEARCH_BAR.x, SEARCH_BAR.y + SEARCH_BAR.h / 2);
+      ctx.fillText(truncate(ctx, 'Send this ' + what + ' to a chat', SEARCH_BAR.w - 112), SEARCH_BAR.x + 112, cy);
     } else {
       const counts = state.unreadBox || {};
-      BOX_TABS.forEach((b, i) => drawButton(ctx, boxTabRect(i), b.label + (counts[b.arg] ? '  ' + counts[b.arg] : ''), {
-        active: (route.box || 'inbox') === b.arg, hover: hover === 'box:' + b.arg, size: 36,
-      }));
+      BOX_TABS.forEach((b, i) => {
+        const r = boxTabRect(i);
+        drawButton(ctx, r, b.label, { active: (route.box || 'inbox') === b.arg, hover: hover === 'box:' + b.arg });
+        if (counts[b.arg]) drawPill(ctx, r.x + r.w - 20, r.y + r.h / 2, counts[b.arg] > 99 ? '99+' : String(counts[b.arg]), 'fill');
+      });
     }
     if (renderStatus(ctx, route, sharing ? 'No chats to share to yet' : (route.box === 'requests' ? 'No message requests' : 'No messages yet'))) return;
     const items = route.items || [];
@@ -548,21 +742,20 @@
       const conv = items[first + slot];
       if (!conv) break;
       const r = listRowRect(slot);
-      let right = null;
-      let sub = messagePreview(conv.last_message, conv.participant);
+      let pill = null;
       if (sharing) {
         const sent = (route.sent || {})[conv.id];
-        right = { label: { sending: 'SENDING…', sent: 'SENT ✓', failed: 'RETRY' }[sent] || 'SEND', accent: sent !== 'sending' };
-        sub = '@' + ((conv.participant && conv.participant.username) || '');
+        pill = { sending: { label: 'SENDING…' }, sent: { label: 'SENT ✓', style: 'accent' },
+          failed: { label: 'RETRY', style: 'accent' } }[sent] || { label: 'SEND', style: 'fill' };
       } else if (conv.unread_count) {
-        right = { label: conv.unread_count + ' NEW', accent: true };
+        pill = { label: conv.unread_count + ' NEW', style: 'fill' };
       } else if (conv.is_request) {
-        right = { label: 'REQUEST' };
+        pill = { label: 'REQUEST' };
       }
       const key = sharing ? 'share-to:' + (first + slot) : 'chip:/messages/' + conv.id;
-      renderConversationRow(ctx, r, conv, sub, right, hover === key);
+      renderConversationRow(ctx, r, conv, messagePreview(conv.last_message, conv.participant), pill, hover === key);
     }
-    renderScrollButtons(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
+    renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
   }
 
   function bubbleText(m) {
@@ -575,27 +768,26 @@
 
   function renderThread(ctx, state, hover) {
     const t = tokens();
+    const T = t.hex;
     const route = state.route;
     const det = route.detail;
     const f = state.field || {};
     if (det) {
       const p = det.participant || {};
       const cy = SEARCH_BAR.y + SEARCH_BAR.h / 2;
-      drawAvatar(ctx, SEARCH_BAR.x + 52, cy, 52, p);
-      ctx.fillStyle = t.hex.ink;
-      ctx.font = '44px ' + t.font.sans;
+      drawAvatar(ctx, SEARCH_BAR.x + 48, cy, 48, p);
+      const x = SEARCH_BAR.x + 128;
+      const note = det.is_request ? 'wants to message you' : (det.state === 'pending' ? 'request sent' : '');
+      ctx.fillStyle = T.ink;
+      ctx.font = '600 40px ' + t.font.sans;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      const name = truncate(ctx, p.display_name || p.username || '', 640);
-      ctx.fillText(name, SEARCH_BAR.x + 136, cy);
-      const note = det.is_request ? 'wants to message you' : (det.state === 'pending' ? 'request sent' : '');
-      if (note) {
-        ctx.fillStyle = t.hex.ink2;
-        ctx.font = '32px ' + t.font.mono;
-        ctx.fillText(note, SEARCH_BAR.x + 136 + ctx.measureText(name).width + 40, cy + 2);
-      }
+      ctx.fillText(truncate(ctx, p.display_name || p.username || '', 640), x, cy - 18);
+      ctx.fillStyle = note ? T.accent : T.ink3;
+      ctx.font = '600 26px ' + t.font.mono;
+      ctx.fillText(truncate(ctx, note ? note.toUpperCase() : '@' + (p.username || ''), 640), x, cy + 26);
       detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, {
-        primary: b.primary, disabled: b.disabled, size: 36, hover: !b.disabled && hover === b.action,
+        primary: b.primary, disabled: b.disabled, hover: !b.disabled && hover === b.action,
       }));
     }
     if (!renderStatus(ctx, route, 'No messages yet. Say hi!')) {
@@ -610,41 +802,28 @@
         const w = Math.min(row.w, ctx.measureText(text).width + 64);
         const x = m.mine ? row.x + row.w - w : row.x;
         ctx.globalAlpha = m.pending ? 0.6 : 1;
-        ctx.fillStyle = m.mine ? t.hex.accent : t.hex.surface2;
-        ctx.fillRect(x, row.y, w, row.h);
-        ctx.fillStyle = m.mine ? t.hex.onAccent : (m.deleted ? t.hex.inkMuted : t.hex.ink);
+        tile(ctx, { x, y: row.y, w, h: row.h }, 12, m.mine ? T.accent : T.surface2, m.mine ? null : T.rule, 2);
+        ctx.fillStyle = m.mine ? T.onAccent : (m.deleted ? T.inkMuted : T.ink);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(text, x + 32, row.y + row.h / 2 + 2);
         ctx.globalAlpha = 1;
       }
-      renderScrollButtons(ctx, route, THREAD_SCROLL, Math.max(0, items.length - THREAD_ROWS), hover);
+      renderScrollRail(ctx, route, THREAD_SCROLL, Math.max(0, items.length - THREAD_ROWS), hover);
     }
     const canMessage = !!(det && det.can_message);
     if (canMessage) {
-      QUICK_REPLIES.forEach((q, i) => drawButton(ctx, quickRect(i), q, { hover: hover === 'quick-reply:' + q, size: 32 }));
+      QUICK_REPLIES.forEach((q, i) => drawButton(ctx, quickRect(i), q, {
+        hover: hover === 'quick-reply:' + q, size: 32, font: t.font.sans, weight: 600,
+      }));
     }
     const typing = f.focused && f.id === 'compose';
-    const r = COMPOSE_BAR;
-    ctx.fillStyle = t.hex.surface2;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = typing ? t.hex.accent : (hover === 'compose-focus' ? t.hex.ink : t.hex.rule);
-    ctx.lineWidth = 4;
-    ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4);
-    const draft = typing ? f.text + '|' : (route.draft || '');
     let placeholder = 'Message ' + (route.label || '');
     if (det && !canMessage) placeholder = det.state === 'pending' ? 'Waiting for them to accept' : "You can't reply in this chat";
-    ctx.fillStyle = draft ? t.hex.ink : t.hex.inkMuted;
-    ctx.font = '40px ' + t.font.sans;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    // Long drafts show their end, where typing happens.
-    let shown = draft || placeholder;
-    while (shown.length > 1 && ctx.measureText(shown).width > r.w - 64) shown = shown.slice(1);
-    ctx.fillText(shown, r.x + 32, r.y + r.h / 2);
+    drawField(ctx, COMPOSE_BAR, typing ? f.text : (route.draft || ''), placeholder, typing, canMessage && hover === 'compose-focus');
     drawButton(ctx, SEND_BTN, 'SEND', {
       primary: canMessage && !!(typing ? f.text : route.draft), disabled: !canMessage,
-      hover: canMessage && hover === 'compose-send', size: 40,
+      hover: canMessage && hover === 'compose-send', size: 36,
     });
   }
 
@@ -661,31 +840,59 @@
     return String(e.source || e.type || 'entry').replace(/_/g, ' ').toUpperCase();
   }
 
-  // Wallet: balance + reward progress in the tool row, BUY on the right, ledger rows below.
+  // Caption over value in a dark tile (wallet tool row).
+  function statTile(ctx, r, caption, value, valueFont, valueColor) {
+    const t = tokens();
+    tile(ctx, r, 12, ROW, t.hex.rule, 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = t.hex.ink3;
+    ctx.font = '600 22px ' + t.font.mono;
+    ctx.fillText(caption, r.x + 24, r.y + 26);
+    ctx.fillStyle = valueColor || t.hex.ink;
+    ctx.font = valueFont || '700 38px ' + t.font.mono;
+    ctx.fillText(truncate(ctx, value, r.w - 48), r.x + 24, r.y + 68);
+  }
+
+  // Wallet: balance, stat and reward-progress tiles in the tool row, BUY on the right, ledger rows below.
   function renderWallet(ctx, state, hover) {
     const t = tokens();
+    const T = t.hex;
     const route = state.route;
     const w = route.detail;
+    const y = SEARCH_BAR.y;
+    const h = SEARCH_BAR.h;
     if (w) {
-      const avail = Number(w.available_credits) || 0;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = t.hex.accent;
-      ctx.font = '76px ' + t.font.display;
-      const balance = avail.toLocaleString('en-US');
-      ctx.fillText(balance, SEARCH_BAR.x, SEARCH_BAR.y + SEARCH_BAR.h / 2);
-      const x = SEARCH_BAR.x + ctx.measureText(balance).width + 32;
-      ctx.fillStyle = t.hex.ink;
-      ctx.font = '34px ' + t.font.display;
-      ctx.fillText('CREDITS', x, SEARCH_BAR.y + SEARCH_BAR.h * 0.3);
-      ctx.fillStyle = t.hex.ink2;
-      ctx.font = '28px ' + t.font.mono;
+      const bal = { x: 48, y, w: 480, h };
+      const balance = (Number(w.available_credits) || 0).toLocaleString('en-US');
+      statTile(ctx, bal, 'AVAILABLE', balance, '52px ' + t.font.display, T.accent);
+      ctx.strokeStyle = T.accent;
+      shape(ctx, bal, 12);
+      ctx.stroke();
+      ctx.font = '52px ' + t.font.display;
+      const bx = bal.x + 24 + Math.min(ctx.measureText(balance).width, bal.w - 48) + 20;
+      ctx.fillStyle = T.ink2;
+      ctx.font = '700 26px ' + t.font.mono;
+      if (bx + ctx.measureText('CREDITS').width < bal.x + bal.w - 20) ctx.fillText('CREDITS', bx, y + 74);
+      statTile(ctx, { x: 544, y, w: 200, h }, 'RESERVED', fmtCount(w.reserved_credits));
+      statTile(ctx, { x: 760, y, w: 200, h }, 'EARNED', fmtCount(w.lifetime_earned));
+      statTile(ctx, { x: 976, y, w: 200, h }, 'SPENT', fmtCount(w.lifetime_spent));
       const r = state.rewards;
-      let line = 'Reserved ' + fmtCount(w.reserved_credits) + ' · Earned ' + fmtCount(w.lifetime_earned) + ' · Spent ' + fmtCount(w.lifetime_spent);
-      if (r) line += r.capped ? ' · Reel rewards: daily cap reached' : ' · Reels: ' + r.progress + '/10 to next credit';
-      ctx.fillText(truncate(ctx, line, SEARCH_BAR.w - DETAIL_BTN_W - 48 - (x - SEARCH_BAR.x)), x, SEARCH_BAR.y + SEARCH_BAR.h * 0.72);
+      if (r) {
+        const p = { x: 1192, y, w: 412, h };
+        tile(ctx, p, 12, ROW, T.rule, 2);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = T.ink3;
+        ctx.font = '600 22px ' + t.font.mono;
+        ctx.fillText(truncate(ctx, 'REELS · ' + (r.capped ? 'DAILY CAP REACHED' : r.progress + '/10 TO NEXT CREDIT'), p.w - 48), p.x + 24, y + 26);
+        const segW = (p.w - 48 - 9 * 6) / 10;
+        for (let i = 0; i < 10; i++) {
+          ctx.fillStyle = r.capped || i < r.progress ? T.accent : T.surface3;
+          ctx.fillRect(p.x + 24 + i * (segW + 6), y + 56, segW, 24);
+        }
+      }
     }
-    detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, { primary: b.primary, hover: hover === b.action, size: 36 }));
+    detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, { primary: b.primary, hover: hover === b.action }));
     if (renderStatus(ctx, route, 'No credit activity yet')) return;
     const items = route.items || [];
     const first = route.scroll || 0;
@@ -693,39 +900,42 @@
       const e = items[first + slot];
       if (!e) break;
       const r = listRowRect(slot);
-      ctx.fillStyle = t.hex.surface;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
+      const delta = ledgerDelta(e);
+      const cy = r.y + r.h / 2;
+      tile(ctx, r, 12, ROW, T.ruleStrong, 2);
+      ctx.fillStyle = delta.gain ? T.accent : T.ruleStrong;
+      ctx.fillRect(r.x, r.y + 14, 6, r.h - 28);
+      tile(ctx, { x: r.x + 36, y: cy - 36, w: 72, h: 72 }, 10, T.surface2, T.rule, 2);
+      icon(ctx, 'credits', r.x + 72, cy, 44, delta.gain ? T.ink : T.ink2, T.surface2);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = t.hex.ink;
-      ctx.font = '40px ' + t.font.sans;
-      ctx.fillText(truncate(ctx, ledgerLabel(e), r.w - 640), r.x + 32, r.y + r.h * 0.34);
-      ctx.fillStyle = t.hex.ink2;
-      ctx.font = '30px ' + t.font.mono;
-      ctx.fillText(String(e.created_at || '').slice(0, 10), r.x + 32, r.y + r.h * 0.7);
-      const delta = ledgerDelta(e);
+      ctx.fillStyle = T.ink;
+      ctx.font = '600 36px ' + t.font.sans;
+      ctx.fillText(truncate(ctx, ledgerLabel(e), r.w - 720), r.x + 136, cy - 20);
+      ctx.fillStyle = T.ink3;
+      ctx.font = '28px ' + t.font.mono;
+      ctx.fillText(String(e.created_at || '').slice(0, 10), r.x + 136, cy + 24);
       ctx.textAlign = 'right';
-      ctx.fillStyle = delta.gain ? t.hex.accent : t.hex.ink;
-      ctx.font = '44px ' + t.font.display;
-      ctx.fillText(delta.text, r.x + r.w - 32, r.y + r.h * 0.38);
-      ctx.fillStyle = t.hex.inkMuted;
-      ctx.font = '26px ' + t.font.mono;
-      ctx.fillText('balance ' + (Number(e.balance_available) || 0).toLocaleString('en-US'), r.x + r.w - 32, r.y + r.h * 0.76);
+      ctx.fillStyle = delta.gain ? T.accent : T.ink;
+      ctx.font = '700 44px ' + t.font.mono;
+      ctx.fillText(delta.text, r.x + r.w - 32, cy - 14);
+      ctx.fillStyle = T.inkMuted;
+      ctx.font = '600 24px ' + t.font.mono;
+      ctx.fillText('BALANCE ' + (Number(e.balance_available) || 0).toLocaleString('en-US'), r.x + r.w - 32, cy + 30);
     }
-    renderScrollButtons(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
+    renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
   }
 
-  // Sections without a body yet show a labelled placeholder.
+  // Sections without a body yet show their icon, a status line and the route.
   function renderSectionBody(ctx, state) {
-    const t = tokens();
-    ctx.fillStyle = t.hex.ink2;
-    ctx.font = '52px ' + t.font.sans;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Coming to VR soon', MAIN_W / 2, MAIN_H / 2);
-    ctx.fillStyle = t.hex.inkMuted;
-    ctx.font = '36px ' + t.font.mono;
-    ctx.fillText((state.route && state.route.path) || '', MAIN_W / 2, MAIN_H / 2 + 80);
+    const T = tokens().hex;
+    const route = state.route || {};
+    const cx = MAIN_W / 2;
+    const cy = MAIN_H / 2 - 120;
+    tile(ctx, { x: cx - 60, y: cy - 60, w: 120, h: 120 }, 16, T.surface2, T.accent, 2);
+    icon(ctx, SECTION_ICONS[route.section] || 'logo', cx, cy, 68, T.ink, T.surface2);
+    drawStatus(ctx, 'Coming to VR soon', MAIN_H / 2 + 20);
+    if (route.path) pathPill(ctx, cx, MAIN_H / 2 + 116, route.path);
   }
 
   // getImage(url) → a loaded image or null (the host owns loading and caching).
@@ -733,21 +943,19 @@
     const t = tokens();
     const s = state || {};
     ctx.clearRect(0, 0, MAIN_W, MAIN_H);
-    ctx.fillStyle = t.hex.bg;
-    ctx.globalAlpha = 0.96;
+    ctx.fillStyle = 'rgba(13,14,15,0.97)';
     ctx.fillRect(0, 0, MAIN_W, MAIN_H);
-    ctx.globalAlpha = 1;
     ctx.strokeStyle = t.hex.ruleStrong;
-    ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, MAIN_W - 4, MAIN_H - 4);
+    ctx.lineWidth = 3;
+    ctx.strokeRect(1.5, 1.5, MAIN_W - 3, MAIN_H - 3);
     if (s.handoff) {
-      renderHeader(ctx, 'OPEN IN 2D', '', hover);
+      renderHeader(ctx, 'OPEN IN 2D', '', hover, 'exit');
       renderHandoffCard(ctx, s.handoff, hover);
       return;
     }
     const route = s.route || {};
     const section = route.section;
-    renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover);
+    renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover, SECTION_ICONS[section]);
     if (section === 'messages' || section === 'share') { renderConversationList(ctx, s, hover); return; }
     if (section === 'thread') { renderThread(ctx, s, hover); return; }
     if (section === 'wallet') { renderWallet(ctx, s, hover); return; }
@@ -865,18 +1073,26 @@
     return out;
   }
 
+  // Dock-style keys: letters in sans, function keys quieter in mono caps, ENTER in accent.
   function renderKeyboard(ctx, hover, field) {
     const t = tokens();
     const shift = !!(field && field.shift);
+    const emoji = !!(field && field.layout === 'emoji');
     ctx.clearRect(0, 0, KB_W, KB_H);
-    ctx.fillStyle = t.hex.bg;
-    ctx.globalAlpha = 0.94;
+    ctx.fillStyle = 'rgba(13,14,15,0.97)';
     ctx.fillRect(0, 0, KB_W, KB_H);
-    ctx.globalAlpha = 1;
-    keyboardRects(field).forEach((k) => drawButton(ctx, k, k.label, {
-      primary: k.id === 'enter', active: k.id === 'shift' && shift,
-      hover: hover === 'key:' + k.id, size: Array.from(k.label).length > 1 ? 36 : 48,
-    }));
+    ctx.strokeStyle = t.hex.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, KB_W - 2, KB_H - 2);
+    keyboardRects(field).forEach((k) => {
+      const fn = k.id in KB_LABELS || k.id.indexOf('layout:') === 0;
+      let size = emoji ? 44 : 48;
+      if (fn) size = Array.from(k.label).length > 1 ? 28 : 40;
+      drawButton(ctx, k, k.label, {
+        primary: k.id === 'enter', active: k.id === 'shift' && shift, quiet: fn,
+        hover: hover === 'key:' + k.id, size, font: fn ? t.font.mono : t.font.sans, weight: fn ? 700 : 600,
+      });
+    });
   }
 
   function resolveKeyboardHit(x, y, field) {
