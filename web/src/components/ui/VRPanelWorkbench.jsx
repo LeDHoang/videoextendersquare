@@ -16,7 +16,7 @@ if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
 }
 
 const DURATION = 42;
-const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH CARD', 'EARTH LABEL', 'SHELL NAV', 'SHELL MAIN', 'SHELL KEYBOARD'];
+const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH DOCK', 'EARTH CARD', 'EARTH LABEL', 'SHELL NAV', 'SHELL MAIN', 'SHELL KEYBOARD'];
 const SHELL_KEYS = { 'SHELL NAV': 1, 'SHELL MAIN': 1, 'SHELL KEYBOARD': 1 };
 const SIZES = UI ? {
   COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
@@ -31,7 +31,7 @@ const SIZES = UI ? {
   } : {}),
 } : {};
 const IDLE_HOVER = {
-  DOCK: -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '',
+  DOCK: -1, 'EARTH DOCK': -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '',
   'SHELL NAV': '', 'SHELL MAIN': '', 'SHELL KEYBOARD': '',
 };
 const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
@@ -298,9 +298,13 @@ function commentsItem(s) {
   return { item: PLAYLIST[s.idx], itemState: { available: true, following: s.following } };
 }
 
+// EARTH DOCK is the dock as Earth mode shows it, whatever the dock variant.
+const isDock = (key) => key === 'DOCK' || key === 'EARTH DOCK';
+const dockMock = (key, mock) => (key === 'EARTH DOCK' ? { ...mock, dock: 'EARTH' } : mock);
+
 // The dock canvas shrinks to fit its live controls, as in the engine.
 function panelSize(key, mock) {
-  return key === 'DOCK' ? UI.controlsCanvasSize(dockOptions(mock, { time: 0 })) : SIZES[key];
+  return isDock(key) ? UI.controlsCanvasSize(dockOptions(dockMock(key, mock), { time: 0 })) : SIZES[key];
 }
 
 function drawPanel(key, ctx, mock, comments, s, now) {
@@ -309,7 +313,8 @@ function drawPanel(key, ctx, mock, comments, s, now) {
     if (key === 'SHELL NAV') SC.renderNavBar(ctx, state, s.hover[key]);
     else if (key === 'SHELL MAIN') SC.renderMainPanel(ctx, state, s.hover[key], (url) => getPosters()[Number(String(url).slice(5)) || 0]);
     else SC.renderKeyboard(ctx, s.hover[key], state.field);
-  } else if (key === 'DOCK') {
+  } else if (isDock(key)) {
+    mock = dockMock(key, mock);
     UI.renderControlsCanvas(ctx, {
       ...dockOptions(mock, s),
       packContext: mock.dock === 'PACK' ? { title: 'TOKYO AFTER DARK', queueOpen: false } : null,
@@ -317,8 +322,8 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       idx: s.idx,
       item: PLAYLIST[s.idx],
       comments,
-      hoveredButton: s.hover.DOCK,
-      pressedButton: s.pressed,
+      hoveredButton: s.hover[key],
+      pressedButton: s.pressedKey === key ? s.pressed : -1,
       isCurved: mock.curve !== 'FLAT',
       curvatureMode: CURVES[mock.curve],
       lockToViewer: mock.lock,
@@ -532,7 +537,7 @@ export default function VRPanelWorkbench() {
     if (key === 'SHELL NAV') return SC.resolveNavHit(x, y);
     if (key === 'SHELL MAIN') return SC.resolveMainHit(s.shell.getRenderState(), x, y);
     if (key === 'SHELL KEYBOARD') return SC.resolveKeyboardHit(x, y, s.shell.getRenderState().field);
-    if (key === 'DOCK') return UI.resolveControlsHit(x, y, dockOptions(m, s));
+    if (isDock(key)) return UI.resolveControlsHit(x, y, dockOptions(dockMock(key, m), s));
     if (key === 'COMMENTS') return UI.resolveCommentsPanelRegion(x, y, { comments: list, cPanelTab: s.tab, cPanelScrollY: s.scroll, ...commentsItem(s) });
     if (key === 'OVERLAY') return UI.resolveOverlayCommentAt(x, y, s.overlayRegions);
     if (key === 'EARTH CARD') return UI.resolveEarthPreviewHit(x, y);
@@ -548,7 +553,7 @@ export default function VRPanelWorkbench() {
       if (!hit) return;
       const handled = s.shell.handleHit(hit);
       setLastAction(`SHELL › ${hit.action}${hit.arg != null && hit.arg !== '' ? ` ${hit.arg}` : ''}${handled ? '' : ' (ignored)'}`);
-    } else if (key === 'DOCK') {
+    } else if (isDock(key)) {
       const btn = UI.CTRL_BUTTONS[hit];
       if (!btn) return;
       const a = btn.action;
@@ -565,7 +570,7 @@ export default function VRPanelWorkbench() {
       else if (a === 'like') s.liked = !s.liked;
       else if (a === 'save_reel' || a === 'collect') s.saved = !s.saved;
       else if (a === 'follow') s.following = !s.following;
-      setLastAction(`DOCK › ${a}`);
+      setLastAction(`${key} › ${a}`);
     } else if (key === 'COMMENTS' && hit) {
       if (hit.startsWith('tab:')) {
         s.tab = hit.slice(4);
@@ -602,7 +607,10 @@ export default function VRPanelWorkbench() {
       interact.current.pressed = -1;
     },
     onPointerDown: (event) => {
-      if (key === 'DOCK') interact.current.pressed = hitTest(key, ...toNative(event, key));
+      if (isDock(key)) {
+        interact.current.pressed = hitTest(key, ...toNative(event, key));
+        interact.current.pressedKey = key;
+      }
     },
     onPointerUp: () => { interact.current.pressed = -1; },
     onClick: (event) => {
