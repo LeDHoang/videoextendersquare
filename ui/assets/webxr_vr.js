@@ -6451,17 +6451,24 @@ window.WebXRVR = window.WebXRVR || (function () {
   // (same width and tilt, shared edge); open, the dock is hidden and the bar
   // keeps that same size under the main panel.
   let shellNavK = 1;
+  let shellNavDockDist = 0;
   function layoutShellNav() {
     if (!shellNavMesh || !THREE) return;
     const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
     if (!anchor) return;
     const open = anchor === shellMainMesh;
+    const dist = anchor.position.distanceTo(getHeadPosition());
     // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
-    if (!open) shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
-    const k = shellNavK;
+    if (!open) {
+      shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+      shellNavDockDist = dist;
+    }
+    // Open, the bar keeps the angular size it has under the dock, so it reads
+    // the same on every page even though the main panel sits further away.
+    const k = open && shellNavDockDist > 0 ? shellNavK * dist / shellNavDockDist : shellNavK;
     const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
     const navH = SHELL_NAV_SIZE.h * k;
-    const gap = open ? navH * 0.25 : 0;
+    const gap = open ? navH * 0.5 : 0;
     shellNavMesh.scale.set(k, k, 1);
     shellNavMesh.quaternion.copy(anchor.quaternion);
     shellNavMesh.position.copy(anchor.position)
