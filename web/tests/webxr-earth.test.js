@@ -6144,16 +6144,16 @@ test('grip on an Earth panel drags it along the laser and it stays put', () => {
   };
   // Grip with the laser on the dock grabs it; swinging the laser right
   // carries the dock with it.
-  aim(0, 0.25, -0.85);
+  aim(0, 0.31, -0.85);
   api.processXRInput(null, grip);
-  aim(0.4, 0.25, -0.85);
+  aim(0.4, 0.31, -0.85);
   api.processXRInput(null, grip);
   const moved = api.computeDockPose(head, 'earth').pos;
   assert.ok(moved.x > start.x + 0.2, `dock followed the laser: ${moved.x}`);
   // Released, the dock keeps its new spot.
   api.processXRInput(null, open);
   renderer.__runScheduledFrame(32);
-  aim(-0.4, 0.25, -0.85);
+  aim(-0.4, 0.31, -0.85);
   api.processXRInput(null, open);
   closeTo(api.computeDockPose(head, 'earth').pos.x, moved.x);
   // A grip already held when the laser lands on the panel never grabs.

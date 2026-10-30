@@ -42,7 +42,7 @@ test('loaded canvas exposes one North Up control at the dedicated dock rectangle
   const buttons = api.CTRL_BUTTONS.filter((button) => button.action === 'earth_north_up');
   assert.equal(buttons.length, 1);
   const { label, x, y, w, h } = buttons[0];
-  assert.deepEqual({ label, x, y, w, h }, { label: 'NORTH UP', x: 602, y: 238, w: 174, h: 42 });
+  assert.deepEqual({ label, x, y, w, h }, { label: 'NORTH UP', x: 602, y: 96, w: 174, h: 36 });
   assert.ok(x >= 0 && y >= 0 && x + w <= api.CONTROLS_W && y + h <= api.CONTROLS_H);
 });
 
@@ -59,9 +59,10 @@ test('North Up visibility and drawing are Earth-only across feed, pack, and sour
           const { labels, rectangles } = recordRender(api, options);
           const northLabels = labels.filter(({ text }) => text === 'NORTH UP');
           assert.equal(northLabels.length, expected ? 1 : 0, context);
-          if (expected) assert.deepEqual(northLabels[0], { text: 'NORTH UP', x: 689, y: 259 });
-          assert.equal(rectangles.some(({ x, y, w, h }) => x === 602 && y === 238 && w === 174 && h === 42), expected, context);
-          assert.equal(hitAction(api, 689, 259, options), expected ? 'earth_north_up' : null, context);
+          if (expected) assert.deepEqual(northLabels[0], { text: 'NORTH UP', x: 689, y: 114 });
+          assert.equal(rectangles.some(({ x, y, w, h }) => x === 602 && y === 96 && w === 174 && h === 36), expected, context);
+          if (expected) assert.equal(hitAction(api, 689, 114, options), 'earth_north_up', context);
+          else assert.notEqual(hitAction(api, 689, 114, options), 'earth_north_up', context);
         }
       }
     }
@@ -72,11 +73,11 @@ test('Earth hit resolution routes North Up center and inclusive edges to its act
   const api = loadCanvas();
   const options = { sceneMode: 'earth' };
   for (const x of [602, 689, 776]) {
-    for (const y of [238, 259, 280]) {
+    for (const y of [96, 114, 132]) {
       assert.equal(hitAction(api, x, y, options), 'earth_north_up', `${x}, ${y}`);
     }
   }
-  for (const [x, y] of [[601, 259], [777, 259], [689, 237], [689, 281], [592, 259]]) {
+  for (const [x, y] of [[601, 114], [777, 114], [689, 95], [689, 133], [592, 114]]) {
     assert.equal(hitAction(api, x, y, options), null, `${x}, ${y}`);
   }
   for (const action of [...earthActions, 'exit']) {
@@ -91,10 +92,11 @@ test('Earth hit resolution routes North Up center and inclusive edges to its act
   }
 });
 
-test('North Up does not overlap any existing control or the other Earth dock targets', () => {
+test('North Up does not overlap the other controls live in the Earth dock', () => {
   const api = loadCanvas();
   const north = api.CTRL_BUTTONS.find((button) => button.action === 'earth_north_up');
-  for (const button of api.CTRL_BUTTONS.filter((entry) => entry !== north)) {
+  // Reels-only controls are never hittable in Earth, so the compact Earth row may share their space.
+  for (const button of api.CTRL_BUTTONS.filter((entry) => entry !== north && [...earthActions, 'exit'].includes(entry.action))) {
     // Hit rectangles have inclusive edges, so even touching edges would be ambiguous.
     const separated = north.x + north.w < button.x || button.x + button.w < north.x ||
       north.y + north.h < button.y || button.y + button.h < north.y;
@@ -121,7 +123,7 @@ test('reels and pack playback preserve reel actions, transport, and their origin
     // COLLECT spans both pack slots on the action row.
     assert.equal(hitAction(api, 637, 212, options), packMode ? 'save_pack' : 'collect');
     assert.equal(hitAction(api, 732, 212, options), packMode ? 'share_pack' : 'collect');
-    assert.equal(hitAction(api, 689, 259, options), null);
+    assert.notEqual(hitAction(api, 689, 114, options), 'earth_north_up');
     for (const action of earthActions) {
       assert.equal(api.isControlVisible(action, options.source, options.itemState, packMode, 'reels'), false);
       const button = api.CTRL_BUTTONS.find((entry) => entry.action === action);
@@ -142,7 +144,7 @@ test('North Up does not bypass existing unavailable-reel and static-card action 
       assert.equal(hitAction(api, ...center(button), options), null);
       assert.ok(!labels.some(({ text }) => text === button.label));
     }
-    assert.equal(hitAction(api, 689, 259, options), null);
+    assert.notEqual(hitAction(api, 689, 114, options), 'earth_north_up');
   }
 });
 
@@ -154,7 +156,7 @@ test('dock canvas size fits the live controls per mode', () => {
   assert.deepEqual(size({ source: video, packMode: true }), { w: 800, h: 260 });
   assert.deepEqual(size({ source: { kind: 'image' } }), { w: 800, h: 260 });
   assert.deepEqual(size({ source: { kind: 'static-card' } }), { w: 800, h: 260 });
-  assert.deepEqual(size({ source: video, sceneMode: 'earth' }), { w: 800, h: 304 });
+  assert.deepEqual(size({ source: video, sceneMode: 'earth' }), { w: 800, h: 156 });
   for (const options of [
     { source: video },
     { source: { kind: 'image' } },

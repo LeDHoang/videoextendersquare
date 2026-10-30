@@ -85,7 +85,7 @@
     { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
 
     // Existing reel actions remain available in both feed and pack playback.
-    // Icon tiles on one row; it ends above the Earth action row (y 238).
+    // Icon tiles on one row.
     { label: 'LIKE',    action: 'like',       x: 24,  y: 188, w: 87, h: 48 },
     { label: 'SAVE',    action: 'save_reel',  x: 119, y: 188, w: 87, h: 48 },
     { label: 'SHARE',   action: 'share_reel', x: 214, y: 188, w: 87, h: 48 },
@@ -102,10 +102,10 @@
 
     // Earth-mode zoom map controls (docs/earth-zoom-map-plan.md Z1): their own
     // row in the Earth dock; visible + hittable only in earth scene mode.
-    { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 238, w: 174, h: 42 },
-    { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 238, w: 174, h: 42 },
-    { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 238, w: 174, h: 42 },
-    { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 238, w: 174, h: 42 },
+    { label: 'OPEN FEED',   action: 'earth_open_feed', x: 24,  y: 96, w: 174, h: 36 },
+    { label: 'ZOOM OUT',    action: 'earth_zoom_out',  x: 218, y: 96, w: 174, h: 36 },
+    { label: 'GLOBE RESET', action: 'earth_reset',     x: 408, y: 96, w: 174, h: 36 },
+    { label: 'NORTH UP',    action: 'earth_north_up',  x: 602, y: 96, w: 174, h: 36 },
 
     // Progress scrub track under the transport (times sit either side)
     { label: 'TRACK', action: 'seek',  x: 84,  y: 148, w: 632, h: 28 },
@@ -598,55 +598,64 @@
     ctx.stroke();
     drawIcon(ctx, 'exit', xb.x + xb.w / 2, xb.y + xb.h / 2, 14, T.accent);
 
-    // Readout tiles
-    const tiles = [
-      { k: 'REALM', v: earth.tier || 'ORBIT', c: T.ink, swatch: earth.tierColor || T.accent },
-      { k: 'SCALE', v: earth.scaleCaption || '—', c: T.ink },
-      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? T.accent : T.ink },
-    ];
-    const tw = 236, th = 96, ty = 70;
-    for (let i = 0; i < tiles.length; i++) {
-      const tx = 24 + i * (tw + 22);
-      previewRoundRect(ctx, tx, ty, tw, th, TOKENS.radius);
-      ctx.fillStyle = T.surface2;
-      ctx.fill();
-      ctx.strokeStyle = T.rule;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      let kx = tx + 18;
-      if (tiles[i].swatch) {
-        ctx.fillStyle = tiles[i].swatch;
-        ctx.fillRect(kx, ty + 20, 8, 8);
-        kx += 16;
-      }
-      ctx.fillStyle = T.ink3;
-      ctx.font = `bold 11px ${TOKENS.font.mono}`;
-      ctx.textAlign = 'left';
-      ctx.fillText(tiles[i].k, kx, ty + 24);
-      ctx.fillStyle = tiles[i].c;
-      // Shrink long values (STREAMING 42%) to the tile instead of overflowing.
-      const v = String(tiles[i].v).slice(0, 14);
-      ctx.font = `800 30px ${TOKENS.font.sans}`;
-      const vw = ctx.measureText(v).width;
-      if (vw > tw - 36) ctx.font = `800 ${Math.max(14, Math.floor(30 * (tw - 36) / vw))}px ${TOKENS.font.sans}`;
-      ctx.fillText(v, tx + 18, ty + 62);
-    }
-    // Zoom meter (scrubber-style track, vermilion fill)
+    // Readout strip: one compact row of realm / scale / map / zoom cells.
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
-    ctx.fillStyle = T.ink3;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
-    ctx.textAlign = 'left';
-    ctx.fillText('ZOOM', 24, 190);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = T.ink;
-    ctx.fillText(Math.round(zp * 100) + '%', 776, 190);
-    previewRoundRect(ctx, 80, 186, 640, 8, TOKENS.radius);
+    const cells = [
+      { k: 'REALM', v: earth.tier || 'ORBIT', c: T.ink, swatch: earth.tierColor || T.accent, w: 176 },
+      { k: 'SCALE', v: earth.scaleCaption || '—', c: T.ink, w: 176 },
+      { k: 'MAP', v: earth.mapStatus || 'ORBITAL', c: earth.mapOffline ? T.accent : T.ink, w: 208 },
+      { k: 'ZOOM', zoom: true, w: 192 },
+    ];
+    const sy = 52, sh = 32, my = sy + sh / 2;
+    previewRoundRect(ctx, 24, sy, 752, sh, TOKENS.radius);
     ctx.fillStyle = T.surface2;
     ctx.fill();
-    if (zp > 0.005) {
-      previewRoundRect(ctx, 80, 186, Math.max(8, 640 * zp), 8, TOKENS.radius);
-      ctx.fillStyle = T.accent;
-      ctx.fill();
+    ctx.strokeStyle = T.rule;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    let cx = 24;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      if (i > 0) {
+        ctx.fillStyle = T.rule;
+        ctx.fillRect(cx, sy + 6, 1, sh - 12);
+      }
+      let kx = cx + 12;
+      if (cell.swatch) {
+        ctx.fillStyle = cell.swatch;
+        ctx.fillRect(kx, my - 4, 8, 8);
+        kx += 14;
+      }
+      ctx.fillStyle = T.ink3;
+      ctx.font = `bold 10px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(cell.k, kx, my);
+      const vx = kx + ctx.measureText(cell.k).width + 8;
+      const room = cx + cell.w - 12 - vx;
+      if (cell.zoom) {
+        // Zoom meter (scrubber-style track, vermilion fill) + percent.
+        ctx.fillStyle = T.ink;
+        ctx.textAlign = 'right';
+        ctx.fillText(Math.round(zp * 100) + '%', cx + cell.w - 12, my);
+        const tw = room - 40;
+        previewRoundRect(ctx, vx, my - 3, tw, 6, TOKENS.radius);
+        ctx.fillStyle = T.surface;
+        ctx.fill();
+        if (zp > 0.005) {
+          previewRoundRect(ctx, vx, my - 3, Math.max(6, tw * zp), 6, TOKENS.radius);
+          ctx.fillStyle = T.accent;
+          ctx.fill();
+        }
+      } else {
+        // Shrink long values (STREAMING 42%) to the cell instead of overflowing.
+        const v = String(cell.v).slice(0, 14);
+        ctx.fillStyle = cell.c;
+        ctx.font = `800 16px ${TOKENS.font.sans}`;
+        const vw = ctx.measureText(v).width;
+        if (vw > room) ctx.font = `800 ${Math.max(10, Math.floor(16 * room / vw))}px ${TOKENS.font.sans}`;
+        ctx.fillText(v, vx, my + 1);
+      }
+      cx += cell.w;
     }
 
     // Action row: OPEN FEED is the primary (vermilion, like play); the map
