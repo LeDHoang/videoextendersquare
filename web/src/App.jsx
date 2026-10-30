@@ -37,11 +37,11 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/reels" replace />} />
-          <Route path="/image" element={<RequireAuth><ImagePage /></RequireAuth>} />
-          <Route path="/video" element={<RequireAuth><VideoPage /></RequireAuth>} />
-          <Route path="/compare" element={<RequireAuth><ComparePage /></RequireAuth>} />
+          <Route path="/image" element={<RequireAuth adminOnly><ImagePage /></RequireAuth>} />
+          <Route path="/video" element={<RequireAuth adminOnly><VideoPage /></RequireAuth>} />
+          <Route path="/compare" element={<RequireAuth adminOnly><ComparePage /></RequireAuth>} />
           <Route path="/reels" element={<ReelsPage />} />
-          <Route path="/reels/immersive-preview" element={<RequireAuth><ImmersivePreviewPage /></RequireAuth>} />
+          <Route path="/reels/immersive-preview" element={<RequireAuth adminOnly><ImmersivePreviewPage /></RequireAuth>} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/explore/tag/:tag" element={<TagExplorePage />} />
           <Route path="/explore/location/:key" element={<LocationExplorePage />} />

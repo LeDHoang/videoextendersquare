@@ -18,14 +18,15 @@ function compactCount(value) {
   return String(count);
 }
 
-function commandFallback(query) {
+// Compare, Video and Image are admin-only in the beta; others fall through to an Explore search.
+function commandFallback(query, isAdmin) {
   const value = query.toLowerCase();
-  if (value.includes('comp') || value === 'ab' || value.includes('diff')) return '/compare';
+  if (isAdmin && (value.includes('comp') || value === 'ab' || value.includes('diff'))) return '/compare';
   if (value.includes('upload') || value.includes('post') || value.includes('share') || value.includes('publish')) return '/upload';
   if (value === 'explore' || value === 'gallery' || value === 'browse') return '/explore';
   if (value === 'reels' || value === 'vr' || value === 'quest' || value === '3d') return '/reels';
-  if (value === 'video' || value === 'extend video') return '/video';
-  if (value === 'image' || value === 'photo' || value === 'picture') return '/image';
+  if (isAdmin && (value === 'video' || value === 'extend video')) return '/video';
+  if (isAdmin && (value === 'image' || value === 'photo' || value === 'picture')) return '/image';
   return '/explore?search=' + encodeURIComponent(query);
 }
 
@@ -40,6 +41,7 @@ function AccountAvatar({ user }) {
 
 export default function HeaderBar({ onToggleSidebar, hidden = false }) {
   const { user, loading: authLoading, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const messaging = useMessaging();
   const { wallet } = useWallet();
   const location = useLocation();
@@ -193,7 +195,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
       event.preventDefault();
       const selected = selectable[activeIndex] || selectable[0];
       if (selected) openResult(selected);
-      else closeSearchAndNavigate(commandFallback(searchVal.trim()));
+      else closeSearchAndNavigate(commandFallback(searchVal.trim(), isAdmin));
     }
   };
 
@@ -362,7 +364,9 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
               <NavLink to="/reels" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>REELS/VR</NavLink>
               <NavLink to="/explore" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>EXPLORE</NavLink>
               <NavLink to="/upload" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>UPLOAD</NavLink>
-              <NavLink to="/compare" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>COMPARE</NavLink>
+              {isAdmin ? (
+                <NavLink to="/compare" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>COMPARE</NavLink>
+              ) : null}
             </nav>
           </div>
 

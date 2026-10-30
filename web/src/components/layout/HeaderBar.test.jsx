@@ -1,6 +1,6 @@
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HeaderBar from './HeaderBar.jsx';
 
@@ -79,5 +79,45 @@ describe('HeaderBar responsive behavior', () => {
     // Closing search returns to normal header
     await user.click(backBtn);
     expect(screen.queryByLabelText('Close search')).not.toBeInTheDocument();
+  });
+});
+
+function Where() {
+  const location = useLocation();
+  return <div data-testid="where">{location.pathname + location.search}</div>;
+}
+
+describe('HeaderBar beta navigation', () => {
+  afterEach(() => {
+    cleanup();
+    mocks.user = null;
+  });
+
+  const searchFor = async (query) => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/reels']}>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+        <Where />
+      </MemoryRouter>
+    );
+    await user.type(screen.getByRole('combobox', { name: 'Search people, tags, and reels' }), query + '{Enter}');
+    return screen.getByTestId('where').textContent;
+  };
+
+  it('hides COMPARE from a regular user and sends tool shortcuts to an Explore search', async () => {
+    mocks.user = { id: 'usr-1', username: 'viewer', role: 'user' };
+    expect(await searchFor('compare')).toBe('/explore?search=compare');
+    expect(screen.queryByRole('link', { name: 'COMPARE' })).not.toBeInTheDocument();
+    cleanup();
+    expect(await searchFor('video')).toBe('/explore?search=video');
+    cleanup();
+    expect(await searchFor('image')).toBe('/explore?search=image');
+  });
+
+  it('keeps COMPARE and the tool shortcuts for an admin', async () => {
+    mocks.user = { id: 'usr-1', username: 'boss', role: 'admin' };
+    expect(await searchFor('compare')).toBe('/compare');
+    expect(screen.getByRole('link', { name: 'COMPARE' })).toBeInTheDocument();
   });
 });

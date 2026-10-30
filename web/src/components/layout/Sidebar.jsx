@@ -22,9 +22,9 @@ const NAV_ITEMS = [
   { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
   { to: '/wallet', label: 'Credits', Icon: IndustrialCreditsIcon }, // TEMP glyph — final art to follow
   { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
-  { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
-  { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
-  { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
+  { to: '/image', label: 'Image', Icon: IndustrialImageIcon, adminOnly: true },
+  { to: '/video', label: 'Video', Icon: IndustrialVideoIcon, adminOnly: true },
+  { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon, adminOnly: true },
 ];
 
 const MODEL_FIELDS = [
@@ -162,7 +162,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
       <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
+        {NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === 'admin').map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}
