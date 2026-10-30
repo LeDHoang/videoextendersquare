@@ -211,7 +211,8 @@
   }
 
   // deps (all optional): exitAndNavigate(path), getUser(), request(path, query) → Promise<json>,
-  // send(method, path, body?) → Promise<json>, playFeed({ videoData, startIndex, label }).
+  // send(method, path, body?) → Promise<json>, playFeed({ videoData, startIndex, label }),
+  // getScene() → 'reels' | 'earth', setScene(scene, wasOpen), earthAvailable() → bool.
   function create(deps) {
     const d = deps || {};
     let stack = [];
@@ -558,7 +559,12 @@
       if (!hit) return false;
       switch (hit.action) {
         case 'nav':
-          if (hit.arg === 'reels') { close(); return true; }
+          if (hit.arg === 'reels' || hit.arg === 'earth') {
+            const wasOpen = isOpen();
+            close();
+            if (d.setScene) d.setScene(hit.arg, wasOpen);
+            return true;
+          }
           if (hit.arg === 'profile') { open(profilePath()); return true; }
           if (NAV_PATHS[hit.arg]) { open(NAV_PATHS[hit.arg]); return true; }
           return false;
@@ -642,6 +648,8 @@
           id: field.id, text: field.text, focused: field.focused && !handoff && !!route,
           layout: field.layout, shift: field.shift,
         },
+        scene: d.getScene ? d.getScene() : 'reels',
+        earthOff: !!(d.earthAvailable && !d.earthAvailable()),
         unread: unread.total,
         unreadBox: { inbox: unread.inbox, requests: unread.requests },
         rewards,

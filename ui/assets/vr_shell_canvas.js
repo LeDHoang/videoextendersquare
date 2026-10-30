@@ -30,10 +30,12 @@
     return (ui && ui.TOKENS) || FALLBACK;
   }
 
-  // Nav bar tabs, left to right, after the ECHO mark. 'reels' closes the
-  // shell, the rest open sections. icon: a VRUICanvas dock icon.
+  // Nav bar tabs, left to right, after the ECHO mark. 'reels' and 'earth'
+  // close the shell into that scene, the rest open sections. icon: a
+  // VRUICanvas dock icon.
   const NAV_ITEMS = [
     { id: 'reels', label: 'REELS', icon: 'reels' },
+    { id: 'earth', label: 'EARTH', icon: 'location' },
     { id: 'explore', label: 'EXPLORE', icon: 'compass' },
     { id: 'messages', label: 'MESSAGES', icon: 'message' },
     { id: 'wallet', label: 'CREDITS', icon: 'credits' },
@@ -451,6 +453,8 @@
   // state: VRShell getRenderState(); hover: nav item id or ''.
   // Drawn as a strip of the reels dock: glass surface, vermilion rule,
   // chamfered icon tiles with mono captions (VRUICanvas renderControlsCanvas).
+  // Closed, the bar hangs flush under the dock, so it drops its top rule and
+  // the dock's bottom edge is the seam.
   function renderNavBar(ctx, state, hover) {
     const t = tokens();
     const T = t.hex;
@@ -460,8 +464,16 @@
     ctx.fillStyle = T.surface;
     ctx.fillRect(0, 0, NAV_W, NAV_H);
     ctx.strokeStyle = T.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, NAV_W - 2, NAV_H - 2);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (s.open) ctx.rect(1.5, 1.5, NAV_W - 3, NAV_H - 3);
+    else {
+      ctx.moveTo(1.5, 0);
+      ctx.lineTo(1.5, NAV_H - 1.5);
+      ctx.lineTo(NAV_W - 1.5, NAV_H - 1.5);
+      ctx.lineTo(NAV_W - 1.5, 0);
+    }
+    ctx.stroke();
     if (ui && ui.drawIcon) ui.drawIcon(ctx, 'logo', 60, NAV_H / 2, 52, T.ink, T.accent, T.surface);
     ctx.fillStyle = T.ink;
     ctx.font = '900 30px ' + (t.font.brand || t.font.display);
@@ -469,8 +481,10 @@
     ctx.textBaseline = 'middle';
     ctx.fillText('ECHO', 98, NAV_H / 2 + 1);
     navRects().forEach((r) => {
-      const active = r.id === 'reels' ? !s.open : s.open && s.tab === r.id;
-      const lit = active || hover === r.id;
+      const scene = s.scene === 'earth' ? 'earth' : 'reels';
+      const active = r.id === 'reels' || r.id === 'earth' ? !s.open && scene === r.id : s.open && s.tab === r.id;
+      const off = r.id === 'earth' && s.earthOff;
+      const lit = !off && (active || hover === r.id);
       if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, 12);
       else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
       ctx.fillStyle = lit ? T.surface3 : T.surface2;
@@ -478,7 +492,7 @@
       ctx.strokeStyle = lit ? T.accent : T.rule;
       ctx.lineWidth = 2;
       ctx.stroke();
-      const ink = lit ? T.ink : T.ink2;
+      const ink = lit ? T.ink : (off ? T.inkMuted : T.ink2);
       if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surface3 : T.surface2);
       ctx.fillStyle = ink;
       ctx.font = 'bold 18px ' + t.font.mono;

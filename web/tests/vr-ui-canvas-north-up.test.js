@@ -79,11 +79,13 @@ test('Earth hit resolution routes North Up center and inclusive edges to its act
   for (const [x, y] of [[601, 259], [777, 259], [689, 237], [689, 281], [592, 259]]) {
     assert.equal(hitAction(api, x, y, options), null, `${x}, ${y}`);
   }
-  for (const action of [...earthActions, 'earth', 'exit']) {
+  for (const action of [...earthActions, 'exit']) {
     const button = api.CTRL_BUTTONS.find((entry) => entry.action === action);
     assert.equal(hitAction(api, ...center(button), options), action);
   }
-  for (const button of api.CTRL_BUTTONS.filter((entry) => ![...earthActions, 'earth', 'exit'].includes(entry.action))) {
+  // The way back to reels is the shell nav's REELS tab, not a dock pill.
+  assert.equal(api.isControlVisible('earth', null, null, false, 'earth'), false);
+  for (const button of api.CTRL_BUTTONS.filter((entry) => ![...earthActions, 'exit'].includes(entry.action))) {
     // Earth actions intentionally reuse collect/pack slots, but must never dispatch their old actions.
     assert.notEqual(hitAction(api, ...center(button), options), button.action);
   }
@@ -105,12 +107,17 @@ test('reels and pack playback preserve reel actions, transport, and their origin
   for (const packMode of [false, true]) {
     const options = { sceneMode: 'reels', packMode, source: { kind: 'video' }, itemState: { available: true } };
     const { labels } = recordRender(api, options);
-    for (const action of [...reelActions, 'rew', 'prev', 'play', 'next', 'fwd', 'seek', 'earth', 'exit']) {
+    for (const action of [...reelActions, 'rew', 'prev', 'play', 'next', 'fwd', 'seek', 'exit']) {
       const button = api.CTRL_BUTTONS.find((entry) => entry.action === action);
       assert.equal(hitAction(api, ...center(button), options), action);
       assert.equal(api.isControlVisible(action, options.source, options.itemState, packMode, 'reels'), true);
       if (reelActions.includes(action)) assert.ok(labels.some(({ text }) => text === button.label));
     }
+    // The earth slot is the pack QUEUE toggle; Earth itself lives on the shell nav.
+    const queue = api.CTRL_BUTTONS.find((entry) => entry.action === 'earth');
+    assert.equal(hitAction(api, ...center(queue), options), packMode ? 'earth' : null);
+    assert.equal(api.isControlVisible('earth', options.source, options.itemState, packMode, 'reels'), packMode);
+    assert.equal(labels.some(({ text }) => text === 'QUEUE'), packMode);
     // COLLECT spans both pack slots on the action row.
     assert.equal(hitAction(api, 637, 212, options), packMode ? 'save_pack' : 'collect');
     assert.equal(hitAction(api, 732, 212, options), packMode ? 'share_pack' : 'collect');

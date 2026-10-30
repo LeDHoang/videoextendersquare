@@ -28,7 +28,7 @@ function recordingCtx() {
 test('nav rects tile the bar without overlap and resolve back to their item', () => {
   const sc = loadCanvas();
   const rects = sc.navRects();
-  assert.deepEqual([...rects.map((r) => r.id)], ['reels', 'explore', 'messages', 'wallet', 'profile']);
+  assert.deepEqual([...rects.map((r) => r.id)], ['reels', 'earth', 'explore', 'messages', 'wallet', 'profile']);
   for (let i = 1; i < rects.length; i++) assert.ok(rects[i].x >= rects[i - 1].x + rects[i - 1].w);
   assert.ok(rects[rects.length - 1].x + rects[rects.length - 1].w <= sc.NAV_W);
   for (const r of rects) {
@@ -59,6 +59,7 @@ test('renderers draw the section title, handoff copy and nav labels', () => {
   rec = recordingCtx();
   sc.renderNavBar(rec.ctx, { open: false }, 'explore');
   assert.ok(rec.texts.includes('CREDITS'));
+  assert.ok(rec.texts.includes('EARTH'));
 });
 
 test('hoverKey matches the renderers hover argument', () => {

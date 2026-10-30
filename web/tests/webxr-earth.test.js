@@ -288,10 +288,9 @@ test('heat zones scale with activity while pitch remains bounded', () => {
   assert.equal(state.visualStyle, 'holographic-zones');
 });
 
-test('the immersive control dock exposes a prominent Earth map action', () => {
+test('the dock keeps its earth slot only as the pack QUEUE toggle', () => {
   const button = loadRenderer().__test.getControlButton('earth');
-  assert.equal(button.label, 'EARTH MAP');
-  assert.ok(button.w >= 100);
+  assert.equal(button.label, 'QUEUE');
   assert.ok(button.h >= 30);
 });
 
@@ -2417,21 +2416,16 @@ test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   assert.ok(firstToken(free.texts, 'FREE'), `has FREE label: ${free.texts.join('|')}`);
 });
 
-test('dock Earth button reads ALL LOCATIONS while a location feed is active', () => {
+test('reels dock draws no Earth pill; packs keep their QUEUE pill', () => {
+  // Earth and the main feed are shell nav tabs under the dock.
   const ui = loadUICanvasStandalone();
   const plain = makeRecordingCtx();
   ui.renderControlsCanvas(plain.ctx, dockRenderOptions());
-  assert.ok(plain.texts.some((t) => t.split(' ')[0] === 'EARTH'), `has EARTH MAP: ${plain.texts.join('|')}`);
-  assert.ok(!plain.texts.some((t) => t.startsWith('ALL LOCATIONS')));
-  const filtered = makeRecordingCtx();
-  ui.renderControlsCanvas(filtered.ctx, dockRenderOptions({ locationFeedActive: true }));
-  assert.ok(filtered.texts.some((t) => t.startsWith('ALL LOCATIONS')), `has ALL LOCATIONS: ${filtered.texts.join('|')}`);
-  assert.ok(!filtered.texts.some((t) => t.startsWith('EARTH MAP')));
-  // Pack mode keeps its QUEUE label whatever the flag says.
+  assert.ok(!plain.texts.some((t) => t.startsWith('EARTH') || t.startsWith('ALL LOCATIONS') || t.startsWith('QUEUE')),
+    plain.texts.join('|'));
   const pack = makeRecordingCtx();
-  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true, locationFeedActive: true }));
+  ui.renderControlsCanvas(pack.ctx, dockRenderOptions({ packMode: true }));
   assert.ok(pack.texts.some((t) => t.startsWith('QUEUE')));
-  assert.ok(!pack.texts.some((t) => t.startsWith('ALL LOCATIONS')));
 });
 
 test('guide panel renders the controller artwork without errors', () => {

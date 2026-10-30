@@ -6119,7 +6119,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer,
         autoNext: getAutoNext(),
         sceneMode,
-        locationFeedActive: locationFeedActive(),
         earth: sceneMode === 'earth' ? earthDockStatus() : null,
         notificationText,
         notificationUntil,
@@ -6217,6 +6216,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       request: shellRequest,
       send: (method, path, body) => (callbacks.shellSend
         ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
+      getScene: () => sceneMode,
+      earthAvailable: () => !isPackExperience(),
+      // REELS from the open shell just returns to the feed; from the dock it
+      // is the main feed, so it also leaves a location feed.
+      setScene(mode, wasOpen) {
+        if (mode === 'reels' && !wasOpen && sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();
+        else setSceneMode(mode);
+      },
       playFeed(feed) {
         // The new feed autoplays; closing must not toggle it back to paused.
         shellResumePlayback = false;
@@ -6440,22 +6447,25 @@ window.WebXRVR = window.WebXRVR || (function () {
     faceViewerLevel(shellMainMesh, headPos, 0);
   }
 
-  // The nav bar never shares space with the dock: closed, it is a strip just
-  // under the dock (same width and tilt); open, the dock is hidden and the
-  // bar sits under the main panel.
+  // The nav bar is one piece with the dock: closed, it hangs flush under it
+  // (same width and tilt, shared edge); open, the dock is hidden and the bar
+  // keeps that same size under the main panel.
+  let shellNavK = 1;
   function layoutShellNav() {
     if (!shellNavMesh || !THREE) return;
     const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
     if (!anchor) return;
     const open = anchor === shellMainMesh;
     // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
-    const k = open ? 1 : (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+    if (!open) shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+    const k = shellNavK;
     const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
     const navH = SHELL_NAV_SIZE.h * k;
+    const gap = open ? navH * 0.25 : 0;
     shellNavMesh.scale.set(k, k, 1);
     shellNavMesh.quaternion.copy(anchor.quaternion);
     shellNavMesh.position.copy(anchor.position)
-      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - navH * 0.25, 0).applyQuaternion(anchor.quaternion));
+      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
   }
 
   // Keyboard: below the main panel, closer, tilted up toward the viewer.
@@ -7855,6 +7865,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const next = mode === 'earth' && !isPackExperience() ? 'earth' : 'reels';
     const prev = sceneMode;
     sceneMode = next;
+    if (shell && prev !== next) shell.touch();
     applySceneVisibility();
     if (next === 'earth' && prev !== 'earth') {
       openEarthPlayback();

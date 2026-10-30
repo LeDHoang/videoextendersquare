@@ -414,6 +414,10 @@ export default function VRPanelWorkbench() {
       send: (method, path, body) => Promise.resolve(shellSend(method, path, body)),
       exitAndNavigate: (path) => setLastAction(`SHELL › exit VR › ${path}`),
       playFeed: ({ startIndex }) => setLastAction(`SHELL › play reel ${startIndex + 1}`),
+      // REELS / EARTH nav tabs drive the mock dock, as they drive sceneMode in VR.
+      getScene: () => (live.current.mock.dock === 'EARTH' ? 'earth' : 'reels'),
+      setScene: (mode) => setMock((m) => (m.dock === 'PACK' ? m : { ...m, dock: mode === 'earth' ? 'EARTH' : 'REELS' })),
+      earthAvailable: () => live.current.mock.dock !== 'PACK',
     });
     interact.current.shell.refreshUnread();
   }
@@ -538,7 +542,6 @@ export default function VRPanelWorkbench() {
       else if (a === 'lock') setMock((m) => ({ ...m, lock: !m.lock }));
       else if (a === 'mode') setMock((m) => ({ ...m, autoNext: !m.autoNext }));
       else if (a === 'curve') setMock((m) => ({ ...m, curve: CURVE_ORDER[(CURVE_ORDER.indexOf(m.curve) + 1) % CURVE_ORDER.length] }));
-      else if (a === 'earth') setMock((m) => ({ ...m, dock: m.dock === 'EARTH' ? 'REELS' : 'EARTH' }));
       else if (a === 'prev' || a === 'next') {
         s.idx = (s.idx + (a === 'next' ? 1 : PLAYLIST.length - 1)) % PLAYLIST.length;
         s.time = 0;

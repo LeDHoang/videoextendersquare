@@ -97,6 +97,26 @@ test('nav hits route to sections; profile needs a signed-in user', () => {
   assert.equal(s.handleHit({ action: 'nope' }), false);
 });
 
+test('REELS and EARTH nav tabs close the shell and switch the scene', () => {
+  const calls = [];
+  let scene = 'reels';
+  let packs = false;
+  const s = loadShell().create({
+    getScene: () => scene,
+    setScene: (mode, wasOpen) => { calls.push([mode, wasOpen]); scene = mode; },
+    earthAvailable: () => !packs,
+  });
+  s.handleHit({ action: 'nav', arg: 'explore' });
+  s.handleHit({ action: 'nav', arg: 'earth' });
+  assert.equal(s.isOpen(), false);
+  assert.equal(s.getRenderState().scene, 'earth');
+  s.handleHit({ action: 'nav', arg: 'reels' });
+  assert.deepEqual(calls, [['earth', true], ['reels', false]]);
+  assert.equal(s.getRenderState().earthOff, false);
+  packs = true;
+  assert.equal(s.getRenderState().earthOff, true);
+});
+
 test('every state change bumps the version and notifies listeners', () => {
   const s = loadShell().create({});
   const seen = [];

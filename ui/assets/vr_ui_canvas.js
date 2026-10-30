@@ -75,10 +75,11 @@
     { label: 'AUDIO', action: 'mute',  x: 620, y: 100, w: 156, h: 36 },
 
     // Header comment pill → toggles the VR comments panel
-    { label: 'COMMENTS', action: 'comments', x: 528, y: 8, w: 72, h: 32 },
+    { label: 'COMMENTS', action: 'comments', x: 664, y: 8, w: 72, h: 32 },
 
-    // Open Earth activity mode, or restore All Locations after a location feed.
-    { label: 'EARTH MAP', action: 'earth', x: 608, y: 8, w: 128, h: 32 },
+    // Pack queue toggle (packs only). Earth and the main feed live on the
+    // shell nav bar under the dock.
+    { label: 'QUEUE', action: 'earth', x: 584, y: 8, w: 72, h: 32 },
 
     // Header exit button
     { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
@@ -111,7 +112,7 @@
   ];
 
   // Dock header chip shown while a stereo reel is drawn per eye.
-  const STEREO_CHIP = { x: 456, y: 8, w: 64, h: 32 };
+  const STEREO_CHIP = { x: 592, y: 8, w: 64, h: 32 };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -470,6 +471,7 @@
 
   function isControlVisible(action, source, itemState, isPackExp, sceneMode) {
     if (isEarthAction(action)) return sceneMode === 'earth';
+    if (action === 'earth') return !!isPackExp;
     if (isPackAction(action)) return !!isPackExp;
     if (action === 'collect') return !isPackExp && sceneMode !== 'earth';
     if (isReelAction(action)) return source.kind !== 'static-card' && (!itemState || itemState.available !== false);
@@ -586,20 +588,8 @@
     ctx.font = `12px ${TOKENS.font.mono}`;
     ctx.fillText(String(earth.location || 'WORLD').toUpperCase().slice(0, 40), 144, 24);
 
-    // Mode toggle (active while in Earth) + exit
-    const eIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
-    const eb = CTRL_BUTTONS[eIdx];
-    previewRoundRect(ctx, eb.x, eb.y, eb.w, eb.h, TOKENS.radius);
-    ctx.fillStyle = T.surface3;
-    ctx.fill();
-    ctx.strokeStyle = T.accent;
+    // Exit (the way back to reels is the nav bar's REELS tab)
     ctx.lineWidth = 1;
-    ctx.stroke();
-    drawIcon(ctx, 'location', eb.x + 18, eb.y + eb.h / 2, 16, T.ink);
-    ctx.fillStyle = T.ink;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('EARTH MAP', eb.x + 18 + (eb.w - 18) / 2, eb.y + eb.h / 2);
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
     previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radius);
     ctx.fillStyle = T.surface;
@@ -710,7 +700,6 @@
       lockToViewer = false,
       autoNext = true,
       sceneMode = 'reels',
-      locationFeedActive = false,
       notificationText = '',
       notificationUntil = 0,
       stereo = 'mono',
@@ -790,7 +779,7 @@
     // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
     if (stereo === 'sbs' || stereo === 'tb') {
       // Sits flush against the comment pill; packs step left of the index pill.
-      const chipX = packMode ? STEREO_CHIP.x - 72 : STEREO_CHIP.x;
+      const chipX = packMode ? STEREO_CHIP.x - 152 : STEREO_CHIP.x;
       ctx.fillStyle = T.accent;
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
@@ -814,28 +803,23 @@
     ctx.textAlign = 'center';
     ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
 
-    // Index pill: packs only; the reels feed is an endless scroll.
+    // Packs only: index pill and queue toggle. The reels feed is an endless
+    // scroll, and Earth / all locations live on the nav bar's tabs.
     if (packMode) {
-      const indexPill = { x: commentBtn.x - 72, y: 8, w: 64, h: 32 };
+      const earthBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
+      const earthButton = CTRL_BUTTONS[earthBtnIdx];
+      const indexPill = { x: earthButton.x - 72, y: 8, w: 64, h: 32 };
       headerPill(indexPill, false);
       ctx.fillStyle = T.ink2;
       ctx.fillText(`${playlist.length ? idx + 1 : 0} / ${playlist.length}`, indexPill.x + indexPill.w / 2, 24);
-    }
 
-    // Earth button (QUEUE in pack mode)
-    const earthBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'earth');
-    const earthButton = CTRL_BUTTONS[earthBtnIdx];
-    const isEarthHover = (hoveredButton === earthBtnIdx);
-    const earthActive = sceneMode === 'earth' || isEarthHover || (packMode && packContext && packContext.queueOpen);
-    headerPill(earthButton, earthActive);
-    drawIcon(ctx, packMode ? 'more' : 'location', earthButton.x + 18, 24, 16, earthActive ? T.ink : T.ink2);
-    ctx.fillStyle = earthActive ? T.ink : T.ink2;
-    ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
-    ctx.fillText(
-      packMode ? 'QUEUE' : (locationFeedActive ? 'ALL LOCATIONS' : 'EARTH MAP'),
-      earthButton.x + 18 + (earthButton.w - 18) / 2,
-      24
-    );
+      const queueActive = hoveredButton === earthBtnIdx || !!(packContext && packContext.queueOpen);
+      headerPill(earthButton, queueActive);
+      drawIcon(ctx, 'more', earthButton.x + 16, 24, 16, queueActive ? T.ink : T.ink2);
+      ctx.fillStyle = queueActive ? T.ink : T.ink2;
+      ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
+      ctx.fillText('QUEUE', earthButton.x + 16 + (earthButton.w - 16) / 2, 24);
+    }
 
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
