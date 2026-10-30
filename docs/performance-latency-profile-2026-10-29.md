@@ -418,9 +418,13 @@ Repeated on 2026-10-30 from an unfiltered network, against the section 7 runs. P
 | Seattle (SEA) | 279 → 276 ms | 464 → 385 ms | 185 → 109 ms | −76 ms |
 | London (LHR) | 388 → 454 ms | 606 → 609 ms | 218 → 155 ms | −63 ms |
 | Frankfurt (FRA) | 392 → 553 ms | 574 → 673 ms | 182 → 120 ms | −62 ms |
-| New York (EWR) | 353 → 410 ms | 518 → 781 ms | 165 → 371 ms | not usable |
-| Singapore (SIN) | 239 → 920 ms | 430 → 916 ms | 191 → −4 ms | not usable |
+| New York (EWR), rerun | 353 → 355 ms | 518 → 478 ms | 165 → 123 ms | −42 ms |
+| Tokyo (NRT) | 217 → 204 ms | 374 → 358 ms | 157 → 154 ms | −3 ms |
+| Sydney (SYD) | 399 → 673 ms | 560 → 815 ms | 161 → 142 ms | not usable |
+| Singapore (SIN), two runs | 239 → 920 and 579 ms | 430 → 916 and 726 ms | 191 → −4 and 147 ms | not usable |
 
-The four usable locations agree: building the list takes about 55 to 76 ms less per request, in line with the loopback drop at c=1 (158 to 120 ms p50). The New York and Singapore runs were taken on congested VPN servers, where healthz alone varied by more than the effect being measured. A first Frankfurt attempt was routed through Prague (PRG) and was discarded. Tokyo and Sydney were not repeated in this round.
+Five of the six usable locations agree: building the list takes about 42 to 76 ms less per request, in line with the loopback drop at c=1 (158 to 120 ms p50). Tokyo is the exception at 3 ms, and one run there cannot tell whether that is the path or the server. A first New York run (healthz 410 ms, list over healthz 371 ms) was taken on a congested server and was replaced by the rerun above. Sydney and both Singapore runs were also congested: ping to the VPS rose from 376 to 636 ms in Sydney and from 282 to over 600 ms in Singapore, so healthz alone moved by more than the effect being measured. The second Singapore run also switched egress from SIN to VIE partway through. A first Frankfurt attempt was routed through Prague (PRG) and was discarded.
 
 The list payload is unchanged in size (41,700 to 41,706 bytes) and in content: production returns 201 items, all of them published posts.
+
+Two further changes to the same endpoint were committed after this round and are not deployed yet. The comments query no longer joins each comment's post, which is already loaded for the request (`04d2bc1`; `reel_records` 40 to 33 ms locally). The output root is resolved once per request instead of once per item (`09e32f0`; the local `/api/reels` request 86 to 80.5 ms on top of the first change). The response stays byte-identical after both.
