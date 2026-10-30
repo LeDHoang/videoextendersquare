@@ -1388,7 +1388,7 @@ def _codec_key(codec: str | None) -> str:
     return (codec or "hevc").lower()
 
 
-def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
+def _sibling_media_url(play_path: str, sibling: Path, output_root: Path) -> str | None:
     """Reference a cached sibling file (<stem>-explore.mp4 / -poster.jpg) as
     a /media/ URL if present and fresh, else None."""
     try:
@@ -1398,7 +1398,7 @@ def _sibling_media_url(play_path: str, sibling: Path) -> str | None:
             except OSError:
                 fresh = True
             if fresh:
-                prel = sibling.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+                prel = sibling.resolve().relative_to(output_root).as_posix()
                 return public_url(prel)
     except (OSError, ValueError):
         pass
@@ -1419,6 +1419,7 @@ def _build_payload(
     tiles) serve the original file directly with a lightweight poster thumb.
     """
     mode = _codec_key(codec)
+    output_root = OUTPUT_DIR.resolve()
     payload = []
     paths = [item["rel_path"] for item in videos]
     try:
@@ -1489,7 +1490,7 @@ def _build_payload(
         if _is_image_item(item):
             # Single image tile: no codec/proxy/transcode needed.
             try:
-                rel = Path(src_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+                rel = Path(src_path).resolve().relative_to(output_root).as_posix()
             except (OSError, ValueError):
                 continue
             if is_stereo:
@@ -1499,7 +1500,7 @@ def _build_payload(
                 images = (social_row or {}).get("images") or [cover]
             else:
                 url = public_url(rel)
-                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path)) or url
+                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path), output_root) or url
                 # Every image of the post in order (a loose file is a 1-image post).
                 images = (social_row or {}).get("images") or [{
                     "path": rel,
@@ -1528,8 +1529,8 @@ def _build_payload(
         if is_stereo and not stereo["stereo_crop"]:
             # 2D plays the H.264 left-eye rendition; grid assets derive from it.
             mono_path = str(SM.mono_sibling_path(src_path))
-            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path))
-            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path))
+            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path), output_root)
+            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path), output_root)
             payload.append({
                 **base,
                 "media_type": "video",
@@ -1553,14 +1554,14 @@ def _build_payload(
                     play_path = str(preview_p)
                     is_proxy = True
 
-        rel = Path(play_path).resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+        rel = Path(play_path).resolve().relative_to(output_root).as_posix()
         play_codec = SM.get_video_codec(play_path)
 
         # Lightweight Explore-grid assets: reference the cached
         # <stem>-explore.mp4 / <stem>-poster.jpg if present and fresh, else
         # None (the grid generates them via POST /explore-preview).
-        preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path))
-        poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path))
+        preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path), output_root)
+        poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path), output_root)
 
         payload.append({
             **base,
