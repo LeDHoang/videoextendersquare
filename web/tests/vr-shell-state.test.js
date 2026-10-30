@@ -429,3 +429,58 @@ test('share sheet lists chats you can message and sends to one', async () => {
   assert.deepEqual([...sent[0][1].usernames], ['amy']);
   assert.equal(s.share({ kind: 'nope', target_id: 'x' }), null);
 });
+
+function walletShell(user = { username: 'me' }) {
+  const asked = [];
+  const s = loadShell().create({
+    getUser: () => user,
+    exitAndNavigate: (p) => asked.push(['exit', p]),
+    request: (path, query) => {
+      asked.push([path, { ...query }]);
+      if (path === '/api/billing/wallet') return Promise.resolve({ available_credits: 42 });
+      return Promise.resolve({ transactions: [{ id: 't1', delta_available: 1 }, { id: 't2', delta_available: -5 }] });
+    },
+  });
+  return { s, asked };
+}
+
+test('wallet: loads balance and ledger; BUY hands off to the 2D wallet', async () => {
+  const { s, asked } = walletShell();
+  s.open('/wallet');
+  await tick(); await tick();
+  const route = s.getRenderState().route;
+  assert.equal(route.detail.available_credits, 42);
+  assert.deepEqual(route.items.map((e) => e.id), ['t1', 't2']);
+  assert.ok(asked.some(([p, q]) => p === '/api/billing/transactions' && q.limit === 50));
+  assert.equal(s.getRenderState().tab, 'wallet');
+  assert.equal(s.handleHit({ action: 'buy' }), true);
+  assert.equal(s.getRenderState().handoff.path, '/wallet');
+  s.handleHit({ action: 'handoff-cancel' });
+  assert.equal(s.section(), 'wallet');
+  s.handleHit({ action: 'buy' });
+  s.handleHit({ action: 'handoff-confirm' });
+  assert.deepEqual(asked[asked.length - 1], ['exit', '/wallet']);
+  assert.equal(s.isOpen(), false);
+});
+
+test('wallet needs a signed-in user', () => {
+  const { s, asked } = walletShell(null);
+  s.open('/wallet');
+  assert.equal(s.getRenderState().handoff.path, '/login');
+  assert.equal(asked.length, 0);
+});
+
+test('noteReward keeps the progress line and reloads an open wallet on an award', async () => {
+  const { s, asked } = walletShell();
+  s.noteReward({ progress: 3, remaining: 7 });
+  assert.deepEqual({ ...s.getRenderState().rewards }, { progress: 3, remaining: 7, capped: false });
+  s.open('/wallet');
+  await tick(); await tick();
+  const before = asked.length;
+  s.noteReward({ progress: 0, remaining: 10, credit_awarded: true, daily_cap_reached: true });
+  assert.equal(s.getRenderState().rewards.capped, true);
+  await tick(); await tick();
+  assert.equal(asked.length, before + 2, 'balance and ledger reloaded');
+  s.noteReward(null);
+  assert.equal(s.getRenderState().rewards.capped, true);
+});

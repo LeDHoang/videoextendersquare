@@ -174,6 +174,13 @@ export default function ImmersivePreviewPage() {
         </div>
         <div className="sx-control-group">
           <Button disabled={!renderer?.shell} onClick={() => { renderer.shell.share(); syncState(); }}>SHARE REEL</Button>
+          {/* Sample reel-reward reply so the wallet's progress line can be reviewed. */}
+          <Button
+            disabled={!renderer?.shell}
+            onClick={() => { renderer.shell.noteReward({ progress: 7, remaining: 3 }); renderer.shell.open('/wallet'); syncState(); }}
+          >
+            REWARD PROGRESS
+          </Button>
         </div>
         <ToggleRow
           label="SIDE-BY-SIDE STEREO"

@@ -6838,6 +6838,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       return !!shell.share(o);
     },
     refreshUnread() { if (shell) shell.refreshUnread(); },
+    noteReward(result) { if (shell) shell.noteReward(result); },
   };
   // </vr-shell-glue>
 

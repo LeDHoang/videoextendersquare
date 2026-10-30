@@ -135,6 +135,8 @@
         { action: 'accept', label: 'ACCEPT', primary: true, disabled: busy },
         { action: 'decline', label: 'DECLINE', disabled: busy || !det.can_decline },
       ];
+    } else if (route.section === 'wallet') {
+      btns = [{ action: 'buy', label: 'BUY CREDITS', primary: true }];
     } else if (route.section === 'pack') {
       btns = [
         { action: 'play', arg: 0, label: '▶ PLAY ALL', primary: true, disabled: !(route.items || []).length },
@@ -612,6 +614,73 @@
     });
   }
 
+  // '+1,000' / '-35'; reserve moves show as (reserved ±n) when available is unchanged.
+  function ledgerDelta(e) {
+    const sign = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('en-US');
+    const a = Number(e.delta_available) || 0;
+    const r = Number(e.delta_reserved) || 0;
+    if (!a && r) return { text: '(reserved ' + sign(r) + ')', gain: false };
+    return { text: sign(a), gain: a > 0 };
+  }
+
+  function ledgerLabel(e) {
+    return String(e.source || e.type || 'entry').replace(/_/g, ' ').toUpperCase();
+  }
+
+  // Wallet: balance + reward progress in the tool row, BUY on the right, ledger rows below.
+  function renderWallet(ctx, state, hover) {
+    const t = tokens();
+    const route = state.route;
+    const w = route.detail;
+    if (w) {
+      const avail = Number(w.available_credits) || 0;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = t.hex.accent;
+      ctx.font = '76px ' + t.font.display;
+      const balance = avail.toLocaleString('en-US');
+      ctx.fillText(balance, SEARCH_BAR.x, SEARCH_BAR.y + SEARCH_BAR.h / 2);
+      const x = SEARCH_BAR.x + ctx.measureText(balance).width + 32;
+      ctx.fillStyle = t.hex.ink;
+      ctx.font = '34px ' + t.font.display;
+      ctx.fillText('CREDITS', x, SEARCH_BAR.y + SEARCH_BAR.h * 0.3);
+      ctx.fillStyle = t.hex.ink2;
+      ctx.font = '28px ' + t.font.mono;
+      const r = state.rewards;
+      let line = 'Reserved ' + fmtCount(w.reserved_credits) + ' · Earned ' + fmtCount(w.lifetime_earned) + ' · Spent ' + fmtCount(w.lifetime_spent);
+      if (r) line += r.capped ? ' · Reel rewards: daily cap reached' : ' · Reels: ' + r.progress + '/10 to next credit';
+      ctx.fillText(truncate(ctx, line, SEARCH_BAR.w - DETAIL_BTN_W - 48 - (x - SEARCH_BAR.x)), x, SEARCH_BAR.y + SEARCH_BAR.h * 0.72);
+    }
+    detailButtons(route).forEach((b) => drawButton(ctx, b, b.label, { primary: b.primary, hover: hover === b.action, size: 36 }));
+    if (renderStatus(ctx, route, 'No credit activity yet')) return;
+    const items = route.items || [];
+    const first = route.scroll || 0;
+    for (let slot = 0; slot < LIST_ROWS; slot++) {
+      const e = items[first + slot];
+      if (!e) break;
+      const r = listRowRect(slot);
+      ctx.fillStyle = t.hex.surface;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = t.hex.ink;
+      ctx.font = '40px ' + t.font.sans;
+      ctx.fillText(truncate(ctx, ledgerLabel(e), r.w - 640), r.x + 32, r.y + r.h * 0.34);
+      ctx.fillStyle = t.hex.ink2;
+      ctx.font = '30px ' + t.font.mono;
+      ctx.fillText(String(e.created_at || '').slice(0, 10), r.x + 32, r.y + r.h * 0.7);
+      const delta = ledgerDelta(e);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = delta.gain ? t.hex.accent : t.hex.ink;
+      ctx.font = '44px ' + t.font.display;
+      ctx.fillText(delta.text, r.x + r.w - 32, r.y + r.h * 0.38);
+      ctx.fillStyle = t.hex.inkMuted;
+      ctx.font = '26px ' + t.font.mono;
+      ctx.fillText('balance ' + (Number(e.balance_available) || 0).toLocaleString('en-US'), r.x + r.w - 32, r.y + r.h * 0.76);
+    }
+    renderScrollButtons(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
+  }
+
   // Sections without a body yet show a labelled placeholder.
   function renderSectionBody(ctx, state) {
     const t = tokens();
@@ -647,6 +716,7 @@
     renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover);
     if (section === 'messages' || section === 'share') { renderConversationList(ctx, s, hover); return; }
     if (section === 'thread') { renderThread(ctx, s, hover); return; }
+    if (section === 'wallet') { renderWallet(ctx, s, hover); return; }
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
     if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
     else if (section === 'profile' || section === 'pack') renderDetailRow(ctx, route, hover);
@@ -663,6 +733,11 @@
     const route = state && state.route;
     if (route && (route.section === 'messages' || route.section === 'share')) return resolveListHit(route, x, y);
     if (route && route.section === 'thread') return resolveThreadHit(route, x, y);
+    if (route && route.section === 'wallet') {
+      if (detailButtons(route).some((b) => inRect(b, x, y))) return { action: 'buy' };
+      const sb = SCROLL_BTNS.find((r) => inRect(r, x, y));
+      return sb ? { action: 'scroll', arg: sb.arg } : null;
+    }
     if (!route || !GRID_SECTIONS[route.section]) return null;
     if (route.section === 'explore' || route.section === 'search') {
       if (inRect(SEARCH_BAR, x, y)) return { action: 'search-focus' };

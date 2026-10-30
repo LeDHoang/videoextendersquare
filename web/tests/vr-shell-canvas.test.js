@@ -49,9 +49,9 @@ test('main panel: close button always hits, handoff buttons only on the card', (
 test('renderers draw the section title, handoff copy and nav labels', () => {
   const sc = loadCanvas();
   let rec = recordingCtx();
-  sc.renderMainPanel(rec.ctx, { route: { section: 'wallet', path: '/wallet', arg: '' } }, '');
-  assert.ok(rec.texts.includes('CREDITS'));
-  assert.ok(rec.texts.includes('/wallet'));
+  sc.renderMainPanel(rec.ctx, { route: { section: 'rewards', path: '/rewards', arg: '' } }, '');
+  assert.ok(rec.texts.includes('REWARDS'));
+  assert.ok(rec.texts.includes('/rewards'));
   rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { handoff: { title: 'FINISH ON 2D', message: 'm', path: '/upload' } }, 'handoff-confirm');
   assert.ok(rec.texts.includes('EXIT VR & OPEN'));
@@ -203,4 +203,30 @@ test('nav badge shows the unread count on messages', () => {
   const rec = recordingCtx();
   sc.renderNavBar(rec.ctx, { open: true, unread: 120 }, '');
   assert.ok(rec.texts.includes('99+'));
+});
+
+test('wallet: balance, reward progress, ledger rows and BUY', () => {
+  const sc = loadCanvas();
+  const items = Array.from({ length: 8 }, (_, i) => ({
+    source: 'reel_reward', delta_available: i ? 1 : -35, delta_reserved: 0, balance_available: 100 + i, created_at: '2026-10-30T01:00:00',
+  }));
+  items[1] = { type: 'reserve', delta_available: 0, delta_reserved: 20, balance_available: 90, created_at: '2026-10-29T01:00:00' };
+  const route = {
+    section: 'wallet', path: '/wallet', items, scroll: 0, status: 'ready',
+    detail: { available_credits: 1234, reserved_credits: 20, lifetime_earned: 9, lifetime_spent: 35 },
+  };
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route, rewards: { progress: 7, remaining: 3, capped: false } }, 'buy');
+  for (const text of ['1,234', 'CREDITS', 'BUY CREDITS', 'REEL REWARD', '−35', '+1', '(reserved +20)', 'RESERVE', '2026-10-30']) {
+    assert.ok(rec.texts.includes(text), text);
+  }
+  assert.ok(rec.texts.some((t) => t.includes('7/10 to next credit')));
+  const buy = sc.detailButtons(route)[0];
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, buy.x + 10, buy.y + 10) }, { action: 'buy' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900) }, { action: 'scroll', arg: 1 });
+  const row = sc.listRowRect(0);
+  assert.equal(sc.resolveMainHit({ route }, row.x + 10, row.y + 10), null, 'ledger rows are read-only');
+  const empty = recordingCtx();
+  sc.renderMainPanel(empty.ctx, { route: { section: 'wallet', items: [], status: 'ready' } }, '');
+  assert.ok(empty.texts.includes('No credit activity yet'));
 });

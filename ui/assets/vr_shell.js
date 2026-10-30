@@ -30,7 +30,7 @@
   };
 
   // Sections that need a signed-in viewer; signed out they show the sign-in handoff.
-  const NEEDS_USER = { messages: 1, thread: 1, share: 1 };
+  const NEEDS_USER = { messages: 1, thread: 1, share: 1, wallet: 1 };
 
   function decode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
@@ -68,7 +68,7 @@
   // List sections (inbox, share sheet) and the thread scroll one row at a time.
   const LIST_ROWS = 6;
   const THREAD_ROWS = 6;
-  const PAGE = { messages: [1, LIST_ROWS], share: [1, LIST_ROWS], thread: [1, THREAD_ROWS] };
+  const PAGE = { messages: [1, LIST_ROWS], share: [1, LIST_ROWS], thread: [1, THREAD_ROWS], wallet: [1, LIST_ROWS] };
 
   function maxScroll(route) {
     const page = PAGE[route.section] || [GRID_COLS, GRID_ROWS];
@@ -143,6 +143,13 @@
         items: (r) => conversations(r).filter((c) => c && c.can_message && c.participant),
         label: () => route.share.title || '',
       };
+      // Wallet: newest ledger entries first; the balance card rides along as the detail.
+      case 'wallet': return {
+        path: '/api/billing/transactions', query: { limit: 50 },
+        detail: '/api/billing/wallet',
+        items: (r) => (Array.isArray(r.transactions) ? r.transactions : []),
+        detailOf: (r, det) => det || null,
+      };
       default: return null;
     }
   }
@@ -157,6 +164,8 @@
     // layout is the keyboard page (alpha | symbols | emoji); shift capitalises the next letter.
     let field = { id: 'search', text: '', focused: false, layout: 'alpha', shift: false };
     let unread = { total: 0, inbox: 0, requests: 0 };
+    // Last reel-reward claim reply: { progress, remaining, capped } for the wallet's progress line.
+    let rewards = null;
     let version = 0;
     const listeners = [];
 
@@ -198,7 +207,8 @@
 
     function push(route) {
       if (NEEDS_USER[route.section] && !user()) {
-        showHandoff('/login', 'SIGN IN ON 2D', 'Sign in on the 2D site to use messages.');
+        showHandoff('/login', 'SIGN IN ON 2D', route.section === 'wallet'
+          ? 'Sign in on the 2D site to see your credits.' : 'Sign in on the 2D site to use messages.');
         return route;
       }
       handoff = null;
@@ -226,6 +236,15 @@
         unread = next;
         dirty();
       }, () => {});
+    }
+
+    // Reel-reward claim reply from the player. An awarded credit reloads an open wallet.
+    function noteReward(result) {
+      if (!result) return;
+      rewards = { progress: result.progress | 0, remaining: result.remaining | 0, capped: !!result.daily_cap_reached };
+      const route = top();
+      if (result.credit_awarded && route && route.section === 'wallet') load(route);
+      dirty();
     }
 
     // Fills route.items/related/status; a reply for a route no longer on the stack is dropped.
@@ -523,6 +542,9 @@
           return true;
         case 'share-to':
           return shareTo(hit.arg | 0);
+        case 'buy':
+          showHandoff('/wallet', 'BUY ON 2D', 'Buying credits needs the 2D site. Exit VR to continue.');
+          return true;
         case 'key':
           return type(hit.arg);
         case 'handoff-cancel':
@@ -559,6 +581,7 @@
         },
         unread: unread.total,
         unreadBox: { inbox: unread.inbox, requests: unread.requests },
+        rewards,
         version,
       };
     }
@@ -570,6 +593,7 @@
       showHandoff,
       share,
       refreshUnread,
+      noteReward,
       handleHit,
       scroll,
       type,

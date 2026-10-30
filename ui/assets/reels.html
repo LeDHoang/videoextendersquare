@@ -4122,6 +4122,9 @@
         ? window.ReelsRewards.progressMessage(result)
         : (result.credit_awarded ? '+1 ECHO CREDIT' : String(result.progress || 0) + '/10 TO NEXT CREDIT');
       showRewardToast(message, result.credit_awarded);
+      try {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.shell && WebXRVR.shell.noteReward) WebXRVR.shell.noteReward(result);
+      } catch (e) {}
       if (!result.credit_awarded) return;
       const detail = { ...result, type: 'echo:credits-awarded' };
       window.dispatchEvent(new CustomEvent('echo:credits-awarded', { detail }));
