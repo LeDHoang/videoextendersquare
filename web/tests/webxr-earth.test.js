@@ -5730,6 +5730,22 @@ test('VR shell: ?vrshell=0 kill switch keeps navigation on 2D', () => {
   assert.equal(renderer.shell.isOpen(), false);
 });
 
+test('VR shell: nav bar re-poses to the real head height on open', async () => {
+  const { renderer } = await enterLiveSession({ withShell: true });
+  const api = renderer.__test;
+  const nav = api.getScene().children.find((m) => m && m.renderOrder === 6 &&
+    m.geometry && m.geometry.parameters && m.geometry.parameters.height === 0.16);
+  assert.ok(nav, 'nav bar mesh exists');
+  // First pose taken before tracking settled (default 1.6 m head)...
+  api.getCamera().position.y = 1.6;
+  renderer.shell.open('/explore');
+  renderer.shell.close();
+  // ...then the seated headset reports its real height.
+  api.getCamera().position.y = 0.92;
+  renderer.shell.open('/explore');
+  assert.ok(Math.abs(nav.position.y - (0.92 - 0.8)) < 1e-6, `nav follows head height (${nav.position.y})`);
+});
+
 test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl, withShell: true });

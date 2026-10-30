@@ -6476,6 +6476,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
   let shellNavYaw = null;
+  let shellNavHeadY = 0;
   // Main-panel drag scroll with fling; shellMainY is the canvas y under the ray.
   let shellDrag = null;
   let shellMainY = null;
@@ -6616,6 +6617,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         try { callbacks.onTogglePlay(); } catch (e) {}
       }
       layoutShellMain(getHeadPosition());
+      shellNavYaw = null;
+      layoutShellNav(getHeadPosition());
     } else if (!open && shellWasOpen) {
       shellStick = { dir: 0, t: 0 };
       const resume = shellResumePlayback;
@@ -6713,12 +6716,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     faceViewerLevel(shellMainMesh, headPos, 0);
   }
 
-  // The nav bar sits low and re-centres only when the head turns well away.
+  // The nav bar sits low and re-centres only when the head turns well away
+  // or its height drifts (the first pose can predate real headset tracking).
   function layoutShellNav(headPos) {
     if (!shellNavMesh) return;
     const yaw = headYaw();
-    if (shellNavYaw !== null && Math.abs(Math.atan2(Math.sin(yaw - shellNavYaw), Math.cos(yaw - shellNavYaw))) < 0.9) return;
+    if (shellNavYaw !== null && Math.abs(headPos.y - shellNavHeadY) < 0.25 &&
+      Math.abs(Math.atan2(Math.sin(yaw - shellNavYaw), Math.cos(yaw - shellNavYaw))) < 0.9) return;
     shellNavYaw = yaw;
+    shellNavHeadY = headPos.y;
     shellNavMesh.position.set(headPos.x - Math.sin(yaw) * 1.1, headPos.y - 0.8, headPos.z - Math.cos(yaw) * 1.1);
     faceViewerLevel(shellNavMesh, headPos);
   }
