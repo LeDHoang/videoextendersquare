@@ -624,8 +624,12 @@
       ctx.textAlign = 'left';
       ctx.fillText(tiles[i].k, kx, ty + 24);
       ctx.fillStyle = tiles[i].c;
+      // Shrink long values (STREAMING 42%) to the tile instead of overflowing.
+      const v = String(tiles[i].v).slice(0, 14);
       ctx.font = `800 30px ${TOKENS.font.sans}`;
-      ctx.fillText(String(tiles[i].v).slice(0, 14), tx + 18, ty + 62);
+      const vw = ctx.measureText(v).width;
+      if (vw > tw - 36) ctx.font = `800 ${Math.max(14, Math.floor(30 * (tw - 36) / vw))}px ${TOKENS.font.sans}`;
+      ctx.fillText(v, tx + 18, ty + 62);
     }
     // Zoom meter (scrubber-style track, vermilion fill)
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;

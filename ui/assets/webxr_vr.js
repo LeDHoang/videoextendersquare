@@ -2296,7 +2296,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function updateEarthPreviewBillboard(time) {
     if (!earthPreviewMesh) return;
-    if (sceneMode !== 'earth') {
+    if (sceneMode !== 'earth' || isShellOpen()) {
       earthPreviewMesh.visible = false;
       if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
@@ -6490,8 +6490,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (shellMainMesh) shellMainMesh.visible = open;
     if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
     if (!open) return;
-    // The open shell replaces the reel screen and every reel-side panel.
-    [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh]
+    // The open shell replaces the reel screen, every reel-side panel and the
+    // Earth location card / preview (they would float over the shell).
+    [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh,
+      earthLabelMesh, earthPreviewMesh]
       .forEach((m) => { if (m) m.visible = false; });
   }
 

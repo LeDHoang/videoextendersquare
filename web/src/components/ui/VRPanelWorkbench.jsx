@@ -71,17 +71,6 @@ const PLAYLIST = [
     views: 1250000,
   },
 ];
-const EARTH_STATUS = {
-  tier: 'CITY',
-  tierColor: '#3b82f6',
-  zoomPct: 240,
-  scaleCaption: '5 KM',
-  mapStatus: 'LIVE TILES',
-  mapOffline: false,
-  location: 'HANOI',
-  northUp: true,
-  canOpenFeed: true,
-};
 // Globe zoom stops for the breadcrumb: render scale, zoom share, scale bar.
 const EARTH_ZOOMS = {
   GLOBE: { scale: 1, pct: 0, bar: null },
@@ -89,6 +78,32 @@ const EARTH_ZOOMS = {
   CITY: { scale: 60, pct: 72, bar: { pixels: 120, caption: '5 KM' } },
   STREET: { scale: 400, pct: 100, bar: { pixels: 90, caption: '200 M' } },
 };
+// Engine EARTH_TIERS: the dock's tier tile name and colour by render scale.
+const EARTH_TIERS = [
+  { name: 'ORBIT', max: 3, color: '#39D7FF' },
+  { name: 'REGION', max: 24, color: '#4FE3C1' },
+  { name: 'CITY', max: 200, color: '#FFC857' },
+  { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+];
+// Mirrors the engine's earthDockStatus() for the Earth zoom / place / offline
+// controls; zoomed views stream at 60%, like the Earth label's streaming bar.
+function earthDockStatus(mock) {
+  const z = EARTH_ZOOMS[mock.earthZoom];
+  const zoomed = z.scale > 1;
+  const tier = EARTH_TIERS.find((t) => z.scale < t.max);
+  const offline = zoomed && mock.earthOffline;
+  return {
+    tier: tier.name,
+    tierColor: tier.color,
+    zoomPct: z.pct,
+    scaleCaption: z.bar ? z.bar.caption : '—',
+    mapStatus: offline ? 'OFFLINE' : (zoomed ? 'STREAMING 60%' : 'ORBITAL'),
+    mapOffline: offline,
+    location: mock.earthPlace ? 'HANOI' : (zoomed ? 'WORLD' : 'EARTH ACTIVITY'),
+    northUp: true,
+    canOpenFeed: !!mock.earthPlace,
+  };
+}
 const EARTH_LOCATION = { name: 'Hanoi', slug: 'hanoi', heat: 0.72, active_reel_count: 18 };
 const COMMENT_TEMPLATES = [
   ['mika_tokyo', '#ff3b1f', 'The lantern reflections here are unreal'],
@@ -308,7 +323,7 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       curvatureMode: CURVES[mock.curve],
       lockToViewer: mock.lock,
       autoNext: mock.autoNext,
-      earth: mock.dock === 'EARTH' ? EARTH_STATUS : null,
+      earth: mock.dock === 'EARTH' ? earthDockStatus(mock) : null,
       stereo: mock.stereo.toLowerCase(),
     });
   } else if (key === 'COMMENTS') {

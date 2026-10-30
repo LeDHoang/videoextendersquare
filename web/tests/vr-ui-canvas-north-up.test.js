@@ -165,3 +165,23 @@ test('dock canvas size fits the live controls per mode', () => {
     assert.deepEqual({ ...rectangles[0] }, { x: 0, y: 0, w, h }, 'container drawn at the fitted size');
   }
 });
+
+test('Earth dock MAP tile shrinks a long status to fit its tile', () => {
+  const api = loadCanvas();
+  const drawn = [];
+  const ctx = new Proxy({
+    font: '',
+    fillText(text, x) { drawn.push({ text, x, font: this.font }); },
+    // ~0.62 em per glyph, as the 800-weight sans renders on Quest.
+    measureText(text) { return { width: String(text).length * 0.62 * (parseFloat(/(\d+)px/.exec(this.font)?.[1]) || 10) }; },
+  }, {
+    get(target, property) { return property in target ? target[property] : () => {}; },
+    set(target, property, value) { target[property] = value; return true; },
+  });
+  api.renderControlsCanvas(ctx, { sceneMode: 'earth', source: { kind: 'video' }, earth: { mapStatus: 'STREAMING 100%' } });
+  const label = drawn.find(({ text }) => text === 'STREAMING 100%');
+  assert.ok(label, 'status drawn');
+  const size = parseFloat(/(\d+)px/.exec(label.font)[1]);
+  assert.ok(size < 30, `font shrank (${size}px)`);
+  assert.ok(14 * 0.62 * size <= 236 - 36, 'text fits the tile');
+});
