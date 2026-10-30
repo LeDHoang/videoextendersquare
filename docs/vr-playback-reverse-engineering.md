@@ -1,0 +1,490 @@
+# How YouTube VR and PlayaVR play video, compared with our reels VR
+
+Date: 2026-10-25. Static analysis of the builds installed on the user's Quest, pulled over adb:
+
+| App | Package / version | base.apk sha256 |
+| --- | --- | --- |
+| YouTube VR | `com.google.android.apps.youtube.vr.oculus` 1.89.09 (18909000) | `d4a7841e…0c175151` |
+| PlayaVR | `com.swearl.playa` 3.2.0 (939) | `ac136e74…ba2ce65` |
+
+Tools: jadx (Java), Ghidra 12.1.4 through REA (native code), `dwarfdump`, and a custom IL2CPP metadata parser.
+Each finding below is labelled:
+- **Observed**: read directly from code or data.
+- **Inferred**: concluded from observed code but not traced end to end.
+- **Unknown**: not found.
+
+Nothing in this report comes from watching the apps run.
+
+---
+
+## 1. Exact buffer and readahead amounts
+
+### PlayaVR: observed
+
+PlayaVR's own native player, `libPlayaMedia.so` (sha256 `167ee728…be511a0`), ships with DWARF debug info, so constants and logic decompile cleanly.
+
+Defaults parsed in `pm::Session::do_open`. Evidence: Ghidra pseudocode of `0x14373c`, and string search `ev_f25f1b71…`.
+
+| Option (JSON key) | Default | Clamp | Meaning |
+| --- | --- | --- | --- |
+| `buffer_ahead_sec` | **30 s** | target ≥ 4 MB | Readahead target = byterate × 30 s, where byterate = file size ÷ duration |
+| `max_buffer_mb` | **256 MB** | ≥ 20 MB | Readahead is capped at `max_buffer_mb − 16 MB` |
+| back buffer | **8 MB** | — | Bytes kept behind the read position |
+| `preroll_ms` | **3000** | — | Bytes needed before the first frame = min(byterate × 3 s, **512 KB**) |
+| `startup_buffer_ms` | **0 (off)** | gives up after 30 s | Optional extra wait before play |
+| `gapless_preroll` | off natively; C# literal sends `true` | only for clips ≤ 15 s, for at most 6 s after open | Waits until the rest of the file can download in ≤ 0.9× its remaining play time |
+| `seek_preroll_ms` | 2000 | 0–10000 | Buffer required after a seek |
+| `seek_max_walk_ms` | 2000 | 0–60000 | Maximum decode-forward distance from a keyframe on a seek |
+
+The C# wrapper (`PlayaMediaOptions.get_Defaults`) can override these keys. Its literals are in the IL2CPP metadata, but the values are set in compiled IL2CPP code that was not disassembled (see Unknowns).
+
+Fetch loop, from `BufferedSource::io_main` at `0x14fc60`, evidence `ev_2e3f23e4…`:
+- It keeps **one sequential HTTP stream** and reads **256 KB** at a time. It does not issue a separate range request per chunk.
+- It stops reading when the bytes ahead reach the target, or when the window reaches `max_buffer_bytes`. It then re-checks every 50 ms.
+- A seek outside the window re-opens the stream at the new offset.
+- If the index (`moov`) sits at the end of the file, a separate tail connection fetches up to 32 MB (`kTailMaxBytes`).
+- Bandwidth estimate: an exponential moving average of each read's throughput, `bps = 0.2·inst + 0.8·bps`.
+
+Stall and rebuffer logic, from `Session::pump` at `0x140fc0`:
+- **Low water:** less than **3 s** of media buffered ahead. Below this, the starvation and slip detectors are active.
+- **Dry:** less than max(0.25 s of media, 256 KB) ahead, or less than 40 ms in the audio ring, for more than **700 ms**. A dry state starts a stall.
+- **Starvation:** while buffer is low, playback advanced less than 50% of the expected distance over 1 s.
+- **Clock slip:** slip accumulates and decays with a 2 s half-life. A stall triggers above 500 ms of slip; with hysteresis, it clears below 250 ms.
+- **Rebuffer target when a stall begins** = clamp((media byterate − download rate) × 60, 3 s, 15 s) of media.
+  - If the previous stall ended less than 45 s ago, the target is the previous target × 2, up to 15 s.
+  - The target never exceeds the bytes left in the file.
+- **During the hold:** after 1.5 s, the target is re-estimated as `ahead + fill_rate × (12 s − held)`, clamped to 3–15 s.
+- **Resume:** once the bytes ahead reach the target and at least 2 s have passed.
+  - Resume after 1 s instead if the rest of the file can download in ≤ 0.9× its remaining play time ("gapless finish").
+  - After a stall ends, late-frame dropping is suppressed for 1.5 s.
+
+Decode queue (`kFrameQueueDepth = 3`):
+- Normally the queue holds 3 frames, or fewer if the decoder reports that.
+- Above 3840×2160 pixels (`0x7e9000`), the queue is cut to **1 frame**, so an 8K video doesn't keep three 8K frames in memory.
+- Late-frame rule: a frame is dropped when its timestamp + 50 ms is behind the clock and a frame was presented less than 100 ms ago (`kLateDiscardMs = 50`).
+
+Other DWARF constants:
+- `kChunkSize` 256 KB, `kAvioBufferSize` 64 KB, `kForwardWaitSlack` 2 MB.
+- `kWarmupFrames` 128, `kWarmupMaxWallMs` 2000.
+- `kHardResyncMs` 200, `kMaxTrim` 0.05, which means the A/V clock is corrected by at most ±5% playback rate.
+
+PlayaVR also bundles AVPro Video, an ExoPlayer wrapper used for HLS/DASH streams:
+- `DefaultLoadControl.setBufferDurationsMs(min, max, playback, afterRebuffer)`, with values passed in from C#.
+- `setInitialBitrateEstimate(Long.MAX_VALUE)`, so ABR starts at the highest rendition.
+- A `VideoStreamLimiter` caps resolution and bitrate.
+
+### PlayaVR: runtime capture (logcat + `Player.log`, 2026-10-25)
+
+Three local files were played: a 1024² H.264 clip, a 3840² HEVC clip, and a 3840×7680 10-bit HEVC 360° clip (8K). No streamed video was played, because no stream source was available.
+
+- **Observed: the options the C# layer sends.** All three opens logged the same options:
+
+  ```
+  {"prefer_hw": true, "render_event_present": true, "nv12_direct": true,
+   "audio_rate": 48000, "audio_channels": 2, "audio_latency_ms": 42}
+  ```
+
+  - None of the buffering keys are sent: `buffer_ahead_sec`, `max_buffer_mb`, `preroll_ms`, `startup_buffer_ms`, `seek_*` and `gapless_preroll` are all missing. So the **native defaults listed above apply** (30 s ahead, 256 MB, 3000 ms preroll, gapless off).
+  - This holds for local files. Whether a streamed open sends different options is still unknown.
+- **Observed: network layer settings** (logged at startup, used for streams): HTTP/2 transport, a 64 MB cache with a 24 MB "recent window", and the engine's default source window.
+- **Observed: open timings for local files.**
+
+  | File | Probe | Decoder open | First frame after open |
+  | --- | --- | --- | --- |
+  | 1024² H.264 | 21 ms | 28 ms | 62 ms |
+  | 3840² HEVC | 5 ms | 20 ms | 41 ms |
+  | 3840×7680 HEVC 10-bit | 14 ms | 37 ms | 151 ms |
+
+  Even 8K reaches the first frame in about 150 ms when the bytes are local. Startup cost in Playa is almost entirely the network.
+- **Observed: render path.**
+  - Every open logged `hw decoder opened: mediacodec/… (surface output — zero copy)`.
+  - Each frame is then resolved on the GPU into an RGBA8 texture **at full source resolution** (`resolve target 3840x7680 RGBA8`).
+  - 10-bit video is reduced to 8-bit in that step, and the app warns about banding.
+  - A startup warning says `OpenGLES3 has no zero-copy path; frames will go through CPU readback`. The per-open lines contradict it, so it probably refers to a different output path (inferred).
+- **Observed: frame pacing.** During the 4K² and 8K clips the compositor reported 72/72 FPS, with 0–3 stale frames per second and no tearing.
+
+### YouTube VR: amounts are server-sent; not in the APK
+
+- **Observed:** all readahead and prefetch policy arrives as protobufs inside `MediaFetchHotConfig` / `MediaFetchColdConfig`. The native C++ types are:
+  - `ServerReadaheadConfig`, `MinReadaheadPolicy`, `ReadaheadBasedPrefetchPolicy`, `SabrPrefetchConfig`
+  - `BandwidthEstimationConfig`, `NearestRankBandwidthEstimatorConfig`, `BandwidthSamplingPolicy`
+
+  These are RTTI strings in `libgoogle3.so`. The Java classes are protobuf-lite with obfuscated fields, so there are no field names or defaults.
+- **Unknown:** the numbers. Ghidra ran out of memory on the 13 MB `libgoogle3.so`, so any fallbacks used when fields are absent were not recovered. A runtime capture (Stats for Nerds, or a proxy on the `/initplayback` response) is the realistic way to get them.
+
+### YouTube VR: runtime capture (logcat, 2026-10-25, Quest 3)
+
+Two videos were played: a 147 s flat video (moving closer and further away) and an 84 s 360° video. The app logs every QoE ping URL (`YT.qoe`) and its player events (`YT.mlplayer`). The field meanings below are inferred from their values; YouTube does not document them.
+
+- **Observed: buffer health (`bh`, seconds of media ahead).**
+  - Flat video: 46.7 s at 31 s, then 54.5, 68.4, 70.0, and 57–58 s later.
+  - 360° video: 40.1 s at 31 s, then 24.3 s at 61 s. At 61 s only 23 s of the video was left, so it had buffered to the end.
+  - So the server-sent readahead target is **about 60–70 s**, roughly 2× Playa's 30 s default.
+- **Observed: downloads come in bursts (`bwm` = bytes : seconds).**
+  - Flat: 28.8 MB in 4.3 s (≈ 54 Mbps), 19.0 MB in 2.6 s (≈ 58 Mbps), then 0.4 MB in 0.2 s while the buffer was full.
+  - 360°: 140.8 MB in 9.4 s (≈ 119 Mbps), then 18.3 MB in 1.1 s (≈ 134 Mbps).
+  - The client fills the buffer at full link speed, then idles until it drops.
+- **Observed: startup.** From `loadVideo` to `onPlaying`:
+  - 666 ms for the flat video (first playback, so the decoder was created).
+  - 761 ms for the 360° video (decoder reused).
+  - Decoder setup itself (`MediaCodec ttff`) took 37–56 ms, so almost all of the startup time is network.
+- **Observed: smoothness.** Dropped frames (`df`) were 0 at every report, including across format switches.
+
+## 2. Thresholds the quality picker uses
+
+### YouTube VR
+
+- **Observed:** the client sets a **target viewport** from how large the virtual screen appears in the headset.
+
+  `VideoContainer.c(w, h)` receives the screen's on-screen pixel size from native code (`onVirtualScreenPixelSizeUpdate`). It then requests `(w × 1.5, h × 1.5)`, but only when the height changes by **≥ 150 px**.
+
+  The initial viewport is `max(1920, longSide/2) × max(1080, shortSide/2)`.
+
+  So YouTube aims for 1.5× the pixels the screen actually covers in your view, and updates when you move closer or further away.
+- **Observed:** formats are chosen by **SABR**, which is server-side ABR.
+  - The client sends `ClientAbrState` (viewport, bandwidth estimate, buffer state, ~70 fields) with each media request, and the server picks the next format.
+  - The client's bandwidth estimate comes from `NearestRankBandwidthEstimator`, a percentile over recent samples, configured by the server.
+  - A `FALLBACK_TO_CABR` path (client ABR) exists.
+- **Unknown:** the numeric switch-up/down thresholds and the percentile. They live on YouTube's servers or in server-sent config.
+- **Observed at runtime: what was chosen.** All video was **AV1 on the hardware decoder** (`c2.qti.av1.decoder`) with Opus audio (itag 251). The itags are 398 = 720p, 399 = 1080p, 400 = 1440p, 401 = 2160p.
+
+  | Time | Reported viewport (`view`) | Format chosen |
+  | --- | --- | --- |
+  | Flat, 0.8 s | 1920 × 1080 (the initial default) | 399 (1080p) |
+  | Flat, 36 s | 3295 × 1720 (moved closer) | 400 (1440p) |
+  | Flat, 52 s | 2484 × 1401 | 401 (2160p) |
+  | Flat, 90 s | 1234 × 628 (moved away) | 398 (720p) |
+  | Flat, 91 s | 1234 × 628 | 400 (1440p) |
+  | 360°, 0.5 s | 2329 × 1047 | 401 (2160p), held to the end |
+
+  - It ramps up one step at a time (1080 → 1440 → 2160), about 15 s apart, rather than jumping to the top.
+  - Moving away dropped it straight to 720p, but it went back up to 1440p one second later with the same viewport. So the viewport is not a strict cap on its own. The server also weighs bandwidth and buffer.
+  - The player reports `lmq.2160` (inferred: limit max quality = 2160). Even the 360° video stopped at 2160p. Whether that video also had an 8K rendition is unknown.
+  - Switches either open a new decoder (37–45 ms) or reconfigure the existing one (`CODEC_REUSE_MODE_REUSE_WITH_RECONFIGURATION`). Neither caused a visible stall.
+
+### PlayaVR
+
+- **Observed:** there is no ABR for progressive files. One file plays at its own bitrate, and stability comes from the byterate-relative buffering above.
+- For adaptive streams (AVPro/ExoPlayer), it uses ExoPlayer's stock `AdaptiveTrackSelection` (media3 1.4.1 defaults), wrapped in `LimitedAdaptiveTrackSelection` with a user or device resolution cap. Startup is at the highest rendition.
+
+## 3. Does the video go straight to the Quest compositor as its own layer?
+
+### YouTube VR: only for flat DRM video
+
+- **Observed (Java, `ghg` and `VideoContainer`):** the secure surface (`onSecureSurfaceCreated`, `nativeGetSecurePlaybackSurface`) is selected only when both of these hold:
+  - the projection is flat (RECTANGULAR_2D/3D), and
+  - the format carries Widevine DRM.
+
+  All other video, including all 360°/180° and normal flat video, goes through `SurfaceTexture`, then an OES external texture, which the native renderer samples into the eye buffers (`samplerExternalOES` shaders in `libyoutubevrjni.so`, with XR_FB_foveation).
+
+  This path is zero-copy, but it is **not** a separate compositor layer.
+- **Observed:** `libyoutube_vr_impress_jni.so` imports `XR_KHR_android_surface_swapchain`. `RenderViewToOpenXr` uses it for **UI panels**: Android Views are drawn into an OpenXR swapchain surface. Evidence `ev_e7c827a5…` and `ev_e5fda8a1…`.
+- **Inferred:** the DRM path creates an android-surface swapchain (protected content) and submits it as a quad layer.
+  - The strings XR_FB_composition_layer_* and EGL_EXT_protected_content support this.
+  - The cylinder and equirect layer extensions are absent from the strings.
+  - The native call chain was not traced.
+
+### PlayaVR
+
+- **Observed:** MediaCodec decodes to a `SurfaceTexture`. The OES texture is resolved into an RGBA8 render target, and Unity textures the 180/360 mesh with it (`GlesTextureSink`, "OES resolve program").
+- If surface output fails, it falls back to buffer output with a CPU copy.
+- There is no compositor layer for the video.
+
+**Conclusion:** neither app relies on compositor layers for normal playback. What both do is **zero-copy decode: decoder → SurfaceTexture → GPU texture**, with no CPU readback or re-upload.
+
+---
+
+## 4. What this means for our reels VR
+
+How our stack works today:
+- One progressive MP4 per reel. Masters are **3840² HEVC** (hardware encoders capped at 24–26 Mbps; stream copy and the libx265 fallback are uncapped), `+faststart`. A 2160 H.264 `-preview.mp4` also exists.
+- In VR, frames are drawn by default through a **2048² canvas proxy** (`drawImage`, then `CanvasTexture` upload, `webxr_vr.js:14,4899`).
+- A direct `THREE.VideoTexture` is used only with `?vrtex=video`, and **only in the desktop preview loop** (`onPreviewFrame`). The XR render loop always calls `uploadVideoFrame()`, so in the headset the flag left mono on the canvas path and broke stereo (`commitTextureStereo` is skipped). The direct path has never run in XR.
+- One hidden `<video>` is meant to preload the next reel, but `nextVideo`/`prevVideo` set `lastSwitchTime` and then call `loadVideo` → `preloadNext` in the same tick. The 1500 ms throttle sees ~0 ms, clears the preloader and returns, and nothing retries. In practice **the next reel is never preloaded** after a swipe or auto-advance.
+
+Recommendations, in order of expected impact:
+
+1. **Remove the per-frame copy.** Both apps are zero-copy, but we do `drawImage` plus a full texture upload every frame.
+   - Make the direct `VideoTexture` path the default and keep the canvas proxy as a fallback.
+   - Quality matters here too. Playa resolves at full source resolution (up to 3840×7680) and still holds 72 FPS. Our proxy is 2048² for mono (half the linear resolution of a 3840² master) and 2048 px per eye for stereo (a large loss for 4K/8K stereo). It also caps uploads at 30/s (`VR_VIDEO_UPLOAD_MIN_MS = 33`), so 60 fps sources play at 30.
+   - The direct texture is just the `map` on the same `screenMesh`, so Dome, SQ Curve and Flat all keep working.
+   - **WebXR media layers** (`XRMediaBinding`) would give the sharpest image, because the compositor samples the video once at panel resolution and skips our eye buffer. They are a poor fit as the default path:
+     - Shapes are quad, cylinder and equirect only. Flat maps exactly to a quad layer. Dome uses a radial spherical-cap warp (`createScreenGeometry` mode 1) and SQ Curve is biaxial, so neither can be reproduced; an equirect layer only approximates them.
+     - Layers composite outside our projection layer. Drawing the comments overlay or anything else on top of the video needs a punch-through (video layer behind, transparent hole in the projection layer).
+     - It requires the `layers` session feature, which changes the session setup that v8.17 had to strip down to stop the flashes.
+     - At most, it could be an optional Flat-mode enhancement. **Parked for later**; not part of the `vr-rea-playback` branch.
+   - **Cheaper quality lever: foveation.** three.js defaults XR fixed foveation to `1` (maximum), and we never call `renderer.xr.setFoveation`. With Dome filling much of the view, the outer part of the reel is rendered at reduced resolution. Try `setFoveation(0)` (or a low value) and, if GPU headroom allows, `setFramebufferScaleFactor` above 1. Check frame pacing and flashes in the headset.
+2. **Start after a small buffer.** Playa shows the first frame once min(3 s, **512 KB**) is buffered. Our reels can start equally fast if the first ~0.5–1 MB of the next one or two reels is already local.
+   - Preload **two** reels ahead instead of one.
+   - Fix the "skip if last switch < 1.5 s" throttle first: as written it cancels every preload (see above). Schedule the preload after the active reel starts playing instead.
+   - `faststart` is already set, which matters: Playa needs a separate tail fetch when `moov` is at the end.
+3. **Pick resolution from the panel's on-screen size, like YouTube.**
+   - Compute the panel's projected pixel height per eye and request about 1.5× that, with ~150 px hysteresis.
+   - This needs at least two renditions per reel. The 3840² master and the existing 2160 `-preview.mp4` are already two.
+   - Today every mono reel plays the 3840² master in VR, even when the panel covers only part of the view.
+4. **Cap the bitrate.** Playa's buffer rules are all "seconds of media", which only holds up if the bitrate is bounded.
+   - Hardware-encoded masters are capped (24M/26M/48M), but stream-copied masters keep the source bitrate, and the libx265 fallback (CRF 20) and the H.264 preview have no `-maxrate/-bufsize`.
+   - Add VBV caps, e.g. 3840² HEVC ≈ 26 Mbps and the 2160 preview ≈ 12 Mbps.
+5. **Handle stalls with Playa's logic** if we take over buffering (MSE, or watching `buffered`/`waiting`):
+   - Hold until 3–15 s ahead, scaled by the bandwidth deficit, and double the target if stalls repeat within 45 s.
+   - For short reels (≤ 15 s), wait up to ~6 s until the whole clip can download in 0.9× its duration, then play without stalls.
+6. **Serving.** A single keep-alive stream with large reads is what Playa does. Starlette `StaticFiles` with Range support already fits.
+   - Add `Cache-Control: public, max-age=86400` on dev `/media` (R2 already sends it), so preloaded bytes are reused. Not `immutable`: file names are not content-addressed and derived files are rebuilt in place.
+
+## 5. Results on the `vr-rea-playback` branch (Quest 3S, 90 Hz)
+
+Every run is 2 minutes in AUTO mode, recorded with `scripts/debug-quest-square-capture.cjs` (`reports/quest-squares-<UTC>-<label>/`).
+- `switchMs` is load start to the first decoded frame of the new reel. With 4–5 switches per run it is noisy, and each run plays different reels.
+- `dtMax` is the worst frame gap per second (diag, 1 Hz).
+- Stale is the sum of the VrApi `Stale=` counts in logcat.
+- Run-to-run noise is large: the same canvas path scored 49 ms and 31.7 ms dtMax p90 in two runs.
+
+| Label | Build / flags | switchMs median (max) | dtMax p90 | rows > 25 ms | Stale total | FPS min | Decoder errors |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `baseline` | v8.23, canvas proxy | 105 (124) | 49.0 | 23 | 342 | 79 | 0 |
+| `s1-direct` | v8.24, direct (default) | 193 (339) | 43.6 | 20 | 386 | 81 | 0 |
+| `s1-canvas` | v8.24, `?vrtex=canvas` | 196 (199) | 31.7 | 18 | 253 | 83 | 0 |
+| `s1-fov1` | v8.24, direct, `?vrfov=1` | 121 (372) | 56.2 | 23 | 300 | 80 | 0 |
+| `s1-fov05` | v8.24, direct, `?vrfov=0.5` | 97 (402) | 38.7 | 18 | 298 | 80 | 0 |
+| `s1-fov0` | v8.24, direct, `?vrfov=0` | 177 (425) | 34.2 | 18 | 318 | 82 | 0 |
+| `s2-preload` | v8.25 + preload fix | 108 (153) | 34.1 | 24 | 265 | 79 | 0 |
+| `s4-cache` | v8.25 + Cache-Control | 69 (69), 1 switch | 32.2 | 7 | 105 | 87 | 0 |
+| `s6-fbs1` | v8.25, `?vrfbs=1` | 72 (118) | 33.9 | 12 | 148 | 83 | 0 |
+| `s6-fbs12` | v8.25, `?vrfbs=1.2` | 80 (101) | 28.7 | 6 | 72 | 88 | 0 |
+| `s6-fbs15` | v8.25, `?vrfbs=1.5` | 68 (68), 1 switch | 31.8 | 7 | 97 | 88 | 0 |
+
+**Step 1: direct texture.**
+- In the headset the direct path binds the full source: mono 3840×3840 and SBS 4096×2048, with the eye textures as `VideoTexture` clones.
+- Verified in headset screenshots: Dome, the comments overlay and image posts (still on the canvas).
+- Frame pacing is within run-to-run noise of the canvas path.
+- `switchMs` does not depend on the texture path. It is measured on the `<video>` element.
+- Fixed-frame comparison (headset level, Flat, a 3840² master paused at 1.0 s, path switched at runtime): colours match (mean absolute difference 0.86/255). The direct path has 7.5% more edge energy, but the difference is barely visible. This master is itself upscaled from 1080p; a native 4K source would show more. A 1080×778 reel showed +4%.
+- Both paths sample with `LinearFilter` and no mipmaps. A 3840² texture on a panel about 700 px wide is minified about 5×, so fine detail may shimmer. Step 5 (picking a smaller rendition for small panels) is the planned mitigation.
+
+**Step 1: foveation.**
+- The flag reaches the compositor layer. In the headset the session's `XRProjectionLayer.fixedFoveation` reads 1 with `?vrfov=1` and 0 by default; its texture is 3360×1760.
+- VrApi's `Fov=` logcat field stays 0 in every run, so it does not report WebXR layer foveation.
+- No foveation level changed frame pacing beyond noise. fov 0 was no worse than three's default of 1 (dtMax p90 34.2 vs 56.2; stale 318 vs 300).
+- VrApi shows `GPU%≈0.23` while a reel plays, so the GPU has plenty of headroom.
+- The default is now **0** (off), so the periphery renders at full resolution. `?vrfov=` overrides it.
+- Given the GPU headroom, `setFramebufferScaleFactor` above 1 was tried next (step 6).
+
+**Step 2: preload.**
+- `preloadNext` now warms the next reel once the active reel fires `playing`, or after 1.5 s if it never starts. Each switch cancels the pending warm-up and clears the preloader, so rapid flicks still open no background transfers.
+- In the headset the preloader reached `readyState` 4 with 2 s buffered. Entering VR still clears the preloader on purpose, so the first reel after entry has nothing warmed.
+- All 5 switches in `s2-preload` were preloader hits (0 before). The median was 108 ms with a max of 153.
+- The same reels in `s1-direct` took 339, 221, 193 and 156 ms. Now they take 108, 118, 62 and 153 ms.
+- No decoder errors with the second 4K decoder warm, and pacing within noise.
+- The planned idx+2 range fetch was not added. idx+1 already hits every switch in AUTO, so idx+2 would only help rapid flicks.
+
+**Step 3: bitrate caps.** Every file VR plays now has a bounded bitrate.
+- Stream copy: a square HEVC master is copied only when ffprobe reports `format.bit_rate` ≤ 26 Mbps. Above that, or when the bitrate is unknown, it is re-encoded.
+- The libx265 fallback is now capped CRF: `-crf 20 -x265-params vbv-maxrate=26000:vbv-bufsize=48000`. A 2 s test encode came out at 26.2 Mbps.
+- The H.264 preview (`make_web_preview`) gets `-maxrate 12M -bufsize 24M` for mono and `20M/40M` for stereo proxies. On a 6 s test window the mono preview dropped from 20.0 to 13.9 Mbps; the excess is the VBV start-up burst.
+- The 2D-only left-eye rendition (`-mono`) is not capped. VR never plays it.
+- Read-only survey of `output/`: 15 of 68 masters are over 26 Mbps, 8 of them square 3840² HEVC that the old gate stream-copied (max 54 Mbps). The 31 existing previews have a median of 36 Mbps and a max of 70 Mbps.
+- Existing files were not re-encoded. The caps apply to new uploads, so no Quest run was needed for this step.
+
+**Step 4: cache headers on dev `/media`.**
+- Dev `/media` now sends `Cache-Control: public, max-age=86400`, the same value R2 uploads carry. It is not `immutable`, because previews and stereo proxies are rebuilt in place; the ETag still revalidates them.
+- The live dev server returns the header on both the 200 and the 206 (Range) response.
+- `s4-cache` (2 min, AUTO): the first reel was long, so the run has a single switch, a 69 ms preloader hit. Pacing was within noise (dtMax p90 32.2, FPS min 87) with 0 decoder errors. The effect on revisits (prev) was not measured separately.
+
+**Step 5: rendition by on-screen size. Built, measured, reverted.**
+- Built: the payload offered `proxy_url` (`<stem>-preview.mp4`) for mono HEVC masters, `WebXRVR.getProjectedScreenPx()` projected the panel's bounding box through the left-eye XR camera, and `playbackFor` played the proxy when `1.5 × px < 2160`, with a 150 px hysteresis band.
+- Measured in the headset at the default layout (`screenScale` 4 m at 2.24 m, about 83°):
+
+  | Mode | Panel size (px) |
+  | --- | --- |
+  | Dome | 2259 |
+  | SQ Curve | 2134 |
+  | Flat | 1578 |
+
+  The eye viewport is about 1680×1760. A Flat screencap confirms the panel fills the whole visible lens area.
+- The rule needs the panel under about 1340 px, so at the default size it always picks the master. The proxy would only play if a viewer shrank the panel to about scale 3.2 or below.
+- Only 1 of 24 dev feed items had a fresh preview to offer. Existing previews also have a higher bitrate than the masters (median 36 Mbps; step 3 caps new ones at 12 Mbps).
+- The plan's rule was to keep this step only if `switchMs` dropped with no visible softness. With no case where it changes playback, it was reverted. YouTube's rule pays off on its flat theatre screen; our panel fills the view.
+
+**Step 6: framebuffer scale.**
+- New flag `?vrfbs=<0.5..2>`, passed to `renderer.xr.setFramebufferScaleFactor` before `setSession`. three hands it to `XRWebGLBinding.createProjectionLayer` as `scaleFactor`.
+- Measured projection layer size in the headset: 3360×1760 at 1 (1680×1760 per eye, below the ~1832×1920 panel), 5040×2640 at 1.5. A request for 2 is clamped to 5040×2640, so 1.5 is the Quest 3S maximum.
+- Pacing at 1.2 and 1.5 was within noise of 1 (table above). VrApi GPU% median/p90 went from 0.21/0.35 at 1, to 0.24/0.41 at 1.2, and 0.28/0.42 at 1.5.
+- Fixed-frame comparison (Flat, paused, same item, page reloaded per scale): edge energy rose 7.7% on an image post (2048² canvas) and 12% on a 1080×778 video (direct texture). Mean brightness was unchanged. The difference is visible on fine window grids.
+- The higher scale also cuts the minification the step 1 note warns about by 1.5×. At the default layout the Flat panel spans about 2370 eye-buffer px instead of 1578 (step 5), so a 3840² master is minified about 1.6× rather than 2.4×.
+- The default is now **1.5**. `?vrfbs=1` restores the native size.
+
+**Cold first frame (v8.26, in VR).**
+- Method:
+  - While presenting, a fresh muted `<video>` in the page loads one URL and plays it, with the player paused.
+  - Time runs from setting `src` to the first `requestVideoFrameCallback`.
+  - Cold loads add a unique query string to every URL, because `Network.clearBrowserCache` did not empty the media cache (repeats reached metadata in about 5 ms).
+  - The headset reaches the dev server through `adb reverse` over USB, not Wi-Fi.
+- 6 files, 4 cold loads each and 3 warm repeats each:
+
+  | File | Size, bitrate | Cold median (ms) | Warm median (ms) |
+  | --- | --- | --- | --- |
+  | Feed reel (H.264) | 1080×778 | 98 | 62 |
+  | 3840² HEVC, 5 s | 11 Mbps | 70 | 51 |
+  | 3840² HEVC, 15 s | 8 Mbps | 90 | 49 |
+  | 3840² HEVC, 15 s | 11 Mbps | 67 | 52 |
+  | 3840² HEVC, 9 s | 36 Mbps (over the cap) | 120 | 60 |
+  | 3840² HEVC, 7 s | 52 Mbps (over the cap) | 120 | 61 |
+  | **All** | | **96 (58–156)** | **55 (45–74)** |
+
+- Masters within the bitrate cap start in about 70 ms cold. The two old masters over the cap take about 120 ms, which is the gap the step 3 caps close for new uploads.
+- Warm (bytes local), the element still needs about 50–60 ms, against Playa's 41 ms. That remainder is decoder start-up.
+- Compared with YouTube's 666–761 ms (`loadVideo` to `onPlaying`), ours is about 7× faster. But YouTube's number includes a CDN round trip over Wi-Fi and its server-side ABR request, while ours is a USB link to a local server. Over Wi-Fi or R2 our cold time will be higher; it was not measured.
+
+**Review of the branch against §1–4.**
+
+| Report recommendation | Status on the branch |
+| --- | --- |
+| 1. Zero-copy | Done: direct `VideoTexture` at full source resolution (step 1). Foveation off and framebuffer scale 1.5 add eye-buffer sharpness (steps 1 and 6). Media layers parked. |
+| 2. Small start buffer, preload | Next reel warmed after `playing` (step 2). Every AUTO switch was a preloader hit, at 68–118 ms. idx+2 skipped. |
+| 3. Rendition by on-screen size | Measured and reverted (step 5): the panel fills the view, so the master always wins. |
+| 4. Bitrate caps | Done for stream copy, libx265 and previews (step 3). `hevc_videotoolbox` was checked separately: a 10 s 3840² re-encode of a 56 Mbps source averaged 18.1 Mbps, with the worst one-second window at 19.6 Mbps. |
+| 5. Playa stall logic | Not built. Stalls are now counted in the diagnostics (v8.27); none in normal runs (see below). |
+| 6. Serving | Done: `Cache-Control` on dev `/media` (step 4). |
+
+Found and fixed in the review:
+- **Cold first switch after entering VR on a mono reel.** The VR button empties the preloader so that it does not compete with XR start-up.
+  - Stereo reels re-warm when `syncStereoSource` swaps the source. A mono reel keeps its source, and that branch returned without re-warming, so the first switch in VR was always cold.
+  - The same branch also left the next reel's stereo variant in the preloader after leaving VR.
+  - Now it calls `preloadNext` unless the preloader already holds the next reel's current variant. Covered by `reels-stereo.test.js`.
+  - In the headset, VR entry and auto-advance still work. The current dev feed has no video followed by another video, so the re-warm itself was verified only in the harness.
+  - Not covered: an image post as the next item is not re-warmed on the VR switch. Its warm-up is a browser cache fetch, so the cost is small.
+
+### Element swap: measured, not built
+
+YouTube reuses its decoder across items. The closest web equivalent is to promote the warmed preloader `<video>` to the active one instead of reassigning the active element's `src`. Before refactoring the roughly 110 references to the active element, a probe in the headset (in VR, Quest Browser) timed `play()` to the first `requestVideoFrameCallback` frame for four cases. Each case ran on the same files with warm bytes, against four masters from 1080² to 3840².
+
+| Case | First frame after `play()` |
+| --- | --- |
+| Fresh `src` on an idle element (what we do today) | 43–64 ms (91–133 ms on the first try of a file) |
+| Preloaded element, paused, never played (`readyState` 4) | 252–263 ms, every time |
+| Preloaded element primed with `play()`/`pause()` once | 45–90 ms |
+| Element that was playing moments before (hot decoder) | about 20 ms |
+
+- A paused preloaded element is about 200 ms *slower* than a fresh `src`. Quest Browser suspends the idle media pipeline, and resuming it takes about 250 ms. The result was the same visible or hidden, and with any file size.
+- Priming the preloader with one `play()`/`pause()` only brings it back to the fresh-`src` time.
+- The 20 ms case needs the preloader to keep decoding, which means a second 3840² HEVC decoder running all the time. That costs power and decoder headroom for a gain of about 30 ms.
+- **Decision:** not built. Today's warm `src` reassignment is already the fastest cheap option on this browser.
+
+### Stall telemetry (v8.27)
+
+`?xrdiag=1` now reports mid-play stalls of the active video: `stalls` (count since the last post), `stallMs` (time stalled since the last post, an ongoing stall counted up to now) and `stalling`.
+- A stall is a `waiting` event after playback started and not during a seek. It ends at `playing`, or when the source changes (`emptied`). Start-up waits are already `switchMs`.
+
+| Run | Stalls | Stalled time | FPS |
+| --- | --- | --- | --- |
+| Forced: 13 Mbps reel, cache-busted, CDP throttle 2.5 Mbps, 75 s | 4 | 18.5 s | median 91, min 90 |
+| Normal AUTO, local serving, three runs of 1–2 min (110 diag rows) | 0 | 0 | median 90, min 79–85 |
+
+- The forced run confirms the counter in the headset; rendering held 90 FPS while the video waited.
+- **Playa-style rebuffering is not worth building yet.** Normal serving produced no stalls. The dev feed has only two videos among ten image posts, so these runs cover few video seconds. Re-check with this payload on R2 over Wi-Fi or a slow link before deciding.
+
+### Final A/B: old (v8.23) vs branch (v8.27), same scripted run
+
+Both builds ran the same script in one session, with the headset still on the desk.
+- The old build was `ui/assets/webxr_vr.js` and `reels.html` from `4b85b7e`, with step 0.5 telemetry and old behaviour; the files were restored afterwards. The server stayed on the branch, so the old run already had `Cache-Control` on `/media`.
+- Script: LOOP mode, then 8 cycles. Each cycle dwells 4 s on an image post, presses `n` to reach the punk reel (1080×778 H.264, 13 Mbps), plays it 6 s, and presses `p` to go back.
+- The latency is the key press to the first `requestVideoFrameCallback` frame, measured in the page. Bytes are warm in both builds.
+- Then the reel is paused at 10 s in Flat and the eye buffer screencapped.
+
+| Metric | Old v8.23 | Branch v8.27 |
+| --- | --- | --- |
+| Key press to first frame, 8 switches | median 86.5, mean 97, max 127 ms | median 78.5, mean 78.5, max 88 ms |
+| Preloader hits | 0 of 8 | 8 of 8 |
+| Engine `switchMs` median (p90) | 101 (123) | 75 (84) |
+| Eye buffer (projection layer) | 3360×1760, foveation 1 | 5040×2640, foveation 0 |
+| Video texture | 2048² canvas proxy, video rows median 37 uploads/s | full source size, direct, median 59 uploads/s |
+| xrFrames/s median (min) | 91 (88) | 90 (82) |
+| dtMax p90; rows > 25 ms | 29.0 ms; 5 | 27.1 ms; 6 |
+| VrApi stale/s median; FPS min | 3; 84 | 3; 80 |
+| Decoder errors, stalls | 0, (not reported) | 0, 0 |
+
+- **Latency:** about 8 ms faster at the median and 40 ms better at the tail. The tail is what the preloader removes; the median is bounded by decoder start-up (see "Element swap" above).
+- **UI text:** the dock labels are clearly sharper (edge energy +13.7% on the dock crop). Old `SHARE`/`FOLLOW` labels are smeared; on the branch they are crisp. That comes from framebuffer scale 1.5 with foveation off.
+- **Video:** on this 1080×778 reel the two frames look alike. The old canvas path shows slightly blockier edges, so edge energy is 15% *higher* on the old frame; that is aliasing, not detail. A 3840² master gains from the direct texture (step 1: +7.5% edge energy) and from the eye buffer (step 6: +12%).
+- **Pacing:** within noise. The branch had one 484 ms frame gap during one of the eight image dwells, with none in the old run. 46 later warm-ups did not reproduce it, and the preloader is ruled out as the cause (see "Two hitches after the A/B" below).
+- **Side finding:** the 2 s luma clip (3840² HEVC, 24 fps) in LOOP mode gave dtMax p90 67 ms and 7 stale frames/s in an earlier run. The cause is the glow colour probe, not the loop restart. v8.28 fixes it (see below).
+
+Against the reference players (numbers from §1–3; they were not re-run here):
+- **PlayaVR** shows a local first frame in about 41 ms. Ours is 71–88 ms from key press. The gap is decoder start-up, which the web `<video>` does not let us avoid cheaply.
+- **YouTube VR** takes 666–761 ms from `loadVideo` to `onPlaying` over Wi-Fi with a CDN round trip, and its decoder switch itself is 37–45 ms. Our USB-to-local numbers are not directly comparable with its network path.
+- Quality path: like both native players for normal playback, we now sample the decoded frame straight into the eye buffer with no CPU copy. Neither uses a compositor layer for normal video (§3), so the eye-buffer size is the shared ceiling; ours is now the Quest 3S maximum for WebXR.
+
+Open, with recommendations:
+- **Sampling.** The screen texture uses `LinearFilter` without mipmaps, like YouTube's OES path. Step 6 cut the minification of a 3840² master from about 2.4× to 1.6×, which lowers the shimmer risk. Mipmaps for a per-frame video texture would cost a mip generation every frame.
+
+### Two hitches after the A/B (v8.28)
+
+Method: an in-page probe wraps `XRSession.requestAnimationFrame` and logs every XR frame gap over 30 ms. A `longtask` PerformanceObserver and the media and image events are logged on the same clock. It ran in the headset over CDP; the capture tool ran for the diag and VrApi numbers.
+
+**Luma loop stutter: cause found and fixed (v8.28).**
+- The XR loop samples the glow colour every 800 ms. It drew the video into an 8×8 `willReadFrequently` (software) canvas and called `getImageData`. On a 3840² HEVC frame that `drawImage` reads back the whole frame. It measured 51–58 ms of main thread per sample (43–78 ms in a second check), so the headset dropped about 5 frames every 800 ms.
+- The loop restart is not the cause. The page loops by seeking on `ended`; the seek takes 26–36 ms, and the direct `VideoTexture` stays bound (same element). In 14 loops per 30 s run, 1 of 36 gaps fell within 150 ms of a seek, and it was at the probe's 800 ms beat. With `?glowprobe=0` there were 0 gaps over 14 loops. Hold-last-frame is not involved either: `updateDirectVideoBinding` returns early for an already-bound element, so a loop never reaches the readiness hold.
+- Fix: `createImageBitmap(video, crop, {resizeWidth: 8, resizeHeight: 8})` scales on the GPU, then the 8×8 bitmap is read back. A probe that is still running skips the next sample. Stereo still averages the left eye only. Browsers without `createImageBitmap` keep the old path. Measured directly, the new probe takes 1–2 ms async plus 5–15 ms to read the 8×8 bitmap, with no long tasks. The glow colour still follows the video in the headset.
+
+| Luma 2 s clip, LOOP, 30 s | v8.27 | `?glowprobe=0` | v8.28 |
+| --- | --- | --- | --- |
+| XR frame gaps > 30 ms | 35–36 | 0 | 0–2 (max 50 ms) |
+| Missed frames/s (probe) | 5.6–5.9 | 0 | 0–0.2 |
+| Long tasks | 36, median 61–63 ms | 0 | 0 |
+| XR frames/s | 83.8–84.2 | 89.8 | 89.4–89.6 |
+
+Capture of the same clip (`analyze.py`), the earlier v8.27 run against a 45 s v8.28 run:
+- dtMax p90 67.1 ms (31 rows > 25 ms) became 19.5 ms (0 rows).
+- xrFrames/s median went from 87 to 90.
+- VrApi stale/s median went from 7 to 4 (p90 11 to 5).
+- Video frames/s went from 19 to 21. The clip is 24 fps, so the earlier "19 uploads/s" was the frame rate minus drops, not an upload limit.
+
+The probe hit every high-resolution video, not only short loops. Its cost scales with frame size, which is why the 1080×778 punk reel did not show it.
+
+**484 ms image-dwell gap: not reproduced, cause unknown.**
+- Warm-up ruled out. Image→punk dwell cycles were run with the preloader warming punk every time (`loadstart` through `canplaythrough` on `#preloadVideo`, a second decoder producing its first frame):
+  - 15 cycles from the image before punk, without the capture tool: 0 gaps over 40 ms, 0 long tasks.
+  - 31 warm-ups on the same image (`…061215-fb17a3.png`) and the same reel as the A/B, with the capture tool: 0 gaps, 0 long tasks.
+- Large PNG decode ruled out for this post. Its slides are 1080×608, 0.75–1.1 MB, and the slide change at +4 s in each dwell showed no gap.
+- Capture tool not shown to be the cause. `ovrgpuprofiler -t` sampled about every 19 s, and its last sample before the gap finished more than 2 s before the gap's diag window. It also ran through the 31-warm-up run with no gap. The capture's logcat has 3–9 s silences every ~10 s in every run, so logcat cannot place the gap.
+- Still open: a one-off system event such as tracking cameras stopping (logcat shows camera stops 3–5 s earlier) or a GC pause. A trace was not taken because the gap could not be triggered. If it returns, the probe above names the frame and its long task.
+
+**Image slide-change long task: cause found and fixed.**
+- Reproduced in the headset. A probe stepped `#slideNextBtn` every 1.5 s on multi-image posts and timed every `drawImage` of `#reelsImage` and every GL texture upload. Over 72 changes on 6 posts, the 1080×495 slide (`…ff9f82.png`, and the identical file `…89e627.png`) loaded 9 times. 2 of those loads gave an 88 ms long task and a 90–98 ms XR frame gap, starting 1 ms after the slide's `load`. The other 7 were fast, which fits a hit in Chrome's decoded-image cache and the earlier 3 of 12.
+- Attribution, from the timings rather than a Perfetto trace: `drawImage` into the proxy canvas took 0–0.3 ms, because it only records the draw. The cost lands in the canvas `texSubImage2D` (81–82 ms), where Chrome rasterizes the canvas and decodes the PNG on the main thread. Other slides cost 13–30 ms in the same call.
+- Why this slide: it carries a 26 KB `iCCP` ICC profile. Most uploads carry a 284 B one; 10 files in `output/uploads` carry the 26 KB one. The file size is not the reason: it is 0.53 MB against 0.8–1.2 MB for fast slides. Without colour conversion the off-thread decode takes 14–16 ms instead of 73–84 ms, so the profile conversion is most of the cost.
+- `img.decode()` does not help. Measured directly on the slow PNG with a fresh URL, then drawn into a 2048² canvas and uploaded:
+
+| Path | Main-thread block | Upload |
+| --- | --- | --- |
+| `<img>` as now | — | 76–82 ms |
+| `await img.decode()` first | — | 75–85 ms |
+| `createImageBitmap(img)` | 70–85 ms in the call | 0.4–1 ms |
+| `createImageBitmap(blob)` | ≤ 7 ms (decode on a worker, resolves in 73–84 ms) | 0.5–1 ms |
+
+- Fix (`reels.html`, `vrImageSource`): for image posts the VR source is an `ImageBitmap` from `createImageBitmap(await (await fetch(src)).blob())`. The fetch hits the cache the `<img>` already filled. Until the bitmap is ready the source reports `ready: false`, so the engine keeps the last frame. If the fetch or decode fails, VR draws the `<img>` as before. The old bitmap is closed on a slide change, and a late bitmap for a slide already left is dropped. The bitmap is pixel-identical to the `<img>` (max difference 0 on a 64×32 sample), so the ICC conversion is kept. The engine is unchanged; the 2D page still shows the `<img>`.
+
+| Slide changes, 1.5 s per slide | Before | After |
+| --- | --- | --- |
+| Changes (posts) | 72 (6) | 72 (6) and 96 (8) |
+| Loads of the 1080×495 ICC slide | 9 (2 slow) | 4 and 4 |
+| XR frame gaps > 40 ms | 4 (90, 98, 40, 42 ms) | 0 and 0 |
+| Long tasks | 2 × 88 ms | 0 and 0 |
+| Slide uploads > 4 ms | 20 of 78 (12–82 ms) | 0 and 0 (of 105 in the second run) |
+| `load` to slide drawn in VR | 0–1 ms | 15–49 ms; ~105 ms for the ICC slide |
+
+The slide now appears in VR a few frames after `load` instead of freezing the headset for those frames. A headset screenshot after the fix showed the current slide.
+
+Modes and stereo, after the fix:
+- Flat, SQ Curve and Dome: 12 slide changes on 2 posts in each mode. All three had 0 XR gaps, 0 long tasks and no upload over 4 ms. Every slide was drawn from the bitmap, never the `<img>`, 22–53 ms after `load` (98 ms twice). Headset screenshots in SQ Curve and Dome showed the current slide.
+- Top-bottom stereo image (`tb-test-still-image-…e59edd.png`, 2048×4096, the only stereo image post): the VR source switched to the stereo file, and its bitmap was drawn whole into the 2048×4096 stereo proxy. Measured on that file alone, the `<img>` upload took 105–111 ms of main thread. The bitmap path took 4.1–4.6 ms, after a 110–118 ms decode on a worker (main-thread gap ≤ 7 ms).
+- VR entry has 4–5 long tasks of 52–203 ms on both a mono and the stereo image post. They are session start-up, not the slide: the stereo bitmap draw fell between them. `make test` passes, with a new `web/tests/reels-vr-image-bitmap.test.js`.
+
+## Unknowns and how to resolve them
+
+| Unknown | Why it is still open | How to get it |
+| --- | --- | --- |
+| YouTube ABR thresholds | Server-sent; native fallbacks not decompiled (Ghidra ran out of memory on `libgoogle3.so`). The runtime readahead (≈ 60–70 s) and the formats chosen are now measured (see above) | Proxy the SABR traffic, or retry Ghidra headless with a larger heap |
+| PlayaVR options for **streamed** video | Local playback is resolved: no buffer overrides are sent, so the native defaults apply. No stream was played | Open any HTTP(S) MP4 in PlayaVR while capturing `adb logcat`, then read the `opening: … (options …)` and `buffer target:` lines |
+| YouTube DRM quad-layer internals | Native call chain not traced | Disassemble the `ImpressNativeController` secure-surface path |
+| `kStallThreshold`, `kCatchupMarginMs`, `kDefaultSeekMaxWalkMs` symbols | Stored as variables, not constants. The effective values found inline in `pump`/`do_open` are listed above | Not needed for the recommendations |

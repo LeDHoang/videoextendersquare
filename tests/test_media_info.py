@@ -262,3 +262,34 @@ def test_backfill_respects_the_limit_and_finishes_the_rest_next_time(backfill):
     assert sum(row(i)[1] is not None for i in ids) == 2
     assert services.backfill_media_info(factory, limit=2) == 1
     assert all(row(i)[1] == 32 for i in ids)
+
+
+def _stream_hash(path: Path) -> str:
+    return subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0", "-c", "copy", "-f", "streamhash", "-"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+
+@needs_ffmpeg
+def test_faststart_moves_the_index_forward_without_touching_the_streams(tmp_path):
+    source = tmp_path / "clip.mp4"
+    make_video(source)
+    # Publish remuxes the hidden part file, whose name has no video extension.
+    part = tmp_path / ".clip.mp4.part"
+    shutil.copy(source, part)
+    assert media._moov_after_mdat(part)
+
+    media.make_faststart(part, "mp4")
+
+    assert not media._moov_after_mdat(part)
+    assert _stream_hash(part) == _stream_hash(source)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".clip.mp4.part", "clip.mp4"]
+
+
+def test_faststart_leaves_unreadable_files_alone(tmp_path):
+    junk = tmp_path / "junk.mp4"
+    junk.write_bytes(b"\x00\x00\x00\x10mdat" + b"\x00" * 8)
+    media.make_faststart(junk, "mp4")
+    assert junk.read_bytes() == b"\x00\x00\x00\x10mdat" + b"\x00" * 8
+    assert [p.name for p in tmp_path.iterdir()] == ["junk.mp4"]

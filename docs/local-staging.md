@@ -24,7 +24,7 @@ These still need the real accounts listed in `docs/to-beta.md`:
   copies, purge-by-URL, the 100 MB request limit and the 100 s origin timeout.
 - Real R2 (needs a payment method on the Cloudflare account) and the named Tunnel
   (needs a domain on Cloudflare).
-- CPX32 timings. An Apple-silicon laptop under the same `cpus: 3` cap is a
+- VPS timings. An Apple-silicon laptop under the same `cpus: 3` cap is a
   *lower bound* for the VPS, not an equivalent.
 - Quest over the network on a trusted HTTPS origin. Caddy's local CA is not
   trusted by the headset; use `adb reverse` (RUNNING.md, Meta Quest section) or a

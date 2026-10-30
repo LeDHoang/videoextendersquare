@@ -24,6 +24,8 @@ import threading
 import time
 from collections import Counter, deque
 
+import sentry_sdk
+
 from server.settings import env_int
 
 logger = logging.getLogger("sx.alerts")
@@ -61,6 +63,8 @@ def incr(name: str) -> None:
     with _lock:
         _events.setdefault(name, deque(maxlen=10_000)).append(now)
         _totals[name] += 1
+    # Mirrored to Sentry application metrics (a no-op without SENTRY_DSN).
+    sentry_sdk.metrics.count(name, 1)
 
 
 def _percentile(values: list[float], fraction: float) -> float | None:
@@ -152,18 +156,33 @@ def snapshot() -> dict:
         "db_pool": _pool_gauges(),
         "sse": _sse_gauges(),
         "disk": disk_status(),
+        "limits": alert_limits(),
+    }
+
+
+def alert_limits() -> dict:
+    """The watchdog's thresholds, served with the snapshot so the Overview colours by the same numbers."""
+    return {
+        "min_requests": MIN_REQUESTS_FOR_ALERT,
+        "error_rate": env_float("SX_ALERT_5XX_RATE", 0.05),
+        "p95_ms": env_int("SX_ALERT_P95_MS", 2000, minimum=1),
+        "failures": env_int("SX_ALERT_FAILURES", 3, minimum=1),
+        "disk_min_free_gb": env_int("SX_DISK_MIN_FREE_GB", 5, minimum=0),
+        "open_reports": env_int("SX_ALERT_OPEN_REPORTS", 20, minimum=1),
+        "open_support_requests": env_int("SX_ALERT_OPEN_SUPPORT", 10, minimum=1),
     }
 
 
 def _registration_and_report_spikes() -> dict[str, str]:
-    """Reports and sign-ups in the last hour against the hour before (moderation-stats spike rule)."""
+    """Reports and sign-ups in the last hour against the hour before (moderation-stats spike rule),
+    and the open report queue and support inbox against their backlog limits."""
     from datetime import timedelta
 
     from sqlalchemy import func
 
     from server.routers.account_safety import _windowed
     from server.social.database import SessionLocal
-    from server.social.models import Report, User, utcnow
+    from server.social.models import Report, SupportRequest, User, utcnow
 
     floor = env_int("SX_MOD_SPIKE_MIN", 10, minimum=1)
     now = utcnow()
@@ -178,21 +197,27 @@ def _registration_and_report_spikes() -> dict[str, str]:
                 spikes[f"{label}_spike"] = (
                     f"{label} spike: {window['current']} in the last hour (previous hour {window['previous']})"
                 )
+        limits = alert_limits()
+        for key, model, name in (("open_reports", Report, "reports"), ("open_support_requests", SupportRequest, "support requests")):
+            waiting = db.query(func.count(model.id)).filter(model.status == "open").scalar() or 0
+            if waiting >= limits[key]:
+                spikes[f"{key}_backlog"] = f"{waiting} open {name} waiting for staff (limit {limits[key]})"
     return spikes
 
 
 def evaluate_alerts(snap: dict) -> dict[str, str]:
     """Alert key -> message for every threshold the snapshot crosses."""
     alerts: dict[str, str] = {}
+    limits = alert_limits()
     requests = snap["requests"]
     if requests["count"] >= MIN_REQUESTS_FOR_ALERT:
-        max_rate = env_float("SX_ALERT_5XX_RATE", 0.05)
+        max_rate = limits["error_rate"]
         if requests["error_rate"] >= max_rate:
             alerts["5xx_rate"] = (
                 f"5xx rate {requests['error_rate']:.1%} over the last {WINDOW_S // 60} min "
                 f"({requests['errors_5xx']} of {requests['count']} requests)"
             )
-        max_p95 = env_int("SX_ALERT_P95_MS", 2000, minimum=1)
+        max_p95 = limits["p95_ms"]
         if (requests["p95_ms"] or 0) >= max_p95:
             alerts["p95"] = f"p95 latency {requests['p95_ms']} ms over the last {WINDOW_S // 60} min (limit {max_p95} ms)"
     jobs = snap["jobs"]
@@ -202,7 +227,7 @@ def evaluate_alerts(snap: dict) -> dict[str, str]:
     if pool.get("capacity") and pool.get("checkedout", 0) >= pool["capacity"]:
         alerts["db_pool"] = f"DB pool exhausted: {pool['checkedout']} of {pool['capacity']} connections checked out"
     failures = snap["events"].get("job_failed", 0) + snap["events"].get("derived_failed", 0)
-    max_failures = env_int("SX_ALERT_FAILURES", 3, minimum=1)
+    max_failures = limits["failures"]
     if failures >= max_failures:
         alerts["processing_failures"] = f"{failures} processing failures in the last {WINDOW_S // 60} min"
     return alerts

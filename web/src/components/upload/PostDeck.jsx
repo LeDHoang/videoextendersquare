@@ -112,6 +112,7 @@ export function ShareSection({ num, user, title, path, jobDone, shareDisabled, p
         <>
           {!title.trim() ? <GatedReason>TITLE IS REQUIRED BEFORE SHARING</GatedReason> : null}
           {path === 'extend' && !jobDone ? <GatedReason>RENDER THE 1:1 EXTEND FIRST</GatedReason> : null}
+          {path === 'convert' && !jobDone ? <GatedReason>MAKE 3D FIRST</GatedReason> : null}
           <Button primary className="sx-studio-render" disabled={shareDisabled} loading={publishing} onClick={onShare}>
             SHARE REEL TO UPLOADS
           </Button>

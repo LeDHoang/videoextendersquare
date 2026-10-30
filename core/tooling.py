@@ -27,13 +27,14 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 # the previous 14 Mbps target left 4K masters (e.g. Travis 5.8, Tron 11.4)
 # visibly soft/banded when viewed up-close in immersive WebXR. Quest 3S panel
 # is ~1832px/eye so 4K is ~2× oversampled; the gains here are bitrate, not px.
-# NOTE: libx265 uses CRF rate-control; pairing a bitrate cap with -crf gives
-# ffmpeg contradictory instructions (CRF wins), so none is set here.
+# libx265 keeps CRF quality control under a VBV ceiling (capped CRF): x265's
+# vbv-maxrate/vbv-bufsize (kbps) bound the peaks at the hardware encoders'
+# 26 Mbps, so playback buffering can rely on a bounded bitrate.
 HEVC_CANDIDATES: list[tuple[str, list[str]]] = [
     ("hevc_videotoolbox", ["-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart"]),
     ("hevc_nvenc", ["-preset", "slow", "-rc", "vbr", "-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-movflags", "+faststart"]),
     ("hevc_qsv", ["-b:v", "24M", "-maxrate", "26M", "-bufsize", "48M", "-movflags", "+faststart"]),
-    ("libx265", ["-crf", "20", "-preset", "medium", "-tag:v", "hvc1", "-movflags", "+faststart"]),
+    ("libx265", ["-crf", "20", "-preset", "medium", "-x265-params", "vbv-maxrate=26000:vbv-bufsize=48000", "-tag:v", "hvc1", "-movflags", "+faststart"]),
 ]
 
 

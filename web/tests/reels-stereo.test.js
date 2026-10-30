@@ -73,6 +73,7 @@ function loadStereo(items, { presenting = false } = {}) {
     resolveItemUrl: (item) => (item.tunnel_url ? item.tunnel_url + item.url : item.url),
     showImageSlide: (index) => calls.slides.push(index),
     preloadNext: () => { calls.preload += 1; },
+    preloadVideo: fakeVideo(),
     notifyVisualSourceChange: () => { calls.notify += 1; },
     updateSoundBtnUI: () => {},
     updatePlayBtnUI: () => {},
@@ -236,6 +237,25 @@ test('an image-post VR switch re-warms the next item for the new state', () => {
   const { syncStereoSource, calls } = loadStereo([post, sbsPost]);
   syncStereoSource();
   assert.equal(calls.preload, 1);
+});
+
+test('a mono reel re-warms the next reel on a VR switch unless the preloader holds it', () => {
+  const mono = { media_type: 'video', url: '/media/uploads/a.mp4' };
+  const { syncStereoSource, context, engine, calls } = loadStereo([mono, sbsPost]);
+  context.video.src = mono.url;
+  // The VR button cleared the preloader; the source itself does not change.
+  engine.presenting = true;
+  syncStereoSource();
+  assert.equal(context.video.src, mono.url);
+  assert.equal(calls.preload, 1);
+  // Preloader already holds the next reel's VR (stereo) variant: no re-warm.
+  context.preloadVideo.src = sbsPost.stereo_url;
+  syncStereoSource();
+  assert.equal(calls.preload, 1);
+  // Leaving VR: the warmed stereo variant is stale for 2D.
+  engine.presenting = false;
+  syncStereoSource();
+  assert.equal(calls.preload, 2);
 });
 
 test('VR entry swaps the source once, from the onEnterVR callback only', () => {

@@ -216,3 +216,25 @@ def test_report_spike_raises_an_alert(app, monkeypatch, caplog):
     caplog.set_level(logging.ERROR, logger="sx.alerts")
     assert metrics.check_alerts() == ["reports_spike"]
     assert "6 in the last hour" in caplog.records[-1].getMessage()
+
+
+def test_open_queue_backlog_raises_an_alert(app, monkeypatch, caplog):
+    monkeypatch.setenv("SX_ALERT_OPEN_REPORTS", "2")
+    monkeypatch.setattr(metrics, "snapshot", _snapshot)
+    reporter = add_user(app, "reporter")
+    with app.state.testing_session() as db:
+        for index in range(2):
+            db.add(Report(reporter_id=reporter, target_type="user", target_id=f"x{index}", reason="spam",
+                          created_at=utcnow() - timedelta(days=3)))
+        db.commit()
+    caplog.set_level(logging.ERROR, logger="sx.alerts")
+    assert metrics.check_alerts() == ["open_reports_backlog"]
+    assert "2 open reports waiting for staff (limit 2)" in caplog.records[-1].getMessage()
+
+
+def test_snapshot_serves_the_alert_limits(monkeypatch):
+    monkeypatch.setenv("SX_ALERT_P95_MS", "1500")
+    limits = metrics.alert_limits()
+    assert limits["p95_ms"] == 1500
+    assert limits["min_requests"] == metrics.MIN_REQUESTS_FOR_ALERT
+    assert (limits["open_reports"], limits["open_support_requests"]) == (20, 10)

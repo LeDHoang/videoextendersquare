@@ -24,10 +24,19 @@ const stats = (reportSpike) => ({
   spike_floor: 10,
   open_reports: 7,
   open_support_requests: 2,
+  queue_limits: { open_reports: 20, open_support_requests: 10 },
   windows: { '24h': windowStats(reportSpike), '7d': windowStats(false) },
   disk: [{ volume: 'output', ok: true, free_gb: 42.5 }],
 });
 
+const SERIES_KEYS = ['reports', 'support_requests', 'posts', 'signups', 'unverified', 'messages', 'credits_captured'];
+const hourly = {
+  start: '2026-10-12T00:00:00+00:00',
+  hours: 336,
+  series: Object.fromEntries(SERIES_KEYS.map((key) => [key, Array.from({ length: 336 }, (_, i) => i % 5)])),
+};
+
+const limits = { min_requests: 20, error_rate: 0.05, p95_ms: 2000, failures: 3, disk_min_free_gb: 5, open_reports: 20, open_support_requests: 10 };
 const ops = {
   window_s: 300,
   requests: {
@@ -42,8 +51,17 @@ const ops = {
   jobs: { queued: 1, running: 2, active: 3, capacity: 6 },
   db_pool: { class: 'QueuePool', size: 5, checkedout: 2, overflow: -3, capacity: 15 },
   sse: { open_streams: 4 },
-  disk: [],
+  disk: [{ volume: 'output', ok: true, free_gb: 42.5 }],
+  limits,
 };
+
+const respond = ({ statsBody = stats(false), opsBody = ops, hourlyBody = hourly } = {}) => (path) => {
+  if (path === '/api/moderation/stats') return Promise.resolve(statsBody);
+  if (path === '/api/moderation/stats/hourly') return hourlyBody instanceof Error ? Promise.reject(hourlyBody) : Promise.resolve(hourlyBody);
+  if (path === '/api/ops/metrics') return opsBody instanceof Error ? Promise.reject(opsBody) : Promise.resolve(opsBody);
+  return Promise.resolve({ reports: [] });
+};
+const chip = (name) => screen.getByRole('button', { name: new RegExp('^' + name + ':') });
 
 function renderOverview() {
   return render(
@@ -61,20 +79,45 @@ describe('ModerationPage overview', () => {
   afterEach(cleanup);
 
   it('loads the stats and shows the counts with the previous period', async () => {
-    mocks.api.get.mockResolvedValue(stats(false));
+    mocks.api.get.mockImplementation(respond());
     renderOverview();
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
     expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats');
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats/hourly');
     expect(screen.getByText('300')).toBeTruthy();
     expect(screen.getByRole('img', { name: '@loud 12' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'OPEN 9, RESOLVED 0, DISMISSED 0' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'SPAM 9' })).toBeTruthy();
-    expect(screen.getByText('+350%')).toBeTruthy();
+    expect(screen.getByText('▲ +350% VS BEFORE')).toBeTruthy();
+    expect(screen.getByText(/User reports about profiles, posts/)).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('draws the hourly charts and hides them when the hourly call fails', async () => {
+    mocks.api.get.mockImplementation(respond());
+    renderOverview();
+    await waitFor(() => expect(screen.getByRole('img', { name: 'REPORTS FILED over time, now and before' })).toBeTruthy());
+    expect(screen.getByRole('img', { name: 'REPORTS FILED by hour and day' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'DIRECT MESSAGES' }));
+    expect(screen.getByRole('img', { name: 'DIRECT MESSAGES over time, now and before' })).toBeTruthy();
+    cleanup();
+    mocks.api.get.mockImplementation(respond({ hourlyBody: new Error('nope') }));
+    renderOverview();
+    await waitFor(() => expect(screen.getByText(/Hourly counts did not load/)).toBeTruthy());
+    expect(screen.queryByRole('img', { name: /over time/ })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('colours the queue checks against the server backlog limits', async () => {
+    mocks.api.get.mockImplementation(respond({ statsBody: { ...stats(false), open_reports: 20, open_support_requests: 0 } }));
+    renderOverview();
+    await waitFor(() => expect(chip('REPORT QUEUE').dataset.state).toBe('bad'));
+    expect(chip('SUPPORT INBOX').dataset.state).toBe('ok');
+    expect(screen.getByText(/1 problem\./)).toBeTruthy();
+  });
+
   it('opens the reports queue from its tile', async () => {
-    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/moderation/stats' ? stats(false) : { reports: [] }));
+    mocks.api.get.mockImplementation(respond());
     renderOverview();
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
     fireEvent.click(screen.getByText('OPEN REPORTS'));
@@ -82,43 +125,62 @@ describe('ModerationPage overview', () => {
   });
 
   it('flags a spiking metric', async () => {
-    mocks.api.get.mockResolvedValue(stats(true));
+    mocks.api.get.mockImplementation(respond({ statsBody: stats(true) }));
     renderOverview();
     await waitFor(() => expect(screen.getByText('SPIKE')).toBeTruthy());
-    expect(screen.getByRole('alert').textContent).toMatch(/SPIKE: REPORTS/);
+    expect(chip('ACTIVITY SPIKES').dataset.state).toBe('bad');
+    expect(chip('ACTIVITY SPIKES').textContent).toMatch(/REPORTS FILED/);
   });
 
   it('does not ask a moderator for the operations metrics', async () => {
-    mocks.api.get.mockResolvedValue(stats(false));
+    mocks.api.get.mockImplementation(respond());
     renderOverview();
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
     expect(mocks.api.get).not.toHaveBeenCalledWith('/api/ops/metrics');
-    expect(screen.queryByText(/OPERATIONS · LAST/)).toBeNull();
+    expect(screen.queryByText(/SERVER HEALTH · LAST/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^SERVER ERRORS:/ })).toBeNull();
   });
 
   it('shows the operations block to an admin', async () => {
     mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
-    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/ops/metrics' ? ops : stats(false)));
+    mocks.api.get.mockImplementation(respond());
     renderOverview();
-    await waitFor(() => expect(screen.getByText(/OPERATIONS · LAST 5 MIN/)).toBeTruthy());
-    expect(screen.getByText('310 ms')).toBeTruthy();
-    expect(screen.getByText('3 / 6')).toBeTruthy();
-    expect(screen.getByText('2 / 15')).toBeTruthy();
-    expect(screen.getByText('SLOWEST ROUTES')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/SERVER HEALTH · LAST 5 MIN/)).toBeTruthy());
+    expect(screen.getAllByText('310 ms').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: 'AI JOB SLOTS 3 / 6' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'DATABASE CONNECTIONS 2 / 15' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: '2xx 110, 429 7, 5xx 3' })).toBeTruthy();
+    expect(screen.getByText('429 RATE-LIMITED')).toBeTruthy();
     expect(screen.getByText('GET /api/reels/feed')).toBeTruthy();
-    expect(screen.getByText('900 ms · 5XX 3')).toBeTruthy();
-    expect(screen.getByText('50 REQS · P50 120 ms · MAX 1500 ms')).toBeTruthy();
     expect(screen.getByText('GET PAGES + STATIC FILES')).toBeTruthy();
-    expect(screen.getByText('1 REQ · P50 9 ms · MAX 9 ms · 429 2')).toBeTruthy();
-    expect(screen.getByText(/Only routes hit in the last 5 min appear/)).toBeTruthy();
+    expect(chip('SERVER ERRORS').dataset.state).toBe('warn');
+    expect(chip('DATABASE CONNECTIONS').dataset.state).toBe('ok');
+    expect(chip('FAILED AI JOBS').dataset.state).toBe('warn');
+  });
+
+  it('keeps rate and latency checks amber below the request minimum', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    const quiet = { ...ops, requests: { ...ops.requests, count: 5, errors_5xx: 5, error_rate: 1, p95_ms: 9000 } };
+    mocks.api.get.mockImplementation(respond({ opsBody: quiet }));
+    renderOverview();
+    await waitFor(() => expect(chip('SERVER ERRORS').dataset.state).toBe('warn'));
+    expect(chip('SLOWEST 5% OF CALLS').dataset.state).toBe('warn');
+    expect(chip('SERVER ERRORS').textContent).toMatch(/no alert under 20/);
+  });
+
+  it('turns the database check red when the pool is exhausted', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    mocks.api.get.mockImplementation(respond({ opsBody: { ...ops, db_pool: { ...ops.db_pool, checkedout: 15 } } }));
+    renderOverview();
+    await waitFor(() => expect(chip('DATABASE CONNECTIONS').dataset.state).toBe('bad'));
   });
 
   it('keeps the moderation overview when the operations call fails', async () => {
     mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
-    mocks.api.get.mockImplementation((path) => (path === '/api/ops/metrics' ? Promise.reject(new Error('nope')) : Promise.resolve(stats(false))));
+    mocks.api.get.mockImplementation(respond({ opsBody: new Error('nope') }));
     renderOverview();
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
-    expect(screen.queryByText(/OPERATIONS · LAST/)).toBeNull();
+    expect(screen.queryByText(/SERVER HEALTH · LAST/)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

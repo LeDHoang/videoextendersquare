@@ -6,6 +6,7 @@ import math
 import os
 from datetime import datetime
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from server.social.models import (
@@ -191,8 +192,11 @@ def _update_affinity_row(row, value: float, event: EngagementEvent) -> None:
 
 
 def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
+    """Refresh co-watch pairs and similarities between *post_id* and the
+    actor's 20 most recent watches, with a fixed number of set-based queries
+    (one per table) instead of several per pair."""
     recent = (
-        db.query(ActorItemAffinity)
+        db.query(ActorItemAffinity.post_id)
         .filter(
             ActorItemAffinity.actor_key == actor_key,
             ActorItemAffinity.post_id != post_id,
@@ -202,9 +206,22 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
         .limit(20)
         .all()
     )
-    for other in recent:
-        left_id, right_id = sorted((post_id, other.post_id))
-        pair = get_or_create(
+    others = [row.post_id for row in recent]
+    if not others:
+        return
+    keys = [tuple(sorted((post_id, other))) for other in others]
+    touches_post = or_(
+        and_(CoWatchPair.left_post_id == post_id, CoWatchPair.right_post_id.in_(others)),
+        and_(CoWatchPair.right_post_id == post_id, CoWatchPair.left_post_id.in_(others)),
+    )
+
+    now = utcnow()
+    pairs = {
+        (pair.left_post_id, pair.right_post_id): pair
+        for pair in db.query(CoWatchPair).filter(CoWatchPair.actor_key == actor_key, touches_post)
+    }
+    for left_id, right_id in keys:
+        pair = pairs.get((left_id, right_id)) or get_or_create(
             db,
             CoWatchPair,
             CoWatchPair.actor_key == actor_key,
@@ -214,23 +231,39 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
             left_post_id=left_id,
             right_post_id=right_id,
         )
-        pair.last_seen_at = utcnow()
-        support = db.query(CoWatchPair.id).filter(
-            CoWatchPair.left_post_id == left_id,
-            CoWatchPair.right_post_id == right_id,
-        ).count()
-        left_viewers = db.query(ActorItemAffinity.id).filter(
-            ActorItemAffinity.post_id == left_id,
-            ActorItemAffinity.qualified_watches > 0,
-        ).count()
-        right_viewers = db.query(ActorItemAffinity.id).filter(
-            ActorItemAffinity.post_id == right_id,
-            ActorItemAffinity.qualified_watches > 0,
-        ).count()
-        cosine = support / math.sqrt(max(1, left_viewers) * max(1, right_viewers))
+        pair.last_seen_at = now
+
+    supports = {
+        (left_id, right_id): count
+        for left_id, right_id, count in db.query(
+            CoWatchPair.left_post_id, CoWatchPair.right_post_id, func.count(CoWatchPair.id)
+        )
+        .filter(touches_post)
+        .group_by(CoWatchPair.left_post_id, CoWatchPair.right_post_id)
+    }
+    viewers = dict(
+        db.query(ActorItemAffinity.post_id, func.count(ActorItemAffinity.id))
+        .filter(ActorItemAffinity.post_id.in_([post_id, *others]), ActorItemAffinity.qualified_watches > 0)
+        .group_by(ActorItemAffinity.post_id)
+        .all()
+    )
+    similarities = {
+        (row.source_post_id, row.target_post_id): row
+        for row in db.query(ItemSimilarity).filter(
+            ItemSimilarity.method == "co_watch",
+            ItemSimilarity.model_version == "co-watch-v1",
+            or_(
+                and_(ItemSimilarity.source_post_id == post_id, ItemSimilarity.target_post_id.in_(others)),
+                and_(ItemSimilarity.target_post_id == post_id, ItemSimilarity.source_post_id.in_(others)),
+            ),
+        )
+    }
+    for left_id, right_id in keys:
+        support = supports.get((left_id, right_id), 0)
+        cosine = support / math.sqrt(max(1, viewers.get(left_id, 0)) * max(1, viewers.get(right_id, 0)))
         score = cosine * support / (support + 3.0)
         for source_id, target_id in ((left_id, right_id), (right_id, left_id)):
-            similarity = get_or_create(
+            similarity = similarities.get((source_id, target_id)) or get_or_create(
                 db,
                 ItemSimilarity,
                 ItemSimilarity.source_post_id == source_id,
@@ -244,7 +277,7 @@ def _update_co_watch(db: Session, actor_key: str, post_id: str) -> None:
             )
             similarity.support = support
             similarity.score = score
-            similarity.updated_at = utcnow()
+            similarity.updated_at = now
 
 
 def _daily_contribution_cap() -> int:

@@ -42,6 +42,20 @@ make start     # uvicorn serves API + static on :8000
 
 Open http://localhost:8000.
 
+MAKE 3D (2D-to-3D conversion) needs PyTorch and OpenCV, which `make install`
+does not add. Install them into the same venv, then set
+`SX_STEREO_CONVERT_ENABLED=1` in `.env`:
+
+```bash
+.venv/bin/pip install -r requirements-3d.txt
+```
+
+On a Linux host without a GPU, add
+`--extra-index-url https://download.pytorch.org/whl/cpu` to get the much
+smaller CPU wheels (see the notes in `requirements-3d.txt`). The first
+conversion downloads the depth checkpoint (about 110 MB) into `.models/` under
+the server's working directory.
+
 ## Streamlit fallback
 
 ```bash
@@ -116,8 +130,10 @@ refuses to boot until every check in `server/settings.py` passes.
 | `R2_ENDPOINT_URL` | _(unset)_ | S3 endpoint override; local staging points it at SeaweedFS. Unset means `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `SX_ENV_FILE`, `SX_APP_PORT` | _(unset)_ | Compose only: env file for the app (default `.env`) and its loopback port (default `8000`). Local staging uses `.env.staging` and `8001` |
 | `SENTRY_DSN`, `SX_LOG_LEVEL` | DSN, `INFO` | Release tag comes from the `GIT_SHA` build arg |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.2` | Share of requests traced in Sentry; `/api/healthz` and `/api/readyz` are never traced |
 | `SX_ALERT_5XX_RATE` / `SX_ALERT_P95_MS` | `0.05` / `2000` | Watchdog thresholds over the last 5 min (need at least 20 requests). Crossings are error logs, so Sentry events |
 | `SX_ALERT_FAILURES` | `3` | Failed jobs plus failed derived encodes in 5 min before an alert |
+| `SX_ALERT_OPEN_REPORTS` / `SX_ALERT_OPEN_SUPPORT` | `20` / `10` | Open reports / open support requests waiting before an alert; the Overview turns those checks red at the same numbers |
 | `SX_ALERT_INTERVAL_S` / `SX_ALERT_COOLDOWN_S` | `60` / `900` | How often the watchdog checks, and how long one alert stays quiet after it fires |
 | `SX_LOG_FORMAT` | `json` | `json` (default in production) or `text`; every line carries the `request_id` echoed in `X-Request-ID` |
 | `SX_CSP_MODE` | `report` | `off` (default outside production), `report` (default in production; reports go to `POST /api/csp-report` and the log) or `enforce` |
@@ -135,6 +151,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_FFMPEG_THREADS` / `SX_FFMPEG_NICE` | `2` / `10` | Per-encode threads / nice level |
 | `SX_REEL_PACK_CREATION_ENABLED`, `SX_REEL_PACK_DISCOVERY_ENABLED`, `SX_REEL_PACK_IMMERSIVE_ENABLED` | `1` | Explicit beta launch decision: Reel Packs ON |
 | `SX_CREDITS_ENABLED`, `SX_STRIPE_ENABLED`, `SX_REEL_REWARDS_ENABLED` | `0` | Off for the beta |
+| `SX_STEREO_CONVERT_ENABLED` | `0` | MAKE 3D stays off: the image has no torch, and the VPS decision is in `docs/to-beta.md` (AI inference) |
 
 ## Environment variables
 
@@ -166,6 +183,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_TURNSTILE_SITE_KEY` / `SX_TURNSTILE_SECRET` | Cloudflare Turnstile for sign-up. The site key goes to the SPA, the secret stays on the server. With the secret unset the check is skipped and a warning is logged at boot | empty |
 | `SX_LOGIN_RATE_LIMIT` | `0` lifts the sign-in limits (20 per IP, 10 per account, per 15 min) for scripted runs. Production refuses to boot with `0` unless `SX_PUBLIC_URL` is a localhost URL | `1` |
 | `SX_MOD_SPIKE_MIN` | Smallest count the moderation Overview flags as a spike (at least 3x the previous window) | `10` |
+| `SX_STEREO_CONVERT_ENABLED` | MAKE 3D (`POST /api/stereo/convert`, `docs/stereo-3d-reels.md`). It also needs `pip install -r requirements-3d.txt`; without those packages `/api/config` reports it off and the route answers 503 | `0` |
 | `SX_REGISTRATION_ENABLED` | `0` closes public registration (invite-only); `SX_REGISTRATION_ALLOWLIST` emails can still register | `1` |
 | `SX_REGISTRATION_ALLOWLIST` | Comma-separated invite emails honored while registration is closed (case-insensitive) | empty (fully closed) |
 | `DATABASE_URL` | Shared social/messaging/billing database URL | `sqlite:///./data/echo.db` |

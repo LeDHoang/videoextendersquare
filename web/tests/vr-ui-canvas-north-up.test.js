@@ -111,9 +111,9 @@ test('reels and pack playback preserve reel actions, transport, and their origin
       assert.equal(api.isControlVisible(action, options.source, options.itemState, packMode, 'reels'), true);
       if (reelActions.includes(action)) assert.ok(labels.some(({ text }) => text === button.label));
     }
-    assert.equal(hitAction(api, 111, 259, options), packMode ? null : 'collect');
-    assert.equal(hitAction(api, 305, 259, options), packMode ? 'save_pack' : null);
-    assert.equal(hitAction(api, 495, 259, options), packMode ? 'share_pack' : null);
+    // COLLECT spans both pack slots on the action row.
+    assert.equal(hitAction(api, 637, 212, options), packMode ? 'save_pack' : 'collect');
+    assert.equal(hitAction(api, 732, 212, options), packMode ? 'share_pack' : 'collect');
     assert.equal(hitAction(api, 689, 259, options), null);
     for (const action of earthActions) {
       assert.equal(api.isControlVisible(action, options.source, options.itemState, packMode, 'reels'), false);
@@ -136,5 +136,25 @@ test('North Up does not bypass existing unavailable-reel and static-card action 
       assert.ok(!labels.some(({ text }) => text === button.label));
     }
     assert.equal(hitAction(api, 689, 259, options), null);
+  }
+});
+
+test('dock canvas size fits the live controls per mode', () => {
+  const api = loadCanvas();
+  const video = { kind: 'video' };
+  const size = (options) => ({ ...api.controlsCanvasSize(options) });
+  assert.deepEqual(size({ source: video, itemState: { available: true } }), { w: 800, h: 260 });
+  assert.deepEqual(size({ source: video, packMode: true }), { w: 800, h: 260 });
+  assert.deepEqual(size({ source: { kind: 'image' } }), { w: 800, h: 260 });
+  assert.deepEqual(size({ source: { kind: 'static-card' } }), { w: 800, h: 260 });
+  assert.deepEqual(size({ source: video, sceneMode: 'earth' }), { w: 800, h: 304 });
+  for (const options of [
+    { source: video },
+    { source: { kind: 'image' } },
+    { source: video, sceneMode: 'earth', earth: {} },
+  ]) {
+    const { w, h } = api.controlsCanvasSize(options);
+    const { rectangles } = recordRender(api, options);
+    assert.deepEqual({ ...rectangles[0] }, { x: 0, y: 0, w, h }, 'container drawn at the fitted size');
   }
 });

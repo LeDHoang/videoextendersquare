@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   probes: {},
   models: {},
+  features: {},
   wallet: null,
 }));
 
@@ -29,14 +30,19 @@ vi.mock('../api/client.js', () => ({
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id: 'u1', username: 'maker' } }) }));
 vi.mock('../hooks/WalletContext.jsx', () => ({ useWallet: () => mocks.wallet }));
 vi.mock('../hooks/HealthContext.jsx', () => ({ useHealthContext: () => ({ probes: mocks.probes }) }));
-vi.mock('../hooks/ConfigContext.jsx', () => ({ useConfigContext: () => ({ config: { models: mocks.models } }) }));
-// The SSE job tracker is replaced by a button that completes the job.
+vi.mock('../hooks/ConfigContext.jsx', () => ({ useConfigContext: () => ({ config: { models: mocks.models, features: mocks.features } }) }));
+// The SSE job tracker is replaced by a button that completes the job. MAKE 3D
+// jobs (job-3d…) finish with a side-by-side result, as the server's do.
 vi.mock('../components/ui/JobRunner.jsx', () => ({
   default: ({ jobId, onDone, onSettled }) => (
     <button
       type="button"
       onClick={() => {
-        onDone?.({ download_url: `/api/jobs/${jobId}/download`, preview_url: null });
+        onDone?.({
+          download_url: `/api/jobs/${jobId}/download`,
+          preview_url: null,
+          ...(jobId.startsWith('job-3d') ? { stereo_layout: 'sbs' } : {}),
+        });
         onSettled?.({ status: 'complete' });
       }}
     >
@@ -133,6 +139,7 @@ const renderButton = () => screen.getByRole('button', { name: /RENDER .*4K SQUAR
 beforeEach(() => {
   mocks.probes = { ...ALL_PROBES };
   mocks.models = MODELS;
+  mocks.features = {};
   mocks.wallet = {
     wallet: { available_credits: 1000 },
     catalog: { credits_enabled: true },
@@ -673,5 +680,127 @@ describe('UploadPage studio — 3D stereo posts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove eyes2.png' }));
     await waitFor(() => expect(screen.queryByAltText('eyes2.png')).toBeNull());
     expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
+  });
+});
+
+describe('UploadPage studio — MAKE 3D', () => {
+  // POST /api/stereo/convert answers a job; publish answers a post.
+  const answer = (convertJobId) => mocks.post.mockImplementation(async (path) => (
+    path === '/api/stereo/convert'
+      ? { job_id: convertJobId, status: 'queued', kind: 'image', payment_source: 'local' }
+      : { meta: { title: 'square' }, rel_path: 'uploads/x.jpg', media_url: '/m' }
+  ));
+  const make3d = () => screen.getByRole('button', { name: '▶ MAKE 3D' });
+  const share = () => screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' });
+
+  it('turns a square image into side-by-side 3D and shares that render', async () => {
+    mocks.features = { stereo_convert: true };
+    answer('job-3d-img');
+    renderPage();
+    await pick(['square.png']);
+    await screen.findByText('ALREADY 1:1');
+    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
+    fireEvent.click(radio('Publish path', 'MAKE 3D'));
+    expect(screen.getByText('MAKE 3D FIRST')).toBeInTheDocument();
+    expect(screen.getByText('3D SIDE-BY-SIDE · MAKE 3D')).toBeInTheDocument();
+    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
+    expect(share()).toBeDisabled();
+
+    fireEvent.click(make3d());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', stage_id: 'st-square.png' }));
+    // Running: the path is locked and nothing can be shared yet.
+    expect(radio('Publish path', 'SHARE DIRECTLY')).toBeDisabled();
+    expect(share()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-img' }));
+    const left = await screen.findByAltText('3D result for square.png (left eye)');
+    expect(left).toHaveAttribute('src', '/api/jobs/job-3d-img/download');
+    expect(left).toHaveClass('sx-stereo-sbs');
+    expect(radio('Stage view', '3D')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('3D SIDE-BY-SIDE · LEFT EYE')).toBeInTheDocument();
+    expect(screen.queryByText('MAKE 3D FIRST')).toBeNull();
+
+    fireEvent.click(share());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
+    const [path, body] = mocks.post.mock.calls[1];
+    expect(path).toBe('/api/uploads/publish');
+    expect(body).toMatchObject({ kind: 'image', job_id: 'job-3d-img', stereo_layout: 'sbs' });
+    expect(body.stage_id).toBeUndefined();
+  });
+
+  it('labels a 3D video result as H.264, not as an HEVC master', async () => {
+    mocks.features = { stereo_convert: true };
+    answer('job-3d-vid');
+    renderPage();
+    await pick(['square.mp4']);
+    await screen.findByText('ALREADY 1:1');
+    fireEvent.click(radio('Publish path', 'MAKE 3D'));
+    fireEvent.click(make3d());
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-3d-vid' }));
+    expect(await screen.findByText('3D SIDE-BY-SIDE · LEFT EYE')).toBeInTheDocument();
+    expect(screen.getByText('3D H.264')).toBeInTheDocument();
+    expect(screen.queryByText(/HEVC MASTER/)).toBeNull();
+  });
+
+  it('makes a finished extend render 3D and shares the 3D render', async () => {
+    mocks.features = { stereo_convert: true };
+    mocks.form.mockResolvedValue({ job_id: 'job-ext' });
+    answer('job-3d-ext');
+    renderPage();
+    await pick(['square.png']);
+    await screen.findByText('ALREADY 1:1');
+    fireEvent.click(radio('Publish path', 'EXTEND ANYWAY'));
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
+    expect(await screen.findByAltText('Rendered square result for square.png')).toBeInTheDocument();
+
+    fireEvent.click(make3d());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', job_id: 'job-ext' }));
+    expect(share()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-ext' }));
+    expect(await screen.findByAltText('3D result for square.png (left eye)')).toHaveAttribute('src', '/api/jobs/job-3d-ext/download');
+
+    fireEvent.click(share());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
+    expect(mocks.post.mock.calls[1][1]).toMatchObject({ kind: 'image', job_id: 'job-3d-ext', stereo_layout: 'sbs' });
+  });
+
+  it('shows why a start failed, and drops the 3D render when the path changes', async () => {
+    mocks.features = { stereo_convert: true };
+    answer('job-3d-img');
+    mocks.post.mockRejectedValueOnce(Object.assign(new Error('3D conversion is not installed on this server.'), { status: 503, code: 'STEREO_CONVERT_UNAVAILABLE' }));
+    renderPage();
+    await pick(['square.png']);
+    await screen.findByText('ALREADY 1:1');
+    fireEvent.click(radio('Publish path', 'MAKE 3D'));
+    fireEvent.click(make3d());
+    expect(await screen.findByText('MAKE 3D is not available on this server right now.')).toBeInTheDocument();
+    expect(make3d()).toBeEnabled();
+    expect(share()).toBeDisabled();
+
+    fireEvent.click(make3d());
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-3d-img' }));
+    await screen.findByAltText('3D result for square.png (left eye)');
+    expect(screen.queryByText('MAKE 3D is not available on this server right now.')).toBeNull();
+
+    fireEvent.click(radio('Publish path', 'SHARE DIRECTLY'));
+    expect(screen.getByAltText('square.png')).toBeInTheDocument();
+    expect(radio('Stage view', 'EXTENDED')).toBeDisabled();
+    fireEvent.click(share());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(3));
+    const body = mocks.post.mock.calls[2][1];
+    expect(body).toMatchObject({ kind: 'image', stage_id: 'st-square.png' });
+    expect(body.job_id).toBeUndefined();
+    expect(body.stereo_layout).toBeUndefined();
+  });
+
+  it('is not offered when the server cannot convert', async () => {
+    renderPage();
+    await pick(['square.png']);
+    await screen.findByText('ALREADY 1:1');
+    expect(within(screen.getByRole('radiogroup', { name: 'Publish path' })).queryByRole('radio', { name: 'MAKE 3D' })).toBeNull();
   });
 });

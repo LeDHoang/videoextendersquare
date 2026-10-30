@@ -10,7 +10,7 @@ from argon2 import PasswordHasher
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import joinedload, sessionmaker
 
 from verified_signup import register_verified
@@ -19,6 +19,7 @@ from server.social import auth, database, safety
 from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
+    ActorItemAffinity,
     CoWatchPair,
     EngagementEvent,
     Follow,
@@ -364,6 +365,44 @@ def test_attributed_events_update_quality_affinity_and_co_watch(app):
             assert stats.qualified_views == 1
             assert db.query(CoWatchPair).count() == 1
             assert db.query(ItemSimilarity).count() == 2
+
+
+def test_co_watch_scores_match_support_and_viewers_in_fixed_queries(app):
+    from server.social.recommendations.events import _update_co_watch
+
+    posts = seed_catalog(app, creators=3, posts_per_creator=2)
+    p0, p1, p2 = (post.id for post in posts[:3])
+    with app.state.testing_session() as db:
+        for actor, watched in (("a:one", (p0, p1, p2)), ("a:two", (p0, p1))):
+            for post_id in watched:
+                db.add(ActorItemAffinity(actor_key=actor, post_id=post_id, qualified_watches=1))
+        db.flush()
+        _update_co_watch(db, "a:one", p0)
+
+        statements = []
+        listener = lambda *args: statements.append(args[2])
+        event.listen(db.get_bind(), "before_cursor_execute", listener)
+        try:
+            _update_co_watch(db, "a:two", p0)
+            _update_co_watch(db, "a:one", p0)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", listener)
+        db.commit()
+
+        # Repeat views with existing rows: 5 selects plus the flushed updates,
+        # never a query per pair.
+        assert len(statements) <= 2 * 8, statements
+        assert db.query(CoWatchPair).count() == 3
+        sims = {(row.source_post_id, row.target_post_id): row for row in db.query(ItemSimilarity)}
+        assert len(sims) == 4
+        # (p0, p1): watched together by both actors; each post has 2 viewers.
+        for key in ((p0, p1), (p1, p0)):
+            assert sims[key].support == 2
+            assert sims[key].score == pytest.approx(1.0 * 2 / 5)
+        # (p0, p2): one actor; p0 has 2 viewers, p2 has 1.
+        for key in ((p0, p2), (p2, p0)):
+            assert sims[key].support == 1
+            assert sims[key].score == pytest.approx((1 / 2 ** 0.5) * 1 / 4)
 
 
 def test_feedback_hard_excludes_items_and_creators(app):

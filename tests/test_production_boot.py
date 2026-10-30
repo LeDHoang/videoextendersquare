@@ -54,11 +54,54 @@ def test_sentry_scrubs_credentials():
     event = {
         "request": {
             "cookies": {"echo_session": "secret"},
-            "headers": {"Cookie": "echo_session=secret", "X-CSRF-Token": "t", "Accept": "*/*"},
+            "headers": {
+                "Cookie": "echo_session=secret",
+                "X-CSRF-Token": "t",
+                "Cf-Connecting-Ip": "203.0.113.7",
+                "Accept": "*/*",
+            },
         }
     }
     scrubbed = app_module._sentry_before_send(event, None)
     assert "cookies" not in scrubbed["request"]
     assert scrubbed["request"]["headers"]["Cookie"] == "[filtered]"
     assert scrubbed["request"]["headers"]["X-CSRF-Token"] == "[filtered]"
+    assert scrubbed["request"]["headers"]["Cf-Connecting-Ip"] == "[filtered]"
     assert scrubbed["request"]["headers"]["Accept"] == "*/*"
+
+
+def test_sentry_drops_query_strings():
+    event = {
+        "request": {"url": "https://x/api/users/search", "query_string": "q=alice"},
+        "spans": [{"data": {"url": "https://tenor.googleapis.com/v2/search", "http.query": "q=cat&key=k"}}],
+    }
+    scrubbed = app_module._sentry_before_send(event, None)
+    assert "query_string" not in scrubbed["request"]
+    assert scrubbed["spans"][0]["data"] == {"url": "https://tenor.googleapis.com/v2/search"}
+    crumb = app_module._sentry_before_breadcrumb({"data": {"url": "u", "http.query": "key=k"}}, None)
+    assert crumb["data"] == {"url": "u"}
+
+
+def test_sentry_skips_health_checks(monkeypatch):
+    monkeypatch.delenv("SENTRY_TRACES_SAMPLE_RATE", raising=False)
+    assert app_module._sentry_traces_sampler({"asgi_scope": {"path": "/api/readyz"}}) == 0
+    assert app_module._sentry_traces_sampler({"asgi_scope": {"path": "/api/feed"}}) == 0.2
+
+
+def test_dev_media_is_cacheable_and_keeps_range_support(monkeypatch, tmp_path):
+    """Dev /media sends the same Cache-Control as R2 uploads, so the reels
+    preloader's bytes are reused by the next load; Range still answers 206."""
+    from server import media_store
+
+    monkeypatch.delenv("SX_ENV", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output" / "clip.mp4").write_bytes(b"0123456789" * 100)
+    client = TestClient(app_module.create_app())
+    full = client.get("/media/clip.mp4")
+    assert full.status_code == 200
+    assert full.headers["cache-control"] == media_store.CACHE_CONTROL
+    part = client.get("/media/clip.mp4", headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206
+    assert part.headers["cache-control"] == media_store.CACHE_CONTROL
+    assert part.content == (b"0123456789" * 10)

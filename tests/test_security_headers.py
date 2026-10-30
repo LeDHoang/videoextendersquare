@@ -57,6 +57,7 @@ def app(monkeypatch, tmp_path):
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text(INDEX_HTML, encoding="utf-8")
     (static / "assets" / "index-abc.js").write_text("console.log(1)", encoding="utf-8")
+    (static / "assets" / "index-CJh6BpX3.js").write_text("console.log(2)", encoding="utf-8")
     real_mount_spa(application, static)
 
     monkeypatch.setattr(reels, "_recommendation_feed_data", lambda **_: {"items": []})
@@ -182,6 +183,12 @@ def test_spa_assets_are_served_untouched(client):
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
+def test_hashed_spa_assets_are_immutable_and_unhashed_ones_revalidate(client):
+    hashed = client.get("/assets/index-CJh6BpX3.js")
+    assert hashed.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert "cache-control" not in client.get("/assets/index-abc.js").headers
+
+
 def test_reels_player_scripts_are_nonced(client, monkeypatch):
     monkeypatch.setenv("SX_CSP_MODE", "report")
     first = client.get("/api/reels/player")
@@ -191,6 +198,30 @@ def test_reels_player_scripts_are_nonced(client, monkeypatch):
     second = client.get("/api/reels/player")
     assert _header_nonce(second) != nonce
     _assert_scripts_nonced(second.text, _header_nonce(second))
+
+
+def test_vendored_player_scripts_are_linked_and_long_cached(client):
+    from server.routers.reels import PLAYER_SCRIPTS
+
+    page = client.get("/api/reels/player").text
+    srcs = re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', page)
+    assert len(srcs) == len(PLAYER_SCRIPTS)
+    # The ~300 KB template only: none of the ~2.2 MB of vendored code inline.
+    assert len(page) < 600_000 and "__THREE_JS__" not in page
+
+    entries = client.get("/api/reels/player-inline").json()["scripts"]
+    linked = [e["src"] for e in entries if isinstance(e, dict)]
+    assert linked == srcs
+    assert isinstance(entries[-1], str) and "loadVideo(" in entries[-1]
+
+    for src in srcs:
+        response = client.get(src)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/javascript")
+        assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    stale = client.get(srcs[0].split("?")[0] + "?v=old")
+    assert stale.headers["cache-control"] == "no-cache"
+    assert client.get("/api/reels/player-script/reels.html").status_code == 404
 
 
 def test_compare_player_may_be_framed_same_origin(client, monkeypatch):

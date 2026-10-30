@@ -1,6 +1,6 @@
 # Deploy runbook — invite-only beta
 
-One Hetzner VPS (SIN, CPX32: 4 vCPU / 8 GB) runs `compose.yaml`: the app, `postgres:16` and `cloudflared`. Nothing listens on a public port. Traffic arrives through a Cloudflare Tunnel, and public media is served from a Cloudflare R2 bucket on `media.<domain>`.
+One OVHcloud VPS (VPS-2 in Hillsboro, Oregon: 4 vCPU / 8 GB / 75 GB) runs `compose.yaml`: the app, `postgres:16` and `cloudflared`. Nothing listens on a public port. Traffic arrives through a Cloudflare Tunnel, and public media is served from a Cloudflare R2 bucket on `media.<domain>`.
 
 Related docs:
 - `deploy/env.example`: the production `.env` template.
@@ -11,6 +11,24 @@ Related docs:
 ## 1. One-time dashboard checklist
 
 Complete each item once per environment. Tick it in your own copy of this list.
+
+**Production progress (2026-10-29).** The domain is not bought yet, so every step that needs `<domain>` is still open.
+- Done:
+  - Cloudflare account, with a payment method on file (R2 requires one).
+  - R2 public bucket `publicmedia` and the private backup bucket, both with location hint `apac`. `r2.dev` is not enabled.
+  - Two Account API tokens, each with Object Read & Write scoped to one bucket. The app token's four `R2_*` values are in `.env`. A list/put/get/delete test with the app's client (`server/media_store.py`) passed.
+  - Tunnel created and its token in `TUNNEL_TOKEN`. The token decodes, and its account matches `R2_ACCOUNT_ID`. The dashboard shows "Waiting for your Tunnel to connect" until cloudflared runs on the VPS.
+  - fal account, with a spend limit and prepaid credit. `FAL_KEY` is in `.env`.
+  - Sentry project `ledhoang/videoextendersquare-server`, with its DSN in `SENTRY_DSN`. The "Server watchdog: ALERT / Low disk space" alert rule emails on a new issue, and a test event delivered the email. A smoke test confirmed that traces, logs and metrics arrive, and that outbound query strings are stripped.
+  - VPS (2026-10-29): OVHcloud VPS-2 in Hillsboro, Debian 13, provisioned and hardened (section "OVHcloud VPS" below). Docker is installed and the repo is cloned to `/opt/echo`.
+  - Server `.env` (2026-10-29): built from `deploy/env.example`. The secrets were generated on the VPS with `openssl rand`, and a copy is kept off the box. The `<domain>` URL values and SMTP are still placeholders.
+  - App and Postgres (2026-10-29): `docker compose up -d --build` runs both, healthy. The app listens on `127.0.0.1:8000` only. `/api/readyz` reports the database ok at schema `20261022_0017` and the output directory writable. cloudflared is not started yet.
+- Waiting for the domain:
+  - the Tunnel public hostname, then `docker compose --profile tunnel up -d`;
+  - the `media.<domain>` custom domain and `SX_MEDIA_BASE_URL`;
+  - CORS, the Transform Rule, the Cache Rules and SSL/TLS.
+- Next on the VPS (no domain needed): the rclone remote for the backup token, the nightly cron with `BACKUP_SENTRY_CRON_URL`, and the restore drill (`docs/backup-restore-runbook.md`).
+- Not confirmed: the 30-day lifecycle rule on the backup bucket.
 
 ### Cloudflare
 
@@ -62,10 +80,10 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - Turn on **Always Use HTTPS**.
   - Turn on **HSTS** only after HTTPS is verified end to end on both hosts. Start with a short `max-age`, and do not turn on preload for the beta.
 
-### Hetzner
+### OVHcloud VPS
 
-- [ ] **Firewall.** Allow inbound **TCP 22 only**, ideally from your own IPs. The app port 8000 is bound to `127.0.0.1` in `compose.yaml`, and the Tunnel is outbound-only.
-- [ ] Enable automatic security updates (`unattended-upgrades`). Use SSH key auth only.
+- [x] **Firewall (2026-10-29).** `ufw default deny incoming` and `ufw allow 22/tcp`, so inbound is **TCP 22 only**. The app port 8000 is bound to `127.0.0.1` in `compose.yaml`, so Docker's habit of bypassing ufw for published ports does not expose it. The Tunnel is outbound-only.
+- [x] **Updates and SSH (2026-10-29).** `unattended-upgrades` is enabled. SSH accepts keys only, set in `/etc/ssh/sshd_config.d/01-hardening.conf`. Keep the `01-` prefix: `50-cloud-init.conf` turns password auth on, and sshd keeps the first value it reads.
 
 ### Alerts
 
@@ -74,7 +92,9 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [ ] **Sentry.** Create a project and set `SENTRY_DSN`. Releases are tagged with `GIT_SHA`, which is passed as a build arg.
   The in-app watchdog (`SX_ALERT_*`) and the low-disk check log errors, and Sentry turns those into events.
   In Sentry, add an alert rule that notifies you on every new issue whose message starts with `ALERT ` or `Low disk space`.
-- [ ] **Backups.** Optionally add a healthchecks.io check, and set `BACKUP_PING_URL` for `deploy/backup.sh`.
+  The same DSN also sends traces (`SENTRY_TRACES_SAMPLE_RATE`, default 0.2; health checks are skipped), INFO+ logs, and the watchdog counters as metrics. All of these fit in the free Developer plan. Profiling is not included in that plan, so it stays off.
+  After the domain is live, add a Sentry uptime monitor on `https://<domain>/api/readyz` (the free plan includes one). It can replace UptimeRobot.
+- [ ] **Backups.** Set `BACKUP_SENTRY_CRON_URL` for `deploy/backup.sh`, which creates a Sentry cron monitor on the first run. A healthchecks.io check (`BACKUP_PING_URL`) also works.
 
 ### Secret escrow
 
@@ -131,7 +151,7 @@ A restart drops in-flight jobs and staged uploads, because both live in containe
 | Check CPU and memory | `docker stats` |
 | Check ffmpeg niceness | `docker compose exec app ps -o ni,comm -C ffmpeg` |
 | Open a psql shell | `docker compose exec postgres psql -U echo echo` |
-| Check the schema revision | `docker compose exec app alembic current`. Expect `20261022_0016`. |
+| Check the schema revision | `docker compose exec app alembic current`. Expect `20261022_0017`. |
 | Check disk | `df -h /` and `docker system df` |
 
 Logs rotate at 10 MB × 5 files per service (json-file driver).

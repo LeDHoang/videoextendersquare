@@ -7,6 +7,9 @@ import hmac
 import os
 import re
 import secrets
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -17,7 +20,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import AuthSession, RateLimitEvent, User, utcnow
+from .models import AuthSession, User, utcnow
 
 
 SESSION_COOKIE = "echo_session"
@@ -371,31 +374,41 @@ def validate_origin(request: Request) -> None:
 
 
 class RateLimiter:
-    """Database-backed limiter shared by every application worker."""
+    """In-process sliding-window limiter. The app runs as exactly one worker
+    (deploy/entrypoint.sh: --workers 1), so this process sees every request,
+    without the four database round trips per check the table-backed limiter
+    cost. Counts start over when the process restarts."""
+
+    _SWEEP_SECONDS = 60
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits: dict[str, tuple[int, deque]] = {}
+        self._next_sweep = 0.0
 
     def check(self, db: Session, key: str, limit: int, window_seconds: int) -> None:
-        now = utcnow()
-        cutoff = now - timedelta(seconds=max(1, int(window_seconds)))
-        key_digest = keyed_hash(key)
-        db.query(RateLimitEvent).filter(
-            RateLimitEvent.created_at < now - timedelta(days=2),
-        ).delete(synchronize_session=False)
-        db.query(RateLimitEvent).filter(
-            RateLimitEvent.key_hash == key_digest,
-            RateLimitEvent.created_at < cutoff,
-        ).delete(synchronize_session=False)
-        count = db.query(RateLimitEvent.id).filter(
-            RateLimitEvent.key_hash == key_digest,
-            RateLimitEvent.created_at >= cutoff,
-        ).count()
-        if count >= limit:
-            db.commit()
-            raise HTTPException(
-                status_code=429,
-                detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
-            )
-        db.add(RateLimitEvent(key_hash=key_digest, created_at=now))
-        db.commit()
+        # `db` is unused; callers keep passing it.
+        window = max(1, int(window_seconds))
+        now = time.monotonic()
+        with self._lock:
+            if now >= self._next_sweep:
+                self._hits = {k: v for k, v in self._hits.items() if v[1] and v[1][-1] > now - v[0]}
+                self._next_sweep = now + self._SWEEP_SECONDS
+            hits = self._hits.get(key, (window, deque()))[1]
+            self._hits[key] = (window, hits)
+            while hits and hits[0] <= now - window:
+                hits.popleft()
+            if len(hits) >= limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
+                )
+            hits.append(now)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._hits.clear()
+            self._next_sweep = 0.0
 
 
 rate_limiter = RateLimiter()

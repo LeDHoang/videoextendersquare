@@ -249,10 +249,11 @@ def _catalog(
 ) -> dict[str, CatalogItem]:
     hidden_users = blocked_user_ids(db, actor.user_id)
     dismissed_posts, dismissed_creators = _active_dismissals(db, actor.actor_key)
+    # Plain columns, not Post entities: the catalog spans up to
+    # MAX_CATALOG_SIZE posts on every feed request and needs only these.
     query = (
-        db.query(Post)
+        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
         .join(User, User.id == Post.owner_id)
-        .options(selectinload(Post.tags).selectinload(PostTag.tag))
         .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
     )
     excluded_creators = hidden_users | dismissed_creators
@@ -271,11 +272,17 @@ def _catalog(
         followed = db.query(Follow.followee_id).filter(Follow.follower_id == actor.user_id)
         query = query.filter(or_(Post.owner_id == actor.user_id, Post.owner_id.in_(followed)))
     posts = query.order_by(Post.created_at.desc(), Post.id.desc()).limit(MAX_CATALOG_SIZE).all()
+    tags: dict[str, list[str]] = defaultdict(list)
+    if posts:
+        for post_id, tag_id in db.query(PostTag.post_id, PostTag.tag_id).filter(
+            PostTag.post_id.in_([post.id for post in posts])
+        ):
+            tags[post_id].append(tag_id)
     return {
         post.id: CatalogItem(
             post_id=post.id,
             owner_id=post.owner_id,
-            tag_ids=tuple(link.tag_id for link in post.tags),
+            tag_ids=tuple(tags.get(post.id, ())),
             created_at=aware(post.created_at),
             like_count=int(post.like_count or 0),
             view_count=int(post.view_count or 0),

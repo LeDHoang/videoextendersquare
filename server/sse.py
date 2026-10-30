@@ -11,6 +11,7 @@ so that stays small — which matches the frontend's `useSSE` contract of
 """
 
 import asyncio
+import json
 from typing import AsyncIterator
 
 from fastapi import Request
@@ -45,7 +46,7 @@ async def job_progress_stream(request: Request, rec: JobRecord) -> AsyncIterator
                 "error": rec.error,
             }
 
-        yield {"data": data}
+        yield {"data": json.dumps(data)}
 
         if terminal:
             break

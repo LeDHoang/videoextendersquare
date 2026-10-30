@@ -11,6 +11,7 @@ Serves:
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from fastapi.staticfiles import StaticFiles
 # production secrets passed via the environment (docker -e / secret manager).
 load_dotenv(override=False)
 
+from server.media_store import CACHE_CONTROL  # noqa: E402
+from server.metrics import env_float  # noqa: E402
 from server.observability import RequestIDMiddleware, configure_logging, current_request_id  # noqa: E402
 from server.settings import env_int, is_production, production_config_errors  # noqa: E402
 
@@ -35,7 +38,16 @@ logger = logging.getLogger("server.app")
 _CLEANUP_INTERVAL_S = 15 * 60
 
 
-_SCRUBBED_HEADERS = {"cookie", "authorization", "x-csrf-token", "set-cookie"}
+# cf-connecting-ip / true-client-ip carry the visitor's IP behind Cloudflare;
+# the SDK's own PII filter only knows x-forwarded-for and x-real-ip.
+_SCRUBBED_HEADERS = {
+    "cookie",
+    "authorization",
+    "x-csrf-token",
+    "set-cookie",
+    "cf-connecting-ip",
+    "true-client-ip",
+}
 
 
 def _sentry_before_send(event, hint):
@@ -48,16 +60,37 @@ def _sentry_before_send(event, hint):
             event["tags"] = {"request_id": request_id}
     request = event.get("request") or {}
     request.pop("cookies", None)
+    # Query strings carry search terms (users, GIFs) that are not ours to ship.
+    request.pop("query_string", None)
     headers = request.get("headers")
     if isinstance(headers, dict):
         for name in list(headers):
             if name.lower() in _SCRUBBED_HEADERS:
                 headers[name] = "[filtered]"
+    # Outbound HTTP spans record the raw query: the Tenor search sends its API
+    # key and the user's search terms there.
+    for span in event.get("spans") or ():
+        (span.get("data") or {}).pop("http.query", None)
     return event
 
 
+def _sentry_before_breadcrumb(crumb, hint):
+    (crumb.get("data") or {}).pop("http.query", None)
+    return crumb
+
+
+_UNTRACED_PATHS = {"/api/healthz", "/api/readyz"}
+
+
+def _sentry_traces_sampler(context) -> float:
+    scope = context.get("asgi_scope") or {}
+    if scope.get("path") in _UNTRACED_PATHS:
+        return 0
+    return env_float("SENTRY_TRACES_SAMPLE_RATE", 0.2)
+
+
 def _init_sentry() -> None:
-    """Error tracking, active only when SENTRY_DSN is set (backend only, no PII)."""
+    """Errors, traces, logs and metrics, active only when SENTRY_DSN is set (backend only, no PII)."""
     dsn = os.environ.get("SENTRY_DSN", "").strip()
     if not dsn:
         return
@@ -68,9 +101,12 @@ def _init_sentry() -> None:
         environment=os.environ.get("SX_ENV", "development"),
         release=os.environ.get("GIT_SHA") or None,
         send_default_pii=False,
-        traces_sample_rate=0,
+        traces_sampler=_sentry_traces_sampler,
+        enable_logs=True,
         max_request_body_size="never",
         before_send=_sentry_before_send,
+        before_send_transaction=_sentry_before_send,
+        before_breadcrumb=_sentry_before_breadcrumb,
     )
 
 
@@ -243,6 +279,31 @@ async def lifespan(app: FastAPI):
         await _drain_workers()
 
 
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles with the same Cache-Control R2 uploads carry. Not immutable:
+    previews and stereo proxies are rebuilt in place under the same URL, and
+    the ETag still revalidates them."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = CACHE_CONTROL
+        return response
+
+
+class HashedAssetFiles(StaticFiles):
+    """Vite build output. Content-hashed names (``index-CJh6BpX3.js``) never
+    change in place, so browsers and the edge may keep them for a year.
+    Unhashed files copied from ``web/public/assets`` keep ETag revalidation."""
+
+    _HASHED = re.compile(r"-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$")
+
+    def file_response(self, full_path, *args, **kwargs):
+        response = super().file_response(full_path, *args, **kwargs)
+        if self._HASHED.search(str(full_path)):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def mount_spa(app: FastAPI, static_dir: Path) -> None:
     """Serve the built React app from *static_dir*, if it exists.
 
@@ -256,7 +317,7 @@ def mount_spa(app: FastAPI, static_dir: Path) -> None:
 
     from server.security_headers import nonce_request_html
 
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="web-assets")
+    app.mount("/assets", HashedAssetFiles(directory=static_dir / "assets"), name="web-assets")
     html_cache: dict[Path, str] = {}
 
     def html_document(request: Request, file: Path) -> HTMLResponse:
@@ -305,10 +366,10 @@ def create_app() -> FastAPI:
     # errors get an ID too (security headers sit inside it).
     app.add_middleware(RequestIDMiddleware)
 
-    from server.routers import account_safety, admin, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, support, uploads, video
+    from server.routers import account_safety, admin, billing, compare, config, health, image, map_tiles, messages, model_info, packs, reels, rewards, social, stereo_convert, support, uploads, video
 
     production = is_production()
-    modules = [health, config, model_info, billing, image, video, account_safety, admin, social, packs, messages, reels, map_tiles, rewards, uploads, support]
+    modules = [health, config, model_info, billing, image, video, account_safety, admin, social, packs, messages, reels, map_tiles, rewards, uploads, stereo_convert, support]
     if not production:
         # Compare reads output/pairs through /media; neither exists in production.
         modules.append(compare)
@@ -323,7 +384,7 @@ def create_app() -> FastAPI:
         # inside the Reels/Compare iframes works. Never in production: output/
         # holds unpublished uploads, logs and test folders. Published media is
         # served from R2 (SX_MEDIA_BASE_URL) there.
-        app.mount("/media", StaticFiles(directory=output_dir), name="media")
+        app.mount("/media", CachedStaticFiles(directory=output_dir), name="media")
 
     avatar_dir = Path("data/avatars").resolve()
     avatar_dir.mkdir(parents=True, exist_ok=True)

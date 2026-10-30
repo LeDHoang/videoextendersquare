@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.23-20261016-exit-vr-awaits-end';
+  const VR_VERSION = 'v8.28-20261026-glow-probe-gpu-scale';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -57,6 +57,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let previewAnimId = null;
   let previewCanvas = null;
   let previewCameraMode = 'headset'; // 'headset' | 'orbit'
+  // Desktop preview only (startPreview {hiFi:true}): MSAA + mipmapped panels.
+  // XR sessions never set it, so the headset keeps the legacy sampling.
+  let previewHiFi = false;
   let sceneMode = 'reels'; // 'reels' | 'earth'
   let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
   let isCurved = true;
@@ -82,10 +85,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const CONTROLS_AUTO_HIDE_MS = 5000;
   // Side-panel layout (upstream factors): side gap from the screen edge and
   // the slight forward (viewer-side) offset, in screen-local meters.
-  const PANEL_SIDE_GAP = 0.384;
-  const PANEL_FWD_OFFSET = -0.15;
+  const PANEL_SIDE_GAP = 0.445;
+  const PANEL_FWD_OFFSET = -0.34;
   const CPANEL_SCALE_FACTOR = 0.432;
-  const GUIDE_SCALE_FACTOR = 0.4212;
+  const GUIDE_SCALE_FACTOR = 0.314;
 
   // v8.4 video upload path A/B: 'subimage' (three same-size updates, default)
   // vs 'respec' (force full texImage2D re-spec per upload, legacy behavior).
@@ -118,12 +121,25 @@ window.WebXRVR = window.WebXRVR || (function () {
   // three r186 forces alpha:true on the XR layer regardless, so antialias
   // (MSAA resolve on the XR layer) is the isolated variable. ?xrfull=1
   // restores the entire legacy stack (session + renderer).
+  // v8.24: the direct VideoTexture is the default in the preview AND the XR
+  // loop (before, the XR loop ignored ?vrtex=video and always used the 2048²
+  // canvas proxy, halving 3840² masters and capping uploads at 30/s).
+  // ?vrtex=canvas restores the canvas proxy. ?vrfov=<0..1> sets XR fixed
+  // foveation before the session starts. The default is 0 (off): three's
+  // default of 1 (maximum) renders the periphery of a Dome-filled view at
+  // reduced resolution, and the Quest 3S A/B showed no frame-pacing cost for
+  // 0 with the GPU ~23% busy (docs/vr-playback-reverse-engineering.md §5).
+  // v8.26: ?vrfbs=<0.5..2> sets the XR framebuffer scale before the session
+  // starts. The default is 1.5: at 1 the eye buffer (1680×1760) is below the
+  // 3S panel (~1832×1920 per eye); the 3S clamps the layer at 1.5 (2520×2640
+  // per eye). Pacing matched 1 and GPU went from ~21% to ~28% busy.
   const debugFlags = {
     lock: true, overlay: true, guide: true, glow: true,
-    dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: false,
+    dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: true,
+    fov: 0,          // XR fixed foveation (?vrfov=0..1); 0 = off
+    fbs: 1.5,        // XR framebuffer scale factor (?vrfbs=0.5..2); 1 = native
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
-    horizonhud: false, // bezel ring + compass dial at street zoom (?horizonhud=1 restores)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
     xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
     vrshell: true,   // in-VR site shell (?vrshell=0 → in-VR navigation leaves XR, pre-shell behaviour)
@@ -144,13 +160,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('glowprobe', '0')) debugFlags.glowprobe = false;
       if (has('domoverlay', '0')) debugFlags.domoverlay = false;
       if (has('vrtex', 'video')) debugFlags.vrtex = true;
+      if (has('vrtex', 'canvas')) debugFlags.vrtex = false;
+      const fov = q.match(/(?:\?|&)vrfov=([0-9.]+)(?:&|$)/);
+      if (fov && Number.isFinite(Number(fov[1]))) debugFlags.fov = Math.max(0, Math.min(1, Number(fov[1])));
+      const fbs = q.match(/(?:\?|&)vrfbs=([0-9.]+)(?:&|$)/);
+      if (fbs && Number(fbs[1]) > 0) debugFlags.fbs = Math.max(0.5, Math.min(2, Number(fbs[1])));
       if (has('xrminimal', '1')) debugFlags.xrminimal = true;
       if (has('xrfull', '1')) debugFlags.xrfull = true;
       if (has('earthmap', '0')) debugFlags.earthmap = false;
       if (has('earthstyle', 'raw')) debugFlags.earthstyle = 'raw';
       if (has('topdown', '1')) debugFlags.topdown = true;
       if (has('topdown', '0')) debugFlags.topdown = false;
-      if (has('horizonhud', '1')) debugFlags.horizonhud = true;
       if (has('xrdiag', '1')) debugFlags.xrdiag = true;
       if (has('vrshell', '0')) debugFlags.vrshell = false;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
@@ -373,26 +393,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthAtmosphereMesh = null;
   let earthTileLodLevels = [];
 
-  // Step 6.3: street-table horizon bezel + interactive north compass badge.
-  // A lightweight ring around the active tile ring gives the tangent table a
-  // finished model edge; clicking/lasering the compass badge swings the map
-  // back to true north via the existing resetEarthNorthUp pose (≤0.5°).
-  let earthBezelMesh = null;
-  let earthCompassMesh = null;
-  let earthCompassCanvas = null;
-  let earthCompassCtx = null;
-  let earthCompassTexture = null;
-  function earthBezelRadius() {
-    try {
-      const S = Math.max(1, earthZoom);
-      if (!(S > 1.02) || !earthFocus) return 0;
-      // Frames the comfortable tabletop patch (≈0.8 m), not the multi-metre planet.
-      return Math.min(0.8, earthVisibleRadius(S) * 0.24);
-    } catch (e) { return 0; }
-  }
-  function earthBezelVisible() {
-    return !!(sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && earthBezelMesh);
-  }
   // Map bearing as the viewer sees it: the clockwise angle (rad) from screen-up
   // to geographic north, measured in the plane perpendicular to the line of
   // sight (head → focus anchor). 0 means the map is north-up on screen — which is
@@ -424,244 +424,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       return Math.atan2(nr, nu);
     } catch (e) { return 0; }
   }
-  const EARTH_BEZEL_INNER = 0.86, EARTH_BEZEL_OUTER = 1.08;
-  // Surveyor's bezel: static 1024² texture (ticks every 5°, majors every 15°,
-  // N/E/S/W lettering, soft inner glow). Drawn once; orientation is applied by
-  // rotating the mesh to true north each frame.
-  function drawEarthBezelTexture(canvas) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-    const C = 512, rOuter = 512, rIn = rOuter * EARTH_BEZEL_INNER / EARTH_BEZEL_OUTER;
-    ctx.clearRect(0, 0, 1024, 1024);
-    if (ctx.createRadialGradient) {
-      const g = ctx.createRadialGradient(C, C, rIn - 6, C, C, rOuter);
-      g.addColorStop(0, 'rgba(57,215,255,0.00)');
-      g.addColorStop(0.18, 'rgba(57,215,255,0.20)');
-      g.addColorStop(1, 'rgba(10,40,70,0.0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(C, C, rOuter, 0, Math.PI * 2); ctx.arc(C, C, rIn - 6, 0, Math.PI * 2, true); ctx.fill();
-    }
-    ctx.strokeStyle = 'rgba(120,235,255,0.95)';
-    ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(C, C, rIn, 0, Math.PI * 2); ctx.stroke();
-    for (let deg = 0; deg < 360; deg += 5) {
-      const major = deg % 15 === 0, card = deg % 90 === 0;
-      const len = card ? 56 : (major ? 34 : 18);
-      const a = (deg - 90) * Math.PI / 180;
-      ctx.strokeStyle = card ? '#FFC857' : (major ? 'rgba(190,245,255,0.95)' : 'rgba(120,205,235,0.65)');
-      ctx.lineWidth = card ? 7 : (major ? 4 : 2.5);
-      ctx.beginPath();
-      ctx.moveTo(C + Math.cos(a) * (rIn + 6), C + Math.sin(a) * (rIn + 6));
-      ctx.lineTo(C + Math.cos(a) * (rIn + 6 + len), C + Math.sin(a) * (rIn + 6 + len));
-      ctx.stroke();
-    }
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const letters = [['N', 0, '#FFC857', 54], ['E', 90, '#DFF8FF', 40], ['S', 180, '#DFF8FF', 40], ['W', 270, '#DFF8FF', 40]];
-    for (const [ch, deg, color, size] of letters) {
-      const a = (deg - 90) * Math.PI / 180;
-      const r = rIn + 102;
-      ctx.fillStyle = color;
-      ctx.font = '800 ' + size + 'px Archivo, sans-serif';
-      ctx.fillText(ch, C + Math.cos(a) * r, C + Math.sin(a) * r);
-    }
-    return true;
-  }
-  function ensureEarthBezel() {
-    if (!THREE || !scene || !earthGroup || !debugFlags.horizonhud) return;
-    try {
-      if (!earthBezelMesh && typeof document !== 'undefined') {
-        const bezelCanvas = document.createElement('canvas');
-        bezelCanvas.width = 1024;
-        bezelCanvas.height = 1024;
-        let bezelTexture = null;
-        try {
-          if (drawEarthBezelTexture(bezelCanvas)) {
-            bezelTexture = new THREE.CanvasTexture(bezelCanvas);
-            try { if (THREE.SRGBColorSpace !== undefined) bezelTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-            applyLinearSampling(bezelTexture);
-          }
-        } catch (e) { bezelTexture = null; }
-        const geo = new THREE.RingGeometry(EARTH_BEZEL_INNER, EARTH_BEZEL_OUTER, 128);
-        const mat = new THREE.MeshBasicMaterial({
-          color: bezelTexture ? 0xffffff : 0x39d7ff, map: bezelTexture, transparent: true, opacity: 0.9,
-          side: THREE.DoubleSide, depthWrite: false,
-        });
-        earthBezelMesh = new THREE.Mesh(geo, mat);
-        earthBezelMesh.renderOrder = 5;
-        earthBezelMesh.frustumCulled = false;
-        earthBezelMesh.visible = false;
-        scene.add(earthBezelMesh);
-      }
-      if (!earthCompassCanvas && typeof document !== 'undefined') {
-        earthCompassCanvas = document.createElement('canvas');
-        earthCompassCanvas.width = 256;
-        earthCompassCanvas.height = 256;
-        earthCompassCtx = earthCompassCanvas.getContext('2d');
-      }
-      if (!earthCompassTexture && earthCompassCanvas && THREE) {
-        earthCompassTexture = new THREE.CanvasTexture(earthCompassCanvas);
-        try { if (THREE.SRGBColorSpace !== undefined) earthCompassTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-      }
-      if (!earthCompassMesh && earthCompassTexture) {
-        const mat = new THREE.MeshBasicMaterial({
-          map: earthCompassTexture, transparent: true,
-          depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-        });
-        earthCompassMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), mat);
-        earthCompassMesh.renderOrder = 101;
-        earthCompassMesh.frustumCulled = false;
-        earthCompassMesh.visible = false;
-        earthCompassMesh.userData.compassBadge = true;
-        scene.add(earthCompassMesh);
-      }
-    } catch (e) {}
-  }
-  // Live compass dial: the card rotates so N always points at true north
-  // relative to the viewer; ring glows cyan while the map is locked north-up.
-  let earthCompassKey = '';
-  function refreshEarthCompassCanvas(relBearing) {
-    if (!earthCompassCtx || !earthCompassCanvas) return;
-    try {
-      const rel = Number.isFinite(relBearing) ? relBearing : 0;
-      const deg = Math.round(rel * 180 / Math.PI);
-      const aligned = Math.abs(((deg % 360) + 540) % 360 - 180) < 3;
-      const key = deg + '|' + (earthNorthUp ? 1 : 0) + '|' + (aligned ? 1 : 0);
-      if (key === earthCompassKey) return;
-      earthCompassKey = key;
-      const ctx = earthCompassCtx;
-      ctx.setTransform && ctx.setTransform(2, 0, 0, 2, 0, 0);
-      ctx.clearRect(0, 0, 128, 128);
-      const accent = (earthNorthUp || aligned) ? '#39D7FF' : '#FFB11F';
-      if (ctx.createRadialGradient) {
-        const g = ctx.createRadialGradient(64, 56, 6, 64, 64, 62);
-        g.addColorStop(0, 'rgba(22,44,72,0.96)');
-        g.addColorStop(1, 'rgba(5,10,22,0.97)');
-        ctx.fillStyle = g;
-      } else ctx.fillStyle = 'rgba(7,12,24,0.95)';
-      ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.save();
-      ctx.translate(64, 64);
-      ctx.rotate(rel);
-      for (let d = 0; d < 360; d += 15) {
-        const a = d * Math.PI / 180;
-        const long = d % 90 === 0;
-        ctx.strokeStyle = long ? '#DFF8FF' : 'rgba(140,190,220,0.6)';
-        ctx.lineWidth = long ? 2 : 1;
-        ctx.beginPath();
-        ctx.moveTo(Math.sin(a) * 52, -Math.cos(a) * 52);
-        ctx.lineTo(Math.sin(a) * (long ? 44 : 47), -Math.cos(a) * (long ? 44 : 47));
-        ctx.stroke();
-      }
-      // North needle (amber) + south tail
-      ctx.fillStyle = '#FFB11F';
-      ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(8, 0); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = 'rgba(190,215,235,0.55)';
-      ctx.beginPath(); ctx.moveTo(0, 36); ctx.lineTo(7, 0); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#F7FAFC';
-      ctx.font = '800 15px Archivo, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('N', 0, -30 + 0);
-      ctx.restore();
-      ctx.fillStyle = '#0B1626';
-      ctx.beginPath(); ctx.arc(64, 64, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
-      // Fixed lubber marker (view-up) at the top edge
-      ctx.fillStyle = accent;
-      ctx.beginPath(); ctx.moveTo(64, 2); ctx.lineTo(71, 12); ctx.lineTo(57, 12); ctx.closePath(); ctx.fill();
-      if (earthCompassTexture) earthCompassTexture.needsUpdate = true;
-    } catch (e) {}
-  }
-  function updateEarthBezel() {
-    if (!earthBezelMesh || !earthCompassMesh) return;
-    try {
-      const head = getHeadPosition();
-      const center = earthLiveCenter();
-      const radius = earthBezelRadius();
-      const show = !!(debugFlags.horizonhud && sceneMode === 'earth' && earthFocus && Math.max(1, earthZoom) >= 16 && radius > 0);
-      earthBezelMesh.visible = show;
-      earthCompassMesh.visible = show;
-      if (!show) return;
-      const rel = earthMapBearing();
-      // Bezel lies IN the map's tangent plane at the focus (a convex planet falls
-      // away beneath it, so it reads as a floating surveyor's plate): local
-      // +X = east, +Y = true north (texture top), +Z = outward normal.
-      const anchor = earthZoomAnchor || { x: center.x, y: center.y, z: center.z };
-      const basis = earthGeographicBasis(earthFocus.lat, earthFocus.lon);
-      const nW = qRotate(earthQuat, basis.normal);
-      const northW = qRotate(earthQuat, basis.north);
-      const eastW = vNorm(vCross(northW, nW));
-      const lift = 0.012;
-      earthBezelMesh.position.set(anchor.x + nW.x * lift, anchor.y + nW.y * lift, anchor.z + nW.z * lift);
-      earthBezelMesh.scale.setScalar(Math.max(0.05, radius));
-      try {
-        const bq = qFromBasis(eastW, northW, nW);
-        earthBezelMesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
-      } catch (e2) { earthBezelMesh.lookAt(anchor.x + nW.x, anchor.y + nW.y, anchor.z + nW.z); }
-      if (earthBezelMesh.material) {
-        earthBezelMesh.material.opacity = reducedMotion ? 0.9 : 0.8 + 0.1 * Math.sin(Date.now() * 0.002);
-      }
-      // Compass dial rides beside the breadcrumb (camera-plane left of it), so
-      // it is always on-screen, never overlaps the label, and stays pointable.
-      refreshEarthCompassCanvas(rel);
-      const lbl = earthLabelMesh && earthLabelMesh.visible ? earthLabelMesh : null;
-      const ls = lbl ? (lbl.scale.x || 1) : 1;
-      const gazeFwd = earthHeadForward(), fovHalf = earthViewHalfFov();
-      if (lbl) {
-        let fx = head.x - lbl.position.x, fy = head.y - lbl.position.y, fz = head.z - lbl.position.z;
-        const fl = Math.hypot(fx, fy, fz) || 1;
-        fx /= fl; fz /= fl;
-        let rx = fz, rz = -fx;
-        const rl = Math.hypot(rx, rz) || 1;
-        rx /= rl; rz /= rl;
-        const off = EARTH_LABEL_HALF_W * ls + 0.14 * ls;
-        // Candidate slots beside the breadcrumb, in preference order: left,
-        // right, above-left, below-left. Take the first that is fully in view
-        // and clear of the reel card; else fall back to the least-bad (left).
-        const upx = 0, upy = 1;
-        const slots = [
-          { x: -rx * off, y: 0, z: -rz * off },
-          { x: rx * off, y: 0, z: rz * off },
-          { x: -rx * 0.33 * ls, y: upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
-          { x: -rx * 0.33 * ls, y: -upy * (EARTH_LABEL_HALF_H + 0.13) * ls, z: -rz * 0.33 * ls },
-        ];
-        let chosen = null;
-        for (const sl of slots) {
-          const cand = { x: lbl.position.x + sl.x, y: lbl.position.y + sl.y, z: lbl.position.z + sl.z };
-          const cc = earthGazeClamp(cand, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
-          if (cc.clamped) continue;
-          if (earthPreviewMesh && earthRectOverlapsPanel(cand, 0.1 * ls, 0.1 * ls, earthPreviewMesh, 0.25, 0.35, gazeFwd, 0.02)) continue;
-          let blocked = false;
-          for (const k of earthHudKeeps) {
-            const ca = earthViewAngles(cand, head, gazeFwd), ka = earthViewAngles(k, head, gazeFwd);
-            const rA = Math.atan(0.1 * ls / ca.d) + Math.atan(k.r / ka.d);
-            if (Math.abs(ca.yaw - ka.yaw) < rA && Math.abs(ca.pitch - ka.pitch) < rA) { blocked = true; break; }
-          }
-          if (blocked) continue;
-          chosen = cand;
-          break;
-        }
-        if (!chosen) chosen = { x: lbl.position.x + slots[0].x, y: lbl.position.y, z: lbl.position.z + slots[0].z };
-        earthCompassMesh.position.set(chosen.x, chosen.y, chosen.z);
-      } else {
-        earthCompassMesh.position.set(anchor.x, anchor.y + 0.16, anchor.z - radius - 0.1);
-      }
-      earthCompassMesh.scale.setScalar(ls);
-      {
-        const cw = earthGazeClamp(earthCompassMesh.position, head, gazeFwd, 0.1 * ls, 0.1 * ls, fovHalf);
-        if (cw.clamped) earthCompassMesh.position.set(cw.x, cw.y, cw.z);
-        // Never sit on the breadcrumb: slide down-left out of it if they meet.
-        if (lbl) earthSeparatePanel(earthCompassMesh, 0.1, 0.1, lbl, EARTH_LABEL_HALF_W, EARTH_LABEL_HALF_H, gazeFwd, head, fovHalf, 'left');
-      }
-      earthCompassMesh.lookAt(head.x, head.y, head.z);
-      earthCompassMesh.userData.worldRadius = 0.14 * ls;
-    } catch (e) {}
-  }
-
   // Notification State
   let notificationText = '';
   let notificationUntil = 0;
@@ -704,6 +466,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // VR comment keyboard (DOM overlay) state
   let domOverlayRoot = null;
   let domOverlayInput = null;
+  let vrKeyboardOpen = false;
   let pendingSyncTime = null;
 
   // Telemetry & Render Stats
@@ -804,6 +567,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let glowAlphaTexture = null;
   let glowProbeCanvas = null;
   let glowProbeCtx = null;
+  let glowProbePending = false;
   // Ambient glow color state (upstream updateAmbilightColor semantics:
   // 8x8 video probe, enhance, lerp toward target).
   let glowColor = [0.10, 0.24, 0.62];
@@ -867,6 +631,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let controlsCanvas = null;
   let controlsCtx = null;
   let controlsTexture = null;
+  // Logical (pre-UI_PANEL_RES) dock canvas size; shrinks to fit the live
+  // controls (VRUICanvas.controlsCanvasSize).
+  let controlsLogicalW = 1024;
+  let controlsLogicalH = 384;
   let commentsCanvas = null;
   let commentsCtx = null;
   let commentsTexture = null;
@@ -923,6 +691,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     return tex;
   }
 
+  // UI panel textures: legacy linear sampling, except in desktop hi-fi
+  // preview, where panels minified into a laptop window shimmer without mips.
+  function applyPanelSampling(tex) {
+    return previewHiFi ? applyEarthTileSampling(tex) : applyLinearSampling(tex);
+  }
+
+  // Dock / comments / guide / earth-card canvases are rastered at
+  // UI_PANEL_RES× their logical layout (drawing code keeps logical px via
+  // setTransform) and always mipmapped, so text stays sharp in-headset
+  // without enlarging the panels. The 1024² overlay stays 1×.
+  const UI_PANEL_RES = 2;
+  function createPanelCanvas(w, h) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w * UI_PANEL_RES;
+    canvas.height = h * UI_PANEL_RES;
+    const ctx = canvas.getContext('2d');
+    if (ctx && ctx.setTransform) ctx.setTransform(UI_PANEL_RES, 0, 0, UI_PANEL_RES, 0, 0);
+    return { canvas, ctx };
+  }
+
   // ─── Preview sizing & camera ──────────────────────────────────────
   // Mirrors the old raw-WebGL resizePreviewCanvas(): keeps the drawing
   // buffer in sync with CSS layout every frame instead of freezing the
@@ -972,21 +760,41 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the tilted top edge still clears the sphere (see dock test).
   const EARTH_DOCK_POS = { x: 0, y: 0.20, z: -0.85 };
 
-  // Target world sizes (meters) for a given screen base size.
-  function dockTargetSize(base) {
-    const w = base * 0.82;
-    return { w, h: w * (384 / 1024) };
+  // Layout tuning for the /reels/immersive-preview sliders. Defaults are the
+  // shipped constants; stopPreview and every XR session reset to them, so
+  // the headset only ever sees values that were pasted back into the code.
+  function defaultLayoutTuning() {
+    return {
+      screenScale: DEFAULT_SCALE,
+      screenDistance: -DEFAULT_POS.z,
+      screenHeight: DEFAULT_POS.y,
+      dockWidth: 0.82,
+      dockGap: DOCK_GAP,
+      panelSideGap: PANEL_SIDE_GAP,
+      panelFwdOffset: PANEL_FWD_OFFSET,
+      commentsScale: CPANEL_SCALE_FACTOR,
+      guideScale: GUIDE_SCALE_FACTOR,
+    };
+  }
+  let layoutTuning = defaultLayoutTuning();
+
+  // Target world sizes (meters) for a given screen base size. dockWidth sizes
+  // the full 1024x384 dock; a smaller fitted canvas keeps the same metres per
+  // canvas pixel so the controls stay the same physical size.
+  function dockTargetSize(base, canvasW = 1024, canvasH = 384) {
+    const mpp = base * layoutTuning.dockWidth / 1024;
+    return { w: mpp * canvasW, h: mpp * canvasH };
   }
   function commentsPanelTargetSize(base) {
     const ui = getUICanvas();
-    const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (680 / 560);
-    const w = base * CPANEL_SCALE_FACTOR;
+    const aspect = ui ? (ui.CPANEL_H / ui.CPANEL_W) : (920 / 560);
+    const w = base * layoutTuning.commentsScale;
     return { w, h: w * aspect };
   }
   function guideTargetSize(base) {
     const ui = getUICanvas();
-    const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
-    const w = base * GUIDE_SCALE_FACTOR;
+    const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
+    const w = base * layoutTuning.guideScale;
     return { w, h: w * aspect };
   }
 
@@ -996,7 +804,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // UI derived screen-relative at live screenScale. (The v8.4 tandem rig was
   // reverted per owner request.)
   function getLockedAnchor() {
-    return { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
+    return { x: DEFAULT_POS.x, y: layoutTuning.screenHeight, z: -layoutTuning.screenDistance };
   }
 
   function ensureScreenQuat() {
@@ -1110,9 +918,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Legacy-exact: the transport panel stays fixed and level in the room
       // at the default screen spot while the locked screen follows the gaze.
       const a = getLockedAnchor();
-      pos = { x: a.x, y: a.y - DEFAULT_SCALE / 2 - DOCK_GAP, z: a.z };
+      pos = { x: a.x, y: a.y - layoutTuning.screenScale / 2 - layoutTuning.dockGap, z: a.z };
     } else {
-      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - DOCK_GAP, z: 0 });
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
     const hx = (headPos && Number(headPos.x)) || 0;
@@ -1134,19 +942,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   // spot sized at DEFAULT_SCALE; unlocked = screen-relative at live scale
   // (upstream getCommentsPanelCenter/Size + getGuideCenter verbatim).
   function getCommentsPanelLayout() {
-    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x - base / 2 - size.w / 2 - PANEL_SIDE_GAP,
+        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + PANEL_FWD_OFFSET,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: -base / 2 - size.w / 2 - PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+        x: -base / 2 - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
@@ -1154,19 +962,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function getGuidePanelLayout() {
-    const base = lockToViewer ? DEFAULT_SCALE : screenScale;
+    const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = guideTargetSize(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x + base / 2 + size.w / 2 + PANEL_SIDE_GAP,
+        x: a.x + base / 2 + size.w / 2 + layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + PANEL_FWD_OFFSET,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: base / 2 + size.w / 2 + PANEL_SIDE_GAP, y: 0, z: PANEL_FWD_OFFSET,
+        x: base / 2 + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
@@ -1260,7 +1068,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     guideMesh.position.set(layout.center.x, layout.center.y, layout.center.z);
     try {
       const ui = getUICanvas();
-      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
       guideMesh.scale.set(layout.w, layout.h / aspect, 1);
     } catch (e) {}
     faceViewerLevel(guideMesh, headPos);
@@ -1279,9 +1087,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       controlsMesh.rotation.set(pose.pitch, pose.yaw, 0);
     }
     // Legacy-exact dock sizing: earth 1.2, locked DEFAULT_SCALE, else live.
-    const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? DEFAULT_SCALE : screenScale);
-    const size = dockTargetSize(base);
+    const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? layoutTuning.screenScale : screenScale);
+    const size = dockTargetSize(base, controlsLogicalW, controlsLogicalH);
     try { controlsMesh.scale.set(size.w / 1.6, size.h / 0.6, 1); } catch (e) {}
+    // Keep the top edge where the full-height dock had it (same gap below the
+    // screen) when the fitted canvas is shorter.
+    const lift = (dockTargetSize(base).h - size.h) / 2;
+    if (lift > 0) {
+      try { controlsMesh.position.add(new THREE.Vector3(0, lift, 0).applyQuaternion(controlsMesh.quaternion)); } catch (e) {}
+    }
     // Side panels keep their stations but face the viewer too.
     layoutCommentsPanel(headPos);
     layoutGuidePanel(headPos);
@@ -2289,147 +2103,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     else ctx.rect(x, y, w, h);
   }
   function drawEarthLabelPanel(ctx, o) {
-    // Logical space is 640×148; the canvas is 2× for crisp text in-headset.
+    // The canvas is 2× the 640×148 logical layout (crisp in-headset).
     if (ctx.setTransform) { const k = (earthLabelCanvas && earthLabelCanvas.width / 640) || 1; ctx.setTransform(k, 0, 0, k, 0, 0); }
-    ctx.clearRect(0, 0, EARTH_LABEL_LOGICAL_W, EARTH_LABEL_LOGICAL_H);
-    const tierIdx = earthTierIndex(o.scale);
-    const tier = o.offline ? { name: 'OFFLINE', color: '#FF7A59' } : EARTH_TIERS[tierIdx];
-    const accent = o.featured ? '#FFB11F' : tier.color;
-    const hasGrad = !!ctx.createLinearGradient;
-    // Glass body
-    earthRoundRect(ctx, 2, 2, 636, EARTH_LABEL_LOGICAL_H - 4, 20);
-    if (hasGrad) {
-      const g = ctx.createLinearGradient(0, 2, 0, EARTH_LABEL_LOGICAL_H - 2);
-      g.addColorStop(0, 'rgba(18,34,58,0.95)');
-      g.addColorStop(1, 'rgba(5,10,22,0.97)');
-      ctx.fillStyle = g;
-    } else ctx.fillStyle = 'rgba(8,16,30,0.96)';
-    ctx.fill();
-    // Rim: accent on the left fading to slate on the right
-    if (hasGrad) {
-      const rg = ctx.createLinearGradient(0, 0, 640, 0);
-      rg.addColorStop(0, accent);
-      rg.addColorStop(0.55, 'rgba(70,100,134,0.75)');
-      rg.addColorStop(1, 'rgba(58,80,107,0.55)');
-      ctx.strokeStyle = rg;
-    } else ctx.strokeStyle = accent;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    // Top specular line
-    if (hasGrad) {
-      const sg = ctx.createLinearGradient(20, 0, 620, 0);
-      sg.addColorStop(0, 'rgba(255,255,255,0)');
-      sg.addColorStop(0.5, 'rgba(190,235,255,0.35)');
-      sg.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.strokeStyle = sg;
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(24, 4.5); ctx.lineTo(616, 4.5); ctx.stroke();
-    }
-    ctx.textBaseline = 'middle';
-    // Tier chip
-    ctx.font = '700 12px "JetBrains Mono", monospace';
-    const chipText = tier.name;
-    const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
-    earthRoundRect(ctx, 18, 14, chipW, 26, 13);
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
-    ctx.fill();
-    ctx.strokeStyle = tier.color;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = tier.color;
-    ctx.beginPath(); ctx.arc(32, 27, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.textAlign = 'left';
-    ctx.fillText(chipText, 44, 28);
-    // Title (the zoom share is carried by the gauge, not repeated in text)
-    const titleText = o.zoomed ? String(o.title).replace(/\s·\s\d+%$/, '') : String(o.title);
-    const titleX = 18 + chipW + 14;
-    const titleMax = 540 - titleX;
-    let fs = 25;
-    ctx.fillStyle = '#F7FAFC';
-    ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
-    while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
-      fs -= 1;
-      ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
-    }
-    ctx.fillText(titleText, titleX, 28);
-    // Zoom gauge (right)
-    const gx = 592, gy = 34, gr = 20;
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(160,190,220,0.18)';
-    ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
-    const frac = Math.max(0, Math.min(1, (Number(o.zoomPct) || 0) / 100));
-    if (frac > 0.005) {
-      ctx.strokeStyle = tier.color;
-      ctx.beginPath(); ctx.arc(gx, gy, gr, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
-    }
-    ctx.lineCap = 'butt';
-    ctx.fillStyle = '#F7FAFC';
-    ctx.font = '700 13px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
-    // Detail line
-    ctx.textAlign = 'left';
-    ctx.fillStyle = o.offline ? '#FFB199' : '#B8C6D9';
-    ctx.font = '700 15px "JetBrains Mono", monospace';
-    ctx.fillText(o.detail, 20, 61);
-    // Divider
-    ctx.fillStyle = 'rgba(140,175,210,0.16)';
-    ctx.fillRect(20, 76, 600, 1);
-    // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
-    if (o.zoomed) {
-      ctx.fillStyle = '#7F93AD';
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('SCALE', 20, 94);
-      drawEarthScaleBar(ctx, o.scaleBar);
-    } else if (o.hint) {
-      ctx.fillStyle = '#7F93AD';
-      ctx.font = '700 11px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(o.hint, 20, 94);
-    }
-    // Action row: trigger hint (zoomed) left, RESET ROTATION button right.
-    ctx.fillStyle = 'rgba(140,175,210,0.16)';
-    ctx.fillRect(20, 106, 600, 1);
-    if (o.zoomed && o.hint) {
-      ctx.fillStyle = accent;
-      ctx.font = '700 11px "JetBrains Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(o.hint, 20, 127);
-    }
-    {
-      const b = EARTH_LABEL_RESET_RECT;
-      const on = !!o.resetEnabled, hot = on && !!o.resetHot;
-      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 14);
-      ctx.fillStyle = on ? (hot ? 'rgba(85,231,255,0.34)' : 'rgba(85,231,255,0.12)') : 'rgba(110,140,170,0.08)';
-      ctx.fill();
-      ctx.strokeStyle = on ? (hot ? '#BFF5FF' : 'rgba(85,231,255,0.85)') : 'rgba(110,140,170,0.35)';
-      ctx.lineWidth = hot ? 2.5 : 1.5;
-      ctx.stroke();
-      ctx.fillStyle = on ? (hot ? '#F2FDFF' : '#A9F0FF') : '#5F7891';
-      ctx.font = '800 12px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
-    }
-    // Realm ladder: four segments, filled through the current realm
-    const segW = 36, segGap = 6, ladderX = 620 - (segW * 4 + segGap * 3);
-    for (let i = 0; i < EARTH_TIERS.length; i++) {
-      const sx = ladderX + i * (segW + segGap);
-      ctx.fillStyle = 'rgba(160,190,220,0.16)';
-      earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
-      if (i <= tierIdx) {
-        ctx.fillStyle = EARTH_TIERS[i].color;
-        earthRoundRect(ctx, sx, 91, segW, 6, 3); ctx.fill();
-      }
-    }
-    // Tile streaming progress hairline along the bottom edge
-    if (o.streaming >= 0) {
-      ctx.fillStyle = 'rgba(160,190,220,0.16)';
-      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, 596, 2);
-      ctx.fillStyle = tier.color;
-      ctx.fillRect(22, EARTH_LABEL_LOGICAL_H - 6, Math.max(4, 596 * o.streaming), 2);
-    }
+    const ui = getUICanvas();
+    if (ui && ui.renderEarthLabelCanvas) ui.renderEarthLabelCanvas(ctx, o);
   }
 
   function refreshEarthLabel() {
@@ -2669,7 +2346,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Gaze-safe HUD placement ────────────────────────────────────────────
-  // Label / preview / compass are positioned from world anchors (so they sit
+  // Label / preview are positioned from world anchors (so they sit
   // naturally by the globe) but must never leave the viewer's field of view
   // when they move around. After the anchored placement, each panel's centre is
   // clamped — in head-relative yaw/pitch, at its own distance — so the WHOLE
@@ -3092,8 +2769,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     refreshEarthTexture();
     refreshEarthLabel();
     updateEarthTiles(time);
-    ensureEarthBezel();
-    updateEarthBezel();
     tickEarthPreviewDwell(); // desktop pointer rests send no hover updates
     updateEarthPreviewBillboard(time);
   }
@@ -4270,14 +3945,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // callers, tests, and future miss branches.
     if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
     const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
-    ctx.strokeStyle = '#E8F6FF';
+    ctx.strokeStyle = echoHex('ink', '#f2f3f5');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(left, 94); ctx.lineTo(right, 94);
     ctx.moveTo(left, 89); ctx.lineTo(left, 99);
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
-    ctx.fillStyle = '#E8F6FF';
+    ctx.fillStyle = echoHex('ink', '#f2f3f5');
     ctx.font = '700 15px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
@@ -5256,7 +4931,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const fullStack = useFullStack();
       const opts = fullStack
         ? { canvas, alpha: true, antialias: true, powerPreference: 'high-performance' }
-        : { canvas, alpha: false, antialias: false, powerPreference: 'high-performance' };
+        : { canvas, alpha: false, antialias: previewHiFi, powerPreference: 'high-performance' };
       lastRendererOpts = { alpha: !!opts.alpha, antialias: !!opts.antialias };
       if (context) opts.context = context;
       renderer = new THREE.WebGLRenderer(opts);
@@ -5368,7 +5043,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       overlayCtx = overlayCanvas.getContext('2d');
     }
     if (!overlayTexture && overlayCanvas && debugFlags.overlay) {
-      overlayTexture = applyLinearSampling(new THREE.CanvasTexture(overlayCanvas));
+      overlayTexture = applyPanelSampling(new THREE.CanvasTexture(overlayCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) overlayTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!overlayMesh && overlayTexture && debugFlags.overlay) {
@@ -5392,13 +5067,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Controls Dock Mesh
     const ui = getUICanvas();
     if (!controlsCanvas && typeof document !== 'undefined') {
-      controlsCanvas = document.createElement('canvas');
-      controlsCanvas.width = ui ? ui.CONTROLS_W : 1024;
-      controlsCanvas.height = ui ? ui.CONTROLS_H : 384;
-      controlsCtx = controlsCanvas.getContext('2d');
+      controlsLogicalW = ui ? ui.CONTROLS_W : 1024;
+      controlsLogicalH = ui ? ui.CONTROLS_H : 384;
+      ({ canvas: controlsCanvas, ctx: controlsCtx } = createPanelCanvas(controlsLogicalW, controlsLogicalH));
     }
     if (!controlsTexture && controlsCanvas) {
-      controlsTexture = applyLinearSampling(new THREE.CanvasTexture(controlsCanvas));
+      controlsTexture = applyEarthTileSampling(new THREE.CanvasTexture(controlsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) controlsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!controlsMesh && controlsTexture) {
@@ -5420,13 +5094,11 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     // Comments Panel Mesh
     if (!commentsCanvas && typeof document !== 'undefined') {
-      commentsCanvas = document.createElement('canvas');
-      commentsCanvas.width = ui ? ui.CPANEL_W : 560;
-      commentsCanvas.height = ui ? ui.CPANEL_H : 680;
-      commentsCtx = commentsCanvas.getContext('2d');
+      ({ canvas: commentsCanvas, ctx: commentsCtx } = createPanelCanvas(
+        ui ? ui.CPANEL_W : 560, ui ? ui.CPANEL_H : 920));
     }
     if (!commentsTexture && commentsCanvas) {
-      commentsTexture = applyLinearSampling(new THREE.CanvasTexture(commentsCanvas));
+      commentsTexture = applyEarthTileSampling(new THREE.CanvasTexture(commentsCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) commentsTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!commentsMesh && commentsTexture) {
@@ -5449,17 +5121,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Controller guide mesh (upstream guide panel, RIGHT of the player).
     // ?guide=0 skips it entirely.
     if (!guideCanvas && typeof document !== 'undefined' && debugFlags.guide) {
-      guideCanvas = document.createElement('canvas');
-      guideCanvas.width = uiOverlay ? uiOverlay.GUIDE_W : 440;
-      guideCanvas.height = uiOverlay ? uiOverlay.GUIDE_H : 760;
-      guideCtx = guideCanvas.getContext('2d');
+      ({ canvas: guideCanvas, ctx: guideCtx } = createPanelCanvas(
+        uiOverlay ? uiOverlay.GUIDE_W : 440, uiOverlay ? uiOverlay.GUIDE_H : 1124));
     }
     if (!guideTexture && guideCanvas && debugFlags.guide) {
-      guideTexture = applyLinearSampling(new THREE.CanvasTexture(guideCanvas));
+      guideTexture = applyEarthTileSampling(new THREE.CanvasTexture(guideCanvas));
       try { if (THREE.SRGBColorSpace !== undefined) guideTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!guideMesh && guideTexture && debugFlags.guide) {
-      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (760 / 440);
+      const aspect = ui ? (ui.GUIDE_H / ui.GUIDE_W) : (1124 / 440);
       const gGeo = new THREE.PlaneGeometry(1, aspect);
       const gMat = new THREE.MeshBasicMaterial({
         map: guideTexture,
@@ -5702,7 +5372,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // NOTE: do NOT set renderOrder on this THREE.Group. Group.renderOrder is a
       // *group sort order* that outranks every child's own renderOrder, so a value
       // here drew the whole tile layer AFTER the scene-rooted HUD (label, preview
-      // card, bezel, compass) and buried them under the map at any zoom with tiles.
+      // card) and buried them under the map at any zoom with tiles.
       // Tile meshes carry their own renderOrder (1 coarse / 2 fine).
       earthTileGroup.frustumCulled = false;
       earthMesh.add(earthTileGroup);
@@ -5756,18 +5426,15 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       if (!earthPreviewCanvas && typeof document !== 'undefined') {
         try {
-          earthPreviewCanvas = document.createElement('canvas');
           // 512×716 keeps the 0.5 × 0.7 m billboard texel-square (no stretch).
-          earthPreviewCanvas.width = 512;
-          earthPreviewCanvas.height = 716;
-          earthPreviewCtx = earthPreviewCanvas.getContext('2d');
+          ({ canvas: earthPreviewCanvas, ctx: earthPreviewCtx } = createPanelCanvas(512, 716));
         } catch (e) {
           earthPreviewCanvas = null;
           earthPreviewCtx = null;
         }
       }
       if (!earthPreviewTexture && earthPreviewCanvas && THREE) {
-        earthPreviewTexture = applyLinearSampling(new THREE.CanvasTexture(earthPreviewCanvas));
+        earthPreviewTexture = applyEarthTileSampling(new THREE.CanvasTexture(earthPreviewCanvas));
         try { if (THREE.SRGBColorSpace !== undefined) earthPreviewTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
       }
       if (!earthPreviewMesh && earthPreviewTexture) {
@@ -6191,6 +5858,34 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastUploadedSource = '__cleared__';
   }
 
+  // Per-frame screen texture update, shared by the preview and XR loops.
+  function updateVisualTexture(source) {
+    if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
+      // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
+      // the current frame per render. Telemetry counts decoded frames.
+      if (updateDirectVideoBinding(source, false)) {
+        const vf = decodedFrameCount(source.element);
+        if (vf >= 0 && vf !== lastVideoFrameCount) {
+          renderStats.videoUploads += 1;
+          lastVideoFrameCount = vf;
+        }
+        lastVideoTime = Number(source.currentTime) || 0;
+        hasDisplayedVisual = true;
+      } else {
+        // Fresh element below HAVE_FUTURE_DATA or source not ready: hold
+        // the previous map (v8.9 semantics), count the wait.
+        renderStats.transNotReady += 1;
+      }
+    } else if (source && source.ready === false) {
+      // Frames spent waiting for data (buffering/seeking at transitions):
+      // counted so on-device telemetry attributes stalls to buffering.
+      if (source.element) renderStats.transNotReady += 1;
+      clearPendingTexture();
+    } else {
+      uploadVideoFrame();
+    }
+  }
+
   // Samples the playing video at 8x8 and steers the ambient glow color
   // (upstream updateAmbilightColor: average, enhance, lerp 0.08/frame).
   function updateGlowColor(time, intervalMs) {
@@ -6206,6 +5901,25 @@ window.WebXRVR = window.WebXRVR || (function () {
       const layout = sourceStereoLayout(source);
       const vw = Number(source.element.videoWidth) || 0;
       const vh = Number(source.element.videoHeight) || 0;
+      if (typeof createImageBitmap === 'function' && vw > 0 && vh > 0) {
+        // v8.28: scale to 8x8 on the GPU and read back only that. Drawing
+        // the video into the software probe canvas read back the whole
+        // frame: 51–58 ms of main thread per sample on 3840² HEVC (Quest
+        // 3S), a ~5-frame hitch every 800 ms. Stereo: left eye only.
+        if (glowProbePending) return;
+        glowProbePending = true;
+        createImageBitmap(source.element, 0, 0,
+          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh,
+          { resizeWidth: 8, resizeHeight: 8, resizeQuality: 'low' })
+          .then((bmp) => {
+            glowProbeCtx.drawImage(bmp, 0, 0);
+            try { bmp.close(); } catch (e) {}
+            setGlowTargetFromProbe();
+          })
+          .catch(() => {})
+          .then(() => { glowProbePending = false; });
+        return;
+      }
       if (layout !== 'mono' && vw > 0 && vh > 0) {
         // Stereo: average the left eye only.
         glowProbeCtx.drawImage(source.element, 0, 0,
@@ -6213,16 +5927,21 @@ window.WebXRVR = window.WebXRVR || (function () {
       } else {
         glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
       }
-      const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
-      let r = 0, g = 0, b = 0;
-      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-      const n = (d.length / 4) * 255;
-      glowTarget = [
-        Math.min(1, (r / n) * 1.35 + 0.03),
-        Math.min(1, (g / n) * 1.35 + 0.05),
-        Math.min(1, (b / n) * 1.45 + 0.09),
-      ];
+      setGlowTargetFromProbe();
     } catch (e) {}
+  }
+
+  // Average the 8x8 probe canvas into the glow target (enhanced).
+  function setGlowTargetFromProbe() {
+    const d = glowProbeCtx.getImageData(0, 0, 8, 8).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    const n = (d.length / 4) * 255;
+    glowTarget = [
+      Math.min(1, (r / n) * 1.35 + 0.03),
+      Math.min(1, (g / n) * 1.35 + 0.05),
+      Math.min(1, (b / n) * 1.45 + 0.09),
+    ];
   }
 
   function applyGlowColor() {
@@ -6247,9 +5966,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!ui || ui.CP_LIST_TOP === undefined) return;
     let filtered = comments;
-    if (cPanelTab === 'sync') {
-      filtered = comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined);
-    } else if (cPanelTab === 'general') {
+    if (cPanelTab === 'general') {
       filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
     }
     const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
@@ -6383,6 +6100,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (controlsCtx && !(debugFlags.dockfreeze && dockFreezePainted)) {
       const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
       const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
+      resizeControlsCanvas(ui.controlsCanvasSize({
+        source, itemState, sceneMode, packMode: isPackExperience(),
+      }));
       ui.renderControlsCanvas(controlsCtx, {
         source,
         itemState,
@@ -6443,6 +6163,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         cPanelHighlightId,
         user: callbacks.getCurrentUser ? callbacks.getCurrentUser() : null,
         currentTime: source.currentTime,
+        ...commentsPanelItem(),
       });
       if (commentsTexture) {
         commentsTexture.needsUpdate = true;
@@ -6969,31 +6690,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     applySceneVisibility();
 
     if (sceneMode === 'reels') {
-      const source = getVisualSource();
-      if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
-        // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
-        // the current frame per render. Telemetry counts decoded frames.
-        if (updateDirectVideoBinding(source, false)) {
-          const vf = decodedFrameCount(source.element);
-          if (vf >= 0 && vf !== lastVideoFrameCount) {
-            renderStats.videoUploads += 1;
-            lastVideoFrameCount = vf;
-          }
-          lastVideoTime = Number(source.currentTime) || 0;
-          hasDisplayedVisual = true;
-        } else {
-          // Fresh element below HAVE_FUTURE_DATA or source not ready: hold
-          // the previous map (v8.9 semantics), count the wait.
-          renderStats.transNotReady += 1;
-        }
-      } else if (source && source.ready === false) {
-        // Frames spent waiting for data (buffering/seeking at transitions):
-        // counted so on-device telemetry attributes stalls to buffering.
-        if (source.element) renderStats.transNotReady += 1;
-        clearPendingTexture();
-      } else {
-        uploadVideoFrame();
-      }
+      updateVisualTexture(getVisualSource());
       updateGlowColor(time, 120);
       applyGlowColor();
       refreshOverlayTexture(time);
@@ -7167,14 +6864,29 @@ window.WebXRVR = window.WebXRVR || (function () {
     return { ray, hit: null, controlIndex, panelDesc };
   }
 
+  // Resizes the dock canvas to the fitted logical size. The texture is
+  // disposed so three reallocates its (immutable) GPU storage at the new size,
+  // and the mesh is rescaled to keep the controls' physical size.
+  function resizeControlsCanvas(size) {
+    if (!controlsCanvas || !size) return;
+    if (size.w === controlsLogicalW && size.h === controlsLogicalH) return;
+    controlsLogicalW = size.w;
+    controlsLogicalH = size.h;
+    controlsCanvas.width = size.w * UI_PANEL_RES;
+    controlsCanvas.height = size.h * UI_PANEL_RES;
+    if (controlsCtx && controlsCtx.setTransform) controlsCtx.setTransform(UI_PANEL_RES, 0, 0, UI_PANEL_RES, 0, 0);
+    if (controlsTexture) { try { controlsTexture.dispose(); } catch (e) {} }
+    layoutControlsDock();
+  }
+
   // Maps a controls-dock UV hit to a button index (shared by preview
   // hover, XR hover, and XR select handling).
   function controlIndexFromUV(uv) {
     if (!uv) return -1;
     const ui = getUICanvas();
     if (!ui) return -1;
-    const w = controlsCanvas ? controlsCanvas.width : 1024;
-    const h = controlsCanvas ? controlsCanvas.height : 384;
+    const w = controlsLogicalW;
+    const h = controlsLogicalH;
     const cx = uv.x * w;
     const cy = (1 - uv.y) * h;
     const source = getVisualSource();
@@ -7231,23 +6943,10 @@ window.WebXRVR = window.WebXRVR || (function () {
           raycaster.set(origin, direction);
         }
         if (hovering < 0 && !carded && earthMesh && earthGroup && earthGroup.visible !== false) {
-          let compassed = false;
-          if (earthCompassMesh && earthCompassMesh.visible) {
-            try {
-              const hits = raycaster.intersectObject(earthCompassMesh, false);
-              if (hits.length > 0) {
-                dist = hits[0].distance;
-                hovering = -3; // compass badge hover (own highlight channel)
-                compassed = true;
-              }
-            } catch (e) {}
-          }
-          if (!compassed) {
-            const hit = hitTestEarth(origin, direction);
-            if (hit.hit) {
-              dist = hit.dist;
-              hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
-            }
+          const hit = hitTestEarth(origin, direction);
+          if (hit.hit) {
+            dist = hit.dist;
+            hovering = hit.zoneIndex >= 0 ? -2 : -1; // -2 = globe hover (no dock button)
           }
         }
       } else {
@@ -7267,14 +6966,14 @@ window.WebXRVR = window.WebXRVR || (function () {
             try {
               const ui = getUICanvas();
               if (hits[0].uv && ui && typeof ui.resolveCommentsPanelRegion === 'function') {
-                const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
-                const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+                const w = ui.CPANEL_W;
+                const h = ui.CPANEL_H;
                 lastCommentsCanvasX = hits[0].uv.x * w;
                 lastCommentsCanvasY = (1 - hits[0].uv.y) * h;
                 const comments = callbacks.getComments ? callbacks.getComments() : [];
                 cPanelHover = ui.resolveCommentsPanelRegion(
                   lastCommentsCanvasX, lastCommentsCanvasY,
-                  { comments, cPanelTab, cPanelScrollY }) || '';
+                  { comments, cPanelTab, cPanelScrollY, ...commentsPanelItem() }) || '';
               }
             } catch (e) {}
           }
@@ -7302,7 +7001,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         } catch (e) {}
       }
     } catch (e) {}
-    const isHover = hovering >= 0 || overScreen || hovering === -2 || hovering === -3;
+    const isHover = hovering >= 0 || overScreen || hovering === -2;
     dist = Math.max(0.2, Math.min(30, dist));
     try {
       laserPositions[0] = origin.x;
@@ -7505,10 +7204,55 @@ window.WebXRVR = window.WebXRVR || (function () {
     return (renderStats[k] || 0) - (xrDiagBases[k] || 0);
   }
 
+  // Last reel switch: load start to first decoded frame, reported by the host
+  // page (docs/vr-playback-reverse-engineering.md, step 0.5 baseline).
+  let lastSwitchTiming = null;
+  function noteSwitchTiming(ms, src, fromCache) {
+    lastSwitchTiming = {
+      ms: Math.round(Number(ms) || 0),
+      src: String(src || '').split('?')[0].split('/').pop().slice(-80),
+      fromCache: !!fromCache,
+    };
+  }
+
+  // Mid-play stalls of the active video: a 'waiting' after playback started
+  // (not while seeking), timed until it plays again or the source changes.
+  // Startup waits are switchMs. Bound only while ?xrdiag=1 is on.
+  let stallEl = null;
+  let stallStart = -1;
+  let stallCount = 0;
+  let stallMs = 0;
+  let stallPosted = { count: 0, ms: 0 };
+  function stallNow() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+  function onStallWaiting() {
+    if (!stallEl || stallStart >= 0 || stallEl.seeking || !(Number(stallEl.currentTime) > 0)) return;
+    stallStart = stallNow();
+    stallCount += 1;
+  }
+  function onStallEnd() {
+    if (stallStart < 0) return;
+    stallMs += stallNow() - stallStart;
+    stallStart = -1;
+  }
+  function trackStalls(el) {
+    if (el === stallEl) return;
+    const events = { waiting: onStallWaiting, playing: onStallEnd, emptied: onStallEnd };
+    if (stallEl && stallEl.removeEventListener) {
+      for (const k in events) stallEl.removeEventListener(k, events[k]);
+    }
+    onStallEnd();
+    stallEl = el && el.addEventListener ? el : null;
+    if (stallEl) for (const k in events) stallEl.addEventListener(k, events[k]);
+  }
+
   function postXRDiag(time) {
     // Debug-only: never sends anything unless ?xrdiag=1 opted in.
     if (!debugFlags.xrdiag) return;
     try {
+      try {
+        const vs = getVisualSource();
+        trackStalls(vs && vs.kind === 'video' ? vs.element : null);
+      } catch (e) {}
       if (xrDiagLastT >= 0) {
         const dt = time - xrDiagLastT;
         xrDiagFrames += 1;
@@ -7554,7 +7298,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         uploadMode: videoUploadMode,
         locked: lockToViewer,
         flags: { ...debugFlags },
+        switchMs: lastSwitchTiming ? lastSwitchTiming.ms : null,
+        switchSrc: lastSwitchTiming ? lastSwitchTiming.src : null,
+        switchFromCache: lastSwitchTiming ? lastSwitchTiming.fromCache : null,
       };
+      // Stalls since the last post; an ongoing stall counts up to now.
+      const stallTotal = stallMs + (stallStart >= 0 ? stallNow() - stallStart : 0);
+      payload.stalls = stallCount - stallPosted.count;
+      payload.stallMs = Math.round(stallTotal - stallPosted.ms);
+      payload.stalling = stallStart >= 0;
+      stallPosted = { count: stallCount, ms: stallTotal };
       xrDiagFrames = 0;
       xrDiagMaxDt = 0;
       resetXRDiag();
@@ -7857,6 +7610,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     previewCanvas = canvas;
     previewCameraMode = opts.cameraMode === 'orbit' ? 'orbit' : 'headset';
+    previewHiFi = !!opts.hiFi;
     stereoMode = !!opts.stereo;
     if (typeof opts.reducedMotion === 'boolean') reducedMotion = opts.reducedMotion;
     controlsVisible = opts.showControls !== false;
@@ -7934,6 +7688,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     screenPos = { x: DEFAULT_POS.x, y: DEFAULT_POS.y, z: DEFAULT_POS.z };
     screenScale = DEFAULT_SCALE;
     screenDistance = -DEFAULT_POS.z;
+    layoutTuning = defaultLayoutTuning();
+    previewHiFi = false;
     lockToViewer = false;
     cPanelTab = 'all';
     cPanelScrollY = 0;
@@ -7984,6 +7740,43 @@ window.WebXRVR = window.WebXRVR || (function () {
     applyPreviewCamera();
     emitPreviewState();
     return previewCameraMode;
+  }
+
+  function getLayoutTuning() {
+    return { ...layoutTuning };
+  }
+
+  // Preview-only: an XR session keeps the shipped layout. Screen size and
+  // distance go through the same clamps as the in-headset scale gestures.
+  function setLayoutTuning(patch) {
+    if (xrSession || !patch) return getLayoutTuning();
+    const next = { ...layoutTuning };
+    for (const key of Object.keys(next)) {
+      const value = Number(patch[key]);
+      if (patch[key] !== undefined && Number.isFinite(value)) next[key] = value;
+    }
+    next.screenScale = clampScreenScale(next.screenScale);
+    next.screenDistance = clampScreenDistance(next.screenDistance);
+    layoutTuning = next;
+    screenScale = next.screenScale;
+    screenDistance = next.screenDistance;
+    screenPos = { x: DEFAULT_POS.x, y: next.screenHeight, z: -next.screenDistance };
+    commitScreenTransform();
+    layoutControlsDock();
+    return getLayoutTuning();
+  }
+
+  function resetLayoutTuning() {
+    return setLayoutTuning(defaultLayoutTuning());
+  }
+
+  // Vertical FOV of the desktop preview camera (three.js fov is vertical).
+  function setPreviewFov(degrees) {
+    const fov = Number(degrees);
+    if (xrSession || !camera || !Number.isFinite(fov)) return camera ? camera.fov : null;
+    camera.fov = Math.max(30, Math.min(120, fov));
+    camera.updateProjectionMatrix();
+    return camera.fov;
   }
 
   async function requestPreviewFullscreen(target) {
@@ -8101,11 +7894,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Label/preview are scene-rooted (Z1 zoom), so they gate explicitly.
     if (earthLabelMesh) earthLabelMesh.visible = isEarth;
     if (earthPreviewMesh && !isEarth) earthPreviewMesh.visible = false;
-    // The street bezel ring and compass dial are scene-rooted too: only the
-    // Earth dressing pass re-shows them, so every other mode must hide them.
     if (!isEarth) {
-      if (earthBezelMesh) earthBezelMesh.visible = false;
-      if (earthCompassMesh) earthCompassMesh.visible = false;
       earthHudSlide.label = null;
       earthHudSlide.preview = null;
       earthHudLastT = -1;
@@ -8286,8 +8075,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // cheap). Returns the zone index or -1. Previously only the desktop
   // path resolved zones — the XR laser collapsed everything to "globe",
   // so hover highlight + previews never fired on Quest.
-  // Step 6.3: the compass badge is hoverable too — a laser over the badge
-  // reports 'compass' so the preview button highlight path can surface it.
   // Ray → floating earth panels (reel card, WORLD › location panel):
   // { panel: 'card'|'label', region, distance } for the nearest one hit
   // (region '' off the buttons), else null. Panels sit in front of the
@@ -8421,20 +8208,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         earthRecentHover = { index: recent.index, at: recent.at, used: true };
       }
       return panelHit.panel === 'card' ? 'preview' : 'label';
-    }
-    if (earthCompassMesh && earthCompassMesh.visible) {
-      try {
-        const c = earthCompassMesh.position;
-        const r = Number(earthCompassMesh.userData.worldRadius) || 0.16;
-        const ox = origin.x - c.x, oy = origin.y - c.y, oz = origin.z - c.z;
-        const dx = direction.x, dy = direction.y, dz = direction.z;
-        const a = dx * dx + dy * dy + dz * dz;
-        if (a > 1e-12) {
-          const t = Math.max(0, -(ox * dx + oy * dy + oz * dz) / a);
-          const px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
-          if (Math.sqrt(px * px + py * py + pz * pz) <= r && t < 10) return 'compass';
-        }
-      } catch (e) {}
     }
     let hit = null;
     try {
@@ -9283,14 +9056,25 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!uv || !ui || typeof ui.resolveCommentsPanelRegion !== 'function') return '';
     try {
-      const w = commentsCanvas ? commentsCanvas.width : ui.CPANEL_W;
-      const h = commentsCanvas ? commentsCanvas.height : ui.CPANEL_H;
+      const w = ui.CPANEL_W;
+      const h = ui.CPANEL_H;
       lastCommentsCanvasX = uv.x * w;
       lastCommentsCanvasY = (1 - uv.y) * h;
       const comments = callbacks.getComments ? callbacks.getComments() : [];
       return ui.resolveCommentsPanelRegion(lastCommentsCanvasX, lastCommentsCanvasY,
-        { comments, cPanelTab, cPanelScrollY }) || '';
+        { comments, cPanelTab, cPanelScrollY, ...commentsPanelItem() }) || '';
     } catch (e) { return ''; }
+  }
+
+  // Current reel + its follow state for the comments panel creator block.
+  function commentsPanelItem() {
+    const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
+    const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
+    let itemState = {};
+    if (callbacks.getCurrentItemState) {
+      try { itemState = callbacks.getCurrentItemState() || {}; } catch (e) {}
+    }
+    return { item: playlist[idx] || null, itemState };
   }
 
   // Screen UV → pop-up overlay comment id (shared XR/preview).
@@ -9320,18 +9104,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   // XR trigger on the globe = GRAB (same drag machine as the mouse): hold the
   // trigger and sweep the controller to turn the planet under the laser; a
   // clean press-release is still a tap (zoom / select), dispatched by
-  // endEarthDrag. Dock buttons and the compass keep their own click path.
+  // endEarthDrag. Dock buttons keep their own click path.
   let earthXrGrabActive = false; // WebXR order: selectstart → select → selectend
-  function earthCompassUnderRay(origin, direction) {
-    try {
-      if (!earthCompassMesh || !earthCompassMesh.visible || !raycaster) return false;
-      raycaster.set(origin, direction);
-      return raycaster.intersectObject(earthCompassMesh, false).length > 0;
-    } catch (e) { return false; }
-  }
   function onVRSelectStart(ev) {
     if (sceneMode === 'earth' && earthMesh && activeRayOrigin && activeRayDir && hoveredButton < 0 &&
-        !shellHover.panel && !earthCompassUnderRay(activeRayOrigin, activeRayDir) &&
+        !shellHover.panel &&
         !earthHudPanelHit(activeRayOrigin, activeRayDir)) {
       const hit = hitTestEarth(activeRayOrigin, activeRayDir);
       if (hit.hit) {
@@ -9414,21 +9191,6 @@ window.WebXRVR = window.WebXRVR || (function () {
           handled = true;
         }
         raycaster.set(rayOrigin, rayDir);
-        // Step 6.3: compass badge click → true-north pose (400 ms slerp is
-        // inside resetEarthNorthUp's instant pose; the eased feel comes from
-        // the zoom-frame smoothing, not a second animation machine).
-        if (!handled && earthCompassMesh && earthCompassMesh.visible) {
-          try {
-            const hits = raycaster.intersectObject(earthCompassMesh, false);
-            if (hits.length > 0) {
-              if (resetEarthNorthUp()) {
-                showNotification('NORTH UP');
-                pulseInput(ev.data);
-                handled = true;
-              }
-            }
-          } catch (e) {}
-        }
         if (!handled) {
           const hit = hitTestEarth(rayOrigin, rayDir);
           if (hit.hit) {
@@ -9610,6 +9372,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     screenScale = DEFAULT_SCALE;
     screenDistance = -DEFAULT_POS.z;
+    layoutTuning = defaultLayoutTuning();
     isInitialPoseSet = false;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
@@ -9792,6 +9555,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       } catch (e) {
         try { renderer.xr.setReferenceSpaceType('local'); } catch (e2) {}
       }
+      // Fixed foveation (?vrfov=); three applies it to the layer setSession creates.
+      if (typeof renderer.xr.setFoveation === 'function') {
+        try { renderer.xr.setFoveation(debugFlags.fov); } catch (e) {}
+      }
+      // Eye-buffer resolution (?vrfbs=); three passes it to the projection layer.
+      if (typeof renderer.xr.setFramebufferScaleFactor === 'function') {
+        try { renderer.xr.setFramebufferScaleFactor(debugFlags.fbs); } catch (e) {}
+      }
 
       try {
         await renderer.xr.setSession(session);
@@ -9842,13 +9613,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       renderer.setAnimationLoop((time, frame) => {
         applySceneVisibility();
         if (sceneMode === 'reels') {
-          const source = getVisualSource();
-          if (source && source.ready === false) {
-            if (source.element) renderStats.transNotReady += 1;
-            clearPendingTexture();
-          } else {
-            uploadVideoFrame();
-          }
+          updateVisualTexture(getVisualSource());
           updateGlowColor(time, 800);
           applyGlowColor();
           // Head lock: the screen follows the gaze every frame
@@ -10076,12 +9841,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     lastEarthLabelKey = '';
     lastEarthPreviewUpdate = -1;
     pinSharedGeo = null;
-    earthBezelMesh = null;
-    earthCompassMesh = null;
-    earthCompassCanvas = null;
-    earthCompassCtx = null;
-    earthCompassTexture = null;
-    earthCompassKey = '';
     laserPositions = null;
     reticleTexture = null;
     previewHoverRay = null;
@@ -10335,6 +10094,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
       return true;
     }
+    if (desc === 'follow') {
+      if (callbacks.onFollow) callbacks.onFollow();
+      vrLastUiUploadT = -1;
+      return true;
+    }
+    if (desc === 'creator') {
+      if (callbacks.onOpenCurrentProfile) callbacks.onOpenCurrentProfile();
+      return true;
+    }
     if (desc === 'account') {
       if (callbacks.onOpenAccount) callbacks.onOpenAccount();
       return true;
@@ -10409,57 +10177,61 @@ window.WebXRVR = window.WebXRVR || (function () {
       showNotification('KEYBOARD DISABLED (?domoverlay=0)');
       return;
     }
-    // v8.16: the minimal session (v8.15 default) doesn't request the
-    // dom-overlay layer, so focusing the input would summon no keyboard —
-    // fail explicitly instead of stranding the user on an invisible field.
-    // ?xrfull=1 restores the layer.
-    let overlayGranted = false;
+    // Quest Browser 26.1+ summons the system keyboard for any focused DOM
+    // text input during an immersive session (XRSession.isSystemKeyboardSupported),
+    // so the minimal session needs no dom-overlay layer. The legacy dom-overlay
+    // layer (?xrfull=1) is the fallback for older browsers.
+    let keyboardAvailable = false;
     try {
-      overlayGranted = !!(xrSession && xrSession.enabledFeatures &&
-        xrSession.enabledFeatures.includes('dom-overlay'));
-    } catch (e) { overlayGranted = false; }
-    if (!overlayGranted) {
-      showNotification('KEYBOARD NEEDS FULL SESSION (?xrfull=1)');
+      keyboardAvailable = !!(xrSession && (xrSession.isSystemKeyboardSupported ||
+        (xrSession.enabledFeatures && xrSession.enabledFeatures.includes('dom-overlay'))));
+    } catch (e) { keyboardAvailable = false; }
+    if (!keyboardAvailable) {
+      showNotification('KEYBOARD NEEDS QUEST BROWSER 26.1+');
       return;
     }
     initDomOverlay();
     if (!domOverlayInput) return;
+    // A field still focused/open (keyboard dismissed by a path that never
+    // blurred it) would make focus() a no-op: send what it holds, blur, reopen.
+    if (vrKeyboardOpen || (typeof document !== 'undefined' && document.activeElement === domOverlayInput)) {
+      closeVrKeyboard(true);
+    }
     const source = getVisualSource();
     pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
     domOverlayInput.value = '';
     domOverlayInput.style.display = 'block';
+    vrKeyboardOpen = true;
     try { domOverlayInput.focus(); } catch (e) {}
   }
 
-  function closeVrKeyboard() {
+  // Closes the field; post=true sends whatever was typed. Idempotent: the
+  // blur fired by hiding the field must not post a second time.
+  function closeVrKeyboard(post) {
+    const wasOpen = vrKeyboardOpen;
+    vrKeyboardOpen = false;
+    const text = post && wasOpen && domOverlayInput ? domOverlayInput.value.trim() : '';
     if (domOverlayInput) {
       domOverlayInput.style.display = 'none';
       try { domOverlayInput.blur(); } catch (e) {}
     }
+    if (text && callbacks.onPostComment) callbacks.onPostComment(text, pendingSyncTime);
   }
 
   function onCommentInputKeydown(e) {
     if (e.key === 'Enter') {
       if (e.preventDefault) e.preventDefault();
-      const text = domOverlayInput ? domOverlayInput.value.trim() : '';
-      closeVrKeyboard();
-      if (text && callbacks.onPostComment) {
-        callbacks.onPostComment(text, pendingSyncTime);
-      }
+      closeVrKeyboard(true);
     } else if (e.key === 'Escape') {
       if (e.preventDefault) e.preventDefault();
-      closeVrKeyboard();
+      closeVrKeyboard(false);
     }
   }
 
+  // The system keyboard raises no key events (Quest Browser): its Done key,
+  // dismiss button or an outside click just blur the field. Blur sends.
   function onCommentInputBlur() {
-    setTimeout(() => {
-      try {
-        if (domOverlayInput && document.activeElement !== domOverlayInput) {
-          domOverlayInput.style.display = 'none';
-        }
-      } catch (e) {}
-    }, 150);
+    closeVrKeyboard(true);
   }
 
   // v8.4 video upload path A/B ('subimage' default | 'respec' forces full
@@ -10484,6 +10256,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       console.log('[WebXRVR] Initialised', VR_VERSION);
     },
     setVideoUploadMode,
+    noteSwitchTiming,
 
     async isSupported() {
       const xr = getXR();
@@ -10500,6 +10273,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     stopPreview,
     resetPreview,
     setPreviewCameraMode,
+    setPreviewFov,
+    getLayoutTuning,
+    setLayoutTuning,
+    resetLayoutTuning,
     setPreviewStereo,
     setReducedMotion,
     setSceneMode,
@@ -10580,7 +10357,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       getDebugFlags() { return { ...debugFlags }; },
       setDebugFlags(patch) {
         const p = patch || {};
-        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'horizonhud', 'xrdiag', 'vrshell']) {
+        for (const k of ['lock', 'overlay', 'guide', 'glow', 'dockfreeze', 'glowprobe', 'domoverlay', 'vrtex', 'xrminimal', 'xrfull', 'earthmap', 'topdown', 'xrdiag', 'vrshell']) {
           if (p[k] !== undefined) debugFlags[k] = !!p[k];
         }
         if (p.earthstyle !== undefined) debugFlags.earthstyle = p.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -10597,11 +10374,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       commentsRegionFromUV,
       overlayCommentFromUV,
       refreshOverlayTexture,
+      getRendererOpts() { return lastRendererOpts; },
       getTextureFilterInfo() {
         const describe = (tex) => tex ? {
           minFilter: tex.minFilter,
           magFilter: tex.magFilter,
           generateMipmaps: !!tex.generateMipmaps,
+          size: tex.image && tex.image.width ? [tex.image.width, tex.image.height] : null,
         } : null;
         return {
           video: describe(videoTexture),
@@ -10609,6 +10388,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           comments: describe(commentsTexture),
           overlay: describe(overlayTexture),
           guide: describe(guideTexture),
+          earthPreview: describe(earthPreviewTexture),
         };
       },
       getScreenState() {
@@ -10689,6 +10469,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           screenShowsLeftEye: !!(eyeTextures && screenMesh && screenMesh.material.map === eyeTextures.L),
           screenMaterialVisible: !!(screenMesh && screenMesh.material && screenMesh.material.visible),
           screenVisible: !!(screenMesh && screenMesh.visible),
+          eyesAreVideo: !!(eyeTextures && eyeTextures.L.isVideoTexture && eyeTextures.R.isVideoTexture),
           left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
           right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
         };
@@ -10802,8 +10583,12 @@ window.WebXRVR = window.WebXRVR || (function () {
                 : -1,
               hasMap: !!(screenMesh.material && screenMesh.material.map),
               mapSize: (screenMesh.material && screenMesh.material.map && screenMesh.material.map.image)
-                ? [screenMesh.material.map.image.width, screenMesh.material.map.image.height]
+                ? (screenMesh.material.map.isVideoTexture
+                  ? [screenMesh.material.map.image.videoWidth, screenMesh.material.map.image.videoHeight]
+                  : [screenMesh.material.map.image.width, screenMesh.material.map.image.height])
                 : null,
+              directVideo: !!(directVideoTexture && screenMesh.material &&
+                screenMesh.material.map === monoScreenMap(directVideoTexture)),
               stereo: textureStereo,
               eyeMeshes: !!(eyeMeshL && eyeMeshL.visible && eyeMeshR && eyeMeshR.visible),
             };
@@ -10835,6 +10620,7 @@ window.WebXRVR = window.WebXRVR || (function () {
             info.dock = {
               pos: [controlsMesh.position.x, controlsMesh.position.y, controlsMesh.position.z],
               rot: [controlsMesh.rotation.x, controlsMesh.rotation.y, controlsMesh.rotation.z],
+              scale: [controlsMesh.scale.x, controlsMesh.scale.y],
             };
           }
           info.glow = {
@@ -10910,8 +10696,12 @@ window.WebXRVR = window.WebXRVR || (function () {
           };
           // Mean brightness of the 2048^2 proxy canvas (16x16 downsample).
           // Distinguishes "proxy never painted" from "texture/mesh path broken".
+          // Not meaningful while the direct video texture is bound.
           try {
-            if (vrProxyCanvas && typeof document !== 'undefined' && document.createElement) {
+            if (directVideoTexture && screenMesh && screenMesh.material &&
+                screenMesh.material.map === monoScreenMap(directVideoTexture)) {
+              info.proxyMean = 'direct';
+            } else if (vrProxyCanvas && typeof document !== 'undefined' && document.createElement) {
               const probe = document.createElement('canvas');
               probe.width = 16;
               probe.height = 16;
@@ -11144,13 +10934,6 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthPreviewPosterImages,
       earthTileSourceIsLight,
       EARTH_TIERS,
-      earthBezelState() {
-        return {
-          visible: !!(earthBezelMesh && earthBezelMesh.visible && earthCompassMesh && earthCompassMesh.visible),
-          radius: earthBezelRadius(),
-          northUp: !!earthNorthUp,
-        };
-      },
       earthTilePrefetchStats() {
         let ready = 0;
         try {

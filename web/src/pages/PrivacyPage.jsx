@@ -94,8 +94,8 @@ export default function PrivacyPage() {
           <li><strong>OpenStreetMap:</strong> map tile requests. Our server fetches and caches the tiles, so OpenStreetMap does not receive your IP address from us.</li>
           <li><strong>Our email provider:</strong> your email address and the content of service emails.</li>
           <li><strong>Cloudflare:</strong> Cloudflare Tunnel carries all traffic between your browser and our server, Cloudflare’s CDN caches and delivers media, and Cloudflare R2 stores published photos and videos. Cloudflare therefore receives your IP address and the requests you make.</li>
-          <li><strong>Hetzner:</strong> hosts the server that runs ECHO, including our database and the files you upload.</li>
-          <li><strong>Sentry:</strong> receives error reports from our server when something goes wrong, which can include technical details of the request that failed. Sentry is not used in the web app or the VR player.</li>
+          <li><strong>OVHcloud:</strong> hosts the server that runs ECHO, including our database and the files you upload.</li>
+          <li><strong>Sentry:</strong> receives error reports, server logs and performance data (how long requests take) from our server. These include technical details of requests, such as the page path and your account ID, but not your IP address, cookies, search terms or message content. Sentry is not used in the web app or the VR player.</li>
           <li><strong>Authorities:</strong> when the law requires it, or to protect people from serious harm, for example reports of child sexual abuse material.</li>
           <li><strong>A buyer or successor</strong> if ECHO is sold or merged. We will tell you before your data is covered by a different policy.</li>
         </ul>
@@ -169,7 +169,7 @@ export default function PrivacyPage() {
       <Section id="privacy-transfers" title="11. International transfers">
         <p>
           We store data in <V k="hostingRegion" />. Some providers listed in section 4, such as fal.ai, Cloudflare,
-          Sentry, Stripe, and Google, process data in other countries, including the United States. Where the law requires it,
+          Sentry, Stripe, and Google, process data in other countries as well. Where the law requires it,
           we use contracts or other approved safeguards for these transfers.
         </p>
       </Section>

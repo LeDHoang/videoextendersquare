@@ -90,10 +90,14 @@ export default function ReelsPage() {
 
   const codecParam =
     codec === 'ALL CODECS' ? 'all' : codec === 'H264 (Browser/VR)' ? 'h264' : 'hevc';
+  // The list depends on who is viewing, not on auth finishing or the user object
+  // being replaced; keying on these avoids a second /api/reels when auth resolves.
+  const viewerId = user?.id || null;
+  const followingAuthLoading = feedScope === 'following' && authLoading;
 
   useEffect(() => {
-    if (feedScope === 'following' && authLoading) return;
-    if (feedScope === 'following' && !user) {
+    if (followingAuthLoading) return;
+    if (feedScope === 'following' && !viewerId) {
       const next = '/reels?' + searchParams.toString();
       navigate('/login?next=' + encodeURIComponent(next), { replace: true });
       return;
@@ -127,7 +131,7 @@ export default function ReelsPage() {
         }
         setData({ total: 0, count: 0, folders: [], videos: [] });
       });
-  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, only3d, sort, refreshKey, authLoading, user, navigate, searchParams, setUser]);
+  }, [folder, codecParam, debouncedSearch, activeTag, activeLocation, feedScope, activeAuthor, deepPost, only3d, sort, refreshKey, followingAuthLoading, viewerId, navigate, searchParams, setUser]);
 
   const clearDeepLink = () => {
     setDeepPlay(null);
@@ -183,6 +187,9 @@ export default function ReelsPage() {
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
   const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
   const initialIndex = deepPostId ? 0 : (deepIndex >= 0 ? deepIndex : 0);
+  // Without a ?play= deep link the player's params do not depend on the list,
+  // so it starts loading alongside /api/reels instead of after it.
+  const playerEarly = !deepPlay && feedScope !== 'following' && debouncedSearch === search;
   const playerParams = {
     folder,
     codec: codecParam,
@@ -441,12 +448,12 @@ export default function ReelsPage() {
       ) : null}
 
       {/* Player Mount */}
-      {data === null ? (
+      {data === null && !playerEarly ? (
         <>
           <ControlRailSkeleton label="Loading reels controls" />
           <ReelsPlayerSkeleton label="Loading reels" />
         </>
-      ) : !videos.length ? (
+      ) : data !== null && !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."

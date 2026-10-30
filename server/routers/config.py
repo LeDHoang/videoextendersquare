@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from core import models as _models
 from server import media as SM
-from server.features import reel_pack_features
+from server.features import reel_pack_features, stereo_convert_enabled
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 from server.social.turnstile import turnstile_site_key
 
@@ -39,7 +39,7 @@ def get_config():
     """
     return {
         "models": _models.config_payload(_model_config),
-        "features": {"reel_packs": reel_pack_features()},
+        "features": {"reel_packs": reel_pack_features(), "stereo_convert": stereo_convert_enabled()},
         # Public by design; the SPA renders the Turnstile widget with it. Empty = no challenge.
         "turnstile_site_key": turnstile_site_key(),
         "upload_limits": {

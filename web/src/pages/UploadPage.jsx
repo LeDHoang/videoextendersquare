@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { BlockingBanner, Mono } from '../components/ui/primitives.jsx';
 import { Segmented, Button, ToggleRow } from '../components/ui/controls.jsx';
+import JobRunner from '../components/ui/JobRunner.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useObjectUrl } from '../hooks/useObjectUrl.js';
@@ -26,6 +27,7 @@ import { DetailsSection, ShareSection, TITLE_MAX, TAGS_MAX } from '../components
 
 const STUDIO_MODES = ['POST', 'BATCH EXTEND'];
 const PATH_OPTS = ['SHARE DIRECTLY', 'EXTEND ANYWAY'];
+const MAKE_3D = 'MAKE 3D';
 // One post is either a single video or 1–10 images (a slideshow), never both.
 const MAX_POST_IMAGES = 10;
 
@@ -91,6 +93,7 @@ export default function UploadPage() {
   const probes = health?.probes || {};
   const studioOk = probes.vapoursynth?.ok && probes.ffms2?.ok && probes.znedi3?.ok;
   const models = cfgCtx?.config?.models || {};
+  const canConvert = !!cfgCtx?.config?.features?.stereo_convert;
 
   // Each kind keeps its own extender settings for the whole visit.
   const imageCfg = useImageExtendConfig(models);
@@ -109,7 +112,7 @@ export default function UploadPage() {
   const [gallery, setGallery] = useState([]);
   const [galleryView, setGalleryView] = useState(null);
   const isSlideshow = gallery.length > 1;
-  const [path, setPath] = useState('skip'); // 'skip' | 'extend'
+  const [path, setPath] = useState('skip'); // 'skip' | 'extend' | 'convert'
   // 3D: publish an exact 2:1 / 1:2 upload as full side-by-side / top-bottom
   // stereo (as-is, one square per eye). On by default when detected.
   const [stereoOn, setStereoOn] = useState(false);
@@ -118,6 +121,13 @@ export default function UploadPage() {
   const [jobSettled, setJobSettled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [renderError, setRenderError] = useState('');
+  // MAKE 3D: a side-by-side 3D render of the square upload ('convert' path)
+  // or of the finished extend render. Once done, it is what gets published.
+  const [convertJob, setConvertJob] = useState(null);
+  const [convertDone, setConvertDone] = useState(null);
+  const [convertSettled, setConvertSettled] = useState(false);
+  const [convertBusy, setConvertBusy] = useState(false);
+  const [convertError, setConvertError] = useState('');
   // Why the last file selection was refused (a refused selection keeps
   // whatever was staged before).
   const [pickError, setPickError] = useState('');
@@ -179,9 +189,9 @@ export default function UploadPage() {
   const blocked = blockedIds.filter((id) => probes[id] && !probes[id].ok).map((id) => probes[id]);
   const studioBlocked = activeKind === 'video' && cfg.studioPicked && !studioOk;
 
-  const postRendering = busy || (!!job && !jobSettled);
+  const postRendering = busy || (!!job && !jobSettled) || convertBusy || (!!convertJob && !convertSettled);
   const batchRendering = batchBusy || batch.some((entry) => entry.status === 'rendering');
-  const canShareSource = path === 'skip' ? !!staged : !!jobDone;
+  const canShareSource = path === 'skip' ? !!staged : path === 'convert' ? !!convertDone : !!jobDone;
 
   const captionTags = useMemo(() => {
     const found = [];
@@ -202,7 +212,7 @@ export default function UploadPage() {
     return merged;
   }, [tags, captionTags]);
 
-  const shareDisabled = blocked.length > 0 || !staged || !title.trim() || !canShareSource || publishing || busy;
+  const shareDisabled = blocked.length > 0 || !staged || !title.trim() || !canShareSource || publishing || postRendering;
 
   // ── POST intake ──
   const suggestTitle = (name) => {
@@ -301,6 +311,7 @@ export default function UploadPage() {
     setJob(null);
     setJobDone(null);
     setJobSettled(false);
+    clearConvert();
     releaseEntries(gallery);
     setGallery([]);
     setGalleryView(null);
@@ -419,6 +430,7 @@ export default function UploadPage() {
     setJob(null);
     setJobDone(null);
     setJobSettled(false);
+    clearConvert();
     try {
       const freshQuotes = funding.paymentSource === 'credits' && funding.cloudRequired ? await funding.quoteState.refresh() : [];
       const fd = processForm(staged, new Map(freshQuotes.map((quote) => [quote.stage_id, quote])));
@@ -429,6 +441,27 @@ export default function UploadPage() {
       setRenderError(billingErrorMessage(requestError, 'Could not start cloud processing.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const clearConvert = () => {
+    setConvertJob(null);
+    setConvertDone(null);
+    setConvertSettled(false);
+    setConvertError('');
+  };
+
+  const startConvert = async () => {
+    clearConvert();
+    setConvertBusy(true);
+    try {
+      const source = path === 'extend' ? { job_id: job.jobId } : { stage_id: staged.stage_id };
+      const res = await api.post('/api/stereo/convert', { kind, ...source });
+      setConvertJob({ jobId: res.job_id, name: file?.name || 'upload', kind });
+    } catch (requestError) {
+      setConvertError(billingErrorMessage(requestError, 'Could not start MAKE 3D.'));
+    } finally {
+      setConvertBusy(false);
     }
   };
 
@@ -502,7 +535,9 @@ export default function UploadPage() {
           lon: location?.lon ?? null,
           osm_id: location?.osm_id ?? null,
         },
-        ...(path === 'skip' ? { stage_id: staged.stage_id } : { job_id: job.jobId }),
+        ...(convertDone
+          ? { job_id: convertJob.jobId, stereo_layout: convertDone.stereo_layout }
+          : path === 'skip' ? { stage_id: staged.stage_id } : { job_id: job.jobId }),
         ...(isSlideshow ? { extra_stage_ids: gallery.slice(1).map((entry) => entry.meta.stage_id) } : {}),
         ...(stereo && path === 'skip' ? { stereo_layout: stereo } : {}),
       };
@@ -526,6 +561,7 @@ export default function UploadPage() {
     setJob(null);
     setJobDone(null);
     setJobSettled(false);
+    clearConvert();
     setTitle('');
     autoTitleRef.current = '';
     setCaption('');
@@ -545,6 +581,7 @@ export default function UploadPage() {
     setJob(null);
     setJobDone(null);
     setJobSettled(false);
+    clearConvert();
     // 3D posts are published as-is; a 2D wide/tall frame goes back to extend.
     if (on) setPath('skip');
     else if (!isSquare && !isSlideshow) setPath('extend');
@@ -563,7 +600,7 @@ export default function UploadPage() {
     stageSelected = galleryView;
     stageLayoutMode = 'slideshow';
   } else if (staged) {
-    stageEntries = [{ key: staged.stage_id || 'single', name: file?.name || staged.filename || 'upload', kind, meta: staged, url: previewUrl, result: path === 'extend' ? jobDone : null }];
+    stageEntries = [{ key: staged.stage_id || 'single', name: file?.name || staged.filename || 'upload', kind, meta: staged, url: previewUrl, result: convertDone || (path === 'extend' ? jobDone : null) }];
     stageLayoutMode = 'single';
   }
   const maxSourceDur = isBatch
@@ -580,7 +617,12 @@ export default function UploadPage() {
     upscaleLabel: cfg.upscaleLabel,
     bytedanceRes: cfg.btdRes,
   });
-  const summary = stereo ? `3D ${STEREO_LABELS[stereo]} · AS-IS · NO EXTEND` : pipeline;
+  const summary = stereo
+    ? `3D ${STEREO_LABELS[stereo]} · AS-IS · NO EXTEND`
+    : path === 'convert' || convertJob ? `3D ${STEREO_LABELS.sbs} · MAKE 3D` : pipeline;
+
+  // MAKE 3D takes a square upload or a finished extend render, one at a time.
+  const showConvert = canConvert && !!staged && !isSlideshow && !stereo && (path === 'convert' || (path === 'extend' && !!jobDone));
 
   // ── Deck ──
   let sectionNum = 0;
@@ -669,8 +711,8 @@ export default function UploadPage() {
         <DeckSection
           num={next()}
           title="SOURCE & PUBLISH PATH"
-          badge={!staged ? 'AWAITING SOURCE' : stereo ? '3D · AS-IS' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : 'SHARE DIRECTLY'}
-          badgeTone={(path === 'extend' && staged) || stereo ? 'accent' : 'muted'}
+          badge={!staged ? 'AWAITING SOURCE' : stereo ? '3D · AS-IS' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : path === 'convert' ? MAKE_3D : 'SHARE DIRECTLY'}
+          badgeTone={(path !== 'skip' && staged) || stereo ? 'accent' : 'muted'}
         >
           {staged && stereoChoice ? (
             <StereoChoice choice={stereoChoice} meta={staged} on={!!stereo} onToggle={onStereoToggle} disabled={postRendering} slideshow={isSlideshow} />
@@ -692,17 +734,18 @@ export default function UploadPage() {
               <div className="sx-accent-block" role="note">
                 <div className="sx-accent-block-title">✓ ALREADY 1:1 — YOU CAN SKIP EXTENDING</div>
                 <div className="sx-accent-block-body">
-                  <p>Your media is already square. Share it directly, or extend anyway for AI outpainting and the 4K master.</p>
+                  <p>Your media is already square. Share it directly, or extend anyway for AI outpainting and the 4K master.{canConvert ? ' MAKE 3D turns it into side-by-side 3D for VR.' : ''}</p>
                 </div>
               </div>
               <Segmented
-                options={PATH_OPTS}
-                value={path === 'skip' ? PATH_OPTS[0] : PATH_OPTS[1]}
+                options={canConvert ? [...PATH_OPTS, MAKE_3D] : PATH_OPTS}
+                value={path === 'skip' ? PATH_OPTS[0] : path === 'extend' ? PATH_OPTS[1] : MAKE_3D}
                 onChange={(v) => {
-                  setPath(v === PATH_OPTS[0] ? 'skip' : 'extend');
+                  setPath(v === PATH_OPTS[0] ? 'skip' : v === PATH_OPTS[1] ? 'extend' : 'convert');
                   setJob(null);
                   setJobDone(null);
                   setJobSettled(false);
+                  clearConvert();
                 }}
                 disabled={postRendering}
                 ariaLabel="Publish path"
@@ -718,6 +761,38 @@ export default function UploadPage() {
           )}
         </DeckSection>
         {staged && path === 'extend' && !isSlideshow ? renderExtendSections() : null}
+        {showConvert ? (
+          <DeckSection num={next()} title="MAKE 3D" badge="SIDE-BY-SIDE · NO CREDITS" badgeTone={convertDone ? 'ok' : 'accent'}>
+            <p className="sx-studio-note">
+              Estimates depth and renders a second eye: the {path === 'extend' ? 'extended render' : kind} becomes a 2:1 side-by-side pair, one square per eye, for VR. 2D views show the left eye. Videos up to 60 s.
+            </p>
+            {!convertJob || (convertSettled && !convertDone) ? (
+              <div className="sx-studio-actions">
+                <Button primary onClick={startConvert} loading={convertBusy} disabled={convertBusy || blocked.length > 0}>▶ MAKE 3D</Button>
+              </div>
+            ) : null}
+            {convertError ? (
+              <div className="sx-error-box" role="alert">
+                <div className="sx-error-title">MAKE 3D FAILED</div>
+                <div>{convertError}</div>
+              </div>
+            ) : null}
+            {convertJob ? (
+              <JobRunner
+                key={convertJob.jobId}
+                jobId={convertJob.jobId}
+                name={convertJob.name}
+                kind={convertJob.kind}
+                showMedia={false}
+                doneLabel="✓ 3D SIDE-BY-SIDE COMPLETE"
+                downloadLabel="↓ DOWNLOAD 3D SIDE-BY-SIDE"
+                onDone={setConvertDone}
+                onSettled={() => setConvertSettled(true)}
+              />
+            ) : null}
+            {convertDone ? <Mono>✓ 3D RENDER COMPLETE — READY TO SHARE IN 3D</Mono> : null}
+          </DeckSection>
+        ) : null}
         {staged ? (
           <>
             <DetailsSection
@@ -742,7 +817,7 @@ export default function UploadPage() {
               user={user}
               title={title}
               path={path}
-              jobDone={jobDone}
+              jobDone={path === 'convert' ? convertDone : jobDone}
               shareDisabled={shareDisabled}
               publishing={publishing}
               onShare={share}

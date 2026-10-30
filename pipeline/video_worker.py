@@ -16,6 +16,7 @@ from core.tooling import (
 from pipeline.utils import (
     get_video_dimensions_and_duration,
     get_video_codec,
+    get_video_bitrate,
     calculate_square_padding,
     has_audio_stream,
     fetch_fal_result,
@@ -113,17 +114,30 @@ def _is_already_hevc(path: str) -> bool:
         return False
 
 
+# A stream copy keeps the source bitrate; above the HEVC encoders' 26 Mbps
+# cap (core.tooling.HEVC_CANDIDATES) the master is re-encoded instead.
+STREAM_COPY_MAX_BITRATE = 26_000_000
+
+
+def _within_bitrate_cap(path: str) -> bool:
+    """True if *path*'s probed bitrate is known and at or under the cap."""
+    bitrate = get_video_bitrate(path)
+    return bitrate is not None and bitrate <= STREAM_COPY_MAX_BITRATE
+
+
 def _master_can_stream_copy(path: str, sharpening: float, target: int = 3840) -> bool:
     """True if *path* is already the deliverable 4K-square HEVC master, so the
     final encode can be replaced by a lossless stream copy.
 
     All of these must hold or a re-encode is still needed: already target
-    dimensions (else scale), already HEVC (else codec conversion), and no
-    sharpening (else the cas filter needs a decode+encode)."""
+    dimensions (else scale), already HEVC (else codec conversion), no
+    sharpening (else the cas filter needs a decode+encode), and a bitrate
+    within the cap (else the copy would keep an uncapped bitrate)."""
     return (
         sharpening <= 0.0
         and _is_already_square(path, target)
         and _is_already_hevc(path)
+        and _within_bitrate_cap(path)
     )
 
 

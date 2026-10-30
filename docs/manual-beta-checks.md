@@ -57,6 +57,11 @@ Open `https://<domain>` on the headset through the Tunnel, not on a LAN IP, and 
 - [ ] **Mono reel.** A mono reel plays in VR, and seeking (scrub forward and back) works.
   - Its requests go to `media.<domain>`, with `206` responses.
 - [ ] **Stereo reel.** A stereo (SBS) reel plays with correct per-eye separation, and seeking works.
+- [ ] **MAKE 3D comfort** (only where `SX_STEREO_CONVERT_ENABLED` is on). Publish one converted video and one converted image from Upload Studio. Each needs a person, with no device tool in the loop.
+  - The background reads as behind the frame and the nearest subject slightly in front of it. Near objects do not double or shimmer, and nothing at the left or right frame edge looks cut off.
+  - Silhouettes stay clean: no stretched rubber edges at hair, hands or object borders.
+  - Depth does not pump or swim within a shot, and it settles at once after a scene cut.
+  - Viewing for a minute causes no eye strain. Compare against a native SBS reel.
 - [ ] **No WebGL taint.** The console shows no `SecurityError`, `tainted`, `cross-origin` or `texImage2D` errors, and no reel renders as a black quad.
 - [ ] **No diagnostics traffic.** The Network tab shows **no** requests to `/api/reels/diag`, because diagnostics are off in production.
 - [ ] **Exit and re-enter.** Exiting VR returns to the 2D page, and re-entering works without a reload.

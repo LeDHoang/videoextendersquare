@@ -20,7 +20,7 @@ const LEGACY_IDS = [
   'notInterestedBtn', 'hideCreatorBtn', 'preloadBtn', 'preloadLabel', 'edgeNav', 'edgePrevBtn', 'edgeNextBtn', 'reelsMeta',
   'metaFolder', 'metaCreator', 'followPill', 'followPillLabel', 'metaTitle', 'metaSize', 'metaViews', 'progressWrap',
   'progressBar', 'progressFill', 'timeDisplay', 'commentMarkers', 'commentsDrawer', 'drawerTitle', 'closeDrawerBtn',
-  'commentsList', 'tabAll', 'tabSync', 'tabGeneral', 'accountBtn', 'accountAvatar', 'accountName', 'syncTimeToggle',
+  'commentsList', 'syncFilterBtn', 'accountBtn', 'accountAvatar', 'accountName', 'syncTimeToggle',
   'syncTimeDisplay', 'commentForm', 'commentInput', 'commentSubmitBtn', 'twitchCommentTicker', 'centerFlash', 'errorOverlay',
   'errorText', 'skipErrorBtn', 'timesyncIconTpl', 'reelsActions', 'reelsAmbientGlow', 'packModeBar', 'packQueuePanel',
   'packStageCard', 'collectMenuPanel', 'saveBtn',
@@ -179,6 +179,12 @@ test('VR callbacks no longer overwrite the sound button markup', () => {
 test('image reels never pop time-synced comments', () => {
   const ticker = html.slice(html.indexOf('function updateTwitchTicker()'), html.indexOf('function openDrawerToComment'));
   assert.match(ticker, /isImageItem\(videoData\[idx\]\)/);
+});
+
+test('general comments carry no GENERAL chip: only time-synced ones get a time pill', () => {
+  assert.doesNotMatch(html, /comment-time-gen/);
+  assert.doesNotMatch(html, /' GENERAL'/);
+  assert.match(html, /if \(timeControl\) left\.append\(timeControl\)/);
 });
 
 test('ticker pills are keyboard reachable', () => {

@@ -18,6 +18,7 @@ const CODE_COPY = {
   INVALID_STAGE: 'Upload is invalid or expired. Upload again.',
   JOB_ENQUEUE_FAILED: 'Processing could not be queued. Try again shortly.',
   STORAGE_FULL: 'The server is out of upload space right now. Try again later.',
+  STEREO_CONVERT_UNAVAILABLE: 'MAKE 3D is not available on this server right now.',
 };
 
 function retryHint(seconds) {

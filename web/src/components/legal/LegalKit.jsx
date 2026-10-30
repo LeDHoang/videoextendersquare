@@ -12,7 +12,7 @@ export const LEGAL = {
   copyrightEmail: '[COPYRIGHT EMAIL]',
   governingLaw: '[GOVERNING LAW]',
   disputeVenue: '[DISPUTE VENUE]',
-  hostingRegion: '[HOSTING REGION]',
+  hostingRegion: 'the United States (our server and database, in Oregon) and the Asia-Pacific region (published photos and videos, and backups, in Cloudflare R2)',
   analyticsRetention: '[ACTIVITY RETENTION PERIOD]',
   mediaPurge: '[DELETED MEDIA PURGE PERIOD]',
   effectiveDate: '[EFFECTIVE DATE]',

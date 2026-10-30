@@ -150,7 +150,7 @@ function loadRenderer(options = {}) {
   window.self = window;
   const mockDocument = {
     documentElement: { classList: { add() {}, remove() {} } },
-    body: { classList: { add() {}, remove() {} } },
+    body: { classList: { add() {}, remove() {} }, appendChild() {} },
     getElementById() { return null; },
     addEventListener() {},
     removeEventListener() {},
@@ -171,6 +171,7 @@ function loadRenderer(options = {}) {
     window,
     self: window,
     document: mockDocument,
+    ...(options.search !== undefined ? { location: { search: options.search, hostname: 'example.test', pathname: '/reels' } } : {}),
     navigator: { userAgent: 'NodeTest' },
     console: options.console || { log() {}, warn() {}, error() {} },
     performance: { now: options.now || (() => 0) },
@@ -385,7 +386,7 @@ test('desktop preview starts without navigator.xr and cleans up GPU resources', 
 test('Reels frames skip Earth draws and Earth frames pause video texture uploads', () => {
   const counters = { deleted: 0 };
   const gl = makeMockGl(counters);
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const canvas = makePreviewCanvas(gl);
   const video = {
     paused: false,
@@ -898,7 +899,7 @@ test('a pending image source holds the prior reel texture before it becomes read
   renderer.stopPreview();
 });
 
-test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static sources', () => {
+test('videos bind a direct VideoTexture by default and static sources rebind the canvas', () => {
   const counters = { deleted: 0, textureSources: [] };
   const gl = makeMockGl(counters);
   const makeVideo = (tag, w, h, frames) => ({
@@ -907,8 +908,8 @@ test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static
     currentTime: 1,
     duration: 10,
     muted: true,
-    width: w,
-    height: h,
+    videoWidth: w,
+    videoHeight: h,
     getVideoPlaybackQuality: () => ({ totalVideoFrames: frames }),
     addEventListener() {},
     removeEventListener() {},
@@ -928,7 +929,7 @@ test('?vrtex=video binds a direct VideoTexture and rebinds the canvas for static
     getPlaylist: () => [],
     getCurrentIndex: () => 0,
   });
-  renderer.__test.setDebugFlags({ vrtex: true });
+  assert.equal(renderer.__test.getDebugFlags().vrtex, true);
   renderer.startPreview(makePreviewCanvas(gl));
   renderer.__runScheduledFrame(16);
   // Direct texture bound: native video dims, not the 2048 proxy canvas.
@@ -1005,7 +1006,7 @@ test('restarting preview after stop rebuilds textures instead of rendering black
     pause() { this.paused = true; },
     play() { this.paused = false; return Promise.resolve(); },
   };
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   renderer.init(videoElement, {
     getPlaylist: () => [],
     getCurrentIndex: () => 0,
@@ -1130,9 +1131,9 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
-  closeTo(comments.center.z, -2.39);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
+  closeTo(comments.center.z, -2.58);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -1176,6 +1177,60 @@ test('bisection flags gate lock, overlay, guide, and glow', () => {
   assert.equal(api.lockApplies(), true);
 });
 
+test('glow probe scales the video to 8x8 on the GPU, never draws the full frame (v8.28)', async () => {
+  const gl = makeMockGl({ deleted: 0 });
+  // Every 2d context records what is drawn into it and reads back pure red.
+  const draws = [];
+  const createElement = (kind) => {
+    if (kind !== 'canvas') return null;
+    const c = makePreviewCanvas(gl);
+    const ctx = makeCanvas2dContext();
+    ctx.drawImage = (src) => { draws.push(src); };
+    ctx.getImageData = (x, y, w, h) => ({
+      data: Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i % 4 === 0 || i % 4 === 3 ? 255 : 0)),
+    });
+    c.getContext = (k) => (k === '2d' ? ctx : gl);
+    return c;
+  };
+  const bitmapCalls = [];
+  const bitmaps = [];
+  const createImageBitmap = (src, sx, sy, sw, sh, opts) => {
+    const bmp = { closed: false, close() { this.closed = true; } };
+    bitmapCalls.push({ src, sw, sh, opts });
+    bitmaps.push(bmp);
+    return Promise.resolve(bmp);
+  };
+  const video = { videoWidth: 3840, videoHeight: 3840, readyState: 4, paused: false, addEventListener() {}, removeEventListener() {} };
+  const renderer = loadRenderer({ gl, createElement, globals: { createImageBitmap } });
+  renderer.init(video, {
+    getVisualSource: () => ({ kind: 'video', element: video, ready: true, paused: false, muted: true, currentTime: 1, duration: 2, version: 'v' }),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const before = renderer.__test.getSceneInfo().glow.color;
+  renderer.__runScheduledFrame(200);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bitmapCalls.length, 1);
+  assert.equal(bitmapCalls[0].src, video);
+  assert.equal(bitmapCalls[0].sw, 3840);
+  assert.equal(bitmapCalls[0].opts.resizeWidth, 8);
+  assert.equal(bitmapCalls[0].opts.resizeHeight, 8);
+  assert.ok(!draws.includes(video), 'the full video frame never goes through drawImage');
+  assert.ok(draws.includes(bitmaps[0]), 'the 8x8 bitmap is read back');
+  assert.equal(bitmaps[0].closed, true);
+  for (let t = 216; t < 300; t += 16) renderer.__runScheduledFrame(t);
+  const after = renderer.__test.getSceneInfo().glow.color;
+  assert.ok(after[0] > before[0] && after[2] < before[2], 'glow steers toward the sampled red');
+
+  // Stereo SBS samples the left eye only.
+  renderer.setSourceStereo('sbs');
+  renderer.__runScheduledFrame(400);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bitmapCalls.length, 2);
+  assert.equal(bitmapCalls[1].sw, 1920);
+  assert.equal(bitmapCalls[1].sh, 3840);
+  renderer.stopPreview();
+});
+
 test('dockfreeze stops dock texture re-uploads after the first paint', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -1198,7 +1253,7 @@ test('dockfreeze stops dock texture re-uploads after the first paint', () => {
 
 test('transition counters attribute source changes, clears, and buffering', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const video = {
     paused: true, readyState: 1, currentTime: 0, duration: 10, muted: true,
     addEventListener() {}, removeEventListener() {},
@@ -1480,7 +1535,7 @@ test('dock UV hits resolve to the expected transport action', () => {
     getCurrentItemState: () => ({ available: true }),
   });
   renderer.startPreview(makePreviewCanvas(gl));
-  // Play button center on the 1024x384 dock canvas (x 360-440, y 76-156).
+  // Play button on the 1024x384 dock canvas (x 364-436, y 60-132).
   const play = renderer.__test.controlIndexFromUV({ x: 400 / 1024, y: 1 - 116 / 384 });
   assert.ok(play >= 0);
   renderer.__test.executeControl('play');
@@ -2250,8 +2305,8 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.384));
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.384);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
   // Legacy-exact: locked mode anchors both to the room spot tracking the
   // default screen (NOT the live screenDistance).
   api.setScreenState({ locked: true, distance: 3.0 });
@@ -2259,13 +2314,14 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  closeTo(lockedComments.center.z, -2.39);
-  closeTo(lockedGuide.center.z, -2.39);
+  closeTo(lockedComments.center.z, -2.58);
+  closeTo(lockedGuide.center.z, -2.58);
 });
 
-test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
+test('comment panel actions drive the time-sync toggle, scroll, like, seek, follow, and close', () => {
   const liked = [];
   const sought = [];
+  const opened = [];
   const renderer = loadRenderer();
   const comments = [
     { id: 'c1', author_name: 'ann', text: 'first', timestamp: 1 },
@@ -2273,28 +2329,31 @@ test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
     { id: 'c3', author_name: 'cat', text: 'third', timestamp: null },
     { id: 'c4', author_name: 'dan', text: 'fourth', timestamp: 4 },
     { id: 'c5', author_name: 'eve', text: 'fifth', timestamp: null },
+    { id: 'c6', author_name: 'fay', text: 'sixth', timestamp: 6 },
   ];
   renderer.init(null, {
     getComments: () => comments,
     onLikeComment: (id) => liked.push(id),
     onSeekTo: (t) => sought.push(t),
+    onFollow: () => opened.push('follow'),
+    onOpenCurrentProfile: () => opened.push('creator'),
   });
   const api = renderer.__test;
   api.toggleCommentsPanel();
   assert.equal(api.getScreenState().commentsPanelVisible, true);
-  // Tabs switch the filter and reset the scroll.
-  assert.equal(api.executeCommentAction('tab:sync'), true);
-  assert.equal(api.getScreenState().cPanelTab, 'sync');
-  // Scroll bounds follow the filtered list (3 sync × 112 − 520 = −184 → 0).
-  api.refreshPanelScrollBounds(comments.filter((c) => c.timestamp !== null && c.timestamp !== undefined));
+  // Time-sync toggle off: general comments only, scroll reset.
+  assert.equal(api.executeCommentAction('tab:general'), true);
+  assert.equal(api.getScreenState().cPanelTab, 'general');
+  // Scroll bounds follow the filtered list (2 general × 92 − 496 < 0 → 0).
+  api.refreshPanelScrollBounds(comments);
   assert.equal(api.executeCommentAction('scrolldown'), true);
   assert.equal(api.getScreenState().cPanelScrollY, 0);
-  // All tab: 5 × 112 − 520 = 40 max scroll.
+  // Toggle on: every comment, 6 × 92 − 496 = 56 max scroll.
   assert.equal(api.executeCommentAction('tab:all'), true);
   api.refreshPanelScrollBounds(comments);
-  assert.equal(api.getScreenState().cPanelMaxScroll, 40);
+  assert.equal(api.getScreenState().cPanelMaxScroll, 56);
   assert.equal(api.executeCommentAction('scrolldown'), true);
-  assert.equal(api.getScreenState().cPanelScrollY, 40);
+  assert.equal(api.getScreenState().cPanelScrollY, 56);
   assert.equal(api.executeCommentAction('scrollup'), true);
   assert.equal(api.getScreenState().cPanelScrollY, 0);
   // Item actions route to host callbacks.
@@ -2302,6 +2361,10 @@ test('comment panel actions drive tabs, scroll, like, seek, and close', () => {
   assert.deepEqual(liked, ['c2']);
   assert.equal(api.executeCommentAction('seek:c4'), true);
   assert.deepEqual(sought, [4]);
+  // Creator block: FOLLOW and the creator name.
+  assert.equal(api.executeCommentAction('follow'), true);
+  assert.equal(api.executeCommentAction('creator'), true);
+  assert.deepEqual(opened, ['follow', 'creator']);
   assert.equal(api.executeCommentAction('panel'), true);
   assert.equal(api.executeCommentAction('bogus'), false);
   // Close hides the panel.
@@ -2337,7 +2400,7 @@ test('popup overlay regions resolve to the clicked comment', () => {
 
 test('dock AUTO/LOOP and LOCK/FREE labels follow live state', () => {
   const ui = loadUICanvasStandalone();
-  assert.equal(ui.GUIDE_H, 760);
+  assert.equal(ui.GUIDE_H, 1124);
   // Recording ctx captures fillText(text, x, y) joined with spaces.
   const firstToken = (texts, label) => texts.some((t) => t.split(' ')[0] === label);
   const loop = makeRecordingCtx();
@@ -2459,19 +2522,133 @@ test('overlay fade repaints while visible, bounded at the UI interval', () => {
   renderer.stopPreview();
 });
 
-test('canvas textures use legacy linear sampling without mipmaps', () => {
+test('video and overlay textures use legacy linear sampling without mipmaps', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
   renderer.init(null, {});
   renderer.startPreview(makePreviewCanvas(gl));
   const THREE = renderer.getThree();
   const filters = renderer.__test.getTextureFilterInfo();
-  for (const [name, f] of Object.entries(filters)) {
+  for (const name of ['video', 'overlay']) {
+    const f = filters[name];
     assert.ok(f, `${name} texture exists`);
     assert.equal(f.minFilter, THREE.LinearFilter, `${name} minFilter`);
     assert.equal(f.generateMipmaps, false, `${name} no mipmaps`);
   }
   renderer.stopPreview();
+});
+
+test('UI panels raster at 2x their logical size, always mipmapped, and hit-test in logical px', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const THREE = renderer.getThree();
+  const filters = renderer.__test.getTextureFilterInfo();
+  const sizes = { controls: [2048, 768], comments: [1120, 1840], guide: [880, 2248] };
+  for (const [name, size] of Object.entries(sizes)) {
+    assert.deepEqual([...filters[name].size], size, `${name} canvas 2x`);
+    assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);
+    assert.equal(filters[name].generateMipmaps, true, `${name} mipmaps`);
+  }
+  assert.deepEqual([...filters.overlay.size], [1024, 1024], 'overlay stays 1x');
+  // Logical-px hit mapping is unchanged by the 2x backing store.
+  const play = renderer.__test.controlIndexFromUV({ x: 400 / 1024, y: 1 - 116 / 384 });
+  assert.ok(play >= 0, 'dock hit resolves in logical px');
+  renderer.stopPreview();
+});
+
+test('dock canvas shrinks to fit its live controls and keeps their physical size', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {
+    getVisualSource: () => ({
+      kind: 'video', element: { readyState: 4 }, ready: true, paused: false,
+      muted: true, currentTime: 1, duration: 10, version: 'v1',
+    }),
+    isPackMode: () => false,
+    getCurrentItemState: () => ({ available: true }),
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  const api = renderer.__test;
+  // Video reels: controls span x 24-776, y 8-236, plus a 24px margin.
+  assert.deepEqual([...api.getTextureFilterInfo().controls.size], [1600, 520]);
+  const info = api.getSceneInfo();
+  const base = info.screenState.scale;
+  const fitted = api.dockTargetSize(base, 800, 260);
+  closeTo(info.dock.scale[0], fitted.w / 1.6);
+  closeTo(info.dock.scale[1], fitted.h / 0.6);
+  closeTo(fitted.w / 800, api.dockTargetSize(base).w / 1024); // same metres per px
+  // Top edge stays where the full-height dock had it: the center moves up
+  // the (tilted) panel by half the height difference.
+  const center = api.computeDockPose(null).pos;
+  const [x, y, z] = info.dock.pos;
+  closeTo(Math.hypot(x - center.x, y - center.y, z - center.z), (api.dockTargetSize(base).h - fitted.h) / 2);
+  assert.ok(y > center.y, 'moved up');
+  // Play button center (x 364-436, y 60-132) on the fitted 800x260 canvas.
+  const play = api.controlIndexFromUV({ x: 400 / 800, y: 1 - 96 / 260 });
+  assert.ok(play >= 0, 'play resolves on the fitted canvas');
+  renderer.stopPreview();
+});
+
+test('hi-fi preview mipmaps the UI panels with MSAA and stopPreview restores legacy', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { hiFi: true });
+  const THREE = renderer.getThree();
+  const filters = renderer.__test.getTextureFilterInfo();
+  for (const name of ['controls', 'comments', 'overlay', 'guide']) {
+    assert.equal(filters[name].minFilter, THREE.LinearMipmapLinearFilter, `${name} minFilter`);
+    assert.equal(filters[name].generateMipmaps, true, `${name} mipmaps`);
+  }
+  assert.equal(filters.video.generateMipmaps, false, 'video keeps legacy sampling');
+  assert.equal(renderer.__test.getRendererOpts().antialias, true);
+  renderer.stopPreview();
+
+  renderer.startPreview(makePreviewCanvas(gl));
+  assert.equal(renderer.__test.getTextureFilterInfo().overlay.generateMipmaps, false);
+  assert.equal(renderer.__test.getRendererOpts().antialias, false);
+  renderer.stopPreview();
+});
+
+test('layout tuning starts at the shipped constants and stopPreview resets it', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  assert.deepEqual({ ...renderer.getLayoutTuning() }, {
+    screenScale: 4,
+    screenDistance: 2.24,
+    screenHeight: 1.52,
+    dockWidth: 0.82,
+    dockGap: 0.08,
+    panelSideGap: 0.445,
+    panelFwdOffset: -0.34,
+    commentsScale: 0.432,
+    guideScale: 0.314,
+  });
+  const before = api.getCommentsPanelLayout();
+  const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });
+  closeTo(api.dockTargetSize(4).w, 2.8);
+  assert.equal(tuned.screenScale, 10, 'screen size uses the gesture clamp');
+  assert.equal('bogus' in tuned, false);
+  assert.equal(api.getScreenState().scale, 10);
+  assert.ok(api.getCommentsPanelLayout().center.x < before.center.x, 'bigger screen + gap push the panel left');
+
+  renderer.stopPreview();
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
+  assert.equal(api.getScreenState().scale, 4);
+});
+
+test('an XR session ignores preview layout tuning', async () => {
+  const { renderer } = await enterLiveSession();
+  assert.equal(renderer.isPresenting(), true, 'precondition: live session bound');
+  renderer.setLayoutTuning({ dockWidth: 0.5 });
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
+  assert.equal(renderer.__test.dockTargetSize(4).w, 3.28);
 });
 
 test('domoverlay flag omits the overlay layer from session options', async () => {
@@ -2570,7 +2747,7 @@ test('reel switches hold the last frame instead of flashing black', () => {
 
 test('video uploads gate on decoded frames, not wall-clock time', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   let decoded = 10;
   const video = {
     paused: false, readyState: 4, currentTime: 1.0, duration: 10, muted: true,
@@ -2599,7 +2776,7 @@ test('video uploads gate on decoded frames, not wall-clock time', () => {
 
 test('fresh visuals wait for forward-buffered data, steady visuals do not', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   const video = {
     paused: false, readyState: 2, currentTime: 0, duration: 10, muted: true,
     src: 'a', currentSrc: 'a', addEventListener() {}, removeEventListener() {},
@@ -4583,48 +4760,6 @@ test('Step 6.2: preview accompaniment freezes under reduced motion', () => {
   renderer.stopPreview();
 });
 
-test('Step 6.3: street bezel + compass appear at street zoom and hide at globe', () => {
-  const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
-  renderer.init(null, {});
-  renderer.startPreview(makePreviewCanvas(gl));
-  const api = renderer.__test;
-  renderer.setSceneMode('earth');
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  renderer.__runScheduledFrame(64);
-  let bezel = api.earthBezelState();
-  assert.equal(bezel.visible, true, 'bezel + compass show at street zoom');
-  assert.ok(bezel.radius > 0.3 && bezel.radius < 3, `bezel radius sane, got ${bezel.radius}`);
-  api.setEarthZoom(1);
-  renderer.__runScheduledFrame(96);
-  bezel = api.earthBezelState();
-  assert.equal(bezel.visible, false, 'bezel hides back at globe scale');
-  renderer.stopPreview();
-});
-
-test('Step 6.3: compass laser hover reports the badge without moving the globe', () => {
-  const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl });
-  renderer.init(null, {});
-  renderer.startPreview(makePreviewCanvas(gl));
-  const api = renderer.__test;
-  renderer.setSceneMode('earth');
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  const scene = api.getScene();
-  const badge = scene.children.find((child) => child && child.userData && child.userData.compassBadge);
-  assert.ok(badge, 'compass badge exists in the scene');
-  badge.visible = true;
-  badge.position.set(0, 1.3, -1.15);
-  badge.userData.worldRadius = 0.5;
-  const hovered = api.updateEarthHoverFromRay({ x: 0, y: 1.3, z: 0 }, { x: 0, y: 0, z: -1 });
-  assert.equal(hovered, 'compass', 'laser over the badge reports compass');
-  renderer.stopPreview();
-});
-
 test('Heat/cone coincidence survives a street→globe zoom-out', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });
@@ -4669,7 +4804,7 @@ test('Heat/cone coincidence survives a street→globe zoom-out', () => {
 test('HUD regression: the tile Group never carries a renderOrder (it would outrank the HUD)', () => {
   // THREE.Group.renderOrder is a group sort order that beats every child's own
   // renderOrder; a value on the tile group drew the whole map OVER the label,
-  // preview card, bezel and compass at every zoom with tiles.
+  // preview card at every zoom with tiles.
   assert.doesNotMatch(rendererSource, /earthTileGroup\.renderOrder\s*=/);
   const { renderer, api } = topdownHarness();
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
@@ -4744,7 +4879,7 @@ test('Preview card posters are same-origin loads with a capped cache and tolerat
 });
 
 test('Preview billboard texture matches the 1:1.4 plane so text is never stretched', () => {
-  assert.match(rendererSource, /earthPreviewCanvas\.width = 512;\s*earthPreviewCanvas\.height = 716;/);
+  assert.match(rendererSource, /earthPreviewCtx \} = createPanelCanvas\(512, 716\)/);
   assert.match(rendererSource, /new THREE\.PlaneGeometry\(0\.5, 0\.7\)/);
   const ui = loadUICanvasStandalone();
   closeTo(ui.EARTH_PREVIEW_W / ui.EARTH_PREVIEW_H, 0.5 / 0.7, 0.002);
@@ -4897,30 +5032,6 @@ test('panel separation lifts the preview off the breadcrumb and keeps it in view
 
 // ─── Mode-exit cleanup and keep-out zones ───────────────────────────────
 
-test('leaving Earth mode hides the bezel ring and compass dial (they are scene-rooted)', () => {
-  const { renderer, api } = topdownHarness();
-  api.setDebugFlags({ horizonhud: true });
-  api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
-  renderer.__runScheduledFrame(32);
-  renderer.__runScheduledFrame(64);
-  assert.equal(api.earthBezelState().visible, true, 'precondition: street zoom shows them');
-  const scene = api.getScene();
-  const compass = scene.children.find((c) => c && c.userData && c.userData.compassBadge);
-  assert.equal(compass.visible, true);
-  renderer.setSceneMode('reels'); // e.g. after opening a location's reels
-  assert.equal(api.earthBezelState().visible, false);
-  assert.equal(compass.visible, false, 'compass hidden in reels');
-  // A reels frame must not resurrect them.
-  renderer.__runScheduledFrame(96);
-  assert.equal(compass.visible, false);
-  assert.equal(api.earthBezelState().visible, false);
-  // Re-entering Earth starts clean at the globe (no bezel at orbit scale).
-  renderer.setSceneMode('earth');
-  renderer.__runScheduledFrame(128);
-  assert.equal(api.earthBezelState().visible, false);
-  renderer.stopPreview();
-});
-
 test('keep-out zones push a panel off the focused pin: up first, sideways if the view refuses', () => {
   const { renderer, api } = topdownHarness();
   const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
@@ -4957,7 +5068,7 @@ test('the live breadcrumb never covers the zoom anchor or the hovered pin', () =
   const keeps = api.earthHudKeepOuts();
   assert.ok(keeps.length >= 1, 'anchor / pin keep-outs exist');
   const scene = api.getScene();
-  const label = scene.children.find((c) => c && c.renderOrder === 100 && !(c.userData && c.userData.compassBadge));
+  const label = scene.children.find((c) => c && c.renderOrder === 100);
   const head = { x: 0, y: 1.6, z: 0 }, fwd = { x: 0, y: 0, z: -1 };
   for (const k of keeps) {
     const a = api.earthViewAngles(label.position, head, fwd), b = api.earthViewAngles(k, head, fwd);
@@ -5087,14 +5198,14 @@ test('zoomed stick nudge moves the content the way the stick points, on screen',
   renderer.stopPreview();
 });
 
-test('the street bezel ring and compass dial are off by default (?horizonhud=1 restores them)', () => {
+test('no bezel ring or compass dial exists in the Earth scene', () => {
   const { renderer, api } = topdownHarness();
   api.setEarthZoom(512, { lat: 25.76, lon: -80.19 });
   renderer.__runScheduledFrame(32);
   renderer.__runScheduledFrame(64);
-  assert.equal(api.earthBezelState().visible, false);
   const scene = api.getScene();
-  assert.equal(scene.children.some((c) => c && c.userData && c.userData.compassBadge), false, 'no compass mesh is even created');
+  assert.equal(scene.children.some((c) => c && c.userData && c.userData.compassBadge), false);
+  assert.doesNotMatch(rendererSource, /earthBezelMesh|earthCompassMesh/);
   renderer.stopPreview();
 });
 
@@ -5500,7 +5611,8 @@ function stereoHarness(initialSource) {
   const counters = { deleted: 0, textureSources: [] };
   const gl = makeMockGl(counters);
   let source = initialSource;
-  const renderer = loadRenderer({ gl });
+  // The stereo proxy tests exercise the canvas path (?vrtex=canvas).
+  const renderer = loadRenderer({ gl, search: '?vrtex=canvas' });
   renderer.init(initialSource.element, {
     getVisualSource: () => source,
     getPlaylist: () => [],
@@ -5650,6 +5762,111 @@ test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
   renderer.stopPreview();
 });
 
+// ─── Direct VideoTexture default (v8.24) ────────────────────────────────
+
+function directHarness(initialSource) {
+  const gl = makeMockGl({ deleted: 0, textureSources: [] });
+  let source = initialSource;
+  const renderer = loadRenderer({ gl, search: '' });
+  renderer.init(initialSource.element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  let t = 16;
+  const frame = () => { renderer.__runScheduledFrame(t); t += 16; };
+  const setSource = (next) => { source = next; renderer.onVideoChange(); };
+  return { renderer, api: renderer.__test, frame, setSource };
+}
+
+test('the XR render loop goes through the shared texture update (direct path reachable in VR)', () => {
+  // Regression guard: v8.13-v8.23 XR frames called uploadVideoFrame()
+  // directly, so ?vrtex=video never reached the headset.
+  const loop = rendererSource.slice(rendererSource.indexOf('renderer.setAnimationLoop((time, frame) => {'));
+  const reels = loop.slice(0, loop.indexOf('updateGlowColor(time, 800)'));
+  assert.match(reels, /updateVisualTexture\(getVisualSource\(\)\)/);
+  assert.doesNotMatch(reels, /uploadVideoFrame\(/);
+});
+
+test('a mono video in XR shows through the direct texture at native size and survives curvature changes', () => {
+  const { renderer, api, frame } = directHarness(stereoVideo('mono-direct', 'mono', 3840, 3840));
+  api.setXrSessionForTest({});
+  frame();
+  let screen = api.getSceneInfo().screen;
+  assert.equal(screen.directVideo, true);
+  assert.equal(screen.mapSize.join(','), '3840,3840');
+  for (const mode of ['dome', 'curved', 'flat']) {
+    renderer.setCurvatureMode(mode);
+    frame();
+    screen = api.getSceneInfo().screen;
+    assert.equal(screen.directVideo, true, `direct map kept in ${mode}`);
+  }
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
+test('SBS and top-bottom videos in XR split the direct texture into per-eye video views', () => {
+  for (const [layout, repeat] of [['sbs', [0.5, 1]], ['tb', [1, 0.5]]]) {
+    const { renderer, api, frame } = directHarness(stereoVideo('direct-' + layout, layout));
+    api.setXrSessionForTest({});
+    frame();
+    const state = api.getStereoState();
+    assert.equal(state.textureStereo, layout);
+    assert.equal(state.eyesAreVideo, true, `${layout} eyes clone the VideoTexture`);
+    assert.equal(state.canvas, null, `${layout} never allocates the stereo proxy`);
+    assert.equal(state.left.visible && state.right.visible, true);
+    assert.deepEqual([...state.left.repeat], repeat);
+    assert.equal(state.screenMaterialVisible, false);
+    api.setXrSessionForTest(null);
+    renderer.stopPreview();
+  }
+});
+
+test('images keep the canvas proxy while videos use the direct texture', () => {
+  const image = {
+    kind: 'image', element: { complete: true, naturalWidth: 1080, naturalHeight: 1080 },
+    ready: true, paused: true, currentTime: 0, duration: 8, version: 'img-1',
+  };
+  const { renderer, api, frame, setSource } = directHarness(image);
+  frame();
+  assert.equal(api.getSceneInfo().screen.directVideo, false);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  setSource(stereoVideo('vid-after-img', 'mono', 2160, 2160));
+  frame();
+  assert.equal(api.getSceneInfo().screen.directVideo, true);
+  renderer.stopPreview();
+});
+
+test('?vrtex=canvas opts out of the direct texture; ?vrfov sets foveation', () => {
+  const canvas = loadRenderer({ search: '?vrtex=canvas&vrfov=0.5' });
+  canvas.init(null, {});
+  assert.equal(canvas.__test.getDebugFlags().vrtex, false);
+  assert.equal(canvas.__test.getDebugFlags().fov, 0.5);
+  const defaults = loadRenderer({ search: '' });
+  defaults.init(null, {});
+  assert.equal(defaults.__test.getDebugFlags().vrtex, true);
+  assert.equal(defaults.__test.getDebugFlags().fov, 0);
+  const clamped = loadRenderer({ search: '?vrfov=3' });
+  clamped.init(null, {});
+  assert.equal(clamped.__test.getDebugFlags().fov, 1);
+});
+
+test('?vrfbs sets the XR framebuffer scale; default 1.5, clamped to 0.5..2', () => {
+  const defaults = loadRenderer({ search: '' });
+  defaults.init(null, {});
+  assert.equal(defaults.__test.getDebugFlags().fbs, 1.5);
+  const native = loadRenderer({ search: '?vrfbs=1' });
+  native.init(null, {});
+  assert.equal(native.__test.getDebugFlags().fbs, 1);
+  const high = loadRenderer({ search: '?vrfbs=4' });
+  high.init(null, {});
+  assert.equal(high.__test.getDebugFlags().fbs, 2);
+  const low = loadRenderer({ search: '?vrfbs=0.1' });
+  low.init(null, {});
+  assert.equal(low.__test.getDebugFlags().fbs, 0.5);
+});
+
 test('preview split-screen and the content stereo layout are independent', () => {
   const gl = makeMockGl({ deleted: 0, textureSources: [] });
   const renderer = loadRenderer({ gl });
@@ -5786,4 +6003,109 @@ test('VR shell: an idle open shell uploads nothing; changes and teardown are cle
   renderer.stopPreview();
   assert.equal(renderer.shell.isOpen(), false, 'teardown drops the shell');
   assert.equal(renderer.getPreviewState().shell, null);
+});
+
+// ── Quest system keyboard for VR comments ───────────────────────────
+function makeKeyboardInput() {
+  const handlers = {};
+  return {
+    style: {}, value: '', handlers, focused: 0, blurred: 0,
+    setAttribute() {},
+    appendChild() {},
+    addEventListener(type, fn) { handlers[type] = fn; },
+    focus() { this.focused += 1; },
+    blur() { this.blurred += 1; if (handlers.blur) handlers.blur(); },
+  };
+}
+
+async function enterKeyboardSession(sessionExtra) {
+  const input = makeKeyboardInput();
+  const posted = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    globals: { XRWebGLLayer: class { constructor() { this.framebuffer = null; } } },
+    createElement: (kind) => (kind === 'input' ? input : kind === 'div' ? { style: {}, appendChild() {} } : null),
+  });
+  renderer.init(null, {
+    onPostComment: (text, t) => posted.push({ text, t }),
+    getVisualSource: () => ({ kind: 'video', element: {}, currentTime: 12.34 }),
+  });
+  const session = makeLiveXrSession(sessionExtra);
+  await renderer.enterVR({ xr: { requestSession: async () => session } });
+  return { renderer, input, posted };
+}
+
+test('ADD opens the Quest system keyboard on a minimal session (isSystemKeyboardSupported)', async () => {
+  const { renderer, input } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  assert.equal(renderer.__test.executeCommentAction('add'), true);
+  assert.equal(input.style.display, 'block');
+  assert.equal(input.focused, 1, 'focus() summons the system keyboard');
+});
+
+test('ADD without any keyboard support shows a notice and never focuses the field', async () => {
+  const { renderer, input } = await enterKeyboardSession({ isSystemKeyboardSupported: false });
+  renderer.__test.executeCommentAction('add');
+  assert.equal(input.focused, 0);
+});
+
+test('keyboard Done (blur) posts the typed comment once, synced to the playhead', async () => {
+  const { renderer, input, posted } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  renderer.__test.executeCommentAction('add');
+  input.value = '  great reel  ';
+  input.blur(); // Done / dismiss: the system keyboard raises no key events
+  input.blur(); // a second blur must not double-post
+  assert.deepEqual(posted, [{ text: 'great reel', t: 12.3 }]);
+  assert.equal(input.style.display, 'none');
+});
+
+test('Enter posts once; Escape and an empty field post nothing', async () => {
+  const { renderer, input, posted } = await enterKeyboardSession({ isSystemKeyboardSupported: true });
+  const act = renderer.__test.executeCommentAction;
+  act('add'); input.value = 'hi';
+  input.handlers.keydown({ key: 'Enter' });
+  assert.equal(posted.length, 1, 'Enter posts exactly once despite the blur it causes');
+  act('add'); input.value = 'nope';
+  input.handlers.keydown({ key: 'Escape' });
+  act('add'); input.value = '   ';
+  input.blur();
+  assert.equal(posted.length, 1);
+});
+
+test('shared earth HUD renderers: tiers stay in sync with the engine and every renderer paints', () => {
+  const { renderer, api } = topdownHarness();
+  const ui = loadUICanvasStandalone();
+  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.color}`);
+  assert.equal(tiers(ui.EARTH_TIERS).join(","), tiers(api.EARTH_TIERS).join(","));
+  for (const s of [1, 3, 24, 200, 16384]) assert.equal(ui.earthTierIndex(s), api.earthTierIndex(s));
+  const label = makeRecordingCtx();
+  ui.renderEarthLabelCanvas(label.ctx, {
+    title: 'WORLD › Hanoi · 72%', detail: '72% HEAT · 18 ACTIVE', zoomed: true, zoomPct: 72, featured: true,
+    offline: false, scaleBar: { pixels: 120, caption: '5 KM' }, scale: 60, streaming: 0.5,
+    hint: 'TRIGGER  ▸  OPEN FEED', resetEnabled: true, resetHot: false,
+  });
+  assert.ok(label.texts.some((t) => t.includes('RESET ROTATION')), 'label paints the reset button');
+  assert.ok(label.texts.some((t) => t.startsWith('WORLD › Hanoi')), 'label paints the title');
+  assert.equal(ui.resolveEarthLabelHit(ui.EARTH_LABEL_RESET_RECT.x + 1, ui.EARTH_LABEL_RESET_RECT.y + 1), 'face');
+  assert.equal(ui.resolveEarthLabelHit(0, 0), null);
+  renderer.stopPreview();
+});
+
+test('dock LIKE, SAVE and COLLECT outlines light up when the reel is liked or saved', () => {
+  const ui = loadUICanvasStandalone();
+  const outlines = (itemState) => {
+    const { ctx } = makeRecordingCtx();
+    const strokes = [];
+    const stroke = ctx.stroke;
+    ctx.stroke = (...a) => { strokes.push(String(ctx.strokeStyle)); return stroke && stroke.apply(ctx, a); };
+    ui.renderControlsCanvas(ctx, dockRenderOptions({ itemState: { available: true, ...itemState } }));
+    return strokes.join('|');
+  };
+  const base = outlines({});
+  assert.notEqual(outlines({ liked: true }), base, 'liked lights LIKE');
+  assert.notEqual(outlines({ saved: true }), base, 'saved lights SAVE / COLLECT');
+  // saved lights both SAVE and COLLECT; liked only LIKE.
+  const accentCount = (s) => s.split('|').filter((c) => c === ui.TOKENS.hex.accent).length;
+  assert.equal(accentCount(outlines({ saved: true })) - accentCount(base), 2);
+  assert.equal(accentCount(outlines({ liked: true })) - accentCount(base), 1);
 });

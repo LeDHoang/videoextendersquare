@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { ReelsPlayerSkeleton } from './Skeleton.jsx';
 import { revealScrollTarget } from '../../utils/revealPlayer.js';
+import { runScripts } from '../../utils/playerScripts.js';
 
 // Embeds the Reels/VR player directly in the page (no iframe) so it sizes
 // itself to the viewport. The backend returns scoped CSS + body HTML + the
@@ -148,69 +149,77 @@ export default function ReelsPlayer({
     host.innerHTML = data.html;
     mount.appendChild(host);
 
-    for (const code of data.scripts) {
-      const s = document.createElement('script');
-      s.textContent = code;
-      mount.appendChild(s);
-    }
+    let cancelled = false;
     let revealTimer = 0;
     let revealAttempts = 0;
-    if (revealOnLoad && !previewMode && !revealedRef.current) {
-      const tryReveal = () => {
-        const frame = document.getElementById('reelsFrame');
-        const rect = frame ? frame.getBoundingClientRect() : null;
-        // Layout can still be settling for a moment (fonts, the skeleton swap). A timer (not rAF) so a tab
-        // that loads in the background still ends up scrolled.
-        if (!rect || rect.height < 100) {
-          if (revealAttempts < 60) {
-            revealAttempts += 1;
-            revealTimer = window.setTimeout(tryReveal, 50);
-          }
-          return;
-        }
-        revealedRef.current = true;
-                if (userScrolledRef.current) return;
-        const header = document.querySelector('.sx-top-bar');
-        const target = revealScrollTarget({
-          top: rect.top,
-          bottom: rect.bottom,
-          viewportHeight: window.innerHeight,
-          headerBottom: header ? Math.max(0, header.getBoundingClientRect().bottom) : 0,
-          scrollY: window.scrollY,
-          align: revealAlign,
-        });
-        if (target !== null) window.scrollTo({ top: target, behavior: 'auto' });
-      };
-      revealTimer = window.setTimeout(tryReveal, 0);
-    }
     let previewFrame = 0;
     let previewAttempts = 0;
-    if (previewMode) {
-      const tryStartPreview = () => {
-        try {
-          const renderer = window.WebXRVR;
-          const canvas = previewCanvasRef.current;
-          if (!renderer?.startPreview || !canvas) throw new Error('Preview renderer did not initialize.');
-          // Layout may still be 0×0 on the first frame (fonts/skeleton swap);
-          // wait a few frames for a real size before binding the GL context.
-          if ((canvas.clientWidth | 0) === 0 && previewAttempts < 30) {
-            previewAttempts += 1;
-            previewFrame = window.requestAnimationFrame(tryStartPreview);
+    // Reveal and preview need the player initialized, so they wait for every script.
+    const afterScripts = () => {
+      if (revealOnLoad && !previewMode && !revealedRef.current) {
+        const tryReveal = () => {
+          const frame = document.getElementById('reelsFrame');
+          const rect = frame ? frame.getBoundingClientRect() : null;
+          // Layout can still be settling for a moment (fonts, the skeleton swap). A timer (not rAF) so a tab
+          // that loads in the background still ends up scrolled.
+          if (!rect || rect.height < 100) {
+            if (revealAttempts < 60) {
+              revealAttempts += 1;
+              revealTimer = window.setTimeout(tryReveal, 50);
+            }
             return;
           }
-          renderer.startPreview(canvas, previewOptions);
-          onPreviewReady?.(renderer);
-        } catch (error) {
-          const hint = /webgl/i.test(String(error?.message || ''))
-            ? ' — WebGL context creation failed. Enable hardware acceleration (Chrome: Settings → System → Use graphics acceleration), disable --disable-gpu, and reload. Headless/software-GL browsers need SwiftShader (`--use-gl=swiftshader`).'
-            : '';
-          setErr(String(error?.message || error) + hint);
-        }
-      };
-      previewFrame = window.requestAnimationFrame(tryStartPreview);
-    }
+          revealedRef.current = true;
+                  if (userScrolledRef.current) return;
+          const header = document.querySelector('.sx-top-bar');
+          const target = revealScrollTarget({
+            top: rect.top,
+            bottom: rect.bottom,
+            viewportHeight: window.innerHeight,
+            headerBottom: header ? Math.max(0, header.getBoundingClientRect().bottom) : 0,
+            scrollY: window.scrollY,
+            align: revealAlign,
+          });
+          if (target !== null) window.scrollTo({ top: target, behavior: 'auto' });
+        };
+        revealTimer = window.setTimeout(tryReveal, 0);
+      }
+      if (previewMode) {
+        const tryStartPreview = () => {
+          try {
+            const renderer = window.WebXRVR;
+            const canvas = previewCanvasRef.current;
+            if (!renderer?.startPreview || !canvas) throw new Error('Preview renderer did not initialize.');
+            // Layout may still be 0×0 on the first frame (fonts/skeleton swap);
+            // wait a few frames for a real size before binding the GL context.
+            if ((canvas.clientWidth | 0) === 0 && previewAttempts < 30) {
+              previewAttempts += 1;
+              previewFrame = window.requestAnimationFrame(tryStartPreview);
+              return;
+            }
+            renderer.startPreview(canvas, previewOptions);
+            onPreviewReady?.(renderer);
+          } catch (error) {
+            const hint = /webgl/i.test(String(error?.message || ''))
+              ? ' — WebGL context creation failed. Enable hardware acceleration (Chrome: Settings → System → Use graphics acceleration), disable --disable-gpu, and reload. Headless/software-GL browsers need SwiftShader (`--use-gl=swiftshader`).'
+              : '';
+            setErr(String(error?.message || error) + hint);
+          }
+        };
+        previewFrame = window.requestAnimationFrame(tryStartPreview);
+      }
+    };
+    runScripts(mount, data.scripts, () => cancelled).then(
+      () => {
+        if (!cancelled) afterScripts();
+      },
+      (error) => {
+        if (!cancelled) setErr(String(error?.message || error));
+      },
+    );
     // Tear down player timers/handlers (e.g. the image-reel dwell timer).
     return () => {
+      cancelled = true;
       if (revealTimer) window.clearTimeout(revealTimer);
       if (previewFrame) window.cancelAnimationFrame(previewFrame);
       if (previewMode && window.WebXRVR?.stopPreview) {

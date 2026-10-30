@@ -3,7 +3,7 @@
 Standalone CLI twin of the /api/reels/spatialize endpoint — run without the
 server (from the repo root):
     .venv/bin/python scripts/batch_spatialize.py            # default dirs
-    .venv/bin/python scripts/batch_spatialize.py --half     # half-SBS (3840x3840)
+    .venv/bin/python scripts/batch_spatialize.py --half     # half-SBS (each eye half width)
 """
 
 import argparse
@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--out", default=os.path.join("output", "testpipeline-3d"))
     parser.add_argument("--strength", type=float, default=1.0, help="depth strength multiplier")
     parser.add_argument("--half", action="store_true", help="half-SBS output (per-eye downscaled)")
+    parser.add_argument("--codec", choices=["h264", "hevc"], default="h264", help="output video codec")
     parser.add_argument("--force", action="store_true", help="force overwrite of existing outputs")
     args = parser.parse_args()
 
@@ -56,6 +57,7 @@ def main() -> int:
                 status_callback=lambda m: print(f"    {m}"),
                 strength=args.strength,
                 half_sbs=args.half,
+                codec=args.codec,
             )
             elapsed = round(time.time() - reel_t0, 2)
             processed_times.append((name, elapsed, metrics.get("resolution", "unknown"), metrics.get("frames", 0)))

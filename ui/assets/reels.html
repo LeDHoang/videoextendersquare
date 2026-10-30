@@ -361,7 +361,7 @@
 
   /* Keyboard focus rings for the controls that had none. */
   .edge-chevron:focus-visible,
-  .drawer-tab:focus-visible,
+  .drawer-sync-filter:focus-visible,
   .drawer-close-btn:focus-visible,
   .comment-name:focus-visible,
   .comment-time-btn:focus-visible,
@@ -1068,36 +1068,27 @@
     gap: 8px;
     margin-left: auto;
   }
-  .drawer-tabs { display: flex; gap: 6px; align-items: center; }
-  .drawer-tab {
+  /* One-button filter: on = all comments, off = general only. */
+  .drawer-sync-filter {
+    width: 32px; height: 32px;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 32px;
+    justify-content: center;
+    padding: 0;
     background: var(--sx-surface-3);
     border: 1px solid var(--sx-rule-strong);
-    color: var(--sx-accent);
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 0 14px;
     border-radius: 0;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-    line-height: 1;
     box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .drawer-tab .material-symbols-outlined { font-size: 14px; line-height: 1; }
-  .drawer-tab svg { width: 14px; height: 14px; display: block; }
-  .drawer-tab:hover { background: var(--sx-surface-3); border-color: var(--sx-accent); }
-  .drawer-tab.active {
-    background: var(--sx-accent);
-    color: var(--sx-on-accent);
+  .drawer-sync-filter svg { width: 18px; height: 18px; display: block; opacity: 0.4; filter: grayscale(1); transition: opacity 0.15s ease, filter 0.15s ease; }
+  .drawer-sync-filter:hover { border-color: var(--sx-accent); }
+  .drawer-sync-filter[aria-pressed="true"] {
     border-color: var(--sx-accent);
     box-shadow: 0 0 12px color-mix(in srgb, var(--sx-accent) 28%, transparent);
   }
+  .drawer-sync-filter[aria-pressed="true"] svg { opacity: 1; filter: none; }
   .drawer-close-btn {
     width: 32px; height: 32px;
     display: inline-flex;
@@ -1175,16 +1166,14 @@
     color: var(--avatar-border, var(--sx-accent));
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .comment-time-btn, .comment-time-gen {
+  .comment-time-btn {
     display: inline-flex; align-items: center; gap: 4px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; font-weight: 700;
+    font-size: 10px; font-weight: 700;
     padding: 3px 8px;
     border-radius: 0;
     white-space: nowrap;
     flex-shrink: 0;
-  }
-  .comment-time-btn {
     background: var(--sx-surface-3);
     border: 1px solid var(--sx-accent);
     color: var(--sx-accent-hi);
@@ -1196,14 +1185,9 @@
   .sync-time-toggle svg { width: 13px; height: 13px; display: block; }
   .sync-time-icon { display: inline-flex; line-height: 1; }
   .comment-time-btn:hover { background: var(--sx-accent); border-color: var(--sx-accent); color: var(--sx-on-accent); }
-  .comment-time-gen {
-    background: var(--sx-surface-3);
-    border: 1px solid var(--sx-accent);
-    color: var(--sx-accent-hi);
-  }
   .comment-msg {
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
-    font-size: 15px; line-height: 22px;
+    font-size: 13px; line-height: 18px;
     color: #e3e2e3;
     word-break: break-word;
     margin: 0;
@@ -1213,7 +1197,7 @@
     border: none;
     color: var(--sx-accent);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 12px;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -1563,13 +1547,6 @@
     .drawer-header {
       padding: 10px 12px;
       gap: 8px;
-    }
-    .drawer-tabs {
-      flex-wrap: wrap;
-    }
-    .drawer-tab {
-      padding: 0 8px;
-      font-size: 10px;
     }
     .comment-input-wrap {
       min-width: 0;
@@ -2410,11 +2387,7 @@
         <h2 class="drawer-title" id="drawerTitle">COMMENTS <span class="drawer-title-count">(0)</span></h2>
       </div>
       <div class="drawer-header-right">
-        <div class="drawer-tabs" role="tablist" aria-label="Comment filter">
-          <button type="button" class="drawer-tab active" data-tab="all" id="tabAll" role="tab" aria-selected="true">ALL</button>
-          <button type="button" class="drawer-tab" data-tab="sync" id="tabSync" role="tab" aria-selected="false">__ICON_TIMESYNC__ TIME-SYNC</button>
-          <button type="button" class="drawer-tab" data-tab="general" id="tabGeneral" role="tab" aria-selected="false"><span class="material-symbols-outlined">forum</span> GENERAL</button>
-        </div>
+        <button type="button" class="drawer-sync-filter" id="syncFilterBtn" aria-pressed="true" title="Time-synced comments shown (tap for general only)" aria-label="Include time-synced comments">__ICON_TIMESYNC__</button>
         <button type="button" class="drawer-close-btn" id="closeDrawerBtn" title="Close Comments (Esc)" aria-label="Close comments"><span class="material-symbols-outlined">close</span></button>
       </div>
     </div>
@@ -2479,6 +2452,7 @@
   </div>
 </aside>
 
+<script>/* Canvas text never fetches a webfont: warm Orbitron for the VR dock wordmark. */ if (document.fonts && document.fonts.load) document.fonts.load("900 16px Orbitron").catch(function () {});</script>
 <script>__QUEST_CONTROLLER_IMG_JS__</script>
 <script>__REELS_FEED_STATE_JS__</script>
 <script>__REELS_REWARDS_JS__</script>
@@ -2665,9 +2639,7 @@
     const drawerTitle = document.getElementById('drawerTitle');
     const closeDrawerBtn = document.getElementById('closeDrawerBtn');
     const commentsList = document.getElementById('commentsList');
-    const tabAll = document.getElementById('tabAll');
-    const tabSync = document.getElementById('tabSync');
-    const tabGeneral = document.getElementById('tabGeneral');
+    const syncFilterBtn = document.getElementById('syncFilterBtn');
     const accountBtn = document.getElementById('accountBtn');
     const accountAvatar = document.getElementById('accountAvatar');
     const accountName = document.getElementById('accountName');
@@ -2683,10 +2655,6 @@
     const blobSourceMap = {};
     let isPreloading = false;
     let preloadedCount = 0;
-    // v8.9: background transfers started during rapid prev/next flight
-    // contend with the active reel over the USB tunnel — preloadNext backs
-    // off while the user is flying through the playlist.
-    let lastSwitchTime = 0;
 
     function isImageItem(item) {
       return !!item && item.media_type === 'image';
@@ -3077,6 +3045,42 @@
       return creator && creator.username ? '@' + creator.username : 'ECHO CREATOR';
     }
 
+    // <reels-vr-image-bitmap>
+    // VR draws image posts from an ImageBitmap decoded off the main thread.
+    // Drawing the <img> into the proxy canvas decoded it, and converted its
+    // ICC profile, synchronously at the texture upload: 80 ms on a 1080x495
+    // PNG with a 26 KB profile. img.decode() and createImageBitmap(img) still
+    // block the main thread for that long; createImageBitmap(blob) does not.
+    // Until the bitmap is ready the engine keeps the last frame.
+    let vrImageBitmap = { url: '', bitmap: null, failed: false };
+    function vrImageSource(image) {
+      const url = image ? image.getAttribute('src') : '';
+      const fallback = { element: image, ready: !!(image && image.complete && image.naturalWidth) };
+      if (!url || typeof createImageBitmap !== 'function' || typeof fetch !== 'function') return fallback;
+      if (vrImageBitmap.url !== url) {
+        if (vrImageBitmap.bitmap) vrImageBitmap.bitmap.close();
+        const entry = (vrImageBitmap = { url, bitmap: null, failed: false });
+        // cache: 'reload' because the <img> fetched this URL without CORS, and
+        // R2 sends no Access-Control-Allow-Origin (or Vary: Origin) to a
+        // request without Origin. Reusing that cached copy fails the CORS check.
+        fetch(url, { cache: 'reload' })
+          .then((response) => {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.blob();
+          })
+          .then((blob) => createImageBitmap(blob))
+          .then((bitmap) => {
+            if (vrImageBitmap === entry) entry.bitmap = bitmap;
+            else bitmap.close();
+          })
+          .catch(() => { entry.failed = true; });
+      }
+      if (vrImageBitmap.bitmap) return { element: vrImageBitmap.bitmap, ready: true };
+      if (vrImageBitmap.failed) return fallback;
+      return { element: image, ready: false };
+    }
+    // </reels-vr-image-bitmap>
+
     function currentVisualSource() {
       const item = videoData[idx] || null;
       if (collectOpen) {
@@ -3104,10 +3108,11 @@
         };
       }
       if (isImageItem(item)) {
+        const vrImage = vrImageSource(reelsImage);
         return {
           kind: 'image',
-          element: reelsImage,
-          ready: !!(reelsImage && reelsImage.complete && reelsImage.naturalWidth),
+          element: vrImage.element,
+          ready: vrImage.ready,
           paused: !imageTimer,
           muted: true,
           currentTime: imageElapsedNow() / 1000,
@@ -3151,6 +3156,13 @@
       const nextUrl = blobFor(idx, playUrl) || playUrl;
       if (video.getAttribute('src') === nextUrl) {
         applyEntryStereo(playback);
+        // The VR button empties the preloader, and the next reel's variant
+        // follows the VR state: re-warm unless it already holds the right one.
+        const next = videoData[idx + 1];
+        if (preloadVideo && next && next.available !== false && next.media_type !== 'static' && !isImageItem(next)) {
+          const nextPlay = playbackUrlFor(next, next);
+          if (preloadVideo.getAttribute('src') !== (blobFor(idx + 1, nextPlay) || nextPlay)) preloadNext(idx);
+        }
         return;
       }
       const resumeAt = typeof resumeOverride === 'number' ? resumeOverride : (video.currentTime || 0);
@@ -5235,7 +5247,7 @@
     function openDrawerToComment(commentId) {
       if (!commentId) return;
       toggleDrawer(true);
-      setActiveTab('all');
+      setSyncFilter(true);
       // Wait for the drawer slide-up (0.34s) so scroll offsets are correct.
       // The docked column does not slide so it can scroll straight away.
       setTimeout(() => {
@@ -5252,20 +5264,15 @@
       }, isDocked ? 0 : 380);
     }
 
-    // ── Active tab control helpers ──
-    function setActiveTab(key) {
-      const map = { all: tabAll, sync: tabSync, general: tabGeneral };
-      const activeEl = map[key] || tabAll;
-      [tabAll, tabSync, tabGeneral].forEach((t) => {
-        if (!t) return;
-        t.classList.remove('active');
-        t.setAttribute('aria-selected', 'false');
-      });
-      if (activeEl) {
-        activeEl.classList.add('active');
-        activeEl.setAttribute('aria-selected', 'true');
+    // ── Time-sync filter: on shows every comment, off shows general only ──
+    function setSyncFilter(on) {
+      activeTab = on ? 'all' : 'general';
+      if (syncFilterBtn) {
+        syncFilterBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        syncFilterBtn.title = on
+          ? 'Time-synced comments shown (tap for general only)'
+          : 'General comments only (tap to include time-synced)';
       }
-      activeTab = (activeEl && activeEl.getAttribute('data-tab')) || 'all';
       renderDrawerComments();
     }
 
@@ -5288,9 +5295,7 @@
       if (sideComms) sideComms.textContent = fmtCount(comments.length);
 
       let filtered = comments;
-      if (activeTab === 'sync') {
-        filtered = comments.filter((comment) => comment.timestamp !== null && comment.timestamp !== undefined);
-      } else if (activeTab === 'general') {
+      if (activeTab === 'general') {
         filtered = comments.filter((comment) => comment.timestamp === null || comment.timestamp === undefined);
       }
 
@@ -5298,7 +5303,7 @@
       if (!filtered.length) {
         const empty = document.createElement('div');
         empty.className = 'comment-empty';
-        const qualifier = activeTab === 'sync' ? 'time-synced ' : activeTab === 'general' ? 'general ' : '';
+        const qualifier = activeTab === 'general' ? 'general ' : '';
         empty.append(
           document.createTextNode('No ' + qualifier + 'comments yet.'),
           document.createElement('br'),
@@ -5350,17 +5355,11 @@
               showFlash('⏱ ' + formatTime(timestamp));
             }
           });
-        } else {
-          timeControl = document.createElement('span');
-          timeControl.className = 'comment-time-gen';
-          const icon = document.createElement('span');
-          icon.className = 'material-symbols-outlined';
-          icon.style.fontSize = '12px';
-          icon.textContent = 'forum';
-          timeControl.append(icon, document.createTextNode(' GENERAL'));
         }
 
-        left.append(avatar, name, timeControl);
+        // General comments carry no chip: no time pill means general.
+        left.append(avatar, name);
+        if (timeControl) left.append(timeControl);
 
         const actions = document.createElement('div');
         actions.className = 'comment-actions';
@@ -5434,11 +5433,7 @@
       updateTwitchTicker();
     }
 
-    // Tab button listeners
-    [tabAll, tabSync, tabGeneral].forEach((tab) => {
-      if (!tab) return;
-      tab.addEventListener('click', () => setActiveTab(tab.getAttribute('data-tab')));
-    });
+    if (syncFilterBtn) syncFilterBtn.addEventListener('click', () => setSyncFilter(activeTab === 'general'));
 
     if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => toggleDrawer(false));
     if (commentBtn) commentBtn.addEventListener('click', () => toggleDrawer());
@@ -5550,17 +5545,40 @@
       });
     }
 
+    // <reels-preload>
+    // Warm the next reel once the active one is playing, or after 1.5 s if
+    // it never starts, so the background transfer doesn't fight the active
+    // load for tunnel bandwidth. Every call (each switch) cancels the
+    // pending warm-up and clears the preloader, so flying through reels
+    // opens no background transfers.
+    const PRELOAD_DELAY_MS = 1500;
+    let preloadTimer = null;
+    let preloadOnPlaying = null;
+    function cancelPendingPreload() {
+      if (preloadTimer) clearTimeout(preloadTimer);
+      if (preloadOnPlaying) video.removeEventListener('playing', preloadOnPlaying);
+      preloadTimer = null;
+      preloadOnPlaying = null;
+    }
+
     function preloadNext(currentIndex) {
-      if (!videoData || videoData.length <= 1) {
-        clearPreloadVideo();
+      cancelPendingPreload();
+      clearPreloadVideo();
+      if (!videoData || videoData.length <= 1) return;
+      const run = function () {
+        cancelPendingPreload();
+        if (idx === currentIndex) warmNext(currentIndex);
+      };
+      if (!isImageItem(videoData[currentIndex]) && !video.paused && video.readyState >= 3) {
+        run();
         return;
       }
-      if (Date.now() - lastSwitchTime < 1500) {
-        // Flying through reels: don't open new background transfers while
-        // the active load is still fighting for tunnel bandwidth.
-        clearPreloadVideo();
-        return;
-      }
+      preloadOnPlaying = run;
+      video.addEventListener('playing', preloadOnPlaying);
+      preloadTimer = setTimeout(run, PRELOAD_DELAY_MS);
+    }
+
+    function warmNext(currentIndex) {
       const nextIdx = currentIndex + 1;
       const nextItem = videoData[nextIdx];
       if (!nextItem || nextItem.available === false || nextItem.media_type === 'static') {
@@ -5585,6 +5603,7 @@
         preloadVideo.load();
       }
     }
+    // </reels-preload>
 
     // Render an image post: its images on screen in turn, no timeline,
     // the post's dwell (15s default) split across the images.
@@ -5615,6 +5634,26 @@
       if (!options || options.autoplay !== false) armImageTimer();
       else updatePlayBtnUI(false);
       if (isPackMode) schedulePackProgress();
+    }
+
+    // Switch latency: load start to the first decoded frame of the new src,
+    // reported to the VR engine's ?xrdiag=1 telemetry. A cache hit is a blob
+    // URL or a src the hidden preloader had already warmed.
+    let switchToken = 0;
+    function noteSwitchStart(src) {
+      const token = ++switchToken;
+      const startMs = performance.now();
+      const fromCache = String(src).startsWith('blob:') ||
+        !!(preloadVideo && preloadVideo.src && preloadVideo.src === video.src);
+      const done = function () {
+        if (token !== switchToken) return;
+        switchToken++;
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.noteSwitchTiming) {
+          WebXRVR.noteSwitchTiming(performance.now() - startMs, video.currentSrc || video.src, fromCache);
+        }
+      };
+      if (typeof video.requestVideoFrameCallback === 'function') video.requestVideoFrameCallback(done);
+      else video.addEventListener('playing', done, { once: true });
     }
 
     function loadVideo(index, options) {
@@ -5699,6 +5738,7 @@
       const itemUrl = blobFor(idx, playUrl) || playUrl;
       applyEntryStereo(playback);
       video.src = itemUrl;
+      noteSwitchStart(itemUrl);
       video.muted = isMuted;
       const requestedTime = Number(loadOptions.seekTo);
       if (Number.isFinite(requestedTime) && requestedTime > 0) {
@@ -5973,7 +6013,6 @@
 
     // Navigation
     async function nextVideo(reason) {
-      lastSwitchTime = Date.now();
       finishViewTracking(reason || 'manual_next');
       if (isPackMode && PackState) {
         if (packUnavailableTimer) {
@@ -6001,7 +6040,6 @@
       }
     }
     function prevVideo() {
-      lastSwitchTime = Date.now();
       if (isPackMode && PackState) {
         if (packUnavailableTimer) {
           clearTimeout(packUnavailableTimer);
@@ -7081,7 +7119,10 @@
         onReportReel: function() { return reportTarget('post', videoData[idx] && videoData[idx].post_id); },
         getCurrentItemState: function() {
           const item = videoData[idx] || {};
-          return { liked: !!item._liked, saved: !!item._saved, following: !!item._following, available: item.available !== false };
+          return {
+            liked: !!item._liked, saved: !!item._saved, following: !!item._following, available: item.available !== false,
+            canFollow: !!(followPill && !followPill.hidden),
+          };
         },
         onUnmute: function() {
           isMuted = false;
