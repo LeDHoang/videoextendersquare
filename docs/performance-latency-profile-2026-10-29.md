@@ -428,3 +428,22 @@ Five of the six usable locations agree: building the list takes about 42 to 76 m
 The list payload is unchanged in size (41,700 to 41,706 bytes) and in content: production returns 201 items, all of them published posts.
 
 Two further changes to the same endpoint were committed after this round and are not deployed yet. The comments query no longer joins each comment's post, which is already loaded for the request (`04d2bc1`; `reel_records` 40 to 33 ms locally). The output root is resolved once per request instead of once per item (`09e32f0`; the local `/api/reels` request 86 to 80.5 ms on top of the first change). The response stays byte-identical after both.
+
+### Capacity after deploying `04d2bc1` and `09e32f0`
+
+Deployed on 2026-10-30 and measured on loopback with the same `load.py`, 30 s per step, a distinct client IP per worker. Every request returned 200. The section 3 baseline is from before any of the fixes.
+
+| Route | Concurrency | Good rps, section 3 → now | p50, section 3 → now | p95, section 3 → now | p99, section 3 → now |
+|---|---|---|---|---|---|
+| `/api/reels` | 1 | 4.9 → 7.3 | 176 → 120 ms | 328 → 226 ms | 480 → 238 ms |
+| `/api/reels` | 10 | 4.1 → 5.6 | 2.3 → 1.7 s | 3.0 → 2.2 s | 8.4 → 7.5 s |
+| `/api/reels` | 25 | 4.0 → 5.9 | 5.8 → 4.2 s | 8.2 → 6.0 s | 12.6 → 10.3 s |
+| `/api/reels/feed` | 10 | 12.9 → 12.1 | 1.0 → 0.76 s | 1.4 → 0.92 s | 1.5 → 1.04 s |
+| `/api/reels/feed` | 25 | 7.6 → 11.8 | 2.7 → 1.8 s | 6.1 → 3.5 s | 8.2 → 4.4 s |
+| `/api/reels/player` | 10 | 5.3 → 10.2 | 1.7 → 0.91 s | 2.1 → 1.10 s | 10.9 → 1.30 s |
+
+Against the run just before this deploy (section 9 table above), `/api/reels` at 10 and 25 is unchanged within noise (5.9 → 5.6 and 5.9 → 5.9 rps). The two changes save a few milliseconds of a request that costs about 170 ms of CPU, which is too small to show under load. The gains in this table come from the earlier fixes. The section 3 feed runs at 10 were partly rate limited, so the feed row at 10 is not a clean comparison.
+
+The p99 at 10 and 25 is still several seconds, and every step had a maximum of 7.8 to 13.6 s. These outliers appear on every route at once, which suggests a stall of the whole process rather than slow requests on one route.
+
+**Rough user capacity.** The CPU cost of a session start (one `/api/reels`, one player load and one feed page) fell from about 0.57 s to about 0.35 s. The single app process saturates at about 170 session starts per minute, up from about 105. Watching videos does not load the VPS, because media is served from R2.
