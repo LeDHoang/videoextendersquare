@@ -365,3 +365,62 @@ The player route serves about twice as many requests, and the feed about 1.6–1
 - Recommendation 3 (`media.<domain>` with caching) and 9 (hosting region) need a domain and a decision. They are the main remaining wins for the US and Europe.
 - Recommendation 5 (SPA waterfall) is not done.
 - Recommendation 6 is only partly done. The feed still rebuilds its candidates on every request, and `/api/reels` still builds its full list.
+
+## 9. Reels list fixes (2026-10-30, second deploy)
+
+### What shipped
+
+Deployed to production as `9d638e8`.
+
+| Commit | Change |
+|---|---|
+| `a3e2010` | `/api/reels` serializes its ~600 KB response with pydantic-core (`response_model=dict`) instead of `jsonable_encoder`, which cost about 42 ms of the request in production. Image posters are checked with one `stat` instead of three. |
+| `7feca1a` | Without a `?play=` deep link, `/reels` starts loading the player alongside `/api/reels` instead of after it. |
+| `9d638e8` | `/reels` fetched `/api/reels` twice for anonymous visitors: once on mount, and again when `/api/auth/me` returned no user. The list now keys on the viewer id, so it is fetched once. |
+
+### Server capacity on loopback
+
+Same run as section 8. Only `/api/reels` was targeted; the feed and player rows matched section 8 within noise.
+
+| Route | Concurrency | Good rps, section 8 | Good rps, now | p50 section 8 | p50 now |
+|---|---|---|---|---|---|
+| `/api/reels` | 1 | 5.6 | 5.8 | 158 | 120 |
+| `/api/reels` | 10 | 4.8 | 5.9 | 1977 | 1634 |
+| `/api/reels` | 25 | 4.6 | 5.9 | 4997 | 4086 |
+
+`/api/reels` serves about 25% more requests under load, and a single request is about 40 ms faster. Against the first baseline (4.0 rps at 25), it is now about 1.5×.
+
+### Browser load of `/reels` in production (from home, warm)
+
+| | Before | After |
+|---|---|---|
+| `/api/reels` requests per page load | 2 | 1 |
+| Player request starts | after the list returns | at the same time as the list (both at 881 ms) |
+| List response | — | 882 → 1611 ms |
+| Player response | — | 881 → 2053 ms |
+
+### Function and quality check
+
+- `make test` passed: 706 pytest, 399 node and 478 vitest tests.
+- `/api/reels` through the tunnel returned 200 with the same keys, 201 items, and posters on all 159 images.
+- `/reels` rendered 201 items and a playing video, with no console errors.
+- A `?play=` deep link still waits for the list and opens the requested post.
+- An anonymous visitor to `/reels?feed=following` is still redirected to `/login`.
+- No media files were touched in this deploy.
+
+### Location probes
+
+Repeated on 2026-10-30 from an unfiltered network, against the section 7 runs. Ping to the VPS was higher than in section 7 at every location (for example 238 to 631 ms in Seattle), so absolute times are not comparable. The table compares warm time to first byte of `/api/reels` minus warm `/api/healthz` from the same run, which removes the shared network path and leaves the time the server spends building the list.
+
+| Location (colo) | healthz warm, before → after | `/api/reels` warm, before → after | List time over healthz, before → after | Change |
+|---|---|---|---|---|
+| Home, Vietnam (HKG) | 209 → 238 ms | 403 → 377 ms | 194 → 139 ms | −55 ms |
+| Seattle (SEA) | 279 → 276 ms | 464 → 385 ms | 185 → 109 ms | −76 ms |
+| London (LHR) | 388 → 454 ms | 606 → 609 ms | 218 → 155 ms | −63 ms |
+| Frankfurt (FRA) | 392 → 553 ms | 574 → 673 ms | 182 → 120 ms | −62 ms |
+| New York (EWR) | 353 → 410 ms | 518 → 781 ms | 165 → 371 ms | not usable |
+| Singapore (SIN) | 239 → 920 ms | 430 → 916 ms | 191 → −4 ms | not usable |
+
+The four usable locations agree: building the list takes about 55 to 76 ms less per request, in line with the loopback drop at c=1 (158 to 120 ms p50). The New York and Singapore runs were taken on congested VPN servers, where healthz alone varied by more than the effect being measured. A first Frankfurt attempt was routed through Prague (PRG) and was discarded. Tokyo and Sydney were not repeated in this round.
+
+The list payload is unchanged in size (41,700 to 41,706 bytes) and in content: production returns 201 items, all of them published posts.
