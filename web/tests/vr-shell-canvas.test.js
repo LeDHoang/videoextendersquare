@@ -128,6 +128,24 @@ test('keyboard keys tile the canvas and resolve to their id', () => {
   assert.ok(rec.texts.includes('Q'));
 });
 
+test('keyboard strip echoes the field above the keys', () => {
+  const sc = loadCanvas();
+  const top = Math.min(...sc.keyboardRects({ layout: 'alpha' }).map((k) => k.y));
+  assert.ok(top >= 96, `keys start below the strip (${top})`);
+  assert.equal(sc.resolveKeyboardHit(sc.KB_W / 2, 40, { layout: 'alpha' }), null, 'strip is not a key');
+  const rec = recordingCtx();
+  sc.renderKeyboard(rec.ctx, '', { id: 'compose', text: 'hello there', layout: 'alpha' });
+  assert.ok(rec.texts.includes('hello there'));
+
+  // A keystroke repaints only the strip: its text, no keys, nothing below the strip.
+  const strip = recordingCtx();
+  const bottoms = [];
+  ['clearRect', 'fillRect'].forEach((name) => { strip.ctx[name] = (x, y, w, h) => bottoms.push(y + h); });
+  sc.renderKeyboardField(strip.ctx, { id: 'compose', text: 'hello there!', layout: 'alpha' });
+  assert.ok(strip.texts.includes('hello there!') && !strip.texts.includes('q'));
+  assert.ok(bottoms.length && bottoms.every((b) => b <= top), `strip stays above the keys (${bottoms})`);
+});
+
 test('profile and pack detail rows resolve their buttons and draw counts', () => {
   const sc = loadCanvas();
   const profile = { section: 'profile', items: [], detail: { username: 'bob', is_following: false, follower_count: 1200, post_count: 3 } };

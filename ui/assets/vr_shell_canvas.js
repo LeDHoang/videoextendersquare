@@ -1035,12 +1035,15 @@
     return null;
   }
 
-  // Laser keyboard (own panel, shown while a field is focused).
+  // Laser keyboard (own panel, shown while a field is focused). A strip on top
+  // echoes the field, since the keyboard sits over the main panel's field.
   const KB_W = 1280;
-  const KB_H = 480;
+  const KB_H = 576;
+  const KB_STRIP = 96;
   const KB_GAP = 12;
   const KB_KEY_W = (KB_W - KB_GAP * 11) / 10;
-  const KB_KEY_H = (KB_H - KB_GAP * 5) / 4;
+  const KB_KEY_H = (KB_H - KB_STRIP - KB_GAP * 5) / 4;
+  const KB_BG = 'rgba(13,14,15,0.97)';
   const KB_LABELS = { backspace: '⌫', space: 'SPACE', enter: 'ENTER', close: 'HIDE', shift: '⇧' };
   const KB_LAYOUTS = {
     alpha: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
@@ -1055,7 +1058,7 @@
     const rows = KB_LAYOUTS[layout].map((r) => Array.from(r));
     const out = [];
     const unit = KB_KEY_W + KB_GAP;
-    const rowY = (r) => KB_GAP + r * (KB_KEY_H + KB_GAP);
+    const rowY = (r) => KB_STRIP + KB_GAP + r * (KB_KEY_H + KB_GAP);
     const key = (id, label, x, row, w) => out.push({ id, label, x, y: rowY(row), w, h: KB_KEY_H });
     rows[0].forEach((c, i) => key(c, c, KB_GAP + i * unit, 0, KB_KEY_W));
     rows[1].forEach((c, i) => key(c, c, KB_GAP + unit / 2 + i * unit, 1, KB_KEY_W));
@@ -1079,11 +1082,12 @@
     const shift = !!(field && field.shift);
     const emoji = !!(field && field.layout === 'emoji');
     ctx.clearRect(0, 0, KB_W, KB_H);
-    ctx.fillStyle = 'rgba(13,14,15,0.97)';
+    ctx.fillStyle = KB_BG;
     ctx.fillRect(0, 0, KB_W, KB_H);
     ctx.strokeStyle = t.hex.accent;
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, KB_W - 2, KB_H - 2);
+    renderKeyboardField(ctx, field);
     keyboardRects(field).forEach((k) => {
       const fn = k.id in KB_LABELS || k.id.indexOf('layout:') === 0;
       let size = emoji ? 44 : 48;
@@ -1093,6 +1097,17 @@
         hover: hover === 'key:' + k.id, size, font: fn ? t.font.mono : t.font.sans, weight: fn ? 700 : 600,
       });
     });
+  }
+
+  // Repaints just the strip, inside the border and above the keys: all a
+  // keystroke changes on a keyboard renderKeyboard already drew.
+  function renderKeyboardField(ctx, field) {
+    const h = KB_STRIP + KB_GAP / 2 - 2;
+    ctx.clearRect(2, 2, KB_W - 4, h);
+    ctx.fillStyle = KB_BG;
+    ctx.fillRect(2, 2, KB_W - 4, h);
+    drawField(ctx, { x: KB_GAP, y: KB_GAP, w: KB_W - KB_GAP * 2, h: KB_STRIP - KB_GAP },
+      field && field.text, '', true, false, 28);
   }
 
   function resolveKeyboardHit(x, y, field) {
@@ -1127,6 +1142,7 @@
     thumbUrl,
     keyboardRects,
     renderKeyboard,
+    renderKeyboardField,
     LIST_ROWS,
     listRowRect,
     threadRowRect,

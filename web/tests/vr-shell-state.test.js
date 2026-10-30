@@ -172,6 +172,21 @@ test('search field: focus, type, backspace, enter opens the search route', () =>
   assert.equal(s.getRenderState().field.focused, false);
 });
 
+test('keystrokes bump the version but not the content version', () => {
+  const s = loadShell().create({});
+  s.open('/explore');
+  s.focusField(true);
+  const focused = s.getRenderState();
+  assert.equal(focused.contentVersion, focused.version, 'focus is a content change');
+  for (const k of ['c', 'shift', 'layout:symbols', 'backspace', 'space']) s.type(k);
+  let st = s.getRenderState();
+  assert.equal(st.version, focused.version + 5);
+  assert.equal(st.contentVersion, focused.contentVersion, 'field-only changes');
+  s.type('close');
+  st = s.getRenderState();
+  assert.equal(st.contentVersion, st.version, 'closing the keyboard repaints the panels');
+});
+
 test('play hands the grid to the player and closes the shell', async () => {
   const played = [];
   const s = loadShell().create({

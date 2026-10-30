@@ -6181,16 +6181,18 @@ window.WebXRVR = window.WebXRVR || (function () {
   const SHELL_MAIN_RADIUS = 2.2;
   const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
   const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
-  const SHELL_KB_SIZE = { w: 1.2, h: 0.45 };
+  const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
   const SHELL_IMAGE_CAP = 96;
+  const SHELL_TYPING_IDLE_MS = 400;
   let shell = null;
   let shellWasOpen = false;
+  let shellDirtyContent = -1;
   let shellResumePlayback = false;
   let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
   let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
   let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
   let shellKbWasShown = false;
-  let shellPainted = { mainVersion: -1, navVersion: -1, kbVersion: -1, mainHover: null, navHover: null, kbHover: null };
+  let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
   const shellImages = new Map();
   let shellStick = { dir: 0, t: 0 };
@@ -6326,6 +6328,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function onShellDirty() {
+    // Keystrokes change only the keyboard texture, repainted on the next frame;
+    // layout, visibility and preview state stay as they were.
+    const content = shell.getRenderState().contentVersion;
+    if (content === shellDirtyContent) { vrLastUiUploadT = -1; return; }
+    shellDirtyContent = content;
     const open = shell.isOpen();
     if (open && !shellWasOpen) {
       // Covering the reel pauses it; closing resumes only what was playing.
@@ -6406,7 +6413,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
       shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
     }
-    shellPainted = { mainVersion: -1, navVersion: -1, kbVersion: -1, mainHover: null, navHover: null, kbHover: null };
+    shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
     shell.refreshUnread();
   }
 
@@ -6519,38 +6526,53 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // Redraws only what changed (state version or hover), so an idle shell uploads nothing.
+  // Keystrokes repaint only the keyboard, whose strip echoes the field; the main
+  // panel's copy of the field catches up once typing pauses.
   function updateShellTextures() {
     const sc = getShellCanvas();
     if (!sc || !shell) return;
     const state = shell.getRenderState();
+    if (shellPainted.seenVersion !== state.version) {
+      shellPainted.seenVersion = state.version;
+      shellPainted.seenAt = vrLastUiUploadT;
+    }
     const mainHover = shellHover.panel === 'main' ? shellHover.key : '';
     const navHover = shellHover.panel === 'nav' ? shellHover.key : '';
     const kbHover = shellHover.panel === 'kb' ? shellHover.key : '';
+    const kbKeys = state.field.layout + ':' + !!state.field.shift;
     if (shellKbCtx && shellKbMesh && shellKbMesh.visible &&
         (shellPainted.kbHover !== kbHover || shellPainted.kbVersion !== state.version)) {
-      sc.renderKeyboard(shellKbCtx, kbHover, state.field);
+      // The keys repaint on hover, layout or shift; otherwise only the strip's text changed.
+      if (shellPainted.kbHover !== kbHover || shellPainted.kbKeys !== kbKeys) {
+        sc.renderKeyboard(shellKbCtx, kbHover, state.field);
+      } else {
+        sc.renderKeyboardField(shellKbCtx, state.field);
+      }
       shellKbTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.kbHover = kbHover;
+      shellPainted.kbKeys = kbKeys;
       shellPainted.kbVersion = state.version;
     } else if (shellKbMesh && !shellKbMesh.visible) {
       shellPainted.kbHover = null;
     }
     if (shellNavCtx && shellNavMesh && shellNavMesh.visible &&
-        (shellPainted.navVersion !== state.version || shellPainted.navHover !== navHover)) {
+        (shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
       sc.renderNavBar(shellNavCtx, state, navHover);
       shellNavTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.navHover = navHover;
-      shellPainted.navVersion = state.version;
+      shellPainted.navVersion = state.contentVersion;
     }
     if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
-        (shellPainted.mainVersion !== state.version || shellPainted.mainHover !== mainHover)) {
+        (shellPainted.mainContent !== state.contentVersion || shellPainted.mainHover !== mainHover ||
+          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS))) {
       sc.renderMainPanel(shellMainCtx, state, mainHover, getShellImage);
       shellMainTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.mainHover = mainHover;
       shellPainted.mainVersion = state.version;
+      shellPainted.mainContent = state.contentVersion;
     }
   }
 
@@ -9766,6 +9788,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     disposeShellMeshes();
     shell = null;
     shellWasOpen = false;
+    shellDirtyContent = -1;
     if (overlayTexture) { try { overlayTexture.dispose(); } catch (e) {} overlayTexture = null; }
     if (guideTexture) { try { guideTexture.dispose(); } catch (e) {} guideTexture = null; }
     if (earthPreviewTexture) { try { earthPreviewTexture.dispose(); } catch (e) {} earthPreviewTexture = null; }

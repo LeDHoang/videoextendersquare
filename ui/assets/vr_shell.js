@@ -216,10 +216,14 @@
     // Last reel-reward claim reply: { progress, remaining, capped } for the wallet's progress line.
     let rewards = null;
     let version = 0;
+    // Version of the last change beyond the focused field's text, layout or
+    // shift: the main and nav panels repaint on this, not on every keystroke.
+    let contentVersion = 0;
     const listeners = [];
 
-    function dirty() {
+    function dirty(fieldOnly) {
       version += 1;
+      if (!fieldOnly) contentVersion = version;
       listeners.forEach((fn) => { try { fn(version); } catch (e) {} });
     }
 
@@ -371,8 +375,8 @@
     function type(key) {
       if (!field.focused) return false;
       if (key === 'close') { focusField(false); return true; }
-      if (LAYOUT_KEYS[key]) { field.layout = LAYOUT_KEYS[key]; dirty(); return true; }
-      if (key === 'shift') { field.shift = !field.shift; dirty(); return true; }
+      if (LAYOUT_KEYS[key]) { field.layout = LAYOUT_KEYS[key]; dirty(true); return true; }
+      if (key === 'shift') { field.shift = !field.shift; dirty(true); return true; }
       if (key === 'enter') {
         const q = field.text.trim();
         if (field.id === 'compose') {
@@ -395,7 +399,7 @@
         field.text += add;
         if (key !== 'space') field.shift = false;
       }
-      dirty();
+      dirty(true);
       return true;
     }
 
@@ -632,6 +636,7 @@
         unreadBox: { inbox: unread.inbox, requests: unread.requests },
         rewards,
         version,
+        contentVersion,
       };
     }
 
@@ -648,7 +653,7 @@
       type,
       focusField,
       // Redraw without a state change (e.g. a thumbnail finished loading).
-      touch: dirty,
+      touch() { dirty(); },
       isOpen,
       section() { return handoff ? 'handoff' : (top() ? top().section : null); },
       getRenderState,

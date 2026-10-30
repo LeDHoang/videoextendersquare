@@ -135,7 +135,7 @@ function loadRenderer(options = {}) {
     QUEST_CONTROLLER_B64: '',
     addEventListener() {},
     removeEventListener() {},
-    dispatchEvent() { return true; },
+    dispatchEvent(event) { if (options.onEvent) options.onEvent(event); return true; },
     matchMedia() { return { matches: false }; },
     requestAnimationFrame(callback) {
       scheduledFrame = callback;
@@ -5970,7 +5970,11 @@ test('VR shell: nav bar sits under the dock, or under the main panel when open',
 
 test('VR shell: an idle open shell uploads nothing; changes and teardown are clean', () => {
   const gl = makeMockGl({ deleted: 0 });
-  const renderer = loadRenderer({ gl, withShell: true });
+  let previewEvents = 0;
+  const renderer = loadRenderer({
+    gl, withShell: true,
+    onEvent: (event) => { if (event.type === 'echo:webxr-preview-state') previewEvents += 1; },
+  });
   let toggles = 0;
   const video = {
     paused: false, readyState: 4, currentTime: 1, duration: 10, muted: true,
@@ -6000,6 +6004,19 @@ test('VR shell: an idle open shell uploads nothing; changes and teardown are cle
   renderer.__runScheduledFrame(1200);
   renderer.__runScheduledFrame(1400);
   assert.equal(uploads(), afterOpen, 'idle open shell uploads nothing');
+
+  renderer.__test.activateShellHit({ action: { action: 'search-focus' } });
+  renderer.__runScheduledFrame(1600);
+  const afterFocus = uploads();
+  assert.ok(afterFocus >= afterOpen + 2, 'focus repaints the main panel and paints the keyboard');
+  const eventsBeforeKey = previewEvents;
+  renderer.shell.type('a');
+  assert.equal(previewEvents, eventsBeforeKey, 'a keystroke emits no preview state');
+  renderer.__runScheduledFrame(1700);
+  assert.equal(uploads(), afterFocus + 1, 'a keystroke repaints only the keyboard');
+  renderer.__runScheduledFrame(2200);
+  assert.equal(uploads(), afterFocus + 2, 'the main panel catches up once typing pauses');
+  renderer.shell.type('close');
 
   renderer.shell.close();
   assert.equal(video.paused, false, 'closing resumes what was playing');
