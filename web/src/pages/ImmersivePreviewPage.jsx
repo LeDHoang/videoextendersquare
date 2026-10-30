@@ -359,7 +359,7 @@ export default function ImmersivePreviewPage() {
               ['VIDEO UPLOADS', previewState.renderStats?.videoUploads ?? 0, 'PAUSED WHILE EARTH IS OPEN'],
             ]}
           />
-          <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
+          <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE (SHIFT-DRAG TO LOOK) · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
           <Mono>SHELL: DRAG OR WHEEL THE MAIN PANEL TO SCROLL (FLICK TO FLING) · CLICK TO OPEN · ADD ?vrshell=0 TO THE URL TO DISABLE THE SHELL</Mono>
         </>
       ) : null}

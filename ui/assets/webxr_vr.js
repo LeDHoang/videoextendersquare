@@ -7420,7 +7420,9 @@ window.WebXRVR = window.WebXRVR || (function () {
         vrLastUiUploadT = -1;
         return;
       }
-      if (sceneMode === 'earth' && target && target.hit) {
+      // Shift-drag looks around instead, so the dock below the globe stays
+      // reachable when a zoomed globe fills the view.
+      if (sceneMode === 'earth' && target && target.hit && !event.shiftKey) {
         beginEarthDrag(source, target.hit);
         previewPointer.earth = true;
       }
@@ -7450,8 +7452,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
         return;
       }
-      if (sceneMode === 'earth') {
-        if (previewPointer.earth && target && target.hit && target.hit.hit && target.hit.local) {
+      if (sceneMode === 'earth' && previewPointer.earth) {
+        if (target && target.hit && target.hit.hit && target.hit.local) {
           updateEarthDrag(target.hit, previewPointer.source);
         }
         return;
