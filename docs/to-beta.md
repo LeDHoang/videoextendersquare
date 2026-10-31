@@ -535,6 +535,8 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment until public-regi
 - Backend **727 passed, 10 skipped**; vitest **478 passed** (40 files).
 - `scripts/verify_staging.cjs` **26/26** on the rebuilt image. The owner-delete check now expects the post to 404 and its object to stay (200).
 - Job results: a synthetic completed video job (no fal call) wrote `result.mp4`, `result-preview.mp4` and `job.json` under `jobs/<32-hex hash>/`, and no key contained the job id. After `up -d --force-recreate app` the job dir was gone. The status route answered `complete`, both downloads returned the original bytes, and the files were back in the job dir. An unknown job id answered 404.
+- VPS deploy of `b13b594` (the VPS checkout moved from `vr-rea-playback` to `dev`; pre-deploy dump taken): migration `20261031_0018` ran at boot, `/api/readyz` ok, and the boot requeue rebuilt the derived files of 8 posts.
+- `scripts/prune_local_media.py` on the VPS: the dry run listed 201 published posts. The real run dropped 416 local copies and freed 396 MB, and `output/uploads` went from 1.1 GB to 487 MB. All 479 media URLs in the feed then answered 200 from R2. What stays: 510 MB of evidence from posts removed before 2026-11-01, and 2.1 GB of seed media outside `uploads/` (`FAL Playground test 4K/`, `pairs/`, `testpipeline*/` and others). R2 holds that seed media at the same size, but `drop_local` only drops files under `uploads/`.
 
 **2026-10-31 storage redesign (local staging, schema `20261031_0018`):**
 
