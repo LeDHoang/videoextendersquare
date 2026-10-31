@@ -19,6 +19,7 @@ keep the dev ``/media/`` mount and nothing is uploaded.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import mimetypes
@@ -74,8 +75,27 @@ def public_url(rel: str) -> str:
     return "/media/" + rel
 
 
+_ROOT_PREFIX = OUTPUT_ROOT.as_posix() + "/"
+
+
+@functools.lru_cache(maxsize=8)
+def _resolved_root(cwd: str, root: str) -> str:
+    return os.path.realpath(Path(cwd, root))
+
+
 def rel_path(path: str | Path) -> str | None:
-    """Output-relative POSIX path of *path*, or None outside output/."""
+    """Output-relative POSIX path of *path*, or None outside output/.
+
+    The reels list calls this hundreds of times per request, so the common
+    case (a path spelled under the real output root) is answered without
+    touching the filesystem. Anything else takes the resolving path.
+    """
+    if isinstance(path, str) and path.startswith(_ROOT_PREFIX) and ".." not in path and "//" not in path:
+        return path[len(_ROOT_PREFIX):] or None
+    root = _resolved_root(os.getcwd(), str(OUTPUT_ROOT))
+    lexical = os.path.normpath(os.path.join(os.getcwd(), path))
+    if lexical.startswith(root + os.sep):
+        return Path(lexical[len(root) + 1:]).as_posix()
     try:
         return Path(path).resolve().relative_to(OUTPUT_ROOT.resolve()).as_posix()
     except (OSError, ValueError):

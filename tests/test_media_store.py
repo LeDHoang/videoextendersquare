@@ -413,3 +413,20 @@ def test_publish_with_r2_down_is_503_and_leaves_nothing(app, publisher, r2):
         with app.state.Session() as db:
             assert db.query(Post).count() == 0
     assert list(Path("output/uploads").iterdir()) == []
+
+
+def test_rel_path_answers_without_resolving_and_rejects_outside(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "output" / "uploads").mkdir(parents=True)
+    (tmp_path / "elsewhere").mkdir()
+    real = tmp_path / "output" / "uploads" / "a.mp4"
+
+    assert media_store.rel_path("output/uploads/a.mp4") == "uploads/a.mp4"
+    assert media_store.rel_path(real) == "uploads/a.mp4"
+    assert media_store.rel_path("output/uploads/../uploads/a.mp4") == "uploads/a.mp4"
+    assert media_store.rel_path("output/../elsewhere/a.mp4") is None
+    assert media_store.rel_path(tmp_path / "elsewhere" / "a.mp4") is None
+
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "output")
+    assert media_store.rel_path(link / "uploads" / "a.mp4") == "uploads/a.mp4"
