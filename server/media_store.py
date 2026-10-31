@@ -7,7 +7,8 @@ call site needs its own upload hook.
 
 R2 is the only durable copy of published media; this disk is a work area
 (see docs/storage-design.md). Builders :func:`fetch_local` what they read and
-:func:`drop_local` it when done. Removing a post only hides it: its objects
+:func:`drop_local` it when done. Both take any path under ``output/``, so they
+also cover seed media outside ``uploads/`` that R2 holds under the same key. Removing a post only hides it: its objects
 stay, so a staff restore can publish it again. Completed job results are
 kept under ``jobs/`` (see server/output.py).
 
@@ -204,17 +205,18 @@ def _download(path: Path, rel: str) -> None:
 
 
 def fetch_local(path: str | Path) -> bool:
-    """Make sure a published file is on this disk, downloading its object when it is not.
+    """Make sure a post's file is on this disk, downloading its object when it is not.
 
     Returns True when the file is local afterwards. Builders of derived
     assets call this before reading an original whose local copy was
-    dropped.
+    dropped. Any path under output/ is fetched by its output-relative key,
+    seed media outside ``uploads/`` included.
     """
     path = Path(path)
     if path.is_file():
         return True
     rel = rel_path(path)
-    if not (enabled() and is_published(rel)):
+    if not (enabled() and rel):
         return False
     try:
         _download(path, rel)
@@ -235,11 +237,13 @@ def fetch_file(key: str, path: str | Path) -> bool:
 
 
 def drop_local(paths: Iterable[str | Path]) -> int:
-    """Remove this disk's copies of published files that R2 holds; returns how many.
+    """Remove this disk's copies of post files that R2 holds; returns how many.
 
     A copy goes only when its object exists with the same size, so the
     evidence of a post removed while removals still deleted its objects, and
-    a file that never reached R2, both stay. Never raises; no-op without R2.
+    a file that never reached R2, both stay. Any path under output/ is
+    checked against its output-relative key, seed media outside ``uploads/``
+    included; callers pass only post media. Never raises; no-op without R2.
     """
     if not enabled():
         return 0
@@ -247,7 +251,7 @@ def drop_local(paths: Iterable[str | Path]) -> int:
     for path in paths:
         path = Path(path)
         rel = rel_path(path)
-        if not is_published(rel) or not path.is_file():
+        if not rel or not path.is_file():
             continue
         try:
             size = path.stat().st_size

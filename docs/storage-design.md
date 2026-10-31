@@ -142,7 +142,7 @@ Failed and cancelled jobs are not kept. Their job dirs go with the retention swe
 Posts published before this design kept their local copies. `scripts/prune_local_media.py` frees them once:
 
 - It records each published post first, so nothing it drops goes missing from the record.
-- It then drops each copy whose R2 object exists with the same size.
+- It then drops each copy whose R2 object exists with the same size. That includes seed media outside `uploads/` (`pairs/`, `testpipeline/` and others), which R2 holds under the same path.
 - It skips unpublished posts, whose local files may be the only copy (posts removed before 2026-11-01). It keeps posts it cannot record, and copies R2 lacks or holds at another size.
 
 ```bash
@@ -154,7 +154,7 @@ Run it in a quiet window (see the limits below).
 
 ## How the disk stays safe
 
-`drop_local` removes a copy only when a `HEAD` on its object returns the same size. A file that never reached R2, or that R2 holds at another size, stays.
+`drop_local` removes a copy only when a `HEAD` on its object returns the same size. A file that never reached R2, or that R2 holds at another size, stays. It and `fetch_local` take any path under `output/`, keyed by its output-relative path, so seed media outside `uploads/` can be dropped and fetched back. `commit`, `republish_paths` and `delete` still act only on `uploads/`.
 
 `fetch_local` downloads through a `.part` file and renames it, so a reader never sees a half-written original.
 
@@ -165,6 +165,7 @@ Run it in a quiet window (see the limits below).
 - **An unknown job id costs one R2 read.** `get_job` asks R2 about any well-formed id it does not hold in memory.
 - **Concurrent lazy builds can race a drop.** Two viewers rebuilding siblings of one post at the same time can see a file dropped under them. The request answers "transcode failed" and the client retries.
 - **The prune script needs a quiet window.** Which encodes are pending is held in the app's memory, and the script runs in another process, so it cannot see them. A job running at the same time can lose an input, or its record entries, and is rebuilt on the next boot.
+- **Rebuilt siblings of seed posts stay local.** `commit` uploads only under `uploads/`, so a sibling rebuilt for a seed post never reaches R2. Readers then serve whatever R2 holds at that key, which may be older or missing. This predates this design.
 - **`scripts/batch_stereo_mono.py` reads local files.** It cannot process a post whose original was dropped.
 - **A recorded feed item's mtime is the post's `created_at`,** not the file's mtime.
 - **Stale siblings are not recorded.** A sibling older than its original is left out of the record and rebuilt.

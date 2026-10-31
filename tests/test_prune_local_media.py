@@ -89,3 +89,21 @@ def test_prune_dry_run_changes_nothing(library):
     assert Path("output/uploads/cover.jpg").exists()
     with Session() as db:
         assert db.query(Post).one().media_files is None
+
+
+def test_prune_drops_seed_media_outside_uploads(library):
+    Session, s3, add_post = library
+    Path("output/pairs").mkdir()
+    Path("output/pairs/seed.jpg").write_bytes(b"seed")
+    s3.objects["pairs/seed.jpg"] = {"body": b"seed"}
+    with Session() as db:
+        db.add(Post(owner_id="owner", media_path="pairs/seed.jpg", media_type="image", status="published"))
+        db.commit()
+
+    with Session() as db:
+        totals = _prune_module().prune(db)
+
+    assert totals == {"posts": 1, "files": 1, "bytes": 4, "dropped": 1, "freed": 4, "unrecorded": 0}
+    assert not Path("output/pairs/seed.jpg").exists()
+    with Session() as db:
+        assert set(db.query(Post).one().media_files) == {"pairs/seed.jpg"}

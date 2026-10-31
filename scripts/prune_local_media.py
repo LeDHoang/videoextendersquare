@@ -8,8 +8,9 @@ left behind.
 
 Per published post (cover + slides) it first records the files on disk, so
 nothing it drops goes missing from the record, then drops each copy whose R2
-object exists with the same size. Copies that R2 lacks or holds at another
-size stay. So do the files of unpublished posts (moderation evidence) and of
+object exists with the same size. That covers seed media outside uploads/
+too, which R2 holds under the same output-relative key. Copies that R2 lacks
+or holds at another size stay. So do the files of unpublished posts (moderation evidence) and of
 posts that still have no record (their readers look at this disk).
 
 The image does not ship scripts/, so pipe it into the app container from the

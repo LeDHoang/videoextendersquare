@@ -170,6 +170,10 @@ def test_fetch_local_downloads_a_dropped_copy(r2):
     assert media_store.fetch_local(dest)
     assert dest.read_bytes() == b"video"
     assert not Path("output/uploads/.clip.mp4.part").exists()
+    # Seed media outside uploads/ is fetched by its key too.
+    r2.objects["testpipeline/x.mp4"] = {"body": b"seed"}
+    assert media_store.fetch_local(Path("output/testpipeline/x.mp4"))
+    assert Path("output/testpipeline/x.mp4").read_bytes() == b"seed"
     # Already local: no download.
     r2.objects.clear()
     assert media_store.fetch_local(dest)
@@ -194,18 +198,22 @@ def test_drop_local_removes_only_copies_r2_holds(r2, caplog):
     r2.objects["uploads/short.mp4"] = {"body": b"vid"}
     Path("output/testpipeline").mkdir()
     Path("output/testpipeline/x.mp4").write_bytes(b"video")
+    r2.objects["testpipeline/x.mp4"] = {"body": b"video"}
+    Path("outside.mp4").write_bytes(b"video")
     count = media_store.drop_local([
         Path("output/uploads/same.mp4"),
         Path("output/uploads/short.mp4"),  # its object differs: kept
         Path("output/uploads/local-only.mp4"),  # never reached R2: kept
         Path("output/uploads/never-built.mp4"),
-        Path("output/testpipeline/x.mp4"),  # not published: kept
+        Path("output/testpipeline/x.mp4"),  # seed media R2 holds: dropped
+        Path("outside.mp4"),  # not under output/: kept
     ])
-    assert count == 1
+    assert count == 2
     assert not Path("output/uploads/same.mp4").exists()
     assert Path("output/uploads/short.mp4").exists()
     assert Path("output/uploads/local-only.mp4").exists()
-    assert Path("output/testpipeline/x.mp4").exists()
+    assert not Path("output/testpipeline/x.mp4").exists()
+    assert Path("outside.mp4").exists()
     assert "its R2 object has 3 bytes, this copy 5" in caplog.text
 
 
