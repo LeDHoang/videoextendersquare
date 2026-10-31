@@ -200,6 +200,18 @@ def test_reels_player_scripts_are_nonced(client, monkeypatch):
     _assert_scripts_nonced(second.text, _header_nonce(second))
 
 
+def test_reels_player_gzips_only_when_asked(client, monkeypatch):
+    monkeypatch.setenv("SX_CSP_MODE", "report")
+    plain = client.get("/api/reels/player", headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in plain.headers
+    zipped = client.get("/api/reels/player", headers={"Accept-Encoding": "gzip"})
+    assert zipped.headers["content-encoding"] == "gzip"
+    assert "Accept-Encoding" in zipped.headers["vary"]
+    assert int(zipped.headers["content-length"]) < len(plain.content) / 3
+    # httpx decodes the body; only the per-response nonce differs.
+    assert zipped.text.replace(_header_nonce(zipped), "N") == plain.text.replace(_header_nonce(plain), "N")
+
+
 def test_vendored_player_scripts_are_linked_and_long_cached(client):
     from server.routers.reels import PLAYER_SCRIPTS
 

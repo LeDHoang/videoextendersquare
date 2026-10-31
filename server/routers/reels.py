@@ -1,6 +1,7 @@
 """Reels router — output scan, filtering, H.264 proxy generation, time-synced comments,
 and the full Reels/VR player page (replaces the Streamlit reels_view iframe)."""
 
+import gzip
 import hashlib
 import json
 import math
@@ -2861,11 +2862,13 @@ def reels_player(
     html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
     html = html.replace("loadVideo(0);", f"loadVideo(__SX_START_INDEX__);")
     html = html.replace("__SX_START_INDEX__", str(start_idx))
-    result = Response(
-        content=html,
-        media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-    )
+    headers = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Vary": "Accept-Encoding"}
+    content = html.encode("utf-8")
+    # ~400 KB of HTML crosses the tunnel to Cloudflare; gzip sends about a fifth of it.
+    if "gzip" in request.headers.get("accept-encoding", "").lower():
+        content = gzip.compress(content, compresslevel=5)
+        headers["Content-Encoding"] = "gzip"
+    result = Response(content=content, media_type="text/html; charset=utf-8", headers=headers)
     for header, value in response.raw_headers:
         if header.lower() == b"set-cookie":
             result.raw_headers.append((header, value))
