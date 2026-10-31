@@ -183,7 +183,7 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
 def _discard_stored(stored_files) -> None:
     """Remove every local file and R2 object a failed publish created."""
     candidates = [candidate for stored in stored_files for candidate in SM.derived_files(stored)]
-    media_store.delete_paths(candidates)
+    media_store.delete_paths(candidates, evidence=False)
     for candidate in candidates:
         try:
             Path(candidate).unlink(missing_ok=True)
@@ -195,8 +195,9 @@ def _discard_stored(stored_files) -> None:
 # also the left-eye rendition) take minutes on a 4K original, past
 # Cloudflare's 100 s origin timeout. Publish returns once the original is
 # committed and the post exists; one background worker builds the rest.
-# Readers probe for siblings per request, so until each file lands a post
-# serves its original with no poster (stereo: stereo_crop of the raw file).
+# Each built file is recorded on the post (posts.media_files), so until it
+# is a post serves its original with no poster (stereo: stereo_crop of the
+# raw file).
 _derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
 _derived_lock = threading.Lock()
 _derived_futures: set[Future] = set()
@@ -251,7 +252,8 @@ def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
 
     Looks at live video posts published into output/uploads whose web
     preview, Explore preview or poster (stereo: left-eye rendition and its
-    grid assets) is missing locally. Runs in a background thread at boot.
+    grid assets) is missing from the post's media record (unrecorded posts:
+    from this disk). Runs in a background thread at boot.
     """
     from server.social.database import SessionLocal
     from server.social.models import Post
@@ -260,17 +262,18 @@ def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
     queued = 0
     with SessionLocal() as db:
         rows = (
-            db.query(Post.media_path, Post.stereo_layout)
+            db.query(Post.media_path, Post.stereo_layout, Post.media_files)
             .filter(Post.media_type == "video", Post.status == "published", Post.deleted_at.is_(None))
             .order_by(Post.created_at.desc())
             .all()
         )
-    for rel, layout in rows:
+    for rel, layout, files in rows:
         if queued >= limit:
             break
         dest = OUTPUT_DIR / rel
         try:
-            if dest.resolve().parent != root or not dest.is_file():
+            # A recorded original may live only in R2; the job fetches it.
+            if dest.resolve().parent != root or (files is None and not dest.is_file()):
                 continue
         except OSError:
             continue
@@ -278,7 +281,7 @@ def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
             continue
         stereo = layout if layout in ("sbs", "tb") else None
         try:
-            if not SM.missing_derived_assets(dest, stereo):
+            if not SM.missing_derived_assets(dest, stereo, files):
                 continue
         except Exception:
             logger.exception("Could not check the derived assets of %s", dest.name)
@@ -304,7 +307,22 @@ def _derived_step(label: str, dest: Path, make, *args, **kwargs) -> str | None:
     if not built:
         logger.warning("Could not build the %s of %s", label, dest.name)
         metrics.incr("derived_failed")
+        return built
+    _record_files(dest)
     return built
+
+
+def _record_files(dest: Path) -> None:
+    """Store what a step built on the post: readers serve recorded files only."""
+    from server.social.database import SessionLocal
+    from server.social.services import rerecord_media_files
+
+    try:
+        with SessionLocal() as db:
+            rerecord_media_files(db, [media_store.rel_path(dest)])
+            db.commit()
+    except Exception:
+        logger.exception("Could not record the files of %s", dest.name)
 
 
 def _build_video_assets(dest: Path) -> None:
@@ -341,12 +359,37 @@ def _post_is_live(rel: str) -> bool:
         )
 
 
+def _fetch_inputs(dest: Path, rel: str) -> bool:
+    """Bring a dropped original back from R2, with the siblings its post records.
+
+    The generators then reuse those siblings instead of encoding them again.
+    A fresh publish has everything on disk and fetches nothing.
+    """
+    if dest.is_file():
+        return True
+    from server.social.database import SessionLocal
+    from server.social.models import Post
+
+    with SessionLocal() as db:
+        files = db.query(Post.media_files).filter(Post.media_path == rel).scalar() or {}
+    if not media_store.fetch_local(dest):
+        return False
+    for path in SM.derived_files(dest)[1:]:
+        if SM.has_media_file(path, files):
+            media_store.fetch_local(path)
+    return True
+
+
 def _run_derived_job(dest: Path, rel: str, build) -> None:
     """Run *build* for a published upload, then tidy up whatever happened."""
     from server.routers import reels as reels_router
 
     try:
-        build()
+        if _fetch_inputs(dest, rel):
+            build()
+        else:
+            logger.warning("The original of %s is neither on disk nor in R2", dest.name)
+            metrics.incr("derived_failed")
     except Exception:
         logger.exception("Derived assets of %s failed", dest.name)
         metrics.incr("derived_failed")
@@ -360,6 +403,8 @@ def _run_derived_job(dest: Path, rel: str, build) -> None:
                 media_store.delete_paths(SM.derived_files(dest)[1:])
         except Exception:
             logger.exception("Could not check the post of %s after its encode", dest.name)
+        # R2 holds the post now (an unpublished one keeps its evidence).
+        media_store.drop_local(SM.derived_files(dest))
         reels_router.invalidate_scan_cache()
 
 
@@ -583,8 +628,13 @@ def publish_upload(
         _queue_derived_assets(dest, rel, lambda: _build_stereo_video_assets(dest, stereo))
     elif req.kind == "video":
         _queue_derived_assets(dest, rel, lambda: _build_video_assets(dest))
+    # The job records what it built in its own session; read that back.
+    db.refresh(post)
     reels_router.invalidate_scan_cache()
     entry = post_card(post, db, context.user.id)
+    if req.kind == "image":
+        # No background job reads them: R2 holds the post from here on.
+        media_store.drop_local([path for stored in (dest, *extra_dests) for path in SM.derived_files(stored)])
     return {
         "post_id": post.id,
         "rel_path": rel,

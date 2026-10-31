@@ -17,7 +17,8 @@ Run from the repo root (media is read from ./output), after `make migrate`:
 Local ffmpeg only, no paid APIs. Safe to repeat: each asset is checked on its
 own and only the missing ones are made; fresh assets are kept. A VR proxy over
 STEREO_PROXY_LONG_SIDE (built before the cap) counts as missing and is
-rebuilt. Soft-deleted posts (status != "published") are skipped.
+rebuilt. Soft-deleted posts (status != "published") are skipped. Posts that
+got new assets are recorded again (posts.media_files), so readers serve them.
 """
 import argparse
 import sys
@@ -29,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 from server import media as SM  # noqa: E402
 from server.social.database import SessionLocal  # noqa: E402
 from server.social.models import Post  # noqa: E402
+from server.social.services import rerecord_media_files  # noqa: E402
 
 
 def missing_assets(path: Path, layout: str, kind: str) -> list[str]:
@@ -82,22 +84,28 @@ def main() -> None:
             for media_path in [post.media_path, *(slide.media_path for slide in post.slides)]:
                 path = Path("output") / media_path
                 if path.is_file():
-                    jobs.append((path, post.stereo_layout, post.media_type))
+                    jobs.append((path, post.stereo_layout, post.media_type, post.media_path))
 
     built = failed = 0
-    for path, layout, kind in jobs:
+    touched = set()
+    for path, layout, kind, cover in jobs:
         missing = missing_assets(path, layout, kind)
         state = "complete" if not missing else "missing " + ", ".join(missing)
         print(f"[{layout}] {path} — {state}")
         if args.dry_run or not missing:
             continue
         started = time.time()
+        touched.add(cover)
         if build(path, layout, kind) and not missing_assets(path, layout, kind):
             built += 1
             print(f"    built in {time.time() - started:.1f}s")
         else:
             failed += 1
             print(f"    FAILED — still missing: {', '.join(missing_assets(path, layout, kind)) or 'nothing'}")
+    if touched:
+        with SessionLocal() as db:
+            rerecord_media_files(db, touched)
+            db.commit()
     print(f"{len(jobs)} stereo file(s); built {built}, failed {failed}.")
 
 

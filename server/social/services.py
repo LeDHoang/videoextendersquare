@@ -294,6 +294,7 @@ def reel_records(
                 "width": post.width,
                 "height": post.height,
                 "stereo_layout": post.stereo_layout or "mono",
+                "media_files": post.media_files,
                 **post_image_fields(post),
                 "author_name": post.owner.username,
                 "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
@@ -359,14 +360,15 @@ def _output_url(path: Path) -> str | None:
         return None
 
 
-def stereo_fields(media_path: str, layout: str | None) -> dict:
+def stereo_fields(media_path: str, layout: str | None, files: dict | None = None) -> dict:
     """Playback fields for a post's stereo layout (docs/stereo-3d-reels.md).
 
     Mono posts get {"stereo_layout": "mono", "stereo_url": None}. Stereo posts
     also get "url" pointing at the left-eye <stem>-mono rendition every 2D
     surface plays, "stereo_url" at the full stereo file (or its H.264 proxy)
     the VR player samples per eye, and "stereo_crop" when no rendition exists
-    yet so 2D shows the raw file cropped to the left eye instead.
+    yet so 2D shows the raw file cropped to the left eye instead. *files* is
+    the post's media record (posts.media_files); without it the disk is read.
     """
     from server import media as media_service
 
@@ -374,7 +376,7 @@ def stereo_fields(media_path: str, layout: str | None) -> dict:
     if layout == "mono":
         return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False}
     source = Path("output") / media_path
-    mono, stereo = media_service.stereo_paths(str(source))
+    mono, stereo = media_service.stereo_paths(str(source), files)
     raw_url = public_url(media_path)
     mono_url = _output_url(mono) if mono else None
     return {
@@ -385,7 +387,13 @@ def stereo_fields(media_path: str, layout: str | None) -> dict:
     }
 
 
-def _image_entry(media_path: str, width: int | None, height: int | None, layout: str = "mono") -> dict:
+def _image_entry(
+    media_path: str,
+    width: int | None,
+    height: int | None,
+    layout: str = "mono",
+    files: dict | None = None,
+) -> dict:
     """One image of an image post as the player needs it.
 
     For stereo images "url"/"poster_url" are the left-eye rendition and its
@@ -393,7 +401,7 @@ def _image_entry(media_path: str, width: int | None, height: int | None, layout:
     """
     from server import media as media_service
 
-    stereo = stereo_fields(media_path, layout)
+    stereo = stereo_fields(media_path, layout, files)
     url = stereo.get("url") or public_url(media_path)
     poster_url = url
     try:
@@ -401,9 +409,14 @@ def _image_entry(media_path: str, width: int | None, height: int | None, layout:
         if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
             source = media_service.mono_sibling_path(str(source))
         poster = Path(media_service.explore_poster_path(str(source)))
-        poster_stat = poster.stat()  # one stat; a missing poster raises and keeps the fallback
-        if stat.S_ISREG(poster_stat.st_mode) and poster_stat.st_size > 0 and poster_stat.st_mtime >= source.stat().st_mtime:
-            poster_url = _output_url(poster) or poster_url
+        if files is not None:
+            # The record only holds posters that were fresh when recorded.
+            if media_service.has_media_file(poster, files):
+                poster_url = _output_url(poster) or poster_url
+        else:
+            poster_stat = poster.stat()  # one stat; a missing poster raises and keeps the fallback
+            if stat.S_ISREG(poster_stat.st_mode) and poster_stat.st_size > 0 and poster_stat.st_mtime >= source.stat().st_mtime:
+                poster_url = _output_url(poster) or poster_url
     except (OSError, ValueError):
         pass
     return {
@@ -427,8 +440,9 @@ def post_image_fields(post: Post) -> dict:
     if post.media_type != "image":
         return {"images": [], "dwell_ms": None}
     layout = post.stereo_layout or "mono"
-    images = [_image_entry(post.media_path, post.width, post.height, layout)]
-    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout) for slide in post.slides)
+    files = post.media_files
+    images = [_image_entry(post.media_path, post.width, post.height, layout, files)]
+    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout, files) for slide in post.slides)
     return {"images": images, "dwell_ms": int(post.dwell_ms or IMAGE_POST_DWELL_MS)}
 
 
@@ -450,6 +464,51 @@ def published_media_paths(db: Session | None = None) -> set[str]:
 
     with SessionLocal() as session:
         return {row[0] for row in session.query(Post.media_path).all()}
+
+
+def post_media_items(db: Session | None = None) -> list[dict]:
+    """Feed items (the scan_output_media shape) of every post row, newest first.
+
+    Built from each post's media record, so nothing is read from disk. Rows
+    without a record (posts.media_files NULL) are listed only while their
+    original is on this disk, as the output/ scan did. A recorded item's
+    mtime is the post's creation time.
+    """
+    from server import media as media_service
+
+    if db is None:
+        from .database import SessionLocal
+
+        with SessionLocal() as session:
+            return post_media_items(session)
+    items = []
+    columns = (Post.media_path, Post.media_type, Post.media_files, Post.created_at)
+    for rel, media_type, files, created_at in db.query(*columns).all():
+        path = Path("output") / rel
+        if files is not None:
+            if rel not in files:
+                continue
+            size = files[rel].get("bytes")
+            created = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            mtime = created.timestamp()
+        else:
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            size, mtime = st.st_size, st.st_mtime
+        items.append({
+            "path": str(path.resolve()),
+            "rel_path": rel,
+            "filename": path.name,
+            "folder": path.parent.as_posix() if path.parent != Path(".") else "root",
+            "size_bytes": size,
+            "size_human": media_service.human_bytes(size),
+            "mtime": mtime,
+            "media_type": media_type,
+        })
+    items.sort(key=lambda item: item["mtime"], reverse=True)
+    return items
 
 
 def _probe_size(media_path: str) -> tuple[int | None, int | None]:
@@ -493,6 +552,37 @@ def sync_post_slides(db: Session, post: Post, slide_paths: list[str]) -> None:
         width, height = _probe_size(media_path)
         post.slides.append(PostSlide(position=position, media_path=media_path, width=width, height=height))
     db.flush()
+
+
+def record_media_files(post: Post, *, reset: bool = False) -> None:
+    """Record the post's local files (cover, slides, derived siblings) in post.media_files.
+
+    Merges into the existing record, so a file whose local copy is gone (it
+    lives on in R2) stays recorded. *reset* starts over for a new or
+    replaced original, but only when that original is on disk.
+    """
+    from server import media as media_service
+
+    found: dict[str, dict] = {}
+    for rel in [post.media_path, *(slide.media_path for slide in post.slides)]:
+        found.update(media_service.local_media_files(Path("output") / rel))
+    if reset and post.media_path in found:
+        post.media_files = found
+    elif found:
+        post.media_files = {**(post.media_files or {}), **found}
+
+
+def rerecord_media_files(db: Session, media_paths) -> None:
+    """Merge newly built siblings into the record of the posts whose cover is in *media_paths*.
+
+    Locks and re-reads the rows (Postgres) so two builders of one post cannot
+    drop each other's entries. The caller commits.
+    """
+    paths = sorted({normalize_media_path(path) for path in media_paths if path})
+    if not paths:
+        return
+    for post in db.query(Post).filter(Post.media_path.in_(paths)).with_for_update().populate_existing().all():
+        record_media_files(post)
 
 
 def apply_media_info(post: Post) -> None:
@@ -625,6 +715,7 @@ def create_or_update_post(
     sync_post_tags(db, post, list(tags or []))
     if slide_paths is not None or post.media_type != "image":
         sync_post_slides(db, post, list(slide_paths or []))
+    record_media_files(post, reset=True)
     db.flush()
     return post
 
@@ -637,10 +728,11 @@ def shared_preview_urls(post: Post) -> dict:
     from server import media as media_service
 
     url = public_url(post.media_path)
-    stereo = stereo_fields(post.media_path, post.stereo_layout)
+    files = post.media_files
+    stereo = stereo_fields(post.media_path, post.stereo_layout, files)
     if post.media_type == "image":
         if stereo["stereo_layout"] != "mono":
-            cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"])
+            cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"], files)
             return {"preview_url": cover["url"], "poster_url": cover["poster_url"]}
         return {"preview_url": url, "poster_url": url}
     try:
@@ -653,7 +745,7 @@ def shared_preview_urls(post: Post) -> dict:
 
         def sibling_url(path: Path) -> str | None:
             try:
-                if path.exists() and path.stat().st_size > 0:
+                if media_service.has_media_file(path, files):
                     return public_url(path.resolve().relative_to(root).as_posix())
             except (OSError, ValueError):
                 return None
@@ -744,7 +836,7 @@ def post_card(
         },
         "created_at": post.created_at.isoformat() if post.created_at else None,
     }
-    card.update(stereo_fields(post.media_path, post.stereo_layout))
+    card.update(stereo_fields(post.media_path, post.stereo_layout, post.media_files))
     card.update(shared_preview_urls(post))
     return card
 

@@ -517,6 +517,7 @@ def restore_content(
         db.rollback()
         fail(503, "MEDIA_STORE_UNAVAILABLE", "The post's media could not be published again. Try later.")
     db.commit()
+    media_store.drop_local(media_files)
     return {"item": serialize_content(db, content_type, get_content(db, content_type, content_id))}
 
 

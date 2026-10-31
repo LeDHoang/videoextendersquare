@@ -24,7 +24,8 @@ SCANNED = [
 def fake_scan(monkeypatch):
     monkeypatch.setattr(reels.SM, "scan_output_media", lambda _root: list(SCANNED))
     monkeypatch.setattr(reels, "slide_media_paths", lambda _db=None: {"uploads/slide.jpg"})
-    monkeypatch.setattr(reels, "published_media_paths", lambda _db=None: {"uploads/posted.mp4"})
+    # Posts come from their media records, wherever their files are.
+    monkeypatch.setattr(reels, "post_media_items", lambda _db=None: [_item("uploads/posted.mp4"), _item("uploads/remote.mp4")])
     reels.invalidate_scan_cache()
     yield
     reels.invalidate_scan_cache()
@@ -36,9 +37,9 @@ def _rels():
 
 def test_dev_keeps_loose_files_discoverable(monkeypatch):
     monkeypatch.delenv("SX_ENV", raising=False)
-    assert _rels() == ["uploads/posted.mp4", "testpipeline/loose.mp4", "uploads/orphan.mp4"]
+    assert _rels() == ["uploads/posted.mp4", "uploads/remote.mp4", "testpipeline/loose.mp4", "uploads/orphan.mp4"]
 
 
 def test_production_surfaces_only_posted_files(monkeypatch):
     monkeypatch.setenv("SX_ENV", "production")
-    assert _rels() == ["uploads/posted.mp4"]
+    assert _rels() == ["uploads/posted.mp4", "uploads/remote.mp4"]

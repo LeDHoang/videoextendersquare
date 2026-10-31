@@ -314,12 +314,16 @@ def media_card(
 ) -> dict:
 
     card = post_card(post, db, viewer_id, state)
+    files = post.media_files
     source = Path("output") / post.media_path
     card["filename"] = source.name
     card["folder"] = source.parent.name if source.parent != Path("output") else "root"
     try:
-        card["size"] = media_service.human_bytes(source.stat().st_size)
-    except (OSError, AttributeError):
+        if files is not None:
+            card["size"] = media_service.human_bytes(files[post.media_path]["bytes"])
+        else:
+            card["size"] = media_service.human_bytes(source.stat().st_size)
+    except (OSError, AttributeError, KeyError):
         card["size"] = ""
     stereo = (post.stereo_layout or "mono") != "mono"
     if post.media_type == "image":
@@ -336,7 +340,7 @@ def media_card(
 
     def sibling_url(path: Path) -> str | None:
         try:
-            if path.exists() and path.stat().st_size > 0:
+            if media_service.has_media_file(path, files):
                 rel = path.resolve().relative_to(Path("output").resolve()).as_posix()
                 return public_url(rel)
         except (OSError, ValueError):
@@ -346,7 +350,7 @@ def media_card(
     card["preview_url"] = sibling_url(media_service.explore_preview_path(str(grid_source)))
     card["poster_url"] = sibling_url(media_service.explore_poster_path(str(grid_source)))
     try:
-        card["codec"] = media_service.get_video_codec(str(source)).upper()
+        card["codec"] = media_service.video_codec(str(source), files).upper()
     except Exception:
         card["codec"] = ""
     return card

@@ -22,7 +22,7 @@ from server.routers import video as video_router
 from server.social import auth, database
 from server.social.database import Base, get_db
 from server.social.models import Post
-from server.social.services import post_card
+from server.social.services import post_card, post_media_items
 from test_media_store import FakeS3, register
 
 DERIVED = ("-poster.jpg", "-explore.mp4", "-preview.mp4")
@@ -155,14 +155,60 @@ def test_publish_returns_before_encodes_and_assets_land_after(setup, tmp_path):
         f".{stored.stem}-preview.mp4.part",
     ]
     for suffix in DERIVED:
-        assert sibling(stored, suffix).exists()
         assert media_store.rel_path(sibling(stored, suffix)) in s3.objects
+    # R2 holds the post now: this disk keeps no copy.
+    assert not any(path.exists() for path in SM.derived_files(stored))
     assert part_files() == []
     assert not SM.derived_pending(stored)
     with Session() as db:
         card = post_card(db.query(Post).one(), db)
     assert card["preview_url"] == f"https://media.example.com/uploads/{stored.stem}-explore.mp4"
     assert card["poster_url"] == f"https://media.example.com/uploads/{stored.stem}-poster.jpg"
+
+
+def test_the_post_records_its_files_as_they_land(setup, tmp_path):
+    client, Session, s3, ffmpeg, futures = setup
+    body = publish_video(client, tmp_path)
+    stored = stored_path(body)
+    with Session() as db:
+        files = db.query(Post).one().media_files
+    assert files == {body["rel_path"]: {"bytes": 4096, "codec": "hevc", "width": None, "height": None}}
+
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+    with Session() as db:
+        files = db.query(Post).one().media_files
+    assert set(files) == {body["rel_path"], *(media_store.rel_path(sibling(stored, s)) for s in DERIVED)}
+    poster = media_store.rel_path(sibling(stored, "-poster.jpg"))
+    assert files[poster] == {"bytes": len(s3.objects[poster]["body"])}
+    assert files[media_store.rel_path(sibling(stored, "-preview.mp4"))]["codec"] == "hevc"
+
+    # Readers trust the record: the dropped poster is still served (from R2).
+    assert not sibling(stored, "-poster.jpg").exists()
+    with Session() as db:
+        card = post_card(db.query(Post).one(), db)
+    assert card["poster_url"] == f"https://media.example.com/uploads/{stored.stem}-poster.jpg"
+
+
+def test_a_post_with_no_local_files_still_lists_and_previews(setup, tmp_path):
+    client, Session, s3, ffmpeg, futures = setup
+    body = publish_video(client, tmp_path)
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+    stored = stored_path(body)
+    assert not any(path.exists() for path in SM.derived_files(stored))
+
+    with Session() as db:
+        files = db.query(Post).one().media_files
+        items = post_media_items(db)
+    assert [(item["rel_path"], item["size_bytes"]) for item in items] == [(body["rel_path"], 4096)]
+    # The Explore tile is answered from the record: nothing is fetched or encoded.
+    encodes = len(ffmpeg.encodes)
+    rel, preview_url, poster_url, error = reels._gen_explore_assets(body["rel_path"], "mono", files)
+    assert error is None
+    assert preview_url == f"https://media.example.com/uploads/{stored.stem}-explore.mp4"
+    assert poster_url == f"https://media.example.com/uploads/{stored.stem}-poster.jpg"
+    assert not stored.exists() and len(ffmpeg.encodes) == encodes
 
 
 def test_failed_encodes_are_logged_and_leave_a_usable_post(setup, tmp_path, caplog):
@@ -184,14 +230,13 @@ def test_failed_encodes_are_logged_and_leave_a_usable_post(setup, tmp_path, capl
 
     assert "Could not build the explore preview" in caplog.text
     assert "Could not build the web preview" in caplog.text
-    assert sibling(stored, "-poster.jpg").exists()
-    assert not sibling(stored, "-explore.mp4").exists()
-    assert not sibling(stored, "-preview.mp4").exists()
     assert set(s3.objects) == {body["rel_path"], media_store.rel_path(sibling(stored, "-poster.jpg"))}
+    assert not any(path.exists() for path in SM.derived_files(stored))
     assert part_files() == []
     with Session() as db:
         post = db.query(Post).one()
         assert post.status == "published"
+        assert set(post.media_files) == {body["rel_path"], media_store.rel_path(sibling(stored, "-poster.jpg"))}
         card = post_card(post, db)
     assert card["preview_url"] == body["media_url"]
     assert card["poster_url"].endswith("-poster.jpg")
@@ -211,7 +256,7 @@ def test_a_raising_build_still_cleans_up(setup, tmp_path, monkeypatch, caplog):
         futures[0].result(timeout=10)
     assert "Building the explore preview" in caplog.text
     assert part_files() == []
-    assert sibling(stored_path(body), "-preview.mp4").exists()
+    assert media_store.rel_path(sibling(stored_path(body), "-preview.mp4")) in _s3.objects
     assert not SM.derived_pending(stored_path(body))
 
 

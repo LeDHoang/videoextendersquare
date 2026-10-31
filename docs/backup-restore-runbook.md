@@ -7,6 +7,7 @@ What a full restore needs, and where each piece lives:
 | PostgreSQL (users, posts, DMs, reports, credits) | `pgdata` volume | `deploy/backup.sh`: nightly `pg_dump -Fc` to the private R2 bucket |
 | Avatars | `data` volume, `/app/data/avatars` | `deploy/backup.sh`: nightly tarball to the private R2 bucket |
 | Published media | R2 public bucket (`media.<domain>`) | R2 itself (no copy; deletes are takedowns) |
+| Files of unpublished posts (moderation evidence) | `output` volume, `/app/output/uploads` | Not backed up (see step 3) |
 | `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY`, `SX_FAL_KEY_ENCRYPTION_KEY` | `.env` on the VPS | **Password-manager escrow** (`docs/deploy-runbook.md` §Secret escrow) |
 | Map-tile cache, job temp files, staged uploads | `data/map_tiles`, container `/tmp` | Not backed up (rebuildable / ephemeral) |
 
@@ -71,7 +72,7 @@ docker compose exec -T postgres sh -c \
 
 ```bash
 docker compose up -d app
-docker compose exec app alembic current        # expect 20261022_0016 (head)
+docker compose exec app alembic current        # expect 20261031_0018 (head)
 ```
 
 ### 2. Avatars: untar into the data volume
@@ -83,19 +84,19 @@ docker compose exec -T app tar -C /app/data -xzf - < ./restore/avatars-*.tar.gz
 
 The `exec` runs as the image's non-root `app` user, so the extracted files are owned correctly.
 
-### 3. Public media: copy the R2 bucket back into `output/uploads`
+### 3. Public media: nothing to copy
 
-The request-time sibling probes (posters, previews, stereo variants) look for local copies under `output/uploads`, so a restored host needs them even though R2 still serves the public URLs.
+The public R2 bucket holds every published file, and the app serves posts from the media record in the database (`posts.media_files`), not from local copies. Builders download the files they read and drop them afterwards (`docs/storage-design.md`). Point `R2_*` at the same public bucket and the restored host serves everything. Do not copy the bucket into `output/uploads`.
+
+What a restore does not bring back is the moderation evidence. When a post is unpublished, its R2 objects are deleted and its files stay only on the old host's `output` volume. If the old host is still reachable, copy them over. First run `scripts/prune_local_media.py` there (see its docstring), so that the archive holds little more than the evidence:
 
 ```bash
-# rclone remote for the PUBLIC bucket (read-only token is enough):
-rclone lsf r2-public:<public-bucket> --max-depth 1          # confirm the key layout
-rclone copy r2-public:<public-bucket>/uploads ./restore/uploads --transfers 16
-docker compose cp ./restore/uploads app:/app/output/
-docker compose exec -u 0 app chown -R app:app /app/output/uploads
+# On the old host:
+docker compose exec -T app python - < scripts/prune_local_media.py
+docker compose exec -T app tar -C /app/output -czf - uploads > evidence.tar.gz
+# On the restored host:
+docker compose exec -T app tar -C /app/output -xzf - < evidence.tar.gz
 ```
-
-(If the keys are not prefixed with `uploads/`, copy the bucket root into `./restore/uploads` instead.)
 
 ### 4. Verify
 

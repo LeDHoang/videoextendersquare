@@ -11,6 +11,7 @@ Last updated: 2026-09-12
 
 ## Existing project references
 
+- [Storage design: what is stored where](storage-design.md)
 - [X-inspired Reels and creator recommendation plan](x-recommendation-system-plan.md)
 - [Full-stack migration plan](implementation_plan.md)
 - [User profile and social progress](user-profile-social-implementation-progress.md)

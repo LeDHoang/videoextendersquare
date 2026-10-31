@@ -299,11 +299,17 @@ def make_faststart(path: str | Path, ext: str) -> None:
         out.unlink(missing_ok=True)
 
 
-def has_web_preview(src: str) -> bool:
-    if get_video_codec(src) in {"h264", "avc1"}:
+def video_codec(src: str, files: dict | None = None) -> str:
+    """Codec of *src*: from a post's media record when given, else ffprobe."""
+    if files is not None:
+        return (files.get(media_store.rel_path(src)) or {}).get("codec") or "unknown"
+    return get_video_codec(src)
+
+
+def has_web_preview(src: str, files: dict | None = None) -> bool:
+    if video_codec(src, files) in {"h264", "avc1"}:
         return True
-    dest = Path(src).with_name(Path(src).stem + "-preview.mp4")
-    return dest.exists() and dest.stat().st_size > 0
+    return has_media_file(Path(src).with_name(Path(src).stem + "-preview.mp4"), files)
 
 
 def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = None) -> str | None:
@@ -396,6 +402,43 @@ def derived_files(stored: Path) -> list[Path]:
     ]
 
 
+def local_media_files(stored: str | Path) -> dict[str, dict]:
+    """Record of the files an original and its derived siblings hold on disk.
+
+    Shape (posts.media_files): {output-relative path: {"bytes": n}}; a video
+    original and its -preview.mp4 also carry "codec", "width" and "height".
+    Missing, empty and stale siblings (older than the original) are left out,
+    so readers of the record never need the disk.
+    """
+    stored = Path(stored)
+    probed = (stored, stored.with_name(stored.stem + "-preview.mp4"))
+    files: dict[str, dict] = {}
+    for path in derived_files(stored):
+        rel = media_store.rel_path(path)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if not rel or size <= 0 or (path != stored and not _sibling_is_fresh(path, str(stored))):
+            continue
+        entry = {"bytes": size}
+        if path in probed and path.suffix.lstrip(".").lower() in VIDEO_EXTS:
+            info = probe_media_info(str(path)) or {}
+            entry.update(codec=get_video_codec(str(path)), width=info.get("width"), height=info.get("height"))
+        files[rel] = entry
+    return files
+
+
+def has_media_file(path: Path, files: dict | None) -> bool:
+    """True when *path* is a non-empty file: per a post's media record when given, else on disk."""
+    if files is not None:
+        return media_store.rel_path(path) in files
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def discard_part_files(stored: Path) -> None:
     """Remove the hidden .part file of every derived sibling of *stored*."""
     for sibling in derived_files(stored)[1:]:
@@ -444,22 +487,20 @@ def derived_pending(src: str | Path) -> bool:
         return _pending_key(src) in _pending_derived
 
 
-def missing_derived_assets(stored: str | Path, stereo: str | None = None) -> bool:
+def missing_derived_assets(stored: str | Path, stereo: str | None = None, files: dict | None = None) -> bool:
     """True when a published video lacks a derived file its publish job builds.
 
     2D: poster, Explore preview, and the web preview unless the original is
     already H.264. Stereo: the left-eye rendition with its poster and
     Explore preview, and the stereo web preview when one is needed.
     Only file presence is checked, so a restart-lost encode is found
-    without re-encoding anything.
+    without re-encoding anything. With the post's media record (*files*)
+    nothing is read from disk.
     """
     stored = Path(stored)
 
     def present(path: Path) -> bool:
-        try:
-            return path.is_file() and path.stat().st_size > 0
-        except OSError:
-            return False
+        return has_media_file(path, files)
 
     if stereo in ("sbs", "tb"):
         mono = mono_sibling_path(str(stored))
@@ -468,14 +509,17 @@ def missing_derived_assets(stored: str | Path, stereo: str | None = None) -> boo
             return True
         if present(stored.with_name(stored.stem + "-preview.mp4")):
             return False
-        if get_video_codec(str(stored)) not in {"h264", "avc1"}:
+        if video_codec(str(stored), files) not in {"h264", "avc1"}:
             return True
-        info = probe_media_info(str(stored)) or {}
+        if files is not None:
+            info = files.get(media_store.rel_path(stored)) or {}
+        else:
+            info = probe_media_info(str(stored)) or {}
         return max(info.get("width") or 0, info.get("height") or 0) > STEREO_PROXY_LONG_SIDE
     grid = (explore_poster_path(str(stored)), explore_preview_path(str(stored)))
     if not all(present(path) for path in grid):
         return True
-    return not has_web_preview(str(stored))
+    return not has_web_preview(str(stored), files)
 
 
 def explore_preview_path(src: str) -> Path:
@@ -534,19 +578,19 @@ def is_derived_media(name: str) -> bool:
     return Path(name).stem.endswith(MONO_SUFFIX)
 
 
-def stereo_paths(src: str) -> tuple[Path | None, Path]:
-    """(left-eye mono rendition or None, best stereo playback file) of an original."""
+def stereo_paths(src: str, files: dict | None = None) -> tuple[Path | None, Path]:
+    """(left-eye mono rendition or None, best stereo playback file) of an original.
+
+    With the post's media record (*files*) nothing is read from disk.
+    """
     path = Path(src)
     mono = mono_sibling_path(src)
-    try:
-        has_mono = mono.is_file() and mono.stat().st_size > 0
-    except OSError:
-        has_mono = False
+    has_mono = has_media_file(mono, files)
     stereo = path
     if path.suffix.lstrip(".").lower() in VIDEO_EXTS:
         proxy = path.with_name(path.stem + "-preview.mp4")
         try:
-            if proxy.is_file() and proxy.stat().st_size > 0 and _proxy_within_cap(proxy):
+            if has_media_file(proxy, files) and _proxy_within_cap(proxy, files):
                 stereo = proxy
         except OSError:
             pass
@@ -556,13 +600,18 @@ def stereo_paths(src: str) -> tuple[Path | None, Path]:
 _proxy_side_cache: dict[tuple[str, int, int], int | None] = {}
 
 
-def _proxy_within_cap(proxy: Path) -> bool:
+def _proxy_within_cap(proxy: Path, files: dict | None = None) -> bool:
     """True unless the proxy is known to exceed STEREO_PROXY_LONG_SIDE.
 
     Proxies built before the cap existed can be 8K, which the Quest cannot
     decode; those are skipped until `scripts/batch_stereo_mono.py` rebuilds
-    them. The probe is cached per (path, mtime, size).
+    them. The probe is cached per (path, mtime, size); a media record
+    (*files*) answers from its recorded size.
     """
+    if files is not None:
+        entry = files.get(media_store.rel_path(proxy)) or {}
+        sides = [v for v in (entry.get("width"), entry.get("height")) if v]
+        return not sides or max(sides) <= STEREO_PROXY_LONG_SIDE
     st = proxy.stat()
     key = (str(proxy), st.st_mtime_ns, st.st_size)
     if key not in _proxy_side_cache:

@@ -25,7 +25,7 @@ from server.social.models import (
     User,
     utcnow,
 )
-from server.social.services import post_media_files
+from server.social.services import post_media_files, record_media_files
 
 # Content type -> (model, column holding the author's user id).
 CONTENT_MODELS = {
@@ -182,6 +182,7 @@ def restore_target(db: Session, target_type: str, target_id: str) -> list:
         originals = [row.media_path, *(slide.media_path for slide in row.slides)]
         if not all((Path("output") / rel).is_file() for rel in originals if rel):
             fail(409, "MEDIA_MISSING", "The post's media files are no longer on the server.")
+        record_media_files(row, reset=True)
         row.status = "published"
         owner.post_count = int(owner.post_count or 0) + 1
     elif target_type == "pack":

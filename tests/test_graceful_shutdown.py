@@ -16,11 +16,13 @@ from sqlalchemy.orm import sessionmaker
 
 from verified_signup import register_verified
 from server import media as SM
+from server import media_store
 from server.jobs import JobCancelled, JobManager, JobStatus, ShuttingDown
 from server.routers import image, social, uploads
 from server.social import auth, database
 from server.social.database import Base, get_db
 from server.social.models import Post, User
+from test_media_store import FakeS3
 
 # server.app calls load_dotenv() at import; keep the developer's .env out of
 # the test process (see test_production_boot.py).
@@ -226,6 +228,48 @@ def test_post_with_a_missing_poster_is_re_encoded_at_boot(library):
     assert not SM.derived_pending(lost)
     # Nothing is left to do on the next boot.
     assert uploads.requeue_missing_derived() == 0
+
+
+def test_recorded_post_gone_from_disk_is_fetched_back_and_completed(library, monkeypatch, caplog):
+    add_post, encodes, futures = library
+    monkeypatch.setenv("SX_MEDIA_BASE_URL", "https://media.example.com")
+    monkeypatch.setenv("R2_PUBLIC_BUCKET", "public-media")
+    s3 = FakeS3()
+    downloads = []
+    download_file = s3.download_file
+    s3.download_file = lambda bucket, key, filename: (downloads.append(key), download_file(bucket, key, filename))
+    monkeypatch.setattr(media_store, "_client", s3)
+    remote = add_post("remote", poster=False)
+    gone = add_post("gone", poster=False)
+    preview = SM.explore_preview_path(str(remote))
+    s3.objects["uploads/remote.mp4"] = {"body": b"original"}
+    s3.objects["uploads/remote-explore.mp4"] = {"body": b"preview"}
+    with database.SessionLocal() as db:
+        for post in db.query(Post).all():
+            post.media_files = {
+                post.media_path: {"bytes": 8, "codec": "h264", "width": None, "height": None},
+                post.media_path.replace(".mp4", "-explore.mp4"): {"bytes": 7},
+            }
+        db.commit()
+    for path in (remote, preview, gone):
+        path.unlink()
+
+    with caplog.at_level(logging.WARNING, logger="server.routers.uploads"):
+        assert uploads.requeue_missing_derived() == 2
+        for future in futures:
+            future.result(timeout=10)
+
+    # The original and its recorded preview come back from R2; only the poster is encoded.
+    assert sorted(downloads) == ["uploads/gone.mp4", "uploads/remote-explore.mp4", "uploads/remote.mp4"]
+    assert encodes == ["remote-poster.jpg"]
+    with database.SessionLocal() as db:
+        assert "uploads/remote-poster.jpg" in db.query(Post).filter_by(title="remote").one().media_files
+    # Afterwards the copies R2 holds are dropped again; the poster never reached R2 here, so it stays.
+    assert not remote.exists() and not preview.exists()
+    assert SM.explore_poster_path(str(remote)).exists()
+    # Nothing to fetch the other original from: nothing is built.
+    assert "The original of gone.mp4 is neither on disk nor in R2" in caplog.text
+    assert not gone.exists()
 
 
 def test_boot_requeue_is_capped(library):

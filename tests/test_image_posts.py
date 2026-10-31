@@ -116,11 +116,12 @@ def test_deleting_a_post_removes_its_slides(session, owner):
 
 def test_scan_hides_slides_behind_their_post(monkeypatch):
     scanned = [
-        {"rel_path": "uploads/a.png", "filename": "a.png", "media_type": "image"},
-        {"rel_path": "uploads/b.png", "filename": "b.png", "media_type": "image"},
-        {"rel_path": "uploads/clip.mp4", "filename": "clip.mp4", "media_type": "video"},
+        {"rel_path": "uploads/a.png", "filename": "a.png", "media_type": "image", "mtime": 3.0},
+        {"rel_path": "uploads/b.png", "filename": "b.png", "media_type": "image", "mtime": 2.0},
+        {"rel_path": "uploads/clip.mp4", "filename": "clip.mp4", "media_type": "video", "mtime": 1.0},
     ]
     monkeypatch.setattr(reels.SM, "scan_output_media", lambda _root: list(scanned))
+    monkeypatch.setattr(reels, "post_media_items", lambda db=None: [])
     monkeypatch.setattr(reels, "slide_media_paths", lambda db=None: {"uploads/b.png"})
     monkeypatch.setitem(reels._scan_cache, "at", 0.0)
     monkeypatch.setitem(reels._scan_cache, "data", [])

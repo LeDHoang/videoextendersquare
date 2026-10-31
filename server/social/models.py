@@ -144,6 +144,12 @@ class Post(Base):
     # Stereo posts keep the original at media_path (the VR source) and a
     # left-eye <stem>-mono sibling for every 2D surface.
     stereo_layout = Column(String(16), nullable=False, default="mono", server_default="mono")
+    # Every stored file of the post (cover, slides and their derived
+    # siblings): {output-relative path: {"bytes", and for a video original
+    # and its -preview.mp4 "codec", "width", "height"}}. Request-time code
+    # reads this instead of the disk (docs/storage-design.md). NULL means
+    # not recorded yet; readers then fall back to the local files.
+    media_files = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)

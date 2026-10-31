@@ -204,9 +204,14 @@ def test_stereo_post_without_rendition_falls_back_to_crop(client, tmp_path):
     user = _register(client, "stereo_legacy")
     stage = _stage_image(tmp_path, user, "legacy", _stereo_still("sbs"))
     meta = _publish(client, {"kind": "image", "title": "L", "stage_id": stage, "stereo_layout": "sbs"}).json()["meta"]
-    (Path("output") / meta["url"].removeprefix("/media/")).unlink()
+    mono_rel = meta["url"].removeprefix("/media/")
+    (Path("output") / mono_rel).unlink()
     with client.testing_session() as db:
-        card = post_card(db.query(Post).one(), db)
+        post = db.query(Post).one()
+        # The record wins over the disk: a legacy row lists no rendition.
+        assert post_card(post, db)["stereo_crop"] is False
+        post.media_files = {rel: entry for rel, entry in post.media_files.items() if rel != mono_rel}
+        card = post_card(post, db)
     assert card["stereo_crop"] is True
     assert card["url"] == card["stereo_url"] == f"/media/{meta['path']}"
 

@@ -41,7 +41,7 @@ def app(tmp_path, monkeypatch):
     application.state.Session = Session
     generated = []
 
-    def fake_gen(rel, layout="mono"):
+    def fake_gen(rel, layout="mono", files=None):
         generated.append(rel)
         return rel, f"/media/{rel}-preview", f"/media/{rel}-poster", None
 

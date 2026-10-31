@@ -2,10 +2,14 @@
 
 Rule: a published file (anything under ``output/uploads/``) exists locally
 only once its R2 object exists. Generators write a hidden ``.part`` file and
-hand it to :func:`commit`, which uploads first and renames second, so the
-request-time sibling probes (``exists()`` / ``stat()``) stay correct and no
-call site needs its own upload hook. Local copies stay on disk as the
-working set for derived assets and as unserved moderation evidence.
+hand it to :func:`commit`, which uploads first and renames second, so no
+call site needs its own upload hook.
+
+R2 is the only durable copy of published media; this disk is a work area
+(see docs/storage-design.md). Builders :func:`fetch_local` what they read and
+:func:`drop_local` it when done. Unpublishing (:func:`delete_paths`) brings a
+dropped copy back first, so a removed post keeps its files here as unserved
+moderation evidence, and a staff restore can publish them again.
 
 R2 is on when ``SX_MEDIA_BASE_URL`` and ``R2_PUBLIC_BUCKET`` are both set
 (production requires them, see ``server/settings.py``). Without them URLs
@@ -14,10 +18,12 @@ keep the dev ``/media/`` mount and nothing is uploaded.
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import mimetypes
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -154,6 +160,92 @@ def _upload(local: str | Path, rel: str) -> None:
         raise MediaStoreError(f"Could not store {rel}") from ex
 
 
+@contextmanager
+def _local_lock():
+    """Serialize dropping local copies against unpublishing, across processes.
+
+    Without it a copy could be dropped between an unpublish checking it is
+    here and deleting its object, losing the only copy.
+    """
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_ROOT / ".media-store.lock", "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def _missing(ex: Exception) -> bool:
+    """True when *ex* is R2 saying the object does not exist."""
+    code = str((getattr(ex, "response", None) or {}).get("Error", {}).get("Code", ""))
+    return code in ("404", "NoSuchKey", "NotFound")
+
+
+def _download(path: Path, rel: str) -> None:
+    """Download *rel* to *path* through a hidden ``.part`` file, so a half-written copy is never read."""
+    part = path.with_name(f".{path.name}.part")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        client().download_file(_bucket(), rel, str(part))
+        os.replace(part, path)
+    finally:
+        part.unlink(missing_ok=True)
+
+
+def fetch_local(path: str | Path) -> bool:
+    """Make sure a published file is on this disk, downloading its object when it is not.
+
+    Returns True when the file is local afterwards. Builders of derived
+    assets call this before reading an original whose local copy was
+    dropped.
+    """
+    path = Path(path)
+    if path.is_file():
+        return True
+    rel = rel_path(path)
+    if not (enabled() and is_published(rel)):
+        return False
+    try:
+        _download(path, rel)
+    except Exception as ex:
+        logger.warning("R2 download of %s failed: %s", rel, ex)
+        return False
+    return True
+
+
+def drop_local(paths: Iterable[str | Path]) -> int:
+    """Remove this disk's copies of published files that R2 holds; returns how many.
+
+    A copy goes only when its object exists with the same size, so the
+    evidence of an unpublished post (its objects are gone) and a file that
+    never reached R2 both stay. Never raises; no-op without R2.
+    """
+    if not enabled():
+        return 0
+    count = 0
+    for path in paths:
+        path = Path(path)
+        rel = rel_path(path)
+        if not is_published(rel) or not path.is_file():
+            continue
+        with _local_lock():
+            try:
+                size = path.stat().st_size
+                stored = client().head_object(Bucket=_bucket(), Key=rel)["ContentLength"]
+            except Exception as ex:
+                if not (isinstance(ex, FileNotFoundError) or _missing(ex)):
+                    logger.warning("Kept %s: could not check its R2 object: %s", rel, ex)
+                continue
+            if stored != size:
+                logger.warning("Kept %s: its R2 object has %s bytes, this copy %s", rel, stored, size)
+                continue
+            try:
+                path.unlink()
+            except OSError as ex:
+                logger.warning("Could not drop the local copy of %s: %s", rel, ex)
+                continue
+        count += 1
+    return count
+
+
 def republish_paths(paths: Iterable[str | Path]) -> int:
     """Upload the kept local copies of *paths* again (a restored post); returns how many.
 
@@ -195,5 +287,26 @@ def delete(rels: Iterable[str]) -> int:
     return len(keys)
 
 
-def delete_paths(paths: Iterable[str | Path]) -> int:
-    return delete(rel for rel in (rel_path(path) for path in paths) if rel)
+def delete_paths(paths: Iterable[str | Path], *, evidence: bool = True) -> int:
+    """Unpublish *paths*, first downloading any dropped local copy (see :func:`delete`).
+
+    The local copies are all that remains afterwards: moderation evidence and
+    what a staff restore publishes again. The takedown wins over evidence: an
+    object that cannot be downloaded is logged and still deleted. A failed
+    publish passes ``evidence=False``, since it removes its files anyway.
+    """
+    paths = [Path(path) for path in paths]
+    rels = [rel for rel in (rel_path(path) for path in paths) if rel]
+    if not (evidence and enabled()):
+        return delete(rels)
+    with _local_lock():
+        for path, rel in ((path, rel_path(path)) for path in paths):
+            if not is_published(rel) or path.is_file():
+                continue
+            try:
+                _download(path, rel)
+            except Exception as ex:
+                # Most candidates are siblings that were never built.
+                if not _missing(ex):
+                    logger.error("Could not keep %s before unpublishing it: %s", rel, ex)
+        return delete(rels)

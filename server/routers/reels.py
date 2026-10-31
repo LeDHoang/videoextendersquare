@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from server import media_store
 from server.media_store import public_url
 from server.security_headers import nonce_request_html
 from server import media as SM
@@ -30,12 +31,14 @@ from server.social.database import get_db
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, PostSlide, ViewDedup
 from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
 from server.social.services import (
+    post_media_items,
     published_media_paths,
     IMAGE_POST_DWELL_MS,
     _image_entry,
     get_post_by_reference,
     metadata_for_paths,
     reel_records,
+    rerecord_media_files,
     scoped_media_paths,
     slide_media_paths,
     stereo_fields,
@@ -1270,34 +1273,36 @@ class CommentCreate(BaseModel):
 # ─── SCAN & FILTER ───────────────────────────────────────────────────────
 
 def _scan_cached(db: Session | None = None) -> list[dict]:
-    """Scan output/ (cached for _SCAN_TTL) minus the extra slides of posts.
+    """Every post's media (cached for _SCAN_TTL) minus the extra slides of posts.
 
-    In production only files with a Post row surface: loose folders under
-    output/ (pipeline tests, captures) are never discoverable there, which
-    closes the feed, tags, locations, packs and recommendations at once.
+    Posts come from their media records (post_media_items), so a post plays
+    whether or not its files are on this disk. Production lists nothing
+    else: loose folders under output/ (pipeline tests, captures) are never
+    discoverable there, which closes the feed, tags, locations, packs and
+    recommendations at once. Dev also scans output/ for those loose files.
 
-    A failed slide lookup raises a 503 (see _reel_data_unavailable) and
-    leaves the cache stale, so the next request retries the lookup.
+    A failed post or slide lookup raises a 503 (see _reel_data_unavailable)
+    and leaves the cache stale, so the next request retries the lookup.
     """
     now = time.monotonic()
     if now - _scan_cache["at"] > _SCAN_TTL or not _scan_cache["data"]:
         _scan_cache["at"] = now
-        scanned = SM.scan_output_media(str(OUTPUT_DIR))
         # Extra images of a multi-image post play inside that post, so they
         # never surface as tiles of their own.
         try:
             slides = slide_media_paths(db)
-            published = published_media_paths(db) if is_production() else None
+            items = post_media_items(db)
         except SQLAlchemyError as exc:
             # Never cache or serve a scan without the slide filter: a slide
             # is not any post's media_path, so _build_payload would seed it
             # with fabricated metadata until the cache expired.
             invalidate_scan_cache()
             raise _reel_data_unavailable() from exc
-        _scan_cache["data"] = [
-            item for item in scanned
-            if item["rel_path"] not in slides and (published is None or item["rel_path"] in published)
-        ]
+        if not is_production():
+            listed = {item["rel_path"] for item in items}
+            items += [item for item in SM.scan_output_media(str(OUTPUT_DIR)) if item["rel_path"] not in listed]
+            items.sort(key=lambda item: item["mtime"], reverse=True)
+        _scan_cache["data"] = [item for item in items if item["rel_path"] not in slides]
     return _scan_cache["data"]
 
 
@@ -1390,9 +1395,17 @@ def _codec_key(codec: str | None) -> str:
     return (codec or "hevc").lower()
 
 
-def _sibling_media_url(play_path: str, sibling: Path, output_root: Path) -> str | None:
+def _sibling_media_url(play_path: str, sibling: Path, output_root: Path, files: dict | None = None) -> str | None:
     """Reference a cached sibling file (<stem>-explore.mp4 / -poster.jpg) as
-    a /media/ URL if present and fresh, else None."""
+    a /media/ URL if present and fresh, else None. With the post's media
+    record (*files*) presence is read from it instead of the disk."""
+    if files is not None:
+        try:
+            if SM.has_media_file(sibling, files):
+                return public_url(sibling.resolve().relative_to(output_root).as_posix())
+        except (OSError, ValueError):
+            pass
+        return None
     try:
         if sibling.exists() and sibling.stat().st_size > 0:
             try:
@@ -1433,6 +1446,9 @@ def _build_payload(
     for item in videos:
         src_path = item["path"]
         social_row = social_rows.get(item["rel_path"])
+        # The post's recorded files answer every presence/codec question
+        # below; loose files and unrecorded posts still read the disk.
+        files = (social_row or {}).get("media_files")
         comments = (
             social_row.get("comments", [])
             if social_row is not None
@@ -1482,7 +1498,7 @@ def _build_payload(
             if social_row is not None
             else SM.legacy_stereo_layout(item["rel_path"], meta.get("width"), meta.get("height"), root=str(OUTPUT_DIR))
         ) or "mono"
-        stereo = stereo_fields(item["rel_path"], layout)
+        stereo = stereo_fields(item["rel_path"], layout, files)
         base["stereo_layout"] = stereo["stereo_layout"]
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
@@ -1497,12 +1513,12 @@ def _build_payload(
                 continue
             if is_stereo:
                 # 2D shows the left-eye rendition; stereo_url is the full still.
-                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout)
+                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout, files)
                 url, poster_url = cover["url"], cover["poster_url"]
                 images = (social_row or {}).get("images") or [cover]
             else:
                 url = public_url(rel)
-                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path), output_root) or url
+                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path), output_root, files) or url
                 # Every image of the post in order (a loose file is a 1-image post).
                 images = (social_row or {}).get("images") or [{
                     "path": rel,
@@ -1531,8 +1547,8 @@ def _build_payload(
         if is_stereo and not stereo["stereo_crop"]:
             # 2D plays the H.264 left-eye rendition; grid assets derive from it.
             mono_path = str(SM.mono_sibling_path(src_path))
-            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path), output_root)
-            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path), output_root)
+            preview_url = _sibling_media_url(mono_path, SM.explore_preview_path(mono_path), output_root, files)
+            poster_url = _sibling_media_url(mono_path, SM.explore_poster_path(mono_path), output_root, files)
             payload.append({
                 **base,
                 "media_type": "video",
@@ -1545,25 +1561,25 @@ def _build_payload(
             })
             continue
 
-        codec_name = SM.get_video_codec(src_path)
+        codec_name = SM.video_codec(src_path, files)
         play_path = src_path
         is_proxy = False
 
         if mode in ("h264", "all"):
             if codec_name not in {"h264", "avc1"}:
                 preview_p = Path(src_path).with_name(Path(src_path).stem + "-preview.mp4")
-                if preview_p.exists() and preview_p.stat().st_size > 0:
+                if SM.has_media_file(preview_p, files):
                     play_path = str(preview_p)
                     is_proxy = True
 
         rel = Path(play_path).resolve().relative_to(output_root).as_posix()
-        play_codec = SM.get_video_codec(play_path)
+        play_codec = SM.video_codec(play_path, files)
 
         # Lightweight Explore-grid assets: reference the cached
         # <stem>-explore.mp4 / <stem>-poster.jpg if present and fresh, else
         # None (the grid generates them via POST /explore-preview).
-        preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path), output_root)
-        poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path), output_root)
+        preview_url = _sibling_media_url(play_path, SM.explore_preview_path(play_path), output_root, files)
+        poster_url = _sibling_media_url(play_path, SM.explore_poster_path(play_path), output_root, files)
 
         payload.append({
             **base,
@@ -2317,14 +2333,20 @@ def _stereo_items(videos: list[dict], db: Session | None) -> list[dict]:
     ]
 
 
-def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None, str | None, str | None]:
+def _gen_explore_assets(
+    rel: str, layout: str = "mono", files: dict | None = None
+) -> tuple[str, str | None, str | None, str | None]:
     """Generate one item's Explore assets. Returns
     (rel, preview_url, poster_url, error). Posters are cheap single frames;
     previews are full re-encodes — both run in parallel across videos.
-    Image tiles only need a poster (the full image is its own preview)."""
+    Image tiles only need a poster (the full image is its own preview).
+
+    Assets the post's media record (*files*) already lists are answered from
+    it; the source is fetched back from R2 only when something must be built.
+    """
     root = OUTPUT_DIR.resolve()
     p = (root / rel).resolve()
-    if not p.is_relative_to(root) or not p.is_file():
+    if not p.is_relative_to(root) or (files is None and not p.is_file()):
         return rel, None, None, "not found"
     if SM.derived_pending(p):
         # The publish job is building these; the tile keeps its fallback.
@@ -2332,43 +2354,18 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
     # A 3D original's grid assets come from its left-eye 2D rendition, so
     # tiles stay square (the rendition only exists for stereo posts).
     # Before that rendition exists, crop the left eye of the original.
-    mono, _stereo = SM.stereo_paths(str(p))
+    mono, _stereo = SM.stereo_paths(str(p), files)
     crop = None
     if mono is not None:
         p = mono.resolve()
     elif layout in SM.STEREO_LAYOUTS and layout != "mono":
         if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
             # A still's left eye is a cheap PIL crop: build the rendition now.
-            built = SM.make_left_eye_rendition(str(p), layout)
+            built = SM.make_left_eye_rendition(str(p), layout) if media_store.fetch_local(p) else None
             if built:
                 p = Path(built).resolve()
         else:
             crop = SM.left_eye_crop(layout)
-    if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
-        try:
-            poster = SM.make_image_poster(str(p))
-        except Exception as ex:  # noqa: BLE001
-            return rel, None, None, str(ex)
-
-        def _img_url(local: str | None) -> str | None:
-            if not local:
-                return None
-            try:
-                return public_url(Path(local).resolve().relative_to(root).as_posix())
-            except ValueError:
-                return None
-
-        poster_url = _img_url(poster)
-        # The tile uses the full image (or its left eye) as its own preview.
-        return rel, _img_url(str(p)), poster_url, None
-    try:
-        prev = SM.make_explore_preview(str(p), crop=crop)
-    except Exception as ex:  # noqa: BLE001
-        return rel, None, None, str(ex)
-    try:
-        poster = SM.make_explore_poster(str(p), crop=crop)
-    except Exception:  # noqa: BLE001
-        poster = None  # poster is best-effort; the tile still works
 
     def _url(local: str | None) -> str | None:
         if not local:
@@ -2378,10 +2375,47 @@ def _gen_explore_assets(rel: str, layout: str = "mono") -> tuple[str, str | None
         except ValueError:
             return None
 
-    preview_url, poster_url = _url(prev), _url(poster)
+    def _recorded(path: Path) -> str | None:
+        return _url(str(path)) if files is not None and SM.has_media_file(path, files) else None
+
+    if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+        poster_url = _recorded(SM.explore_poster_path(str(p)))
+        if not poster_url:
+            if not media_store.fetch_local(p):
+                return rel, None, None, "not found"
+            try:
+                poster_url = _url(SM.make_image_poster(str(p)))
+            except Exception as ex:  # noqa: BLE001
+                return rel, None, None, str(ex)
+        # The tile uses the full image (or its left eye) as its own preview.
+        return rel, _url(str(p)), poster_url, None
+    preview_url = _recorded(SM.explore_preview_path(str(p)))
+    poster_url = _recorded(SM.explore_poster_path(str(p)))
+    if not (preview_url and poster_url) and not media_store.fetch_local(p):
+        return rel, None, None, "not found"
+    if not preview_url:
+        try:
+            preview_url = _url(SM.make_explore_preview(str(p), crop=crop))
+        except Exception as ex:  # noqa: BLE001
+            return rel, None, None, str(ex)
+    if not poster_url:
+        try:
+            poster_url = _url(SM.make_explore_poster(str(p), crop=crop))
+        except Exception:  # noqa: BLE001
+            poster_url = None  # poster is best-effort; the tile still works
     if not preview_url:
         return rel, None, poster_url, "transcode failed"
     return rel, preview_url, poster_url, None
+
+
+def _drop_local_copies(rels: list[str]) -> None:
+    """Drop what a request fetched or built; R2 holds published media.
+
+    A post whose publish job still runs keeps its files: the job reads them.
+    """
+    media_store.drop_local(
+        path for rel in rels if not SM.derived_pending(OUTPUT_DIR / rel) for path in SM.derived_files(OUTPUT_DIR / rel)
+    )
 
 
 EXPLORE_PREVIEW_PER_MINUTE = 30
@@ -2431,9 +2465,10 @@ def generate_explore_previews(
         if rel not in layouts and Path(rel).parts[:1] and Path(rel).parts[0] in SM.LEGACY_SBS_FOLDERS
         and db.query(Post.id).filter(Post.media_path == rel).first() is None
     )
+    records = dict(db.query(Post.media_path, Post.media_files).filter(Post.media_path.in_(rels)).all()) if rels else {}
     with ThreadPoolExecutor(max_workers=EXPLORE_GEN_WORKERS) as ex:
         for rel, preview_url, poster_url, err in ex.map(
-            lambda rel: _gen_explore_assets(rel, layouts.get(rel, "mono")), rels
+            lambda rel: _gen_explore_assets(rel, layouts.get(rel, "mono"), records.get(rel)), rels
         ):
             if preview_url:
                 generated[rel] = preview_url
@@ -2441,6 +2476,10 @@ def generate_explore_previews(
                 posters[rel] = poster_url
             if err:
                 failed.append({"path": rel, "error": err})
+    # Readers serve recorded files only (posts.media_files).
+    rerecord_media_files(db, [*generated, *posters])
+    db.commit()
+    _drop_local_copies(rels)
     return {"generated": generated, "posters": posters, "failed": failed}
 
 
@@ -2616,7 +2655,7 @@ def generate_proxies(
     failed = []
     for rel in paths:
         p = (root / rel).resolve()
-        if not p.is_relative_to(root) or not p.is_file():
+        if not p.is_relative_to(root) or not media_store.fetch_local(p):
             failed.append({"path": rel, "error": "not found"})
             continue
         try:
@@ -2627,6 +2666,9 @@ def generate_proxies(
                 failed.append({"path": rel, "error": "transcode failed"})
         except Exception as ex:  # noqa: BLE001
             failed.append({"path": rel, "error": str(ex)})
+    rerecord_media_files(db, generated)
+    db.commit()
+    _drop_local_copies(paths)
     _scan_cache["at"] = 0.0
     return {"generated": generated, "failed": failed}
 

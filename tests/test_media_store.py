@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from argon2 import PasswordHasher
+from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
@@ -22,7 +23,7 @@ from server.routers import social
 from server.social import auth
 from server.social.database import Base, get_db
 from server.social.models import Post, PostSlide
-from server.social.services import post_media_files
+from server.social.services import post_card, post_media_files
 
 
 PASSWORD = "correct-horse-battery"
@@ -40,6 +41,17 @@ class FakeS3:
             raise RuntimeError("R2 down")
         assert bucket == "public-media"
         self.objects[key] = {"body": Path(filename).read_bytes(), **(ExtraArgs or {})}
+
+    def download_file(self, bucket, key, filename):
+        assert bucket == "public-media"
+        if key not in self.objects:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
+        Path(filename).write_bytes(self.objects[key]["body"])
+
+    def head_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
+        return {"ContentLength": len(self.objects[Key]["body"])}
 
     def delete_objects(self, Bucket, Delete):
         keys = [item["Key"] for item in Delete["Objects"]]
@@ -138,6 +150,103 @@ def test_republish_uploads_kept_local_copies(r2):
     r2.fail_uploads = True
     with pytest.raises(media_store.MediaStoreError):
         media_store.republish_paths([Path("output/uploads/clip.mp4")])
+
+
+def test_fetch_local_downloads_a_dropped_copy(r2):
+    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
+    dest = Path("output/uploads/clip.mp4")
+    assert media_store.fetch_local(dest)
+    assert dest.read_bytes() == b"video"
+    assert not Path("output/uploads/.clip.mp4.part").exists()
+    # Already local: no download.
+    r2.objects.clear()
+    assert media_store.fetch_local(dest)
+
+
+def test_fetch_local_fails_without_an_object(r2, caplog):
+    assert not media_store.fetch_local(Path("output/uploads/gone.mp4"))
+    assert "R2 download" in caplog.text
+    assert list(Path("output/uploads").iterdir()) == []
+    Path("output/testpipeline").mkdir()
+    assert not media_store.fetch_local(Path("output/testpipeline/x.mp4"))
+
+
+def test_fetch_local_is_a_no_op_without_r2(workdir):
+    assert not media_store.fetch_local(Path("output/uploads/clip.mp4"))
+
+
+def test_drop_local_removes_only_copies_r2_holds(r2, caplog):
+    for name, body in (("same.mp4", b"video"), ("short.mp4", b"video"), ("local-only.mp4", b"video")):
+        Path("output/uploads", name).write_bytes(body)
+    r2.objects["uploads/same.mp4"] = {"body": b"video"}
+    r2.objects["uploads/short.mp4"] = {"body": b"vid"}
+    Path("output/testpipeline").mkdir()
+    Path("output/testpipeline/x.mp4").write_bytes(b"video")
+    count = media_store.drop_local([
+        Path("output/uploads/same.mp4"),
+        Path("output/uploads/short.mp4"),  # its object differs: kept
+        Path("output/uploads/local-only.mp4"),  # never reached R2: kept
+        Path("output/uploads/never-built.mp4"),
+        Path("output/testpipeline/x.mp4"),  # not published: kept
+    ])
+    assert count == 1
+    assert not Path("output/uploads/same.mp4").exists()
+    assert Path("output/uploads/short.mp4").exists()
+    assert Path("output/uploads/local-only.mp4").exists()
+    assert Path("output/testpipeline/x.mp4").exists()
+    assert "its R2 object has 3 bytes, this copy 5" in caplog.text
+
+
+def test_drop_local_keeps_the_copy_when_r2_cannot_be_checked(r2, caplog):
+    def boom(**_kwargs):
+        raise RuntimeError("R2 down")
+
+    r2.head_object = boom
+    Path("output/uploads/clip.mp4").write_bytes(b"video")
+    assert media_store.drop_local([Path("output/uploads/clip.mp4")]) == 0
+    assert Path("output/uploads/clip.mp4").exists()
+    assert "could not check its R2 object" in caplog.text
+
+
+def test_drop_local_is_a_no_op_without_r2(workdir):
+    Path("output/uploads/clip.mp4").write_bytes(b"video")
+    assert media_store.drop_local([Path("output/uploads/clip.mp4")]) == 0
+    assert Path("output/uploads/clip.mp4").exists()
+
+
+def test_delete_paths_brings_dropped_copies_back_as_evidence(r2):
+    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
+    r2.objects["uploads/clip-poster.jpg"] = {"body": b"poster"}
+    Path("output/uploads/clip-poster.jpg").write_bytes(b"local poster")
+    count = media_store.delete_paths([
+        Path("output/uploads/clip.mp4"),
+        Path("output/uploads/clip-poster.jpg"),
+        Path("output/uploads/clip-preview.mp4"),  # never built: nothing to keep
+    ])
+    assert count == 3
+    assert r2.objects == {}
+    assert Path("output/uploads/clip.mp4").read_bytes() == b"video"
+    # A local copy is never overwritten.
+    assert Path("output/uploads/clip-poster.jpg").read_bytes() == b"local poster"
+    assert not Path("output/uploads/clip-preview.mp4").exists()
+
+
+def test_delete_paths_deletes_even_when_evidence_cannot_be_kept(r2, caplog):
+    def boom(*_args):
+        raise RuntimeError("R2 down")
+
+    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
+    r2.download_file = boom
+    assert media_store.delete_paths([Path("output/uploads/clip.mp4")]) == 1
+    assert r2.objects == {}
+    assert "Could not keep uploads/clip.mp4 before unpublishing it" in caplog.text
+
+
+def test_delete_paths_without_evidence_skips_the_download(r2):
+    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
+    assert media_store.delete_paths([Path("output/uploads/clip.mp4")], evidence=False) == 1
+    assert r2.objects == {}
+    assert not Path("output/uploads/clip.mp4").exists()
 
 
 def test_delete_skips_unpublished_keys_and_batches(r2, monkeypatch):
@@ -301,6 +410,12 @@ def test_publish_stores_original_and_poster_in_r2(app, publisher, r2):
     assert body["poster_url"].startswith("https://media.example.com/uploads/")
     assert rel in r2.objects
     assert any(key.endswith("-poster.jpg") for key in r2.objects)
+    # R2 holds the post from here on: this disk keeps no copy, and its card still reads.
+    assert [path.name for path in Path("output/uploads").iterdir()] == []
+    with app.state.Session() as db:
+        card = post_card(db.query(Post).one(), db)
+    assert card["url"] == body["media_url"]
+    assert card["images"][0]["poster_url"] == body["poster_url"]
 
 
 def test_publish_with_r2_down_is_503_and_leaves_nothing(app, publisher, r2):
