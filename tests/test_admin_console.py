@@ -42,8 +42,6 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_ADMIN_USERS", "admin_user")
     monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user")
     monkeypatch.setattr(support, "send_support_notification", lambda *args: None)
-    deleted_media: list = []
-    monkeypatch.setattr(admin.media_store, "delete_paths", lambda paths: deleted_media.extend(paths) or 0)
     republished_media: list = []
     monkeypatch.setattr(admin.media_store, "republish_paths", lambda paths: republished_media.extend(paths) or 0)
     engine = sa.create_engine(
@@ -61,7 +59,6 @@ def app(tmp_path, monkeypatch):
 
     application.dependency_overrides[get_db] = override_get_db
     application.state.Session = Session
-    application.state.deleted_media = deleted_media
     application.state.republished_media = republished_media
     yield application
     engine.dispose()
@@ -299,14 +296,14 @@ def test_content_search_remove_and_restore(app, staff, tmp_path, monkeypatch):
     assert pack["status"] == "draft" and pack["removed"] is False
 
     assert mutate(mod_client, "POST", f"/api/admin/content/post/{post_id}/remove", REASON).status_code == 200
-    assert app.state.deleted_media, "post media are deleted after commit"
     with app.state.Session() as db:
         assert db.get(Post, post_id).status == "deleted"
         assert db.get(User, target["id"]).post_count == 0
     removed_only = mod_client.get("/api/admin/content", params={"type": "post", "status": "removed"}).json()["items"]
     assert [row["id"] for row in removed_only] == [post_id]
 
-    # The kept local original is what makes a post restorable.
+    # Without a record, the kept local original is what makes a post restorable
+    # (removals deleted R2 objects until 2026-11-01).
     monkeypatch.chdir(tmp_path)
     missing = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
     assert missing.status_code == 409 and code(missing) == "MEDIA_MISSING"
@@ -325,6 +322,23 @@ def test_content_search_remove_and_restore(app, staff, tmp_path, monkeypatch):
     assert [row[0] for row in actions(app)] == [
         "content.remove", "content.restore", "content.remove", "content.restore", "content.remove", "content.restore",
     ]
+
+
+def test_a_recorded_post_restores_without_a_local_copy(app, staff, tmp_path, monkeypatch):
+    admin_client, _ = staff["admin"]
+    mod_client, _ = staff["mod"]
+    _, target = staff["user"]
+    monkeypatch.chdir(tmp_path)
+    post_id = create_post(app, target["id"])
+    with app.state.Session() as db:
+        post = db.get(Post, post_id)
+        post.media_files = {post.media_path: {"bytes": 4}}
+        db.commit()
+
+    assert mutate(mod_client, "POST", f"/api/admin/content/post/{post_id}/remove", REASON).status_code == 200
+    restored = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["item"]["status"] == "published"
 
 
 def test_author_deleted_content_cannot_be_restored(app, staff):

@@ -6,10 +6,11 @@ What a full restore needs, and where each piece lives:
 |---|---|---|
 | PostgreSQL (users, posts, DMs, reports, credits) | `pgdata` volume | `deploy/backup.sh`: nightly `pg_dump -Fc` to the private R2 bucket |
 | Avatars | `data` volume, `/app/data/avatars` | `deploy/backup.sh`: nightly tarball to the private R2 bucket |
-| Published media | R2 public bucket (`media.<domain>`) | R2 itself (no copy; deletes are takedowns) |
-| Files of unpublished posts (moderation evidence) | `output` volume, `/app/output/uploads` | Not backed up (see step 3) |
+| Media of every post, published or removed | R2 public bucket (`media.<domain>`), `uploads/` | R2 itself (no copy) |
+| Completed job results | R2 public bucket, `jobs/` | R2 itself; a lifecycle rule deletes them after 30 days |
+| Files of posts removed before 2026-11-01 (moderation evidence) | `output` volume, `/app/output/uploads` | Not backed up (see step 3) |
 | `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY`, `SX_FAL_KEY_ENCRYPTION_KEY` | `.env` on the VPS | **Password-manager escrow** (`docs/deploy-runbook.md` §Secret escrow) |
-| Map-tile cache, job temp files, staged uploads | `data/map_tiles`, container `/tmp` | Not backed up (rebuildable / ephemeral) |
+| Map-tile cache, job dirs, staged uploads | `data/map_tiles`, container `/tmp` | Not backed up (rebuildable / ephemeral; completed jobs are read back from `jobs/`) |
 
 > **The database alone is not a backup.** DMs, report evidence, and saved fal keys are encrypted with the three escrowed secrets. Restoring a dump with different secrets boots fine but every encrypted field is unreadable. Session cookies are signed with `SX_SECURITY_SECRET`; a new one logs everyone out.
 
@@ -86,9 +87,9 @@ The `exec` runs as the image's non-root `app` user, so the extracted files are o
 
 ### 3. Public media: nothing to copy
 
-The public R2 bucket holds every published file, and the app serves posts from the media record in the database (`posts.media_files`), not from local copies. Builders download the files they read and drop them afterwards (`docs/storage-design.md`). Point `R2_*` at the same public bucket and the restored host serves everything. Do not copy the bucket into `output/uploads`.
+The public R2 bucket holds the files of every post, published or removed, and the completed job results, and the app serves posts from the media record in the database (`posts.media_files`), not from local copies. Builders download the files they read and drop them afterwards (`docs/storage-design.md`). Point `R2_*` at the same public bucket and the restored host serves everything. Do not copy the bucket into `output/uploads`.
 
-What a restore does not bring back is the moderation evidence. When a post is unpublished, its R2 objects are deleted and its files stay only on the old host's `output` volume. If the old host is still reachable, copy them over. First run `scripts/prune_local_media.py` there (see its docstring), so that the archive holds little more than the evidence:
+What a restore does not bring back is the moderation evidence of posts removed before 2026-11-01. Their R2 objects were deleted, and their files stay only on the old host's `output` volume. Posts removed since then keep their objects. If the old host is still reachable, copy them over. First run `scripts/prune_local_media.py` there (see its docstring), so that the archive holds little more than the evidence:
 
 ```bash
 # On the old host:

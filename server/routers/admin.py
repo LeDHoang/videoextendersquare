@@ -492,10 +492,9 @@ def remove_content(
     row = get_content(db, content_type, content_id)
     if row.deleted_at is not None:
         fail(409, "CONTENT_ALREADY_REMOVED", "This content is already removed.")
-    _removed, media_files = remove_target(db, content_type, content_id)
+    remove_target(db, content_type, content_id)
     record_action(db, context.user, REMOVE_ACTION, content_type, content_id, reason=reason)
     db.commit()
-    media_store.delete_paths(media_files)
     return {"item": serialize_content(db, content_type, row)}
 
 

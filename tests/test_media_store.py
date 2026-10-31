@@ -1,7 +1,8 @@
-"""Published media storage: R2 upload-then-rename, URLs, unpublish deletes."""
+"""Published media storage: R2 upload-then-rename, URLs, unpublish keeps the objects."""
 
 from __future__ import annotations
 
+import io
 import shutil
 import time
 import subprocess
@@ -47,6 +48,17 @@ class FakeS3:
         if key not in self.objects:
             raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
         Path(filename).write_bytes(self.objects[key]["body"])
+
+    def put_object(self, Bucket, Key, Body, **extra):
+        if self.fail_uploads:
+            raise RuntimeError("R2 down")
+        assert Bucket == "public-media"
+        self.objects[Key] = {"body": Body, **extra}
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not Found"}}, "GetObject")
+        return {"Body": io.BytesIO(self.objects[Key]["body"])}
 
     def head_object(self, Bucket, Key):
         if Key not in self.objects:
@@ -214,41 +226,6 @@ def test_drop_local_is_a_no_op_without_r2(workdir):
     assert Path("output/uploads/clip.mp4").exists()
 
 
-def test_delete_paths_brings_dropped_copies_back_as_evidence(r2):
-    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
-    r2.objects["uploads/clip-poster.jpg"] = {"body": b"poster"}
-    Path("output/uploads/clip-poster.jpg").write_bytes(b"local poster")
-    count = media_store.delete_paths([
-        Path("output/uploads/clip.mp4"),
-        Path("output/uploads/clip-poster.jpg"),
-        Path("output/uploads/clip-preview.mp4"),  # never built: nothing to keep
-    ])
-    assert count == 3
-    assert r2.objects == {}
-    assert Path("output/uploads/clip.mp4").read_bytes() == b"video"
-    # A local copy is never overwritten.
-    assert Path("output/uploads/clip-poster.jpg").read_bytes() == b"local poster"
-    assert not Path("output/uploads/clip-preview.mp4").exists()
-
-
-def test_delete_paths_deletes_even_when_evidence_cannot_be_kept(r2, caplog):
-    def boom(*_args):
-        raise RuntimeError("R2 down")
-
-    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
-    r2.download_file = boom
-    assert media_store.delete_paths([Path("output/uploads/clip.mp4")]) == 1
-    assert r2.objects == {}
-    assert "Could not keep uploads/clip.mp4 before unpublishing it" in caplog.text
-
-
-def test_delete_paths_without_evidence_skips_the_download(r2):
-    r2.objects["uploads/clip.mp4"] = {"body": b"video"}
-    assert media_store.delete_paths([Path("output/uploads/clip.mp4")], evidence=False) == 1
-    assert r2.objects == {}
-    assert not Path("output/uploads/clip.mp4").exists()
-
-
 def test_delete_skips_unpublished_keys_and_batches(r2, monkeypatch):
     monkeypatch.setattr(media_store, "_DELETE_BATCH", 2)
     count = media_store.delete(["uploads/a.mp4", "uploads/b.jpg", "uploads/c.jpg", "testpipeline/x.mp4"])
@@ -347,7 +324,7 @@ def register(client, username):
     return response.json()["user"]
 
 
-def test_owner_delete_removes_r2_objects_and_keeps_local_files(app, r2):
+def test_owner_delete_only_hides_the_post(app, r2):
     for name in ("cover.jpg", "cover-poster.jpg", "slide.jpg"):
         Path("output/uploads", name).write_bytes(b"x")
         r2.objects[f"uploads/{name}"] = {"body": b"x"}
@@ -361,8 +338,8 @@ def test_owner_delete_removes_r2_objects_and_keeps_local_files(app, r2):
             post_id = post.id
         response = client.delete(f"/api/posts/{post_id}", headers={"x-csrf-token": client.cookies.get("echo_csrf")})
         assert response.status_code == 200, response.text
-    assert r2.objects == {}
-    assert Path("output/uploads/cover.jpg").exists()
+    assert set(r2.objects) == {"uploads/cover.jpg", "uploads/cover-poster.jpg", "uploads/slide.jpg"}
+    assert r2.deleted == []
 
 
 # ─── Publish ─────────────────────────────────────────────────────────────

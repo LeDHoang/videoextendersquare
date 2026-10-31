@@ -56,8 +56,9 @@ Every action is logged with the moderator, the action and the note, in the repor
 history and in the audit log. Write a note on every action that is not `dismiss`: it
 is the record an appeal is judged against.
 
-Removing a post deletes the bucket object, but the edge can serve a cached copy for
-up to a day. For S1 and copyright cases, also follow **Takedowns** below.
+Removing a post only hides it: its bucket objects stay, and their URLs keep working.
+The edge can also serve a cached copy for up to a day. For S1 and copyright cases,
+also follow **Takedowns** below.
 
 ## Staff console
 
@@ -147,8 +148,8 @@ Process:
 3. Tell the uploader what was removed and that they may send a counter-notice to
    the copyright address.
 4. A counter-notice is forwarded to the complainant. Restoring content after a
-   counter-notice needs a waiting period and a re-upload by the user, because a
-   removed post's media is deleted **(confirm with lawyer)**.
+   counter-notice needs a waiting period and a re-upload by the user, because the
+   takedown deletes the post's media in the bucket **(confirm with lawyer)**.
 5. Repeat infringers: suspend an account after its **third** valid notice.
    Record each notice in the report note so the count is visible.
 
@@ -158,8 +159,9 @@ list for notices, needs a lawyer before the public launch **(confirm with lawyer
 ## Takedowns
 
 For S1 and copyright removals, follow `docs/deploy-runbook.md` §5: remove in the
-app, purge every media URL of the post by URL in Cloudflare, then check that
-`curl -sI` returns `404` with no `cf-cache-status: HIT`.
+app, delete the post's objects in the bucket, purge every media URL of the post by
+URL in Cloudflare, then check that `curl -sI` returns `404` with no
+`cf-cache-status: HIT`.
 
 ## Drill log
 

@@ -288,8 +288,9 @@ def cancel_image_job(job_id: str, request: Request, context: AuthContext = Depen
     return {"job_id": job_id, "status": rec.status.value}
 
 
+# Not async: a job missing from memory is read back from R2 (blocking).
 @router.get("/jobs/{job_id}/stream")
-async def stream_job_progress(
+def stream_job_progress(
     job_id: str, request: Request, context: AuthContext | None = Depends(get_optional_auth)
 ):
     """SSE endpoint streaming job progress in real time."""
@@ -323,7 +324,7 @@ def download_image(job_id: str, context: AuthContext | None = Depends(get_option
     p = Path(rec.result["path"]).resolve()
     if not p.is_relative_to(output.job_dir(job_id).resolve()):
         raise HTTPException(status_code=400, detail="Invalid result path")
-    if not p.exists() or not p.is_file():
+    if not output.fetch(job_id, p):
         raise HTTPException(status_code=404, detail="File not found")
     media_type = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
     return FileResponse(path=str(p), media_type=media_type, filename=p.name)

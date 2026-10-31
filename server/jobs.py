@@ -208,7 +208,17 @@ class JobManager:
 
     def get_job(self, job_id: str) -> JobRecord | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            record = self._jobs.get(job_id)
+        if record is not None:
+            return record
+        # A completed job kept in R2 outlives a restart and the retention sweep.
+        from server.output import restore
+
+        record = restore(job_id)
+        if record is None:
+            return None
+        with self._lock:
+            return self._jobs.setdefault(job_id, record)
 
     def list_jobs(self, kind: str | None = None) -> list[dict]:
         with self._lock:
@@ -303,6 +313,9 @@ class JobManager:
                     record.progress = 1.0
                     record.elapsed = fmt_elapsed(time.monotonic() - t0)
                     record.result = result
+                from server.output import keep
+
+                keep(record)
             except JobCancelled as ex:
                 self._finish_cancelled(record, ex, elapsed=fmt_elapsed(time.monotonic() - t0))
             except Exception as ex:

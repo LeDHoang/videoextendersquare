@@ -260,7 +260,7 @@ def test_a_raising_build_still_cleans_up(setup, tmp_path, monkeypatch, caplog):
     assert not SM.derived_pending(stored_path(body))
 
 
-def test_post_deleted_while_encoding_drops_late_r2_siblings(setup, tmp_path):
+def test_post_deleted_while_encoding_keeps_its_r2_media(setup, tmp_path):
     client, Session, s3, ffmpeg, futures = setup
     body = publish_video(client, tmp_path)
     stored = stored_path(body)
@@ -270,9 +270,11 @@ def test_post_deleted_while_encoding_drops_late_r2_siblings(setup, tmp_path):
     assert response.status_code == 200, response.text
     ffmpeg.gate.set()
     futures[0].result(timeout=10)
-    assert s3.objects == {}
-    # Local copies stay as unserved moderation evidence, like unpublish.
-    assert sibling(stored, "-poster.jpg").exists()
+    # A deleted post is only hidden: R2 keeps every file, so the disk drops them.
+    assert media_store.rel_path(stored) in s3.objects
+    assert media_store.rel_path(sibling(stored, "-poster.jpg")) in s3.objects
+    assert not stored.exists()
+    assert not sibling(stored, "-poster.jpg").exists()
 
 
 def test_startup_sweep_removes_stale_part_files(tmp_path, monkeypatch):

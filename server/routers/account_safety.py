@@ -32,7 +32,6 @@ from server.social.auth import (
     validate_password,
     verify_password,
 )
-from server import media_store
 from server.settings import env_int
 from server.social.database import get_db
 from server.social.email import send_password_reset_email
@@ -70,7 +69,7 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import recompute_follow_counts, remove_relationships
-from server.social.services import post_media_files, shared_preview_urls
+from server.social.services import shared_preview_urls
 from server.social.staff import (
     REMOVE_ACTION,
     record_action,
@@ -783,10 +782,9 @@ def moderate_report(
         fail(409, "REPORT_ALREADY_REVIEWED", "This report has already been reviewed.")
     db.expire(report)
 
-    media_files = []
     audit = (f"report.{req.action}", "report", report.id)
     if req.action == "remove_content":
-        _removed, media_files = remove_target(db, target_type, target_id)
+        remove_target(db, target_type, target_id)
         audit = (REMOVE_ACTION, target_type, target_id)
     elif req.action == "suspend_user":
         if not target_user:
@@ -800,7 +798,6 @@ def moderate_report(
         details={"forced_claim_of": forced_from} if forced_from else None,
     )
     db.commit()
-    media_store.delete_paths(media_files)
     return {"report": serialize_report(db, report)}
 
 
@@ -870,9 +867,6 @@ def erase_account(db: Session, user: User) -> None:
     for comment in authored_comments:
         comment.deleted_at = now
 
-    media_files = post_media_files(
-        db.query(Post).filter(Post.owner_id == user.id, Post.deleted_at.is_(None)).all()
-    )
     db.query(Post).filter(Post.owner_id == user.id, Post.deleted_at.is_(None)).update(
         {Post.status: "deleted", Post.deleted_at: now}, synchronize_session=False
     )
@@ -939,7 +933,6 @@ def erase_account(db: Session, user: User) -> None:
     user.follower_count = 0
     user.following_count = 0
     db.commit()
-    media_store.delete_paths(media_files)
 
     if old_avatar:
         from pathlib import Path

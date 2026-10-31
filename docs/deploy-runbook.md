@@ -38,6 +38,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [ ] **R2 public bucket.** Create it with location hint **`apac`** (Asia-Pacific).
   - Connect the custom domain `media.<domain>`. Do not enable the `r2.dev` URL.
   - Set `R2_PUBLIC_BUCKET` and `SX_MEDIA_BASE_URL=https://media.<domain>`.
+  - Add a lifecycle rule that deletes objects with the prefix `jobs/` after **30 days**. Completed job results live there (`docs/storage-design.md` §Job results).
 - [ ] **R2 private backup bucket.** Create it with location hint `apac`, and leave it with no public access and no custom domain.
   - Add a lifecycle rule that deletes objects after **30 days**.
 - [ ] **R2 API tokens.** Create two tokens:
@@ -141,7 +142,7 @@ docker compose ps                                  # app should turn "healthy"
 
 Rollback, the pre-deploy dump and migrations: `docs/incident-response.md`.
 
-A restart drops in-flight jobs and staged uploads, because both live in container `/tmp`. Deploy when the job queue is idle.
+A restart drops in-flight jobs and staged uploads, because both live in container `/tmp`. Completed jobs are read back from R2. Deploy when the job queue is idle.
 
 ## 4. Operations
 
@@ -171,11 +172,12 @@ Health checks:
 
 ## 5. Takedowns
 
-Deleting a post deletes its R2 object. However, **the Cloudflare edge can keep serving a cached copy for up to 1 day**. For an urgent takedown (CSAM, legal request, doxxing):
+Removing a post only hides it in the app. Its R2 objects stay, and their URLs keep working for anyone who has them. **The Cloudflare edge can also keep serving a cached copy for up to 1 day.** For an urgent takedown (CSAM, legal request, doxxing):
 
 1. Remove the content in the app (admin delete).
-2. Go to Cloudflare → Caching → Configuration → **Custom Purge** → purge by URL. Purge every `https://media.<domain>/...` URL of the post: the video, the poster, the preview and any stereo variants.
-3. Verify the takedown:
+2. Delete the post's objects in R2. Go to R2 → the public bucket and delete `uploads/<stem>.<ext>` and every `uploads/<stem>-*` object (poster, previews, web proxy, stereo variants). Slides have stems of their own. The post's media record (`posts.media_files`) lists every key. Do not restore the post afterwards: it would have no media.
+3. Go to Cloudflare → Caching → Configuration → **Custom Purge** → purge by URL. Purge every `https://media.<domain>/...` URL of the post: the video, the poster, the preview and any stereo variants.
+4. Verify the takedown:
    ```bash
    curl -sI https://media.<domain>/<key>
    ```

@@ -7,9 +7,9 @@ call site needs its own upload hook.
 
 R2 is the only durable copy of published media; this disk is a work area
 (see docs/storage-design.md). Builders :func:`fetch_local` what they read and
-:func:`drop_local` it when done. Unpublishing (:func:`delete_paths`) brings a
-dropped copy back first, so a removed post keeps its files here as unserved
-moderation evidence, and a staff restore can publish them again.
+:func:`drop_local` it when done. Removing a post only hides it: its objects
+stay, so a staff restore can publish it again. Completed job results are
+kept under ``jobs/`` (see server/output.py).
 
 R2 is on when ``SX_MEDIA_BASE_URL`` and ``R2_PUBLIC_BUCKET`` are both set
 (production requires them, see ``server/settings.py``). Without them URLs
@@ -18,12 +18,11 @@ keep the dev ``/media/`` mount and nothing is uploaded.
 
 from __future__ import annotations
 
-import fcntl
+import json
 import logging
 import mimetypes
 import os
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
@@ -160,17 +159,31 @@ def _upload(local: str | Path, rel: str) -> None:
         raise MediaStoreError(f"Could not store {rel}") from ex
 
 
-@contextmanager
-def _local_lock():
-    """Serialize dropping local copies against unpublishing, across processes.
+def store_file(local: str | Path, key: str) -> None:
+    """Upload *local* as *key*, a key outside ``uploads/`` (job results). Raises MediaStoreError."""
+    _upload(local, key)
 
-    Without it a copy could be dropped between an unpublish checking it is
-    here and deleting its object, losing the only copy.
-    """
-    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_ROOT / ".media-store.lock", "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        yield
+
+def put_json(key: str, data: dict) -> None:
+    """Store *data* as the JSON object *key*. Raises MediaStoreError."""
+    try:
+        client().put_object(
+            Bucket=_bucket(), Key=key, Body=json.dumps(data).encode("utf-8"), ContentType="application/json"
+        )
+    except Exception as ex:
+        logger.error("R2 upload of %s failed: %s", key, ex)
+        raise MediaStoreError(f"Could not store {key}") from ex
+
+
+def get_json(key: str) -> dict | None:
+    """The JSON object *key*, or None when it does not exist. Other errors raise."""
+    try:
+        body = client().get_object(Bucket=_bucket(), Key=key)["Body"].read()
+    except Exception as ex:
+        if _missing(ex):
+            return None
+        raise
+    return json.loads(body)
 
 
 def _missing(ex: Exception) -> bool:
@@ -211,12 +224,22 @@ def fetch_local(path: str | Path) -> bool:
     return True
 
 
+def fetch_file(key: str, path: str | Path) -> bool:
+    """Download the object *key* to *path*; False (logged) when it fails."""
+    try:
+        _download(Path(path), key)
+    except Exception as ex:
+        logger.warning("R2 download of %s failed: %s", key, ex)
+        return False
+    return True
+
+
 def drop_local(paths: Iterable[str | Path]) -> int:
     """Remove this disk's copies of published files that R2 holds; returns how many.
 
     A copy goes only when its object exists with the same size, so the
-    evidence of an unpublished post (its objects are gone) and a file that
-    never reached R2 both stay. Never raises; no-op without R2.
+    evidence of a post removed while removals still deleted its objects, and
+    a file that never reached R2, both stay. Never raises; no-op without R2.
     """
     if not enabled():
         return 0
@@ -226,22 +249,21 @@ def drop_local(paths: Iterable[str | Path]) -> int:
         rel = rel_path(path)
         if not is_published(rel) or not path.is_file():
             continue
-        with _local_lock():
-            try:
-                size = path.stat().st_size
-                stored = client().head_object(Bucket=_bucket(), Key=rel)["ContentLength"]
-            except Exception as ex:
-                if not (isinstance(ex, FileNotFoundError) or _missing(ex)):
-                    logger.warning("Kept %s: could not check its R2 object: %s", rel, ex)
-                continue
-            if stored != size:
-                logger.warning("Kept %s: its R2 object has %s bytes, this copy %s", rel, stored, size)
-                continue
-            try:
-                path.unlink()
-            except OSError as ex:
-                logger.warning("Could not drop the local copy of %s: %s", rel, ex)
-                continue
+        try:
+            size = path.stat().st_size
+            stored = client().head_object(Bucket=_bucket(), Key=rel)["ContentLength"]
+        except Exception as ex:
+            if not (isinstance(ex, FileNotFoundError) or _missing(ex)):
+                logger.warning("Kept %s: could not check its R2 object: %s", rel, ex)
+            continue
+        if stored != size:
+            logger.warning("Kept %s: its R2 object has %s bytes, this copy %s", rel, stored, size)
+            continue
+        try:
+            path.unlink()
+        except OSError as ex:
+            logger.warning("Could not drop the local copy of %s: %s", rel, ex)
+            continue
         count += 1
     return count
 
@@ -249,8 +271,9 @@ def drop_local(paths: Iterable[str | Path]) -> int:
 def republish_paths(paths: Iterable[str | Path]) -> int:
     """Upload the kept local copies of *paths* again (a restored post); returns how many.
 
-    The reverse of :func:`delete_paths`. Missing files are skipped. Raises
-    MediaStoreError on the first failed upload.
+    A post removed while removals still deleted its objects has only these
+    copies. Missing files are skipped. Raises MediaStoreError on the first
+    failed upload.
     """
     count = 0
     for path in paths:
@@ -266,9 +289,8 @@ def republish_paths(paths: Iterable[str | Path]) -> int:
 def delete(rels: Iterable[str]) -> int:
     """Best-effort removal of published objects; returns how many were requested.
 
-    Errors are logged, never raised: takedowns must not fail on storage. The
-    CDN can keep serving a cached copy for up to a day (purge by URL when
-    urgent, see docs/deploy-runbook.md).
+    Errors are logged, never raised. The CDN can keep serving a cached copy
+    for up to a day (purge by URL when urgent, see docs/deploy-runbook.md).
     """
     keys = sorted({rel for rel in rels if is_published(rel)})
     if not keys or not enabled():
@@ -286,27 +308,3 @@ def delete(rels: Iterable[str]) -> int:
             logger.exception("R2 delete of %d objects failed", len(batch))
     return len(keys)
 
-
-def delete_paths(paths: Iterable[str | Path], *, evidence: bool = True) -> int:
-    """Unpublish *paths*, first downloading any dropped local copy (see :func:`delete`).
-
-    The local copies are all that remains afterwards: moderation evidence and
-    what a staff restore publishes again. The takedown wins over evidence: an
-    object that cannot be downloaded is logged and still deleted. A failed
-    publish passes ``evidence=False``, since it removes its files anyway.
-    """
-    paths = [Path(path) for path in paths]
-    rels = [rel for rel in (rel_path(path) for path in paths) if rel]
-    if not (evidence and enabled()):
-        return delete(rels)
-    with _local_lock():
-        for path, rel in ((path, rel_path(path)) for path in paths):
-            if not is_published(rel) or path.is_file():
-                continue
-            try:
-                _download(path, rel)
-            except Exception as ex:
-                # Most candidates are siblings that were never built.
-                if not _missing(ex):
-                    logger.error("Could not keep %s before unpublishing it: %s", rel, ex)
-        return delete(rels)

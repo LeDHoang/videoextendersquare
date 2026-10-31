@@ -1,13 +1,11 @@
 """Staff actions shared by report review and the admin console, and their audit rows.
 
-The helpers change rows inside the caller's transaction and never commit. The
-caller commits, then deletes any media paths a removal returned: deleting the
-objects first could lose media for a row that a rollback keeps.
+The helpers change rows inside the caller's transaction and never commit. A
+removal only hides content: a removed post keeps its R2 objects, so a restore
+can publish it again.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -107,21 +105,19 @@ def reinstate_user(target: User) -> None:
     target.status = "active"
 
 
-def remove_target(db: Session, target_type: str, target_id: str) -> tuple[bool, list]:
-    """Soft-delete content. Returns (removed, media_files); removed is False if it was already gone.
+def remove_target(db: Session, target_type: str, target_id: str) -> bool:
+    """Soft-delete content. Returns False if it was already gone.
 
-    A post's media files are returned so the caller unpublishes them after
-    commit; the local copies stay on disk, which lets an admin restore the post.
+    A post's media stays in R2 (the post is only hidden), which lets an admin
+    restore it.
     """
     now = utcnow()
     model, _owner_field = CONTENT_MODELS[target_type]
     row = db.get(model, target_id)
     if not row or row.deleted_at is not None:
-        return False, []
-    media_files = []
+        return False
     row.deleted_at = now
     if target_type == "post":
-        media_files = post_media_files([row])
         row.status = "deleted"
         owner = db.get(User, row.owner_id)
         if owner:
@@ -146,7 +142,7 @@ def remove_target(db: Session, target_type: str, target_id: str) -> tuple[bool, 
                     message_id=row.id,
                     event_type="message.deleted",
                 ))
-    return True, media_files
+    return True
 
 
 def restore_target(db: Session, target_type: str, target_id: str) -> list:
@@ -154,8 +150,9 @@ def restore_target(db: Session, target_type: str, target_id: str) -> list:
 
     Content the author deleted themselves, or that went with a deleted account,
     stays deleted: only the latest staff action on the target being a removal
-    allows a restore. A post's kept local media files are returned so the
-    caller uploads them again before commit.
+    allows a restore. A post's media files are returned: a post removed while
+    removals still deleted its R2 objects kept local copies, which the caller
+    uploads again before commit.
     """
     if target_type not in ("post", "pack", "comment"):
         fail(422, "INVALID_CONTENT_TYPE", "Only posts, Reel Packs and comments can be restored.")
@@ -178,11 +175,11 @@ def restore_target(db: Session, target_type: str, target_id: str) -> list:
     media_files = []
     if target_type == "post":
         media_files = post_media_files([row])
+        record_media_files(row)
         # Only the originals are required; generated siblings that are missing get skipped.
         originals = [row.media_path, *(slide.media_path for slide in row.slides)]
-        if not all((Path("output") / rel).is_file() for rel in originals if rel):
-            fail(409, "MEDIA_MISSING", "The post's media files are no longer on the server.")
-        record_media_files(row, reset=True)
+        if not all(rel in (row.media_files or {}) for rel in originals if rel):
+            fail(409, "MEDIA_MISSING", "The post's media files are no longer stored.")
         row.status = "published"
         owner.post_count = int(owner.post_count or 0) + 1
     elif target_type == "pack":

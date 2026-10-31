@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import media_store, metrics
+from server import media_store, metrics, output
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -183,7 +183,7 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
 def _discard_stored(stored_files) -> None:
     """Remove every local file and R2 object a failed publish created."""
     candidates = [candidate for stored in stored_files for candidate in SM.derived_files(stored)]
-    media_store.delete_paths(candidates, evidence=False)
+    media_store.delete(media_store.rel_path(candidate) for candidate in candidates)
     for candidate in candidates:
         try:
             Path(candidate).unlink(missing_ok=True)
@@ -346,19 +346,6 @@ def _build_stereo_video_assets(dest: Path, layout: str) -> None:
         _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
 
 
-def _post_is_live(rel: str) -> bool:
-    from server.social.database import SessionLocal
-    from server.social.models import Post
-
-    with SessionLocal() as db:
-        return (
-            db.query(Post.id)
-            .filter(Post.media_path == rel, Post.status == "published", Post.deleted_at.is_(None))
-            .first()
-            is not None
-        )
-
-
 def _fetch_inputs(dest: Path, rel: str) -> bool:
     """Bring a dropped original back from R2, with the siblings its post records.
 
@@ -396,14 +383,7 @@ def _run_derived_job(dest: Path, rel: str, build) -> None:
     finally:
         SM.discard_part_files(dest)
         SM.clear_derived_pending(dest)
-        try:
-            # Deleted while encoding: unpublish already ran, so drop the
-            # siblings this job uploaded after it (local files stay).
-            if not _post_is_live(rel):
-                media_store.delete_paths(SM.derived_files(dest)[1:])
-        except Exception:
-            logger.exception("Could not check the post of %s after its encode", dest.name)
-        # R2 holds the post now (an unpublished one keeps its evidence).
+        # R2 holds the post now, deleted or not.
         media_store.drop_local(SM.derived_files(dest))
         reels_router.invalidate_scan_cache()
 
@@ -449,7 +429,7 @@ def _resolve_source(
         if rec.owner_id and rec.owner_id != context.user.id:
             raise HTTPException(status_code=403, detail="job_id does not belong to this account")
         worker_path = rec.result.get("path")
-        if not worker_path or not Path(worker_path).is_file():
+        if not worker_path or not output.fetch(job_id, worker_path):
             raise HTTPException(status_code=400, detail="job result file is missing")
         return worker_path, Path(worker_path).name
     # Staged skip-extend path: look in both routers' staging maps.

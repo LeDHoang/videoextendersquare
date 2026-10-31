@@ -339,9 +339,7 @@ def metadata_for_paths(paths: list[str], db: Session | None = None) -> dict[str,
 def post_media_files(posts) -> list[Path]:
     """Every local file (originals and generated siblings) of *posts*.
 
-    Collect before the commit that deletes the posts, then pass the list to
-    ``media_store.delete_paths`` once it has landed: unpublishing removes the
-    public R2 copies and keeps local files as unserved moderation evidence.
+    The paths exist or not: a dropped copy lives on in R2 only.
     """
     from server import media as media_service
 

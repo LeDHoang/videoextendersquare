@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Live checks against the local staging stack (docs/local-staging.md):
 // production boot, edge gates, invite-only sign-up, publish to the media
-// bucket, Range + CORS on the media origin, and unpublish removing the object.
+// bucket, Range + CORS on the media origin, and unpublish hiding the post but
+// keeping its object.
 //
 //   node scripts/verify_staging.cjs
 //   node scripts/verify_staging.cjs --app https://localhost:8443 --media https://localhost:9443
@@ -308,10 +309,12 @@ async function main() {
   check('media Cache-Control', /max-age=86400/.test(plain.headers.get('cache-control') || ''), plain.headers.get('cache-control'));
   if (body.poster_url) check('poster on media origin', (await fetch(body.poster_url)).status === 200, body.poster_url);
 
-  // ── Unpublish removes the object ──
+  // ── Unpublish hides the post and keeps the object ──
   const removed = await call(`/api/posts/${body.post_id}`, { method: 'DELETE' });
   check('owner delete 200', removed.status === 200, `HTTP ${removed.status}`);
-  check('media object gone (404)', (await fetch(body.media_url)).status === 404);
+  const hidden = await call(`/api/posts/${body.post_id}`);
+  check('deleted post hidden (404)', hidden.status === 404, `HTTP ${hidden.status}`);
+  check('media object kept (200)', (await fetch(body.media_url)).status === 200);
 }
 
 main()
