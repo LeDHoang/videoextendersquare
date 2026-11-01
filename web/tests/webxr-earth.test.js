@@ -1124,15 +1124,20 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   api.setScreenState({ locked: true, pos: { x: 1, y: 1.5, z: -3 }, distance: 3.0 });
   const dock = api.computeDockPose({ x: 0, y: 1.6, z: 0 });
   closeTo(dock.pos.x, 0);
-  closeTo(dock.pos.y, 1.52 - 2.0 - 0.08);
+  // fix7: the 25 deg drop cap lands below the floor clamp here, so the dock
+  // sits at DOCK_MIN_FLOOR_Y (0.6 m).
+  closeTo(dock.pos.y, 0.6);
   closeTo(dock.pos.z, -2.24);
   const comments = api.getCommentsPanelLayout();
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
   closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
-  closeTo(comments.center.z, -2.58);
+  // fix25: the comments panel keeps its distance from the viewer but swings
+  // in to 25 deg left of straight ahead (it sat at about 52 deg).
+  const sideX = 2 + comments.w / 2 + 0.445;
+  closeTo(Math.hypot(comments.center.x, comments.center.z), Math.hypot(sideX, 2.58));
+  closeTo(Math.atan2(-comments.center.x, -comments.center.z) * 180 / Math.PI, 25);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -1970,6 +1975,17 @@ async function enterLiveSession(options = {}, sessionExtra = {}) {
   return { renderer, session, log, classes };
 }
 
+test('fix27: the first VR entry shows the dock and guide once (localStorage flag)', async () => {
+  const store = {};
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const XRWebGLLayer = class { constructor() { this.framebuffer = null; } };
+  const first = await enterLiveSession({ globals: { XRWebGLLayer, localStorage } });
+  assert.equal(first.renderer.__test.getScreenState().controlsVisible, true, 'first entry shows the guide');
+  assert.equal(store.echo_vr_guide_seen_v1, '1');
+  const second = await enterLiveSession({ globals: { XRWebGLLayer, localStorage } });
+  assert.equal(second.renderer.__test.getScreenState().controlsVisible, false, 'later entries start hidden');
+});
+
 test('exitVR resolves immediately when no session is active', async () => {
   const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
   renderer.init(null, {});
@@ -2247,6 +2263,53 @@ test('grip plus stick X moves the screen further and closer', () => {
   closeTo(api.getScreenState().distance, before);
 });
 
+test('fix24: NEXT hides the dock at once; other presses restart the auto-hide timer', () => {
+  const timers = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const calls = [];
+  const renderer = loadRenderer({
+    gl,
+    globals: { setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {} },
+  });
+  renderer.init(makeVideoMock(), { onNext: () => calls.push('next'), onLike: () => calls.push('like') });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const like = api.controlIndexFromUV({ x: 67 / 1024, y: 1 - 212 / 384 });
+  const next = api.controlIndexFromUV({ x: 474 / 1024, y: 1 - 96 / 384 });
+  assert.ok(like >= 0 && next >= 0, 'dock hits resolve');
+  timers.length = 0;
+  api.executeControlButton(like);
+  assert.deepEqual(calls, ['like']);
+  assert.equal(api.getScreenState().controlsVisible, true);
+  assert.ok(timers.some((t) => t.ms === 5000), 'LIKE restarts the 5 s auto-hide');
+  api.executeControlButton(next);
+  assert.deepEqual(calls, ['like', 'next']);
+  assert.equal(api.getScreenState().controlsVisible, false, 'NEXT hides the dock');
+  renderer.stopPreview();
+});
+
+test('fix26: a reel with a media error shows SKIP / RETRY after the hold', () => {
+  const clock = { t: 0 };
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, now: () => clock.t });
+  const calls = [];
+  const video = {
+    paused: false, readyState: 0, currentTime: 0, duration: 0, muted: true, error: { code: 4 },
+    addEventListener() {}, removeEventListener() {}, load() { calls.push('load'); this.error = null; },
+    play() { calls.push('play'); return Promise.resolve(); },
+  };
+  renderer.init(video, { onNext: () => calls.push('next') });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.refreshOverlayTexture(1000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), null, 'held during the first 2.5 s');
+  clock.t = 2600;
+  api.refreshOverlayTexture(2000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), 'load:skip');
+  assert.equal(api.overlayCommentFromUV({ x: 0.38, y: 0.45 }), 'load:retry');
+  renderer.stopPreview();
+});
+
 test('A and B buttons toggle playback and the control panels', () => {
   const toggles = [];
   const renderer = loadRenderer();
@@ -2313,7 +2376,9 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  closeTo(lockedComments.center.z, -2.58);
+  // fix25: the locked comments panel swings in to 25 deg at the same
+  // viewer distance, so it moves back from the -2.58 m station.
+  closeTo(Math.atan2(-lockedComments.center.x, -lockedComments.center.z) * 180 / Math.PI, 25);
   closeTo(lockedGuide.center.z, -2.58);
 });
 
@@ -2666,7 +2731,8 @@ test('domoverlay flag omits the overlay layer from session options', async () =>
   captured = null;
   await renderer.enterVR({ xr });
   assert.ok(!(captured.optionalFeatures || []).includes('dom-overlay'), 'minimal session omits dom-overlay');
-  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'local,local-floor');
+  // fix27: hand tracking is optional in the default session (pinch selects).
+  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'hand-tracking,local,local-floor');
   // Legacy full session (?xrfull=1) restores the overlay layer request.
   api.setDebugFlags({ xrfull: true });
   captured = null;
@@ -2683,7 +2749,7 @@ test('default session request is minimal, xrfull restores legacy (v8.15+)', asyn
   };
   await renderer.enterVR({ xr });
   assert.ok(captured, 'session requested');
-  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'local,local-floor');
+  assert.equal([...(captured.optionalFeatures || [])].sort().join(','), 'hand-tracking,local,local-floor');
   renderer.__test.setDebugFlags({ xrfull: true });
   captured = null;
   await renderer.enterVR({ xr });
@@ -5958,7 +6024,7 @@ test('VR shell: nav bar sits under the dock, or under the main panel when open',
   assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -1.125 / 2, `under the main panel (${p.y})`);
   renderer.shell.close();
   p = local(dock);
-  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3, `under the dock (${p.y})`);
+  assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3 + 1e-9, `under the dock (${p.y})`);
   assert.ok(Math.abs(1.5 * nav.scale.x - 1.6 * dock.scale.x) < 1e-6, 'as wide as the dock');
 });
 

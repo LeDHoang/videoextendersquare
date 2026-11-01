@@ -227,6 +227,20 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+  <section class="attempt">
+    <h4>Not attempted · changes stereo depth, needs on-headset comfort testing</h4>
+    <p>Turning depth testing back on changes how every panel is seen in stereo. The head-locked default screen also puts the dome between the viewer and every room-fixed panel, so with depth testing on, the dome would hide the panels. A safe change has to land together with the locking change under "Head-locked screen spans about 89°" and be judged on the headset.</p>
+    <p>Proposed change:</p>
+    <ul>
+      <li>In <code>ui/assets/webxr_vr.js</code>, set <code>depthTest: true</code> on the materials of the dock (:5127), comments panel (:5152) and guide (:5180).</li>
+      <li>Keep the overlay (:5098) as is: it lies on the screen surface itself.</li>
+      <li>Place each panel at least 0.1 m in front of the dome surface along the view ray. At the default 4 m dome that means about 0.3–0.7 m nearer than the screen centre plane, because the dome curves toward the viewer at its edges.</li>
+      <li>Alternatively, move the dock and panels to <code>XRQuadLayer</code>s, which the compositor depth-sorts and draws sharper.</li>
+    </ul>
+    <p>Not verified.</p>
+  </section>
+
+
   <article class="finding high">
     <h3><span class="chip">High</span>Head-locked screen spans about 89°</h3>
     <dl>
@@ -235,6 +249,21 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Default to world-locked with a lazy follow (recentre after the head turns more than ~30° for 1 s). Default screen width to about 55°, with grip + stick to resize.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Not attempted · changes the default locking and screen size, needs on-headset comfort testing</h4>
+    <p>The default lock and the 4 m screen were confirmed by the owner as legacy behaviour (see the comment above <code>getLockedAnchor</code>). Changing them alters every session, and the comfort result can only be judged on the headset.</p>
+    <p>Proposed change, all in <code>ui/assets/webxr_vr.js</code>:</p>
+    <ul>
+      <li>Set <code>lockToViewer = false</code> by default in <code>resetXRSessionState</code> (:9613), <code>init</code> (:10497) and the headset preview (:7799, :7873).</li>
+      <li>Add a lazy follow to <code>applyLockToViewer</code> (:882): re-centre over about 0.5 s once the head yaw has been more than 30° off the screen for 1 s.</li>
+      <li>Set <code>DEFAULT_SCALE</code> (:74) to about <code>2 × 2.24 × tan(27.5°) ≈ 2.3</code> m, so the screen is about 55° wide at the 2.24 m station.</li>
+      <li>Keep grip + stick resizing.</li>
+    </ul>
+    <p>Once the screen is that size, the dock-below-screen layout lands near −29°. The 20° unlocked-dock cap from fix25 can then be applied without the dock overlapping the dome.</p>
+    <p>Not verified.</p>
+  </section>
+
 
   <div class="with-shot">
     <article class="finding med">
@@ -261,6 +290,29 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+  <section class="attempt">
+    <h4>Attempted fix · comments panel only, checked in the immersive preview, not on a headset</h4>
+    <p>Changed (<code>webxr_vr.js</code>, new <code>clampSideOffset</code> used by <code>getCommentsPanelLayout</code>): in locked mode, which is the feed's default, the comments panel swings in from about 52° to 25° left of straight ahead. It stays the same distance from the viewer (about 4.2 m), so its size in view is unchanged. The unit tests for the locked layout were updated to expect 25°. In <code>/reels/immersive-preview</code>, pressing COMMENTS now opens the panel inside the headset-camera view.</p>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>Unlocked dock pitch.</strong> At the default 4 m dome screen, 2.24 m away, a dock 20° below the eye line sits inside the screen's area: about 0.8 m below centre, while the screen's bottom edge is 2 m below centre. The dock would then sit behind the curved surface but still draw in front of it, which is the depth conflict in "UI panels draw through the video dome". The alternative is to pull it about 0.7 m toward the viewer, which needs comfort testing on the headset. The 20° cap should follow the smaller default screen proposed under "Head-locked screen spans about 89°".</li>
+      <li><strong>Panel overlaps the dock.</strong> At 25°, the bottom of the panel covers the dock's top-left corner: the title, AUTO, DOME and the elapsed time. The panel draws on top and takes those clicks until it is closed.</li>
+      <li><strong>Right panel unchanged.</strong> The right-hand panel is the controller guide, which shows every time the dock shows. It is left at about 50°, because at 25° it would cover LOCK and MUTE on every pause.</li>
+      <li><strong>No slide-in animation.</strong> The panel does not animate in from the button.</li>
+      <li><strong>Unlocked panels unchanged.</strong> In unlocked mode the side panels stay relative to the screen, as before.</li>
+    </ul>
+    <p>Not verified on a Quest. The angles come from the layout math and the desktop preview.</p>
+    <figure>
+      <img src="img/fix25-side-panels-before.jpg" alt="Desktop preview, 113° wide view: the comments panel is cut off at the far left edge, about 52° from centre" loading="lazy">
+      <figcaption>Before (preview harness on the HEAD engine): the comments panel opens at about 52°, at the edge of a 113° view.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix25-side-panels-preview-after.jpg" alt="Immersive preview page: the comments panel now floats left of centre beside the dock, overlapping the dock's top-left corner" loading="lazy">
+      <figcaption>After (<code>/reels/immersive-preview</code>, 75° vertical FOV): the panel opens at 25° and is in view. Note the overlap with the dock's left column.</figcaption>
+    </figure>
+  </section>
+
+
   <article class="finding med" style="margin-top:14px">
     <h3><span class="chip">Medium</span>Dock auto-hide is inverted</h3>
     <dl>
@@ -268,6 +320,22 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Reset the timer only on pointer hover or input, and hide immediately after actions that change the reel.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · checked in the desktop preview engine and unit tests, not on a headset</h4>
+    <p>Changed (<code>webxr_vr.js</code>): <code>executeControlButton</code> no longer restarts the auto-hide timer before acting. PREV and NEXT now hide the dock as soon as they run. Every other press restarts the 5 s timer after its action, so a PLAY press now sees the new paused state (paused reels keep the dock up, as before). When the timer fires, a pointer resting on a dock button or on the nav strip keeps the dock up for another 5 s. EXIT does not restart the timer. This fix also covers the VR half of "Enter VR is hidden two taps deep": in <code>applyShellVisibility</code> the shell nav strip now shows and hides with the dock, and stays up while the shell is open. A new test, "fix24: NEXT hides the dock at once…", checks that LIKE queues the 5 s timer and NEXT hides the dock. To expose the button handler to the test, <code>executeControlButton</code> was added to <code>__test</code>.</p>
+    <p>Checked: in a preview harness that loads the real <code>ui/assets</code> scripts, hiding the controls now hides the nav strip too. Before, the strip stayed over the video.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest. The hover keep-alive and the hide after NEXT were checked by reading the code and by the unit test, not with a controller. XR sessions still start with the dock and nav hidden, except on the first entry (fix27), so the nav strip now appears only after B, a tap on empty space, or a pause. Before, it was always visible. The 2D "Enter VR" button in the main rail is outside the VR code and was not touched here.</p>
+    <figure>
+      <img src="img/fix24-nav-autohide-before.jpg" alt="Desktop preview with the dock hidden: the REELS / EARTH / EXPLORE / MESSAGES / CREDITS / PROFILE nav strip still floats over the bottom of the reel" loading="lazy">
+      <figcaption>Before: with the dock hidden, the nav strip stays over the video.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix24-nav-autohide-after.jpg" alt="Same preview with the dock hidden: no nav strip, only the reel and a pop-up comment" loading="lazy">
+      <figcaption>After: the nav strip hides with the dock (desktop preview harness, same engine; not a headset capture).</figcaption>
+    </figure>
+  </section>
+
 
   <div class="with-shot" style="margin-top:14px">
     <article class="finding med">
@@ -284,6 +352,23 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+  <section class="attempt">
+    <h4>Attempted fix · checked in a desktop preview harness and by rendering the overlay canvas, not on a headset</h4>
+    <p>Changed: <code>webxr_vr.js</code> has a new <code>reelLoadState</code>, which runs every frame from the overlay refresh. A video reel whose element has a media error (or <code>NETWORK_NO_SOURCE</code>) turns <em>failed</em> once it has waited <code>FRESH_VISUAL_MAX_HOLD_MS</code> (2.5 s). A reel that is not ready, or that stalls mid-play, shows <em>loading</em> after 0.5 s. Stall tracking (<code>trackStalls</code>) is now bound by this check on every frame; only the diagnostics POST still needs <code>?xrdiag=1</code>.</p>
+    <p><code>vr_ui_canvas.js</code> <code>renderOverlayCanvas</code> takes a <code>loadState</code>. When the reel has failed, it dims the whole frame (62% black) and draws "This reel couldn't load" with RETRY and SKIP buttons (220×72 px on the 1024 px overlay, roughly 18°×6° on the default screen). While loading, it draws a spinner and "Loading…" over the held frame. SKIP calls <code>onNext</code>. RETRY calls <code>load()</code> and then <code>play()</code> on the element. Both go through the existing pop-up-comment hit path, now <code>handleOverlayHit</code>.</p>
+    <p>Checked: in a preview harness running the real engine, pointing the video at a missing file left the old frame for about 2.5 s, then showed the dimmed card below. The hit regions resolve to <code>load:skip</code> and <code>load:retry</code>. A new unit test, "fix26: a reel with a media error shows SKIP / RETRY after the hold", covers the timing.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest. RETRY was checked by reading the code only. The overlay follows the existing overlay rules: it is hidden while the comments panel is open and when <code>?overlay=0</code> is set. The title row still shows the raw filename when a reel has no title.</p>
+    <figure>
+      <img src="img/fix26-load-error-after.jpg" alt="Desktop preview: the reel frame is dimmed, with the white text This reel couldn't load above a dark RETRY button and an orange SKIP button" loading="lazy">
+      <figcaption>After: a reel whose file is missing, about 3.5 s after the switch (desktop preview harness, same engine).</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix26-loading-after.jpg" alt="Overlay canvas: a dark plate with an orange-and-grey ring spinner above the word Loading…, over a colour test frame" loading="lazy">
+      <figcaption>After: the loading state, rendered from <code>renderOverlayCanvas</code> to an image.</figcaption>
+    </figure>
+  </section>
+
+
   <article class="finding med" style="margin-top:14px">
     <h3><span class="chip">Medium</span>Input and onboarding gaps</h3>
     <dl>
@@ -295,6 +380,21 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Request <code>hand-tracking</code> as an optional feature with pinch to select. Show the guide once on first entry. Upload a frame on every new video frame (<code>requestVideoFrameCallback</code>) instead of a fixed cap.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · unit tests only, not on a headset</h4>
+    <p><strong>Hand tracking.</strong> The default (minimal) session now asks for <code>'hand-tracking'</code> as an optional feature (<code>webxr_vr.js</code>, <code>enterVR</code>). The laser and select path already use each input source's target ray and the <code>select</code> events, so a pinch should select the way a trigger does. The two session-option tests now expect <code>hand-tracking,local,local-floor</code>. This deliberately changes an asserted value.</p>
+    <p><strong>Guide on first entry.</strong> The first XR session on a browser now shows the dock and the controller guide, with no auto-hide timer, until the viewer's first input. A localStorage flag, <code>echo_vr_guide_seen_v1</code>, records that this has happened; the step is skipped when <code>?guide=0</code> is set or storage is unavailable. A new test, "fix27: the first VR entry shows the dock and guide once", covers it.</p>
+    <p><strong>Video upload.</strong> No change was needed. Since v8.24 the default path is the direct <code>THREE.VideoTexture</code>, and three r186 drives it with <code>requestVideoFrameCallback</code>, so frames upload as they decode. The 33 ms cap (<code>VR_VIDEO_UPLOAD_MIN_MS</code>) applies only to the <code>?vrtex=canvas</code> fallback. There, <code>setupVideoFrameTracking</code> already lets each rVFC frame bypass the cap, and the cap is kept as the fallback.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest.</p>
+    <ul>
+      <li>Asking for hand tracking changes the session request that the v8.15–v8.17 flash bisection settled on. That bisection pinned the flashes on antialias, not on session features, but this still needs a check on the headset for flashes and for pinch selection.</li>
+      <li>With hands there is no B button, stick or grip, so hiding the dock, the stick flicks and resizing are controller-only.</li>
+      <li>The guide still covers controllers only.</li>
+      <li>The guide sits about 50° to the right (see fix25), so on a 3S its inner edge is near the edge of view.</li>
+    </ul>
+  </section>
+
 
   <article class="finding high" style="margin-top:14px">
     <h3><span class="chip">High</span>Dock and nav are anchored below the floor</h3>
@@ -309,6 +409,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <h4>Attempted fix · measured on the Quest 3S</h4>
     <p><strong>Changed</strong> (<code>webxr_vr.js</code>, <code>getLockedAnchor</code> and <code>computeDockPose</code>): the locked anchor now takes the viewer's eye height from the first frame of each XR session instead of the fixed 1.52 m (reset in <code>resetXRSessionState</code>; a manually tuned screen height still wins). The dock drop below the anchor is capped at 25° below the eye line at the dock's distance (it was half the 4 m screen, about 33°), and the dock stays at least 0.6 m above the floor and never above eye level − 0.3 m. The nav strip hangs from the dock, so it follows.</p>
     <p><strong>Measured:</strong> headset on a desk, eye at 0.50 m. The nav strip moved from −33° (centre y −0.88 m, out of view) to −6° (y 0.25 m) and now shows in the lower view. <strong>Not verified:</strong> seated (about 1.2 m) and standing (about 1.6 m) heads, which need a person wearing the headset; at those heights the 25° cap should put the dock about 1.0 m below the eye, floor-clamped. The side panels now share the same eye-height anchor and were not looked at.</p>
+    <p><strong>Follow-up:</strong> this change broke two layout tests in <code>webxr-earth.test.js</code>. One expected the old dock height and now expects the 0.6 m floor clamp. The other is the nav-under-dock check: the strip is flush with the dock's lower edge, and the strict comparison failed on a 1e-16 rounding error, so it now allows 1e-9.</p>
     <figure>
       <img src="img/fix7-dock-after.jpg" alt="Stereo capture from the Quest 3S after the change: the ECHO nav strip (Reels, Earth, Explore, Messages, Credits, Profile) sits just below the centre of the view over a Paris reel." loading="lazy">
       <figcaption>After, on the headset: the nav strip is in the lower half of the view instead of below it.</figcaption>
@@ -338,6 +439,25 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (Playwright with <code>navigator.xr.isSessionSupported('immersive-vr')</code> stubbed to true, /reels at 1024×768 and 375×812)</h4>
+  <p><code>ui/assets/reels.html</code>: when the browser reports <code>immersive-vr</code> support, as on Quest, the VR button leaves the More menu. It becomes a labelled "ENTER VR" pill above the main rail: 115×44 at 1024px, 134×53 at 375px. It is the second Tab stop after the player frame, where before it could not be reached without opening More. It keeps its click handler and its <code>aria-label</code>. Browsers without support are unchanged; on localhost the button still shows only in More as a dev affordance.</p>
+  <p><strong>Not verified:</strong> on a real Quest headset; only the stubbed WebXR API was tested. <strong>Not done:</strong> hiding the VR nav strip together with the dock. That is in <code>ui/assets/webxr_vr.js</code>, which another agent owns. The once-only pose notice is unchanged.</p>
+  <figure>
+    <img src="img/fix13-enter-vr-before-1024.jpg" alt="Before: with WebXR supported, the rail shows only sound, like, comments, share and more; VR is hidden in More" loading="lazy">
+    <figcaption>Before: no VR button in the main rail.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix13-enter-vr-after-1024.jpg" alt="After: a purple ENTER VR pill sits above the main rail on the reels player" loading="lazy">
+    <figcaption>After: 1024px. A labelled Enter VR button sits above the rail.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix13-enter-vr-after-375.jpg" alt="After: phone width, ENTER VR pill above the rail" loading="lazy">
+    <figcaption>After: 375px.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding low">
     <h3><span class="chip">Low</span>Smaller VR issues</h3>
     <dl>
@@ -362,6 +482,32 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </tbody>
     </table>
   </div>
+
+  <section class="attempt">
+    <h4>Attempted fix · checked by rendering the VR canvases to images, not on a headset</h4>
+    <p>Changed:</p>
+    <ul>
+      <li>The dock's audio pill now names the action, <strong>MUTE</strong> or <strong>UNMUTE</strong>, instead of the state (MUTED / AUDIO). The speaker icon still shows the current state (<code>vr_ui_canvas.js</code>).</li>
+      <li>When <code>getCurrentUser()</code> returns no user, the comments panel footer reads <strong>SIGN IN TO COMMENT</strong>. Pressing it calls the host's <code>onOpenAccount</code>, which shows the existing "SIGN IN ON 2D" handoff in VR. When signed in, it still opens the keyboard (<code>webxr_vr.js</code>, <code>executeCommentAction('add')</code>).</li>
+      <li>The guide header reads <strong>META QUEST</strong>.</li>
+    </ul>
+    <p>No tests asserted these strings.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest. Not changed:</p>
+    <ul>
+      <li>PROFILE and the ECHO logo in both the dock and the nav.</li>
+      <li>The guide covering controllers only.</li>
+      <li>Next inside an image carousel stepping through images, with no hint.</li>
+    </ul>
+    <figure>
+      <img src="img/fix28-vr-copy-before.jpg" alt="Before: dock audio pill reads MUTED, comments footer reads + ADD COMMENT while signed out, guide header reads META QUEST 3" loading="lazy">
+      <figcaption>Before: MUTED, + ADD COMMENT (signed out), META QUEST 3.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix28-vr-copy-after.jpg" alt="After: dock audio pill reads UNMUTE, comments footer reads SIGN IN TO COMMENT while signed out, guide header reads META QUEST" loading="lazy">
+      <figcaption>After: UNMUTE, SIGN IN TO COMMENT, META QUEST (canvases rendered to an image).</figcaption>
+    </figure>
+  </section>
+
 </section>
 
 <!-- ============ PLAYER ============ -->
@@ -406,6 +552,30 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (Playwright on /reels with white_frame_reel.mp4 at 1024×768 and 375×812)</h4>
+  <p>In <code>ui/assets/reels.html</code> the video now has a bottom scrim (<code>.reels-video-wrap::after</code>): a black gradient from 0 to 60% over the bottom 45% of the frame, at most 220px. It sits under the meta block, the time readout and the rail. The creator name went from 10px accent to 13px white with a text shadow; it turns accent on hover. The title went from 12px to 14px, and the size/views line from 10px <code>--sx-ink-3</code> to 13px <code>--sx-ink-2</code>. Computed sizes measured in the browser: creator 13px, title 14px.</p>
+  <p>At 1280×800 and wider (the docked layout, ≥1100×560) the creator and caption are in the side column, not on the video. The scrim is turned off there, so the before/after pair is shot at 1024px, the widest layout where the text sits on the video.</p>
+  <p><strong>Not done:</strong> the 10px folder chip and the docked layout's <code>0:03 / 0:06</code> time readout still sit on the bare video.</p>
+  <figure>
+    <img src="img/fix09-overlay-scrim-before-1024.jpg" alt="Before: on an all-white reel at 1024px the creator name, title and size line are almost invisible" loading="lazy">
+    <figcaption>Before: white reel at 1024px. The title and size line disappear into the frame.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix09-overlay-scrim-after-1024.jpg" alt="After: the same reel with a dark gradient at the bottom; creator, title and size line are white on grey and readable" loading="lazy">
+    <figcaption>After: 1024px. The scrim is behind the meta block and the text is 13–14px.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix09-overlay-scrim-before-375.jpg" alt="Before: phone width, white reel, title and size line unreadable" loading="lazy">
+    <figcaption>Before: 375px.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix09-overlay-scrim-after-375.jpg" alt="After: phone width, white reel with bottom scrim, creator and title readable" loading="lazy">
+    <figcaption>After: 375px.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding med">
     <h3><span class="chip">Medium</span>Wrong error message for a missing file</h3>
     <dl>
@@ -433,6 +603,21 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (Playwright keyboard checks on /reels at 1024×768 and 375×812, and /reels/immersive-preview at 1280×800)</h4>
+  <p><code>ui/assets/reels.html</code>: closing the comments sheet now returns focus to whatever opened it, or to the Comments button if nothing did. This works with the close button and with Esc. Before the change, focus stayed on the hidden <code>#closeDrawerBtn</code> or <code>#commentInput</code>; now it lands on <code>#commentBtn</code>. Rail buttons went from 32px (34px in phone fullscreen) to 44px in every breakpoint, measured 44×44 at 1024px and 53×53 at 375px, where the rail is scaled 1.2×. In the More group on a phone, all 8 visible buttons still fit inside the frame. <code>web/src/components/ui/ReelsPlayer.jsx</code>: the hidden player mount behind the immersive preview uses <code>inert</code> instead of <code>aria-hidden</code>. Tabbing through the preview page went from 73 stops (20 inside the hidden mount) to 55 stops (0 inside). <code>web/src/styles/global.css</code>: the share dialog's × went from 19×13 to 44×44.</p>
+  <p>The share dialog already gave focus back to the Share button on close and on Esc before this change (from an earlier fix), so that part needed no edit. <strong>Not done:</strong> a keyboard path into the 3D preview canvas. The page-edge prev/next chevrons are still 32px.</p>
+  <figure>
+    <img src="img/fix10-focus-rail-after.jpg" alt="Reels player at 1024px after closing comments with Escape: the focus ring is on the Comments button in a rail of 44px buttons" loading="lazy">
+    <figcaption>After: comments closed with Esc. Focus is back on the Comments button, and the rail buttons are 44px.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix10-share-close-after.jpg" alt="Share dialog with a 44px close button in the top right, focused on open" loading="lazy">
+    <figcaption>After: the share dialog's close button is 44×44.</figcaption>
+  </figure>
+</section>
+
+
   <div class="with-shot" style="margin-top:14px">
     <article class="finding med">
       <h3><span class="chip">Medium</span>Preview is a control panel, not a preview</h3>
@@ -447,6 +632,21 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (Playwright on /reels/immersive-preview at 1280×800, signed in, WebGL running)</h4>
+  <p><code>web/src/pages/ImmersivePreviewPage.jsx</code>: the scene now comes right after one compact toolbar. The toolbar holds view (3D scene / flat panels), scene (Reels / Earth), camera (headset / orbit) and FOV, all as segmented controls, plus Reset view and Fullscreen. Everything else moved into a closed native <code>&lt;details&gt;</code> ("More controls"), reusing the existing <code>.sx-expander</code> style: curvature, shell pages, share/reward, the stereo, reduced-motion and hi-fi toggles, layout tuning, draw stats, the shell hint and the "Preview scope" note. The FOV preset now defaults to Quest 3 (96° vertical) instead of Desktop 70°. At 1280×800 the canvas top moved from 700px to 393px, and the controls above it went from 30 to 17. Checked in the browser: Earth / Orbit / SQ curve each update the status pill, the panel opens and shows all 9 tuning sliders, and the page throws no errors.</p>
+  <p><strong>Not done:</strong> at 1280px the toolbar still wraps to two rows (Reset view and Fullscreen drop to a second line). The large page hero is unchanged.</p>
+  <figure>
+    <img src="img/fix11-preview-before.jpg" alt="Before: immersive preview at 1280×800 with four rows of buttons and toggles; the scene starts at the bottom edge" loading="lazy">
+    <figcaption>Before: the scene starts at y=700.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/fix11-preview-after.jpg" alt="After: immersive preview at 1280×800 with a compact toolbar and the 3D scene filling most of the viewport, Quest 3 FOV selected" loading="lazy">
+    <figcaption>After: compact toolbar and the scene at y=393, with Quest 3 96° selected by default.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding low" style="margin-top:14px">
     <h3><span class="chip">Low</span>Smaller player issues</h3>
     <dl>
@@ -459,6 +659,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </ul></dd>
     </dl>
   </article>
+
+<section class="attempt">
+  <h4>Attempted fix · verified locally (Playwright on /reels at 1024×768 with reducedMotion "reduce" vs "no-preference", and the share dialog)</h4>
+  <p><code>web/src/styles/global.css</code>: "SEND TO 0" is now a plain outlined button (grey text, not-allowed cursor) while it is disabled. It gets the accent fill only once at least one person is selected. Measured background: <code>rgb(255,59,31)</code> before, transparent after. <code>ui/assets/reels.html</code>: with <code>prefers-reduced-motion: reduce</code>, <code>loadVideo</code> treats every load as <code>autoplay:false</code>, so reels and image dwell timers start paused and tap or Space plays them. This does not apply inside a WebXR session. Measured: with no preference the video was playing at 2.5s; with reduce it was paused at 0.00s, and Space started it.</p>
+  <p><strong>Not done:</strong> captions / a caption track; titles derived from folder chips and filenames; visible labels for the More-menu items, which are still icon-only with title and aria-label. Under reduced motion there is also no on-screen play hint (the player has no visible play button). Because the immersive preview reuses this player, its reel also starts paused when the OS asks for reduced motion.</p>
+  <figure>
+    <img src="img/fix10-share-close-after.jpg" alt="Share dialog with nobody selected: SEND TO 0 is an outlined grey button, not the orange primary" loading="lazy">
+    <figcaption>After: with nobody selected, "SEND TO 0" is an outlined grey button, not the primary.</figcaption>
+  </figure>
+</section>
+
 </section>
 
 <!-- ============ WEB ============ -->
@@ -502,6 +713,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </section>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (drawer at 375px, Playwright)</h4>
+  <p>Follow-ups to the earlier drawer fix. <strong>aria-expanded:</strong> the header menu button now carries <code>aria-expanded</code>, using the drawer state passed in from <code>AppShell.jsx</code> (<code>HeaderBar.jsx</code>). It read false, then true after opening, then false after Escape. <strong>Launcher over the drawer:</strong> at 900px and below, while the drawer is open, the MESSAGE launcher and dock drop to just under the backdrop (<code>global.css</code>, a <code>body:has(.sx-sidebar.sx-open)</code> rule). The element at the launcher's position is now the drawer's own card. <strong>inert:</strong> while the overlay drawer is open, <code>Sidebar.jsx</code> sets <code>inert</code> on <code>.sx-main</code>, the footer, the launcher and the dock, and clears it on close. The header stays live because it sits above the backdrop and its menu button closes the drawer. Checked: the menu button still closes the drawer, and Escape returns focus to it with <code>inert</code> cleared.</p>
+  <p><strong>Not done:</strong> the shared native-<code>&lt;dialog&gt;</code> primitive. The drawer in the screenshot still shows the engine-probe telemetry because this is the dev server (see the navigation finding).</p>
+  <figure>
+    <img src="img/fix16-drawer-after.jpg" alt="Mobile drawer open at 375px. The drawer's nav grid and credits card are fully visible; the MESSAGE launcher no longer floats over the drawer and is dimmed behind the backdrop." loading="lazy" style="max-width:320px">
+    <figcaption>After: drawer at 375px. The MESSAGE launcher is behind the backdrop, not on top of the drawer.</figcaption>
+  </figure>
+</section>
+
+
   <div class="with-shot" style="margin-top:14px">
     <article class="finding low">
       <h3><span class="chip">Low</span>Legal pages show template placeholders (deferred)</h3>
@@ -517,6 +739,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <figcaption>/terms. Placeholders are highlighted in yellow.</figcaption>
     </figure>
   </div>
+
+<section class="attempt">
+  <h4>Not attempted · deferred by product scope</h4>
+  <p>Legal content is handled separately before public launch, as the finding's status says. <code>LegalKit.jsx</code> and the Terms and Privacy pages were not changed in this pass.</p>
+</section>
+
 
   <div class="with-shot" style="margin-top:14px">
     <article class="finding low">
@@ -534,6 +762,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/wallet signed in at 1280px, credits off)</h4>
+  <p>When the catalog reports <code>credits_enabled: false</code>, <code>WalletPage.jsx</code> drops the three pack cards, the BUY buttons, "MOST POPULAR", the red <code>role="alert"</code> banner and the "INSTANT ALLOCATION AFTER PAYMENT" note. In their place it shows one line: "Buying credits isn't available yet. You can still use free tools." Nothing changes when credits are on (the beta setup). The page in this environment showed 0 BUY buttons. <code>WalletPage.test.jsx</code>: the credits-disabled test now checks for the explanation and for no Buy buttons or "MOST POPULAR" (deliberate test update). All 28 wallet tests pass.</p>
+  <p><strong>Not done:</strong> the "STRIPE CHECKOUT IS DISABLED" banner, shown when credits are on but Stripe is off, is unchanged.</p>
+  <figure>
+    <img src="img/fix15-wallet-after.jpg" alt="Wallet page with credits off: the ADD CREDITS panel holds one sentence, Buying credits isn't available yet. You can still use free tools. There are no pricing cards or BUY buttons." loading="lazy">
+    <figcaption>After: /wallet with credits off shows one explanation instead of pack cards with BUY buttons.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding med" style="margin-top:14px">
     <h3><span class="chip">Medium</span>Dead ends and silent redirects</h3>
     <dl>
@@ -542,6 +781,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/no-such-page and /packs/does-not-exist at 1280px; ErrorBoundary by unit test)</h4>
+  <p>Unknown URLs now render a 404 page instead of redirecting to /reels (<code>App.jsx</code>, new <code>pages/NotFoundPage.jsx</code>). The URL stays as typed, and the page says "PAGE NOT FOUND", shows the path, and offers GO TO REELS and SEARCH EXPLORE. <code>EmptyState</code> (<code>primitives.jsx</code>) takes optional action children, so unavailable packs and profiles now get a BACK TO EXPLORE link (<code>PackPage.jsx</code>, <code>ProfilePage.jsx</code>). <code>ErrorBoundary.jsx</code> no longer prints the raw error. It shows "This part of the page stopped working. Reloading usually fixes it." with a RELOAD PAGE button and <code>role="alert"</code>. React 19 already logs caught errors to the console, so the detail is kept there. Sentry is not wired into the web app, so nothing is sent to Sentry. New <code>ErrorBoundary.test.jsx</code> checks that the message and button render and the raw error text does not.</p>
+  <p><strong>Not done:</strong> the not-found reel case is inside the player, which this pass did not touch. The 404 page keeps the bare "ECHO" tab title. The ErrorBoundary was checked only by the unit test, not by forcing a crash in the running app.</p>
+  <figure>
+    <img src="img/fix14-not-found-after.jpg" alt="404 page at /no-such-page: dashed box with PAGE NOT FOUND, a one-line explanation, the path /no-such-page, and two buttons, GO TO REELS and SEARCH EXPLORE." loading="lazy">
+    <figcaption>After: /no-such-page shows a 404 page with ways forward instead of redirecting without a message.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding med">
     <h3><span class="chip">Medium</span>Forms don't explain themselves</h3>
     <dl>
@@ -549,6 +799,23 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>A FormField component with label, hint, inline error and <code>aria-invalid</code>. Next to a disabled button, show the missing requirement ("Add a title to publish").</dd>
     </dl>
   </article>
+
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/settings/profile and /support at 1280px)</h4>
+  <p><strong>Settings</strong> (<code>ProfileSettingsPage.jsx</code>): when the server rejects a profile save with a field-specific error (display name, bio or website), the message now appears under that field. The input gets <code>aria-invalid</code> and an <code>aria-describedby</code> pointing at the message, and both clear on the next edit. Errors not tied to a field still show beside the button. Checked live: "not a site" in Website gives <code>aria-invalid="true"</code> and <code>aria-describedby="ps-website-error"</code>. The disabled DELETE ACCOUNT button now explains itself: "Enter your password and type your username to delete." The hint is linked with <code>aria-describedby</code> and disappears once both fields are valid. <strong>Support</strong> (<code>SupportPage.jsx</code>): the inline errors already carried <code>aria-invalid</code>, and now each is also linked to its field with <code>aria-describedby</code>. New and extended tests are in <code>ProfileSettingsPage.test.jsx</code> and <code>SupportPage.test.jsx</code>.</p>
+  <p><strong>Not done:</strong> no shared FormField component (kept surgical). Other disabled buttons, such as UPDATE PASSWORD and SAVE KEY, rely on their existing checklist and hints.</p>
+  <div class="shot-row">
+    <figure>
+      <img src="img/fix19-settings-website-error-after.jpg" alt="Website field containing not a site, with the error Enter a valid website such as example.com or https://example.com directly under it, above the UPDATE PROFILE button." loading="lazy">
+      <figcaption>After: the website error sits under its field and is linked to it.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix19-delete-reason-after.jpg" alt="Delete account panel with the DELETE ACCOUNT button disabled and the line Enter your password and type your username to delete under it." loading="lazy">
+      <figcaption>After: the disabled delete button says what is missing.</figcaption>
+    </figure>
+  </div>
+</section>
+
 
   <article class="finding med">
     <h3><span class="chip">Medium</span>Navigation repeats and leaks developer data</h3>
@@ -563,6 +830,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (account menu and tab titles at 1280px; dev flag by unit test)</h4>
+  <p><strong>Dev telemetry:</strong> <code>utils/devTools.js</code> already had a flag (<code>VITE_SX_HIDE_DEV_TOOLS</code>), but it was off unless set, and no deploy config set it. Production builds (<code>import.meta.env.PROD</code>) now hide the probe card and telemetry bar by default. <code>true</code> or <code>false</code> still forces either way, and dev and tests are unchanged. The "TELEMETRY / V2.0" subtitle in <code>Sidebar.jsx</code> is now behind the same flag. <code>devTools.test.js</code> gained a production-default case, and the flag's row in <code>RUNNING.md</code> was updated. <strong>Location title:</strong> <code>LocationExplorePage.jsx</code> sets the tab title from the place name, and the route fallback in <code>useDocumentTitle.js</code> no longer uses the slug. /explore/location/tokyo--japan now reads "Tokyo, Japan · ECHO" (it was "tokyo--japan"). <strong>Account menu:</strong> PROFILE, SAVED, SETTINGS, CREDITS / FAL KEY and STAFF are now <code>&lt;Link&gt;</code>s with real <code>href</code>s, so they can be opened in a new tab. LOG OUT stays a button (<code>HeaderBar.jsx</code>, popover CSS widened to <code>:is(a, button)</code>).</p>
+  <p><strong>Not done:</strong> one nav source shared by the header, drawer and sidebar. The header's CREDITS, UPLOAD and MESSAGES buttons still navigate with <code>navigate()</code>. Hiding the telemetry in production was checked by unit test, not in a production build.</p>
+  <figure>
+    <img src="img/fix18-account-menu-after.jpg" alt="Account menu open under the avatar: PROFILE, SAVED, SETTINGS and CREDITS / FAL KEY rows, now links, above a LOG OUT button." loading="lazy" style="max-width:380px">
+    <figcaption>After: account menu items that navigate are links.</figcaption>
+  </figure>
+</section>
+
+
   <article class="finding med">
     <h3><span class="chip">Medium</span>Focus styles removed in places</h3>
     <dl>
@@ -570,6 +848,17 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>A single <code>:focus-visible</code> ring token, not the accent colour on accent fills, and a lint rule against bare <code>outline: none</code>.</dd>
     </dl>
   </article>
+
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/explore at 1280px, focus reached with Tab)</h4>
+  <p>The <code>.sx-pack-tile</code> rule named in the finding, where focus looked the same as hover, is dead CSS: no component uses that class any more. Reel and pack tiles both render as <code>.sx-explore-tile</code>, and that tile only had the global 2px accent outline. On a red or white picture that outline almost disappears. Now <code>.sx-explore-tile:focus-visible</code> draws a ring inside the tile, over the media (<code>global.css</code>). It uses the existing <code>--sx-focus-ring</code> token plus one new token in <code>tokens.css</code>, <code>--sx-focus-halo</code> (a 3px light band inside the ring). Hover still only scales the picture, so keyboard focus and pointer hover now look different. It was drawn inside because tiles sit edge to edge, and an outer ring was hidden by the next tile.</p>
+  <p><strong>Not done:</strong> the dead <code>.sx-pack-tile</code> rules are left in place (pre-existing dead code). The other 13 <code>outline: none</code> rules were not audited, and no lint rule was added.</p>
+  <figure>
+    <img src="img/fix17-tile-focus-after.jpg" alt="An explore tile showing a colour-bar test pattern, focused with the keyboard: a red ring with a white inner band runs around its whole edge and stays visible over the red, white and cyan bars." loading="lazy">
+    <figcaption>After: a keyboard-focused explore tile. The red ring with a white inner band stays visible over bright media.</figcaption>
+  </figure>
+</section>
+
 
   <div class="with-shot" style="margin-top:14px">
     <article class="finding low">
@@ -585,6 +874,27 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/explore at 375px and 1280px)</h4>
+  <p>At 600px and below, the stats, trending tags, content tabs and filters on Explore sit behind a FILTER toggle next to CREATE PACK and SHUFFLE (<code>ExplorePage.jsx</code>, plus two small CSS rules in <code>global.css</code>). The toggle uses <code>aria-expanded</code> and <code>aria-controls</code>. Above 600px the toggle is hidden and the page is unchanged (checked at 1280px). At 375px the first reel tile now starts at about 325px down the page. Before, no media appeared on the first screen.</p>
+  <p><strong>Not done:</strong> the "No Reel Packs match this filter yet" line still sits above the grid on the ALL tab, and the large EXPLORE heading is unchanged. The toggle is an inline collapse rather than a bottom sheet.</p>
+  <div class="shot-row">
+    <figure>
+      <img src="img/fix20-explore-mobile-before.jpg" alt="Before: Explore at 375px. Stats, trending tags, tabs, folder select, codec chips and search fill the screen, with no media visible." loading="lazy" style="max-width:300px">
+      <figcaption>Before: no media on the first screen.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix20-explore-mobile-after.jpg" alt="After: Explore at 375px. Heading, CREATE PACK, SHUFFLE and a collapsed FILTER button, then the first reel tile in the upper half of the screen." loading="lazy" style="max-width:300px">
+      <figcaption>After: the grid leads, and the filters are one tap away.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix20-explore-mobile-filter-open.jpg" alt="After, with FILTER opened: the stats, trending tags, tabs and filter controls appear below the toggle." loading="lazy" style="max-width:300px">
+      <figcaption>After: FILTER opened.</figcaption>
+    </figure>
+  </div>
+</section>
+
+
   <article class="finding low" style="margin-top:14px">
     <h3><span class="chip">Low</span>Smaller web issues</h3>
     <dl>
@@ -596,6 +906,13 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </ul></dd>
     </dl>
   </article>
+
+<section class="attempt">
+  <h4>Attempted fix · verified locally (tab titles and avatar colours read from the running app; tests)</h4>
+  <p><strong>Page titles:</strong> /rules now reads "Community rules · ECHO" and /verify-email reads "Verify email · ECHO" (<code>useDocumentTitle.js</code>). <strong>aria-busy:</strong> the skeleton presets in <code>Skeleton.jsx</code> already had it. The remaining gap was explore and pack tiles that show the shimmer while their media loads, which now set <code>aria-busy</code> until ready (<code>ExploreTile.jsx</code>, <code>PackTile.jsx</code>). <strong>Live region:</strong> the profile SHARE button changes its label to "LINK COPIED", which screen readers did not announce. A visually hidden <code>aria-live="polite"</code> span now announces it (<code>ProfilePage.jsx</code>). The share dialog is owned by another pass. <strong>Avatar contrast:</strong> every avatar measured in the app already used dark initials, at 5.6:1 on the default #ff3b1f. The exception was the phone fullscreen tab bar avatar (<code>.sx-bottom-nav-avatar</code>), which used white initials at 3.56:1 and now uses #08090a at 5.6:1 (<code>global.css</code>).</p>
+  <p><strong>Not done:</strong> the 36–38px icon buttons. Their sizes are hard-coded per class rather than taken from <code>--sx-control-h</code>, so no single token change can raise them cleanly. Also not done: login text sizes and the layout gaps at 375px. The tab-bar avatar change was not screenshotted because it only shows in the phone fullscreen player.</p>
+</section>
+
 </section>
 
 <!-- ============ COPY ============ -->
@@ -639,6 +956,23 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </figure>
     </div>
   </section>
+
+
+<section class="attempt">
+  <h4>Attempted fix · verified locally (/upload, /explore and /settings/profile at 1280px)</h4>
+  <p>Leftovers from the first copy pass, kept in the app's uppercase mono style as decided in fix 5. <strong>Settings:</strong> "TERMINATE PROFILE &amp; PURGE DATA" becomes "DELETE ACCOUNT" (<code>ProfileSettingsPage.jsx</code>). <strong>Upload:</strong> with no file chosen, the studio banner reads "ADD A VIDEO OR IMAGES TO START" with no "PIPELINE:" prefix (<code>stageGeometry.js</code>, <code>UploadPage.jsx</code>). Once a file is chosen the "PIPELINE:" summary returns. <strong>Explore:</strong> the source chips read BEST QUALITY / PLAYS EVERYWHERE. Only the labels changed, so URLs and saved filter values still work. The "CODEC: HEVC" stat is removed (<code>ExplorePage.jsx</code>). Tests updated on purpose: <code>stageGeometry.test.js</code> (summary string) and <code>ProfileSettingsPage.test.jsx</code> (button name). The "ECHO CREDITS ARE DISABLED" row is handled by the wallet finding.</p>
+  <p><strong>Not done:</strong> the other "awaiting source" strings on Upload, the step badge "AWAITING SOURCE" and "AWAITING SOURCE FILE…", which were not in this list. The third Explore chip still reads "ALL CODECS". The location page's own "HEVC MASTER / H264 / VR" chips are unchanged. Sentence case still waits for the type-system decision.</p>
+  <div class="shot-row">
+    <figure>
+      <img src="img/fix22-upload-banner-after.jpg" alt="Upload Studio banner reading ADD A VIDEO OR IMAGES TO START at the right, with no PIPELINE label." loading="lazy">
+      <figcaption>After: /upload banner with no source.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix22-explore-filters-after.jpg" alt="Explore at 1280px: stats show TOTAL REELS, CURATED PACKS and FOLDERS with no CODEC tile; filter chips read BEST QUALITY, PLAYS EVERYWHERE, ALL CODECS." loading="lazy">
+      <figcaption>After: /explore filters and stats.</figcaption>
+    </figure>
+  </div>
+</section>
 </section>
 
 <!-- ============ SYSTEM ============ -->
@@ -654,6 +988,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+  <section class="attempt">
+    <h4>Not attempted · needs the type-scale decision (Phase 1)</h4>
+    <p>As noted under fix 6, the 15px is on <code>body</code> only, so changing that one line would not move the 65–77% figure. The small text comes from individual rules: <code>global.css</code> has 39 rules at <code>0.75rem</code> or below and 2 at 8–11px. Fixing it means adopting the 12 / 14 / 16 / 20 / 28 / 40 scale as tokens and moving those rules onto it, which touches most screens at once and should be reviewed as its own change with before/after captures per page.</p>
+  </section>
+
+
   <article class="finding high">
     <h3><span class="chip">High</span>Danger and brand share one red</h3>
     <dl>
@@ -667,6 +1007,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <h4>Attempted fix · verified locally (Profile settings at 1280px)</h4>
     <p><strong>Changed:</strong> <code>--sx-danger</code> is now rose <code>#f43f5e</code> (hover, dim and border variants follow) in <code>tokens.css</code>, and two hardcoded <code>#ef4444</code> uses in <code>global.css</code> (offline dot, validation error text) now read the token. Rose on the dark surface is about 5:1, so it still passes for text. In the screenshot the Delete account panel reads pink-red, apart from the vermilion Update profile button and header buttons.</p>
     <p><strong>Not done:</strong> one primary fill per view and ghost Credits/Messages header buttons (a layout decision for you), and the 16px root. The 15px is set on <code>body</code> only, so raising it would not fix the real problem, which is the many rules under 12px; that needs the type scale, not one line.</p>
+    <p><strong>Follow-up:</strong> this change left <code>reels.html</code> and <code>VRUICanvas.TOKENS</code> on the old <code>#ef4444</code> / <code>#f87171</code>, so two token-parity tests failed. Both now use <code>#f43f5e</code> / <code>#fb7185</code>, and the parity tests pass.</p>
     <figure>
       <img src="img/fix6-danger-after.jpg" alt="Profile settings: the Delete account panel in rose beside vermilion accent buttons." loading="lazy">
       <figcaption>After: danger (Delete account) versus accent (Update profile, header).</figcaption>
@@ -681,6 +1022,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+  <section class="attempt">
+    <h4>Not attempted · brand decision first</h4>
+    <p>Uppercase mono is the app's current label style (81 <code>text-transform: uppercase</code> rules in <code>global.css</code>), and the copy fixes in this pass deliberately kept it so the screens stay consistent. Switching buttons and body text to sentence case in the sans face is a visual-identity call; once it is made it can ship together with the type scale above.</p>
+  </section>
+
+
   <article class="finding high">
     <h3><span class="chip">High</span>No form, loading or size contract</h3>
     <dl>
@@ -688,6 +1035,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Three sizes (32 / 40 / 48) and one Button with <code>variant</code> (primary, secondary, ghost, danger), <code>size</code> and <code>loading</code>.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Not attempted · Phase 2 primitives</h4>
+    <p>The Button / IconButton / FormField primitives in the table below are a new component layer that every page would migrate to. This pass only made local fixes on the screens with findings (inline errors with <code>aria-describedby</code> and disabled-reason text on the forms; see the forms finding), without adding the shared primitives.</p>
+  </section>
+
 
   <article class="finding med">
     <h3><span class="chip">Medium</span>Tokens leak and layers fight</h3>
@@ -717,6 +1070,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </tbody>
     </table>
   </div>
+
+  <section class="attempt">
+    <h4>Not attempted · Phase 0 guardrails and Phase 1 codemod</h4>
+    <p>Still true at this commit: 163 <code>!important</code> in <code>global.css</code>. Replacing literals, unifying z-index and generating <code>tokens.py</code> are mechanical but large; they need the stylelint rules in place first so the count can only go down. The only token added in this pass is <code>--sx-focus-halo</code>, next to the existing <code>--sx-focus-ring</code> (see the focus-styles fix).</p>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->

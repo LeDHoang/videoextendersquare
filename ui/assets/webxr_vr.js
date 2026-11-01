@@ -761,6 +761,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   const DOCK_GAP = 0.08;
   const DOCK_MAX_DROP_DEG = 25;
   const DOCK_MIN_FLOOR_Y = 0.6;
+  const SIDE_PANEL_MAX_YAW_DEG = 25; // fix25
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -962,6 +963,18 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
   }
 
+  // fix25: swing a side offset (x, z) from the locked anchor in toward
+  // straight ahead so it sits no more than SIDE_PANEL_MAX_YAW_DEG off it
+  // (the comments panel opened at about 52 deg, out of view). The panel keeps
+  // its distance from the viewer; d is the viewer's distance to the anchor.
+  function clampSideOffset(x, z, d) {
+    const back = d - z;
+    const r = Math.hypot(x, back);
+    const lim = SIDE_PANEL_MAX_YAW_DEG * Math.PI / 180;
+    const yaw = Math.max(-lim, Math.min(lim, Math.atan2(x, back)));
+    return { x: r * Math.sin(yaw), z: d - r * Math.cos(yaw) };
+  }
+
   // Side-panel world layout (upstream getCommentsPanelCenter/Size +
   // getGuideCenter verbatim, LEFT comments / RIGHT guide).
   // Legacy-exact panel geometry: locked = room-fixed at the default screen
@@ -973,10 +986,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
+      const c = clampSideOffset(-base / 2 - size.w / 2 - layoutTuning.panelSideGap,
+        layoutTuning.panelFwdOffset, layoutTuning.screenDistance);
       center = {
-        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
+        x: a.x + c.x,
         y: a.y,
-        z: a.z + layoutTuning.panelFwdOffset,
+        z: a.z + c.z,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
@@ -5506,6 +5521,48 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Max time to hold the previous frame waiting for clean first frames
   // before showing whatever the decoder has (safety valve on slow tunnels).
   const FRESH_VISUAL_MAX_HOLD_MS = 2500;
+  // fix26: in-VR loading / error state of the active video reel, drawn on the
+  // overlay over the screen. A reel whose element reports a media error turns
+  // 'failed' once it has waited FRESH_VISUAL_MAX_HOLD_MS; a reel that is not
+  // ready yet, or stalls mid-play, shows 'loading' after LOAD_SPINNER_DELAY_MS.
+  const LOAD_SPINNER_DELAY_MS = 500;
+  let loadWaitSince = -1;
+  function reelLoadState(source) {
+    if (!source || source.kind !== 'video' || !source.element) {
+      loadWaitSince = -1;
+      return '';
+    }
+    const el = source.element;
+    trackStalls(el);
+    const failed = !!el.error || el.networkState === 3; // NETWORK_NO_SOURCE
+    if (!failed && source.ready !== false && stallStart < 0) {
+      loadWaitSince = -1;
+      return '';
+    }
+    const now = nowMs();
+    if (loadWaitSince < 0) loadWaitSince = now;
+    const waited = now - loadWaitSince;
+    if (failed) return waited >= FRESH_VISUAL_MAX_HOLD_MS ? 'failed' : 'loading';
+    return waited >= LOAD_SPINNER_DELAY_MS ? 'loading' : '';
+  }
+
+  // fix26: SKIP / RETRY on the couldn't-load overlay; anything else is a
+  // pop-up comment id and opens the comments panel at it.
+  function handleOverlayHit(id) {
+    if (id === 'load:skip') {
+      if (callbacks.onNext) callbacks.onNext();
+    } else if (id === 'load:retry') {
+      const el = getVisualSource().element;
+      loadWaitSince = -1;
+      try { if (el && el.load) el.load(); } catch (e) {}
+      try {
+        const p = el && el.play ? el.play() : null;
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {}
+    } else {
+      openCommentsPanelToComment(id);
+    }
+  }
 
   function nowMs() {
     try {
@@ -6043,6 +6100,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       return false;
     }
     const source = getVisualSource();
+    const loadState = reelLoadState(source);
     // Suppressed while the comments panel is open (upstream parity).
     const comments = (commentsPanelVisible || source.kind !== 'video' || !callbacks.getComments)
       ? []
@@ -6052,13 +6110,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       activeIds = ui.filterOverlayComments(comments, source.currentTime)
         .map((c) => String(c.id)).join(',');
     } catch (e) { activeIds = ''; }
-    const key = activeIds + '|' + (overlayHoverId || '');
+    const key = activeIds + '|' + (overlayHoverId || '') + '|' + loadState;
     const hasActive = activeIds.length > 0;
     const due = (time === undefined) || (lastOverlayUploadT < 0) ||
       ((time - lastOverlayUploadT) >= VR_UI_MIN_INTERVAL);
     if (!force && key === lastOverlayKey) {
-      // Same set, same hover: repaint only for the fade while visible.
-      if (!hasActive || !due) return overlayHasPopups;
+      // Same set, same hover: repaint only for the fade (or the loading
+      // spinner) while visible.
+      if ((!hasActive && loadState !== 'loading') || !due) return overlayHasPopups;
     }
     lastOverlayKey = key;
     if (time !== undefined) lastOverlayUploadT = time;
@@ -6068,12 +6127,14 @@ window.WebXRVR = window.WebXRVR || (function () {
         comments,
         currentTime: source.currentTime,
         overlayHoverId,
+        loadState,
+        nowMs: nowMs(),
       }) || [];
     } catch (e) { regions = []; }
     overlayRegions = regions;
     if (overlayHoverId && !regions.some((r) => r.id === overlayHoverId)) overlayHoverId = null;
     const had = overlayHasPopups;
-    overlayHasPopups = regions.length > 0;
+    overlayHasPopups = regions.length > 0 || !!loadState;
     if (overlayTexture) {
       overlayTexture.needsUpdate = true;
       renderStats.overlayUploads = (renderStats.overlayUploads || 0) + 1;
@@ -6512,8 +6573,9 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function applyShellVisibility() {
     const pointerActive = !!(xrSession || previewRunning);
-    if (shellNavMesh) shellNavMesh.visible = pointerActive;
     const open = pointerActive && isShellOpen();
+    // fix24: the nav strip hides together with the dock (open shell keeps it).
+    if (shellNavMesh) shellNavMesh.visible = pointerActive && (controlsVisible || open);
     if (shellMainMesh) shellMainMesh.visible = open;
     if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
     if (!open) return;
@@ -7227,6 +7289,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!getVisualSource().paused) {
       try {
         controlsAutoHideTimer = setTimeout(function() {
+          // fix24: a pointer resting on the dock or nav strip keeps them up.
+          if (hoveredButton >= 0 || shellHover.panel === 'nav') { resetAutoHideTimer(); return; }
           controlsVisible = false;
           applySceneVisibility();
         }, CONTROLS_AUTO_HIDE_MS);
@@ -7296,7 +7360,8 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // Mid-play stalls of the active video: a 'waiting' after playback started
   // (not while seeking), timed until it plays again or the source changes.
-  // Startup waits are switchMs. Bound only while ?xrdiag=1 is on.
+  // Startup waits are switchMs. Bound every frame by the loading state
+  // (fix26); only the diag POST stays behind ?xrdiag=1.
   let stallEl = null;
   let stallStart = -1;
   let stallCount = 0;
@@ -7552,7 +7617,7 @@ window.WebXRVR = window.WebXRVR || (function () {
               if (!commentsPanelVisible && screenHit.uv) {
                 const cid = overlayCommentFromUV(screenHit.uv);
                 if (cid) {
-                  openCommentsPanelToComment(cid);
+                  handleOverlayHit(cid);
                   handled = true;
                 }
               }
@@ -9402,7 +9467,7 @@ window.WebXRVR = window.WebXRVR || (function () {
             if (!commentsPanelVisible && hits[0].uv) {
               const cid = overlayCommentFromUV(hits[0].uv);
               if (cid) {
-                openCommentsPanelToComment(cid);
+                handleOverlayHit(cid);
                 pulseInput(ev.data);
                 handled = true;
               }
@@ -9520,6 +9585,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     return null;
   }
 
+  // fix27: true exactly once per browser (localStorage flag), when the guide
+  // panel is enabled; false when storage is unavailable.
+  const VR_GUIDE_SEEN_KEY = 'echo_vr_guide_seen_v1';
+  function takeFirstEntryGuide() {
+    try {
+      if (!debugFlags.guide || typeof localStorage === 'undefined' || localStorage.getItem(VR_GUIDE_SEEN_KEY)) return false;
+      localStorage.setItem(VR_GUIDE_SEEN_KEY, '1');
+      return true;
+    } catch (e) { return false; }
+  }
+
   // Fresh-session state (upstream enterVR reset block): the screen returns
   // to its default pose/scale, feed playback keeps its head lock while
   // pack cards stay room-stable, and all interaction state is cleared.
@@ -9608,7 +9684,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     let session = null;
     const sessionOpts = useFullSession
       ? { optionalFeatures: ['local-floor', 'local', 'bounded-floor', 'hand-tracking'] }
-      : { optionalFeatures: ['local-floor', 'local'] };
+      : { optionalFeatures: ['local-floor', 'local', 'hand-tracking'] }; // fix27: pinch selects
     if (debugFlags.domoverlay && useFullSession) {
       sessionOpts.optionalFeatures.push('dom-overlay');
       if (domOverlayRoot) sessionOpts.domOverlay = { root: domOverlayRoot };
@@ -9707,6 +9783,9 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     xrSession = session;
     resetXRSessionState();
+    // fix27: the first VR entry on this browser shows the dock and controller
+    // guide, with no auto-hide timer, until the viewer's first input.
+    if (takeFirstEntryGuide()) controlsVisible = true;
 
     if (renderer && renderer.xr) {
       renderer.xr.enabled = true;
@@ -10128,7 +10207,6 @@ window.WebXRVR = window.WebXRVR || (function () {
     const action = btns[index].action;
     pressedButton = index;
     vrLastUiUploadT = -1;
-    resetAutoHideTimer();
     switch (action) {
       case 'prev': callbacks.onPrev && callbacks.onPrev(); break;
       case 'next': callbacks.onNext && callbacks.onNext(); break;
@@ -10193,6 +10271,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'collect': callbacks.onCollectReel && callbacks.onCollectReel(); break;
       case 'exit': xrSession ? exitVR() : stopPreview(); break;
     }
+    // fix24: changing the reel hides the dock at once; any other press is
+    // input, so the timer restarts after the action (a play press now sees
+    // the new paused state).
+    if (action === 'prev' || action === 'next') hideControls();
+    else if (action !== 'exit' && controlsVisible) resetAutoHideTimer();
   }
 
   // ─── Comments panel actions (upstream executeCommentAction verbatim) ─
@@ -10219,7 +10302,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       return true;
     }
     if (desc === 'add') {
-      openVrKeyboard();
+      // fix28: signed out, the footer reads SIGN IN TO COMMENT and opens sign-in.
+      const user = callbacks.getCurrentUser ? callbacks.getCurrentUser() : null;
+      if (!user && callbacks.getCurrentUser && callbacks.onOpenAccount) callbacks.onOpenAccount();
+      else openVrKeyboard();
       return true;
     }
     if (desc === 'scrollup') {
@@ -10528,6 +10614,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         return { ...debugFlags };
       },
       processXRInput,
+      executeControlButton,
       executeCommentAction,
       toggleCommentsPanel,
       openCommentsPanelToComment,

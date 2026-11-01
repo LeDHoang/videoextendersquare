@@ -870,7 +870,7 @@
           label = lockToViewer ? 'LOCK' : 'FREE';
           glyph = lockToViewer ? 'lock' : 'unlock';
         } else {
-          label = isMuted ? 'MUTED' : 'AUDIO';
+          label = isMuted ? 'UNMUTE' : 'MUTE'; // fix28: the action, not the state
           icon = isMuted ? 'sound-mute' : 'sound-audio';
         }
         if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
@@ -1411,7 +1411,8 @@
     ctx.font = `bold 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('+ ADD COMMENT', CPANEL_W / 2, footerY + 77);
+    // fix28: signed out, the button leads to sign-in instead.
+    ctx.fillText(user ? '+ ADD COMMENT' : 'SIGN IN TO COMMENT', CPANEL_W / 2, footerY + 77);
   }
 
   // ─── Render In-Screen Popup Comment Overlay ─────────────────────────
@@ -1430,14 +1431,70 @@
     });
   }
 
+  // fix26: loading spinner, or the dimmed couldn't-load card with SKIP and
+  // RETRY (hit ids 'load:skip' / 'load:retry'), centred on the reel.
+  const LOAD_BTNS = [
+    { id: 'load:retry', label: 'RETRY', x: OVERLAY_W / 2 - 236, y: OVERLAY_H / 2 + 16, w: 220, h: 72 },
+    { id: 'load:skip', label: 'SKIP', x: OVERLAY_W / 2 + 16, y: OVERLAY_H / 2 + 16, w: 220, h: 72 },
+  ];
+  function renderLoadState(ctx, loadState, hoverId, nowMs) {
+    const T = TOKENS.hex;
+    const cx = OVERLAY_W / 2;
+    const cy = OVERLAY_H / 2;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (loadState === 'failed') {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+      ctx.fillRect(0, 0, OVERLAY_W, OVERLAY_H);
+      ctx.fillStyle = T.ink;
+      ctx.font = `700 34px ${TOKENS.font.sans}`;
+      ctx.fillText('This reel couldn\'t load', cx, cy - 56);
+      for (const b of LOAD_BTNS) {
+        const hover = hoverId === b.id;
+        const primary = b.id === 'load:skip';
+        ctx.fillStyle = primary ? (hover ? T.accentHi : T.accent) : (hover ? T.surface3 : T.surface2);
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = primary || hover ? T.accent : T.ruleStrong;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = primary ? T.onAccent : T.ink;
+        ctx.font = `bold 28px ${TOKENS.font.mono}`;
+        ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
+      }
+      ctx.restore();
+      return LOAD_BTNS.map((b) => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h }));
+    }
+    // 'loading': a backing plate keeps the spinner readable on any frame.
+    ctx.fillStyle = 'rgba(8, 9, 10, 0.72)';
+    ctx.fillRect(cx - 130, cy - 90, 260, 180);
+    const a = ((Number(nowMs) || 0) / 1000) * Math.PI * 2;
+    ctx.strokeStyle = T.ruleStrong;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 22, 34, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = T.accent;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 22, 34, a, a + Math.PI * 0.6);
+    ctx.stroke();
+    ctx.fillStyle = T.ink;
+    ctx.font = `600 28px ${TOKENS.font.sans}`;
+    ctx.fillText('Loading…', cx, cy + 50);
+    ctx.restore();
+    return [];
+  }
+
   function renderOverlayCanvas(ctx, options = {}) {
-    const { comments = [], currentTime = 0, overlayHoverId = null } = options;
+    const { comments = [], currentTime = 0, overlayHoverId = null, loadState = '', nowMs = 0 } = options;
     const regions = [];
     if (!ctx) return regions;
 
     const active = filterOverlayComments(comments, currentTime);
 
     ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
+    if (loadState === 'failed') return renderLoadState(ctx, loadState, overlayHoverId, nowMs);
+    if (loadState === 'loading') renderLoadState(ctx, loadState, overlayHoverId, nowMs);
     if (active.length === 0) return regions;
 
     // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
@@ -1761,7 +1818,7 @@
     ctx.textAlign = 'right';
     ctx.fillStyle = TOKENS.hex.ink3;
     ctx.font = `600 11px ${TOKENS.font.mono}`;
-    ctx.fillText('META QUEST 3', GUIDE_W - 20, 28);
+    ctx.fillText('META QUEST', GUIDE_W - 20, 28);
 
     // Controller photo, cropped to its content (vector drawing as fallback)
     const photoW = GUIDE_W - 32;
@@ -2303,8 +2360,8 @@
       successHi: '#4ade80',
       warn: '#f2c744',
       warnHi: '#fde047',
-      danger: '#ef4444',
-      dangerHi: '#f87171',
+      danger: '#f43f5e',
+      dangerHi: '#fb7185',
       info: '#3b82f6',
       infoHi: '#60a5fa',
     }),
