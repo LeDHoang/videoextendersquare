@@ -29,11 +29,40 @@ function commandFallback(query) {
   return '/explore?search=' + encodeURIComponent(query);
 }
 
+// Centre the initials by their ink, not their advance box: in a monospace face a wide
+// letter beside a narrow one (W beside E) sits up to half a pixel off the disc's centre.
+function useInkCentring(ref, text) {
+  const [shift, setShift] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !text || !document.fonts) return undefined;
+    let live = true;
+    document.fonts.ready.then(() => {
+      const ctx = live && document.createElement('canvas').getContext('2d');
+      if (!ctx) return;
+      const style = getComputedStyle(el);
+      // Measured at 100× the size, so the ink bounds are precise to a hundredth of a pixel.
+      ctx.font = `${style.fontWeight} ${parseFloat(style.fontSize) * 100}px ${style.fontFamily}`;
+      const m = ctx.measureText(text);
+      setShift((m.width - m.actualBoundingBoxRight + m.actualBoundingBoxLeft) / 200);
+    });
+    return () => { live = false; };
+  }, [ref, text]);
+  return shift;
+}
+
 function AccountAvatar({ user }) {
   const label = (user?.display_name || user?.username || '?').trim();
+  const initials = user?.avatar_url ? '' : label.slice(0, 2).toUpperCase();
+  const ref = useRef(null);
+  const shift = useInkCentring(ref, initials);
   return (
-    <span className="sx-account-avatar" style={{ backgroundColor: user?.avatar_color || 'var(--sx-accent)' }}>
-      {user?.avatar_url ? <img src={user.avatar_url} alt="" /> : label.slice(0, 2).toUpperCase()}
+    <span ref={ref} className="sx-account-avatar" style={{ backgroundColor: user?.avatar_color || 'var(--sx-accent)' }}>
+      {user?.avatar_url ? (
+        <img src={user.avatar_url} alt="" />
+      ) : (
+        <span style={shift ? { position: 'relative', left: shift.toFixed(2) + 'px' } : undefined}>{initials}</span>
+      )}
     </span>
   );
 }
@@ -361,7 +390,6 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             <nav className="sx-top-nav" aria-label="Global Routes">
               <NavLink to="/reels" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>REELS/VR</NavLink>
               <NavLink to="/explore" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>EXPLORE</NavLink>
-              <NavLink to="/compare" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>COMPARE</NavLink>
             </nav>
           </div>
 

@@ -4407,29 +4407,26 @@ body.sx-vr-active .sx-reels-mount,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--sx-accent);
-  border: none;
+  /* Outlined like the other header icon buttons; UPLOAD is the one filled button. */
+  background: var(--sx-bg);
+  border: 1px solid var(--sx-rule-strong);
   border-radius: 0;
-  color: var(--sx-on-accent);
+  color: var(--sx-ink);
   cursor: pointer;
   font-family: 'Archivo Black', Archivo, sans-serif;
   font-size: 0.95rem;
   font-weight: 900;
   line-height: 1;
-  transition: opacity 150ms ease, box-shadow 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
   flex-shrink: 0;
   box-sizing: border-box;
   align-self: center;
 }
 
 .sx-icon-btn:hover {
-  opacity: 0.85;
-}
-
-/* ECHO: accent glow only on hover/focus, never at rest. */
-.sx-icon-btn:hover,
-.sx-icon-btn:focus-visible {
-  box-shadow: 0 0 12px var(--sx-accent-glow);
+  background: var(--sx-surface-hover);
+  border-color: var(--sx-accent);
+  color: var(--sx-accent);
 }
 
 /* Responsive visibility utilities */

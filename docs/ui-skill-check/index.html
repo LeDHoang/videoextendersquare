@@ -1350,7 +1350,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Decision (yours):</strong> UPLOAD stays the one filled action in the header; CREDITS and MESSAGES become outlined. The outline is the same treatment the tablet and phone header buttons already use (<code>--sx-surface-2</code> fill, <code>--sx-rule-strong</code> border, ink text, accent border and text on hover), added as <code>.sx-top-action-btn--ghost</code> in <code>global.css</code>. The ghost hover drops the accent glow, as the tablet buttons do. Keyboard focus still gets the global accent ring.</p>
     <p>On the outlined MESSAGES button the unread count is now an accent dot, the only accent on that button, matching the phone badge and the floating MESSAGE launcher. It used to be a black dot with an accent number. The text stays white, so its contrast is unchanged.</p>
     <p><strong>Also changed, from the navigation finding:</strong> all six header actions (CREDITS, UPLOAD and MESSAGES, at desktop and tablet/phone sizes) are now links (<code>NavLink</code> in <code>HeaderBar.jsx</code>) instead of buttons that called <code>navigate()</code>. They open in a new tab, and the current page's link reports <code>aria-current="page"</code> (checked on /wallet). Screen readers now hear the unread count: "Messages, 1 unread". Before, the phone button said only "Messages". The header tests pass.</p>
-    <p><strong>Not changed:</strong> the filled hamburger button and the filled avatar circle are still accent. The header also offers UPLOAD twice, once as a nav link and once as the action button. Both are left for the "one nav source" change. <strong>Since done:</strong> fix <a href="#fix-47">47</a> removes the UPLOAD nav link and turns credits and messages into compact icon buttons. The hamburger and avatar are still accent.</p>
+    <p><strong>Not changed:</strong> the filled hamburger button and the filled avatar circle are still accent. The header also offers UPLOAD twice, once as a nav link and once as the action button. Both are left for the "one nav source" change. <strong>Since done:</strong> fix <a href="#fix-47">47</a> removes the UPLOAD nav link and turns credits and messages into compact icon buttons. Fix <a href="#fix-50">50</a> makes the hamburger plain and centres the avatar initials. The avatar stays accent, at your choice.</p>
     <figure>
       <img src="img/fix35-header-before.jpg" alt="Header before: 0 CREDITS, UPLOAD and MESSAGES are three solid orange-red buttons; the unread count is a black dot." loading="lazy">
       <figcaption>Before: three filled accent buttons.</figcaption>
@@ -1373,7 +1373,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
     <p><strong>Also fixed:</strong> on tablet and phone, a <code>fill: currentColor</code> rule flooded the closed shapes of the outline icons, so the credit coin and the envelope showed as solid blobs (see the 768px "before"). The icons now keep their own outline colours. Only the red UPLOAD icon is recoloured, to the on-accent ink.</p>
     <p>Measured at 1280px: UPLOAD 88×36, credits 51×36, messages 36×36 with an 18×18 badge, then the avatar, in that order. A new test in <code>HeaderBar.test.jsx</code> checks the order (/upload, /wallet, /messages), that UPLOAD is not in the nav, and the two accessible names. The CSS for the old ghost text buttons is removed.</p>
-    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton).</p>
+    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton). <strong>Since done:</strong> fix <a href="#fix-50">50</a> makes the hamburger plain, keeps the avatar accent (your choice), and takes COMPARE out of the nav.</p>
     <figure>
       <img src="img/fix47-header-1280-before.jpg" alt="Header at 1280px before: nav REELS/VR, EXPLORE, UPLOAD, COMPARE; then 0 CREDITS outlined, UPLOAD filled, MESSAGES outlined with a 1 badge." loading="lazy">
       <figcaption>Before, 1280px: UPLOAD in the nav and as the button.</figcaption>
@@ -1390,6 +1390,49 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <img src="img/fix47-header-768-after.jpg" alt="Header at 768px after: a red-filled upload icon, a black 0 credits button with the outline coin, and an outline envelope with a red 1 badge." loading="lazy">
       <figcaption>After, 768px: same order, outline icons intact.</figcaption>
     </figure>
+  </section>
+
+  <section class="attempt" id="fix-50">
+    <h4>Fix 50 · Follow-up fix · plain hamburger, centred avatar initials, no COMPARE in the nav, verified locally (/explore signed in at 1280, 768 and 375px, one real unread message)</h4>
+    <p><strong>Decision (yours):</strong> take the red fill off the hamburger and take COMPARE out of the header nav. I first made the avatar plain too and sent you a comparison. You chose to keep it red when there is no photo, with the initials properly centred.</p>
+    <ul>
+      <li><strong>Hamburger</strong> (<code>.sx-icon-btn</code> in <code>global.css</code>): black (<code>--sx-bg</code>) with the <code>--sx-rule-strong</code> hairline and white lines, the same as the credits and messages buttons. On hover the border and lines turn accent over <code>--sx-surface-hover</code>, like the other header buttons. The accent glow on hover is gone. Keyboard focus keeps the global accent ring.</li>
+      <li><strong>Nav:</strong> it now holds REELS/VR and EXPLORE. Compare is still in the sidebar, which the hamburger opens.</li>
+      <li><strong>Avatar initials:</strong> the disc keeps your avatar colour (vermilion by default). A photo still replaces it.</li>
+    </ul>
+    <p><strong>Why the initials looked off.</strong> The browser centres the two letters' advance box, not their ink. In JetBrains Mono each capital is centred in its own cell, but a wide letter beside a narrow one is not. The W spreads past its cell and the E stops short, so "WE" sat 0.35px left of the disc's centre (0.7 device pixels on a 2x screen). Vertically it was already centred. Across all 676 capital pairs the error ranges from 0.45px left to 0.52px right, so a fixed nudge would fix "WE" and push other names off.</p>
+    <p><strong>Fix:</strong> <code>AccountAvatar</code> in <code>HeaderBar.jsx</code> measures the initials' ink once the web font has loaded (canvas <code>measureText</code> at 100× size, so the bounds are precise to about 0.01px). It then shifts them by the difference, for example 0.32px right for "WE". The same avatar is used in the header search results, so those initials are centred too. In a browser without <code>document.fonts</code> nothing moves.</p>
+    <p><strong>Measured</strong> on the rendered pixels, against the exact centre of the disc: "WE" and three other pairs that skew either way (LA, KW, JO) are all 0.00px off, horizontally and vertically, at 1x and 2x, at 1280 and 375px. Before, "WE" was 0.25–0.5px left in the same check. At 1280px the order is UPLOAD 88×36, credits 54×36, messages 36×36, then the avatar. The search box shifts left into the space COMPARE left. At 375px the credits button is still hidden, as before.</p>
+    <p><strong>Tests:</strong> <code>HeaderBar.test.jsx</code> checks that the nav is exactly REELS/VR and EXPLORE. A new test fakes the font and the canvas measurement and checks that the initials shift by the measured amount (0.32px for "WE").</p>
+    <p><strong>Not changed:</strong> button sizes. The hamburger and the icon buttons are still under the 44px target (Phase 2 IconButton).</p>
+    <figure>
+      <img src="img/fix50-header-1280-before.jpg" alt="Header at 1280px before: a red-filled hamburger, nav REELS/VR, EXPLORE, COMPARE, then UPLOAD, credits, messages and a red avatar circle with WE." loading="lazy">
+      <figcaption>Before, 1280px: red hamburger, COMPARE in the nav.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix50-header-1280-after.jpg" alt="Header at 1280px after: a black outlined hamburger, nav REELS/VR and EXPLORE, then UPLOAD filled red, credits, messages, and the red avatar circle with WE." loading="lazy">
+      <figcaption>After: plain hamburger; the nav is REELS/VR and EXPLORE; the avatar stays red.</figcaption>
+    </figure>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix50-header-375-before.jpg" alt="Header at 375px before: red hamburger, search, red upload icon, messages with a badge, and a red avatar circle." loading="lazy">
+        <figcaption>Before, 375px: red hamburger.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix50-header-375-after.jpg" alt="Header at 375px after: black hamburger, search, red upload icon, messages with a badge, and the red avatar circle." loading="lazy">
+        <figcaption>After, 375px: plain hamburger.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix50-avatar-before.jpg" alt="The avatar disc zoomed, with blue lines through its exact centre: the letters WE sit slightly left of the vertical line." loading="lazy">
+        <figcaption>Before, 2x pixels zoomed (blue lines: the disc's centre). "WE" sits 0.35px left.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix50-avatar-after.jpg" alt="The same zoom after: the letters WE are centred on the vertical line." loading="lazy">
+        <figcaption>After: centred by the letters' ink.</figcaption>
+      </figure>
+    </div>
   </section>
 
 
@@ -1435,7 +1478,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li>The share of mono and uppercase text is about the same as before, because the system asks for it.</li>
       <li>Spec lines are still uppercase mono, now at 12px. Examples are "3–30 PUBLIC REELS · AUTHORED ORDER", "PNG · JPG · WEBP" and "NO PERSONAL KEY · USING CREDITS". So is "ADD A VIDEO OR IMAGES TO START" on /upload, which sits in the banner's spec slot and is asserted by a test.</li>
       <li>Some rows wrap now that the text is bigger. The wallet tile footers at 375px wrap onto two lines (the tiles were built to wrap).</li>
-      <li>The design system itself still lists eyebrow and label at 11px and has no 13px step. I did not edit it.</li>
+      <li>The design system itself still lists eyebrow and label at 11px and has no 13px step. I did not edit it. <strong>Since done:</strong> at your request the ECHO design system now matches the app. Eyebrow, label and control are 12px, the old 10.8px <code>caption</code> is now <code>small</code> at 13px in sentence case, and there is a new <code>sx-t-small</code> type-scale token. Its type notes say nothing renders under 12px.</li>
     </ul>
     <div class="shot-row">
       <figure>
@@ -1551,15 +1594,8 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 49. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 50. Each item says why it is not done.</small></h2>
   <div class="cols">
-    <div class="box">
-      <h3>Needs your decision</h3>
-      <ul>
-        <li><strong>The hamburger and avatar are still accent-filled.</strong> You set the order of the header's right side (<a href="#fix-47">fix 47</a>) but not these two, so they are unchanged.</li>
-        <li><strong>The design system says 11px.</strong> The ECHO design system still lists eyebrow and label at 11px and has no 13px sentence size. The app now uses 12px and 13px (<a href="#fix-49">fix 49</a>). It should be updated to match.</li>
-      </ul>
-    </div>
     <div class="box">
       <h3>Needs the headset</h3>
       <ul>

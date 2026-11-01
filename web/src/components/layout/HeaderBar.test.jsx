@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,7 +61,7 @@ describe('HeaderBar responsive behavior', () => {
     expect(screen.getByLabelText('Open account menu')).toBeInTheDocument();
   });
 
-  it('orders the right-side actions UPLOAD, credits, messages, and keeps UPLOAD out of the nav', () => {
+  it('orders the right-side actions UPLOAD, credits, messages, and keeps the nav to REELS/VR and EXPLORE', () => {
     mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
 
     const { container } = render(
@@ -71,12 +71,35 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Global Routes' });
-    expect(nav).not.toHaveTextContent('UPLOAD');
+    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['REELS/VR', 'EXPLORE']);
 
     const hrefs = [...container.querySelectorAll('.sx-top-right a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/upload', '/upload', '/wallet', '/messages']);
     expect(screen.getByRole('link', { name: '42 credits' })).toHaveAttribute('href', '/wallet');
     expect(screen.getByRole('link', { name: 'Messages, 3 unread' })).toHaveAttribute('href', '/messages');
+  });
+
+  it('centres the avatar initials by their ink once the font is ready', async () => {
+    mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Wendy' };
+    // "WE" at 100× size: 1440 wide, ink ends 64 short on the right, so it shifts 0.32px right.
+    const measureText = vi.fn(() => ({ width: 1440, actualBoundingBoxLeft: 0, actualBoundingBoxRight: 1376 }));
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText });
+    Object.defineProperty(document, 'fonts', { value: { ready: Promise.resolve() }, configurable: true });
+
+    try {
+      const { container } = render(
+        <MemoryRouter>
+          <HeaderBar onToggleSidebar={vi.fn()} />
+        </MemoryRouter>
+      );
+      const initials = container.querySelector('.sx-account-trigger .sx-account-avatar > span');
+      expect(initials).toHaveTextContent('WE');
+      await waitFor(() => expect(initials.style.left).toBe('0.32px'));
+      expect(measureText).toHaveBeenCalledWith('WE');
+    } finally {
+      delete document.fonts;
+      vi.restoreAllMocks();
+    }
   });
 
   it('activates and deactivates mobile search mode', async () => {
