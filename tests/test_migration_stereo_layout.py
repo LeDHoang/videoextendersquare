@@ -42,12 +42,30 @@ def _post_columns(engine) -> set[str]:
     return {column["name"] for column in sa.inspect(engine).get_columns("posts")}
 
 
-def _insert_post(engine, media_path: str, width: int, height: int) -> None:
-    """Insert a minimal posts row, filling every required column generically."""
-    table = sa.Table("posts", sa.MetaData(), autoload_with=engine)
-    row = {"media_path": media_path, "width": width, "height": height}
+def _reset_postgres(engine) -> None:
+    if engine.dialect.name == "postgresql":
+        # Other Postgres tests create tables with create_all on the same database.
+        with engine.begin() as conn:
+            conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+
+
+def _required_row(connection, table: sa.Table, row: dict) -> dict:
+    """Fill every required column of ``row`` generically.
+
+    A required foreign key reuses any row of the referenced table, inserting a
+    minimal one first when it is empty (PostgreSQL enforces the constraint).
+    """
     for column in table.columns:
         if column.name in row or column.nullable or column.server_default is not None:
+            continue
+        if column.foreign_keys:
+            target = next(iter(column.foreign_keys)).column
+            value = connection.execute(sa.select(target).limit(1)).scalar()
+            if value is None:
+                parent = _required_row(connection, target.table, {})
+                connection.execute(target.table.insert().values(**parent))
+                value = parent[target.name]
+            row[column.name] = value
             continue
         python_type = getattr(column.type, "python_type", str)
         if python_type is int:
@@ -62,7 +80,14 @@ def _insert_post(engine, media_path: str, width: int, height: int) -> None:
             row[column.name] = []
         else:
             row[column.name] = str(uuid.uuid4()) if column.name.endswith("id") else "x"
+    return row
+
+
+def _insert_post(engine, media_path: str, width: int, height: int) -> None:
+    """Insert a minimal posts row, filling every required column generically."""
+    table = sa.Table("posts", sa.MetaData(), autoload_with=engine)
     with engine.begin() as connection:
+        row = _required_row(connection, table, {"media_path": media_path, "width": width, "height": height})
         connection.execute(table.insert().values(**row))
 
 
@@ -74,6 +99,7 @@ def test_stereo_layout_migration_round_trip(tmp_path, monkeypatch, index):
     url = urls[index]
     config = _alembic(url, monkeypatch)
     engine = sa.create_engine(url)
+    _reset_postgres(engine)
     try:
         command.upgrade(config, PREVIOUS)
         assert "stereo_layout" not in _post_columns(engine)

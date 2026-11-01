@@ -378,6 +378,10 @@ def test_support_requests_migration_round_trip(tmp_path, monkeypatch, index):
         pytest.skip("SX_TEST_POSTGRES_URL is not set")
     config = _alembic(urls[index], monkeypatch)
     engine = sa.create_engine(urls[index])
+    if engine.dialect.name == "postgresql":
+        # Other Postgres tests create tables with create_all on the same database.
+        with engine.begin() as conn:
+            conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
     try:
         command.upgrade(config, "20261020_0014")
         assert "support_requests" not in sa.inspect(engine).get_table_names()

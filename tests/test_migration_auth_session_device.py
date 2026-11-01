@@ -12,7 +12,7 @@ from alembic.script import ScriptDirectory
 
 from server.social.database import EXPECTED_SCHEMA_REVISION
 
-from test_migration_stereo_layout import _alembic, _urls
+from test_migration_stereo_layout import _alembic, _reset_postgres, _urls
 
 REVISION = "20261101_0020"
 PREVIOUS = "20261101_0019"
@@ -36,6 +36,7 @@ def test_device_hash_migration_round_trips(tmp_path, monkeypatch, index):
     url = urls[index]
     config = _alembic(url, monkeypatch)
     engine = sa.create_engine(url)
+    _reset_postgres(engine)
     try:
         command.upgrade(config, REVISION)
         assert "device_hash" in _columns(engine)

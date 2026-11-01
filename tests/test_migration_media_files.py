@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import command
 from PIL import Image
 
-from test_migration_stereo_layout import _alembic, _insert_post, _post_columns, _urls
+from test_migration_stereo_layout import _alembic, _insert_post, _post_columns, _reset_postgres, _urls
 
 REVISION = "20261031_0018"
 PREVIOUS = "20261022_0017"
@@ -27,6 +27,7 @@ def test_media_files_migration_backfills_local_files(tmp_path, monkeypatch, inde
     url = urls[index]
     config = _alembic(url, monkeypatch)
     engine = sa.create_engine(url)
+    _reset_postgres(engine)
     monkeypatch.chdir(tmp_path)
     uploads = tmp_path / "output" / "uploads"
     uploads.mkdir(parents=True)

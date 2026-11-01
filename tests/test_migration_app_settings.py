@@ -9,7 +9,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 
-from test_migration_stereo_layout import _alembic, _urls
+from test_migration_stereo_layout import _alembic, _reset_postgres, _urls
 
 REVISION = "20261101_0019"
 PREVIOUS = "20261031_0018"
@@ -23,6 +23,7 @@ def test_app_settings_migration_round_trips(tmp_path, monkeypatch, index):
     url = urls[index]
     config = _alembic(url, monkeypatch)
     engine = sa.create_engine(url)
+    _reset_postgres(engine)
     try:
         command.upgrade(config, REVISION)
         assert "app_settings" in sa.inspect(engine).get_table_names()
