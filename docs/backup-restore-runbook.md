@@ -18,11 +18,16 @@ What a full restore needs, and where each piece lives:
 
 `deploy/backup.sh` runs on the **host** (not in a container) from the repo checkout.
 
-1. Install rclone and add a remote for the private backup bucket (S3 provider `Cloudflare`, endpoint `https://<account-id>.r2.cloudflarestorage.com`, the **backup-only** R2 token):
+1. Install the current rclone from rclone.org, not the Debian package. Debian trixie ships 1.60.1, which follows every multipart upload with `HEAD ?versionId=…`; R2 answers 501, so each backup fails although the object was written.
+   ```bash
+   curl -fsSLO https://downloads.rclone.org/rclone-current-linux-amd64.deb
+   sudo apt-get install -y ./rclone-current-linux-amd64.deb && rclone version
+   ```
+   Then add a remote for the private backup bucket (S3 provider `Cloudflare`, endpoint `https://<account-id>.r2.cloudflarestorage.com`, the **backup-only** R2 token). `no_check_bucket` is needed because a bucket-scoped token cannot create buckets:
    ```bash
    rclone config create r2-backup s3 provider=Cloudflare \
      access_key_id=<backup-token-id> secret_access_key=<backup-token-secret> \
-     endpoint=https://<account-id>.r2.cloudflarestorage.com acl=private
+     endpoint=https://<account-id>.r2.cloudflarestorage.com no_check_bucket=true
    ```
 2. Create `/etc/echo-backup.env` (mode 600):
    ```bash

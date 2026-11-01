@@ -27,7 +27,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - the Tunnel public hostname, then `docker compose --profile tunnel up -d`;
   - the `media.<domain>` custom domain and `SX_MEDIA_BASE_URL`;
   - CORS, the Transform Rule, the Cache Rules and SSL/TLS.
-- Next on the VPS (no domain needed): the rclone remote for the backup token, the nightly cron with `BACKUP_SENTRY_CRON_URL`, and the restore drill (`docs/backup-restore-runbook.md`).
+- Next on the VPS (no domain needed): the restore drill (`docs/backup-restore-runbook.md`). The nightly backup to the private bucket runs since 2026-11-01.
 - Not confirmed: the 30-day lifecycle rule on the backup bucket.
 
 ### Cloudflare
@@ -115,7 +115,8 @@ A database backup is useless without the first three secrets (`docs/backup-resto
 Run these as a non-root sudo user on the VPS.
 
 ```bash
-# Docker Engine + compose plugin (docs.docker.com/engine/install/debian) and rclone, then:
+# Docker Engine + compose plugin (docs.docker.com/engine/install/debian) and rclone
+# from rclone.org (the Debian package is too old for R2; docs/backup-restore-runbook.md), then:
 sudo mkdir -p /opt/echo && sudo chown "$USER" /opt/echo
 git clone <repo-url> /opt/echo && cd /opt/echo
 cp deploy/env.example .env && chmod 600 .env    # fill in every <...>
