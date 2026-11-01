@@ -759,6 +759,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // screenDistance and all sizes track the live screenScale, so scale +
   // distance changes keep the control panel on the reel player.
   const DOCK_GAP = 0.08;
+  const DOCK_MAX_DROP_DEG = 25;
+  const DOCK_MIN_FLOOR_Y = 0.6;
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -808,8 +810,21 @@ window.WebXRVR = window.WebXRVR || (function () {
   // default screen spot, sized at DEFAULT_SCALE). UNLOCKED = free screen with
   // UI derived screen-relative at live screenScale. (The v8.4 tandem rig was
   // reverted per owner request.)
+  // Eye height captured once per XR session, so the room-fixed dock and side
+  // panels follow the viewer's real head height (seated or standing) instead
+  // of the fixed 1.52 m default. Cleared by resetXRSessionState.
+  let sessionEyeY = null;
+  const MIN_EYE_Y = 0.3;
   function getLockedAnchor() {
-    return { x: DEFAULT_POS.x, y: layoutTuning.screenHeight, z: -layoutTuning.screenDistance };
+    let y = layoutTuning.screenHeight;
+    if (y === DEFAULT_POS.y) {
+      if (sessionEyeY === null && xrSession) {
+        const eye = getHeadPosition().y;
+        if (Number.isFinite(eye) && eye >= MIN_EYE_Y) sessionEyeY = eye;
+      }
+      if (sessionEyeY !== null) y = sessionEyeY;
+    }
+    return { x: DEFAULT_POS.x, y, z: -layoutTuning.screenDistance };
   }
 
   function ensureScreenQuat() {
@@ -924,7 +939,12 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Legacy-exact: the transport panel stays fixed and level in the room
       // at the default screen spot while the locked screen follows the gaze.
       const a = getLockedAnchor();
-      pos = { x: a.x, y: a.y - layoutTuning.screenScale / 2 - layoutTuning.dockGap, z: a.z };
+      // The full screenScale/2 drop would put the dock ~33 deg below the eye
+      // line (near the floor); cap it at DOCK_MAX_DROP_DEG and keep it
+      // at least DOCK_MIN_FLOOR_Y above the floor (never above the eye line).
+      const drop = Math.min(layoutTuning.screenScale / 2 + layoutTuning.dockGap,
+        Math.abs(a.z) * Math.tan(DOCK_MAX_DROP_DEG * Math.PI / 180));
+      pos = { x: a.x, y: Math.max(a.y - drop, Math.min(DOCK_MIN_FLOOR_Y, a.y - 0.3)), z: a.z };
     } else {
       const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
@@ -9513,6 +9533,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     screenDistance = -DEFAULT_POS.z;
     layoutTuning = defaultLayoutTuning();
     isInitialPoseSet = false;
+    sessionEyeY = null;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
