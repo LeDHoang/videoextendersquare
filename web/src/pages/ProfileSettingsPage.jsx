@@ -500,7 +500,7 @@ export default function ProfileSettingsPage() {
                     <strong id="ps-delete-confirm-title">DELETE @{user.username.toUpperCase()}?</strong>
                     <button type="button" onClick={() => setDeleteConfirmOpen(false)} aria-label="Close">×</button>
                   </div>
-                  <div className="sx-ps-form">
+                  <div className="sx-post-editor-fields">
                     <p id="ps-delete-confirm-text" className="sx-ps-hint">Are you sure you want to delete your account? Your profile, posts, comments and viewing history are removed for good. This cannot be undone.</p>
                     <button type="button" className="sx-ps-btn sx-ps-btn--block" autoFocus onClick={() => setDeleteConfirmOpen(false)}>CANCEL, KEEP MY ACCOUNT</button>
                     <button type="button" className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block" onClick={confirmDeleteAccount}>YES, DELETE MY ACCOUNT</button>
