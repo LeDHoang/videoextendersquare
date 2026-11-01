@@ -73,7 +73,7 @@ docker compose exec -T postgres sh -c \
 
 ```bash
 docker compose up -d app
-docker compose exec app alembic current        # expect 20261031_0018 (head)
+docker compose exec app alembic current        # expect 20261101_0020 (head)
 ```
 
 ### 2. Avatars: untar into the data volume

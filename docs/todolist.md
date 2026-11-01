@@ -25,8 +25,16 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 - [x] Prod-env fixes (2026-09-20): `load_dotenv(override=False)` so environment beats stray `.env`; `/reels/immersive-preview` behind `RequireAuth`; rewards IP floor `max(10,…)` → min 1 via `reel_reward_ip_cap()`; `RUNNING.md` env table documents all new knobs (`SX_REGISTRATION_ALLOWLIST`, `SX_FAL_MAX_QUOTE_USD`, `SX_QUOTE_RPM`, `SX_PACK_CREATE_HOURLY`, `SX_PUBLISH_*`, `SX_STRIPE_WEBHOOK_*`, `SX_SSE_*`).
 - [x] Account deletion asks "are you sure" in a dialog, and erases recommendation and analytics data (2026-11-01, `c9849b2`): sessions, requests, impressions, dismissals, affinities, co-watch, view dedup and Reel Pack views are deleted; engagement events lose the user id, anonymous id and recommendation links. Covered by `tests/test_profile_beta.py` and `ProfileSettingsPage.test.jsx`.
 - [x] Restart test during queued, running and completed jobs, on a local throwaway backend (2026-11-01): queued job cancelled and refunded, in-flight and completed job ids 404, staged uploads dropped, new jobs accepted, as `docs/deploy-runbook.md` and `docs/incident-response.md` say. The R2 read-back of completed jobs needs the VPS (`docs/to-beta.md`).
+- [x] Deployed `20261101_0019` and `20261101_0020` (kill switches, device column) to the VPS with `9b307e5` (2026-11-01): schema `20261101_0020`, both switches on, anti-abuse env values added.
+- [x] Sentry no longer ships stack-frame locals (2026-11-01, `45f2d1d`): a production test error showed the raw ASGI scope, with cookies, auth and CSRF tokens, client IP and query string, inside frame variables. Request headers were already filtered and the release was set.
 
 ## Still open
+
+- [ ] VPS follow-ups from 2026-11-01 (details in `docs/to-beta.md`):
+  - Deploy `45f2d1d` and send the Sentry test error again. Review or delete older production error events, which may hold real cookies in frame variables.
+  - Run `~/setup-backup.sh <backup-bucket-name>` on the VPS with the backup-only R2 token.
+  - Restart during a completed job on the VPS, to check the R2 read-back.
+  - Run a paid video job and a 4K publish together on the VPS and watch API latency.
 
 - [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
 - [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
