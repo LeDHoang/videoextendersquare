@@ -495,7 +495,7 @@
       const ink = lit ? T.ink : (off ? T.inkMuted : T.ink2);
       if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surface3 : T.surface2);
       ctx.fillStyle = ink;
-      ctx.font = 'bold 18px ' + t.font.mono;
+      ctx.font = 'bold 26px ' + t.font.mono;
       ctx.textAlign = 'center';
       ctx.fillText(r.label, r.x + r.w / 2, r.y + r.h - 22);
       if (active) {

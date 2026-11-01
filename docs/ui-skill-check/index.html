@@ -199,10 +199,24 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <h3><span class="chip">High</span>VR text and targets are below legibility limits</h3>
     <dl>
       <dt>What</dt><dd>Dock labels render at 0.4–0.7° of visual angle; the minimum for comfortable reading is about 1°. The dock sits 3.11 m away, comments at 4.2 m, the guide at 4.0 m. EXIT and COMMENTS targets are 32px, about 1.9°.</dd>
-      <dt>Evidence</dt><dd><code>vr_ui_canvas.js:1683</code>, <code>:1697</code> use <code>bold 10px sans-serif</code>; dock fonts range 10–14px on the canvas texture.</dd>
+      <dt>Evidence</dt><dd>Dock action-tile captions are <code>bold 10px</code> (<code>vr_ui_canvas.js</code>, <code>renderControlsCanvas</code>), side pills and COLLECT 12px, scrub times 12px. Nav tab labels are <code>bold 18px</code> (<code>vr_shell_canvas.js</code>). The dock canvas gives 0.073° per pixel and the nav canvas 0.038° per pixel, so 10px is 0.73° and 18px is 0.68°.</dd>
       <dt>Fix</dt><dd>Size UI in degrees, not canvas pixels. Body text ≥ 1.2°, labels ≥ 1°, targets ≥ 2.5° with 0.5° gaps. Bring panels to 1.0–1.5 m, or scale the canvas so the same font reads larger. Drop ALL-CAPS mono for dock labels.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · text size, checked on the Quest 3S</h4>
+    <p><strong>Changed:</strong> dock action-tile captions 10 → 13px, side pill labels and the scrub times 12 → 13px and 14px (<code>vr_ui_canvas.js</code>), nav tab labels 18 → 26px (<code>vr_shell_canvas.js</code>). At the measured degrees per pixel that is about 0.95° for captions, 1.0° for scrub times and 0.98° for nav labels, up from 0.68–0.73°. The longest labels (SHARE, MESSAGES, CREDITS) still fit their tiles in the headset capture.</p>
+    <p><strong>Not done:</strong> body text is still under the 1.2° target, and the targets and the panel distances in this finding are unchanged. The angles are computed from the measured pixel-to-degree ratio, not re-measured. The scrub times are not in the after capture, because that reel has no scrub bar, so their fit is unchecked.</p>
+    <figure>
+      <img src="img/fix8-dock-text-before.jpg" alt="Stereo capture from the Quest 3S before the change: dock tile captions and nav labels are tiny." loading="lazy">
+      <figcaption>Before: tile captions at 10px, nav labels at 18px.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix8-dock-text-after.jpg" alt="Stereo capture from the Quest 3S after the change: dock tile captions and nav labels are larger and still fit." loading="lazy">
+      <figcaption>After: tile captions at 13px, nav labels at 26px.</figcaption>
+    </figure>
+  </section>
 
   <article class="finding high">
     <h3><span class="chip">High</span>UI panels draw through the video dome</h3>

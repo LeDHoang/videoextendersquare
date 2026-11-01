@@ -876,7 +876,7 @@
         if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
         else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, (isHover || lit) ? T.accent : T.ink2);
         ctx.fillStyle = ink;
-        ctx.font = `bold 12px ${TOKENS.font.mono}`;
+        ctx.font = `bold 13px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, btn.x + 46, cy);
@@ -915,7 +915,7 @@
         ((btn.action === 'save_reel' || btn.action === 'collect') && itemState.saved) ||
         (btn.action === 'follow' && itemState.following);
       const ink = bodyButton(btn, isHover, isPressed, lit);
-      ctx.font = `bold 10px ${TOKENS.font.mono}`;
+      ctx.font = `bold 13px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
       if (btn.action === 'collect') {
         drawIcon(ctx, 'collect', btn.x + btn.w / 2 - 34, cy, 22, ink);
@@ -951,7 +951,7 @@
       ctx.fillRect(trackBtn.x + trackBtn.w * progress - 3, ty - 9, 6, 18);
 
       ctx.fillStyle = T.ink3;
-      ctx.font = `12px ${TOKENS.font.mono}`;
+      ctx.font = `14px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
       ctx.fillText(formatTime(currentTime), 24, ty);
