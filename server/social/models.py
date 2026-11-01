@@ -71,6 +71,8 @@ class AuthSession(Base):
     csrf_hash = Column(String(64), nullable=False)
     user_agent = Column(String(300), nullable=False, default="")
     ip_hash = Column(String(64), nullable=False, default="")
+    # token_hash of the sx_device cookie at sign-in; device-wide quotas key on it.
+    device_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     last_used_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)

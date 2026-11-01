@@ -18,9 +18,9 @@ describe('PrivacyPage', () => {
 
   it('states the retention and cookie facts the server enforces', () => {
     renderPrivacy();
-    // SX_SESSION_DAYS default, anonymous viewer cookie max_age, rate-limit pruning (server/social/auth.py).
+    // SX_SESSION_DAYS default, anonymous viewer and device cookie max_age, rate-limit pruning (server/social/auth.py).
     expect(screen.getByText(/It lasts up to 30 days/)).toBeInTheDocument();
-    expect(screen.getByText(/It lasts 1 year/)).toBeInTheDocument();
+    expect(screen.getAllByText(/It lasts 1 year/)).toHaveLength(2);
     expect(screen.getByText('2 days.')).toBeInTheDocument();
     expect(screen.getByText(/we never receive or store them/)).toBeInTheDocument();
     expect(screen.getByText(/not end-to-end/)).toBeInTheDocument();

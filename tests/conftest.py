@@ -46,3 +46,11 @@ def _fresh_rate_limits():
     from server.social.auth import rate_limiter
 
     rate_limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def _roomy_device_limits(monkeypatch):
+    """Tests sign up several users from one TestClient cookie jar, which is one
+    device; tests/test_device_limits.py lowers these again."""
+    monkeypatch.setenv("SX_REGISTER_DEVICE_HOURLY", "1000")
+    monkeypatch.setenv("SX_REGISTER_DEVICE_DAILY", "1000")

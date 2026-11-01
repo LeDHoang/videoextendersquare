@@ -26,6 +26,7 @@ from .models import AuthSession, User, utcnow
 SESSION_COOKIE = "echo_session"
 CSRF_COOKIE = "echo_csrf"
 ANON_COOKIE = "echo_anon"
+DEVICE_COOKIE = "sx_device"
 SESSION_DAYS = max(1, int(os.environ.get("SX_SESSION_DAYS", "30")))
 COOKIE_SECURE = os.environ.get("SX_COOKIE_SECURE", "0").lower() in {"1", "true", "yes"}
 USERNAME_RE = re.compile(r"^[a-z0-9_]{3,30}$")
@@ -134,7 +135,7 @@ class AuthContext:
     session: AuthSession
 
 
-def create_auth_session(db: Session, user: User, request: Request) -> tuple[AuthSession, str, str]:
+def create_auth_session(db: Session, user: User, request: Request, device_hash: str = "") -> tuple[AuthSession, str, str]:
     session_token = secrets.token_urlsafe(40)
     csrf_token = secrets.token_urlsafe(24)
     client_ip = request_identity(request)
@@ -144,6 +145,7 @@ def create_auth_session(db: Session, user: User, request: Request) -> tuple[Auth
         csrf_hash=token_hash(csrf_token),
         user_agent=request.headers.get("user-agent", "")[:300],
         ip_hash=keyed_hash(client_ip) if client_ip else "",
+        device_hash=device_hash or None,
         expires_at=utcnow() + timedelta(days=SESSION_DAYS),
     )
     db.add(row)
@@ -307,11 +309,11 @@ def require_admin_csrf(context: AuthContext = Depends(require_auth_csrf)) -> Aut
 
 
 
-def _sign_anon_cookie(raw: str) -> str:
-    return f"{raw}.{keyed_hash('anon:' + raw)}"
+def _sign_anon_cookie(raw: str, purpose: str = "anon") -> str:
+    return f"{raw}.{keyed_hash(purpose + ':' + raw)}"
 
 
-def _verify_anon_cookie(value: str | None) -> str | None:
+def _verify_anon_cookie(value: str | None, purpose: str = "anon") -> str | None:
     """Return the raw cookie value if HMAC-valid, else None.
 
     Unsigned legacy values and forged signatures are rejected so bots
@@ -324,7 +326,7 @@ def _verify_anon_cookie(value: str | None) -> str | None:
     if not raw or not sig:
         return None
     try:
-        expected = keyed_hash("anon:" + raw)
+        expected = keyed_hash(purpose + ":" + raw)
     except Exception:
         return None
     if not hmac.compare_digest(sig, expected):
@@ -348,6 +350,31 @@ def ensure_anonymous_cookie(request: Request, response: Response) -> str:
         path="/",
     )
     return token_hash(raw)
+
+
+def device_cookie(request: Request) -> tuple[str, bool]:
+    """Return (raw device id, minted) for the signed ``sx_device`` cookie.
+
+    A security cookie apart from ``echo_anon``: it marks the browser for the
+    signup and quota limits shared by every account on it. A missing or forged
+    value gets a fresh id, which the caller sets with ``set_device_cookie``.
+    """
+    raw = _verify_anon_cookie(request.cookies.get(DEVICE_COOKIE), "device")
+    if raw:
+        return raw, False
+    return secrets.token_urlsafe(24), True
+
+
+def set_device_cookie(response: Response, raw: str) -> None:
+    response.set_cookie(
+        DEVICE_COOKIE,
+        _sign_anon_cookie(raw, "device"),
+        max_age=365 * 24 * 60 * 60,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
 
 
 def validate_origin(request: Request) -> None:

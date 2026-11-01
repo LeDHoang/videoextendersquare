@@ -147,7 +147,7 @@ def upload_video(
     live SSE progress streams) no longer stalls while it runs.
     """
     validate_origin(request)
-    quotas.check_upload_rate(db, context)
+    quotas.check_upload_rate(db, request, context)
     stage_id = uuid.uuid4().hex[:10]
     try:
         dest_path, size_bytes = SM.stage_upload_stream(

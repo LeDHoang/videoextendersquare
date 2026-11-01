@@ -107,6 +107,7 @@ export default function PrivacyPage() {
           <li><strong>Session cookie:</strong> keeps you signed in. It lasts up to 30 days, and you cannot read it with scripts.</li>
           <li><strong>Security (CSRF) cookie:</strong> protects your actions from forged requests. It lasts as long as your session.</li>
           <li><strong>Anonymous viewer cookie:</strong> a random ID that links viewing activity when you are not signed in, so view counts and recommendations work. It lasts 1 year.</li>
+          <li><strong>Device security cookie:</strong> a random ID for this browser, set when you sign up or sign in. It limits how many accounts one browser can create and makes all accounts on it share the same usage limits, to stop abuse. It lasts 1 year, and you cannot read it with scripts.</li>
           <li><strong>Browser storage:</strong> your browser keeps your display preferences (such as grid density and view mode), message drafts, and an action you started before signing in. These stay on your device.</li>
         </ul>
       </Section>

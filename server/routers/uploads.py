@@ -26,9 +26,9 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import kill_switch, media_store, metrics, output
+from server import kill_switch, media_store, metrics, output, quotas
 from server.jobs import JobStatus, job_manager
-from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
+from server.social.auth import AuthContext, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
 from server.social.services import MAX_POST_IMAGES, create_or_update_post, post_card
 
@@ -476,8 +476,8 @@ def publish_upload(
         daily_cap = max(1, int(os.environ.get("SX_PUBLISH_DAILY_MAX", "20")))
     except (TypeError, ValueError):
         daily_cap = 20
-    rate_limiter.check(db, f"publish-hour:{context.user.id}", hourly_cap, 60 * 60)
-    rate_limiter.check(db, f"publish-day:{context.user.id}", daily_cap, 24 * 60 * 60)
+    quotas.check_identity(db, request, context, "publish-hour", hourly_cap, 60 * 60)
+    quotas.check_identity(db, request, context, "publish-day", daily_cap, 24 * 60 * 60)
     _check_stereo_pointer(req, context)
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     extra_sources = _resolve_extra_images(req, request, context)

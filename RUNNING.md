@@ -142,7 +142,8 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_REGISTRATION_ENABLED` / `SX_REGISTRATION_ALLOWLIST` | `0` / invited emails | Invite-only beta |
 | `SX_ADMIN_USERS` / `SX_MODERATOR_USERS` | operator / _(empty)_ | Bootstrap only: sign-in raises a listed account to that role and never lowers it. Roles are stored in the database. Demote in `/moderation` → USERS, after removing the account from the list |
 | `SX_MAX_VIDEO_UPLOAD_MB` / `SX_MAX_IMAGE_UPLOAD_MB` | `95` / `50` | Upload size caps (95 MB stays under Cloudflare's 100 MB request limit) |
-| `SX_UPLOAD_HOURLY_MAX` | `30` | Uploads per user per hour |
+| `SX_UPLOAD_HOURLY_MAX` | `30` | Uploads per user per hour, shared by every account on one browser (`sx_device` cookie), 4x per IP. Publish, MAKE 3D and Explore-preview limits work the same way |
+| `SX_REGISTER_DEVICE_HOURLY` / `SX_REGISTER_DEVICE_DAILY` | `3` / `5` | Signups per browser (`sx_device` cookie) per hour / day, on top of 5/hour per IP |
 | `SX_VIDEO_WORKERS` / `SX_IMAGE_WORKERS` | `1` / `2` | Job concurrency |
 | `SX_MAX_PENDING_JOBS` / `SX_MAX_JOBS_PER_USER` | `6` / `2` | Queue caps (429 when full) |
 | `SX_STAGED_BYTES_MAX` | e.g. `2147483648` | Total bytes held in staged uploads |

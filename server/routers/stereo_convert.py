@@ -21,7 +21,7 @@ from server import kill_switch, output, quotas
 from server.features import feature_enabled, stereo_convert_installed
 from server.jobs import QueueFull, job_manager
 from server.routers.uploads import _resolve_source
-from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, validate_origin
+from server.social.auth import AuthContext, require_auth_csrf, validate_origin
 from server.social.database import get_db
 
 router = APIRouter(prefix="/api/stereo", tags=["stereo"])
@@ -75,7 +75,7 @@ def convert_to_3d(
         raise _reject("SOURCE_TOO_LONG", f"MAKE 3D takes videos up to {sw.MAX_VIDEO_SECONDS}s.")
 
     kill_switch.require_open(db, paid=False)
-    rate_limiter.check(db, f"stereo-convert:{context.user.id}", CONVERTS_PER_HOUR, 60 * 60)
+    quotas.check_identity(db, request, context, "stereo-convert", CONVERTS_PER_HOUR, 60 * 60)
     try:
         job_id = job_manager.reserve_job(kind=req.kind, owner_id=context.user.id)
     except QueueFull as ex:

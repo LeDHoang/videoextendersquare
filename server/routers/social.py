@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from server import settings
+from server.settings import env_int
 from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
@@ -30,6 +31,7 @@ from server.social.auth import (
     aware,
     clear_auth_cookies,
     create_auth_session,
+    device_cookie,
     ensure_anonymous_cookie,
     get_optional_auth,
     hash_password,
@@ -42,6 +44,7 @@ from server.social.auth import (
     require_auth,
     require_auth_csrf,
     set_auth_cookies,
+    set_device_cookie,
     token_hash,
     validate_origin,
     validate_csrf,
@@ -529,6 +532,12 @@ def register(
     if not is_open and not is_registration_allowlisted(email_for_gate):
         error(403, "REGISTRATION_DISABLED", "New account registration is disabled.")
     rate_limiter.check(db, f"register-ip:{request_identity(request)}", 5, 60 * 60)
+    # One browser cannot farm accounts by rotating emails: the signed device cookie
+    # survives across signups (clearing it still leaves the IP limit above).
+    device_raw, device_minted = device_cookie(request)
+    device_hash = token_hash(device_raw)
+    rate_limiter.check(db, f"register-device:{device_hash}", env_int("SX_REGISTER_DEVICE_HOURLY", 3, minimum=1), 60 * 60)
+    rate_limiter.check(db, f"register-device-day:{device_hash}", env_int("SX_REGISTER_DEVICE_DAILY", 5, minimum=1), 24 * 60 * 60)
     if req.accept_terms is not True:
         error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
     verify_turnstile(req.turnstile_token, request_identity(request))
@@ -567,7 +576,10 @@ def register(
     db.refresh(user)
     raw_token = _issue_verification_token(db, user)
     background_tasks.add_task(_deliver_verification_email, email, raw_token)
-    return _verification_accepted(raw_token)
+    response = _verification_accepted(raw_token)
+    if device_minted:
+        set_device_cookie(response, device_raw)
+    return response
 
 
 @router.post("/api/auth/verify-email")
@@ -591,9 +603,12 @@ def verify_email(req: VerifyEmailRequest, request: Request, db: Session = Depend
     ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
     db.commit()
     db.refresh(user)
-    _session, session_token, csrf_token = create_auth_session(db, user, request)
+    device_raw, device_minted = device_cookie(request)
+    _session, session_token, csrf_token = create_auth_session(db, user, request, token_hash(device_raw))
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
+    if device_minted:
+        set_device_cookie(response, device_raw)
     return response
 
 
@@ -642,9 +657,12 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     if user.status == "suspended":
         error(403, "ACCOUNT_SUSPENDED", "This account is suspended. You can appeal on the Support page.")
     bootstrap_role(user)
-    _session, session_token, csrf_token = create_auth_session(db, user, request)
+    device_raw, device_minted = device_cookie(request)
+    _session, session_token, csrf_token = create_auth_session(db, user, request, token_hash(device_raw))
     response = JSONResponse({"user": private_user(user)})
     set_auth_cookies(response, session_token, csrf_token)
+    if device_minted:
+        set_device_cookie(response, device_raw)
     return response
 
 
