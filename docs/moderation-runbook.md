@@ -203,3 +203,29 @@ Gaps found:
 - **Open:** `reinstate_user` on an already-reviewed report keeps the original
   `moderator_id`, so `handled_by` shows who suspended, not which admin reinstated. The
   reinstating admin's id is in the app log only (`Admin ... reinstated user ...`).
+
+### 2026-11-01 — local throwaway backend (kill switch)
+
+Scope: the kill switches from `docs/incident-response.md` §First 15 minutes, on a throwaway
+backend (SQLite at `20261101_0020`, credits on, a dummy fal key, so no fal call was made).
+`liveadmin` (admin) flipped the switches; a new account held a running free job. The API
+steps were scripted (31 checks, all passed); the Kill switches card on `/moderation` was
+then checked in the browser.
+
+| Step | Result |
+|---|---|
+| Queue a free job, then turn `free` off with "cancel running jobs" | 200 with `cancelled: 1`; the job ended `cancelled` |
+| New free job, publish, Explore preview | 503 `FREE_USAGE_PAUSED` for all three |
+| Paid job while `free` is off | Not blocked by the switch (it reached the new-account daily cap, 429 `DAILY_SPEND_CAP`) |
+| `/api/config` | `processing: {free: false, paid: true}` |
+| Non-admin flips a switch | 403 |
+| Turn `all` off | Upload 503 `PROCESSING_PAUSED` |
+| Restart the app | Both switches still off |
+| Audit | One `system.kill_switch` row per flip, with the reason |
+| Restore both | Upload 200 again |
+| Browser | PAUSE asks for a reason and offers to cancel jobs; the card showed PAUSED / RESUME, and RESUME restored it |
+
+Gaps found:
+
+- **Known:** cancelling a running job is cooperative, like a user cancel. The job stops, and
+  its queue slot frees, at the worker's next checkpoint, not at once.
