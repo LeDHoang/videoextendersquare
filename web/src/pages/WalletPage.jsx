@@ -299,12 +299,12 @@ export default function WalletPage() {
         {!wallet ? <div className="sx-ps-hint" role="status">Loading your balance…</div> : null}
       </section>
 
-      <Panel title="ADD CREDITS" note="INSTANT ALLOCATION AFTER PAYMENT" id="add-credits">
+      <Panel title="ADD CREDITS" note={creditsReady ? 'INSTANT ALLOCATION AFTER PAYMENT' : null} id="add-credits">
         {catalogStatus === 'failed' ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">CREDIT PACKS UNAVAILABLE — RELOAD TO RETRY</div> : null}
         {catalogStatus === 'loading' ? <div className="sx-ps-hint" role="status">Loading credit packs…</div> : null}
-        {catalog && !creditsReady ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">ECHO CREDITS ARE DISABLED IN THIS ENVIRONMENT</div> : null}
+        {catalog && !creditsReady ? <p className="sx-cr-copy">Buying credits isn't available yet. You can still use free tools.</p> : null}
         {catalog && creditsReady && !stripeReady ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">STRIPE CHECKOUT IS DISABLED IN THIS ENVIRONMENT</div> : null}
-        {packs.length ? (
+        {creditsReady && packs.length ? (
           <div className="sx-cr-packs">
             {packs.map((pack) => {
               const bonus = Math.max(0, Number(pack.credits) - Number(pack.amount_cents));

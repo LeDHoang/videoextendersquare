@@ -49,6 +49,9 @@ describe('SupportPage', () => {
     send();
     expect(mocks.api.post).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toBeInTheDocument();
+    const email = screen.getByLabelText('EMAIL');
+    expect(email).toHaveAttribute('aria-invalid', 'true');
+    expect(email).toHaveAccessibleDescription(screen.getByRole('alert').textContent);
   });
 
   it('submits a signed-out appeal and shows the request id', async () => {

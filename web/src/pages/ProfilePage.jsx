@@ -371,7 +371,11 @@ export default function ProfilePage() {
   };
 
   if (error && !profile) {
-    return <EmptyState title="PROFILE UNAVAILABLE" text={error} hint={'@' + username} />;
+    return (
+      <EmptyState title="PROFILE UNAVAILABLE" text={error} hint={'@' + username}>
+        <Link className="sx-btn" to="/explore">BACK TO EXPLORE</Link>
+      </EmptyState>
+    );
   }
 
   return (
@@ -432,6 +436,8 @@ export default function ProfilePage() {
                   <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={blockProfile}>BLOCK</button>
                 </>
               )}
+              {/* The SHARE label swap is visual only; this announces it. */}
+              <span className="sx-sr-only" aria-live="polite">{shareLabel}</span>
             </div>
             <div className="sx-pf-stats" role="group" aria-label="Profile statistics">
               <button type="button" className="sx-pf-stat sx-pf-stat--link sx-pf-stat--lead" onClick={() => setDialog('followers')}>

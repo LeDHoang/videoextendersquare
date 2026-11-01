@@ -21,6 +21,7 @@ import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const SORT_OPTIONS = [
   { label: 'TOP', value: 'trending' },
@@ -121,6 +122,8 @@ export default function LocationExplorePage() {
   }, [packDiscoveryEnabled, requestedKey, refreshKey]);
 
   const location = data?.location;
+  // The route only knows the slug ("tokyo--japan"); title the tab with the place name once it loads.
+  useDocumentTitle(location?.name || 'Location');
   const displayName = (location?.name || requestedKey).toUpperCase();
   const locationSlug = location?.slug || requestedKey;
   const relatedLocations = data?.related_locations || [];

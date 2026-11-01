@@ -20,10 +20,12 @@ export default class ErrorBoundary extends Component {
   render() {
     if (this.state.error) {
       if (this.props.fallback) return this.props.fallback;
+      // React 19 already logs caught errors to the console; users get a plain message, not the raw error.
       return (
-        <div className="sx-error-box">
+        <div className="sx-error-box" role="alert">
           <div className="sx-error-title">SOMETHING WENT WRONG</div>
-          <div>{String(this.state.error?.message || this.state.error)}</div>
+          <p>This part of the page stopped working. Reloading usually fixes it.</p>
+          <button type="button" className="sx-btn" onClick={() => window.location.reload()}>RELOAD PAGE</button>
         </div>
       );
     }

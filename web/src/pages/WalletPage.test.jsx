@@ -175,11 +175,12 @@ describe('WalletPage', () => {
       screen.getAllByRole('button', { name: /^Buy / }).forEach((button) => expect(button).toBeDisabled());
     });
 
-    it('disables purchases when credits are disabled', () => {
+    it('replaces the packs with one explanation when credits are disabled', () => {
       mocks.wallet = makeWallet({ catalog: { credits_enabled: false, stripe_enabled: true, packs: PACKS } });
       renderPage();
-      expect(screen.getByText(/ECHO CREDITS ARE DISABLED/)).toBeInTheDocument();
-      screen.getAllByRole('button', { name: /^Buy / }).forEach((button) => expect(button).toBeDisabled());
+      expect(screen.getByText("Buying credits isn't available yet. You can still use free tools.")).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Buy / })).not.toBeInTheDocument();
+      expect(screen.queryByText('★ MOST POPULAR')).not.toBeInTheDocument();
     });
 
     it('surfaces a catalog load failure', () => {

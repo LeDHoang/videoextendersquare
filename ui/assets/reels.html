@@ -35,8 +35,8 @@
     --sx-success-hi: #4ade80;
     --sx-warn: #f2c744;
     --sx-warn-hi: #fde047;
-    --sx-danger: #ef4444;
-    --sx-danger-hi: #f87171;
+    --sx-danger: #f43f5e;
+    --sx-danger-hi: #fb7185;
     --sx-info: #3b82f6;
     --sx-info-hi: #60a5fa;
     --sx-font-display: 'Archivo Black', Archivo, sans-serif;
@@ -249,6 +249,18 @@
     height: 100%;
     background: #000;
     z-index: 2;
+  }
+  /* Bottom scrim so the creator, caption and time stay legible on bright frames. */
+  .reels-video-wrap::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: min(220px, 45%);
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.6) 65%);
+    pointer-events: none;
+    z-index: 1;
   }
   .reels-video-wrap video {
     width: 100%;
@@ -483,8 +495,8 @@
     margin: 0;
   }
   .action-btn {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     border-radius: 8px;
     background: var(--sx-surface-2);
     border: 1px solid var(--sx-rule);
@@ -726,14 +738,15 @@
     border: 0;
     padding: 0;
     background: transparent;
-    color: var(--sx-accent);
-    font: 700 10px/1.2 'JetBrains Mono', monospace;
+    color: var(--sx-ink);
+    font: 700 13px/1.2 'JetBrains Mono', monospace;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
     letter-spacing: 0.06em;
     cursor: pointer;
     pointer-events: auto;
     text-align: left;
   }
-  .meta-creator:hover { color: var(--sx-ink); text-decoration: underline; }
+  .meta-creator:hover { color: var(--sx-accent); text-decoration: underline; }
 
   .reels-meta {
     position: absolute;
@@ -769,7 +782,7 @@
     letter-spacing: 0.06em;
   }
   .meta-title {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--sx-ink);
     line-height: 1.3;
@@ -777,8 +790,9 @@
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   }
   .meta-sub {
-    font-size: 10px;
-    color: var(--sx-ink-3);
+    font-size: 13px;
+    color: var(--sx-ink-2);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
     display: flex;
     gap: 8px;
   }
@@ -1472,6 +1486,25 @@
     color: var(--sx-ink);
     box-shadow: 0 0 16px rgba(168, 85, 247, 0.35);
   }
+  /* Promoted Enter VR (headset browsers): a labelled pill above the rail, right-aligned with it. */
+  .reels-actions:has(> .vr-rail-promoted) {
+    align-items: flex-end;
+  }
+  #vrBtnWrap.vr-rail-promoted {
+    padding: 4px;
+    border-radius: 12px;
+    background: rgba(13, 14, 16, 0.9);
+  }
+  #reelsActions .vr-rail-promoted #vrBtn {
+    width: auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 0 12px;
+  }
+  #reelsActions .vr-rail-promoted #vrBtn .action-btn-label {
+    display: inline;
+    font-size: 12px;
+  }
   .vr-active .reels-badge {
     background: #7C3AED;
   }
@@ -1482,7 +1515,7 @@
   /* ── Responsive: compact rail + overlays on narrow / short viewports ──
      The action column (~500px tall at 44px buttons) overflows phone-sized
      square frames, whose overflow:hidden guillotines it. Compact mode
-     shrinks the rail to fit instead. */
+     tightens the gaps and lets the rail scroll; buttons stay 44px. */
   @media (max-width: 480px), (max-height: 600px) {
     .reels-actions {
       right: 8px;
@@ -1500,8 +1533,8 @@
       padding: 2px;
     }
     .action-btn {
-      width: 30px;
-      height: 30px;
+      width: 44px;
+      height: 44px;
     }
     .action-btn .btn-icon,
     .action-btn .btn-icon svg {
@@ -1556,13 +1589,9 @@
     }
   }
 
-  /* Phones: 10-button rail still exceeds ~331px frames at 36px, so drop
-     to 32px and park the bulk-cache utility (auto-preload keeps working). */
+  /* Phones: keep 44px touch targets (the rail scrolls if it must) and park
+     the bulk-cache utility (auto-preload keeps working). */
   @media (max-width: 480px) {
-    .action-btn {
-      width: 28px;
-      height: 28px;
-    }
     .action-btn .btn-icon,
     .action-btn .btn-icon svg {
       width: 14px;
@@ -1778,7 +1807,8 @@
     right: auto;
     z-index: auto;
   }
-  #sxReelsHost.sx-reels-docked .reels-meta {
+  #sxReelsHost.sx-reels-docked .reels-meta,
+  #sxReelsHost.sx-reels-docked .reels-video-wrap::after {
     display: none;
   }
   .reels-side {
@@ -5402,6 +5432,7 @@
       });
     }
 
+    let drawerOpener = null;
     function toggleDrawer(open) {
       if (!commentsDrawer) return;
       if (isDocked) {
@@ -5420,6 +5451,8 @@
       }
       const willOpen = (typeof open === 'boolean') ? open : !commentsDrawer.classList.contains('open');
       if (willOpen) {
+        const opener = document.activeElement;
+        drawerOpener = (opener && opener !== document.body && !commentsDrawer.contains(opener)) ? opener : commentBtn;
         commentsDrawer.classList.add('open');
         commentBtn.classList.add('active');
         commentBtn.setAttribute('aria-expanded', 'true');
@@ -5429,6 +5462,13 @@
         commentsDrawer.classList.remove('open');
         commentBtn.classList.remove('active');
         commentBtn.setAttribute('aria-expanded', 'false');
+        // Focus inside the closing drawer would be left on hidden controls; hand it back to the opener.
+        const focused = document.activeElement;
+        if (!focused || focused === document.body || commentsDrawer.contains(focused)) {
+          const target = (drawerOpener && document.contains(drawerOpener)) ? drawerOpener : commentBtn;
+          try { target.focus({ preventScroll: true }); } catch (focusError) {}
+        }
+        drawerOpener = null;
       }
       updateTwitchTicker();
     }
@@ -5657,7 +5697,9 @@
     }
 
     function loadVideo(index, options) {
-      const loadOptions = options || {};
+      const loadOptions = Object.assign({}, options);
+      // Reduced motion: reels (and image dwell timers) start paused; tap or Space plays.
+      if (prefersReducedMotion() && !vrPresenting()) loadOptions.autoplay = false;
       if (collectOpen) closeCollectOverlay();
       hideError();
       // Drop the previous image post's slideshow; showImage sets up the next one.
@@ -7199,12 +7241,23 @@
             if (supported || isLocalHost) {
               vrBtnWrap.style.display = '';
             }
+            if (supported) promoteVrButton();
           }).catch(() => {
             if (isLocalHost) vrBtnWrap.style.display = '';
           });
         } else if (isLocalHost) {
           vrBtnWrap.style.display = '';
         }
+      }
+      // On a headset browser (immersive-vr supported) Enter VR is the main action, so it leaves the
+      // More menu for a labelled button at the top of the rail.
+      function promoteVrButton() {
+        const railPrimary = document.getElementById('railPrimary');
+        if (!railPrimary || vrBtnWrap.classList.contains('vr-rail-promoted')) return;
+        railPrimary.parentElement.insertBefore(vrBtnWrap, railPrimary);
+        vrBtnWrap.classList.add('vr-rail-promoted');
+        const label = vrBtn && vrBtn.querySelector('.action-btn-label');
+        if (label) label.textContent = 'ENTER VR';
       }
       refreshVrButton();
       if (typeof navigator !== 'undefined' && navigator.xr && navigator.xr.addEventListener) {

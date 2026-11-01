@@ -257,7 +257,7 @@ export default function ReelsPlayer({
             role="img"
             aria-label="Interactive desktop preview of the immersive Reels scene"
           />
-          <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount sx-immersive-preview-source" aria-hidden="true" />
+          <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount sx-immersive-preview-source" inert />
         </div>
       ) : (
         <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount" />

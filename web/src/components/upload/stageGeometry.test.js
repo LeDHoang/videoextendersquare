@@ -56,7 +56,7 @@ describe('labels', () => {
   });
 
   it('summarises the configured pipeline', () => {
-    expect(pipelineSummary({})).toBe('AWAITING SOURCE');
+    expect(pipelineSummary({})).toBe('ADD A VIDEO OR IMAGES TO START');
     expect(pipelineSummary({ kind: 'image', path: 'skip' })).toBe('AS-IS · NO EXTEND');
     expect(pipelineSummary({ kind: 'video', outpaintLabel: 'LTX 2.3 Quality', engine: 'FAL AI', upscaleLabel: 'Bytedance Upscaler', bytedanceRes: '4k' }))
       .toBe('OUTPAINT: LTX 2.3 QUALITY · UPSCALE: BYTEDANCE UPSCALER 4K');

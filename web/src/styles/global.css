@@ -1941,6 +1941,11 @@ button:hover .sx-sidebar-hero-logo,
     display: block;
   }
 
+  /* The message launcher and dock sit under the backdrop while the drawer is open, not over the drawer. */
+  body:has(.sx-sidebar.sx-open) :is(.sx-message-launcher, .sx-message-dock) {
+    z-index: calc(var(--sx-z-drawer-backdrop) - 1);
+  }
+
   .sx-main {
     padding: var(--sx-4) var(--sx-3) var(--sx-8);
   }
@@ -2199,6 +2204,18 @@ button:hover .sx-sidebar-hero-logo,
   max-width: 500px;
   margin-left: auto;
   margin-right: auto;
+}
+
+.sx-empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sx-3);
+  margin-top: var(--sx-4);
+}
+
+.sx-empty-state-actions .sx-btn {
+  text-decoration: none;
 }
 
 /* Blocking banner */
@@ -4980,6 +4997,22 @@ body.sx-vr-active .sx-reels-mount,
   cursor: pointer;
 }
 
+/* Keyboard focus gets a ring the pointer hover does not (reel and pack tiles share this class). Tiles sit
+   edge to edge and the picture fills them, so the ring is drawn inside, over the media. */
+.sx-explore-tile:focus-visible {
+  outline: none;
+}
+
+.sx-explore-tile:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: var(--sx-focus-ring);
+  box-shadow: var(--sx-focus-halo);
+  pointer-events: none;
+}
+
 .sx-explore-tile:hover .sx-explore-video,
 .sx-explore-tile:focus-visible .sx-explore-video {
   transform: scale(1.04);
@@ -5687,7 +5720,11 @@ button.sx-explore-loc-link:hover {
   font-size: 0.72rem;
 }
 
-.sx-account-popover button {
+.sx-account-popover :is(a, button) {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  text-decoration: none;
   width: 100%;
   min-height: 38px;
   padding: 0 12px;
@@ -5706,7 +5743,7 @@ button.sx-explore-loc-link:hover {
   color: var(--sx-accent-hi);
 }
 
-.sx-account-popover button:hover {
+.sx-account-popover :is(a, button):hover {
   background: var(--sx-surface-hover);
   color: var(--sx-ink);
 }
@@ -7354,6 +7391,14 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   flex-direction: column;
 }
 
+/* 44px close target (the bare glyph was 19×13). */
+.sx-share-dialog > header button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1.4rem;
+}
+
 .sx-share-dialog > header small,
 .sx-share-dialog > header strong {
   max-width: 650px;
@@ -7468,10 +7513,16 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 .sx-share-delivery .sx-fail { color: var(--sx-danger); }
 .sx-share-status { padding: 0 14px 14px; color: var(--sx-ink-3); }
 
-.sx-share-recipients > button:last-child {
+/* Primary only once someone is selected; "SEND TO 0" stays a plain outlined button. */
+.sx-share-recipients > button:last-child:not(:disabled) {
   padding: 9px 13px;
   background: var(--sx-accent);
   color: #0a0a0a;
+}
+
+.sx-share-recipients > button:disabled {
+  color: var(--sx-ink-3);
+  cursor: not-allowed;
 }
 
 @media (max-width: 900px) {
@@ -7807,6 +7858,21 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   display: inline-flex;
   font-size: 0.9rem;
   line-height: 1;
+}
+
+/* Explore on phones: the FILTER toggle hides stats, tags and filters so the grid comes first. */
+.sx-explore-filter-toggle {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .sx-explore-filter-toggle {
+    display: inline-flex;
+  }
+
+  .sx-explore-filters:not(.sx-open) {
+    display: none;
+  }
 }
 
 /* Telemetry strip */
@@ -10926,7 +10992,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   overflow: hidden;
   border-radius: 50%;
   border: 1.5px solid rgba(255, 255, 255, 0.35);
-  color: #fff;
+  /* Dark initials like the other avatars: white on the default #ff3b1f is 3.56:1, this is 5.6:1. */
+  color: #08090a;
   font: 800 12px/1 'JetBrains Mono', ui-monospace, monospace;
 }
 

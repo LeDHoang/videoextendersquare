@@ -97,7 +97,7 @@ export function formatClock(seconds) {
 
 // One-line description of the configured pipeline for the studio banner.
 export function pipelineSummary({ kind, path = 'extend', upscaleOnly, outpaintLabel, engine, upscaleLabel, bytedanceRes }) {
-  if (!kind) return 'AWAITING SOURCE';
+  if (!kind) return 'ADD A VIDEO OR IMAGES TO START';
   if (path === 'skip') return 'AS-IS · NO EXTEND';
   const parts = [];
   if (!upscaleOnly) parts.push(`OUTPAINT: ${(outpaintLabel || 'STOCK').toUpperCase()}`);

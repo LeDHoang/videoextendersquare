@@ -91,6 +91,32 @@ describe('ProfileSettingsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/valid website/);
   });
 
+  it('puts a field-specific save error under that field and links it to the input', async () => {
+    const error = Object.assign(new Error('Enter a valid website such as example.com or https://example.com.'), {
+      detail: { field: 'website' },
+    });
+    mocks.api.patch.mockRejectedValue(error);
+    renderPage();
+    const website = screen.getByLabelText('WEBSITE / PORTFOLIO');
+    fireEvent.change(website, { target: { value: 'nope' } });
+    fireEvent.click(screen.getByRole('button', { name: /UPDATE PROFILE/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/valid website/);
+    expect(website).toHaveAttribute('aria-invalid', 'true');
+    expect(website).toHaveAccessibleDescription(/valid website/);
+    fireEvent.change(website, { target: { value: 'example.com' } });
+    expect(website).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('says why account deletion is locked until both fields are filled', () => {
+    renderPage();
+    const remove = screen.getByRole('button', { name: 'DELETE ACCOUNT' });
+    expect(remove).toHaveAccessibleDescription('Enter your password and type your username to delete.');
+    fireEvent.change(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-delete-password' }), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByLabelText(/TO AUTHORIZE/), { target: { value: 'echodev' } });
+    expect(remove).toBeEnabled();
+    expect(screen.queryByText('Enter your password and type your username to delete.')).not.toBeInTheDocument();
+  });
+
   it('restricts a handle (stripping @) and refreshes the blocked list', async () => {
     mocks.api.put.mockResolvedValue({ blocked: true });
     renderPage();
@@ -111,7 +137,7 @@ describe('ProfileSettingsPage', () => {
     fireEvent.change(screen.getByLabelText('NEW PASSWORD'), { target: { value: 'a-much-longer-1!' } });
     expect(change).toBeEnabled();
 
-    const terminate = screen.getByRole('button', { name: /TERMINATE PROFILE/ });
+    const terminate = screen.getByRole('button', { name: 'DELETE ACCOUNT' });
     fireEvent.change(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-delete-password' }), { target: { value: 'pw' } });
     expect(terminate).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/TO AUTHORIZE/), { target: { value: 'echodev' } });
@@ -198,7 +224,7 @@ describe('ProfileSettingsPage', () => {
   function armDelete(password = 'pw-correct-1', typed = 'echodev') {
     fireEvent.change(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-delete-password' }), { target: { value: password } });
     fireEvent.change(screen.getByLabelText(/TO AUTHORIZE/), { target: { value: typed } });
-    return screen.getByRole('button', { name: /TERMINATE PROFILE/ });
+    return screen.getByRole('button', { name: 'DELETE ACCOUNT' });
   }
 
   it('does not delete when the typed handle is wrong, even with a password', () => {
@@ -239,6 +265,6 @@ describe('ProfileSettingsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Current password is incorrect.');
     expect(mocks.hardRedirect).not.toHaveBeenCalled();
     expect(mocks.auth.setUser).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /TERMINATE PROFILE/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'DELETE ACCOUNT' })).toBeEnabled();
   });
 });

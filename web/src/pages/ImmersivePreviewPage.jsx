@@ -85,7 +85,7 @@ export default function ImmersivePreviewPage() {
   const [renderer, setRenderer] = useState(null);
   const [view, setView] = useState('3D SCENE');
   const [hiFi, setHiFi] = useState(true);
-  const [fov, setFov] = useState('DESKTOP 70°');
+  const [fov, setFov] = useState('QUEST 3 96°');
   const [tuning, setTuning] = useState(null);
   const [copied, setCopied] = useState(false);
   // ReelsPlayer keeps the onPreviewReady from its first render, and every
@@ -172,14 +172,6 @@ export default function ImmersivePreviewPage() {
         </div>
       </Hero>
 
-      <AccentBlock
-        title="PREVIEW SCOPE"
-        lines={[
-          'This view uses the same scene geometry, shaders, live reel, panels, Earth data, and callbacks as the Quest WebXR session.',
-          'It is a scene/layout parity tool. It does not emulate Quest optics, tracking quality, thermal limits, or headset frame-time performance.',
-        ]}
-      />
-
       <div className="sx-immersive-preview-toolbar" aria-label="Preview view">
         <Segmented
           ariaLabel="Preview view"
@@ -187,113 +179,21 @@ export default function ImmersivePreviewPage() {
           value={view}
           onChange={switchView}
         />
-      </div>
-
-      {view === 'FLAT PANELS' ? (
-        <Suspense fallback={<Mono>LOADING PANEL WORKBENCH…</Mono>}>
-          <VRPanelWorkbench />
-        </Suspense>
-      ) : null}
-
-      {view === '3D SCENE' ? (
-        <>
-          <div className="sx-immersive-preview-toolbar" aria-label="Immersive preview controls">
-            <div className="sx-control-group">
-              <Button
-                primary={previewState.sceneMode === 'reels'}
-                disabled={!renderer}
-                onClick={() => invoke('setSceneMode', 'reels')}
-              >
-                REELS
-              </Button>
-              <Button
-                primary={previewState.sceneMode === 'earth'}
-                disabled={!renderer}
-                onClick={() => invoke('setSceneMode', 'earth')}
-              >
-                EARTH ACTIVITY
-              </Button>
-            </div>
-            <div className="sx-control-group" role="group" aria-label="Curvature Mode">
-              <Button
-                primary={isCurvatureActive(previewState.curvatureMode, 'dome')}
-                disabled={!renderer}
-                onClick={() => invoke('setCurvatureMode', 'dome')}
-              >
-                DOME
-              </Button>
-              <Button
-                primary={isCurvatureActive(previewState.curvatureMode, 'sq_curve')}
-                disabled={!renderer}
-                onClick={() => invoke('setCurvatureMode', 'sq_curve')}
-              >
-                SQ CURVE
-              </Button>
-              <Button
-                primary={isCurvatureActive(previewState.curvatureMode, 'flat')}
-                disabled={!renderer}
-                onClick={() => invoke('setCurvatureMode', 'flat')}
-              >
-                FLAT
-              </Button>
-            </div>
-            <div className="sx-control-group">
-              <Button
-                primary={previewState.cameraMode === 'headset'}
-                disabled={!renderer}
-                onClick={() => invoke('setPreviewCameraMode', 'headset')}
-              >
-                HEADSET POV
-              </Button>
-              <Button
-                primary={previewState.cameraMode === 'orbit'}
-                disabled={!renderer}
-                onClick={() => invoke('setPreviewCameraMode', 'orbit')}
-              >
-                ORBIT INSPECT
-              </Button>
-            </div>
-            <div className="sx-control-group" role="group" aria-label="VR shell pages">
-              {SHELL_PAGES.map(([label, path]) => (
-                <Button
-                  key={label}
-                  primary={shellTab(previewState.shell) === label}
-                  disabled={!renderer?.shell}
-                  onClick={() => { renderer.shell.open(path(user)); syncState(); }}
-                >
-                  {label}
-                </Button>
-              ))}
-              <Button disabled={!previewState.shell} onClick={() => { renderer.shell.close(); syncState(); }}>CLOSE SHELL</Button>
-            </div>
-            <div className="sx-control-group">
-              <Button disabled={!renderer?.shell} onClick={() => { renderer.shell.share(); syncState(); }}>SHARE REEL</Button>
-              {/* Sample reel-reward reply so the wallet's progress line can be reviewed. */}
-              <Button
-                disabled={!renderer?.shell}
-                onClick={() => { renderer.shell.noteReward({ progress: 7, remaining: 3 }); renderer.shell.open('/wallet'); syncState(); }}
-              >
-                REWARD PROGRESS
-              </Button>
-            </div>
-            <ToggleRow
-              label="SIDE-BY-SIDE STEREO"
-              checked={previewState.stereo}
-              onChange={(enabled) => invoke('setPreviewStereo', enabled)}
+        {view === '3D SCENE' ? (
+          <>
+            <Segmented
+              ariaLabel="Scene"
+              options={['REELS', 'EARTH ACTIVITY']}
+              value={previewState.sceneMode === 'earth' ? 'EARTH ACTIVITY' : 'REELS'}
+              disabled={!renderer}
+              onChange={(label) => invoke('setSceneMode', label === 'REELS' ? 'reels' : 'earth')}
             />
-            <ToggleRow
-              label="REDUCED MOTION"
-              checked={previewState.reducedMotion}
-              onChange={(enabled) => invoke('setReducedMotion', enabled)}
-            />
-            <ToggleRow
-              label="HI-FI PREVIEW"
-              help="Desktop only: MSAA + mipmapped panels. Restarts the preview. The headset keeps its own sampling."
-              checked={hiFi}
-              onChange={(enabled) => {
-                setRenderer(null);
-                setHiFi(enabled);
-              }}
+            <Segmented
+              ariaLabel="Camera"
+              options={['HEADSET POV', 'ORBIT INSPECT']}
+              value={previewState.cameraMode === 'orbit' ? 'ORBIT INSPECT' : 'HEADSET POV'}
+              disabled={!renderer}
+              onChange={(label) => invoke('setPreviewCameraMode', label === 'HEADSET POV' ? 'headset' : 'orbit')}
             />
             <Segmented
               ariaLabel="Preview field of view"
@@ -306,8 +206,18 @@ export default function ImmersivePreviewPage() {
               <Button disabled={!renderer} onClick={() => invoke('resetPreview')}>RESET VIEW</Button>
               <Button disabled={!renderer} onClick={() => invoke('requestPreviewFullscreen')}>FULLSCREEN</Button>
             </div>
-          </div>
+          </>
+        ) : null}
+      </div>
 
+      {view === 'FLAT PANELS' ? (
+        <Suspense fallback={<Mono>LOADING PANEL WORKBENCH…</Mono>}>
+          <VRPanelWorkbench />
+        </Suspense>
+      ) : null}
+
+      {view === '3D SCENE' ? (
+        <>
           {/* WebGL antialias is fixed per canvas, so hi-fi changes remount the player. */}
           <ReelsPlayer
             key={hiFi ? 'hifi' : 'legacy'}
@@ -322,45 +232,126 @@ export default function ImmersivePreviewPage() {
               syncState(api);
             }}
           />
-
-          {tuning ? (
-            <section className="sx-immersive-tuning" aria-label="Layout tuning">
-              <div className="sx-immersive-tuning-sliders">
-                {TUNING_SLIDERS.map(([key, label, min, max, step]) => (
-                  <label key={key} className="sx-immersive-tuning-row">
-                    <span>{label}</span>
-                    <input
-                      type="range"
-                      min={min}
-                      max={max}
-                      step={step}
-                      value={tuning[key]}
-                      onChange={(event) => changeTuning({ [key]: Number(event.target.value) })}
-                    />
-                    <output>{Number(tuning[key]).toFixed(3)}</output>
-                  </label>
-                ))}
-              </div>
-              <div className="sx-immersive-tuning-out">
-                <pre>{formatTuningConstants(tuning)}</pre>
-                <div className="sx-control-group">
-                  <Button onClick={copyTuning}>{copied ? 'COPIED' : 'COPY CONSTANTS'}</Button>
-                  <Button onClick={resetTuning}>RESET LAYOUT</Button>
-                </div>
-                <Mono>PREVIEW ONLY · PASTE INTO UI/ASSETS/WEBXR_VR.JS TO SHIP · THE HEADSET USES THE SHIPPED VALUES</Mono>
-              </div>
-            </section>
-          ) : null}
-
-          <SpecRow
-            cells={[
-              ['EARTH DRAWS', previewState.renderStats?.earthDrawCalls ?? 0, 'ZERO WHILE REELS MODE IS ACTIVE'],
-              ['REEL DRAWS', previewState.renderStats?.reelDrawCalls ?? 0, 'SHARED SCENE CORE'],
-              ['VIDEO UPLOADS', previewState.renderStats?.videoUploads ?? 0, 'PAUSED WHILE EARTH IS OPEN'],
-            ]}
-          />
           <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE (SHIFT-DRAG TO LOOK) · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
-          <Mono>SHELL: DRAG OR WHEEL THE MAIN PANEL TO SCROLL (FLICK TO FLING) · CLICK TO OPEN · ADD ?vrshell=0 TO THE URL TO DISABLE THE SHELL</Mono>
+
+          <details className="sx-expander">
+            <summary>▸ MORE CONTROLS · CURVATURE, SHELL PAGES, LAYOUT TUNING</summary>
+            <div className="sx-expander-body">
+              <div className="sx-immersive-preview-toolbar" aria-label="Immersive preview controls">
+                <div className="sx-control-group" role="group" aria-label="Curvature Mode">
+                  <Button
+                    primary={isCurvatureActive(previewState.curvatureMode, 'dome')}
+                    disabled={!renderer}
+                    onClick={() => invoke('setCurvatureMode', 'dome')}
+                  >
+                    DOME
+                  </Button>
+                  <Button
+                    primary={isCurvatureActive(previewState.curvatureMode, 'sq_curve')}
+                    disabled={!renderer}
+                    onClick={() => invoke('setCurvatureMode', 'sq_curve')}
+                  >
+                    SQ CURVE
+                  </Button>
+                  <Button
+                    primary={isCurvatureActive(previewState.curvatureMode, 'flat')}
+                    disabled={!renderer}
+                    onClick={() => invoke('setCurvatureMode', 'flat')}
+                  >
+                    FLAT
+                  </Button>
+                </div>
+                <div className="sx-control-group" role="group" aria-label="VR shell pages">
+                  {SHELL_PAGES.map(([label, path]) => (
+                    <Button
+                      key={label}
+                      primary={shellTab(previewState.shell) === label}
+                      disabled={!renderer?.shell}
+                      onClick={() => { renderer.shell.open(path(user)); syncState(); }}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                  <Button disabled={!previewState.shell} onClick={() => { renderer.shell.close(); syncState(); }}>CLOSE SHELL</Button>
+                </div>
+                <div className="sx-control-group">
+                  <Button disabled={!renderer?.shell} onClick={() => { renderer.shell.share(); syncState(); }}>SHARE REEL</Button>
+                  {/* Sample reel-reward reply so the wallet's progress line can be reviewed. */}
+                  <Button
+                    disabled={!renderer?.shell}
+                    onClick={() => { renderer.shell.noteReward({ progress: 7, remaining: 3 }); renderer.shell.open('/wallet'); syncState(); }}
+                  >
+                    REWARD PROGRESS
+                  </Button>
+                </div>
+                <ToggleRow
+                  label="SIDE-BY-SIDE STEREO"
+                  checked={previewState.stereo}
+                  onChange={(enabled) => invoke('setPreviewStereo', enabled)}
+                />
+                <ToggleRow
+                  label="REDUCED MOTION"
+                  checked={previewState.reducedMotion}
+                  onChange={(enabled) => invoke('setReducedMotion', enabled)}
+                />
+                <ToggleRow
+                  label="HI-FI PREVIEW"
+                  help="Desktop only: MSAA + mipmapped panels. Restarts the preview. The headset keeps its own sampling."
+                  checked={hiFi}
+                  onChange={(enabled) => {
+                    setRenderer(null);
+                    setHiFi(enabled);
+                  }}
+                />
+              </div>
+
+              {tuning ? (
+                <section className="sx-immersive-tuning" aria-label="Layout tuning">
+                  <div className="sx-immersive-tuning-sliders">
+                    {TUNING_SLIDERS.map(([key, label, min, max, step]) => (
+                      <label key={key} className="sx-immersive-tuning-row">
+                        <span>{label}</span>
+                        <input
+                          type="range"
+                          min={min}
+                          max={max}
+                          step={step}
+                          value={tuning[key]}
+                          onChange={(event) => changeTuning({ [key]: Number(event.target.value) })}
+                        />
+                        <output>{Number(tuning[key]).toFixed(3)}</output>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="sx-immersive-tuning-out">
+                    <pre>{formatTuningConstants(tuning)}</pre>
+                    <div className="sx-control-group">
+                      <Button onClick={copyTuning}>{copied ? 'COPIED' : 'COPY CONSTANTS'}</Button>
+                      <Button onClick={resetTuning}>RESET LAYOUT</Button>
+                    </div>
+                    <Mono>PREVIEW ONLY · PASTE INTO UI/ASSETS/WEBXR_VR.JS TO SHIP · THE HEADSET USES THE SHIPPED VALUES</Mono>
+                  </div>
+                </section>
+              ) : null}
+
+              <SpecRow
+                cells={[
+                  ['EARTH DRAWS', previewState.renderStats?.earthDrawCalls ?? 0, 'ZERO WHILE REELS MODE IS ACTIVE'],
+                  ['REEL DRAWS', previewState.renderStats?.reelDrawCalls ?? 0, 'SHARED SCENE CORE'],
+                  ['VIDEO UPLOADS', previewState.renderStats?.videoUploads ?? 0, 'PAUSED WHILE EARTH IS OPEN'],
+                ]}
+              />
+              <Mono>SHELL: DRAG OR WHEEL THE MAIN PANEL TO SCROLL (FLICK TO FLING) · CLICK TO OPEN · ADD ?vrshell=0 TO THE URL TO DISABLE THE SHELL</Mono>
+
+              <AccentBlock
+                title="PREVIEW SCOPE"
+                lines={[
+                  'This view uses the same scene geometry, shaders, live reel, panels, Earth data, and callbacks as the Quest WebXR session.',
+                  'It is a scene/layout parity tool. It does not emulate Quest optics, tracking quality, thermal limits, or headset frame-time performance.',
+                ]}
+              />
+            </div>
+          </details>
         </>
       ) : null}
     </div>

@@ -60,6 +60,10 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
   useEffect(() => {
     if (!isOpen || !window.matchMedia?.('(max-width: 900px)').matches) return undefined;
     const opener = document.activeElement;
+    // Everything the backdrop covers leaves the tab order and the accessibility tree while the drawer is open.
+    // The header stays live: it sits above the backdrop and its menu button closes the drawer.
+    const behind = Array.from(document.querySelectorAll('.sx-main, .sx-footer, .sx-message-launcher, .sx-message-dock'));
+    behind.forEach((el) => { el.inert = true; });
     asideRef.current?.querySelector('.sx-sidebar-close-btn')?.focus();
     const onTab = (e) => {
       if (e.key !== 'Tab' || !asideRef.current) return;
@@ -78,6 +82,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
     window.addEventListener('keydown', onTab);
     return () => {
       window.removeEventListener('keydown', onTab);
+      behind.forEach((el) => { el.inert = false; });
       if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
     };
   }, [isOpen]);
@@ -185,7 +190,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             <AnimatedEchoLogo className="sx-sidebar-hero-logo" title="ECHO Logo" />
             <h2 className="sx-sidebar-hero-title">ECHO</h2>
           </div>
-          <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div>
+          {showDevTools ? <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div> : null}
         </Link>
       </div>
 

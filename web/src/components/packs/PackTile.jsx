@@ -125,6 +125,7 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
       role="button"
       tabIndex={0}
       className={'sx-explore-tile sx-pack-tile--reel' + (ready || !activeClip ? '' : ' sx-skel')}
+      aria-busy={ready || !activeClip ? undefined : true}
       onClick={handleOpen}
       onKeyDown={(event) => {
         // Keys bubbling up from the nested buttons belong to those buttons, not to the tile.

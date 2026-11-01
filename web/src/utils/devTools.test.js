@@ -16,4 +16,11 @@ describe('hideDevTools', () => {
     vi.stubEnv('VITE_SX_HIDE_DEV_TOOLS', 'false');
     expect(hideDevTools()).toBe(false);
   });
+
+  it('is on by default in production builds, and "false" turns it back off', () => {
+    vi.stubEnv('PROD', true);
+    expect(hideDevTools()).toBe(true);
+    vi.stubEnv('VITE_SX_HIDE_DEV_TOOLS', 'false');
+    expect(hideDevTools()).toBe(false);
+  });
 });

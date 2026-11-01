@@ -91,12 +91,13 @@ export function AccentBlock({ title, lines = [], tone = 'accent', code = [] }) {
   );
 }
 
-export function EmptyState({ title, text, hint = '' }) {
+export function EmptyState({ title, text, hint = '', children }) {
   return (
     <div className="sx-empty-state">
       <div className="sx-empty-state-title">{title}</div>
       <p className="sx-empty-state-body">{text}</p>
       {hint ? <div className="sx-mono" style={{ color: 'var(--sx-ink-3)', marginTop: 8 }}>{hint}</div> : null}
+      {children ? <div className="sx-empty-state-actions">{children}</div> : null}
     </div>
   );
 }

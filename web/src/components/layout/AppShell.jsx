@@ -109,7 +109,7 @@ function Shell() {
       </a>
 
       {/* Global High-Density Utility Top Bar — auto-hidden in Reels immersive VR / fullscreen */}
-      <HeaderBar onToggleSidebar={() => setDrawerOpen((prev) => !prev)} hidden={immersive} />
+      <HeaderBar onToggleSidebar={() => setDrawerOpen((prev) => !prev)} sidebarOpen={drawerOpen} hidden={immersive} />
 
       {/* Main Grid Shell */}
       <div

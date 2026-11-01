@@ -181,6 +181,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
       role="button"
       tabIndex={0}
       className={'sx-explore-tile' + (ready ? '' : ' sx-skel')}
+      aria-busy={ready ? undefined : true}
       onClick={() => onOpen(video)}
       onKeyDown={(event) => {
         // Keys bubbling up from the nested buttons belong to those buttons, not to the tile.

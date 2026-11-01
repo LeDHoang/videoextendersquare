@@ -845,7 +845,7 @@ export default function UploadPage() {
           disabledOptions={postRendering ? [STUDIO_MODES[1]] : batchRendering ? [STUDIO_MODES[0]] : []}
           ariaLabel="Studio mode"
         />
-        <div className="sx-studio-banner-meta">PIPELINE: <b>{summary}</b></div>
+        <div className="sx-studio-banner-meta">{activeKind ? 'PIPELINE: ' : null}<b>{summary}</b></div>
       </div>
 
       {blocked.length ? (

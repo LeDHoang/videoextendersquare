@@ -134,8 +134,9 @@ export default function SupportPage() {
               value={form.email}
               onChange={set('email')}
               aria-invalid={fieldError.email ? true : undefined}
+              aria-describedby={fieldError.email ? 'support-email-error' : undefined}
             />
-            {fieldError.email ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.email}</div> : null}
+            {fieldError.email ? <div id="support-email-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.email}</div> : null}
           </Field>
           <Field label={isReport ? 'LINK TO THE CONTENT' : 'LINK (OPTIONAL)'} htmlFor="support-link" meta={isReport ? '/reels?post=… · /packs/… · /profile/…' : null}>
             <input
@@ -146,8 +147,9 @@ export default function SupportPage() {
               value={form.link}
               onChange={set('link')}
               aria-invalid={fieldError.link ? true : undefined}
+              aria-describedby={fieldError.link ? 'support-link-error' : undefined}
             />
-            {fieldError.link ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.link}</div> : null}
+            {fieldError.link ? <div id="support-link-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.link}</div> : null}
           </Field>
           <Field label="SUBJECT" htmlFor="support-subject" meta={form.subject.length + ' / ' + SUBJECT_MAX}>
             <input id="support-subject" className="sx-ps-input" type="text" maxLength={SUBJECT_MAX} value={form.subject} onChange={set('subject')} />
@@ -162,8 +164,9 @@ export default function SupportPage() {
               onChange={set('body')}
               placeholder={form.category === 'appeal' ? 'Your username, what was removed or limited, and why you think it was a mistake.' : ''}
               aria-invalid={fieldError.body ? true : undefined}
+              aria-describedby={fieldError.body ? 'support-body-error' : undefined}
             />
-            {fieldError.body ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.body}</div> : null}
+            {fieldError.body ? <div id="support-body-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.body}</div> : null}
           </Field>
           {/* Honeypot: off-screen and hidden from assistive tech; only bots fill it. */}
           <div className="sx-support-trap" aria-hidden="true">

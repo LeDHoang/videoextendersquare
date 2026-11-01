@@ -308,7 +308,11 @@ export default function PackPage() {
   };
 
   if (error && !pack) {
-    return <EmptyState title="REEL PACK UNAVAILABLE" text={error} hint={packId} />;
+    return (
+      <EmptyState title="REEL PACK UNAVAILABLE" text={error} hint={packId}>
+        <Link className="sx-btn" to="/explore">BACK TO EXPLORE</Link>
+      </EmptyState>
+    );
   }
   if (!pack) return <ExploreGridSkeleton label="Loading Reel Pack" />;
 

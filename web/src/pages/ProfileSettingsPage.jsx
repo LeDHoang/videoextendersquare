@@ -68,6 +68,13 @@ function PasswordInput({ name, ...inputProps }) {
   );
 }
 
+// Inline error under one field; the input points at it with aria-describedby.
+function FieldError({ id, text }) {
+  return text ? <div id={id} className="sx-ps-feedback sx-ps-feedback--err" role="alert">{text}</div> : null;
+}
+
+const fieldErrorProps = (id, text) => (text ? { 'aria-invalid': true, 'aria-describedby': id } : {});
+
 function Feedback({ state }) {
   if (!state) return null;
   return state.ok
@@ -99,6 +106,7 @@ export default function ProfileSettingsPage() {
   const [form, setForm] = useState({ display_name: '', bio: '', website: '' });
   const [busy, setBusy] = useState('');
   const [profileStatus, setProfileStatus] = useState(null);
+  const [profileFieldError, setProfileFieldError] = useState({});
   const [avatarStatus, setAvatarStatus] = useState(null);
   const [keyValue, setKeyValue] = useState('');
   const [keyStatus, setKeyStatus] = useState(null);
@@ -145,14 +153,17 @@ export default function ProfileSettingsPage() {
     event.preventDefault();
     return run('profile', async () => {
       setProfileStatus(null);
+      setProfileFieldError({});
       try {
         const result = await api.patch('/api/users/me', form);
         setUser(result.user);
         setProfileStatus({ ok: true, text: 'PROFILE UPDATED' });
       } catch (requestError) {
-        // A rejected save changes nothing, so the reason (e.g. an invalid
-        // website) is shown right beside the button.
-        setProfileStatus({ ok: false, text: requestError.message || 'Could not update profile.' });
+        // A rejected save changes nothing. A reason tied to one field (e.g. an
+        // invalid website) goes under that field; anything else beside the button.
+        const field = requestError.detail?.field;
+        if (['display_name', 'bio', 'website'].includes(field)) setProfileFieldError({ [field]: requestError.message });
+        else setProfileStatus({ ok: false, text: requestError.message || 'Could not update profile.' });
       }
     });
   };
@@ -160,6 +171,7 @@ export default function ProfileSettingsPage() {
   const resetProfile = () => {
     setForm({ display_name: user.display_name || '', bio: user.bio || '', website: user.website || '' });
     setProfileStatus(null);
+    setProfileFieldError({});
   };
 
   const uploadAvatar = async (event) => {
@@ -280,11 +292,12 @@ export default function ProfileSettingsPage() {
   });
 
   const confirmationMatches = deleteForm.confirmation.trim().replace(/^@/, '').toLowerCase() === user.username.toLowerCase();
+  const deleteReady = Boolean(deleteForm.current_password) && confirmationMatches;
   const deleteAccount = (event) => {
     event.preventDefault();
     // Enter inside a field submits the form even while the button is disabled,
     // so the guards are re-checked here.
-    if (!deleteForm.current_password || !confirmationMatches) return;
+    if (!deleteReady) return;
     setDeleteConfirmOpen(true);
   };
   const confirmDeleteAccount = () => {
@@ -362,10 +375,12 @@ export default function ProfileSettingsPage() {
                 </div>
               </FieldRow>
               <FieldRow label="DISPLAY NAME" htmlFor="ps-display-name">
-                <input id="ps-display-name" className="sx-ps-input" maxLength={60} value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} />
+                <input id="ps-display-name" className="sx-ps-input" maxLength={60} value={form.display_name} onChange={(event) => { setForm({ ...form, display_name: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-display-name-error', profileFieldError.display_name)} />
+                <FieldError id="ps-display-name-error" text={profileFieldError.display_name} />
               </FieldRow>
               <FieldRow label="CREATOR BIO" meta={form.bio.length + ' / ' + BIO_MAX + ' CHARS'} htmlFor="ps-bio">
-                <textarea id="ps-bio" className="sx-ps-input sx-ps-textarea" rows={3} maxLength={BIO_MAX} value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} />
+                <textarea id="ps-bio" className="sx-ps-input sx-ps-textarea" rows={3} maxLength={BIO_MAX} value={form.bio} onChange={(event) => { setForm({ ...form, bio: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-bio-error', profileFieldError.bio)} />
+                <FieldError id="ps-bio-error" text={profileFieldError.bio} />
                 {hasRichBio ? (
                   <div className="sx-pf-bio-preview" aria-label="Bio preview">
                     <span>PREVIEW</span>
@@ -376,7 +391,8 @@ export default function ProfileSettingsPage() {
                 )}
               </FieldRow>
               <FieldRow label="WEBSITE / PORTFOLIO" htmlFor="ps-website">
-                <input id="ps-website" className="sx-ps-input" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="example.com or https://example.com" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} />
+                <input id="ps-website" className="sx-ps-input" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="example.com or https://example.com" value={form.website} onChange={(event) => { setForm({ ...form, website: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-website-error', profileFieldError.website)} />
+                <FieldError id="ps-website-error" text={profileFieldError.website} />
               </FieldRow>
               <div className="sx-ps-submit">
                 <button type="submit" className="sx-ps-btn sx-ps-btn--primary" disabled={busy === 'profile' || !dirty}>
@@ -488,9 +504,15 @@ export default function ProfileSettingsPage() {
               <FieldRow label={'TYPE "' + user.username + '" TO AUTHORIZE'} htmlFor="ps-delete-confirm">
                 <input id="ps-delete-confirm" className="sx-ps-input sx-ps-input--danger" autoCapitalize="none" spellCheck={false} placeholder={user.username} value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} />
               </FieldRow>
-              <button type="submit" className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block" disabled={busy === 'delete' || !deleteForm.current_password || !confirmationMatches}>
-                {busy === 'delete' ? 'DELETING…' : 'TERMINATE PROFILE & PURGE DATA'}
+              <button
+                type="submit"
+                className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block"
+                disabled={busy === 'delete' || !deleteReady}
+                aria-describedby={deleteReady ? undefined : 'ps-delete-why'}
+              >
+                {busy === 'delete' ? 'DELETING…' : 'DELETE ACCOUNT'}
               </button>
+              {deleteReady ? null : <p id="ps-delete-why" className="sx-ps-hint">Enter your password and type your username to delete.</p>}
               <Feedback state={deleteStatus} />
             </form>
             {deleteConfirmOpen ? (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
@@ -38,7 +38,7 @@ function AccountAvatar({ user }) {
   );
 }
 
-export default function HeaderBar({ onToggleSidebar, hidden = false }) {
+export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden = false }) {
   const { user, loading: authLoading, logout } = useAuth();
   const messaging = useMessaging();
   const { wallet } = useWallet();
@@ -349,7 +349,7 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
       ) : (
         <>
           <div className="sx-top-left">
-            <button type="button" className="sx-icon-btn" onClick={onToggleSidebar} title="Open/Close Sidebar" aria-label="Toggle Sidebar">
+            <button type="button" className="sx-icon-btn" onClick={onToggleSidebar} title="Open/Close Sidebar" aria-label="Toggle Sidebar" aria-expanded={sidebarOpen}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
@@ -513,11 +513,11 @@ export default function HeaderBar({ onToggleSidebar, hidden = false }) {
                           ⚡ {wallet?.available_credits ?? 0} CREDITS
                         </span>
                       </div>
-                      <button type="button" onClick={() => navigate('/profile/' + user.username)}>PROFILE</button>
-                      <button type="button" onClick={() => navigate('/profile/' + user.username + '?tab=saved')}>SAVED</button>
-                      <button type="button" onClick={() => navigate('/settings/profile')}>SETTINGS</button>
-                      <button type="button" onClick={() => navigate('/wallet')}>CREDITS / FAL KEY</button>
-                      {user.can_moderate ? <button type="button" onClick={() => navigate('/moderation')}>STAFF</button> : null}
+                      <Link to={'/profile/' + user.username}>PROFILE</Link>
+                      <Link to={'/profile/' + user.username + '?tab=saved'}>SAVED</Link>
+                      <Link to="/settings/profile">SETTINGS</Link>
+                      <Link to="/wallet">CREDITS / FAL KEY</Link>
+                      {user.can_moderate ? <Link to="/moderation">STAFF</Link> : null}
                       <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>LOG OUT</button>
                     </div>
                   ) : null}

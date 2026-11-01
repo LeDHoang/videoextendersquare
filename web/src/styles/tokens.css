@@ -125,6 +125,8 @@
   /* ─── Focus System ───────────────────────────────────────── */
   --sx-focus-ring: 2px solid var(--sx-accent);
   --sx-focus-offset: 2px;
+  /* Light band inside the ring, for focus drawn over media where the accent ring alone can vanish into the picture. */
+  --sx-focus-halo: inset 0 0 0 3px var(--sx-ink);
 }
 
 @media (max-width: 640px) {

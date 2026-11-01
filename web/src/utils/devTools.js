@@ -1,6 +1,9 @@
-/* Build-time switch for production: set VITE_SX_HIDE_DEV_TOOLS=true to hide
-   the engine-probe and telemetry panels. Off by default, so dev and tests
-   see the panels unchanged. Read per call so tests can stub the env. */
+/* Build-time switch for the engine-probe and telemetry panels. Production builds hide them unless
+   VITE_SX_HIDE_DEV_TOOLS=false; dev and tests show them unless VITE_SX_HIDE_DEV_TOOLS=true.
+   Read per call so tests can stub the env. */
 export function hideDevTools() {
-  return import.meta.env.VITE_SX_HIDE_DEV_TOOLS === 'true';
+  const flag = import.meta.env.VITE_SX_HIDE_DEV_TOOLS;
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  return Boolean(import.meta.env.PROD);
 }

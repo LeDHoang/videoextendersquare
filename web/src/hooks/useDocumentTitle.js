@@ -22,6 +22,8 @@ const STATIC_TITLES = {
   '/terms': 'Terms of Service',
   '/privacy': 'Privacy Policy',
   '/support': 'Support',
+  '/rules': 'Community rules',
+  '/verify-email': 'Verify email',
 };
 
 function decode(part) {
@@ -34,7 +36,8 @@ export function routeTitle(pathname) {
   if (STATIC_TITLES[path]) return STATIC_TITLES[path];
   const parts = path.split('/').filter(Boolean).map(decode);
   if (parts[0] === 'explore' && parts[1] === 'tag' && parts[2]) return `#${parts[2]}`;
-  if (parts[0] === 'explore' && parts[1] === 'location' && parts[2]) return parts[2];
+  // The slug is not a name; LocationExplorePage sets the place name once it loads.
+  if (parts[0] === 'explore' && parts[1] === 'location' && parts[2]) return 'Location';
   if (parts[0] === 'profile' && parts[1]) return `@${parts[1]}`;
   if (parts[0] === 'packs' && parts[2] === 'edit') return 'Edit reel pack';
   if (parts[0] === 'packs' && parts[1]) return 'Reel pack';

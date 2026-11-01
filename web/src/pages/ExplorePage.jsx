@@ -25,8 +25,8 @@ import { useConfigContext } from '../hooks/ConfigContext.jsx';
 
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
-  { label: CODEC_DEFAULT, value: CODEC_DEFAULT },
-  { label: 'H264 (Browser/VR)', value: 'H264 (Browser/VR)' },
+  { label: 'BEST QUALITY', value: CODEC_DEFAULT },
+  { label: 'PLAYS EVERYWHERE', value: 'H264 (Browser/VR)' },
   { label: 'ALL CODECS', value: 'ALL CODECS' },
 ];
 const CONTENT_OPTS = [
@@ -62,6 +62,8 @@ export default function ExplorePage() {
   const requestedType = searchParams.get('type') || 'all';
   const [contentType, setContentType] = useState(CONTENT_OPTS.some((row) => row.value === requestedType) ? requestedType : 'all');
   const [data, setData] = useState(null);
+  // Phones lead with the grid: stats, tags and filters sit behind a FILTER toggle (CSS shows them on wider screens).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [packData, setPackData] = useState(null);
   const [packLoadingMore, setPackLoadingMore] = useState(false);
   const [packError, setPackError] = useState('');
@@ -260,15 +262,25 @@ export default function ExplorePage() {
                 SHUFFLE
               </HeaderButton>
             ) : null}
+            <button
+              type="button"
+              className="sx-xh-btn sx-explore-filter-toggle"
+              aria-expanded={filtersOpen}
+              aria-controls="sx-explore-filters"
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              <span className="sx-xh-btn-icon" aria-hidden="true">{filtersOpen ? '▴' : '▾'}</span>
+              <span>FILTER</span>
+            </button>
           </>
         )}
       />
+      <div id="sx-explore-filters" className={'sx-explore-filters' + (filtersOpen ? ' sx-open' : '')}>
       <StatStrip
         stats={[
           { label: 'TOTAL REELS', value: data ? order.length : '—' },
           ...(packDiscoveryEnabled ? [{ label: 'CURATED PACKS', value: packData ? packData.total : '—' }] : []),
           { label: 'FOLDERS', value: data ? (data.folders || []).length : '—' },
-          { label: 'CODEC', value: codecParam.toUpperCase(), accent: true },
         ]}
       />
 
@@ -327,6 +339,7 @@ export default function ExplorePage() {
           <DensityToggle value={density} onChange={setDensity} />
         </div>
       </Toolbar>
+      </div>
 
       {previewMessage && reelsVisible ? <Mono>{previewMessage}</Mono> : null}
       {packError && packsVisible ? (
