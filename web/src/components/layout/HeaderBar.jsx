@@ -361,7 +361,6 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             <nav className="sx-top-nav" aria-label="Global Routes">
               <NavLink to="/reels" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>REELS/VR</NavLink>
               <NavLink to="/explore" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>EXPLORE</NavLink>
-              <NavLink to="/upload" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>UPLOAD</NavLink>
               <NavLink to="/compare" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>COMPARE</NavLink>
             </nav>
           </div>
@@ -415,31 +414,9 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
               </svg>
             </button>
 
-            {/* Credits: full text on desktop, compact pill on tablet/mobile. These header
-                actions are links, so they can open in a new tab and report aria-current.
-                UPLOAD is the one filled action; CREDITS and MESSAGES are outlined. */}
-            {user ? (
-              <>
-                <NavLink
-                  to="/wallet"
-                  className="sx-top-action-btn sx-top-action-btn--ghost sx-desktop-only"
-                  title="Open ECHO Credits wallet"
-                >
-                  {wallet?.available_credits ?? '—'} CREDITS
-                </NavLink>
-                <NavLink
-                  to="/wallet"
-                  className="sx-top-credits-pill sx-mobile-tablet-only"
-                  title="Open ECHO Credits wallet"
-                  aria-label="ECHO Credits"
-                >
-                  <IndustrialCreditsIcon className="sx-top-btn-svg" />
-                  <span>{wallet?.available_credits ?? '—'}</span>
-                </NavLink>
-              </>
-            ) : null}
-
-            {/* Upload: full text on desktop, icon button on tablet/mobile */}
+            {/* Right-side actions, in this order: UPLOAD (the one filled action), credits,
+                messages, then the account avatar. They are links, so they can open in a new
+                tab and report aria-current. */}
             <NavLink
               to="/upload"
               className="sx-top-action-btn sx-desktop-only"
@@ -449,30 +426,27 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             </NavLink>
             <NavLink
               to="/upload"
-              className="sx-top-icon-btn sx-mobile-tablet-only"
+              className="sx-top-icon-btn sx-top-icon-btn--primary sx-mobile-tablet-only"
               title="Upload Video or Image"
               aria-label="Upload"
             >
               <IndustrialUploadIcon className="sx-top-btn-svg" />
             </NavLink>
 
-            {/* Messages: full text on desktop, icon with badge on tablet/mobile */}
             {user ? (
               <>
                 <NavLink
-                  to="/messages"
-                  className="sx-top-action-btn sx-top-action-btn--ghost sx-message-nav-btn sx-desktop-only"
-                  title="Open messages"
-                  aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : undefined}
+                  to="/wallet"
+                  className="sx-top-credits-pill"
+                  title="Open ECHO Credits wallet"
+                  aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : 'Credits'}
                 >
-                  <span className="sx-message-nav-label">MESSAGES</span>
-                  {messaging.unread.total ? (
-                    <span className="sx-message-nav-badge"><span>{messaging.unread.total}</span></span>
-                  ) : null}
+                  <span>{wallet?.available_credits ?? '—'}</span>
+                  <IndustrialCreditsIcon className="sx-top-btn-svg" />
                 </NavLink>
                 <NavLink
                   to="/messages"
-                  className="sx-top-icon-btn sx-top-icon-btn--badge sx-mobile-tablet-only"
+                  className="sx-top-icon-btn sx-top-icon-btn--badge"
                   title="Open messages"
                   aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
                 >

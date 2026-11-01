@@ -374,7 +374,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
               {degraded.map((p) => (
                 <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
                   <b style={{ color: 'var(--sx-ink)' }}>{p.label}</b> — {p.detail}
-                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.75rem', marginTop: 2 }}>
+                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.8rem', marginTop: 2 }}>
                     {p.fix}
                   </div>
                 </div>
@@ -392,7 +392,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           ▸ MODEL ENDPOINTS
         </summary>
         <div className="sx-expander-body" style={{ marginTop: 12 }}>
-          <div className="sx-monospace-sm" style={{ fontSize: '0.72rem', marginBottom: 8 }}>
+          <div className="sx-monospace-sm" style={{ marginBottom: 8 }}>
             Optional fal.ai id per slot — blank = stock. E.g. luma/agent/ray/v3.2/reframe
           </div>
           {MODEL_FIELDS.map(({ key, label }) => {
@@ -402,7 +402,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
               <Field key={key} label={`${label}${customLabel ? ` · ${customLabel}` : ''}`}>
                 <input
                   className="sx-input"
-                  style={{ fontSize: '0.75rem', padding: '6px 10px' }}
+                  style={{ fontSize: '0.8rem', padding: '6px 10px' }}
                   placeholder={modelDefaults[key] || ''}
                   value={current}
                   onChange={(e) => {
@@ -417,12 +417,12 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             );
           })}
           {modelErr ? (
-            <div className="sx-monospace-sm" style={{ color: 'var(--sx-danger)', fontSize: '0.72rem' }}>
+            <div className="sx-monospace-sm" style={{ color: 'var(--sx-danger)' }}>
               {modelErr}
             </div>
           ) : null}
           {modelMsg ? (
-            <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)', fontSize: '0.72rem' }}>
+            <div className="sx-monospace-sm" style={{ color: 'var(--sx-accent)' }}>
               {modelMsg}
             </div>
           ) : null}

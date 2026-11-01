@@ -128,7 +128,7 @@ export default function ComparePage() {
               <span className="sx-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>RENDER PAIR</span>
               <select
                 className="sx-select"
-                style={{ flex: '1 1 160px', minWidth: 0, maxWidth: '100%', height: 34, fontSize: '0.75rem', padding: '0 8px', whiteSpace: 'nowrap' }}
+                style={{ flex: '1 1 160px', minWidth: 0, maxWidth: '100%', height: 34, fontSize: '0.8rem', padding: '0 8px', whiteSpace: 'nowrap' }}
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
                 aria-label="Select render pair to inspect"
@@ -184,7 +184,7 @@ export default function ComparePage() {
               <button
                 type="button"
                 className={`sx-btn ${showDownload ? 'sx-primary' : ''}`}
-                style={{ height: 34, padding: '0 12px', fontSize: '0.75rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
+                style={{ height: 34, padding: '0 12px', fontSize: '0.8rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
                 onClick={() => setShowDownload((prev) => !prev)}
               >
                 ↓ DOWNLOAD
@@ -318,7 +318,7 @@ export default function ComparePage() {
                         border: '1px solid var(--sx-rule-strong)',
                         padding: '4px 12px',
                         fontFamily: 'JetBrains Mono',
-                        fontSize: '0.75rem',
+                        fontSize: '0.8rem',
                         color: 'var(--sx-accent)',
                       }}
                     >
@@ -366,7 +366,7 @@ export default function ComparePage() {
                 </div>
                 <div className="sx-telemetry-row">
                   <span className="sx-telemetry-label">HARDWARE</span>
-                  <span className="sx-telemetry-val" style={{ fontSize: '0.75rem', color: 'var(--sx-ink-2)' }}>
+                  <span className="sx-telemetry-val" style={{ fontSize: '0.8rem', color: 'var(--sx-ink-2)' }}>
                     GPU VideoToolbox
                   </span>
                 </div>
@@ -398,7 +398,7 @@ export default function ComparePage() {
                 </div>
                 <div className="sx-telemetry-row">
                   <span className="sx-telemetry-label">NEURAL ENGINE</span>
-                  <span className="sx-telemetry-val" style={{ fontSize: '0.75rem', color: 'var(--sx-ink-2)' }}>
+                  <span className="sx-telemetry-val" style={{ fontSize: '0.8rem', color: 'var(--sx-ink-2)' }}>
                     VapourSynth Plugin
                   </span>
                 </div>

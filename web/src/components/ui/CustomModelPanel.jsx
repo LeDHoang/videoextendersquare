@@ -163,7 +163,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
         <span className="sx-cost-title">
           {entry?.label || 'CUSTOM MODEL'} — MODEL INFO (LIVE FROM FAL.AI)
         </span>
-        <span className="sx-cost-total" style={{ fontSize: '0.72rem', wordBreak: 'break-all' }}>
+        <span className="sx-cost-total" style={{ fontSize: '0.8rem', wordBreak: 'break-all' }}>
           {model}
         </span>
       </div>
@@ -246,7 +246,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
                     </a>
                   </div>
                 ) : null}
-                <div className="sx-monospace-sm" style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                <div className="sx-monospace-sm" style={{ opacity: 0.8 }}>
                   • <b>Source:</b> pulled live from fal.ai
                   {info.fetched_at
                     ? ` at ${new Date(info.fetched_at * 1000).toLocaleString()}${info.from_cache ? ' (server cache, refreshes hourly)' : ''}`
@@ -270,7 +270,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
                   • <b>Not found on fal.ai:</b> {info.error || 'unknown id'} — the render will
                   likely fail. Verify the id on fal.ai/models.
                 </div>
-                <div className="sx-monospace-sm" style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                <div className="sx-monospace-sm" style={{ opacity: 0.8 }}>
                   • Live lookup unavailable (fal.ai may have changed its public schema endpoints,
                   or the id is wrong) — values shown are pipeline estimates only. Check the
                   up-to-date schema/pricing at{' '}
@@ -307,17 +307,17 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
               value={extraText}
               onChange={(e) => setExtraText(e.target.value)}
             />
-            <div className="sx-monospace-sm" style={{ fontSize: '0.72rem', marginTop: 2 }}>
+            <div className="sx-monospace-sm" style={{ marginTop: 2 }}>
               Flat key/value pairs only (string / number / boolean). Media URLs always come from
               your upload — setting them here has no effect.
             </div>
           </div>
           {composed.error ? (
-            <div className="sx-monospace-sm" style={{ color: 'var(--sx-danger)', fontSize: '0.75rem' }}>
+            <div className="sx-monospace-sm" style={{ color: 'var(--sx-danger)' }}>
               ⚠ {composed.error} — render is blocked until this is fixed.
             </div>
           ) : (
-            <div className="sx-monospace-sm" style={{ fontSize: '0.72rem' }}>
+            <div className="sx-monospace-sm">
               Will send{sentKeys.length ? '' : ' (defaults only)'}: {sentKeys.length ? sentKeys.map((k) => `${k}=${JSON.stringify(composed.args[k])}`).join(' · ') : '—'}
             </div>
           )}

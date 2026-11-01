@@ -443,7 +443,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-13">
   <h4>Fix 13 · Attempted fix · verified locally (Playwright with <code>navigator.xr.isSessionSupported('immersive-vr')</code> stubbed to true, /reels at 1024×768 and 375×812)</h4>
   <p><code>ui/assets/reels.html</code>: when the browser reports <code>immersive-vr</code> support, as on Quest, the VR button leaves the More menu. It becomes a labelled "ENTER VR" pill above the main rail: 115×44 at 1024px, 134×53 at 375px. It is the second Tab stop after the player frame, where before it could not be reached without opening More. It keeps its click handler and its <code>aria-label</code>. Browsers without support are unchanged; on localhost the button still shows only in More as a dev affordance.</p>
-  <p><strong>Not verified:</strong> on a real Quest headset; only the stubbed WebXR API was tested. <strong>Not done:</strong> hiding the VR nav strip together with the dock. That is in <code>ui/assets/webxr_vr.js</code>, which another agent owns. The once-only pose notice is unchanged. <strong>Since done:</strong> the nav strip hides with the dock in fix <a href="#fix-24">24</a>.</p>
+  <p><strong>Not verified:</strong> on a real Quest headset; only the stubbed WebXR API was tested. <strong>Not done:</strong> hiding the VR nav strip together with the dock. That is in <code>ui/assets/webxr_vr.js</code>, which another agent owns. The once-only pose notice is unchanged. <strong>Since done:</strong> the nav strip hides with the dock in fix <a href="#fix-24">24</a>. <strong>Since changed:</strong> the labelled pill is gone. Enter VR is now an icon in the rail itself, between Share and More (fix <a href="#fix-48">48</a>).</p>
   <figure>
     <img src="img/fix13-enter-vr-before-1024.jpg" alt="Before: with WebXR supported, the rail shows only sound, like, comments, share and more; VR is hidden in More" loading="lazy">
     <figcaption>Before: no VR button in the main rail.</figcaption>
@@ -456,6 +456,23 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <img src="img/fix13-enter-vr-after-375.jpg" alt="After: phone width, ENTER VR pill above the rail" loading="lazy">
     <figcaption>After: 375px.</figcaption>
   </figure>
+</section>
+
+<section class="attempt" id="fix-48">
+  <h4>Fix 48 · Follow-up fix · Enter VR as an icon in the rail, verified locally (Playwright with <code>immersive-vr</code> stubbed as supported, /reels at 1280×600 and 812×375)</h4>
+  <p><strong>Decision (yours):</strong> the rail stays icon-only, and Enter VR belongs inside it, below Share and above More, with no label. On a headset browser, <code>promoteVrButton()</code> in <code>reels.html</code> now moves the VR button out of the More menu and inserts it just before More. It keeps the rail's 44×44 button shape and the purple tint it already had, so it stands out from its neighbours by colour rather than by a label. Its <code>aria-label</code> and <code>title</code> still say "Enter VR". The pill styles from fix 13 (the right-aligned rail column, the dark pill backing and the visible label) are removed.</p>
+  <p>Measured at 1280×600: the rail reads sound, like, comments, share, Enter VR, more, each 44×44, and Tab moves through them in that order. Browsers without WebXR are unchanged: the button stays in More.</p>
+  <p><strong>Note:</strong> at 812×375 (a phone on its side), six buttons do not fit in the rail's 211px, so it scrolls and More starts below the fold. It already scrolled with five buttons. This only matters if a phone browser reports <code>immersive-vr</code>, which some Android Chrome builds do. <strong>Not verified:</strong> on a real Quest.</p>
+  <div class="shot-row">
+    <figure>
+      <img src="img/fix48-vr-rail-before.jpg" alt="Before: a purple ENTER VR pill with a text label sits above the rail of five icon buttons." loading="lazy" style="max-width:300px">
+      <figcaption>Before (fix 13): a labelled pill above the rail.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix48-vr-rail-after.jpg" alt="After: the rail reads sound, like, comments, share, a purple headset icon, then more; no labels." loading="lazy" style="max-width:240px">
+      <figcaption>After: a headset icon between Share and More.</figcaption>
+    </figure>
+  </div>
 </section>
 
 
@@ -792,7 +809,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>Reduced motion off:</strong> the reel autoplays and no button shows.</li>
       <li><strong>Next reel:</strong> not seen live, because this local feed has one published reel. Every reel goes through the same <code>loadVideo</code> path, which sets the button for images and videos alike.</li>
     </ul>
-    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision.</p>
+    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision. <strong>Since decided (yours):</strong> the rail and the More menu stay icon-only, and Enter VR joins the rail as an icon too (fix <a href="#fix-48">48</a>).</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix46-reduced-motion-play-before.jpg" alt="Player with reduced motion on, before: a still white frame and the rail, with no way to tell it is paused or how to play." loading="lazy">
@@ -1169,7 +1186,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>13px</strong> for the mono sentences: hints, error and notice messages, the consent line, the footer line, and the submit label.</li>
     </ul>
     <p>A script that lists every visible text element under 12px finds none on /login, /signup or /forgot-password. Nothing wraps or overflows at 375px. Body copy and inputs were already 12–16px and are unchanged.</p>
-    <p><strong>Not done:</strong> icon buttons are still 36–38px, and the layout gaps at 375px are unchanged. The 12/13px floors are local to these screens and will need to fit whichever app-wide type scale is chosen.</p>
+    <p><strong>Not done:</strong> icon buttons are still 36–38px, and the layout gaps at 375px are unchanged. The 12/13px floors are local to these screens and will need to fit whichever app-wide type scale is chosen. <strong>Since done:</strong> fix <a href="#fix-49">49</a> makes the same 12/13px floor app-wide.</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix45-login-before.jpg" alt="Sign-in page before: tiny labels EMAIL OR USERNAME, PASSWORD, SHOW, FORGOT PASSWORD? and tabs." loading="lazy">
@@ -1304,6 +1321,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
   <section class="attempt" id="fix-31">
     <h4>Fix 31 · Not attempted · needs the type-scale decision (Phase 1)</h4>
     <p>As noted under fix 6, the 15px is on <code>body</code> only, so changing that one line would not move the 65–77% figure. The small text comes from individual rules: <code>global.css</code> has 39 rules at <code>0.75rem</code> or below and 2 at 8–11px. Fixing it means adopting the 12 / 14 / 16 / 20 / 28 / 40 scale as tokens and moving those rules onto it, which touches most screens at once and should be reviewed as its own change with before/after captures per page.</p>
+    <p><strong>Since done:</strong> fix <a href="#fix-49">49</a> sets a 12px floor (13px for short sentences), taken from the ECHO design system, and moves every rule under 12px onto it.</p>
   </section>
 
 
@@ -1332,7 +1350,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Decision (yours):</strong> UPLOAD stays the one filled action in the header; CREDITS and MESSAGES become outlined. The outline is the same treatment the tablet and phone header buttons already use (<code>--sx-surface-2</code> fill, <code>--sx-rule-strong</code> border, ink text, accent border and text on hover), added as <code>.sx-top-action-btn--ghost</code> in <code>global.css</code>. The ghost hover drops the accent glow, as the tablet buttons do. Keyboard focus still gets the global accent ring.</p>
     <p>On the outlined MESSAGES button the unread count is now an accent dot, the only accent on that button, matching the phone badge and the floating MESSAGE launcher. It used to be a black dot with an accent number. The text stays white, so its contrast is unchanged.</p>
     <p><strong>Also changed, from the navigation finding:</strong> all six header actions (CREDITS, UPLOAD and MESSAGES, at desktop and tablet/phone sizes) are now links (<code>NavLink</code> in <code>HeaderBar.jsx</code>) instead of buttons that called <code>navigate()</code>. They open in a new tab, and the current page's link reports <code>aria-current="page"</code> (checked on /wallet). Screen readers now hear the unread count: "Messages, 1 unread". Before, the phone button said only "Messages". The header tests pass.</p>
-    <p><strong>Not changed:</strong> the filled hamburger button and the filled avatar circle are still accent. The header also offers UPLOAD twice, once as a nav link and once as the action button. Both are left for the "one nav source" change.</p>
+    <p><strong>Not changed:</strong> the filled hamburger button and the filled avatar circle are still accent. The header also offers UPLOAD twice, once as a nav link and once as the action button. Both are left for the "one nav source" change. <strong>Since done:</strong> fix <a href="#fix-47">47</a> removes the UPLOAD nav link and turns credits and messages into compact icon buttons. The hamburger and avatar are still accent.</p>
     <figure>
       <img src="img/fix35-header-before.jpg" alt="Header before: 0 CREDITS, UPLOAD and MESSAGES are three solid orange-red buttons; the unread count is a black dot." loading="lazy">
       <figcaption>Before: three filled accent buttons.</figcaption>
@@ -1340,6 +1358,37 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <figure>
       <img src="img/fix35-header-after.jpg" alt="Header after: 0 CREDITS and MESSAGES are dark outlined buttons with white text, UPLOAD is the only solid orange button, and the unread count is an orange dot." loading="lazy">
       <figcaption>After: UPLOAD is the one filled action; the unread dot carries the accent.</figcaption>
+    </figure>
+  </section>
+
+  <section class="attempt" id="fix-47">
+    <h4>Fix 47 · Follow-up fix · one UPLOAD and a compact right side, verified locally (/explore signed in at 1280, 768 and 375px, one real unread message)</h4>
+    <p><strong>Decision (yours):</strong> the nav link goes, because the button is enough. The right side reads <strong>UPLOAD</strong> (red fill), then <strong>credits</strong> (the number and the credit icon on a black button), then <strong>messages</strong> (an envelope icon with the unread badge), then the avatar. In <code>HeaderBar.jsx</code>:</p>
+    <ul>
+      <li>The nav now holds REELS/VR, EXPLORE and COMPARE. UPLOAD is only the action button.</li>
+      <li>Credits and messages are one link each at every width, replacing the separate desktop text buttons (CREDITS, MESSAGES) and tablet/phone icon buttons. Both are black (<code>--sx-bg</code>) with the hairline border. The credits number is 13px tabular mono, so it does not jump as the balance changes.</li>
+      <li>The unread badge is an 18px accent circle with a 12px count, over the envelope's corner.</li>
+      <li>Screen readers hear "42 credits" and "Messages, 3 unread", or "Messages" when nothing is unread. Both are still links, so they open in a new tab and report <code>aria-current="page"</code>.</li>
+      <li>On tablet and phone, the UPLOAD icon button is now red-filled too, so UPLOAD is the one filled action at every width.</li>
+    </ul>
+    <p><strong>Also fixed:</strong> on tablet and phone, a <code>fill: currentColor</code> rule flooded the closed shapes of the outline icons, so the credit coin and the envelope showed as solid blobs (see the 768px "before"). The icons now keep their own outline colours. Only the red UPLOAD icon is recoloured, to the on-accent ink.</p>
+    <p>Measured at 1280px: UPLOAD 88×36, credits 51×36, messages 36×36 with an 18×18 badge, then the avatar, in that order. A new test in <code>HeaderBar.test.jsx</code> checks the order (/upload, /wallet, /messages), that UPLOAD is not in the nav, and the two accessible names. The CSS for the old ghost text buttons is removed.</p>
+    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton).</p>
+    <figure>
+      <img src="img/fix47-header-1280-before.jpg" alt="Header at 1280px before: nav REELS/VR, EXPLORE, UPLOAD, COMPARE; then 0 CREDITS outlined, UPLOAD filled, MESSAGES outlined with a 1 badge." loading="lazy">
+      <figcaption>Before, 1280px: UPLOAD in the nav and as the button.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix47-header-1280-after.jpg" alt="Header at 1280px after: nav REELS/VR, EXPLORE, COMPARE; then UPLOAD filled red, a black 0 credits button with the coin icon, a black envelope button with a red 1 badge, and the avatar." loading="lazy">
+      <figcaption>After: UPLOAD | 0 + coin | envelope + badge.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix47-header-768-before.jpg" alt="Header at 768px before: credits as a solid red coin and 0, an outlined upload icon, and the envelope drawn as a solid white block." loading="lazy">
+      <figcaption>Before, 768px: credits first, upload outlined, icons flooded solid.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/fix47-header-768-after.jpg" alt="Header at 768px after: a red-filled upload icon, a black 0 credits button with the outline coin, and an outline envelope with a red 1 badge." loading="lazy">
+      <figcaption>After, 768px: same order, outline icons intact.</figcaption>
     </figure>
   </section>
 
@@ -1355,6 +1404,59 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
   <section class="attempt" id="fix-32">
     <h4>Fix 32 · Not attempted · brand decision first</h4>
     <p>Uppercase mono is the app's current label style (81 <code>text-transform: uppercase</code> rules in <code>global.css</code>), and the copy fixes in this pass deliberately kept it so the screens stay consistent. Switching buttons and body text to sentence case in the sans face is a visual-identity call; once it is made it can ship together with the type scale above.</p>
+    <p><strong>Since decided:</strong> fix <a href="#fix-49">49</a> follows the ECHO design system. Labels and actions stay uppercase mono, and sentences are now sentence case.</p>
+  </section>
+
+  <section class="attempt" id="fix-49">
+    <h4>Fix 49 · Follow-up fix · type floor and label style from the ECHO design system, verified locally (15 pages at 1280 and 375px, signed in and out)</h4>
+    <p><strong>What the design system says.</strong> You asked me to decide from the ECHO design system, putting visibility first. It makes uppercase mono part of the identity: "Headlines and actions are UPPERCASE", and JetBrains Mono for "every eyebrow, label, control option, number and path". It also says "Body copy is sentence case, short and plain". It sets body text at 15px and eyebrows and labels at 11px, with <code>ink-3</code> for labels at 4.5:1 or better.</p>
+    <p><strong>Decision.</strong> I kept the identity and fixed the size:</p>
+    <ul>
+      <li><strong>Labels stay uppercase mono, at 12px minimum.</strong> This covers eyebrows, field labels, control options, badges and spec lines. 12px is one step above the system's 11px. Tracked all-caps mono is the hardest text to read at small sizes, and on a phone 11px reads smaller still. In the app the label token was 10.3px (<code>0.6875rem</code>), and single rules went down to 8px. The player's like and comment counts were 8px, and 7px on phones.</li>
+      <li><strong>Sentences become 13px and sentence case.</strong> This covers hints, help text, notes and empty-state lines, the size of the system's <code>code</code> style. Sentences that were written or styled in capitals now follow the system's body-copy rule, for example "Add an image in step 1 to set up the render.", "What you can post and send on ECHO." and the upload caption.</li>
+      <li><strong>Not the 16px root and new six-step scale</strong> that the original finding proposed. The system's 15px body and its display sizes already read well. The measured problem was text under 12px, which the floor removes without resizing every layout.</li>
+    </ul>
+    <p><strong>Changed:</strong></p>
+    <ul>
+      <li><code>tokens.css</code>: <code>--sx-t-eyebrow</code> is 12px (<code>0.8rem</code>, was 10.3px), and there is a new <code>--sx-t-small</code> at 13px. A comment says which one to use.</li>
+      <li><code>global.css</code>: about 200 declarations under 12px (the smallest was 8.2px) now use <code>--sx-t-eyebrow</code>. The 16 rules for sentences (hints, notes, empty states, form errors) use <code>--sx-t-small</code>.</li>
+      <li><code>reels.html</code>: 43 player sizes under 12px are now 12px. These include the rail counts, the follow pill, side-panel labels, the pack queue and the report dialog. The comment-panel empty line is 13px.</li>
+      <li>Inline sizes in <code>Sidebar.jsx</code>, <code>CustomModelPanel.jsx</code> and <code>ComparePage.jsx</code> now follow the same floor.</li>
+      <li>The pack editor's section heads (PACK ORDER, FIND PUBLIC REELS) wrap their note under the title instead of squeezing the title onto three lines at 375px.</li>
+    </ul>
+    <p><strong>Measured:</strong> a script lists every visible text element and its computed size on 15 pages (explore, reels, upload, image, video, compare, wallet, messages, settings, profile, new pack, support, rules, sign-in and sign-up) at 1280 and 375px.</p>
+    <ul>
+      <li><strong>Before</strong>, text under 12px was 67% of elements on Explore, 68% on Wallet and 76% on Settings at 1280px. At 375px it was 81% on Explore, 74% on Wallet and 82% on Settings.</li>
+      <li><strong>After</strong>, it is 0% on all 30 captures. No page scrolls sideways, and no text is clipped. On the phone player, the 12px counts fit easily in their 53px buttons.</li>
+    </ul>
+    <p>Unit, node and backend tests pass (vitest 491, node 465, pytest 759).</p>
+    <p><strong>Left as is:</strong></p>
+    <ul>
+      <li>The share of mono and uppercase text is about the same as before, because the system asks for it.</li>
+      <li>Spec lines are still uppercase mono, now at 12px. Examples are "3–30 PUBLIC REELS · AUTHORED ORDER", "PNG · JPG · WEBP" and "NO PERSONAL KEY · USING CREDITS". So is "ADD A VIDEO OR IMAGES TO START" on /upload, which sits in the banner's spec slot and is asserted by a test.</li>
+      <li>Some rows wrap now that the text is bigger. The wallet tile footers at 375px wrap onto two lines (the tiles were built to wrap).</li>
+      <li>The design system itself still lists eyebrow and label at 11px and has no 13px step. I did not edit it.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix49-type-settings-before.jpg" alt="Password card at 1280px before: MIN 10 CHARACTERS, field labels, SHOW, the checklist and UPDATE PASSWORD in 9–10px uppercase mono." loading="lazy">
+        <figcaption>Before, settings at 1280px: note 9.3px, checklist 9.6px, labels 10.2px, hint 10.8px.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix49-type-settings-after.jpg" alt="Password card at 1280px after: the same card with 12px labels, checklist and button, and a 13px sentence-case hint." loading="lazy">
+        <figcaption>After: 12px labels, 13px hint.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix49-type-wallet-375-before.jpg" alt="Wallet balance tiles at 375px before: AVAILABLE, CREDITS, READY TO USE and the other tile labels in small uppercase mono." loading="lazy" style="max-width:340px">
+        <figcaption>Before, wallet at 375px.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix49-type-wallet-375-after.jpg" alt="Wallet balance tiles at 375px after: the same tiles with larger labels; some footers wrap to a second line." loading="lazy" style="max-width:340px">
+        <figcaption>After: 12px labels; footers wrap.</figcaption>
+      </figure>
+    </div>
   </section>
 
 
@@ -1449,14 +1551,13 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 46. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 49. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs your decision</h3>
       <ul>
-        <li><strong>Labels in the player's More menu.</strong> The rail is icon-only on purpose (CSS comment "Icon-only buttons"). The 9-item More panel cannot fit labels on a phone. The options are labels on desktop only, or a labelled list popover instead of the icon stack (<a href="#fix-46">fix 46</a>).</li>
-        <li><strong>The rest of the header.</strong> The hamburger and avatar are still accent-filled, and UPLOAD appears twice, as a nav link and as the action (<a href="#fix-35">fix 35</a>).</li>
-        <li><strong>Type and label style.</strong> Choosing a type scale, and sentence case versus uppercase mono, unblocks most of the remaining small-text items (<a href="#fix-31">fix 31</a>, <a href="#fix-32">32</a>). The sign-in screens use a local 12/13px floor until then (<a href="#fix-45">fix 45</a>).</li>
+        <li><strong>The hamburger and avatar are still accent-filled.</strong> You set the order of the header's right side (<a href="#fix-47">fix 47</a>) but not these two, so they are unchanged.</li>
+        <li><strong>The design system says 11px.</strong> The ECHO design system still lists eyebrow and label at 11px and has no 13px sentence size. The app now uses 12px and 13px (<a href="#fix-49">fix 49</a>). It should be updated to match.</li>
       </ul>
     </div>
     <div class="box">

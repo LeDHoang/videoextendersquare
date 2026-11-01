@@ -11,7 +11,7 @@ export default function RulesPage() {
       <header className="sx-ps-head">
         <div>
           <h1 className="sx-ps-title">COMMUNITY RULES</h1>
-          <div className="sx-ps-kicker">WHAT YOU CAN POST AND SEND ON ECHO</div>
+          <div className="sx-ps-kicker">What you can post and send on ECHO.</div>
         </div>
       </header>
 

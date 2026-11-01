@@ -280,7 +280,7 @@ export default function PackEditorPage() {
       <section className="sx-pack-library">
         <div className="sx-pack-editor-heading">
           <h2>FIND PUBLIC REELS</h2>
-          <span>ANY CREATOR'S PUBLISHED REELS CAN JOIN THE COLLECTION</span>
+          <span>Any creator's published reels can join the collection.</span>
         </div>
         <input
           className="sx-input"

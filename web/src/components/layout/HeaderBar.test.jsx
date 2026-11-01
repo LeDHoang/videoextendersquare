@@ -61,6 +61,24 @@ describe('HeaderBar responsive behavior', () => {
     expect(screen.getByLabelText('Open account menu')).toBeInTheDocument();
   });
 
+  it('orders the right-side actions UPLOAD, credits, messages, and keeps UPLOAD out of the nav', () => {
+    mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
+
+    const { container } = render(
+      <MemoryRouter>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    const nav = screen.getByRole('navigation', { name: 'Global Routes' });
+    expect(nav).not.toHaveTextContent('UPLOAD');
+
+    const hrefs = [...container.querySelectorAll('.sx-top-right a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(['/upload', '/upload', '/wallet', '/messages']);
+    expect(screen.getByRole('link', { name: '42 credits' })).toHaveAttribute('href', '/wallet');
+    expect(screen.getByRole('link', { name: 'Messages, 3 unread' })).toHaveAttribute('href', '/messages');
+  });
+
   it('activates and deactivates mobile search mode', async () => {
     const user = userEvent.setup();
     render(

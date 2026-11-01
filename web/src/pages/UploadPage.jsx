@@ -699,7 +699,7 @@ export default function UploadPage() {
               <Button onClick={clearBatch} disabled={batchRendering}>CLEAR BATCH</Button>
             </div>
           ) : (
-            <Mono>DROP VIDEOS OR IMAGES ON THE STAGE TO START</Mono>
+            <Mono>Drop videos or images on the stage to start.</Mono>
           )}
         </DeckSection>
         {batch.length ? renderExtendSections() : null}

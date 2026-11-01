@@ -69,7 +69,12 @@
   --sx-t-h2: clamp(1.15rem, 2vw, 1.4rem);
   --sx-t-h3: 1.05rem;
   --sx-t-body: 0.9375rem;
-  --sx-t-eyebrow: 0.6875rem;
+  /* Readability floor (root is 15px): nothing renders under 12px. Uppercase mono
+     labels, eyebrows, control options and badges use --sx-t-eyebrow (12px); short
+     sentences such as hints, help and empty-state lines use --sx-t-small (13px),
+     in sentence case. */
+  --sx-t-eyebrow: 0.8rem;
+  --sx-t-small: 0.8667rem;
   --sx-t-mono: 0.8125rem;
 
   /* ─── Spacing (4px base) ─────────────────────────────────── */

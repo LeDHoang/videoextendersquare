@@ -1,6 +1,6 @@
 export default function StudioLoading({
   title = 'STUDIO',
-  subtitle = 'AWAITING SEQUENCE INITIATION…',
+  subtitle = 'Waiting for a file.',
   compact = false,
 }) {
   // dvh tracks the mobile URL bar; vh is the fallback for older browsers.
