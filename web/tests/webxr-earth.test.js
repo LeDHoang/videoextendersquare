@@ -6233,3 +6233,99 @@ test('grip on an Earth panel drags it along the laser and it stays put', () => {
   assert.deepEqual([reset.x, reset.y, reset.z], [0, 0.20, -0.85]);
   renderer.stopPreview();
 });
+
+// The preview canvas's own keys (fix 54): a keyboard path through the 3D scene.
+function keyedPreview(options = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  const canvas = makePreviewCanvas(gl);
+  const handlers = {};
+  canvas.addEventListener = (type, fn) => { handlers[type] = fn; };
+  canvas.getRootNode = () => canvas.ownerDocument; // lets the real OrbitControls attach
+  renderer.startPreview(canvas, options);
+  const press = (key, extra = {}) => {
+    const event = { key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, prevented: false, ...extra };
+    event.preventDefault = () => { event.prevented = true; };
+    handlers.keydown(event);
+    return event.prevented;
+  };
+  return { renderer, api: renderer.__test, camera: renderer.__test.getCamera(), press };
+}
+
+test('preview keys: arrows look around in headset POV; other keys fall through to the player', () => {
+  const { renderer, camera, press } = keyedPreview();
+  assert.equal(press('ArrowLeft'), true);
+  assert.ok(camera.rotation.y > 0.1, `looked left: ${camera.rotation.y}`);
+  assert.equal(press('ArrowUp'), true);
+  assert.ok(camera.rotation.x > 0.1, `looked up: ${camera.rotation.x}`);
+  press('ArrowRight');
+  press('ArrowDown');
+  closeTo(camera.rotation.y, 0, 1e-9);
+  closeTo(camera.rotation.x, 0, 1e-9);
+  // Space, letters, + / − (nothing to zoom here) and modified arrows are not taken:
+  // the player's own shortcuts and the browser keep them.
+  for (const key of [' ', 'k', 'n', 'm', '+', '-']) assert.equal(press(key), false, key);
+  assert.equal(press('ArrowLeft', { ctrlKey: true }), false);
+  closeTo(camera.rotation.y, 0, 1e-9);
+  renderer.stopPreview();
+});
+
+test('preview keys: orbit inspect continues from where a drag left the camera, and + / − zoom', () => {
+  const { renderer, camera, press } = keyedPreview({ cameraMode: 'orbit' });
+  renderer.setPreviewCameraMode('orbit');
+  const target = { x: 0, y: 1.4, z: -2.0 };
+  const dist = () => Math.hypot(camera.position.x - target.x, camera.position.y - target.y, camera.position.z - target.z);
+  // As if OrbitControls had moved the camera round to the side.
+  camera.position.set(target.x + 4, target.y + 1, target.z);
+  const before = camera.position.clone();
+  press('ArrowLeft');
+  const step = camera.position.distanceTo(before);
+  assert.ok(step > 0.1 && step < 1.5, `one short orbit step from the dragged spot, not a jump back: ${step}`);
+  closeTo(dist(), Math.hypot(4, 1), 1e-6);
+  const d0 = dist();
+  assert.equal(press('+'), true);
+  closeTo(dist(), d0 * 0.85, 1e-6);
+  assert.equal(press('-'), true);
+  closeTo(dist(), d0, 1e-6);
+  renderer.stopPreview();
+});
+
+test('preview keys: in the Earth scene arrows turn the globe, Shift+arrows look, + / − zoom', () => {
+  const { renderer, api, camera, press } = keyedPreview();
+  renderer.setSceneMode('earth');
+  press('ArrowRight');
+  assert.ok(api.getEarthState().yaw > 0.1, 'the surface moves right, as a drag right moves it');
+  press('ArrowDown');
+  assert.ok(api.getEarthState().pitch > 0.1, 'and down with ArrowDown');
+  const yaw = api.getEarthState().yaw;
+  press('ArrowLeft', { shiftKey: true });
+  closeTo(api.getEarthState().yaw, yaw, 1e-9);
+  assert.ok(camera.rotation.y > 0.1, 'Shift+arrow looks around instead');
+  assert.equal(press('+'), true);
+  assert.ok(api.getEarthState().zoomTarget > 1, 'zoomed in');
+  assert.equal(press('-'), true);
+  closeTo(api.getEarthState().zoomTarget, 1, 1e-9);
+  renderer.stopPreview();
+});
+
+test('preview keys: zoomed in on Earth, an arrow pans the map that way on screen', () => {
+  const { renderer, api, press } = keyedPreview();
+  renderer.setSceneMode('earth');
+  const T = renderer.getThree();
+  for (const [key, cx, cy] of [['ArrowRight', 1, 0], ['ArrowLeft', -1, 0], ['ArrowUp', 0, 1], ['ArrowDown', 0, -1]]) {
+    api.setEarthZoom(64, { lat: 35, lon: 139 });
+    api.advanceEarthZoom(100000);
+    const A = api.getEarthState().anchor;
+    const f = new T.Vector3(A.x, A.y - 1.6, A.z).normalize();
+    const right = new T.Vector3().crossVectors(f, new T.Vector3(0, 1, 0)).normalize();
+    const up = new T.Vector3().crossVectors(right, f).normalize();
+    const screenOf = () => { const p = earthWorldSample(renderer, api, 35, 139).point.clone().sub(new T.Vector3(A.x, A.y, A.z)); return { x: p.dot(right), y: p.dot(up) }; };
+    const before = screenOf();
+    assert.equal(press(key), true);
+    const after = screenOf();
+    const dx = after.x - before.x, dy = after.y - before.y;
+    assert.ok(dx * cx + dy * cy > 0, `${key} moved the map toward (${cx},${cy}): ${dx.toFixed(5)}, ${dy.toFixed(5)}`);
+  }
+  renderer.stopPreview();
+});

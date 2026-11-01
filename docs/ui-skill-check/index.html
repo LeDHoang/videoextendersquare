@@ -709,7 +709,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-10">
   <h4>Fix 10 · Attempted fix · verified locally (Playwright keyboard checks on /reels at 1024×768 and 375×812, and /reels/immersive-preview at 1280×800)</h4>
   <p><code>ui/assets/reels.html</code>: closing the comments sheet now returns focus to whatever opened it, or to the Comments button if nothing did. This works with the close button and with Esc. Before the change, focus stayed on the hidden <code>#closeDrawerBtn</code> or <code>#commentInput</code>; now it lands on <code>#commentBtn</code>. Rail buttons went from 32px (34px in phone fullscreen) to 44px in every breakpoint, measured 44×44 at 1024px and 53×53 at 375px, where the rail is scaled 1.2×. In the More group on a phone, all 8 visible buttons still fit inside the frame. <code>web/src/components/ui/ReelsPlayer.jsx</code>: the hidden player mount behind the immersive preview uses <code>inert</code> instead of <code>aria-hidden</code>. Tabbing through the preview page went from 73 stops (20 inside the hidden mount) to 55 stops (0 inside). <code>web/src/styles/global.css</code>: the share dialog's × went from 19×13 to 44×44.</p>
-  <p>The share dialog already gave focus back to the Share button on close and on Esc before this change (from an earlier fix), so that part needed no edit. <strong>Not done:</strong> a keyboard path into the 3D preview canvas. The page-edge prev/next chevrons are still 32px. <strong>Since done:</strong> 44px in fix <a href="#fix-39">39</a>.</p>
+  <p>The share dialog already gave focus back to the Share button on close and on Esc before this change (from an earlier fix), so that part needed no edit. <strong>Not done:</strong> a keyboard path into the 3D preview canvas. The page-edge prev/next chevrons are still 32px. <strong>Since done:</strong> 44px in fix <a href="#fix-39">39</a>, keyboard path in fix <a href="#fix-54">54</a>.</p>
   <figure>
     <img src="img/fix10-focus-rail-after.jpg" alt="Reels player at 1024px after closing comments with Escape: the focus ring is on the Comments button in a rail of 44px buttons" loading="lazy">
     <figcaption>After: comments closed with Esc. Focus is back on the Comments button, and the rail buttons are 44px.</figcaption>
@@ -729,7 +729,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>768:</strong> they sit at the left edge, from x 10 to 54. The frame starts at x 65.</li>
     </ul>
     <p>On phones they stay hidden, as before, because phones navigate by swiping.</p>
-    <p><strong>Not done:</strong> a keyboard path into the 3D preview canvas.</p>
+    <p><strong>Not done:</strong> a keyboard path into the 3D preview canvas. <strong>Since done:</strong> fix <a href="#fix-54">54</a>.</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix39-edge-arrows-before-1280.jpg" alt="Docked gutter with the up and down arrows at 32px." loading="lazy" style="max-width:200px">
@@ -1787,6 +1787,71 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
   </section>
 
+  <section class="attempt" id="fix-54">
+    <h4>Fix 54 · Follow-up fix · A keyboard path into the 3D preview canvas, verified locally (every key measured in the browser in headset, orbit and Earth views, before and after)</h4>
+    <p>On /reels/immersive-preview the 3D scene could already take focus (it is the 21st Tab stop), but once it had focus the keyboard could not move it:</p>
+    <ul>
+      <li>The arrow keys, <kbd>+</kbd> and <kbd>−</kbd> did nothing. The camera stayed at 0, 0.</li>
+      <li><kbd>Space</kbd> played and paused, and <kbd>M</kbd> turned the sound on and off. These keys belong to the hidden 2D player behind the scene, and nothing on the page mentioned them.</li>
+      <li>Screen readers announced the scene as an image, which tells the user there is nothing to operate.</li>
+    </ul>
+    <p>Looking around, orbiting, turning the Earth and zooming were mouse-only.</p>
+    <p><strong>What the keys do now</strong>, when the scene has focus (<code>previewKeyDown</code> in <code>ui/assets/webxr_vr.js</code>):</p>
+    <ul>
+      <li><strong>Arrows act like a short drag.</strong> The mouse drag and the arrows now share one function, so they cannot drift apart.
+        <ul>
+          <li>In HEADSET POV they look around, 0.18 rad per press.</li>
+          <li>In ORBIT INSPECT they orbit the same point the mouse orbits. The mouse drag moves the camera itself, so the arrows first read back where it left the camera. Without that, the first key press would jump the camera back to where it was before the drag.</li>
+          <li>On the Earth they turn the globe the way the arrow points, the same way a drag in that direction does. Zoomed in, they pan the map by the distance the headset thumbstick covers in a tenth of a second, because the globe does not turn when zoomed. <kbd>Shift</kbd>+arrow looks around instead, like Shift-drag.</li>
+        </ul>
+      </li>
+      <li><strong><kbd>+</kbd> and <kbd>−</kbd> zoom</strong> where the mouse wheel zooms: closer or further in ORBIT INSPECT, and one wheel step on the Earth. In HEADSET POV they do nothing, as the wheel does nothing there.</li>
+      <li><strong>Every other key goes on to the player's own shortcuts</strong>, so <kbd>Space</kbd>, <kbd>N</kbd>/<kbd>P</kbd>, <kbd>A</kbd>/<kbd>D</kbd> and <kbd>M</kbd> work as before. Keys held with Ctrl, Alt or Cmd are left alone, so browser shortcuts still work.</li>
+      <li><strong>Keys the scene handles go no further.</strong> The page does not scroll, and the player's own arrow shortcuts (previous/next and seek) do not fire as well.</li>
+      <li><strong>Tab still leaves the scene</strong>, so focus is never trapped.</li>
+    </ul>
+    <p>The scene is now announced as an application, so screen readers pass the keys through to it. A visible line under the scene lists the keys, and it is also the scene's accessible description: "KEYS ON THE SCENE: ARROWS LOOK, ORBIT OR TURN THE EARTH (SHIFT TO LOOK) · + / − ZOOM · SPACE PLAY · N / P NEXT, PREVIOUS · A / D SEEK · M SOUND".</p>
+    <p><strong>Measured in the browser at 1280px</strong>, with focus moved to the scene by Tab:</p>
+    <ul>
+      <li><strong>Headset:</strong> two presses of Left turned the view 0.18 and then 0.36 rad, Up tilted it 0.18, and Right and Down each took one step back. <kbd>Space</kbd> played and paused and <kbd>M</kbd> unmuted, as before. PageDown still scrolls the page; the scene does not use it.</li>
+      <li><strong>Orbit, after a mouse drag:</strong> each arrow continued from where the drag left the camera, for example from (−3.68, −0.52, 0.41) to (−3.33, −0.60, 0.81), with no jump. <kbd>+</kbd> moved closer and <kbd>−</kbd> further.</li>
+      <li><strong>Earth:</strong> Right turned the globe +0.12 per press, the same direction as a drag to the right. Down tilted it the way a downward drag does. <kbd>Shift</kbd>+Left looked around without turning the globe. <kbd>+</kbd> set the zoom target to 2.6 and <kbd>−</kbd> back to 1. Zoomed in over Tokyo, each arrow moved the map toward its own direction on screen.</li>
+      <li>Tab moved on to "▸ MORE CONTROLS". No page errors.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix54-keys-before.jpg" alt="The immersive preview with the scene focused after three presses of the Left arrow: the player panel still faces straight ahead, and under the scene there is only the mouse hint." loading="lazy">
+        <figcaption>Before: after three presses of Left, the view has not moved. Only the mouse is described.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix54-keys-after.jpg" alt="The same view after three presses of Left: the scene has turned left, so the player panel sits angled at the lower right, and a second line under the scene lists the keyboard keys." loading="lazy">
+        <figcaption>After: the same three presses turn the view. A second line lists the keys.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>webxr-earth.test.js</code> gets four tests that drive the real scene code with key events:
+        <ul>
+          <li>Headset: the arrows look around; Space, K, N, M, + and − are passed on to the player; Ctrl+arrow is ignored.</li>
+          <li>Orbit: an arrow continues from a camera the mouse moved, by one step; + and − zoom and come back.</li>
+          <li>Earth: Right and Down turn the globe; Shift+Left looks without turning it; + then − returns the zoom to 1.</li>
+          <li>Zoomed Earth: each arrow moves the map toward its direction on screen.</li>
+        </ul>
+        Making the orbit read-back return early fails the orbit test, which shows the test covers it.
+      </li>
+      <li>New <code>ReelsPlayer.test.jsx</code>: the scene is a focusable application and is described by the page's key line.</li>
+      <li>Results: 513 vitest and 470 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>The buttons inside the scene</strong>: the player dock, the comments panel and the shell pages. Focus cannot move between them. Their main actions are reachable through the keys above, but buttons such as LIKE, SAVE and FOLLOW are not.</li>
+      <li><strong>Picking an Earth heat marker</strong>, to load its reels, still needs a click.</li>
+      <li><strong><kbd>C</kbd></strong> still opens the hidden 2D player's comments drawer, which cannot be seen in the preview. This was already the case.</li>
+      <li><strong>Two mouse quirks, already present, left as they were:</strong> a sideways wheel does nothing on a zoomed Earth, and in ORBIT INSPECT the wheel jumps the camera back after a drag.</li>
+      <li><strong>No test with a real screen reader.</strong> The role and description were checked in the browser and by test only.</li>
+    </ul>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -1830,7 +1895,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 53. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 54. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1844,7 +1909,6 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <ul>
         <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
         <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
-        <li>A keyboard path into the 3D preview canvas.</li>
       </ul>
     </div>
     <div class="box">

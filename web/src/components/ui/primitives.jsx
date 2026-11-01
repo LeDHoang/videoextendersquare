@@ -155,6 +155,6 @@ export function HealthDot({ ok, severity, label, detail }) {
   );
 }
 
-export function Mono({ children }) {
-  return <div className="sx-mono">{children}</div>;
+export function Mono({ children, id }) {
+  return <div className="sx-mono" id={id}>{children}</div>;
 }

@@ -1146,9 +1146,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Applies headset yaw/pitch or orbit spherical position to the camera.
   // Headset mode keeps the old custom drag-look (OrbitControls disabled);
   // orbit mode is fully delegated to THREE.OrbitControls.
+  const PREVIEW_ORBIT_TARGET = { x: 0, y: 1.4, z: -2.0 };
   function applyPreviewCamera() {    if (!camera) return;
     if (previewCameraMode === 'orbit') {
-      const tx = 0, ty = 1.4, tz = -2.0;
+      const tx = PREVIEW_ORBIT_TARGET.x, ty = PREVIEW_ORBIT_TARGET.y, tz = PREVIEW_ORBIT_TARGET.z;
       const d = previewOrbitDistance;
       const cp = Math.cos(previewOrbitPitch), sp = Math.sin(previewOrbitPitch);
       const cy = Math.cos(previewOrbitYaw), sy = Math.sin(previewOrbitYaw);
@@ -7479,6 +7480,73 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
+  // OrbitControls moves the orbit camera itself, so read its angles back before adding a key step.
+  function syncOrbitFromCamera() {
+    if (!orbitControls || !orbitControls.enabled || !camera) return;
+    const ox = camera.position.x - PREVIEW_ORBIT_TARGET.x;
+    const oy = camera.position.y - PREVIEW_ORBIT_TARGET.y;
+    const oz = camera.position.z - PREVIEW_ORBIT_TARGET.z;
+    const d = Math.sqrt(ox * ox + oy * oy + oz * oz);
+    if (!d) return;
+    previewOrbitDistance = d;
+    previewOrbitPitch = Math.asin(oy / d);
+    previewOrbitYaw = Math.atan2(ox, oz);
+  }
+
+  // A drag of (dx, dy) CSS pixels: look around (headset POV) or orbit (orbit inspect).
+  function lookPreviewBy(dx, dy) {
+    const sensitivity = 0.006;
+    if (previewCameraMode === 'orbit') {
+      syncOrbitFromCamera();
+      previewOrbitYaw -= dx * sensitivity;
+      previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
+    } else {
+      previewYaw -= dx * sensitivity;
+      previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
+    }
+    applyPreviewCamera();
+  }
+
+  // Keys on the focused preview canvas. An arrow acts like a short drag that way: it looks
+  // around or orbits, and in the Earth scene it turns the globe (Shift+arrow looks, as
+  // Shift-drag does). + and − zoom like the wheel. Other keys fall through to the player's
+  // own shortcuts (Space, N/P, A/D, M).
+  const PREVIEW_KEY_DRAG_PX = 30;
+  function previewKeyDown(event) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return false;
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    const zoom = { '+': 1, '=': 1, '-': -1, '_': -1 }[event.key] || 0;
+    if (arrow) {
+      const dx = arrow[0] * PREVIEW_KEY_DRAG_PX;
+      const dy = arrow[1] * PREVIEW_KEY_DRAG_PX;
+      if (sceneMode === 'earth' && !event.shiftKey) {
+        // The globe's surface moves the way the arrow points, as it follows a drag.
+        earthTouchInput();
+        earthFling = { yaw: 0, pitch: 0 };
+        if (earthFocus && earthZoom > 1.0001 && earthTopdownActive()) {
+          // Zoomed in: pan the map by what the thumbstick covers in 0.1 s (0.09 m of surface).
+          earthTopdownNudge(arrow[0], -arrow[1], 0.09 / (Math.max(1, earthEffectiveK(earthZoom)) * earthVisibleRadius(earthZoom)));
+        } else {
+          const step = 0.12 / Math.max(1, Math.sqrt(earthZoom));
+          rotateEarth(arrow[0] * step, arrow[1] * step);
+        }
+      } else {
+        lookPreviewBy(dx, dy);
+      }
+    } else if (zoom && sceneMode === 'earth') {
+      adjustEarthZoom(zoom > 0 ? EARTH_ZOOM_STEP : 1 / EARTH_ZOOM_STEP);
+    } else if (zoom && previewCameraMode === 'orbit') {
+      syncOrbitFromCamera();
+      previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance * (zoom > 0 ? 0.85 : 1 / 0.85)));
+      applyPreviewCamera();
+    } else {
+      return false;
+    }
+    // Handled here, so the page does not scroll and the player's arrow shortcuts stay out of it.
+    if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+    return true;
+  }
+
   function installPreviewListeners() {
     if (!previewCanvas || previewListeners) return;
     if (typeof previewCanvas.addEventListener !== 'function') return;
@@ -7563,15 +7631,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       // In orbit mode OrbitControls owns the drag; otherwise custom yaw/pitch.
       if (previewCameraMode === 'orbit' && orbitControls && orbitControls.enabled) return;
-      const sensitivity = 0.006;
-      if (previewCameraMode === 'orbit') {
-        previewOrbitYaw -= dx * sensitivity;
-        previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
-      } else {
-        previewYaw -= dx * sensitivity;
-        previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
-      }
-      applyPreviewCamera();
+      lookPreviewBy(dx, dy);
       } catch (e) { capturePointerError('pointermove', e); }
     };
     const finishPointer = function (event) {
@@ -7680,7 +7740,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
     const onContextMenu = function (event) { if (event.preventDefault) event.preventDefault(); };
     const onKeyDown = function (event) {
-      try { shellKeyDown(event); } catch (e) { capturePointerError('keydown', e); }
+      try {
+        if (!shellKeyDown(event)) previewKeyDown(event);
+      } catch (e) { capturePointerError('keydown', e); }
     };
     previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu, onKeyDown };
     try { previewCanvas.style.touchAction = 'none'; } catch (e) {}

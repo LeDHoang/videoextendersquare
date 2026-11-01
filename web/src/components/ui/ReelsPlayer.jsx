@@ -16,6 +16,7 @@ export default function ReelsPlayer({
   previewMode = false,
   previewOptions = {},
   onPreviewReady,
+  previewDescribedBy,
   revealOnLoad = false,
   revealAlign = false,
 }) {
@@ -254,8 +255,9 @@ export default function ReelsPlayer({
             ref={previewCanvasRef}
             className="sx-immersive-preview-canvas"
             tabIndex="0"
-            role="img"
+            role="application"
             aria-label="Interactive desktop preview of the immersive Reels scene"
+            aria-describedby={previewDescribedBy}
           />
           <div ref={mountRef} id="sxReelsRoot" className="sx-reels-mount sx-immersive-preview-source" inert />
         </div>
