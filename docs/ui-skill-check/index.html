@@ -358,7 +358,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p>Changed: <code>webxr_vr.js</code> has a new <code>reelLoadState</code>, which runs every frame from the overlay refresh. A video reel whose element has a media error (or <code>NETWORK_NO_SOURCE</code>) turns <em>failed</em> once it has waited <code>FRESH_VISUAL_MAX_HOLD_MS</code> (2.5 s). A reel that is not ready, or that stalls mid-play, shows <em>loading</em> after 0.5 s. Stall tracking (<code>trackStalls</code>) is now bound by this check on every frame; only the diagnostics POST still needs <code>?xrdiag=1</code>.</p>
     <p><code>vr_ui_canvas.js</code> <code>renderOverlayCanvas</code> takes a <code>loadState</code>. When the reel has failed, it dims the whole frame (62% black) and draws "This reel couldn't load" with RETRY and SKIP buttons (220×72 px on the 1024 px overlay, roughly 18°×6° on the default screen). While loading, it draws a spinner and "Loading…" over the held frame. SKIP calls <code>onNext</code>. RETRY calls <code>load()</code> and then <code>play()</code> on the element. Both go through the existing pop-up-comment hit path, now <code>handleOverlayHit</code>.</p>
     <p>Checked: in a preview harness running the real engine, pointing the video at a missing file left the old frame for about 2.5 s, then showed the dimmed card below. The hit regions resolve to <code>load:skip</code> and <code>load:retry</code>. A new unit test, "fix26: a reel with a media error shows SKIP / RETRY after the hold", covers the timing.</p>
-    <p><strong>Not done:</strong> Not verified on a Quest. RETRY was checked by reading the code only. The overlay follows the existing overlay rules: it is hidden while the comments panel is open and when <code>?overlay=0</code> is set. The title row still shows the raw filename when a reel has no title.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest. RETRY was checked by reading the code only. The overlay follows the existing overlay rules: it is hidden while the comments panel is open and when <code>?overlay=0</code> is set. The title row still shows the raw filename when a reel has no title. <strong>Update:</strong> kept on purpose: a post with no title is named by its file, and one with a title shows the title (fix <a href="#fix-55">55</a>).</p>
     <figure>
       <img src="img/fix26-load-error-after.jpg" alt="Desktop preview: the reel frame is dimmed, with the white text This reel couldn't load above a dark RETRY button and an orange SKIP button" loading="lazy">
       <figcaption>After: a reel whose file is missing, about 3.5 s after the switch (desktop preview harness, same engine).</figcaption>
@@ -1852,6 +1852,45 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
   </section>
 
+  <section class="attempt" id="fix-55">
+    <h4>Fix 55 · Follow-up fix · A post's title replaces the file name wherever a reel is named, verified locally (/reels opened from Explore, the player's title, and the Explore tile)</h4>
+    <p>The rule you set: a reel is named by its file name by default, and when the post has a title, the title is shown instead.</p>
+    <p>An audit of every place a reel is named found the rule already holds in most of them: the player's title row and side panel, VR's title row and overlay, share cards, packs, and the Explore tile's label. Three places broke it:</p>
+    <ul>
+      <li><strong>/reels opened from Explore</strong> said "PLAYING white_frame_reel.mp4" while the player beside it showed the title OVEREXPOSED TEST FRAME.</li>
+      <li><strong>The player's title tooltip</strong>, shown on hover in fullscreen, gave the post's description. When the post had no description it gave the file name, even for a titled post. It now repeats the title, which is the full text when the row is cut off. The description is still shown in the side panel.</li>
+      <li><strong>An Explore tile whose video cannot play</strong> showed the file name under ▶. It now uses the tile's own label: the title, else the file name.</li>
+    </ul>
+    <p>A reel in a pack that has been removed now drops the previous reel's tooltip. Before, it kept it.</p>
+    <p>Measured in the browser, on the titled reel:</p>
+    <ul>
+      <li>/reels: "PLAYING white_frame_reel.mp4" became "PLAYING Overexposed test frame".</li>
+      <li>Tooltip: "Bright-frame legibility check for the overlay text" became "Overexposed test frame".</li>
+      <li>The untitled reel still reads "PLAYING bright_test_reel.mp4".</li>
+    </ul>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix55-title-before.jpg" alt="Top of /reels opened from Explore: the line reads OPENED FROM EXPLORE — PLAYING white_frame_reel.mp4 (1/2), while the side panel titles the reel OVEREXPOSED TEST FRAME." loading="lazy">
+        <figcaption>Before: the line names the file; the side panel names the post.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix55-title-after.jpg" alt="The same view after: the line reads OPENED FROM EXPLORE — PLAYING Overexposed test frame (1/2), matching the side panel." loading="lazy">
+        <figcaption>After: both name the post.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>reel-titles.test.js</code> reads the player, VR, Explore, pack and /reels code. It checks that every file name shown is the fallback after the post title, and that the tooltip repeats the title. It fails on the old code.</li>
+      <li><code>ExploreTile.test.jsx</code>: when neither the preview nor the original plays, the tile shows "Reel A", not "a.mp4". It fails on the old code.</li>
+      <li>Results: 514 vitest and 472 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>Found while testing, not fixed:</strong> /reels?play= for a local file with no post can play a different reel than it names. The player builds its own For You feed, and when that feed is shorter than the page's list, the start position falls back to the first reel. Locally the line said "PLAYING bright_test_reel.mp4 (2/2)" while the overexposed reel played. Published posts open by post id, so they are not affected. This was already the case.</li>
+      <li>Upload drafts are still named by the file being uploaded, which is the right name before a post exists.</li>
+    </ul>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -1895,7 +1934,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 54. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 55. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1908,7 +1947,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <h3>Larger pieces of work</h3>
       <ul>
         <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
-        <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
+        <li>Captions or a caption track for reels. Titles are done (<a href="#fix-55">fix 55</a>).</li>
       </ul>
     </div>
     <div class="box">

@@ -468,7 +468,7 @@ export default function ReelsPage() {
       ) : (
         <div>
           {deepIndex >= 0 ? (
-            <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
+            <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.title || videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
           ) : null}
           <ReelsPlayer params={playerParams} initialIndex={initialIndex} revealOnLoad />
           {videos.some((v) => v.tunnel_url) ? (

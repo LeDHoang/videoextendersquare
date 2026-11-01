@@ -5768,6 +5768,7 @@
           if (progressWrap) progressWrap.classList.add('image-hidden');
           metaFolder.textContent = '▦ REEL PACK';
           metaTitle.textContent = 'Reel unavailable';
+          metaTitle.removeAttribute('title');
           metaSize.textContent = '';
           renderSidePanel();
           showPackStage('unavailable');
@@ -5782,7 +5783,7 @@
       metaFolder.textContent = isPackMode ? '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length : '📁 ' + (item.folder || 'root');
       metaTitle.textContent = item.title || item.filename;
       try {
-        metaTitle.title = item.caption || item.filename;
+        metaTitle.title = item.title || item.filename;
       } catch (e) {}
       metaSize.textContent = item.size || '';
       refreshEngagementUI();

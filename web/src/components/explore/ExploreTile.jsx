@@ -220,7 +220,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           {failed ? (
             <div className="sx-explore-fallback">
               ▶
-              <span>{video.filename}</span>
+              <span>{label}</span>
             </div>
           ) : (
             <video

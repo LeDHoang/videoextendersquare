@@ -171,6 +171,15 @@ describe('ExploreTile autoplay', () => {
     expect(started).toBe(2);
   });
 
+  it('names the post by its title, not its file, when neither file plays', () => {
+    const { container } = renderTile();
+    show();
+    act(() => { fireEvent.error(container.querySelector('video')); });
+    act(() => { fireEvent.error(container.querySelector('video')); });
+    expect(container.querySelector('.sx-explore-fallback')).toHaveTextContent('Reel A');
+    expect(container.querySelector('.sx-explore-fallback')).not.toHaveTextContent('a.mp4');
+  });
+
   it('does not play a tile that has not scrolled into view', () => {
     const { container } = renderTile();
     act(() => { observers.forEach((o) => o.cb([{ isIntersecting: false }])); });
