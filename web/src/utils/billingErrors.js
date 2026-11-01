@@ -4,6 +4,7 @@
 
 const CODE_COPY = {
   INSUFFICIENT_CREDITS: 'Not enough ECHO Credits for this job — add credits or use My Fal Key.',
+  DAILY_SPEND_CAP: "You reached today's ECHO Credits limit. Try again tomorrow or use My Fal Key.",
   INVALID_QUOTE: 'The quote expired or no longer matches. Retry to get a fresh quote.',
   BILLING_CONFLICT: 'This job was already submitted.',
   BILLING_MISCONFIGURED: 'Cloud billing is temporarily unavailable. Try again later.',

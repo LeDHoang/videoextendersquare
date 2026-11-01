@@ -51,6 +51,10 @@ class RewardError(BillingError):
     code = "REWARD_INELIGIBLE"
 
 
+class DailySpendCapExceeded(BillingError):
+    code = "DAILY_SPEND_CAP"
+
+
 class BillingNotConfigured(BillingError):
     code = "BILLING_MISCONFIGURED"
 
@@ -484,6 +488,30 @@ def quote_payload(row: BillingQuote) -> dict[str, Any]:
     }
 
 
+def _check_daily_spend(db: Session, user_id: str, credits: int, cap: int, now) -> None:
+    """Credits held or spent today (UTC) plus this job must stay within ``cap``."""
+    ensure_account(db, user_id)
+    # Lock the wallet row first (no-op update) so two concurrent submits
+    # cannot both read the same total and pass the cap together.
+    db.execute(
+        update(CreditAccount)
+        .where(CreditAccount.user_id == user_id)
+        .values(updated_at=CreditAccount.updated_at)
+    )
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    spent = db.query(
+        func.coalesce(func.sum(CloudGenerationBilling.reserved_credits - CloudGenerationBilling.released_credits), 0)
+    ).filter(
+        CloudGenerationBilling.user_id == user_id,
+        CloudGenerationBilling.payment_source == "credits",
+        CloudGenerationBilling.created_at >= day_start,
+    ).scalar()
+    if int(spent) + int(credits) > cap:
+        raise DailySpendCapExceeded(
+            f"This job would pass your daily limit of {cap} ECHO Credits. Try again tomorrow or use My Fal Key."
+        )
+
+
 def create_billing_job(
     db: Session,
     *,
@@ -496,6 +524,7 @@ def create_billing_job(
     quote_id: str | None = None,
     stage_specs: list[tuple[str, str]] | None = None,
     fingerprint: dict[str, Any] | None = None,
+    daily_credit_cap: int | None = None,
 ) -> CloudGenerationBilling:
     payment_source = str(payment_source).casefold()
     if payment_source == "byok":
@@ -538,6 +567,8 @@ def create_billing_job(
         raise QuoteError("Processing parameters do not match the quote")
     if quote.stage_fingerprint and fingerprint and dict(quote.stage_fingerprint) != dict(fingerprint):
         raise QuoteError("Upload changed since the quote; request a new quote")
+    if daily_credit_cap is not None:
+        _check_daily_spend(db, user_id, quote.credits, daily_credit_cap, now)
 
     consumed = db.execute(
         update(BillingQuote)

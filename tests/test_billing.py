@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from server.billing.crypto import decrypt_fal_key, encrypt_fal_key
 from server.billing.runtime import resolve_fal_key
 from server.billing.service import (
+    DailySpendCapExceeded,
     BillingError,
     InsufficientCredits,
     QuoteError,
@@ -128,6 +129,62 @@ def test_quote_reuse_and_tamper_are_rejected(sessions):
         create_billing_job(db, user_id=user.id, job_id="good", kind="image", payment_source="credits", stage_id="img", params=params, quote_id=quote.id)
         with pytest.raises(QuoteError, match="already"):
             create_billing_job(db, user_id=user.id, job_id="again", kind="image", payment_source="credits", stage_id="img", params=params, quote_id=quote.id)
+
+
+IMAGE_PARAMS = {"prompt": "", "upscale_only": False, "upscale_engine": "fast", "outpaint_model": "fal-ai/image-apps-v2/outpaint", "upscale_model": "fal-ai/clarity-upscaler", "sharpening": 0.0, "custom_outpaint_args": {}, "custom_upscale_args": {}}
+
+
+def test_daily_spend_cap_blocks_a_job_and_keeps_the_quote(sessions):
+    with sessions() as db:
+        user = add_user(db, "capped")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:cap")
+        db.commit()
+        first = create_quote(db, user_id=user.id, kind="image", stage_id="img", width=1000, height=500, duration=None, params=IMAGE_PARAMS)
+        cap = first.credits
+        create_billing_job(db, user_id=user.id, job_id="cap-1", kind="image", payment_source="credits", stage_id="img", params=IMAGE_PARAMS, quote_id=first.id, daily_credit_cap=cap)
+        second = create_quote(db, user_id=user.id, kind="image", stage_id="img", width=1000, height=500, duration=None, params=IMAGE_PARAMS)
+        with pytest.raises(DailySpendCapExceeded):
+            create_billing_job(db, user_id=user.id, job_id="cap-2", kind="image", payment_source="credits", stage_id="img", params=IMAGE_PARAMS, quote_id=second.id, daily_credit_cap=cap)
+        db.rollback()
+        db.refresh(second)
+        assert second.status == "active"
+        assert get_wallet(db, user.id)["available_credits"] == 100 - cap
+        # A refunded job no longer counts toward today's total.
+        finalize_job_failure(db, "cap-1", error_code="pipeline_failed")
+        create_billing_job(db, user_id=user.id, job_id="cap-2", kind="image", payment_source="credits", stage_id="img", params=IMAGE_PARAMS, quote_id=second.id, daily_credit_cap=cap)
+
+
+def test_concurrent_jobs_cannot_both_pass_the_daily_cap(tmp_path):
+    engine = create_engine("sqlite:///" + str(tmp_path / "cap.db"), connect_args={"check_same_thread": False, "timeout": 10})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session() as db:
+        user = add_user(db, "racer")
+        grant_credits(db, user.id, 100, source="purchase", idempotency_key="purchase:race")
+        db.commit()
+        quotes = [create_quote(db, user_id=user.id, kind="image", stage_id="img", width=1000, height=500, duration=None, params=IMAGE_PARAMS) for _ in range(2)]
+    cap = quotes[0].credits
+
+    def submit(index):
+        with Session() as db:
+            try:
+                create_billing_job(db, user_id=user.id, job_id=f"race-{index}", kind="image", payment_source="credits", stage_id="img", params=IMAGE_PARAMS, quote_id=quotes[index].id, daily_credit_cap=cap)
+                return "ok"
+            except DailySpendCapExceeded:
+                db.rollback()
+                return "capped"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = sorted(pool.map(submit, range(2)))
+    engine.dispose()
+    assert results == ["capped", "ok"]
+
+
+def test_byok_jobs_skip_the_daily_spend_cap(sessions):
+    with sessions() as db:
+        user = add_user(db, "byok_cap")
+        billing = create_billing_job(db, user_id=user.id, job_id="byok-cap", kind="image", payment_source="byok", stage_id="img", params=IMAGE_PARAMS, daily_credit_cap=1)
+        assert billing.payment_source == "byok"
 
 
 def test_concurrent_failure_paths_release_exactly_once(sessions):

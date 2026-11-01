@@ -30,6 +30,7 @@ TIER_LIMITS = {
     "publish_hourly": ("SX_PUBLISH_HOURLY_MAX", 5, {"restricted": 1, "new": 2, "trusted": 10}),
     "publish_daily": ("SX_PUBLISH_DAILY_MAX", 20, {"restricted": 3, "new": 5, "trusted": 40}),
     "jobs_per_user": ("SX_MAX_JOBS_PER_USER", 2, {"restricted": 1, "new": 1, "trusted": 3}),
+    "daily_credits": ("SX_DAILY_CREDIT_CAP", 1000, {"restricted": 50, "new": 100, "trusted": 3000}),
 }
 
 

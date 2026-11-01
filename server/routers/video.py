@@ -326,11 +326,12 @@ def start_video_process(
                     quote_id=quote_id,
                     stage_specs=stage_specs,
                     fingerprint=submit_fingerprint,
+                    daily_credit_cap=trust.limit(db, context.user, "daily_credits"),
                 )
             except BillingError as ex:
                 db.rollback()
                 code = getattr(ex, "code", "")
-                status = 402 if code == "INSUFFICIENT_CREDITS" else 503 if code == "BILLING_MISCONFIGURED" else 409
+                status = 402 if code == "INSUFFICIENT_CREDITS" else 429 if code == "DAILY_SPEND_CAP" else 503 if code == "BILLING_MISCONFIGURED" else 409
                 raise HTTPException(status_code=status, detail={"code": code or "BILLING_ERROR", "message": str(ex)}) from ex
             except IntegrityError as ex:
                 # Same-job retry raced the first submit: the winner owns the

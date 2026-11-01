@@ -22,7 +22,7 @@ from server import security_headers
 from server.routers import social
 from server.social import auth, turnstile
 from server.social.database import Base, get_db
-from server.social.models import EmailVerificationToken, User, utcnow
+from server.social.models import CreditAccount, CreditLedgerEntry, EmailVerificationToken, User, utcnow
 
 REPO = Path(__file__).resolve().parents[1]
 PASSWORD = "correct-horse-battery-99"
@@ -133,6 +133,38 @@ def test_verify_link_activates_account_and_signs_in(env):
     assert client.cookies.get("echo_session") and client.cookies.get("echo_csrf")
     assert client.get("/api/auth/me").json()["user"]["username"] == "newbie"
     assert _status(Session, "newbie") == "active"
+
+
+def _starter_state(Session, username):
+    with Session() as db:
+        user = db.query(User).filter(User.username_norm == username).one()
+        account = db.get(CreditAccount, user.id)
+        grants = db.query(CreditLedgerEntry).filter(CreditLedgerEntry.idempotency_key == f"starter:{user.id}").count()
+        return (account.available_balance if account else 0), grants
+
+
+def test_verifying_grants_starter_credits_once(env, monkeypatch):
+    client, Session, _sent = env
+    monkeypatch.setenv("SX_CREDITS_ENABLED", "1")
+    monkeypatch.setenv("SX_STARTER_CREDITS", "5")
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    assert _starter_state(Session, "newbie") == (5, 1)
+    # Send the account back through verification: the idempotency key holds.
+    with Session() as db:
+        db.query(User).filter(User.username_norm == "newbie").update({User.status: "pending"})
+        db.commit()
+    client.cookies.clear()
+    token = client.post("/api/auth/resend-verification", json={"email": "newbie@example.com"}).json()["debug_token"]
+    assert _verify(client, token).status_code == 200
+    assert _starter_state(Session, "newbie") == (5, 1)
+
+
+def test_no_starter_credits_while_credits_are_off(env, monkeypatch):
+    client, Session, _sent = env
+    monkeypatch.setenv("SX_CREDITS_ENABLED", "0")
+    monkeypatch.setenv("SX_STARTER_CREDITS", "5")
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    assert _starter_state(Session, "newbie") == (0, 0)
 
 
 @pytest.mark.parametrize("kind", ["wrong", "used", "expired", "empty"])

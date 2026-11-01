@@ -173,6 +173,8 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_BILLING_RESERVED_TTL_MIN` | Age after which never-submitted credit reservations are reaped (minimum 5) | `30` |
 | `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `1`) |
 | `SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS` | Account age before reel rewards can be claimed (422 `REWARD_INELIGIBLE`, reason `account_too_new`) | `72` |
+| `SX_DAILY_CREDIT_CAP` | Credits one account can hold or spend on cloud jobs per UTC day (429 `DAILY_SPEND_CAP`; refunded jobs do not count; My Fal Key jobs are exempt). This is the `standard` tier value; `SX_NEW_DAILY_CREDIT_CAP`, `SX_RESTRICTED_DAILY_CREDIT_CAP` and `SX_TRUSTED_DAILY_CREDIT_CAP` default to 100 / 50 / 3000 | `1000` |
+| `SX_STARTER_CREDITS` | Credits granted once when an email is verified (only while `SX_CREDITS_ENABLED` is on; ledger key `starter:<user id>`) | `0` |
 | `SX_FAL_MAX_QUOTE_USD` | Per-job fal spend cap enforced at quote time (`0` disables) | `10` |
 | `SX_STRIPE_WEBHOOK_MAX_BYTES` | Max Stripe webhook body (minimum 1024) | `1048576` |
 | `SX_STRIPE_WEBHOOK_RPM` | Stripe webhook requests per IP per minute | `120` |

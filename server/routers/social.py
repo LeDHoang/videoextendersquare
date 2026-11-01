@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from server import settings
 from server.settings import env_int
+from server.billing.service import flag_enabled, grant_credits
 from server.media_store import public_url
 from server import media as media_service
 from server.social.auth import (
@@ -601,6 +602,10 @@ def verify_email(req: VerifyEmailRequest, request: Request, db: Session = Depend
         EmailVerificationToken.user_id == user.id,
         EmailVerificationToken.used_at.is_(None),
     ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    starter = env_int("SX_STARTER_CREDITS", 0, minimum=0)
+    if starter and flag_enabled("SX_CREDITS_ENABLED"):
+        # Idempotent per user: the key blocks a second grant on any path.
+        grant_credits(db, user.id, starter, source="earned", idempotency_key=f"starter:{user.id}", details={"reason": "starter"})
     db.commit()
     db.refresh(user)
     device_raw, device_minted = device_cookie(request)
