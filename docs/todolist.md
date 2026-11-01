@@ -26,12 +26,12 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 - [x] Account deletion asks "are you sure" in a dialog, and erases recommendation and analytics data (2026-11-01, `c9849b2`): sessions, requests, impressions, dismissals, affinities, co-watch, view dedup and Reel Pack views are deleted; engagement events lose the user id, anonymous id and recommendation links. Covered by `tests/test_profile_beta.py` and `ProfileSettingsPage.test.jsx`.
 - [x] Restart test during queued, running and completed jobs, on a local throwaway backend (2026-11-01): queued job cancelled and refunded, in-flight and completed job ids 404, staged uploads dropped, new jobs accepted, as `docs/deploy-runbook.md` and `docs/incident-response.md` say. The R2 read-back of completed jobs needs the VPS (`docs/to-beta.md`).
 - [x] Deployed `20261101_0019` and `20261101_0020` (kill switches, device column) to the VPS with `9b307e5` (2026-11-01): schema `20261101_0020`, both switches on, anti-abuse env values added.
-- [x] Sentry no longer ships stack-frame locals (2026-11-01, `45f2d1d`): a production test error showed the raw ASGI scope, with cookies, auth and CSRF tokens, client IP and query string, inside frame variables. Request headers were already filtered and the release was set.
+- [x] Sentry no longer ships stack-frame locals (2026-11-01, `45f2d1d`): a production test error showed the raw ASGI scope, with cookies, auth and CSRF tokens, client IP and query string, inside frame variables. Request headers were already filtered and the release was set. Deployed with `b6af68d`; the re-sent test error carries none of those values.
 
 ## Still open
 
 - [ ] VPS follow-ups from 2026-11-01 (details in `docs/to-beta.md`):
-  - Deploy `45f2d1d` and send the Sentry test error again. Review or delete older production error events, which may hold real cookies in frame variables.
+  - Review or delete production Sentry error events from before `b6af68d`, which may hold real cookies in frame variables.
   - Run `~/setup-backup.sh <backup-bucket-name>` on the VPS with the backup-only R2 token.
   - Restart during a completed job on the VPS, to check the R2 read-back.
   - Run a paid video job and a 4K publish together on the VPS and watch API latency.
