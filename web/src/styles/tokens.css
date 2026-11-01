@@ -44,10 +44,10 @@
   --sx-warn-dim: rgba(242, 199, 68, 0.12);
   --sx-warn-border: rgba(242, 199, 68, 0.35);
 
-  --sx-danger: #ef4444;
-  --sx-danger-hi: #f87171;
-  --sx-danger-dim: rgba(239, 68, 68, 0.12);
-  --sx-danger-border: rgba(239, 68, 68, 0.35);
+  --sx-danger: #f43f5e; /* rose, hue-separated from the vermilion accent */
+  --sx-danger-hi: #fb7185;
+  --sx-danger-dim: rgba(244, 63, 94, 0.12);
+  --sx-danger-border: rgba(244, 63, 94, 0.35);
 
   --sx-info: #3b82f6;
   --sx-info-hi: #60a5fa;

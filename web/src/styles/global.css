@@ -1082,8 +1082,8 @@ button:hover .sx-sidebar-hero-logo,
 }
 
 .sx-dot-offline {
-  background: #ef4444;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  background: var(--sx-danger);
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
   animation: sx-pulse 2s infinite;
 }
 
@@ -1491,7 +1491,7 @@ button:hover .sx-sidebar-hero-logo,
 }
 
 .sx-val-err {
-  color: #ef4444;
+  color: var(--sx-danger);
 }
 
 .sx-val-warn {

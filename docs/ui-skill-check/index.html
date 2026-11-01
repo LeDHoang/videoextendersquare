@@ -593,6 +593,22 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </tbody>
     </table>
   </div>
+
+  <section class="attempt">
+    <h4>Attempted fix · verified locally (/upload and /explore at 1280px)</h4>
+    <p><strong>Changed three strings:</strong> the upload drop zone now reads "DROP A VIDEO OR IMAGES, OR CLICK TO BROWSE" (<code>UploadZone.jsx</code>), the Explore kicker reads "ECHO · REELS AND REEL PACKS" (<code>ExplorePage.jsx</code>), and the empty comments line ends "Start the conversation below." (<code>reels.html</code>). All 481 unit tests still pass.</p>
+    <p><strong>Not done, on purpose:</strong> the strings are kept in uppercase mono because that is the app's current label style (see the design-system findings), so the sentence-case suggestions wait for that decision. "TERMINATE PROFILE" and "AWAITING SOURCE" are asserted by existing tests and need a deliberate test update. The wallet and credits copy is skipped because credits are enabled in beta. The HEVC error message needs the HEAD check described under the player error finding. The comments empty state is not shown in a screenshot because it only appears on a reel with no comments.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix5-upload-copy-after.jpg" alt="Upload page drop zone reading DROP A VIDEO OR IMAGES, OR CLICK TO BROWSE with a caption under it." loading="lazy">
+        <figcaption>After: /upload drop zone.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix5-explore-kicker-after.jpg" alt="Explore page heading with the kicker ECHO, REELS AND REEL PACKS." loading="lazy">
+        <figcaption>After: /explore kicker.</figcaption>
+      </figure>
+    </div>
+  </section>
 </section>
 
 <!-- ============ SYSTEM ============ -->
@@ -616,6 +632,16 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Keep orange-red for brand, use one primary fill per view, make danger a distinct crimson used only for destructive actions, and turn header Credits/Messages into ghost buttons.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · verified locally (Profile settings at 1280px)</h4>
+    <p><strong>Changed:</strong> <code>--sx-danger</code> is now rose <code>#f43f5e</code> (hover, dim and border variants follow) in <code>tokens.css</code>, and two hardcoded <code>#ef4444</code> uses in <code>global.css</code> (offline dot, validation error text) now read the token. Rose on the dark surface is about 5:1, so it still passes for text. In the screenshot the Delete account panel reads pink-red, apart from the vermilion Update profile button and header buttons.</p>
+    <p><strong>Not done:</strong> one primary fill per view and ghost Credits/Messages header buttons (a layout decision for you), and the 16px root. The 15px is set on <code>body</code> only, so raising it would not fix the real problem, which is the many rules under 12px; that needs the type scale, not one line.</p>
+    <figure>
+      <img src="img/fix6-danger-after.jpg" alt="Profile settings: the Delete account panel in rose beside vermilion accent buttons." loading="lazy">
+      <figcaption>After: danger (Delete account) versus accent (Update profile, header).</figcaption>
+    </figure>
+  </section>
 
   <article class="finding high">
     <h3><span class="chip">High</span>Monospace uppercase everywhere</h3>

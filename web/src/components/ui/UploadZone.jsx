@@ -50,7 +50,7 @@ export default function UploadZone({ accept, multiple = true, onFiles, caption }
         ⇪
       </div>
       <div className="sx-upload-title">
-        DROP SOURCE FILES OR CLICK TO BROWSE
+        DROP A VIDEO OR IMAGES, OR CLICK TO BROWSE
       </div>
       <div className="sx-upload-caption">{caption}</div>
     </div>
