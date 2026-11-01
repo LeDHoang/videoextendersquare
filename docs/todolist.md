@@ -1,6 +1,6 @@
 # To-do List
 
-Last verified: 2026-11-01 (VPS checks: restart read-back from R2, ffmpeg overlap latency, Sentry review, restore drill onto the Mac from the real R2 backup — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier the same day (registration anti-abuse items: kill switches, device signup limit, trust tiers, daily credit cap and starter credits, per-account alerts: 759 backend pytest, 480 vitest, live API 31/31 — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier, 2026-10-22 (staff console on `/moderation`: 605 backend pytest, 461 vitest, staging UI pass 48/48; before that, ops metrics, load runs, moderation drill and follow-ups: 590 backend pytest, 446 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier, 2026-10-16 (DB pool deadlock fix: 289 backend pytest, 341 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier record, 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
+Last verified: 2026-11-01 (open items re-ranked; VPS checks: restart read-back from R2, ffmpeg overlap latency, Sentry review, restore drill onto the Mac from the real R2 backup — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier the same day (registration anti-abuse items: kill switches, device signup limit, trust tiers, daily credit cap and starter credits, per-account alerts: 759 backend pytest, 480 vitest, live API 31/31 — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier, 2026-10-22 (staff console on `/moderation`: 605 backend pytest, 461 vitest, staging UI pass 48/48; before that, ops metrics, load runs, moderation drill and follow-ups: 590 backend pytest, 446 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier, 2026-10-16 (DB pool deadlock fix: 289 backend pytest, 341 vitest — see "Latest recorded automated verification" in `docs/to-beta.md`). Earlier record, 2026-09-14 on the collection-pipeline working tree (billing-fix batch in `532205e`, Reel Packs in `a093a26`) — collection pipeline pass: 11/11 focused pytest, 77/77 full application pytest, 44/44 Node tests, 13/13 Vitest tests, `vite build` clean, pack/WebXR script syntax clean. Scope: save-to-collection (2D player + XR collect card), mixed-creator public-reel membership with per-viewer blocked-member tombstones, publish 3–30 from PackPage and XR cards, curated-by display rule, generic-DM draft share guard. The earlier billing live-smoke record remains in the deep-test notes below.
 
 VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietnam-2-vr-reels-investigation.md). Reel Packs implementation record: [Reel Packs implementation investigation](reel-packs-implementation-investigation.md).
 
@@ -33,24 +33,21 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
   - ffmpeg overlap: two concurrent 4K encodes raise feed p95 from 104 to 152 ms; no thread cap needed.
   - Sentry review: no production errors besides the scrub test. 9 dev issues resolved; `-D` and `-4` (Mac dev server) still open.
   - Restore drill onto the Mac from `privatemedia`: about 5 minutes to readyz, media and avatars serve.
-
-## Still open
-
-- [ ] The 67 DMs on prod (2026-09-12 to 2026-10-05) cannot be decrypted with the escrowed `SX_MESSAGE_ENCRYPTION_KEY`, on prod or from the backup; they predate the VPS key, and no local key opens them. Send one DM on prod and decrypt it from the next nightly backup to prove the escrowed key, then decide whether to delete the 67.
-- [ ] Check in the Cloudflare dashboard that `privatemedia` has the 30-day lifecycle rule; the backup token cannot read it.
-
-- [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
-- [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
 - [x] Review the Explore page reels loading priority. Done 2026-10-21: preload margin 300 px, at most four concurrent video loads with visible tiles first, no video under reduced motion, first preview batch of eight.
 - [x] Review VR immersive-mode reel playback and loading. Done 2026-10-21 as a code review in `docs/vr-playback-review.md`; the device matrix and Phase 0 fixes stay open.
 - [x] Reduce and spread out controls on the player action rail. Done 2026-10-21: five primary buttons; mode, fullscreen and VR moved into More.
-- [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.
-- [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
-- [ ] MAKE 3D on the server: decide how 3D video runs in production. Measured 2026-10-23 in a CPX32-shaped container (`--cpus=3 --memory=6g`, torch CPU): an image takes 6 s and 1.0 GB, but a 10 s 1080² video takes 14.3 min and 4.1 GB, and a 30 s video takes 64 min. Video therefore needs a GPU worker (serverless per job, or the L40S at the hybrid trigger); production keeps `SX_STEREO_CONVERT_ENABLED=0` until then. Details are in `docs/to-beta.md` under "AI inference". Open items before enabling it:
-  - A single long shot still holds all its depth frames inside the depth model (about 1 MB per frame); depth and render already go one shot at a time.
-  - Pin the checkpoint's SHA-256.
-  - Handle or refuse HDR sources.
-  - Decide whether image-only MAKE 3D ships on the VPS first.
+- [x] `web/src/hooks/MessagingContext.jsx` send-reconcile duplicate bubble and empty optimistic GIF (found during verification): checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20. Fixed 2026-10-21 (reconcile checks the target conversation, the `user:` key is dropped, optimistic GIFs carry their preview).
+
+## Still open
+
+Ranked by priority (2026-11-01). The domain, Tunnel and edge work that blocks most beta checks is tracked in `docs/to-beta.md` → "Open items by priority".
+
+**Before the first invite:**
+
+- [ ] Send one DM on prod and decrypt it from the next nightly backup, to prove the escrowed `SX_MESSAGE_ENCRYPTION_KEY`. The 67 older DMs on prod (2026-09-12 to 2026-10-05) cannot be decrypted with that key, on prod or from the backup; they predate the VPS key and no local key opens them. Kept for now (decision 2026-11-01).
+- [ ] Check in the Cloudflare dashboard that `privatemedia` has the 30-day lifecycle rule; the backup token cannot read it.
+- [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
+- [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
 - [ ] Quest check of the VR UI panel changes (2026-10-24; verified only in the desktop 3D preview, the flat panel workbench and the test suites). On a Quest 3 or 3S:
   - **2× panels:** the dock, comments, guide and Earth label text is crisp at normal viewing distance, with no shimmer when moving the head. Frame pacing does not drop with the larger textures.
   - **Earth view redesign:** the Earth label card, scale bar and Earth dock match the ECHO look of the reels dock (square corners, vermilion accents). Check readability at every zoom band, and that GLOBE RESET, OPEN FEED, ZOOM OUT and NORTH UP all still work.
@@ -58,6 +55,19 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
   - **Dock resize:** the dock changes height when switching between a video (800×370) and an image or static card (800×304), and when entering or leaving Earth (800×304). The resize shows no flicker, black frame or stale texture.
   - **Dock aim:** laser hover and trigger presses land on the right button in every dock (reels, pack, image, static card, Earth). This includes buttons near the edges: exit, LOCK and AUDIO, NORTH UP and the seek bar ends. Check both locked and unlocked modes, and in unlocked mode after grip-dragging the screen.
   - **Controller guide redesign:** the guide (now 440×1124) shows a header, the cropped controller photo at full panel width with readable callouts and no visible box edge, and a control table with all six controls. The table text is readable from the normal seat without leaning in. The taller panel does not clip or overlap the screen edge in locked or unlocked mode, and B still shows and hides it with the dock.
+
+**Before paid features:**
+
+- [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.
+- [ ] True thread-level/Postgres concurrency test for settlement races (atomicity currently rests on single-statement guarded `UPDATE`s + idempotent keys, exercised sequentially).
+
+**Later:**
+
+- [ ] MAKE 3D on the server: decide how 3D video runs in production. Measured 2026-10-23 in a CPX32-shaped container (`--cpus=3 --memory=6g`, torch CPU): an image takes 6 s and 1.0 GB, but a 10 s 1080² video takes 14.3 min and 4.1 GB, and a 30 s video takes 64 min. Video therefore needs a GPU worker (serverless per job, or the L40S at the hybrid trigger); production keeps `SX_STEREO_CONVERT_ENABLED=0` until then. Details are in `docs/to-beta.md` under "AI inference". Open items before enabling it:
+  - A single long shot still holds all its depth frames inside the depth model (about 1 MB per frame); depth and render already go one shot at a time.
+  - Pin the checkpoint's SHA-256.
+  - Handle or refuse HDR sources.
+  - Decide whether image-only MAKE 3D ships on the VPS first.
 - [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
 
 ## VR Reels recommended execution order
@@ -141,7 +151,6 @@ people.
 
 ## Known gaps found during verification (not yet fixed)
 
-- `web/src/hooks/MessagingContext.jsx:305-313`: send-reconcile checks `alreadyPresent` against the optimistic-key list, not the target conversation list, so on key migration (new compose `user:<name>` → conversation id) a message already delivered to the conversation list is appended again (duplicate bubble until the next conversation reload). Optimistic GIF sends render empty until server echo (the optimistic `content` only covers text/emote, lines 282-291). Re-verified 2026-10-20. Fixed 2026-10-21 (reconcile checks the target conversation, the `user:` key is dropped, optimistic GIFs carry their preview).
 - Report on an already-deleted message returns 404 `REPORT_TARGET_NOT_FOUND` (evidence path only verified for live messages).
 - Staged uploads are process-memory: multi-worker deployments need sticky sessions (or a single worker) or quote/submit pairs may miss; a restart drops staged files (documented in `RUNNING.md`).
 - `/api/video/process` defaults `upscale_model` to `fal-ai/seedvr/upscale/video`, while `video_parameters` (the quote) defaults to the ByteDance upscaler, so a client that omits `upscale_model` gets 409 `INVALID_QUOTE`. The SPA always sets it (`web/src/utils/cloudBilling.js`), so only API clients hit it.
