@@ -1,0 +1,664 @@
+<title>ECHO UI/UX Critique</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,700;112,800&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky section index on the left, one reading column of findings; each finding = severity stripe + what / evidence / fix, with its screenshot beside or under it. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #16191f;
+  --muted: #5a6170;
+  --line: #dde1e8;
+  --accent: #2d5bd7;
+  --sev-high: #c62f2f;
+  --sev-high-bg: #fde8e8;
+  --sev-med: #a85d00;
+  --sev-med-bg: #fff1dc;
+  --sev-low: #2f6d4f;
+  --sev-low-bg: #e3f3ea;
+  --code-bg: #eef0f4;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111318; --surface: #191c23; --ink: #e8eaf0; --muted: #9aa2b2; --line: #2b303b;
+    --accent: #7ea2ff; --sev-high: #ff8a80; --sev-high-bg: #3a1c1c; --sev-med: #f2b35b; --sev-med-bg: #35270f;
+    --sev-low: #7fd1a6; --sev-low-bg: #15301f; --code-bg: #232733; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #191c23; --ink: #e8eaf0; --muted: #9aa2b2; --line: #2b303b;
+  --accent: #7ea2ff; --sev-high: #ff8a80; --sev-high-bg: #3a1c1c; --sev-med: #f2b35b; --sev-med-bg: #35270f;
+  --sev-low: #7fd1a6; --sev-low-bg: #15301f; --code-bg: #232733; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 17px/1.55 var(--font-body); }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 14px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+nav.toc a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
+nav.toc .toc-label { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+main { min-width: 0; display: grid; gap: 64px; }
+header h1 { font: 800 clamp(34px, 5vw, 56px)/1.02 var(--font-display); font-stretch: 112%; margin: 0 0 14px; text-wrap: balance; letter-spacing: -.01em; }
+.meta { font: 13px var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.lede { max-width: 68ch; font-size: 19px; margin: 18px 0 0; }
+h2 { font: 700 28px/1.15 var(--font-display); font-stretch: 112%; margin: 0 0 6px; text-wrap: balance; }
+h2 small { display: block; font: 400 15px var(--font-body); color: var(--muted); margin-top: 6px; font-stretch: normal; }
+section > .intro { max-width: 70ch; color: var(--muted); margin: 0 0 24px; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: .82em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }
+.stat { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; border-radius: 6px; }
+.stat b { display: block; font: 800 34px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 14px; color: var(--muted); }
+.stat.h b { color: var(--sev-high); } .stat.m b { color: var(--sev-med); } .stat.l b { color: var(--sev-low); }
+
+.top { counter-reset: t; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.top li { counter-increment: t; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; }
+.top li::before { content: counter(t); font: 800 22px/1.2 var(--font-display); color: var(--accent); font-variant-numeric: tabular-nums; }
+.top li p { margin: 2px 0 0; color: var(--muted); font-size: 15px; }
+
+.finding { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--sev, var(--line)); border-radius: 6px; padding: 20px 22px; display: grid; gap: 12px; }
+.finding + .finding { margin-top: 14px; }
+.finding.high { --sev: var(--sev-high); } .finding.med { --sev: var(--sev-med); } .finding.low { --sev: var(--sev-low); }
+.finding h3 { margin: 0; font-size: 19px; line-height: 1.3; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+.chip { font: 600 11px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 3px; white-space: nowrap; }
+.high .chip { color: var(--sev-high); background: var(--sev-high-bg); }
+.med .chip { color: var(--sev-med); background: var(--sev-med-bg); }
+.low .chip { color: var(--sev-low); background: var(--sev-low-bg); }
+.finding dl { margin: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 6px 14px; font-size: 16px; }
+.finding dt { font: 600 11px/2 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.finding dd { margin: 0; min-width: 0; }
+.finding dd ul { margin: 0; padding-left: 18px; }
+.with-shot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 20px; align-items: start; }
+figure { margin: 0; min-width: 0; }
+figure img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); background: #000; }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; }
+.shot-wide { margin-bottom: 18px; }
+.shot-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+
+.phases { display: grid; gap: 12px; }
+.phase { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 18px; }
+.phase b { font: 700 15px var(--font-display); font-stretch: 112%; }
+.phase p { margin: 0; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 20px; }
+.box h3 { margin: 0 0 8px; font-size: 17px; }
+.box ul { margin: 0; padding-left: 18px; }
+.note { font-size: 15px; color: var(--muted); max-width: 70ch; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  nav.toc { position: static; }
+  nav.toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .with-shot, .shot-row, .cols { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .finding dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .finding dd { margin-bottom: 8px; }
+  .phase { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Sections">
+  <div class="toc-label">Contents</div>
+  <ol>
+    <li><a href="#summary">Summary and priorities</a></li>
+    <li><a href="#vr">VR on Quest 3S</a></li>
+    <li><a href="#player">2D player and preview</a></li>
+    <li><a href="#web">Web UX and accessibility</a></li>
+    <li><a href="#copy">Copy rewrites</a></li>
+    <li><a href="#system">Design system</a></li>
+    <li><a href="#plan">Phased plan</a></li>
+    <li><a href="#works">What works</a></li>
+    <li><a href="#untested">Not tested</a></li>
+  </ol>
+</nav>
+
+<main>
+<header id="summary">
+  <h1>ECHO UI/UX Critique</h1>
+  <div class="meta">
+    <span>1 Nov 2026</span>
+    <span>branch <code>dev</code> @ ccb6208</span>
+    <span>Quest 3S over USB · Quest Browser · Vite :5173</span>
+  </div>
+  <p class="lede">Review of the web app, the 2D reels player, the immersive preview and the WebXR session on a real Quest 3S. Four review passes used the immersive-designer, design-critique, accessibility-review, ux-copy and design-system skills. Every finding below was checked against the code at the line given.</p>
+  <div class="box" style="margin-top:22px">
+    <h3>Checked against</h3>
+    <ul>
+      <li><code>hz-immersive-designer</code> (Meta Horizon OS comfort, legibility and spatial layout rules) for the VR session.</li>
+      <li><code>design:design-critique</code> for hierarchy, consistency and usability of every page.</li>
+      <li><code>design:accessibility-review</code> (WCAG 2.1 AA: contrast, keyboard, focus, target size, screen reader).</li>
+      <li><code>design:ux-copy</code> for labels, errors, empty states and the rewrite table.</li>
+      <li><code>design:design-system</code> for tokens, components and the phased plan.</li>
+    </ul>
+    <p class="note" style="margin:10px 0 0">Evidence came from the code, the browser pane (1280 and 375 px), and a Quest 3S driven over USB.</p>
+  </div>
+  <div class="box" style="margin-top:12px">
+    <h3>Scope notes</h3>
+    <ul>
+      <li><b>Credits will be enabled during beta.</b> The wallet finding is kept only for environments where credits are off.</li>
+      <li><b>Legal pages will be handled later.</b> The placeholder finding is a reminder, not a beta blocker.</li>
+    </ul>
+  </div>
+  <div class="stats" aria-label="Finding counts">
+    <div class="stat h"><b id="n-high">0</b><span>High</span></div>
+    <div class="stat m"><b id="n-med">0</b><span>Medium</span></div>
+    <div class="stat l"><b id="n-low">0</b><span>Low</span></div>
+    <div class="stat"><b>5</b><span>Phases in the fix plan</span></div>
+  </div>
+</header>
+
+<section aria-labelledby="prio-h">
+  <h2 id="prio-h">Fix first<small>Ranked by user harm per hour of work.</small></h2>
+  <ol class="top">
+    <li><div><b>Make VR text and targets readable.</b><p>Raise UI text to at least 1° of visual angle and targets to at least 2.5°. Today dock labels are 0.4–0.7°.</p></div></li>
+    <li><div><b>Stop the floating MESSAGE button covering other controls.</b><p>It covers comment Send, FULLSCREEN, SAVE PACK, footer links and SEND REQUEST.</p></div></li>
+    <li><div><b>Fix keyboard access on Explore tiles and dialogs.</b><p>Nested tile buttons are unreachable by keyboard. The share dialog and mobile drawer do not trap or return focus.</p></div></li>
+    <li><div><b>Show a real error state for a failed reel, in VR and 2D.</b><p>A 404 freezes the last frame in VR and reads as an HEVC codec error in 2D.</p></div></li>
+    <li><div><b>Hide BUY when credits are off.</b><p>Credits are on in beta, so this only matters elsewhere. Legal placeholders (<code>[COMPANY LEGAL NAME]</code>) are deferred.</p></div></li>
+    <li><div><b>Bring comments and panels in front of the viewer.</b><p>Panels open at ±50° yaw and the unlocked dock sits at −44° pitch. Opening comments shows nothing ahead.</p></div></li>
+    <li><div><b>Separate danger red from brand red, and raise the root font size.</b><p>Two near-identical reds and a 15px root make 65–77% of some screens under 12px.</p></div></li>
+    <li><div><b>Rewrite system jargon into user words.</b><p>"PIPELINE: AWAITING SOURCE", "HEVC 4K (RAW MASTER)", "TERMINATE PROFILE &amp; PURGE DATA".</p></div></li>
+  </ol>
+</section>
+
+<!-- ============ VR ============ -->
+<section id="vr" aria-labelledby="vr-h">
+  <h2 id="vr-h">VR on Quest 3S<small>Driven live in Quest Browser over USB with CDP; screenshots are the headset's own stereo capture.</small></h2>
+  <p class="intro">Comfort and legibility are the main problems. The screen is head-locked by default in VR (<code>webxr_vr.js:7703</code> sets <code>lockToViewer = !isPackExperience()</code>), UI panels ignore depth, and the dock text is far below the legibility floor.</p>
+
+  <figure class="shot-wide">
+    <img src="img/04_dock.jpg" alt="Stereo capture from Quest 3: the ECHO control dock covers the lower third of a Bangkok reel; button labels such as LIKE, SAVE and SHARE are tiny." loading="lazy">
+    <figcaption>Default VR view. The dock covers the lower third of the reel and its labels (LIKE, SAVE, SHARE, REPORT) are about 0.5° tall.</figcaption>
+  </figure>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>VR text and targets are below legibility limits</h3>
+    <dl>
+      <dt>What</dt><dd>Dock labels render at 0.4–0.7° of visual angle; the minimum for comfortable reading is about 1°. The dock sits 3.11 m away, comments at 4.2 m, the guide at 4.0 m. EXIT and COMMENTS targets are 32px, about 1.9°.</dd>
+      <dt>Evidence</dt><dd><code>vr_ui_canvas.js:1683</code>, <code>:1697</code> use <code>bold 10px sans-serif</code>; dock fonts range 10–14px on the canvas texture.</dd>
+      <dt>Fix</dt><dd>Size UI in degrees, not canvas pixels. Body text ≥ 1.2°, labels ≥ 1°, targets ≥ 2.5° with 0.5° gaps. Bring panels to 1.0–1.5 m, or scale the canvas so the same font reads larger. Drop ALL-CAPS mono for dock labels.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>UI panels draw through the video dome</h3>
+    <dl>
+      <dt>What</dt><dd>UI meshes use <code>depthTest: false</code>, so they draw on top of everything regardless of distance. In stereo the eyes read the panel as farther than the dome but see it in front, which is a depth conflict and causes eye strain.</dd>
+      <dt>Evidence</dt><dd><code>webxr_vr.js:5063, 5092, 5117, 5145, 5180, 5227</code>.</dd>
+      <dt>Fix</dt><dd>Place panels nearer than the dome surface and turn depth testing back on, or render UI on a quad layer (<code>XRQuadLayer</code>) which the compositor resolves correctly and also renders text sharper.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Head-locked screen spans about 89°</h3>
+    <dl>
+      <dt>What</dt><dd>The reel follows the head by default and fills about 89° horizontally. Guidance for content the eyes must scan is about 50–60°. Head-locked content that large causes neck strain and motion discomfort.</dd>
+      <dt>Evidence</dt><dd><code>webxr_vr.js:7703</code> (session), <code>:9505</code> (headset preview); <code>:67</code> default is overridden.</dd>
+      <dt>Fix</dt><dd>Default to world-locked with a lazy follow (recentre after the head turns more than ~30° for 1 s). Default screen width to about 55°, with grip + stick to resize.</dd>
+    </dl>
+  </article>
+
+  <div class="with-shot">
+    <article class="finding med">
+      <h3><span class="chip">Medium</span>Comments open out of view; unlocked dock drops below the floor</h3>
+      <dl>
+        <dt>What</dt><dd>Comments and profile panels open at ±50–52° yaw, so pressing COMMENTS shows nothing ahead. When unlocked, the dock sits at −44° pitch, near the floor.</dd>
+        <dt>Fix</dt><dd>Open side panels within ±25° and pitch the dock no lower than −20°. Animate the panel in from the button so the eye follows.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/11_12.jpg" alt="Two stereo captures. Top: dock visible at the bottom of the view. Bottom: after unlocking, the dock is almost out of view at the lower edge." loading="lazy">
+      <figcaption>Top: default head-locked view. Bottom: unlocked, the nav strip drops to −49.5° at the lower edge.</figcaption>
+    </figure>
+  </div>
+
+  <div class="with-shot" style="margin-top:14px">
+    <figure>
+      <img src="img/05_comments.jpg" alt="Stereo capture after pressing COMMENTS: the scene ahead is unchanged; only a thin red panel edge shows at the right of the view." loading="lazy">
+      <figcaption>Right after pressing COMMENTS. Only a red panel edge appears at the far right.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/tex_panels.jpg" alt="The comments panel texture with a large empty area reading NO COMMENTS YET, and the controller guide texture." loading="lazy">
+      <figcaption>The comments and guide textures themselves. The guide is the clearest UI in the session; the empty comments state is a large blank area.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding med" style="margin-top:14px">
+    <h3><span class="chip">Medium</span>Dock auto-hide is inverted</h3>
+    <dl>
+      <dt>What</dt><dd><code>executeControlButton</code> calls <code>resetAutoHideTimer()</code> before acting, so pressing a button that should hide the dock restarts its timer instead. The dock lingers over the video after use.</dd>
+      <dt>Fix</dt><dd>Reset the timer only on pointer hover or input, and hide immediately after actions that change the reel.</dd>
+    </dl>
+  </article>
+
+  <div class="with-shot" style="margin-top:14px">
+    <article class="finding med">
+      <h3><span class="chip">Medium</span>No loading or error state in VR</h3>
+      <dl>
+        <dt>What</dt><dd>When a reel fails, VR keeps showing the previous frame with a <code>0:00 / 0:00</code> scrubber and no message. Stall tracking only runs with <code>?xrdiag=1</code>. The title row shows the raw filename.</dd>
+        <dt>Evidence</dt><dd><code>webxr_vr.js:5488</code> <code>FRESH_VISUAL_MAX_HOLD_MS = 2500</code>; stall code gated behind the diag flag.</dd>
+        <dt>Fix</dt><dd>After the 2.5 s hold, dim the frame and show "This reel couldn't load" with Skip and Retry on the dock. Show a spinner during buffering.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/13_14.jpg" alt="Stereo capture of a reel with a broken source: a frozen previous frame, play button shown, time 0:00 / 0:00, title is a raw filename." loading="lazy">
+      <figcaption>Broken source after 4 s: frozen frame, <code>0:00</code>, raw filename as title.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding med" style="margin-top:14px">
+    <h3><span class="chip">Medium</span>Input and onboarding gaps</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>Hand tracking is requested only with <code>?xrfull=1</code>; the default session asks for <code>local-floor</code> and <code>local</code> only (<code>webxr_vr.js:9578</code>).</li>
+        <li>There is no in-VR onboarding; the controller guide only appears on B.</li>
+        <li>Video texture upload is capped at 30 fps (<code>VR_VIDEO_UPLOAD_MIN_MS = 33</code>, <code>:506</code>), which judders against a 72–90 Hz display.</li>
+      </ul></dd>
+      <dt>Fix</dt><dd>Request <code>hand-tracking</code> as an optional feature with pinch to select. Show the guide once on first entry. Upload a frame on every new video frame (<code>requestVideoFrameCallback</code>) instead of a fixed cap.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high" style="margin-top:14px">
+    <h3><span class="chip">High</span>Dock and nav are anchored below the floor</h3>
+    <dl>
+      <dt>What</dt><dd>The screen centre is fixed at 1.52 m, whatever the viewer's height. Measured in <code>local-floor</code> space, the dock sits at y = −0.38 m and the nav strip at −0.88 m, under the floor. For a standing eye that is about 40° and 50° below the horizon. Unlocked, the nav drops to −2.02 m (−49.5°).</dd>
+      <dt>Evidence</dt><dd><code>webxr_vr.js:73</code> <code>DEFAULT_POS.y = 1.52</code>, <code>:78</code> <code>SCREEN_CENTER_Y</code>, <code>:892</code> fallback head height.</dd>
+      <dt>Fix</dt><dd>Anchor from the viewer's head height at session start. Dock 10–20° below eye line at 1.2–1.5 m, clamped to at least floor + 0.6 m.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Phantom laser with no controllers</h3>
+    <dl>
+      <dt>What</dt><dd>With no input sources, the laser and reticle still draw from the world origin, because the ray code falls back to the first controller with an identity pose.</dd>
+      <dt>Evidence</dt><dd><code>webxr_vr.js:7154</code> <code>vrControllers[0]</code> fallback.</dd>
+      <dt>Fix</dt><dd>Hide the laser and reticle when <code>session.inputSources</code> is empty or the controller has no pose.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Enter VR is hidden two taps deep</h3>
+    <dl>
+      <dt>What</dt><dd>On the 2D player the VR button is icon-only, inside the collapsed More menu. The pose notice shows only once (<code>echo_vr_pose_notice_v1</code>). The shell nav also stays over the video after the dock auto-hides.</dd>
+      <dt>Fix</dt><dd>On Quest, put a labelled "Enter VR" button in the main rail. Hide the nav strip together with the dock.</dd>
+    </dl>
+  </article>
+
+  <article class="finding low">
+    <h3><span class="chip">Low</span>Smaller VR issues</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>PROFILE and the ECHO logo appear in both dock and nav.</li>
+        <li>Mute button shows its state ("MUTED") instead of the action.</li>
+        <li>"+ ADD COMMENT" shows while signed out.</li>
+        <li>The guide says "META QUEST 3" on a 3S and covers controllers only.</li>
+        <li>Next inside an image carousel steps through images, not reels, with no hint.</li>
+      </ul></dd>
+    </dl>
+  </article>
+
+  <div class="tablewrap" style="margin-top:14px">
+    <table>
+      <caption class="note" style="text-align:left;padding:12px 14px 0">Performance and memory on device (Quest 3S, 90 Hz, framebuffer scale 1.5, foveation 0)</caption>
+      <thead><tr><th scope="col">Measure</th><th scope="col">Result</th><th scope="col">Read</th></tr></thead>
+      <tbody>
+        <tr><td>Frame time at rest</td><td class="mono">11.12 ms median</td><td>On budget (11.1 ms)</td></tr>
+        <tr><td>10 rapid reel switches, 677 frames</td><td class="mono">p95 12.86 · p99 15.83 · max 36.4 ms; 10% over 12.5 ms</td><td>Dropped frames line up with switches. Try scale 1.0–1.2 or foveation 1.</td></tr>
+        <tr><td>4 enter/exit cycles</td><td class="mono">GPU graphics back to 780–800 MB after each exit; JS heap flat at 28 MB</td><td>No leak</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ PLAYER ============ -->
+<section id="player" aria-labelledby="player-h">
+  <h2 id="player-h">2D player and immersive preview<small><code>ui/assets/reels.html</code>, <code>ReelsPlayer.jsx</code>, <code>/reels/immersive-preview</code></small></h2>
+
+  <div class="with-shot">
+    <article class="finding high">
+      <h3><span class="chip">High</span>MESSAGE launcher covers the comment Send button</h3>
+      <dl>
+        <dt>What</dt><dd>The floating MESSAGE button sits over the comment composer's Send button on /reels. The same launcher covers FULLSCREEN, SAVE PACK, footer links and SEND REQUEST on other pages.</dd>
+        <dt>Fix</dt><dd>Hide the launcher on pages with a bottom-right primary action, or dock it in the header. If it stays floating, reserve its space with bottom padding on the page.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/web_reels.jpg" alt="Reels page at 1280px: the MESSAGE button in the bottom right overlaps the red Send button next to the Add a comment field." loading="lazy">
+      <figcaption>/reels at 1280px. MESSAGE sits on top of the Send button.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding high" style="margin-top:14px">
+    <h3><span class="chip">High</span>Overlay text on video has no scrim</h3>
+    <dl>
+      <dt>What</dt><dd>Creator name and caption sit straight on the video. On bright frames they become unreadable; <code>.meta-creator</code> is also 10px.</dd>
+      <dt>Evidence</dt><dd><code>reels.html:738</code> (<code>.reels-meta</code>).</dd>
+      <dt>Fix</dt><dd>Add a bottom gradient scrim (black 0→60%) under the meta block and raise the text to at least 13px.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Wrong error message for a missing file</h3>
+    <dl>
+      <dt>What</dt><dd>Any <code>MEDIA_ERR_SRC_NOT_SUPPORTED</code> shows the HEVC codec message, including a plain 404. The overlay has no <code>role="alert"</code> and its Skip button is 26px.</dd>
+      <dt>Evidence</dt><dd><code>reels.html:5867</code> (<code>err.code === 4</code>), <code>reels.html:2178</code> (<code>#errorOverlay</code>).</dd>
+      <dt>Fix</dt><dd>HEAD-check the source on error; say "This reel is no longer available" for 404s. Add <code>role="alert"</code> and a 44px Skip button.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Focus is lost and hidden controls stay focusable</h3>
+    <dl>
+      <dt>What</dt><dd>Closing comments or share drops focus to <code>body</code>. 19 focusable elements sit inside the <code>aria-hidden</code> mount, so screen readers skip them while Tab still lands on them. The 3D canvas has no keyboard path.</dd>
+      <dt>Evidence</dt><dd><code>ReelsPlayer.jsx:260</code>; share close is 19×13px at <code>ReelShareDialog.jsx:159</code>.</dd>
+      <dt>Fix</dt><dd>Return focus to the opener on close. Use <code>inert</code> instead of <code>aria-hidden</code> on the hidden mount. Rail buttons from 32–34px up to 44px.</dd>
+    </dl>
+  </article>
+
+  <div class="with-shot" style="margin-top:14px">
+    <article class="finding med">
+      <h3><span class="chip">Medium</span>Preview is a control panel, not a preview</h3>
+      <dl>
+        <dt>What</dt><dd>The page opens with four rows of 20+ toggles before any scene. Preview FOV defaults to 126° horizontal; Quest 3 is about 110°, so layouts look roomier than on device.</dd>
+        <dt>Fix</dt><dd>Put the scene first with a compact toolbar; move the rest into a collapsible panel. Default the FOV preset to Quest 3.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/web_preview.jpg" alt="Immersive reels preview page: heading, a scope notice, and four rows of toggle buttons fill the first screen; the 3D scene starts below the fold." loading="lazy">
+      <figcaption>/reels/immersive-preview at 1280×800. The scene starts below the fold.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding low" style="margin-top:14px">
+    <h3><span class="chip">Low</span>Smaller player issues</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>No captions or caption track.</li>
+        <li>Folder chips and raw filenames show as reel titles.</li>
+        <li>More-menu items are labelled only by <code>title</code>.</li>
+        <li>"SEND TO 0" is styled as a primary action while disabled in meaning.</li>
+        <li>Reduced motion does not stop autoplay.</li>
+      </ul></dd>
+    </dl>
+  </article>
+</section>
+
+<!-- ============ WEB ============ -->
+<section id="web" aria-labelledby="web-h">
+  <h2 id="web-h">Web UX and accessibility<small>React app in <code>web/src</code>, tested at 1280 and 375 px.</small></h2>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Explore tile buttons are unreachable by keyboard</h3>
+    <dl>
+      <dt>What</dt><dd>The whole tile has <code>role="button"</code> and handles Enter/Space by opening the reel. Key presses on the nested buttons bubble up, so they open the tile instead of acting.</dd>
+      <dt>Evidence</dt><dd><code>ExploreTile.jsx:180-190</code>.</dd>
+      <dt>Fix</dt><dd>Make the tile a link on its title/thumbnail only, and keep nested buttons as siblings. At minimum check <code>e.target === e.currentTarget</code> in the handler.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Mobile drawer and share dialog are not modal</h3>
+    <dl>
+      <dt>What</dt><dd>Opening the drawer does not move focus, trap it, or make the page <code>inert</code>; the menu button has no <code>aria-expanded</code>. The share dialog has no focus trap or return.</dd>
+      <dt>Evidence</dt><dd><code>HeaderBar.jsx:352</code>; <code>ReelShareDialog.jsx</code>.</dd>
+      <dt>Fix</dt><dd>Use one Dialog primitive (native <code>&lt;dialog&gt;</code> with <code>showModal()</code>) for drawer, share and report. ReportDialog already does this right and can be the base.</dd>
+    </dl>
+  </article>
+
+  <div class="with-shot" style="margin-top:14px">
+    <article class="finding low">
+      <h3><span class="chip">Low</span>Legal pages show template placeholders (deferred)</h3>
+      <dl>
+        <dt>What</dt><dd>Terms and Privacy render <code>[EFFECTIVE DATE]</code>, <code>[COMPANY LEGAL NAME]</code>, <code>[REGISTERED ADDRESS]</code> and <code>[SUPPORT EMAIL]</code> to the public.</dd>
+        <dt>Evidence</dt><dd><code>LegalKit.jsx:8-18</code>.</dd>
+        <dt>Status</dt><dd>Legal content will be handled later; not part of the beta UI work.</dd>
+        <dt>Fix</dt><dd>Fill the values before public launch, and fail the build if any <code>[ALL CAPS]</code> placeholder remains.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/web_terms.jpg" alt="Terms of Service page showing highlighted placeholders such as [EFFECTIVE DATE], [COMPANY LEGAL NAME] and [SUPPORT EMAIL]." loading="lazy">
+      <figcaption>/terms. Placeholders are highlighted in yellow.</figcaption>
+    </figure>
+  </div>
+
+  <div class="with-shot" style="margin-top:14px">
+    <article class="finding low">
+      <h3><span class="chip">Low</span>Wallet offers purchase while credits are disabled</h3>
+      <dl>
+        <dt>What</dt><dd>A red <code>role="alert"</code> banner says credits are disabled, but three BUY buttons sit right under it, and "MOST POPULAR" still glows. Users can't tell whether buying works.</dd>
+        <dt>Evidence</dt><dd><code>WalletPage.jsx:305</code>.</dd>
+        <dt>Status</dt><dd>Credits will be enabled during beta, so BUY is correct there and the banner should not show. This applies only to environments with credits off.</dd>
+        <dt>Fix</dt><dd>When disabled, replace the tiers with one explanation: "Buying credits isn't available yet. You can still use free tools." Hide BUY buttons.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/web_wallet.jpg" alt="Wallet page: banner reads ECHO CREDITS ARE DISABLED IN THIS ENVIRONMENT above three pricing cards with BUY buttons. Header has three filled red buttons." loading="lazy">
+      <figcaption>/wallet. Also visible: three filled red header buttons and mono uppercase at about 9px.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding med" style="margin-top:14px">
+    <h3><span class="chip">Medium</span>Dead ends and silent redirects</h3>
+    <dl>
+      <dt>What</dt><dd>Unknown URLs redirect to /reels with no message (<code>App.jsx:67</code>). Not-found reels, packs and profiles have no way back. ErrorBoundary shows the raw error string.</dd>
+      <dt>Fix</dt><dd>Add a 404 page with search and a link home. Show a friendly ErrorBoundary message with a reload button; log the detail to Sentry instead.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Forms don't explain themselves</h3>
+    <dl>
+      <dt>What</dt><dd>Support and settings forms show errors far from the field and not linked with <code>aria-describedby</code>. Disabled buttons never say why they are disabled.</dd>
+      <dt>Fix</dt><dd>A FormField component with label, hint, inline error and <code>aria-invalid</code>. Next to a disabled button, show the missing requirement ("Add a title to publish").</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Navigation repeats and leaks developer data</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>The same links appear in header, drawer and sidebar with different labels.</li>
+        <li>Account menu items are buttons, so they can't be opened in a new tab.</li>
+        <li>The sidebar shows dev telemetry to users.</li>
+        <li>Location pages use the slug as the title.</li>
+      </ul></dd>
+      <dt>Fix</dt><dd>One nav source used in all three places. Menu items that navigate become links. Gate telemetry behind a dev flag. Use the location display name.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Focus styles removed in places</h3>
+    <dl>
+      <dt>What</dt><dd>14 rules set <code>outline: none</code>. Most have a replacement, but the pack tile's focus style matches its hover, so keyboard users can't tell focus from pointer.</dd>
+      <dt>Fix</dt><dd>A single <code>:focus-visible</code> ring token, not the accent colour on accent fills, and a lint rule against bare <code>outline: none</code>.</dd>
+    </dl>
+  </article>
+
+  <div class="with-shot" style="margin-top:14px">
+    <article class="finding low">
+      <h3><span class="chip">Low</span>Mobile Explore is mostly chrome</h3>
+      <dl>
+        <dt>What</dt><dd>At 375px the first screen shows stats, filters and codec chips; no reel thumbnail is visible until the second screen.</dd>
+        <dt>Fix</dt><dd>Lead with the grid on mobile. Collapse stats and filters into one "Filter" sheet.</dd>
+      </dl>
+    </article>
+    <figure>
+      <img src="img/web_explore375.jpg" alt="Explore at 375px wide: heading, stat boxes, trending tags, tabs, folder select, codec chips and search fill the screen; no media is visible." loading="lazy">
+      <figcaption>/explore at 375px. No media above the fold.</figcaption>
+    </figure>
+  </div>
+
+  <article class="finding low" style="margin-top:14px">
+    <h3><span class="chip">Low</span>Smaller web issues</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>Login text at 9.75–10.2px; avatar initials at 3.56:1 contrast.</li>
+        <li>Icon buttons at 38px.</li>
+        <li>/rules and /verify-email have no page title.</li>
+        <li>Layout gaps at 375px; skeletons have no <code>aria-busy</code>; share has no live region.</li>
+      </ul></dd>
+    </dl>
+  </article>
+</section>
+
+<!-- ============ COPY ============ -->
+<section id="copy" aria-labelledby="copy-h">
+  <h2 id="copy-h">Copy rewrites<small>Name things the way users think of them, in sentence case.</small></h2>
+  <div class="shot-row">
+    <figure>
+      <img src="img/web_upload.jpg" alt="Upload Studio: heading, PIPELINE: AWAITING SOURCE label, a step labelled 01 SOURCE &amp; PUBLISH PATH, and AWAITING SOURCE FILE text." loading="lazy">
+      <figcaption>/upload. Four status labels say "awaiting source" in different words.</figcaption>
+    </figure>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th scope="col">Today</th><th scope="col">Suggested</th><th scope="col">Where</th></tr></thead>
+      <tbody>
+        <tr><td class="old">PIPELINE: AWAITING SOURCE</td><td>Add a video or images to start</td><td><code>UploadPage.jsx:848</code></td></tr>
+        <tr><td class="old">DROP SOURCE FILES OR CLICK TO BROWSE</td><td>Drop a video or up to 10 images, or browse</td><td>Upload</td></tr>
+        <tr><td class="old">HEVC 4K (RAW MASTER) / H264 (BROWSER/VR)</td><td>Best quality / Plays everywhere</td><td>Explore filters</td></tr>
+        <tr><td class="old">ECHO CREDITS ARE DISABLED IN THIS ENVIRONMENT</td><td>Buying credits isn't available yet</td><td><code>WalletPage.jsx:305</code></td></tr>
+        <tr><td class="old">TERMINATE PROFILE &amp; PURGE DATA</td><td>Delete account</td><td>Settings</td></tr>
+        <tr><td class="old">No comments yet. Be the first to drop one below!</td><td>No comments yet</td><td>Comments</td></tr>
+        <tr><td class="old">REELS AND AUTHORED REEL PACKS</td><td>Reels and packs from creators</td><td>Explore</td></tr>
+        <tr><td class="old">CODEC: HEVC</td><td>(remove; not a user concern)</td><td>Explore stats</td></tr>
+        <tr><td class="old">This browser cannot decode HEVC</td><td>This reel is no longer available (on 404)</td><td><code>reels.html:5867</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ SYSTEM ============ -->
+<section id="system" aria-labelledby="sys-h">
+  <h2 id="sys-h">Design system<small><code>tokens.css</code> (134 lines) and <code>global.css</code> (12,107 lines).</small></h2>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Text is too small across the app</h3>
+    <dl>
+      <dt>What</dt><dd>Root size is 15px. Text under 12px makes up 65–77% of Wallet, Video and Packs.</dd>
+      <dt>Evidence</dt><dd><code>global.css:642</code> <code>font-size: 15px</code>.</dd>
+      <dt>Fix</dt><dd>16px root and a type scale of 12 / 14 / 16 / 20 / 28 / 40. 12px only for tabular metadata.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Danger and brand share one red</h3>
+    <dl>
+      <dt>What</dt><dd><code>--sx-accent: #ff3b1f</code> and <code>--sx-danger: #ef4444</code> are almost the same hue. Delete, Report and Buy look equally alarming. Screens carry 7–9 accent fills, with three filled buttons in the header.</dd>
+      <dt>Evidence</dt><dd><code>tokens.css:29</code>, <code>:47</code>.</dd>
+      <dt>Fix</dt><dd>Keep orange-red for brand, use one primary fill per view, make danger a distinct crimson used only for destructive actions, and turn header Credits/Messages into ghost buttons.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>Monospace uppercase everywhere</h3>
+    <dl>
+      <dt>What</dt><dd>Mono is 65–77% and uppercase 41–63% of visible text. All-caps mono at 9–11px is the hardest text to read, and it removes hierarchy because everything looks like a label.</dd>
+      <dt>Fix</dt><dd>Mono only for numbers, codes and timestamps. Sentence case for buttons and body. Keep uppercase for short eyebrows only.</dd>
+    </dl>
+  </article>
+
+  <article class="finding high">
+    <h3><span class="chip">High</span>No form, loading or size contract</h3>
+    <dl>
+      <dt>What</dt><dd>12 control heights exist although <code>--sx-control-h: 38px</code> is defined. There is no FormField, no shared loading state, no <code>aria-busy</code>. Three button families (<code>.sx-btn</code>, <code>.sx-sidebar-btn-primary</code>, <code>.sx-pill</code>) have different states.</dd>
+      <dt>Fix</dt><dd>Three sizes (32 / 40 / 48) and one Button with <code>variant</code> (primary, secondary, ghost, danger), <code>size</code> and <code>loading</code>.</dd>
+    </dl>
+  </article>
+
+  <article class="finding med">
+    <h3><span class="chip">Medium</span>Tokens leak and layers fight</h3>
+    <dl>
+      <dt>What</dt><dd><ul>
+        <li>78 hex and 97 rgba literals; 163 <code>!important</code>; 163 inline styles; no radius token.</li>
+        <li>z-index tokens say drawer 45, but <code>global.css:1937</code> falls back to 2000.</li>
+        <li>9 infinite animations, including an idle pulse on /video that implies work is happening.</li>
+        <li>12 icon stroke widths; neon glow shadows on many controls.</li>
+        <li><code>tokens.py</code> is a hand-kept subset of <code>tokens.css</code>.</li>
+      </ul></dd>
+      <dt>Fix</dt><dd>Stylelint rules for literals and <code>!important</code>, a single z-index scale, generate <code>tokens.py</code> from CSS, stop infinite animations unless something is running.</dd>
+    </dl>
+  </article>
+
+  <div class="tablewrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th scope="col">Primitive</th><th scope="col">Replaces</th><th scope="col">Must handle</th></tr></thead>
+      <tbody>
+        <tr><td>Button</td><td><code>.sx-btn</code>, <code>.sx-pill</code>, sidebar primary</td><td>variant, size, loading, disabled reason</td></tr>
+        <tr><td>IconButton</td><td>38px ad-hoc icons</td><td>44px target, required label</td></tr>
+        <tr><td>FormField</td><td>per-page labels and errors</td><td>hint, inline error, <code>aria-invalid</code></td></tr>
+        <tr><td>Dialog</td><td>drawer, share, report</td><td>focus trap, return, <code>inert</code></td></tr>
+        <tr><td>Tabs, Chip</td><td>filter rows</td><td>roving focus, selected state</td></tr>
+        <tr><td>Toast</td><td>banners and alerts</td><td>live region, timeout</td></tr>
+        <tr><td>EmptyState</td><td>3 empty-state styles</td><td>title, hint, one action</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ PLAN ============ -->
+<section id="plan" aria-labelledby="plan-h">
+  <h2 id="plan-h">Phased plan<small>Each phase ships on its own and leaves the app working.</small></h2>
+  <div class="phases">
+    <div class="phase"><b>Phase 0</b><p>Guardrails: stylelint for literals, <code>!important</code> and <code>outline: none</code>; generate <code>tokens.py</code>. Quick fixes: legal placeholders, wallet BUY, MESSAGE overlap, tile keyboard bug.</p></div>
+    <div class="phase"><b>Phase 1</b><p>Tokens: 16px root and type scale, split danger from accent, radius and z-index scales, focus ring token. Codemod literals onto tokens.</p></div>
+    <div class="phase"><b>Phase 2</b><p>Primitives: Button, IconButton, FormField, Dialog, Tabs, Chip, Toast, EmptyState.</p></div>
+    <div class="phase"><b>Phase 3</b><p>Screens: Wallet, Upload, Explore mobile, Settings, 404 and error pages, copy rewrites. VR: degree-based sizing, panel placement, depth, error state.</p></div>
+    <div class="phase"><b>Phase 4</b><p>Delete dead CSS and split <code>global.css</code> by feature.</p></div>
+  </div>
+</section>
+
+<!-- ============ WORKS / UNTESTED ============ -->
+<section id="works" aria-labelledby="works-h">
+  <h2 id="works-h">What works</h2>
+  <div class="cols">
+    <div class="box">
+      <h3>Web</h3>
+      <ul>
+        <li>ReportDialog: correct modal focus handling.</li>
+        <li>Auth forms with labels and errors.</li>
+        <li>Search combobox, skip link, tablist and breadcrumb semantics.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>VR</h3>
+      <ul>
+        <li>Controller guide: clear diagram and mapping table.</li>
+        <li>Stereo video and dome curvature render cleanly on device.</li>
+        <li>Laser pointer with a visible hit dot.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="untested" aria-labelledby="untested-h">
+  <h2 id="untested-h">Not tested</h2>
+  <p class="note">Real screen readers (VoiceOver, TalkBack), real touch devices, hand tracking on device, uploads and purchases end to end, and the moderation queue. Contrast and size figures come from computed styles in Chromium; VR angles come from scene geometry read over CDP.</p>
+</section>
+</main>
+</div>
+
+<script>
+for (const s of ["high", "med", "low"]) {
+  document.getElementById("n-" + s).textContent = document.querySelectorAll(".finding." + s).length;
+}
+</script>
