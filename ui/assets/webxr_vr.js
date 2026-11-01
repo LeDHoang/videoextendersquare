@@ -6111,7 +6111,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       activeIds = ui.filterOverlayComments(comments, source.currentTime)
         .map((c) => String(c.id)).join(',');
     } catch (e) { activeIds = ''; }
-    const key = activeIds + '|' + (overlayHoverId || '') + '|' + loadState;
+    // The reel's auto caption (the 2D CC switch applies), on the same overlay;
+    // a cue change is a new key, so the texture re-uploads once per cue.
+    let caption = '';
+    if (!commentsPanelVisible && source.kind === 'video' && callbacks.getCaption) {
+      try { caption = String(callbacks.getCaption() || ''); } catch (e) { caption = ''; }
+    }
+    const key = activeIds + '|' + (overlayHoverId || '') + '|' + loadState + '|' + caption;
     const hasActive = activeIds.length > 0;
     const due = (time === undefined) || (lastOverlayUploadT < 0) ||
       ((time - lastOverlayUploadT) >= VR_UI_MIN_INTERVAL);
@@ -6130,12 +6136,13 @@ window.WebXRVR = window.WebXRVR || (function () {
         overlayHoverId,
         loadState,
         nowMs: nowMs(),
+        caption,
       }) || [];
     } catch (e) { regions = []; }
     overlayRegions = regions;
     if (overlayHoverId && !regions.some((r) => r.id === overlayHoverId)) overlayHoverId = null;
     const had = overlayHasPopups;
-    overlayHasPopups = regions.length > 0 || !!loadState;
+    overlayHasPopups = regions.length > 0 || !!loadState || !!caption;
     if (overlayTexture) {
       overlayTexture.needsUpdate = true;
       renderStats.overlayUploads = (renderStats.overlayUploads || 0) + 1;

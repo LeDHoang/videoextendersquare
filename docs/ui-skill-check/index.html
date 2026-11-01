@@ -781,7 +781,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <h3><span class="chip">Low</span>Smaller player issues</h3>
     <dl>
       <dt>What</dt><dd><ul>
-        <li>No captions or caption track.</li>
+        <li>No captions or caption track. <strong>Since done:</strong> fix <a href="#fix-56">56</a>.</li>
         <li>Folder chips and raw filenames show as reel titles.</li>
         <li>More-menu items are labelled only by <code>title</code>.</li>
         <li>"SEND TO 0" is styled as a primary action while disabled in meaning.</li>
@@ -793,7 +793,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-12">
   <h4>Fix 12 · Attempted fix · verified locally (Playwright on /reels at 1024×768 with reducedMotion "reduce" vs "no-preference", and the share dialog)</h4>
   <p><code>web/src/styles/global.css</code>: "SEND TO 0" is now a plain outlined button (grey text, not-allowed cursor) while it is disabled. It gets the accent fill only once at least one person is selected. Measured background: <code>rgb(255,59,31)</code> before, transparent after. <code>ui/assets/reels.html</code>: with <code>prefers-reduced-motion: reduce</code>, <code>loadVideo</code> treats every load as <code>autoplay:false</code>, so reels and image dwell timers start paused and tap or Space plays them. This does not apply inside a WebXR session. Measured: with no preference the video was playing at 2.5s; with reduce it was paused at 0.00s, and Space started it.</p>
-  <p><strong>Not done:</strong> captions / a caption track; titles derived from folder chips and filenames; visible labels for the More-menu items, which are still icon-only with title and aria-label. Under reduced motion there is also no on-screen play hint (the player has no visible play button). Because the immersive preview reuses this player, its reel also starts paused when the OS asks for reduced motion. <strong>Since done:</strong> a PLAY button in fix <a href="#fix-46">46</a>.</p>
+  <p><strong>Not done:</strong> captions / a caption track; titles derived from folder chips and filenames; visible labels for the More-menu items, which are still icon-only with title and aria-label. Under reduced motion there is also no on-screen play hint (the player has no visible play button). Because the immersive preview reuses this player, its reel also starts paused when the OS asks for reduced motion. <strong>Since done:</strong> a PLAY button in fix <a href="#fix-46">46</a>, and auto captions in fix <a href="#fix-56">56</a>.</p>
   <figure>
     <img src="img/fix10-share-close-after.jpg" alt="Share dialog with nobody selected: SEND TO 0 is an outlined grey button, not the orange primary" loading="lazy">
     <figcaption>After: with nobody selected, "SEND TO 0" is an outlined grey button, not the primary.</figcaption>
@@ -809,7 +809,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>Reduced motion off:</strong> the reel autoplays and no button shows.</li>
       <li><strong>Next reel:</strong> not seen live, because this local feed has one published reel. Every reel goes through the same <code>loadVideo</code> path, which sets the button for images and videos alike.</li>
     </ul>
-    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision. <strong>Since decided (yours):</strong> the rail and the More menu stay icon-only, and Enter VR joins the rail as an icon too (fix <a href="#fix-48">48</a>).</p>
+    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision. <strong>Since decided (yours):</strong> the rail and the More menu stay icon-only, and Enter VR joins the rail as an icon too (fix <a href="#fix-48">48</a>). Captions are done in fix <a href="#fix-56">56</a>.</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix46-reduced-motion-play-before.jpg" alt="Player with reduced motion on, before: a still white frame and the rail, with no way to tell it is paused or how to play." loading="lazy">
@@ -1891,6 +1891,122 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
   </section>
 
+  <section class="attempt" id="fix-56">
+    <h4>Fix 56 · Follow-up fix · Auto captions: made when a video is published if the free speech model is installed, shown in the 2D player and in VR, verified locally with a hand-written caption file (the model could not be downloaded here)</h4>
+    <p>The rule you set: if a free speech-to-text model is available, use it to make captions when a video is published. If not, skip captions.</p>
+    <p><strong>At publish:</strong></p>
+    <ul>
+      <li>After the previews and the other files are built, the background worker checks whether the video has an audio track. If it does, faster-whisper transcribes it. This is the free, MIT-licensed Whisper "base" model, running on the server's CPU, and nothing is sent to an outside service. The captions are saved as <code>&lt;name&gt;.vtt</code> next to the video and uploaded with the other files.</li>
+      <li>Long speech is split at word timings into captions of at most 84 characters, which is two lines of 42.</li>
+      <li>If faster-whisper is not installed, or its model cannot load, the worker logs it once and the video publishes with no captions, as before. Like the MAKE 3D model, it is an opt-in install: <code>requirements-captions.txt</code>, described in RUNNING.md. It adds CTranslate2 and onnxruntime, and the first publish downloads about 150 MB of model weights.</li>
+      <li>Captions are made last, so a slow transcription never holds back the previews. If a transcription fails, the error is logged and counted with the other failed files, and the post stays up.</li>
+    </ul>
+    <p><strong>What viewers see:</strong></p>
+    <ul>
+      <li>The feed gives each video a <code>captions_url</code> when its captions exist and are newer than the video.</li>
+      <li><strong>2D player:</strong> the captions load as a hidden text track, and the player draws the current caption itself, centred low on the reel. The text is 16px semibold white on a near-black backing, so it reads on any frame, including the overexposed test reel below. It sits above the creator block and the pop-up comments and clear of the rail, at 1280 and 390 wide, in fullscreen, and full screen on a phone. It hides while the comments drawer covers the player.</li>
+      <li><strong>CC button:</strong> in the More menu after AUTO/LOOP, icon only like the other More items. It shows only on reels that have captions. Captions start on, and the browser remembers the choice.</li>
+      <li><strong>VR:</strong> the same caption is drawn on the reel's in-screen overlay, just above the dock in the default locked layout, and the pop-up comments move up above it. It follows the 2D CC switch and hides while the comments panel is open. The overlay texture is re-uploaded once per caption, not every frame.</li>
+    </ul>
+    <p>Why the player draws the captions itself: the browser's own captions sit at the bottom of the video, under the progress bar, the creator block and the comment pills, and their backing cannot be set to stay readable on a white frame. Burned-in captions would need a re-encode and could not be turned off.</p>
+    <p>No real transcription ran here: the model weights come from Hugging Face, which this environment cannot reach. The screenshots use a hand-written caption file for the overexposed test reel, with two captions, one containing "&amp;". It goes through the same feed field and player code.</p>
+    <p>Measured in Chromium on the overexposed test reel at 0:04, with two pop-up comments showing:</p>
+    <ul>
+      <li>390×844: the caption spans x 28–276 and y 563–633. The comments start at y 658 and the rail at x 306.</li>
+      <li>1280×800: the caption spans x 126–630 and y 611–632. The comments start at y 687 and the rail at x 695.</li>
+      <li>VR overlay, a 1024px square: the caption ends at y 584 (57%). With a two-line caption, the third comment ends 24px above it. With no caption, the comments stay centred.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-1280-before.jpg" alt="The reel frame at 1280 wide on a white frame at 0:04: no captions." loading="lazy">
+        <figcaption>Before, 1280: no captions.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-1280-after.jpg" alt="The same frame after: one caption line, white text on a near-black backing, centred low on the reel and clear of the rail." loading="lazy">
+        <figcaption>After, 1280: the caption reads on a white frame.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-390-before.jpg" alt="The reel at 390 wide at 0:04: the creator block and folder chip, no captions." loading="lazy">
+        <figcaption>Before, 390.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-390-after.jpg" alt="The same view after: a three-line caption above the creator block, clear of the rail." loading="lazy">
+        <figcaption>After, 390: above the creator block.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-390-pills.jpg" alt="At 390 wide with two pop-up comments showing: the caption sits above both comments and clear of the rail." loading="lazy">
+        <figcaption>With two pop-up comments: the caption sits above them.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-390-more.jpg" alt="The More menu open at 390 wide: the CC button is the third item, after AUTO, outlined in red because captions are on." loading="lazy">
+        <figcaption>The CC button in More, after AUTO, outlined red while on.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix56-vr-before.jpg" alt="The immersive preview before: the white reel screen with the dock below and the controller guide to the right, no caption." loading="lazy">
+        <figcaption>Before, VR (immersive preview): no caption.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-vr-after.jpg" alt="The immersive preview after: a two-line caption on its dark backing sits on the reel just above the dock." loading="lazy">
+        <figcaption>After, VR: the caption sits on the reel just above the dock.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>tests/test_captions.py</code> (13 tests) covers:
+        <ul>
+          <li>WebVTT timing and escaping, and splitting at word timings;</li>
+          <li>audio detection with ffmpeg;</li>
+          <li>no file written when there is no model, no audio or no speech;</li>
+          <li>reusing fresh captions and redoing stale ones;</li>
+          <li>the model being off when it is not installed or its weights cannot load, and loading once on the CPU;</li>
+          <li>the feed linking fresh captions for videos only.</li>
+        </ul>
+      </li>
+      <li><code>tests/test_publish_background.py</code> adds three publish tests with a fake model:
+        <ul>
+          <li>captions are built last, uploaded as <code>text/vtt</code>, recorded, and in the feed;</li>
+          <li>with no model, the post publishes with no warning and no captions;</li>
+          <li>a failed transcription is logged and the post stays up.</li>
+        </ul>
+      </li>
+      <li>New <code>web/tests/reels-captions.test.js</code> (6 tests) runs the player's caption code against a fake video. It covers:
+        <ul>
+          <li>the track and the caption text;</li>
+          <li>a new track for each reel;</li>
+          <li>CC off applying to 2D and VR, and being remembered;</li>
+          <li>blocked storage;</li>
+          <li>the comments drawer;</li>
+          <li>the wiring.</li>
+        </ul>
+      </li>
+      <li><code>webxr-earth.test.js</code> adds two VR tests:
+        <ul>
+          <li>one upload per caption, and the caption hidden while the comments panel is open;</li>
+          <li>the caption's position, wrapping to at most three lines, and the comments moving up above it.</li>
+        </ul>
+        Both fail on the old VR code.</li>
+      <li>Results: 778 pytest tests pass (12 skipped). The 480 node and 514 vitest tests pass, and the production build passes.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li>No real transcription ran, so accuracy, speed on the server's CPU and memory use are untested. The code follows faster-whisper 1.2's API and is tested with a fake model.</li>
+      <li>Videos published before this change have no captions, and there is no backfill job.</li>
+      <li>If the model fails to load, captions stay off until the server restarts.</li>
+      <li>The track has no language label. Whisper detects the language, but it is not stored.</li>
+      <li>Creators cannot edit their captions.</li>
+      <li>VR has no CC button of its own; it follows the 2D switch. The VR caption's position is set for the default locked layout, so in other layouts it may not sit just above the dock.</li>
+      <li>Packs built from the database fallback do not carry captions.</li>
+      <li>At 375×667 the More menu of a captioned reel is 12px too tall for the space, so it scrolls.</li>
+      <li>Moving from one reel to the next was not tried in the browser, because the local feed has one reel. The node test covers the track swap.</li>
+    </ul>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -1934,7 +2050,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 55. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 56. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1947,7 +2063,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <h3>Larger pieces of work</h3>
       <ul>
         <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
-        <li>Captions or a caption track for reels. Titles are done (<a href="#fix-55">fix 55</a>).</li>
+        <li><strong>Auto captions on real speech</strong> (<a href="#fix-56">fix 56</a>): the speech model could not be downloaded here, so a first publish with the model installed is still to check. Older videos need a backfill to get captions.</li>
       </ul>
     </div>
     <div class="box">

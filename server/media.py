@@ -4,7 +4,9 @@ Plain equivalents of the ui/media utilities with NO Streamlit dependency —
 the FastAPI layer must stay usable without the Streamlit fallback installed.
 """
 
+import functools
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -14,6 +16,8 @@ from pathlib import Path
 
 from server import media_store
 from server.settings import env_int
+
+logger = logging.getLogger(__name__)
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -399,6 +403,7 @@ def derived_files(stored: Path) -> list[Path]:
         mono,
         explore_preview_path(str(mono)),
         explore_poster_path(str(mono)),
+        captions_path(str(stored)),
     ]
 
 
@@ -530,6 +535,11 @@ def explore_preview_path(src: str) -> Path:
 def explore_poster_path(src: str) -> Path:
     """Sibling path for the Explore-grid poster thumbnail (<stem>-poster.jpg)."""
     return Path(src).with_name(Path(src).stem + "-poster.jpg")
+
+
+def captions_path(src: str) -> Path:
+    """Sibling path for a video's auto captions (<stem>.vtt, WebVTT)."""
+    return Path(src).with_name(Path(src).stem + ".vtt")
 
 
 def mono_sibling_path(src: str) -> Path:
@@ -830,6 +840,106 @@ def make_explore_poster(src: str, height: int = 720, crop: str | None = None) ->
             return _commit_part(part, dest)
     part.unlink(missing_ok=True)
     return None
+
+
+# Auto captions: the free Whisper speech model through faster-whisper, an
+# optional install (requirements-captions.txt) like the MAKE 3D model. "base"
+# is multilingual and fast enough on a CPU for reels; its weights download
+# from Hugging Face on first use.
+CAPTIONS_MODEL = "base"
+
+
+@functools.lru_cache(maxsize=1)
+def _caption_model():
+    """The speech model, loaded once per process; None when it cannot load here."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        logger.info("Auto captions are off: faster-whisper is not installed (requirements-captions.txt)")
+        return None
+    try:
+        return WhisperModel(CAPTIONS_MODEL, device="cpu", compute_type="int8")
+    except Exception:
+        logger.exception("Auto captions are off: the %s speech model could not load", CAPTIONS_MODEL)
+        return None
+
+
+def has_audio(src: str) -> bool:
+    """True when *src* has an audio stream (ffprobe)."""
+    cmd = ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", src]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return p.returncode == 0 and bool(p.stdout.strip())
+
+
+def _vtt_time(seconds: float) -> str:
+    ms = max(0, round(seconds * 1000))
+    hours, ms = divmod(ms, 3_600_000)
+    minutes, ms = divmod(ms, 60_000)
+    secs, ms = divmod(ms, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{ms:03d}"
+
+
+CAPTION_MAX_CHARS = 84  # two lines of 42, the usual limit for one caption
+
+
+def caption_cues(segments) -> list[tuple[float, float, str]]:
+    """(start, end, text) cues of at most CAPTION_MAX_CHARS, split at word timings.
+
+    A Whisper segment can run to a long sentence, too much to read at once
+    over a reel; a segment without word timings stays one cue.
+    """
+    cues = []
+    for seg in segments:
+        words = [(w.start, w.end, w.word.strip()) for w in (seg.words or []) if w.word.strip()]
+        if not words:
+            if seg.text.strip():
+                cues.append((seg.start, seg.end, seg.text.strip()))
+            continue
+        start, end, text = words[0]
+        for w_start, w_end, word in words[1:]:
+            if len(text) + 1 + len(word) > CAPTION_MAX_CHARS:
+                cues.append((start, end, text))
+                start, text = w_start, word
+            else:
+                text += " " + word
+            end = w_end
+        cues.append((start, end, text))
+    return cues
+
+
+def webvtt(cues) -> str:
+    """WebVTT text of (start s, end s, text) cues, escaped so each shows as written."""
+    lines = ["WEBVTT", ""]
+    for start, end, text in cues:
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines += [f"{_vtt_time(start)} --> {_vtt_time(end)}", text, ""]
+    return "\n".join(lines)
+
+
+def make_captions(src: str) -> str | None:
+    """Caption the speech in a video as a WebVTT sibling (<stem>.vtt).
+
+    Returns None, writing nothing, when the speech model cannot run here
+    (not installed, or its weights cannot load) and for a video with no
+    audio or no speech, which is most reels.
+    """
+    dest = captions_path(src)
+    if has_media_file(dest, None) and _sibling_is_fresh(dest, src):
+        return str(dest)
+    model = _caption_model()
+    if model is None or not has_audio(src):
+        return None
+    # The voice filter skips music and silence, where Whisper tends to invent text.
+    segments, _info = model.transcribe(src, vad_filter=True, word_timestamps=True)
+    cues = caption_cues(segments)
+    if not cues:
+        return None
+    part = _part_path(dest)
+    part.write_text(webvtt(cues), encoding="utf-8")
+    return _commit_part(part, dest)
 
 
 def scan_output_videos(root: str = "output") -> list[dict]:

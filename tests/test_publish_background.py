@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from argon2 import PasswordHasher
@@ -96,6 +97,27 @@ def setup(tmp_path, monkeypatch):
     media_store.set_client(None)
     video_router.STAGED_UPLOADS.pop("bg-video", None)
     engine.dispose()
+
+
+class FakeSpeech:
+    """Stands in for the Whisper model: transcribe() yields *segments*, or raises *error*."""
+
+    def __init__(self, segments=(), error=None):
+        self.segments = [SimpleNamespace(start=start, end=end, text=text, words=None) for start, end, text in segments]
+        self.error = error
+        self.calls: list[tuple[str, dict]] = []
+
+    def transcribe(self, src, **kwargs):
+        self.calls.append((src, kwargs))
+        if self.error:
+            raise self.error
+        return iter(self.segments), SimpleNamespace(language="en")
+
+
+def speech_model(monkeypatch, speech):
+    """Let make_captions run *speech* on a clip that has audio (the fake ffprobe finds none)."""
+    monkeypatch.setattr(SM, "_caption_model", lambda: speech)
+    monkeypatch.setattr(SM, "has_audio", lambda src: True)
 
 
 def publish_video(client, tmp_path):
@@ -258,6 +280,70 @@ def test_a_raising_build_still_cleans_up(setup, tmp_path, monkeypatch, caplog):
     assert part_files() == []
     assert media_store.rel_path(sibling(stored_path(body), "-preview.mp4")) in _s3.objects
     assert not SM.derived_pending(stored_path(body))
+
+
+def test_captions_land_last_and_reach_the_feed(setup, tmp_path, monkeypatch):
+    client, Session, s3, ffmpeg, futures = setup
+    speech = FakeSpeech([(0.0, 1.5, " Hello there "), (2.0, 2.4, "   "), (3.25, 4.0, "Fish & <chips>")])
+    speech_model(monkeypatch, speech)
+    body = publish_video(client, tmp_path)
+    stored = stored_path(body)
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+
+    vtt = media_store.rel_path(sibling(stored, ".vtt"))
+    assert speech.calls == [(str(stored), {"vad_filter": True, "word_timestamps": True})]
+    # After every encode, through R2 like the other siblings, served as WebVTT.
+    assert list(s3.objects)[-1] == vtt
+    assert s3.objects[vtt]["ContentType"] == "text/vtt"
+    assert s3.objects[vtt]["body"].decode() == (
+        "WEBVTT\n\n"
+        "00:00:00.000 --> 00:00:01.500\nHello there\n\n"
+        "00:00:03.250 --> 00:00:04.000\nFish &amp; &lt;chips&gt;\n"
+    )
+    assert not sibling(stored, ".vtt").exists()
+    assert part_files() == []
+    with Session() as db:
+        assert vtt in db.query(Post).one().media_files
+        payload = reels._build_payload(post_media_items(db), "h264", db=db)
+    assert [item["captions_url"] for item in payload] == [f"https://media.example.com/uploads/{stored.stem}.vtt"]
+
+
+def test_no_speech_model_publishes_without_captions(setup, tmp_path, monkeypatch, caplog):
+    client, Session, s3, ffmpeg, futures = setup
+    monkeypatch.setattr(SM, "_caption_model", lambda: None)
+    monkeypatch.setattr(SM, "has_audio", lambda src: True)
+    body = publish_video(client, tmp_path)
+    with caplog.at_level(logging.WARNING, logger="server.routers.uploads"):
+        ffmpeg.gate.set()
+        futures[0].result(timeout=10)
+    stored = stored_path(body)
+    # Skipping is the expected outcome, not a failure.
+    assert [r.getMessage() for r in caplog.records if r.name == "server.routers.uploads" and r.levelno >= logging.WARNING] == []
+    assert media_store.rel_path(sibling(stored, ".vtt")) not in s3.objects
+    with Session() as db:
+        assert set(db.query(Post).one().media_files) == {
+            body["rel_path"], *(media_store.rel_path(sibling(stored, s)) for s in DERIVED)
+        }
+        payload = reels._build_payload(post_media_items(db), "h264", db=db)
+    assert [item["captions_url"] for item in payload] == [None]
+
+
+def test_a_failing_transcription_is_logged_and_the_post_stays_up(setup, tmp_path, monkeypatch, caplog):
+    client, Session, s3, ffmpeg, futures = setup
+    speech_model(monkeypatch, FakeSpeech(error=RuntimeError("decoder crashed")))
+    body = publish_video(client, tmp_path)
+    with caplog.at_level(logging.ERROR, logger="server.routers.uploads"):
+        ffmpeg.gate.set()
+        futures[0].result(timeout=10)
+    stored = stored_path(body)
+    assert f"Building the captions of {stored.name} raised" in caplog.text
+    assert part_files() == []
+    assert media_store.rel_path(sibling(stored, ".vtt")) not in s3.objects
+    with Session() as db:
+        post = db.query(Post).one()
+        assert post.status == "published"
+        assert media_store.rel_path(sibling(stored, "-preview.mp4")) in post.media_files
 
 
 def test_post_deleted_while_encoding_keeps_its_r2_media(setup, tmp_path):

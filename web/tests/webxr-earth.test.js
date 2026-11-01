@@ -2581,6 +2581,71 @@ test('overlay fade repaints while visible, bounded at the UI interval', () => {
   renderer.stopPreview();
 });
 
+test('the auto caption shows on the overlay, uploads once per cue, and steps aside for the comments panel', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 4, currentTime: 2, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  let caption = 'Hello there';
+  renderer.init(video, { getComments: () => [], getCaption: () => caption });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const uploads = () => api.getScreenState().overlayUploads;
+  // A cue alone keeps the overlay up, with no comments.
+  assert.equal(api.refreshOverlayTexture(1000), true);
+  assert.equal(uploads(), 1);
+  // The same cue as time moves on: no repaint.
+  assert.equal(api.refreshOverlayTexture(2000), true);
+  assert.equal(api.refreshOverlayTexture(9000), true);
+  assert.equal(uploads(), 1);
+  caption = 'Next cue';
+  assert.equal(api.refreshOverlayTexture(9050), true);
+  assert.equal(uploads(), 2);
+  caption = '';
+  assert.equal(api.refreshOverlayTexture(9100), false);
+  assert.equal(uploads(), 3);
+  // The comments panel hides the pop-ups, and the caption with them.
+  caption = 'Behind the panel';
+  api.toggleCommentsPanel();
+  assert.equal(api.refreshOverlayTexture(9200), false);
+  api.toggleCommentsPanel();
+  assert.equal(api.refreshOverlayTexture(9300), true);
+  renderer.stopPreview();
+});
+
+test('the overlay caption sits above the dock, wraps to three lines, and lifts the comments above it', () => {
+  const ui = loadUICanvasStandalone();
+  const render = (caption) => {
+    const { ctx, texts } = makeRecordingCtx();
+    const boxes = [];
+    // Caption backings are centred on the screen; the comments' accent bars sit on the left.
+    ctx.fillRect = (x, y, w, h) => { if (x + w / 2 === 512) boxes.push({ x, y, w, h }); };
+    const comments = ['a', 'b', 'c'].map((id) => ({ id, author_name: id, text: 'hi', timestamp: 1 }));
+    const regions = ui.renderOverlayCanvas(ctx, { comments, currentTime: 2, caption });
+    return { texts, boxes, regions };
+  };
+  // The test ctx measures 8px per character: 77 characters fit in 76% of 1024.
+  const short = render('Fish & chips');
+  assert.ok(short.texts.includes(`Fish & chips 512 ${0.57 * 1024 - 22}`), 'centred on one 44px line ending at 57%');
+  assert.deepEqual(short.boxes, [{ x: 512 - (12 * 8 + 28) / 2, y: 0.57 * 1024 - 44, w: 12 * 8 + 28, h: 44 }]);
+
+  const long = render(`${'word '.repeat(40)}\nsecond cue\nthird cue`);
+  const lines = long.boxes.map((box) => box.y);
+  assert.equal(lines.length, 3, 'never more than three lines');
+  assert.deepEqual(lines, [0.57 * 1024 - 132, 0.57 * 1024 - 88, 0.57 * 1024 - 44]);
+  assert.ok(long.boxes.every((box) => box.w <= 1024 * 0.76 + 28));
+
+  // The three pop-up comments end 24px above the caption; without one they stay centred.
+  const bottom = (regions) => regions[2].y + regions[2].h - 6;
+  assert.equal(bottom(short.regions), 0.57 * 1024 - 44 - 24);
+  assert.equal(bottom(long.regions), 0.57 * 1024 - 132 - 24);
+  const none = render('');
+  assert.equal(none.boxes.length, 0);
+  assert.equal(none.regions[0].y + 6, 512 - (3 * 60 + 2 * 11) / 2);
+});
+
 test('video and overlay textures use legacy linear sampling without mipmaps', () => {
   const gl = makeMockGl({ deleted: 0 });
   const renderer = loadRenderer({ gl });

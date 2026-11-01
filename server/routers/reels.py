@@ -1500,6 +1500,9 @@ def _build_payload(
             else SM.legacy_stereo_layout(item["rel_path"], meta.get("width"), meta.get("height"), root=str(OUTPUT_DIR))
         ) or "mono"
         stereo = stereo_fields(item["rel_path"], layout, files)
+        # Auto captions (<stem>.vtt) of a video's original; the 2D rendition and stereo file share its audio.
+        base["captions_url"] = None if _is_image_item(item) else _sibling_media_url(
+            src_path, SM.captions_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]

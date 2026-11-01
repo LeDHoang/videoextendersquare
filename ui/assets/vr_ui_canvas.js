@@ -1485,8 +1485,49 @@
     return [];
   }
 
+  // The playing reel's auto caption, centred, each line on its own near-black backing like the 2D
+  // player's (.reels-captions). Its bottom sits just above the dock, which covers the screen from about
+  // 60% down in the default (locked) layout; a cue is at most two lines, three when two cues overlap.
+  // Returns the caption's top, so the pop-up comments can stack above it.
+  const OVERLAY_CAPTION_BOTTOM = 0.57;
+  const OVERLAY_CAPTION_MAX_LINES = 3;
+  function renderOverlayCaption(ctx, text) {
+    const maxW = OVERLAY_W * 0.76;
+    const lineH = 44;
+    ctx.save();
+    ctx.font = `600 30px ${TOKENS.font.sans}`;
+    const lines = [];
+    String(text).split('\n').forEach((part) => {
+      let line = '';
+      part.split(/\s+/).filter(Boolean).forEach((word) => {
+        const next = line ? line + ' ' + word : word;
+        if (line && ctx.measureText(next).width > maxW) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = next;
+        }
+      });
+      if (line) lines.push(line);
+    });
+    const shown = lines.slice(0, OVERLAY_CAPTION_MAX_LINES);
+    const top = OVERLAY_H * OVERLAY_CAPTION_BOTTOM - shown.length * lineH;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    shown.forEach((line, i) => {
+      const w = ctx.measureText(line).width + 28;
+      const y = top + i * lineH;
+      ctx.fillStyle = 'rgba(8, 9, 10, 0.86)';
+      ctx.fillRect(OVERLAY_W / 2 - w / 2, y, w, lineH);
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.fillText(line, OVERLAY_W / 2, y + lineH / 2);
+    });
+    ctx.restore();
+    return top;
+  }
+
   function renderOverlayCanvas(ctx, options = {}) {
-    const { comments = [], currentTime = 0, overlayHoverId = null, loadState = '', nowMs = 0 } = options;
+    const { comments = [], currentTime = 0, overlayHoverId = null, loadState = '', nowMs = 0, caption = '' } = options;
     const regions = [];
     if (!ctx) return regions;
 
@@ -1495,14 +1536,16 @@
     ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
     if (loadState === 'failed') return renderLoadState(ctx, loadState, overlayHoverId, nowMs);
     if (loadState === 'loading') renderLoadState(ctx, loadState, overlayHoverId, nowMs);
+    const captionTop = caption ? renderOverlayCaption(ctx, caption) : OVERLAY_H;
     if (active.length === 0) return regions;
 
-    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas
+    // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas,
+    // moved up as far as a caption needs.
     const maxShow = Math.min(3, active.length);
     const itemHeight = 60;
     const gap = 11;
     const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
-    const startY = (OVERLAY_H / 2) - (totalH / 2);
+    const startY = Math.min((OVERLAY_H / 2) - (totalH / 2), captionTop - 24 - totalH);
 
     for (let i = 0; i < maxShow; i++) {
       const c = active[i];

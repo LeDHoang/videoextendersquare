@@ -334,6 +334,7 @@ def _build_video_assets(dest: Path) -> None:
     _derived_step("poster", dest, SM.make_explore_poster, str(dest))
     _derived_step("explore preview", dest, SM.make_explore_preview, str(dest))
     _derived_step("web preview", dest, SM.make_web_preview, str(dest))
+    _build_captions(dest)
 
 
 def _build_stereo_video_assets(dest: Path, layout: str) -> None:
@@ -343,6 +344,23 @@ def _build_stereo_video_assets(dest: Path, layout: str) -> None:
     if mono:
         _derived_step("left-eye explore preview", dest, SM.make_explore_preview, mono)
         _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
+    _build_captions(dest)
+
+
+def _build_captions(dest: Path) -> None:
+    """Background, last: auto captions, when the speech model can run on this host.
+
+    Unlike the steps above, no file is the usual outcome (no model, no
+    audio, no speech), so only an error counts as a failure.
+    """
+    try:
+        built = SM.make_captions(str(dest))
+    except Exception:
+        logger.exception("Building the captions of %s raised", dest.name)
+        metrics.incr("derived_failed")
+        return
+    if built:
+        _record_files(dest)
 
 
 def _fetch_inputs(dest: Path, rel: str) -> bool:
