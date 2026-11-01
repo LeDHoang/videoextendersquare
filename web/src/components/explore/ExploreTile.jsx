@@ -183,6 +183,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
       className={'sx-explore-tile' + (ready ? '' : ' sx-skel')}
       onClick={() => onOpen(video)}
       onKeyDown={(event) => {
+        // Keys bubbling up from the nested buttons belong to those buttons, not to the tile.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen(video);

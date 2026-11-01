@@ -81,6 +81,11 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflo
 figure { margin: 0; min-width: 0; }
 figure img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); background: #000; }
 figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; }
+.attempt { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--sev-low); border-radius: 6px; padding: 20px 22px; display: grid; gap: 14px; }
+.attempt h4 { margin: 0; font: 600 12px/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--sev-low); }
+.attempt p { margin: 0; font-size: 16px; }
+.attempt .shot-row { margin-bottom: 0; }
+.attempt code { font-family: var(--font-mono); font-size: 14px; }
 .shot-wide { margin-bottom: 18px; }
 .shot-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
 
@@ -347,6 +352,21 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </figure>
   </div>
 
+  <section class="attempt">
+    <h4>Attempted fix · verified locally on /explore and /reels</h4>
+    <p>The launcher no longer renders on <code>/reels</code>, where the player already has its own bottom-right controls; the header MESSAGES button still opens messaging. On every other page the shell now reserves 64px at the bottom (<code>body:has(.sx-message-launcher) .sx-shell</code>), so footer links and page actions scroll clear of the button. Checked with a signed-in user: no element overlaps the launcher at the end of /explore.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix1-launcher-reels-after.jpg" alt="Reels page after the fix: no MESSAGE button, the red Send button next to Add a comment is fully visible." loading="lazy">
+        <figcaption>After: /reels. Send is clear.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix1-launcher-explore-after.jpg" alt="Explore page scrolled to the end: footer links sit above the MESSAGE button with space between them." loading="lazy">
+        <figcaption>After: end of /explore. Footer clears MESSAGE.</figcaption>
+      </figure>
+    </div>
+  </section>
+
   <article class="finding high" style="margin-top:14px">
     <h3><span class="chip">High</span>Overlay text on video has no scrim</h3>
     <dl>
@@ -364,6 +384,15 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>HEAD-check the source on error; say "This reel is no longer available" for 404s. Add <code>role="alert"</code> and a 44px Skip button.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · verified locally by forcing a 404 on the player video</h4>
+    <p>In <code>reels.html</code>: the overlay now has <code>role="alert"</code>; the heading no longer says "4K VIDEO DECODE ERROR" for every failure; and the message depends on the error code (code 4: "could not be loaded, may have been removed, or the format is not supported"; code 2: connection dropped; anything else: skip to the next). The dev hint about port 8502 is gone. Text grew from 10/12px to 14/16px and the Skip button is 44px tall. <strong>Not done:</strong> the HEAD request that would tell a 404 from an unsupported format, so code 4 still has to cover both cases in one sentence.</p>
+    <figure>
+      <img src="img/fix4-2d-error-after.jpg" alt="Reels player with a failed video: warning icon, heading Can't play this video, a two-line explanation and a Skip to next button." loading="lazy">
+      <figcaption>After: the error state on /reels with a missing video file.</figcaption>
+    </figure>
+  </section>
 
   <article class="finding med">
     <h3><span class="chip">Medium</span>Focus is lost and hidden controls stay focusable</h3>
@@ -415,6 +444,15 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+  <section class="attempt">
+    <h4>Attempted fix · verified locally on /explore</h4>
+    <p>Applied the minimum fix from above, <code>if (event.target !== event.currentTarget) return;</code>, to the tile key handler in both <code>ExploreTile.jsx</code> and <code>PackTile.jsx</code> (the pack tile had the same bug). Before: Enter on a focused SHARE button navigated to the pack page. After: Enter opens the share dialog and the page stays on /explore. The larger change (tile as a link with sibling buttons) is not done.</p>
+    <figure>
+      <img src="img/fix2-tile-share-after.jpg" alt="Explore page after pressing Enter on a tile's Share button: the Share Reel Pack dialog is open and the URL is still /explore." loading="lazy">
+      <figcaption>After: Enter on SHARE opens the share dialog, no navigation.</figcaption>
+    </figure>
+  </section>
+
   <article class="finding high">
     <h3><span class="chip">High</span>Mobile drawer and share dialog are not modal</h3>
     <dl>
@@ -423,6 +461,16 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <dt>Fix</dt><dd>Use one Dialog primitive (native <code>&lt;dialog&gt;</code> with <code>showModal()</code>) for drawer, share and report. ReportDialog already does this right and can be the base.</dd>
     </dl>
   </article>
+
+  <section class="attempt">
+    <h4>Attempted fix · verified locally (share dialog at 1280px, drawer at 375px)</h4>
+    <p><strong>Share dialog</strong> (<code>ReelShareDialog.jsx</code>): Tab now wraps inside the dialog and focus returns to the SHARE button on close. Checked with 12 Tab presses (focus stayed in the dialog) and Escape (dialog closed, SHARE button focused again). <strong>Drawer</strong> (<code>Sidebar.jsx</code>), at 900px and below only: focus moves to the close button on open, Tab wraps inside the drawer (60 presses), and Escape returns focus to the menu button. Desktop keeps the non-modal push sidebar. Both copy the pattern already used in <code>ReportDialog.jsx</code> rather than adding a shared primitive.</p>
+    <p><strong>Not done:</strong> <code>aria-expanded</code> on the menu button, <code>inert</code> on the page behind the drawer, and the shared native-dialog primitive. <strong>New finding:</strong> the floating MESSAGE button sits above the open drawer and covers its lower content (visible in the screenshot).</p>
+    <figure>
+      <img src="img/fix3-drawer-after.jpg" alt="Mobile drawer open at 375px with the close button focused and highlighted; the MESSAGE button floats over the lower right of the drawer." loading="lazy" style="max-width:320px">
+      <figcaption>After: drawer open at 375px, focus on the close button.</figcaption>
+    </figure>
+  </section>
 
   <div class="with-shot" style="margin-top:14px">
     <article class="finding low">

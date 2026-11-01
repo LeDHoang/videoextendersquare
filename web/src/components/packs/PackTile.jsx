@@ -127,6 +127,8 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
       className={'sx-explore-tile sx-pack-tile--reel' + (ready || !activeClip ? '' : ' sx-skel')}
       onClick={handleOpen}
       onKeyDown={(event) => {
+        // Keys bubbling up from the nested buttons belong to those buttons, not to the tile.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           handleOpen();

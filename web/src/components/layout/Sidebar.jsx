@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
@@ -34,6 +34,8 @@ const MODEL_FIELDS = [
   { key: 'upscale_img', label: 'IMAGE UPSCALE (FAL)' },
 ];
 
+const FOCUSABLE = 'a[href], button:not(:disabled), select:not(:disabled), textarea:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 export default function Sidebar({ health, config, setModels, isOpen, onClose }) {
   const showDevTools = !hideDevTools();
   const { user } = useAuth();
@@ -42,6 +44,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
   const [saving, setSaving] = useState(false);
   const [modelMsg, setModelMsg] = useState('');
   const [modelErr, setModelErr] = useState('');
+  const asideRef = useRef(null);
 
   // Close drawer on Escape
   useEffect(() => {
@@ -52,6 +55,32 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
+
+  // Below 900px the drawer overlays the page: move focus in, keep Tab inside it, and hand focus back on close.
+  useEffect(() => {
+    if (!isOpen || !window.matchMedia?.('(max-width: 900px)').matches) return undefined;
+    const opener = document.activeElement;
+    asideRef.current?.querySelector('.sx-sidebar-close-btn')?.focus();
+    const onTab = (e) => {
+      if (e.key !== 'Tab' || !asideRef.current) return;
+      const stops = Array.from(asideRef.current.querySelectorAll(FOCUSABLE));
+      if (!stops.length) return;
+      const active = document.activeElement;
+      const inside = asideRef.current.contains(active);
+      if (e.shiftKey && (active === stops[0] || !inside)) {
+        e.preventDefault();
+        stops[stops.length - 1].focus();
+      } else if (!e.shiftKey && (active === stops[stops.length - 1] || !inside)) {
+        e.preventDefault();
+        stops[0].focus();
+      }
+    };
+    window.addEventListener('keydown', onTab);
+    return () => {
+      window.removeEventListener('keydown', onTab);
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+  }, [isOpen]);
 
   const probes = health?.probes || {};
   const fal = health?.fal_key || {};
@@ -137,7 +166,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
     : null;
 
   return (
-    <aside className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
+    <aside ref={asideRef} className={`sx-sidebar ${isOpen ? 'sx-open' : ''}`} aria-label="Sidebar Controls">
       {/* ─── Command Center Header ──────────────────────────── */}
       <div className="sx-sidebar-header">
         {isOpen ? (

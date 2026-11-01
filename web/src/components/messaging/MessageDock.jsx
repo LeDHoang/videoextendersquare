@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { IndustrialMessageIcon } from '../icons/index.jsx';
@@ -22,9 +22,12 @@ export default function MessageDock() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const messaging = useMessaging();
+  const { pathname } = useLocation();
   if (!user) return null;
   const unread = messaging.unread.total;
   if (!messaging.dockOpen) {
+    // The reels player has its own bottom-right controls (comment Send); the header Messages link covers access there.
+    if (pathname.startsWith('/reels')) return null;
     return (
       <button
         type="button"

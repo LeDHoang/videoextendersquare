@@ -2175,13 +2175,13 @@
     <!-- Chat/Annotations Overlay (Bottom) -->
     <div class="reels-twitch-ticker" id="twitchCommentTicker"></div>
 
-    <div class="video-error-overlay" id="errorOverlay">
+    <div class="video-error-overlay" id="errorOverlay" role="alert">
       <div style="font-size: 32px; color: #FF3B1F;">⚠️</div>
-      <div style="font-weight: 700; color: #FFF; font-size: 12px;">4K VIDEO DECODE ERROR</div>
-      <div style="font-size: 10px; color: #9BA1A8; max-width: 260px;" id="errorText">
-        Unable to decode this 4K HEVC video stream on your browser.
+      <div style="font-weight: 700; color: #FFF; font-size: 16px;">CAN'T PLAY THIS VIDEO</div>
+      <div style="font-size: 14px; line-height: 1.4; color: #C4C9CF; max-width: 340px;" id="errorText">
+        This video could not be played.
       </div>
-      <button style="margin-top: 6px; background: #FF3B1F; border: none; color: #0A0A0A; padding: 5px 14px; font-weight: 800; border-radius: 0px; cursor: pointer; font-size: 11px;" id="skipErrorBtn">
+      <button style="margin-top: 6px; background: #FF3B1F; border: none; color: #0A0A0A; padding: 10px 18px; min-height: 44px; font-weight: 800; border-radius: 0px; cursor: pointer; font-size: 13px;" id="skipErrorBtn">
         SKIP TO NEXT ⬇ (S)
       </button>
     </div>
@@ -5865,9 +5865,12 @@
       } else if (isProxy) {
         console.warn('[ReelsPlayer] Transient error on H.264 proxy stream:', video.src);
       } else if (err && err.code === 4 /* MEDIA_ERR_SRC_NOT_SUPPORTED */) {
-        showError('Video format (HEVC) not supported by browser. Select "H.264 4K (Web & VR)" in the Codec filter above.');
+        // Code 4 also covers a missing file (404), so the copy cannot blame the format alone.
+        showError('This video could not be loaded. It may have been removed, or your browser may not support its format. Try "H.264 4K (Web & VR)" in the Codec filter.');
+      } else if (err && err.code === 2 /* MEDIA_ERR_NETWORK */) {
+        showError('The connection dropped while loading this video. Check your network and try again.');
       } else {
-        showError('Media playback error (Code ' + (err ? err.code : 'unknown') + '). Check media server connection on port 8502.');
+        showError('This video could not be played. Skip to the next one.');
       }
     });
 

@@ -5,12 +5,15 @@ import { api } from '../../api/client.js';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../../hooks/MessagingContext.jsx';
 
+const FOCUSABLE = 'a[href], button:not(:disabled), select:not(:disabled), textarea:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 export default function ReelShareDialog() {
   const { user } = useAuth();
   const messaging = useMessaging();
   const navigate = useNavigate();
   const location = useLocation();
   const closeRef = useRef(null);
+  const dialogRef = useRef(null);
   const linkRef = useRef(null);
   const target = messaging.shareTarget;
   // Require an explicit pack kind — reel payloads in pack playback context may
@@ -54,11 +57,37 @@ export default function ReelShareDialog() {
   useEffect(() => {
     if (!target) return undefined;
     const onKey = (event) => {
-      if (event.key === 'Escape') messaging.closeShare();
+      if (event.key === 'Escape') {
+        messaging.closeShare();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const panel = dialogRef.current;
+      if (!panel) return;
+      const stops = Array.from(panel.querySelectorAll(FOCUSABLE));
+      if (!stops.length) return;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === stops[0] || !panel.contains(active))) {
+        event.preventDefault();
+        stops[stops.length - 1].focus();
+      } else if (!event.shiftKey && (active === stops[stops.length - 1] || !panel.contains(active))) {
+        event.preventDefault();
+        stops[0].focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [messaging, target]);
+
+  const isOpen = Boolean(target);
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    // The focus move into the dialog is deferred, so the opener is still focused here.
+    const opener = document.activeElement;
+    return () => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!user || !query.trim()) {
@@ -153,7 +182,7 @@ export default function ReelShareDialog() {
 
   return (
     <div className="sx-modal-backdrop sx-share-backdrop" role="presentation" onClick={messaging.closeShare}>
-      <section className="sx-share-dialog" role="dialog" aria-modal="true" aria-labelledby="sx-share-title" onClick={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className="sx-share-dialog" role="dialog" aria-modal="true" aria-labelledby="sx-share-title" onClick={(event) => event.stopPropagation()}>
         <header>
           <div><small>{kind === 'pack' ? 'SHARE REEL PACK' : 'SHARE REEL'}</small><strong id="sx-share-title">{metadata?.title || target.title || 'Preparing link…'}</strong></div>
           <button ref={closeRef} type="button" onClick={messaging.closeShare} aria-label="Close share dialog">×</button>
