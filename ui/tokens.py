@@ -1,54 +1,67 @@
-"""Design tokens for Square Extender 4K — bold editorial theme.
+"""Design tokens for Square Extender 4K, read from web/src/styles/tokens.css.
 
-These are the single source of truth for colors, sizes, and spacing.
-Keep in sync with:
-  - .streamlit/config.toml (theme keys)
-  - ui/assets/app.css (CSS custom properties)
-  - Any st.markdown(..., unsafe_allow_html=True) that interpolates these values
+tokens.css is the single source of truth. This module parses its :root block at
+import, so the names below always hold the web app's current values; add a name
+here by pointing it at a token, never by copying a value.
+
+Still hand-kept, because they cannot read CSS: .streamlit/config.toml (theme keys)
+and the :root block of ui/assets/app.css.
 """
 
-# Color palette
-COLOR_BG = "#08090A"
-COLOR_SURFACE = "#101214"
-COLOR_SURFACE_2 = "#16191C"
-COLOR_RULE = "#24282D"
-COLOR_RULE_STRONG = "#3A4047"
-COLOR_INK = "#F2F3F5"
-COLOR_INK_2 = "#A4ABB3"
-COLOR_INK_3 = "#8E959E"
-COLOR_ACCENT = "#FF3B1F"
-COLOR_ACCENT_HI = "#FF5C42"
-COLOR_ACCENT_DIM = "rgba(255,59,31,0.12)"
-COLOR_ON_ACCENT = "#0A0A0A"
-COLOR_WARN = "#F2C744"
+import re
+from pathlib import Path
 
-# Type scale (with baseFontSize=15, 1rem=15px)
-TYPE_HERO = "clamp(2.75rem, 7vw, 5.25rem)"  # Archivo Black
-TYPE_DISPLAY = "3rem"  # Archivo Black
-TYPE_NUMERAL = "4.5rem"  # Archivo Black
-TYPE_STAT = "2.25rem"  # 800 weight
-TYPE_H2 = "1.4rem"  # 800 weight
-TYPE_BODY = "0.9375rem"  # 400 weight
-TYPE_EYEBROW = "0.6875rem"  # 700 mono
-TYPE_MONO = "0.8125rem"  # 400 mono
+_CSS = Path(__file__).resolve().parent.parent / "web" / "src" / "styles" / "tokens.css"
+_ROOT = re.search(r":root\s*\{(.*?)\n\}", _CSS.read_text(encoding="utf-8"), re.S).group(1)
+
+# Every --sx-* custom property in :root, e.g. TOKENS["--sx-accent"] == "#ff3b1f".
+TOKENS = {
+    name: re.sub(r"/\*.*?\*/", "", value).strip()
+    for name, value in re.findall(r"(--sx-[a-z0-9-]+)\s*:\s*([^;]+);", _ROOT)
+}
+
+# Color palette
+COLOR_BG = TOKENS["--sx-bg"]
+COLOR_SURFACE = TOKENS["--sx-surface"]
+COLOR_SURFACE_2 = TOKENS["--sx-surface-2"]
+COLOR_RULE = TOKENS["--sx-rule"]
+COLOR_RULE_STRONG = TOKENS["--sx-rule-strong"]
+COLOR_INK = TOKENS["--sx-ink"]
+COLOR_INK_2 = TOKENS["--sx-ink-2"]
+COLOR_INK_3 = TOKENS["--sx-ink-3"]
+COLOR_ACCENT = TOKENS["--sx-accent"]
+COLOR_ACCENT_HI = TOKENS["--sx-accent-hi"]
+COLOR_ACCENT_DIM = TOKENS["--sx-accent-dim"]
+COLOR_ON_ACCENT = TOKENS["--sx-on-accent"]
+COLOR_WARN = TOKENS["--sx-warn"]
+
+# Type scale (root font size is 15px, so 1rem = 15px)
+TYPE_HERO = TOKENS["--sx-t-hero"]
+TYPE_DISPLAY = TOKENS["--sx-t-display"]
+TYPE_NUMERAL = TOKENS["--sx-t-numeral"]
+TYPE_STAT = TOKENS["--sx-t-stat"]
+TYPE_H2 = TOKENS["--sx-t-h2"]
+TYPE_BODY = TOKENS["--sx-t-body"]
+TYPE_EYEBROW = TOKENS["--sx-t-eyebrow"]
+TYPE_MONO = TOKENS["--sx-t-mono"]
 
 # Spacing scale (4px base)
-SP_1 = "4px"
-SP_2 = "8px"
-SP_3 = "12px"
-SP_4 = "16px"
-SP_5 = "24px"
-SP_6 = "32px"
-SP_7 = "48px"
-SP_8 = "64px"
-SP_9 = "96px"
+SP_1 = TOKENS["--sx-1"]
+SP_2 = TOKENS["--sx-2"]
+SP_3 = TOKENS["--sx-3"]
+SP_4 = TOKENS["--sx-4"]
+SP_5 = TOKENS["--sx-5"]
+SP_6 = TOKENS["--sx-6"]
+SP_7 = TOKENS["--sx-7"]
+SP_8 = TOKENS["--sx-8"]
+SP_9 = TOKENS["--sx-9"]
 
-# Rule weights
-RULE_HAIRLINE = "1px"
-RULE_HEAVY = "3px"
-RULE_ACCENT = "6px"
+# Rule weights: the width part of each rule shorthand ("1px solid var(--sx-rule)" -> "1px")
+RULE_HAIRLINE = TOKENS["--sx-rule-hairline"].split()[0]
+RULE_HEAVY = TOKENS["--sx-rule-heavy"].split()[0]
+RULE_ACCENT = TOKENS["--sx-rule-accent"].split()[0]
 
 # Fonts
-FONT_DISPLAY = "'Archivo Black', Archivo, 'Arial Black', system-ui, sans-serif"
-FONT_UI = "Archivo, ui-sans-serif, system-ui, sans-serif"
-FONT_MONO = "'JetBrains Mono', ui-monospace, monospace"
+FONT_DISPLAY = TOKENS["--sx-font-display"]
+FONT_UI = TOKENS["--sx-font-sans"]
+FONT_MONO = TOKENS["--sx-font-mono"]

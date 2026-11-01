@@ -1548,7 +1548,83 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 
   <section class="attempt" id="fix-34">
     <h4>Fix 34 · Not attempted · Phase 0 guardrails and Phase 1 codemod</h4>
-    <p>Still true at this commit: 163 <code>!important</code> in <code>global.css</code>. Replacing literals, unifying z-index and generating <code>tokens.py</code> are mechanical but large; they need the stylelint rules in place first so the count can only go down. The only token added in this pass is <code>--sx-focus-halo</code>, next to the existing <code>--sx-focus-ring</code> (see the focus-styles fix).</p>
+    <p>Still true at this commit: 163 <code>!important</code> in <code>global.css</code>. Replacing literals, unifying z-index and generating <code>tokens.py</code> are mechanical but large; they need the stylelint rules in place first so the count can only go down. The only token added in this pass is <code>--sx-focus-halo</code>, next to the existing <code>--sx-focus-ring</code> (see the focus-styles fix). <strong>Since done:</strong> the guardrails, the literal codemod and <code>tokens.py</code> in fix <a href="#fix-51">51</a>.</p>
+  </section>
+
+  <section class="attempt" id="fix-51">
+    <h4>Fix 51 · Follow-up fix · stylelint guardrails, token codemod, <code>tokens.py</code> read from CSS, verified locally (30 page captures at 1280 and 375px, compared pixel by pixel)</h4>
+    <p><strong>Guardrails.</strong> <code>web/stylelint.config.mjs</code> sets five rules for the CSS in <code>web/src</code>:</p>
+    <ul>
+      <li>no hex colours;</li>
+      <li>no <code>rgb()</code>, <code>rgba()</code>, <code>hsl()</code> or <code>hsla()</code> (colours come from <code>tokens.css</code>, which is exempt);</li>
+      <li>no <code>!important</code>;</li>
+      <li>no <code>outline: none</code> or <code>outline: 0</code>;</li>
+      <li>a z-index is either a <code>--sx-z-*</code> token, <code>auto</code>, or a single digit for stacking inside one component.</li>
+    </ul>
+    <p><code>global.css</code> broke these rules before they existed, so <code>web/tests/css-guardrails.test.js</code> runs stylelint on every <code>npm test</code> (and so in CI's <code>make test</code>) and compares each rule's count with a baseline:</p>
+    <ul>
+      <li>One more than the baseline fails, with the rule's name and the command that lists the findings (<code>npx stylelint "src/styles/global.css"</code>).</li>
+      <li>One fewer also fails, asking you to lower the baseline. So the numbers only go down.</li>
+      <li>A new CSS file starts at zero for every rule.</li>
+    </ul>
+    <p>The check takes about 0.2s. I proved it by adding <code>color: #fff !important; z-index: 1234</code> to <code>global.css</code>: the test failed on the first extra hex colour.</p>
+    <p><strong>Codemod.</strong> 69 colour literals in <code>global.css</code> were exactly equal to a token, and now use it:</p>
+    <ul>
+      <li>19 hex values became <code>var(--token)</code>, for example <code>#101214</code> → <code>var(--sx-surface)</code>.</li>
+      <li>10 <code>rgba()</code> values that match an alpha token became that token, for example <code>--sx-accent-dim</code>.</li>
+      <li>40 <code>rgba()</code> values are a solid token at another opacity. They became <code>color-mix(in srgb, var(--sx-accent) 22%, transparent)</code>, which the browser resolves to the same colour.</li>
+    </ul>
+    <p>Most were the accent (27). The codemod only swaps exact matches. Near misses stay as they are, because changing them would change pixels. It never edits <code>url()</code> data URIs.</p>
+    <p><strong>One catch, found by the pixel check.</strong> A gradient that contains a <code>color-mix()</code> stop blends in the oklab colour space instead of sRGB. Three gradients came out up to 2/255 different. They keep their <code>rgba()</code> stops, so nothing moves.</p>
+    <p><strong>z-index.</strong> The <code>var(--sx-z-drawer, 2000)</code> the audit flagged is now <code>var(--sx-z-drawer)</code>. The token is always defined (45), so the 2000 never applied; it only misled readers.</p>
+    <p><strong><code>ui/tokens.py</code></strong> (used by the Streamlit compare view) no longer keeps its own copy. It parses the <code>:root</code> block of <code>tokens.css</code> when it is imported and points each existing name at a token, for example <code>COLOR_ACCENT = TOKENS["--sx-accent"]</code>. The values it had drifted to now match the web app: the eyebrow size is 12px, not 11px, and the accent rule is 5px, not 6px.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Rule</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Why the rest stay</th></tr></thead>
+        <tbody>
+          <tr><td style="white-space:nowrap">Hex colours</td><td>72</td><td>53</td><td rowspan="2">37 are pure white or black. Black sits behind video and iframes. White is used for text over photos and video on Explore cards, the sidebar buttons' hover, the QR code's backing and some studio labels. Neither colour is a token (ink is <code>#f2f3f5</code>), so each one needs a choice: move to ink, which is a visible change, or add a media token. The rest are one-off shades with no token.</td></tr>
+          <tr><td style="white-space:nowrap"><code>rgb()</code>/<code>rgba()</code></td><td>98</td><td>48</td></tr>
+          <tr><td style="white-space:nowrap"><code>!important</code></td><td>163</td><td>163</td><td>Each one has to be checked against the specificity it fights, so none is mechanical.</td></tr>
+          <tr><td style="white-space:nowrap">z-index<br>off the scale</td><td>29</td><td>28</td><td>The share and pack dialogs sit under the 1000 top bar, while the phone tab bar is at 100000. That layering moves to one modal layer with the Dialog primitive, where it can be checked on screen.</td></tr>
+          <tr><td style="white-space:nowrap"><code>outline: none</code></td><td>15</td><td>15</td><td>Audited in <a href="#fix-38">fix 38</a>: each one sits beside its own focus style.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Verified:</strong></p>
+    <ul>
+      <li>13 pages (signed in, apart from /login), plus the open account menu and the open drawer, at 1280 and 375px. That is 30 PNGs: full pages, and the viewport for the two open states. Each was compared pixel by pixel with the same capture taken before the change.</li>
+      <li>Every capture is identical. Explore shuffles the order of its two reels between loads, so I repeated those captures until the order matched; then they were identical too.</li>
+      <li>Two "before" runs differ by 46 pixels on the 1280 drawer, which shows the noise floor.</li>
+      <li>The colour swaps that only show on hover (the logo glow, sidebar buttons) are exact by construction, so no screenshot can catch a difference there.</li>
+    </ul>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>css-guardrails.test.js</code> is the ratchet.</li>
+      <li><code>tests/test_ui_tokens.py</code> has three tests:
+        <ul>
+          <li>The values come from <code>tokens.css</code>: a comment after a value is ignored, and the 640px override of <code>--sx-header-h</code> does not win.</li>
+          <li>Every constant equals a token.</li>
+          <li>The module assigns nothing but <code>TOKENS[...]</code>. Pasting <code>"#f2c744"</code> back in fails, even though it is the right value.</li>
+        </ul>
+      </li>
+      <li>One older test matched <code>color: #f2f3f5</code> on the tab bar and now matches <code>var(--sx-ink)</code>, the same colour.</li>
+    </ul>
+    <p><strong>Not covered:</strong></p>
+    <ul>
+      <li>Inline <code>style</code> props in JSX.</li>
+      <li>The CSS inside <code>ui/assets/reels.html</code>. Its token block is already held to <code>tokens.css</code> by <code>echo-token-parity.test.js</code>; its rules are not linted.</li>
+      <li>The Streamlit app's <code>.streamlit/config.toml</code> and <code>ui/assets/app.css</code>, which cannot read CSS variables from another file and still repeat a few values by hand.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix51-sidebar-before.jpg" alt="The open sidebar at 1280px before the codemod: ECHO logo, the nav grid, the credits card with an orange MANAGE CREDITS button, and the live status card." loading="lazy">
+        <figcaption>Before, 1280px: the open sidebar, which uses many of the replaced colours.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix51-sidebar-after.jpg" alt="The same sidebar after the codemod, identical to the before image." loading="lazy">
+        <figcaption>After: the same pixels. 0 of the capture's 1,152,000 pixels differ.</figcaption>
+      </figure>
+    </div>
   </section>
 
 </section>
@@ -1594,7 +1670,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 50. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 51. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1610,7 +1686,6 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
         <li>One navigation source for the header, drawer and sidebar.</li>
         <li>A keyboard path into the 3D preview canvas.</li>
-        <li>Stylelint guardrails and the token codemod (<a href="#fix-34">fix 34</a>).</li>
       </ul>
     </div>
     <div class="box">
@@ -1621,6 +1696,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <li><strong>The "Stripe checkout is disabled" banner:</strong> it only shows when credits are on and Stripe is off, which is not the beta setup.</li>
         <li><strong>"Layout gaps at 375px":</strong> the audit did not record which gaps, so it needs a fresh look.</li>
         <li><strong>The /reels status strip</strong> still shows "CODEC: HEVC" and "H.264 PROXIES" (<a href="#fix-37">fix 37</a>).</li>
+        <li><strong>The colour literals and <code>!important</code> left after the codemod</strong> (<a href="#fix-51">fix 51</a>): each needs a design or specificity decision. The guardrail stops new ones.</li>
       </ul>
     </div>
   </div>
