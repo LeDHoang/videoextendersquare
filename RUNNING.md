@@ -134,6 +134,8 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_ALERT_5XX_RATE` / `SX_ALERT_P95_MS` | `0.05` / `2000` | Watchdog thresholds over the last 5 min (need at least 20 requests). Crossings are error logs, so Sentry events |
 | `SX_ALERT_FAILURES` | `3` | Failed jobs plus failed derived encodes in 5 min before an alert |
 | `SX_ALERT_OPEN_REPORTS` / `SX_ALERT_OPEN_SUPPORT` | `20` / `10` | Open reports / open support requests waiting before an alert; the Overview turns those checks red at the same numbers |
+| `SX_ALERT_USER_SPEND_HOURLY` / `SX_ALERT_NEW_ACCOUNT_SPEND` | `300` / `100` | Credits one account reserves in an hour, and credits an account younger than 24 h spends, before a per-account alert. Free jobs leave no billing row, so they are not counted |
+| `SX_ALERT_ACCOUNTS_PER_IP` / `SX_ALERT_ACCOUNTS_PER_DEVICE` | `5` / `3` | Distinct accounts signed in from one IP / one device (`sx_device` cookie) in 24 h before a per-account alert (minimum 2) |
 | `SX_ALERT_INTERVAL_S` / `SX_ALERT_COOLDOWN_S` | `60` / `900` | How often the watchdog checks, and how long one alert stays quiet after it fires |
 | `SX_LOG_FORMAT` | `json` | `json` (default in production) or `text`; every line carries the `request_id` echoed in `X-Request-ID` |
 | `SX_CSP_MODE` | `report` | `off` (default outside production), `report` (default in production; reports go to `POST /api/csp-report` and the log) or `enforce` |

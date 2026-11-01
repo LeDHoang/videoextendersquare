@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 from argon2 import PasswordHasher
 from fastapi import FastAPI
@@ -12,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from server.routers import account_safety, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import DirectMessage, Conversation, Report, User, utcnow
+from server.social.models import AuthSession, CloudGenerationBilling, DirectMessage, Conversation, Report, User, utcnow
 
 PASSWORD = "correct-horse-battery"
 
@@ -168,3 +169,54 @@ def test_hourly_stats_bucket_each_metric_by_hour(app):
 def test_hourly_stats_require_a_moderator(app):
     add_user(app, "plain_user")
     assert sign_in(app, "plain_user").get("/api/moderation/stats/hourly").status_code == 403
+
+
+def add_billing(app, user_id: str, job_id: str, reserved: int = 0, captured: int = 0, age: timedelta = timedelta(0)):
+    with app.state.testing_session() as db:
+        db.add(CloudGenerationBilling(
+            job_id=job_id, user_id=user_id, kind="image", payment_source="credits",
+            reserved_credits=reserved, captured_credits=captured, created_at=utcnow() - age,
+        ))
+        db.commit()
+
+
+def add_session(app, user_id: str, ip_hash: str = "", device_hash: str | None = None):
+    with app.state.testing_session() as db:
+        db.add(AuthSession(
+            user_id=user_id, token_hash=uuid4().hex, csrf_hash="x", ip_hash=ip_hash,
+            device_hash=device_hash, expires_at=utcnow() + timedelta(days=1),
+        ))
+        db.commit()
+
+
+def test_flagged_accounts_list_each_signal(app, monkeypatch):
+    monkeypatch.setenv("SX_ALERT_USER_SPEND_HOURLY", "50")
+    monkeypatch.setenv("SX_ALERT_NEW_ACCOUNT_SPEND", "20")
+    monkeypatch.setenv("SX_ALERT_ACCOUNTS_PER_DEVICE", "3")
+    monkeypatch.setenv("SX_ALERT_ACCOUNTS_PER_IP", "1000")
+    add_user(app, "the_mod", role="moderator", age=timedelta(days=10))
+    spender = add_user(app, "spender", age=timedelta(days=10))
+    add_billing(app, spender, "s1", reserved=30, age=timedelta(minutes=10))
+    add_billing(app, spender, "s2", reserved=30, age=timedelta(minutes=20))
+    add_billing(app, spender, "old", reserved=500, age=timedelta(hours=3))
+    newcomer = add_user(app, "newcomer", age=timedelta(hours=2))
+    add_billing(app, newcomer, "n1", captured=25, age=timedelta(hours=1, minutes=30))
+    farm = [add_user(app, f"farm{index}", age=timedelta(days=10)) for index in range(3)]
+    for user_id in farm:
+        add_session(app, user_id, ip_hash="farmip", device_hash="d" * 64)
+    add_session(app, spender, device_hash="e" * 64)
+
+    response = sign_in(app, "the_mod").get("/api/moderation/stats/accounts")
+    assert response.status_code == 200, response.text
+    rows = {row["signal"]: row for row in response.json()["accounts"]}
+    assert set(rows) == {"spend_hourly", "accounts_per_device", "new_account_spend"}
+    assert (rows["spend_hourly"]["value"], rows["spend_hourly"]["users"][0]["username"]) == (60, "spender")
+    assert rows["accounts_per_device"]["value"] == 3
+    assert rows["accounts_per_device"]["key"] == "d" * 12
+    assert sorted(user["username"] for user in rows["accounts_per_device"]["users"]) == ["farm0", "farm1", "farm2"]
+    assert rows["new_account_spend"]["users"][0] == {"id": newcomer, "username": "newcomer", "tier": "standard"}
+
+
+def test_flagged_accounts_require_a_moderator(app):
+    add_user(app, "plain_user")
+    assert sign_in(app, "plain_user").get("/api/moderation/stats/accounts").status_code == 403

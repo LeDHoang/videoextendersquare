@@ -356,7 +356,49 @@ function StatusDonut({ byStatus, windowKey }) {
   );
 }
 
-export function OverviewPanel({ stats, hourly, ops, windowKey, onOpenTab }) {
+const SIGNALS = {
+  spend_hourly: 'CREDITS IN 1 H',
+  accounts_per_ip: 'ACCOUNTS ON ONE IP',
+  accounts_per_device: 'ACCOUNTS ON ONE DEVICE',
+  new_account_spend: 'NEW ACCOUNT SPEND',
+};
+
+// Accounts over a per-account alert limit right now (server/routers/account_safety.py flagged_accounts).
+function FlaggedAccounts({ rows, onOpenUser }) {
+  return (
+    <Card wide title="FLAGGED ACCOUNTS" note="Over a per-account alert limit right now: credit bursts, many accounts on one IP or device, and fast spending by accounts under a day old.">
+      {rows.length ? (
+        <div className="sx-ov-table-wrap">
+          <table className="sx-ov-table">
+            <thead>
+              <tr><th>SIGNAL</th><th className="sx-ov-r">VALUE</th><th className="sx-ov-r">LIMIT</th><th>ACCOUNTS</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.signal + ':' + row.key}>
+                  <td>{SIGNALS[row.signal] || row.signal}</td>
+                  <td className="sx-ov-r sx-ov-err">{fmt(row.value)}</td>
+                  <td className="sx-ov-r">{fmt(row.limit)}</td>
+                  <td>
+                    {row.users.map((user, index) => (
+                      <span key={user.id}>
+                        {index ? ', ' : null}
+                        <button type="button" className="sx-ov-link" onClick={() => onOpenUser(user.id)}>@{user.username}</button>
+                        {user.tier !== 'standard' ? <> <Tag>{user.tier.toUpperCase()}</Tag></> : null}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="sx-ov-note">No account is over a limit.</p>}
+    </Card>
+  );
+}
+
+export function OverviewPanel({ stats, hourly, ops, flagged, windowKey, onOpenTab, onOpenUser }) {
   const [metricKey, setMetricKey] = useState('reports');
   const w = stats.windows[windowKey];
   const win = WINDOWS[windowKey];
@@ -429,6 +471,7 @@ export function OverviewPanel({ stats, hourly, ops, windowKey, onOpenTab }) {
           <Card title="BUSIEST MESSAGE SENDERS" note={'Top 5 in ' + win.now + '. One account far ahead of the rest can be spam.'}>
             <BarList rows={senders} empty="No messages in this window." />
           </Card>
+          {flagged ? <FlaggedAccounts rows={flagged.accounts || []} onOpenUser={onOpenUser} /> : null}
         </div>
       </section>
     </div>

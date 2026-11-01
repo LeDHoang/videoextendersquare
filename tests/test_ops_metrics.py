@@ -18,7 +18,7 @@ from server.observability import RequestIDMiddleware
 from server.routers import health, social
 from server.social import auth, database
 from server.social.database import Base, get_db
-from server.social.models import Report, User, utcnow
+from server.social.models import CloudGenerationBilling, Report, User, utcnow
 
 PASSWORD = "correct-horse-battery-ops"
 
@@ -230,6 +230,20 @@ def test_open_queue_backlog_raises_an_alert(app, monkeypatch, caplog):
     caplog.set_level(logging.ERROR, logger="sx.alerts")
     assert metrics.check_alerts() == ["open_reports_backlog"]
     assert "2 open reports waiting for staff (limit 2)" in caplog.records[-1].getMessage()
+
+
+def test_burst_spend_raises_a_per_account_alert(app, monkeypatch, caplog):
+    monkeypatch.setenv("SX_ALERT_USER_SPEND_HOURLY", "40")
+    monkeypatch.setattr(metrics, "snapshot", _snapshot)
+    spender = add_user(app, "spender")
+    with app.state.testing_session() as db:
+        db.add(CloudGenerationBilling(job_id="burst", user_id=spender, kind="video", payment_source="credits", reserved_credits=45))
+        db.commit()
+    caplog.set_level(logging.ERROR, logger="sx.alerts")
+    assert metrics.check_alerts() == [f"account_spend_hourly:{spender}"]
+    assert "spend hourly: 45 (limit 40) for @spender" in caplog.records[-1].getMessage()
+    # The cool-down applies per account, like every other alert.
+    assert metrics.check_alerts() == []
 
 
 def test_snapshot_serves_the_alert_limits(monkeypatch):

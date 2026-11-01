@@ -6340,6 +6340,8 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-ov-cellbar .sx-ov-limit { margin-top: 0; }
 .sx-ov-cellbar .sx-ov-track { height: 10px; }
 .sx-ov-err { color: var(--sx-danger); font-weight: 700; }
+.sx-ov-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.sx-ov-link:hover { color: var(--sx-accent); }
 
 @media (max-width: 700px) {
   .sx-report-layout {

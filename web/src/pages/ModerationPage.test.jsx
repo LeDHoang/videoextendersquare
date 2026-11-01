@@ -55,10 +55,11 @@ const ops = {
   limits,
 };
 
-const respond = ({ statsBody = stats(false), opsBody = ops, hourlyBody = hourly } = {}) => (path) => {
+const respond = ({ statsBody = stats(false), opsBody = ops, hourlyBody = hourly, flaggedBody = { accounts: [] } } = {}) => (path) => {
   if (path === '/api/moderation/stats') return Promise.resolve(statsBody);
   if (path === '/api/moderation/stats/hourly') return hourlyBody instanceof Error ? Promise.reject(hourlyBody) : Promise.resolve(hourlyBody);
   if (path === '/api/ops/metrics') return opsBody instanceof Error ? Promise.reject(opsBody) : Promise.resolve(opsBody);
+  if (path === '/api/moderation/stats/accounts') return flaggedBody instanceof Error ? Promise.reject(flaggedBody) : Promise.resolve(flaggedBody);
   return Promise.resolve({ reports: [] });
 };
 const chip = (name) => screen.getByRole('button', { name: new RegExp('^' + name + ':') });
@@ -114,6 +115,35 @@ describe('ModerationPage overview', () => {
     await waitFor(() => expect(chip('REPORT QUEUE').dataset.state).toBe('bad'));
     expect(chip('SUPPORT INBOX').dataset.state).toBe('ok');
     expect(screen.getByText(/1 problem\./)).toBeTruthy();
+  });
+
+  it('lists flagged accounts and opens one', async () => {
+    const flaggedBody = { accounts: [
+      { signal: 'accounts_per_device', key: 'dddddddddddd', value: 4, limit: 3, users: [
+        { id: 'u1', username: 'farm1', tier: 'new' }, { id: 'u2', username: 'farm2', tier: 'standard' },
+      ] },
+    ] };
+    const base = respond({ flaggedBody });
+    mocks.api.get.mockImplementation((path) => (path === '/api/admin/users/u2'
+      ? Promise.resolve({ user: { id: 'u2', username: 'farm2', email: '', role: 'user', env_role: 'user', status: 'active', created_at: null, last_seen_at: null, post_count: 0, follower_count: 0 }, active_sessions: 0, reports_against: [], reports_filed: [], posts: [], support_requests: [], history: [] })
+      : base(path)));
+    renderOverview();
+    await waitFor(() => expect(screen.getByText('ACCOUNTS ON ONE DEVICE')).toBeTruthy());
+    const row = screen.getByText('ACCOUNTS ON ONE DEVICE').closest('tr');
+    expect(within(row).getByText('NEW')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '@farm2' }));
+    await waitFor(() => expect(mocks.api.get).toHaveBeenCalledWith('/api/admin/users/u2'));
+  });
+
+  it('says so when no account is flagged, and hides the card when the call fails', async () => {
+    mocks.api.get.mockImplementation(respond());
+    renderOverview();
+    await waitFor(() => expect(screen.getByText('No account is over a limit.')).toBeTruthy());
+    cleanup();
+    mocks.api.get.mockImplementation(respond({ flaggedBody: new Error('nope') }));
+    renderOverview();
+    await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
+    expect(screen.queryByText('FLAGGED ACCOUNTS')).toBeNull();
   });
 
   it('opens the reports queue from its tile', async () => {

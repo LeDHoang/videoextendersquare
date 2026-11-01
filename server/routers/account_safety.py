@@ -44,6 +44,7 @@ from server.social.message_crypto import (
 )
 from server.social.models import (
     AuthSession,
+    CloudGenerationBilling,
     Comment,
     CommentLike,
     CreditLedgerEntry,
@@ -630,6 +631,75 @@ def moderation_stats(
         "windows": windows,
         "disk": disk_status(),
     }
+
+
+def flagged_accounts(db: Session, now) -> list[dict]:
+    """Accounts over a per-account alert limit (``alert_limits``), one row per signal:
+
+    - ``spend_hourly``: credits reserved on cloud jobs in the last hour.
+    - ``accounts_per_ip`` / ``accounts_per_device``: distinct accounts signed in
+      from one IP or device in the last 24 h.
+    - ``new_account_spend``: credits captured by an account younger than 24 h.
+
+    Free jobs leave no row, so free-usage bursts are not covered here.
+    """
+    from server import trust
+    from server.metrics import alert_limits
+
+    limits = alert_limits()
+    day_ago = now - timedelta(hours=24)
+    rows: list[dict] = []
+    users: dict[str, User] = {}
+
+    def summary(user_id):
+        user = users.get(user_id) or db.get(User, user_id)
+        if not user:
+            return None
+        users[user_id] = user
+        return {"id": user.id, "username": user.username, "tier": trust.tier(db, user)}
+
+    spenders = (
+        db.query(CloudGenerationBilling.user_id, func.sum(CloudGenerationBilling.reserved_credits))
+        .filter(CloudGenerationBilling.payment_source == "credits", CloudGenerationBilling.created_at > now - timedelta(hours=1))
+        .group_by(CloudGenerationBilling.user_id)
+        .having(func.sum(CloudGenerationBilling.reserved_credits) >= limits["user_spend_hourly"])
+        .all()
+    )
+    for user_id, total in spenders:
+        rows.append({"signal": "spend_hourly", "key": user_id, "value": int(total), "limit": limits["user_spend_hourly"], "users": [summary(user_id)]})
+    for signal, column in (("accounts_per_ip", AuthSession.ip_hash), ("accounts_per_device", AuthSession.device_hash)):
+        groups = (
+            db.query(column, func.count(func.distinct(AuthSession.user_id)))
+            .filter(AuthSession.created_at > day_ago, column.is_not(None), column != "")
+            .group_by(column)
+            .having(func.count(func.distinct(AuthSession.user_id)) >= limits[signal])
+            .all()
+        )
+        for key, count in groups:
+            user_ids = [row[0] for row in db.query(AuthSession.user_id).filter(column == key, AuthSession.created_at > day_ago).distinct().limit(10)]
+            rows.append({"signal": signal, "key": key[:12], "value": int(count), "limit": limits[signal], "users": [u for u in map(summary, user_ids) if u]})
+    newcomers = (
+        db.query(CloudGenerationBilling.user_id, func.sum(CloudGenerationBilling.captured_credits))
+        .join(User, User.id == CloudGenerationBilling.user_id)
+        .filter(User.created_at > day_ago, CloudGenerationBilling.created_at > day_ago)
+        .group_by(CloudGenerationBilling.user_id)
+        .having(func.sum(CloudGenerationBilling.captured_credits) >= limits["new_account_spend"])
+        .all()
+    )
+    for user_id, total in newcomers:
+        rows.append({"signal": "new_account_spend", "key": user_id, "value": int(total), "limit": limits["new_account_spend"], "users": [summary(user_id)]})
+    return rows
+
+
+@router.get("/api/moderation/stats/accounts")
+def moderation_flagged_accounts(
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    """Accounts over a per-account alert limit right now (the same rows the watchdog logs)."""
+    del context
+    now = utcnow()
+    return {"generated_at": now.isoformat(), "accounts": flagged_accounts(db, now)}
 
 
 HOURLY_SPAN_H = 14 * 24

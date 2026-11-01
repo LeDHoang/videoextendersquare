@@ -170,6 +170,10 @@ def alert_limits() -> dict:
         "disk_min_free_gb": env_int("SX_DISK_MIN_FREE_GB", 5, minimum=0),
         "open_reports": env_int("SX_ALERT_OPEN_REPORTS", 20, minimum=1),
         "open_support_requests": env_int("SX_ALERT_OPEN_SUPPORT", 10, minimum=1),
+        "user_spend_hourly": env_int("SX_ALERT_USER_SPEND_HOURLY", 300, minimum=1),
+        "accounts_per_ip": env_int("SX_ALERT_ACCOUNTS_PER_IP", 5, minimum=2),
+        "accounts_per_device": env_int("SX_ALERT_ACCOUNTS_PER_DEVICE", 3, minimum=2),
+        "new_account_spend": env_int("SX_ALERT_NEW_ACCOUNT_SPEND", 100, minimum=1),
     }
 
 
@@ -203,6 +207,23 @@ def _registration_and_report_spikes() -> dict[str, str]:
             if waiting >= limits[key]:
                 spikes[f"{key}_backlog"] = f"{waiting} open {name} waiting for staff (limit {limits[key]})"
     return spikes
+
+
+def _per_account_alerts() -> dict[str, str]:
+    """One alert per flagged account or shared IP/device (``flagged_accounts``)."""
+    from server.routers.account_safety import flagged_accounts
+    from server.social.database import SessionLocal
+    from server.social.models import utcnow
+
+    with SessionLocal() as db:
+        rows = flagged_accounts(db, utcnow())
+    alerts = {}
+    for row in rows:
+        names = ", ".join("@" + user["username"] for user in row["users"])
+        alerts[f"account_{row['signal']}:{row['key']}"] = (
+            f"{row['signal'].replace('_', ' ')}: {row['value']} (limit {row['limit']}) for {names}"
+        )
+    return alerts
 
 
 def evaluate_alerts(snap: dict) -> dict[str, str]:
@@ -240,6 +261,10 @@ def check_alerts() -> list[str]:
         alerts.update(_registration_and_report_spikes())
     except Exception:
         logger.exception("Could not compute report/registration spikes")
+    try:
+        alerts.update(_per_account_alerts())
+    except Exception:
+        logger.exception("Could not compute per-account alerts")
     cooldown = env_int("SX_ALERT_COOLDOWN_S", 900, minimum=0)
     now = time.time()
     logged = []

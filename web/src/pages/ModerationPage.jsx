@@ -75,6 +75,7 @@ export default function ModerationPage() {
   const [stats, setStats] = useState(null);
   const [ops, setOps] = useState(null);
   const [hourly, setHourly] = useState(null);
+  const [flagged, setFlagged] = useState(null);
   const loadOps = user?.role === 'admin';
   // Rows carry the tab and filter they were loaded for, so a tab switch never renders
   // report rows with the support renderer (or the reverse) before the reload lands.
@@ -93,14 +94,16 @@ export default function ModerationPage() {
     if (tab === 'overview') {
       try {
         // Operations numbers and hourly counts are extra: a failure there never hides the moderation overview.
-        const [nextStats, nextOps, nextHourly] = await Promise.all([
+        const [nextStats, nextOps, nextHourly, nextFlagged] = await Promise.all([
           api.get('/api/moderation/stats'),
           loadOps ? api.get('/api/ops/metrics').catch(() => null) : null,
           api.get('/api/moderation/stats/hourly').catch(() => null),
+          api.get('/api/moderation/stats/accounts').catch(() => null),
         ]);
         setStats(nextStats);
         setOps(nextOps);
         setHourly(nextHourly);
+        setFlagged(nextFlagged);
       } catch (requestError) {
         setError(requestError.message || 'Could not load the overview.');
       }
@@ -299,7 +302,7 @@ export default function ModerationPage() {
         stats ? (
           <>
             {isAdmin ? <KillSwitchCard /> : null}
-            <OverviewPanel stats={stats} hourly={hourly} ops={ops} windowKey={statsWindow} onOpenTab={switchTab} />
+            <OverviewPanel stats={stats} hourly={hourly} ops={ops} flagged={flagged} windowKey={statsWindow} onOpenTab={switchTab} onOpenUser={openUser} />
             {ops ? <OpsPanel ops={ops} /> : null}
           </>
         ) : error ? null : <SectionSkeleton label="Loading overview" />
