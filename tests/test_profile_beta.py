@@ -590,3 +590,101 @@ def test_account_deletion_from_settings_is_guarded_and_thorough(app):
         with TestClient(app) as reborn:
             fresh = register(reborn, "doomed_user", "doomed@example.com")
             assert fresh["id"] != user["id"]
+
+
+def test_account_deletion_leaves_no_recommendation_or_analytics_trail(app):
+    from datetime import timedelta
+
+    from server.social.models import (
+        ActorCreatorAffinity,
+        ActorItemAffinity,
+        ActorTagAffinity,
+        CoWatchPair,
+        EngagementEvent,
+        RecommendationDismissal,
+        RecommendationImpression,
+        RecommendationRequest,
+        RecommendationSession,
+        ReelPackView,
+        ViewDedup,
+        utcnow,
+    )
+
+    analytics_models = (
+        RecommendationSession, RecommendationRequest, RecommendationImpression, RecommendationDismissal,
+        ActorItemAffinity, ActorCreatorAffinity, ActorTagAffinity, CoWatchPair, ViewDedup, ReelPackView,
+        EngagementEvent,
+    )
+    with TestClient(app) as victim, TestClient(app) as bystander:
+        doomed = register(victim, "trail_user", "trail@example.com")
+        other = register(bystander, "keeper_user", "keeper@example.com")
+        creator = other["id"]
+        post_a = create_post(app, creator, "tests/a.webp")
+        post_b = create_post(app, creator, "tests/b.webp")
+        anon_id = "a" * 64
+
+        def seed(db, user_id):
+            key = f"u:{user_id}"
+            session = RecommendationSession(
+                actor_key=key, user_id=user_id, surface="feed", filter_hash="f" * 64, filters={},
+                algorithm_version="v1", expires_at=utcnow() + timedelta(hours=1),
+            )
+            db.add(session)
+            db.flush()
+            request = RecommendationRequest(session_id=session.id, page_index=0, requested_count=2, returned_count=1)
+            db.add(request)
+            db.flush()
+            impression = RecommendationImpression(
+                request_id=request.id, session_id=session.id, post_id=post_a, position=0, primary_source="popular",
+            )
+            db.add(impression)
+            db.flush()
+            tag = Tag(name="t" + user_id[:6], slug="t" + user_id[:6])
+            db.add(tag)
+            db.flush()
+            db.add_all([
+                RecommendationDismissal(actor_key=key, user_id=user_id, target_type="post", post_id=post_b, reason="not_interested"),
+                ActorItemAffinity(actor_key=key, user_id=user_id, post_id=post_a, score=3.0),
+                ActorCreatorAffinity(actor_key=key, user_id=user_id, creator_id=creator, score=2.0),
+                ActorTagAffinity(actor_key=key, user_id=user_id, tag_id=tag.id, score=1.0),
+                CoWatchPair(actor_key=key, left_post_id=min(post_a, post_b), right_post_id=max(post_a, post_b)),
+                ViewDedup(post_id=post_a, viewer_key=key, window_date="2026-11-01"),
+                EngagementEvent(
+                    user_id=user_id, anonymous_id=anon_id if user_id == doomed["id"] else None, post_id=post_a,
+                    event_type="view", source="feed", recommendation_session_id=session.id,
+                    recommendation_request_id=request.id, recommendation_impression_id=impression.id,
+                ),
+            ])
+
+        with app.state.testing_session() as db:
+            seed(db, doomed["id"])
+            seed(db, creator)
+            # Signed-out history from the same browser before the account existed.
+            db.add(EngagementEvent(anonymous_id=anon_id, post_id=post_b, event_type="view", source="feed"))
+            db.commit()
+            before = {model: db.query(model).count() for model in analytics_models}
+
+        done = mutate(victim, "DELETE", "/api/users/me", {"current_password": PASSWORD, "confirmation": "DELETE"})
+        assert done.status_code == 200, done.text
+
+        with app.state.testing_session() as db:
+            # No row in any recommendation or analytics table still carries the
+            # account's id, actor key or the anonymous id it was seen with.
+            for model in analytics_models:
+                for row in db.query(model).all():
+                    values = [str(getattr(row, column.key)) for column in model.__table__.columns]
+                    assert not any(doomed["id"] in value for value in values), (model.__tablename__, values)
+            # The anonymous history is no longer linked to any account, so the
+            # account cannot be rebuilt from it.
+            linked = db.query(EngagementEvent).filter(EngagementEvent.anonymous_id == anon_id).all()
+            assert [event.user_id for event in linked] == [None]
+            assert db.query(EngagementEvent).filter(
+                EngagementEvent.user_id.is_(None), EngagementEvent.recommendation_session_id.isnot(None)
+            ).count() == 0
+            # Aggregate event counts survive; the bystander's own state is untouched.
+            assert db.query(EngagementEvent).count() == before[EngagementEvent]
+            for model in analytics_models:
+                if model in (EngagementEvent, ReelPackView):
+                    continue
+                assert db.query(model).count() == before[model] // 2, model.__tablename__
+            assert db.query(RecommendationSession).one().user_id == creator

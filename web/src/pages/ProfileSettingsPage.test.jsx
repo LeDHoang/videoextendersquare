@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProfileSettingsPage from './ProfileSettingsPage.jsx';
@@ -212,6 +212,8 @@ describe('ProfileSettingsPage', () => {
     mocks.api.delete.mockResolvedValue({ ok: true });
     renderPage();
     fireEvent.click(armDelete('pw-correct-1', '@EchoDev'));
+    expect(mocks.api.delete).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'YES, DELETE MY ACCOUNT' }));
     await waitFor(() => expect(mocks.api.delete).toHaveBeenCalledWith('/api/users/me', {
       current_password: 'pw-correct-1', confirmation: 'DELETE',
     }));
@@ -219,10 +221,21 @@ describe('ProfileSettingsPage', () => {
     await waitFor(() => expect(mocks.hardRedirect).toHaveBeenCalledWith('/reels'));
   });
 
+  it('asks "are you sure" first, and cancelling deletes nothing', () => {
+    renderPage();
+    fireEvent.click(armDelete());
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent(/Are you sure you want to delete your account\?/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'CANCEL, KEEP MY ACCOUNT' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(mocks.api.delete).not.toHaveBeenCalled();
+  });
+
   it('stays on the page and explains a wrong password without signing the user out', async () => {
     mocks.api.delete.mockRejectedValue(new Error('Current password is incorrect.'));
     renderPage();
     fireEvent.click(armDelete());
+    fireEvent.click(screen.getByRole('button', { name: 'YES, DELETE MY ACCOUNT' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Current password is incorrect.');
     expect(mocks.hardRedirect).not.toHaveBeenCalled();
     expect(mocks.auth.setUser).not.toHaveBeenCalled();

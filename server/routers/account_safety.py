@@ -43,10 +43,14 @@ from server.social.message_crypto import (
     report_aad,
 )
 from server.social.models import (
+    ActorCreatorAffinity,
+    ActorItemAffinity,
+    ActorTagAffinity,
     AuthSession,
     CloudGenerationBilling,
     Comment,
     CommentLike,
+    CoWatchPair,
     CreditLedgerEntry,
     Conversation,
     ConversationMember,
@@ -62,11 +66,17 @@ from server.social.models import (
     ReelPack,
     ReelPackItem,
     ReelPackSave,
+    ReelPackView,
+    RecommendationDismissal,
+    RecommendationImpression,
+    RecommendationRequest,
+    RecommendationSession,
     Report,
     StaffAction,
     SupportRequest,
     User,
     UserBlock,
+    ViewDedup,
     utcnow,
 )
 from server.social.safety import recompute_follow_counts, remove_relationships
@@ -954,8 +964,41 @@ def erase_account(db: Session, user: User) -> None:
     db.query(Report).filter(Report.reporter_id == user.id).update(
         {Report.reporter_id: None}, synchronize_session=False
     )
+    # Recommendation state is personal history, not a legal record: delete it.
+    # Requests, impressions and event links are cleared explicitly rather than
+    # left to ON DELETE, which SQLite skips without its foreign_keys pragma.
+    # The anonymous id is cleared too, so the cookie's earlier signed-out
+    # history cannot be tied back to the account.
+    actor_key = f"u:{user.id}"
+    session_ids = [
+        row[0]
+        for row in db.query(RecommendationSession.id).filter(
+            or_(RecommendationSession.user_id == user.id, RecommendationSession.actor_key == actor_key)
+        )
+    ]
+    if session_ids:
+        db.query(EngagementEvent).filter(EngagementEvent.recommendation_session_id.in_(session_ids)).update(
+            {
+                EngagementEvent.recommendation_session_id: None,
+                EngagementEvent.recommendation_request_id: None,
+                EngagementEvent.recommendation_impression_id: None,
+            },
+            synchronize_session=False,
+        )
+        for model in (RecommendationImpression, RecommendationRequest):
+            db.query(model).filter(model.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(RecommendationSession).filter(RecommendationSession.id.in_(session_ids)).delete(
+            synchronize_session=False
+        )
+    for model in (RecommendationDismissal, ActorItemAffinity, ActorCreatorAffinity, ActorTagAffinity):
+        db.query(model).filter(or_(model.user_id == user.id, model.actor_key == actor_key)).delete(
+            synchronize_session=False
+        )
+    db.query(CoWatchPair).filter(CoWatchPair.actor_key == actor_key).delete(synchronize_session=False)
+    db.query(ViewDedup).filter(ViewDedup.viewer_key == actor_key).delete(synchronize_session=False)
+    db.query(ReelPackView).filter(ReelPackView.viewer_key == actor_key).delete(synchronize_session=False)
     db.query(EngagementEvent).filter(EngagementEvent.user_id == user.id).update(
-        {EngagementEvent.user_id: None}, synchronize_session=False
+        {EngagementEvent.user_id: None, EngagementEvent.anonymous_id: None}, synchronize_session=False
     )
     db.query(AuthSession).filter(AuthSession.user_id == user.id).update(
         {AuthSession.revoked_at: now}, synchronize_session=False

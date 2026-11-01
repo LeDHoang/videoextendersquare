@@ -110,6 +110,7 @@ export default function ProfileSettingsPage() {
   const [blockedOpen, setBlockedOpen] = useState(true);
   const [deleteForm, setDeleteForm] = useState({ current_password: '', confirmation: '' });
   const [deleteStatus, setDeleteStatus] = useState(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (user) setForm({ display_name: user.display_name || '', bio: user.bio || '', website: user.website || '' });
@@ -283,7 +284,11 @@ export default function ProfileSettingsPage() {
     event.preventDefault();
     // Enter inside a field submits the form even while the button is disabled,
     // so the guards are re-checked here.
-    if (!deleteForm.current_password || !confirmationMatches) return undefined;
+    if (!deleteForm.current_password || !confirmationMatches) return;
+    setDeleteConfirmOpen(true);
+  };
+  const confirmDeleteAccount = () => {
+    setDeleteConfirmOpen(false);
     return run('delete', async () => {
       setDeleteStatus(null);
       try {
@@ -488,6 +493,21 @@ export default function ProfileSettingsPage() {
               </button>
               <Feedback state={deleteStatus} />
             </form>
+            {deleteConfirmOpen ? (
+              <div className="sx-modal-backdrop" role="presentation" onMouseDown={() => setDeleteConfirmOpen(false)}>
+                <section className="sx-people-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ps-delete-confirm-title" aria-describedby="ps-delete-confirm-text" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="sx-people-dialog-head">
+                    <strong id="ps-delete-confirm-title">DELETE @{user.username.toUpperCase()}?</strong>
+                    <button type="button" onClick={() => setDeleteConfirmOpen(false)} aria-label="Close">×</button>
+                  </div>
+                  <div className="sx-ps-form">
+                    <p id="ps-delete-confirm-text" className="sx-ps-hint">Are you sure you want to delete your account? Your profile, posts, comments and viewing history are removed for good. This cannot be undone.</p>
+                    <button type="button" className="sx-ps-btn sx-ps-btn--block" autoFocus onClick={() => setDeleteConfirmOpen(false)}>CANCEL, KEEP MY ACCOUNT</button>
+                    <button type="button" className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block" onClick={confirmDeleteAccount}>YES, DELETE MY ACCOUNT</button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
           </Panel>
         </div>
       </div>
