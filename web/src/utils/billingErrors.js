@@ -19,6 +19,8 @@ const CODE_COPY = {
   JOB_ENQUEUE_FAILED: 'Processing could not be queued. Try again shortly.',
   STORAGE_FULL: 'The server is out of upload space right now. Try again later.',
   STEREO_CONVERT_UNAVAILABLE: 'MAKE 3D is not available on this server right now.',
+  FREE_USAGE_PAUSED: 'Free processing is paused for now. Paid (cloud) jobs still run.',
+  PROCESSING_PAUSED: 'Processing is paused for maintenance. Try again later.',
 };
 
 function retryHint(seconds) {

@@ -23,7 +23,7 @@ from server import media_store
 from server.media_store import public_url
 from server.security_headers import nonce_request_html
 from server import media as SM
-from server import metrics
+from server import kill_switch, metrics
 from server.jobs import job_manager
 from server.settings import is_production
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
@@ -2441,6 +2441,7 @@ def generate_explore_previews(
     live published posts so it is not a free transcoder for arbitrary files.
     """
     validate_origin(request)
+    kill_switch.require_open(db, paid=False)
     rate_limiter.check(db, f"explore-preview:{context.user.id}", EXPLORE_PREVIEW_PER_MINUTE, 60)
     if len(paths) > MAX_EXPLORE_PATHS:
         raise HTTPException(

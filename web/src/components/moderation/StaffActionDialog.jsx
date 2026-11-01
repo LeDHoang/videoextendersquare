@@ -11,7 +11,8 @@ function newRequestId() {
 
 /**
  * Confirm a staff action. Every action needs a reason, which goes to the audit log.
- * `kind` adds a field: 'delete' (type the username), 'credits' (signed amount), 'role' (new role).
+ * `kind` adds a field: 'delete' (type the username), 'credits' (signed amount), 'role' (new role),
+ * 'switch' (also cancel the jobs a pause no longer allows).
  * `onSubmit(values)` performs the request and throws on failure; the dialog then shows the
  * error and stays open, or closes after a successful submit.
  */
@@ -20,6 +21,7 @@ export default function StaffActionDialog({ title, text, confirmLabel = 'CONFIRM
   const [confirmName, setConfirmName] = useState('');
   const [amount, setAmount] = useState('');
   const [nextRole, setNextRole] = useState(role);
+  const [cancelRunning, setCancelRunning] = useState(false);
   // One id per opened dialog: resubmitting after a lost response cannot move credits twice.
   const [requestId] = useState(newRequestId);
   const [busy, setBusy] = useState(false);
@@ -46,6 +48,7 @@ export default function StaffActionDialog({ title, text, confirmLabel = 'CONFIRM
     if (kind === 'delete') values.confirm_username = confirmName.trim();
     if (kind === 'credits') Object.assign(values, { amount: amountValue, request_id: requestId });
     if (kind === 'role') values.role = nextRole;
+    if (kind === 'switch') values.cancel_running = cancelRunning;
     try {
       await onSubmit(values);
     } catch (requestError) {
@@ -75,6 +78,12 @@ export default function StaffActionDialog({ title, text, confirmLabel = 'CONFIRM
           <label>
             <span>AMOUNT (NEGATIVE TO REMOVE)</span>
             <input aria-label="Credit amount" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="50 or -50" />
+          </label>
+        ) : null}
+        {kind === 'switch' ? (
+          <label>
+            <input type="checkbox" aria-label="Cancel jobs" checked={cancelRunning} onChange={(event) => setCancelRunning(event.target.checked)} />
+            <span>ALSO CANCEL QUEUED AND RUNNING JOBS (RESERVED CREDITS ARE RELEASED)</span>
           </label>
         ) : null}
         <label>

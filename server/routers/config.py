@@ -2,11 +2,14 @@
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from core import models as _models
+from server import kill_switch
 from server import media as SM
 from server.features import reel_pack_features, stereo_convert_enabled
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
+from server.social.database import get_db
 from server.social.turnstile import turnstile_site_key
 
 router = APIRouter(prefix="/api/config", tags=["config"])
@@ -31,7 +34,7 @@ class ModelsUpdate(BaseModel):
 
 
 @router.get("")
-def get_config():
+def get_config(db: Session = Depends(get_db)):
     """Return the model/pricing catalog the frontend renders from.
 
     The platform Fal key is server-owned and never exposed here — not even
@@ -40,6 +43,8 @@ def get_config():
     return {
         "models": _models.config_payload(_model_config),
         "features": {"reel_packs": reel_pack_features(), "stereo_convert": stereo_convert_enabled()},
+        # The kill switches, so the SPA can say why a job button is off.
+        "processing": kill_switch.state(db),
         # Public by design; the SPA renders the Turnstile widget with it. Empty = no challenge.
         "turnstile_site_key": turnstile_site_key(),
         "upload_limits": {

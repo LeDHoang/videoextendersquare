@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import media_store, metrics, output
+from server import kill_switch, media_store, metrics, output
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, rate_limiter, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -467,6 +467,7 @@ def publish_upload(
     """Copy the chosen file into output/uploads/ and create an owned post."""
     from server.routers import reels as reels_router
 
+    kill_switch.require_open(db, paid=False)
     try:
         hourly_cap = max(1, int(os.environ.get("SX_PUBLISH_HOURLY_MAX", "5")))
     except (TypeError, ValueError):

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from pipeline import spatial_worker as sw
 from server import media as SM
-from server import output, quotas
+from server import kill_switch, output, quotas
 from server.features import feature_enabled, stereo_convert_installed
 from server.jobs import QueueFull, job_manager
 from server.routers.uploads import _resolve_source
@@ -74,6 +74,7 @@ def convert_to_3d(
     if req.kind == "video" and not 0 < (info.get("duration_ms") or 0) <= sw.MAX_VIDEO_SECONDS * 1000:
         raise _reject("SOURCE_TOO_LONG", f"MAKE 3D takes videos up to {sw.MAX_VIDEO_SECONDS}s.")
 
+    kill_switch.require_open(db, paid=False)
     rate_limiter.check(db, f"stereo-convert:{context.user.id}", CONVERTS_PER_HOUR, 60 * 60)
     try:
         job_id = job_manager.reserve_job(kind=req.kind, owner_id=context.user.id)

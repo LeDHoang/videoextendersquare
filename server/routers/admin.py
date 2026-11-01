@@ -16,8 +16,9 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from server import media_store
+from server import kill_switch, media_store
 from server.billing.service import debit_credits, get_wallet, grant_credits, list_transactions
+from server.jobs import job_manager
 from server.routers.account_safety import erase_account, serialize_report
 from server.routers.social import configured_role, role_rank
 from server.social.auth import (
@@ -72,6 +73,13 @@ class RoleRequest(ReasonRequest):
 
 class DeleteUserRequest(ReasonRequest):
     confirm_username: str = ""
+
+
+class SwitchesRequest(ReasonRequest):
+    free: bool
+    paid: bool
+    # Also stop queued and running jobs the new state no longer allows.
+    cancel_running: bool = False
 
 
 class CreditsRequest(ReasonRequest):
@@ -412,6 +420,36 @@ def adjust_credits(
         )
         db.commit()
     return {"applied": applied, "wallet": get_wallet(db, user.id)}
+
+
+@router.get("/switches")
+def get_switches(context: AuthContext = Depends(require_admin), db: Session = Depends(get_db)):
+    del context
+    return {"switches": kill_switch.state(db)}
+
+
+@router.put("/switches")
+def set_switches(
+    req: SwitchesRequest,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    reason = staff_reason(db, context.user, req.reason)
+    before = kill_switch.state(db)
+    after = kill_switch.set_state(db, context.user, free=req.free, paid=req.paid)
+    # Commit before cancelling: a cancel releases billing in its own session,
+    # and the audit row (immutable) records how many jobs it stopped.
+    db.commit()
+    cancelled = 0
+    if req.cancel_running and not (after["free"] and after["paid"]):
+        message = "Cancelled: processing was paused by staff."
+        cancelled = job_manager.cancel_where(lambda rec: not after["paid"] or not rec.paid, message)
+    record_action(
+        db, context.user, "system.kill_switch", "system", kill_switch.KEY,
+        reason=reason, details={"before": before, "after": after, "cancelled": cancelled},
+    )
+    db.commit()
+    return {"switches": after, "cancelled": cancelled}
 
 
 ContentType = Literal["post", "pack", "comment"]

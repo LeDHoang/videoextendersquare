@@ -6,6 +6,7 @@ import { EmptyState, Hero, Mono, Section } from '../components/ui/primitives.jsx
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import AuditPanel from '../components/moderation/AuditPanel.jsx';
 import ContentPanel from '../components/moderation/ContentPanel.jsx';
+import KillSwitchCard from '../components/moderation/KillSwitchCard.jsx';
 import { OpsPanel, OverviewPanel } from '../components/moderation/OverviewDashboard.jsx';
 import ReportTarget from '../components/moderation/ReportTarget.jsx';
 import StaffActionDialog from '../components/moderation/StaffActionDialog.jsx';
@@ -297,6 +298,7 @@ export default function ModerationPage() {
         : tab === 'overview' ? (
         stats ? (
           <>
+            {isAdmin ? <KillSwitchCard /> : null}
             <OverviewPanel stats={stats} hourly={hourly} ops={ops} windowKey={statsWindow} onOpenTab={switchTab} />
             {ops ? <OpsPanel ops={ops} /> : null}
           </>

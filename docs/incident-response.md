@@ -45,6 +45,12 @@ failure counters and disk. The numbers are per process and reset on restart.
    - fal.ai spend runaway: revoke or rotate `FAL_KEY` in the fal dashboard, set
      `FAL_KEY=` in `.env`, then `docker compose up -d app` (local engines keep working);
    - abuse from one account: suspend it from `/moderation`;
+   - abuse from many accounts, or any runaway you cannot pin down: an admin opens
+     `/moderation` Overview, KILL SWITCHES. PAUSE FREE USAGE stops free jobs,
+     publishing and Explore previews; PAUSE ALL PROCESSING also stops cloud jobs and
+     uploads. Tick "also cancel queued and running jobs" to stop work already in the
+     queue (reserved credits are released). No deploy; it applies to the next
+     request, survives a restart and is in the audit log. RESUME when it is over;
    - disk full: `df -h /`, then `docker system prune` (images and build cache only;
      never `-a --volumes`);
    - database down: `docker compose logs postgres`, then `docker compose restart postgres`.

@@ -76,6 +76,8 @@ class JobRecord:
     # Only reserved (user-submitted) jobs count toward the queue caps;
     # admin spatialize batches are created directly and stay uncounted.
     counted: bool = False
+    # Cloud (credit or BYOK) work; the free-usage kill switch spares it.
+    paid: bool = False
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     future: Future | None = field(default=None, repr=False)
     on_failure: Callable | None = field(default=None, repr=False)
@@ -160,7 +162,7 @@ class JobManager:
             self._jobs[job_id] = record
         return job_id
 
-    def reserve_job(self, kind: str, owner_id: str, job_id: str | None = None) -> str:
+    def reserve_job(self, kind: str, owner_id: str, job_id: str | None = None, *, paid: bool = False) -> str:
         """Create a counted job, or raise QueueFull when a cap is reached.
 
         The check and the insert happen under one lock, so two concurrent
@@ -170,7 +172,7 @@ class JobManager:
         max_pending = env_int("SX_MAX_PENDING_JOBS", 6, minimum=1)
         max_per_user = env_int("SX_MAX_JOBS_PER_USER", 2, minimum=1)
         job_id = job_id or uuid.uuid4().hex[:12]
-        record = JobRecord(job_id=job_id, kind=kind, owner_id=owner_id, counted=True)
+        record = JobRecord(job_id=job_id, kind=kind, owner_id=owner_id, counted=True, paid=paid)
         with self._lock:
             if not self._accepting:
                 raise ShuttingDown()
@@ -343,13 +345,22 @@ class JobManager:
         record = self.get_job(job_id)
         if record is None:
             return False
+        return self._cancel_record(record, "Cancelled by user.")
+
+    def cancel_where(self, predicate: Callable[[JobRecord], bool], reason: str) -> int:
+        """Cancel every unfinished user-submitted job matching *predicate*; returns the count."""
+        with self._lock:
+            records = [rec for rec in self._jobs.values() if rec.counted and predicate(rec)]
+        return sum(1 for record in records if self._cancel_record(record, reason))
+
+    def _cancel_record(self, record: JobRecord, reason: str) -> bool:
         with record._lock:
             if record.status in TERMINAL_STATUSES:
                 return False
             record.cancel_event.set()
         future = record.future
         if future is not None and future.cancel():
-            self._finish_cancelled(record, JobCancelled())
+            self._finish_cancelled(record, JobCancelled(), reason=reason)
         return True
 
     @staticmethod

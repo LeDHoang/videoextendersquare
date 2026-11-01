@@ -15,6 +15,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from server import kill_switch
 from server.jobs import QueueFull, ShuttingDown
 from server.settings import env_int
 from server.social.auth import AuthContext, rate_limiter
@@ -23,7 +24,11 @@ UPLOAD_WINDOW_S = 3600
 
 
 def check_upload_rate(db: Session, context: AuthContext) -> None:
-    """Count one upload against the caller's hourly budget (429 when spent)."""
+    """Count one upload against the caller's hourly budget (429 when spent).
+
+    Paid jobs need uploads, so only the all-processing switch stops them.
+    """
+    kill_switch.require_open(db, paid=True)
     limit = env_int("SX_UPLOAD_HOURLY_MAX", 30, minimum=1)
     rate_limiter.check(db, f"upload:{context.user.id}", limit, UPLOAD_WINDOW_S)
 
