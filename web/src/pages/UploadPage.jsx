@@ -699,7 +699,7 @@ export default function UploadPage() {
               <Button onClick={clearBatch} disabled={batchRendering}>CLEAR BATCH</Button>
             </div>
           ) : (
-            <Mono>AWAITING SOURCE FILES…</Mono>
+            <Mono>DROP VIDEOS OR IMAGES ON THE STAGE TO START</Mono>
           )}
         </DeckSection>
         {batch.length ? renderExtendSections() : null}
@@ -711,7 +711,7 @@ export default function UploadPage() {
         <DeckSection
           num={next()}
           title="SOURCE & PUBLISH PATH"
-          badge={!staged ? 'AWAITING SOURCE' : stereo ? '3D · AS-IS' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : path === 'convert' ? MAKE_3D : 'SHARE DIRECTLY'}
+          badge={!staged ? 'NO FILE YET' : stereo ? '3D · AS-IS' : isSlideshow ? 'AS-IS' : path === 'extend' ? 'EXTEND TO 1:1' : path === 'convert' ? MAKE_3D : 'SHARE DIRECTLY'}
           badgeTone={(path !== 'skip' && staged) || stereo ? 'accent' : 'muted'}
         >
           {staged && stereoChoice ? (
@@ -720,7 +720,6 @@ export default function UploadPage() {
           {!staged ? (
             <>
               <p className="sx-studio-note">Drop one video, or up to 10 images for a slideshow post, on the stage. PNG · JPG · WEBP · MP4 · MOV · AVI · WEBM. 3D side-by-side (2:1) and top-bottom (1:2) files are published as-is.</p>
-              <Mono>AWAITING SOURCE FILE…</Mono>
             </>
           ) : stereo ? null : isSlideshow ? (
             <div className="sx-accent-block" role="note">

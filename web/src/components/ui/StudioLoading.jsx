@@ -11,8 +11,8 @@ export default function StudioLoading({
     <div className="sx-studio-loading" style={{ minHeight }}>
       <div className="sx-studio-loading-grid" />
       <div className={`sx-studio-loading-title${compact ? ' sx-compact' : ''}`}>{title}</div>
+      {/* Idle "add a file" state, so no pulsing dot: nothing is running yet. */}
       <div className="sx-studio-loading-sub">
-        <span className="sx-loading-dot-pulse" />
         <span>{subtitle}</span>
       </div>
     </div>

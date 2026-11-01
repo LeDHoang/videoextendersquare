@@ -1398,6 +1398,31 @@
   .drawer-telemetry-line { flex: 1; height: 1px; background: var(--sx-accent); opacity: 0.45; }
   .drawer-telemetry-dot { width: 4px; height: 4px; background: var(--sx-accent); flex-shrink: 0; }
 
+  /* Reduced motion starts reels paused, and the player has no play button of its own,
+     so a held reel offers one. Static: no transition or animation. */
+  .motion-play-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 41;
+    min-height: 44px;
+    padding: 0 20px;
+    background: rgba(8, 9, 10, 0.86);
+    color: var(--sx-ink);
+    border: 1px solid var(--sx-accent);
+    font: 800 14px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+  .motion-play-btn[hidden] {
+    display: none;
+  }
+  .motion-play-btn:focus-visible {
+    outline: 2px solid var(--sx-ink);
+    outline-offset: 2px;
+  }
+
   /* Center Flash & Error Overlay */
   .center-flash {
     position: absolute;
@@ -2207,6 +2232,7 @@
       </div>
     </section>
     <div class="center-flash" id="centerFlash">▶</div>
+    <button class="motion-play-btn" id="motionPlayBtn" type="button" hidden>▶ PLAY</button>
     <div class="reward-toast" id="rewardToast" role="status" aria-live="polite"></div>
     
     <!-- Chat/Annotations Overlay (Bottom) -->
@@ -2978,7 +3004,13 @@
       errorOverlay.classList.remove('show');
     }
 
+    const motionPlayBtn = document.getElementById('motionPlayBtn');
+    function setMotionPlay(show) {
+      if (motionPlayBtn) motionPlayBtn.hidden = !show;
+    }
+
     function showError(msg, title) {
+      setMotionPlay(false);
       document.getElementById('errorTitle').textContent = title || "CAN'T PLAY THIS REEL";
       if (msg) document.getElementById('errorText').textContent = msg;
       errorOverlay.classList.add('show');
@@ -5717,8 +5749,10 @@
 
     function loadVideo(index, options) {
       const loadOptions = Object.assign({}, options);
-      // Reduced motion: reels (and image dwell timers) start paused; tap or Space plays.
-      if (prefersReducedMotion() && !vrPresenting()) loadOptions.autoplay = false;
+      // Reduced motion: reels (and image dwell timers) start paused; tap, Space or PLAY plays.
+      const motionHeld = prefersReducedMotion() && !vrPresenting();
+      if (motionHeld) loadOptions.autoplay = false;
+      setMotionPlay(false);
       if (collectOpen) closeCollectOverlay();
       hideError();
       // Drop the previous image post's slideshow; showImage sets up the next one.
@@ -5782,6 +5816,7 @@
 
       if (isImageItem(item)) {
         showImage(item, loadOptions);
+        if (motionHeld) setMotionPlay(true);
         return;
       }
 
@@ -5824,6 +5859,7 @@
       if (loadOptions.autoplay === false) {
         video.pause();
         updatePlayBtnUI(false);
+        if (motionHeld) setMotionPlay(true);
         return;
       }
 
@@ -5902,7 +5938,8 @@
       }
     }
 
-    video.addEventListener('play', () => updatePlayBtnUI(true));
+    video.addEventListener('play', () => { updatePlayBtnUI(true); setMotionPlay(false); });
+    if (motionPlayBtn) motionPlayBtn.addEventListener('click', togglePlay);
     video.addEventListener('pause', () => updatePlayBtnUI(false));
 
     video.addEventListener('loadedmetadata', () => {
@@ -5972,6 +6009,7 @@
 
     // Toggle Play/Pause
     function togglePlay() {
+      setMotionPlay(false);
       flashBtn(playBtn);
       // Stills have no media clock — play/pause gates the dwell timer.
       if (isImageItem(videoData[idx])) {

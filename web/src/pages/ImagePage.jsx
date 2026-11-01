@@ -252,7 +252,7 @@ export default function ImagePage() {
 
       <Section num={2} title="Configure Pipeline" active={items.length > 0}>
         {items.length === 0 ? (
-          <StudioLoading title="STUDIO" subtitle="AWAITING SOURCE IMAGE INITIATION…" compact />
+          <StudioLoading title="STUDIO" subtitle="ADD AN IMAGE IN STEP 1 TO SET UP THE RENDER" compact />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div>

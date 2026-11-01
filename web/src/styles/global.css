@@ -4813,10 +4813,6 @@ body.sx-vr-active .sx-reels-mount,
   }
 }
 
-.sx-loading-dot-pulse {
-  animation: sx-loading-pulse 1.8s infinite ease-in-out;
-}
-
 .sx-studio-loading {
   position: relative;
   display: flex;
@@ -4867,13 +4863,6 @@ body.sx-vr-active .sx-reels-mount,
   padding: 6px 16px;
   border: 1px solid var(--sx-rule-strong);
   z-index: 2;
-}
-
-.sx-studio-loading-sub .sx-loading-dot-pulse {
-  width: 8px;
-  height: 8px;
-  background: var(--sx-accent);
-  display: inline-block;
 }
 
 /* ─── Skeleton Loading (shimmer = the app is working) ───
@@ -10438,7 +10427,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-au-kicker {
   margin: 0;
   color: var(--sx-ink-3);
-  font: 700 0.66rem/1 'JetBrains Mono', monospace;
+  font: 700 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.18em;
 }
 
@@ -10489,7 +10478,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-au-step-body b {
   color: var(--sx-ink);
-  font: 700 0.68rem/1.3 'JetBrains Mono', monospace;
+  font: 700 12px/1.3 'JetBrains Mono', monospace;
   letter-spacing: 0.1em;
 }
 
@@ -10518,7 +10507,7 @@ a.sx-xh-btn { text-decoration: none; }
   padding: 15px 8px;
   text-align: center;
   color: var(--sx-ink-3);
-  font: 800 0.66rem/1 'JetBrains Mono', monospace;
+  font: 800 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
   text-decoration: none;
   border-bottom: 2px solid transparent;
@@ -10537,7 +10526,7 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-au-step-label {
   color: var(--sx-accent-hi);
-  font: 800 0.64rem/1 'JetBrains Mono', monospace;
+  font: 800 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.18em;
 }
 
@@ -10572,13 +10561,13 @@ a.sx-xh-btn { text-decoration: none; }
 
 .sx-au-field > label {
   color: var(--sx-ink-3);
-  font: 800 0.65rem/1.2 'JetBrains Mono', monospace;
+  font: 800 12px/1.2 'JetBrains Mono', monospace;
   letter-spacing: 0.1em;
 }
 
 .sx-au-optional {
   color: var(--sx-ink-3);
-  font: 700 0.58rem/1 'JetBrains Mono', monospace;
+  font: 700 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.14em;
 }
 
@@ -10637,7 +10626,7 @@ a.sx-xh-btn { text-decoration: none; }
   background: transparent;
   color: var(--sx-ink-2);
   cursor: pointer;
-  font: 800 0.6rem/1 'JetBrains Mono', monospace;
+  font: 800 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
 }
 
@@ -10649,13 +10638,13 @@ a.sx-xh-btn { text-decoration: none; }
   align-items: center;
   padding: 0 var(--sx-3);
   color: var(--sx-ink-3);
-  font: 600 0.62rem/1 'JetBrains Mono', monospace;
+  font: 600 12px/1 'JetBrains Mono', monospace;
 }
 
 .sx-au-msg {
   margin: 0;
   color: var(--sx-ink-3);
-  font: 600 0.68rem/1.5 'JetBrains Mono', monospace;
+  font: 600 13px/1.5 'JetBrains Mono', monospace;
 }
 
 .sx-au-msg--err { color: var(--sx-danger-hi); }
@@ -10679,7 +10668,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-au-consent > input[aria-invalid='true'] { outline: 1px solid var(--sx-danger); outline-offset: 2px; }
 .sx-au-consent > label {
   color: var(--sx-ink-2);
-  font: 500 0.78rem/1.55 'JetBrains Mono', monospace;
+  font: 500 13px/1.55 'JetBrains Mono', monospace;
   cursor: pointer;
 }
 .sx-au-consent > .sx-au-msg { grid-column: 2; }
@@ -10696,7 +10685,7 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-au-hint {
   margin: 0;
   color: var(--sx-ink-3);
-  font: 500 0.72rem/1.55 'JetBrains Mono', monospace;
+  font: 500 13px/1.55 'JetBrains Mono', monospace;
 }
 
 /* Password rules + strength meter */
@@ -10726,7 +10715,7 @@ a.sx-xh-btn { text-decoration: none; }
   min-width: 92px;
   text-align: right;
   color: var(--sx-ink-3);
-  font: 800 0.58rem/1 'JetBrains Mono', monospace;
+  font: 800 12px/1 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
 }
 
@@ -10749,7 +10738,7 @@ a.sx-xh-btn { text-decoration: none; }
   display: flex;
   gap: 8px;
   color: var(--sx-ink-3);
-  font: 600 0.64rem/1.4 'JetBrains Mono', monospace;
+  font: 600 12px/1.4 'JetBrains Mono', monospace;
   letter-spacing: 0.04em;
 }
 
@@ -10763,7 +10752,7 @@ a.sx-xh-btn { text-decoration: none; }
   border-left-width: 3px;
   background: var(--sx-surface-2);
   color: var(--sx-ink-2);
-  font: 600 0.7rem/1.55 var(--sx-font-mono);
+  font: 600 13px/1.55 var(--sx-font-mono);
   letter-spacing: 0.03em;
   overflow-wrap: anywhere;
 }
@@ -10786,7 +10775,7 @@ a.sx-xh-btn { text-decoration: none; }
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   cursor: pointer;
-  font: 800 0.74rem/1 var(--sx-font-mono);
+  font: 800 13px/1 var(--sx-font-mono);
   letter-spacing: 0.14em;
   text-decoration: none;
   transition: background var(--sx-duration-fast) ease, box-shadow var(--sx-duration-fast) ease, transform var(--sx-duration-fast) ease;
@@ -10816,7 +10805,7 @@ a.sx-xh-btn { text-decoration: none; }
   background: var(--sx-surface-2);
   color: var(--sx-ink);
   cursor: pointer;
-  font: 800 0.64rem/1 var(--sx-font-mono);
+  font: 800 12px/1 var(--sx-font-mono);
   letter-spacing: 0.12em;
 }
 
@@ -10828,7 +10817,7 @@ a.sx-xh-btn { text-decoration: none; }
   display: inline-block;
   padding: 4px 0;
   color: var(--sx-accent-hi);
-  font: 800 0.66rem/1.5 var(--sx-font-mono);
+  font: 800 12px/1.5 var(--sx-font-mono);
   letter-spacing: 0.08em;
   text-decoration: none;
 }
@@ -10863,7 +10852,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   padding-top: var(--sx-4);
   border-top: 1px solid var(--sx-rule);
   color: var(--sx-ink-3);
-  font: 600 0.7rem/1.5 'JetBrains Mono', monospace;
+  font: 600 13px/1.5 'JetBrains Mono', monospace;
 }
 
 /* Result states (sent / done / expired) */
@@ -10899,8 +10888,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 .sx-au-facts > div + div { border-top: 1px solid var(--sx-rule); }
-.sx-au-facts dt { color: var(--sx-ink-3); font: 800 0.6rem/1.4 'JetBrains Mono', monospace; letter-spacing: 0.14em; }
-.sx-au-facts dd { margin: 0; color: var(--sx-ink); font: 600 0.74rem/1.4 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
+.sx-au-facts dt { color: var(--sx-ink-3); font: 800 12px/1.4 'JetBrains Mono', monospace; letter-spacing: 0.14em; }
+.sx-au-facts dd { margin: 0; color: var(--sx-ink); font: 600 13px/1.4 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
 
 .sx-au-actions { display: flex; flex-wrap: wrap; gap: var(--sx-2); }
 .sx-au-actions .sx-au-secondary { flex: 1 1 160px; }

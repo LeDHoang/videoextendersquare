@@ -360,9 +360,6 @@ export default function ExplorePage() {
         />
       ) : (
         <>
-          {packsVisible && !packs.length && !packError ? (
-            <p className="sx-mono" role="status">No Reel Packs match this filter yet — try another search or publish a collection.</p>
-          ) : null}
           {packsVisible || reelsVisible ? (
             <div className={gridClassName(density)} aria-label="Explore results">
               {packsVisible ? packs.map((pack) => (

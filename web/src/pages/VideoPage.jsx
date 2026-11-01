@@ -316,7 +316,7 @@ export default function VideoPage() {
 
       <Section num={2} title="Configure Parameters" active={items.length > 0}>
         {items.length === 0 ? (
-          <StudioLoading title="EXTENDER" subtitle="AWAITING SOURCE VIDEO INITIATION…" compact />
+          <StudioLoading title="EXTENDER" subtitle="ADD A VIDEO IN STEP 1 TO SET UP THE RENDER" compact />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sx-4)' }}>
             <div>
