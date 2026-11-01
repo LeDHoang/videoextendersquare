@@ -16,7 +16,7 @@ const STATIC_TITLES = {
   '/packs/new': 'Create reel pack',
   '/settings/profile': 'Profile settings',
   '/messages': 'Messages',
-  '/wallet': 'Wallet',
+  '/wallet': 'Credits',
   '/upload': 'Upload',
   '/moderation': 'Moderation',
   '/terms': 'Terms of Service',

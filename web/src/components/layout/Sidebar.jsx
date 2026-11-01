@@ -5,27 +5,8 @@ import { NavLink, Link } from 'react-router-dom';
 import { Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
-import {
-  IndustrialImageIcon,
-  IndustrialVideoIcon,
-  IndustrialCompareIcon,
-  IndustrialReelsIcon,
-  IndustrialExploreIcon,
-  IndustrialMessageIcon,
-  IndustrialUploadIcon,
-  IndustrialCreditsIcon,
-} from '../icons/index.jsx';
-
-const NAV_ITEMS = [
-  { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
-  { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
-  { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
-  { to: '/wallet', label: 'Credits', Icon: IndustrialCreditsIcon }, // TEMP glyph — final art to follow
-  { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
-  { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
-  { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
-  { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
-];
+import { IndustrialCreditsIcon } from '../icons/index.jsx';
+import { SIDEBAR_NAV } from './nav.js';
 
 const MODEL_FIELDS = [
   { key: 'outpaint_vid', label: 'VIDEO OUTPAINT' },
@@ -196,7 +177,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
       <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
+        {SIDEBAR_NAV.map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}

@@ -6,11 +6,7 @@ import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import IconButton from '../ui/IconButton.jsx';
-import {
-  IndustrialUploadIcon,
-  IndustrialMessageIcon,
-  IndustrialCreditsIcon,
-} from '../icons/index.jsx';
+import { HEADER_NAV, NAV, accountNav } from './nav.js';
 
 function compactCount(value) {
   const count = Number(value) || 0;
@@ -388,8 +384,9 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
               <span>ECHO</span>
             </NavLink>
             <nav className="sx-top-nav" aria-label="Global Routes">
-              <NavLink to="/reels" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>REELS/VR</NavLink>
-              <NavLink to="/explore" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>EXPLORE</NavLink>
+              {HEADER_NAV.map(({ to, label }) => (
+                <NavLink key={to} to={to} className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>{label}</NavLink>
+              ))}
             </nav>
           </div>
 
@@ -445,41 +442,41 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                 messages, then the account avatar. They are links, so they can open in a new
                 tab and report aria-current. */}
             <NavLink
-              to="/upload"
+              to={NAV.upload.to}
               className="sx-top-action-btn sx-desktop-only"
               title="Open the Upload page"
             >
-              UPLOAD
+              {NAV.upload.label}
             </NavLink>
             <IconButton
               as={NavLink}
-              to="/upload"
+              to={NAV.upload.to}
               variant="primary"
               className="sx-mobile-tablet-only"
               title="Upload Video or Image"
-              label="Upload"
+              label={NAV.upload.label}
             >
-              <IndustrialUploadIcon className="sx-top-btn-svg" />
+              <NAV.upload.Icon className="sx-top-btn-svg" />
             </IconButton>
 
             {user ? (
               <>
                 <NavLink
-                  to="/wallet"
+                  to={NAV.credits.to}
                   className="sx-top-credits-pill"
                   title="Open ECHO Credits wallet"
-                  aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : 'Credits'}
+                  aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : NAV.credits.label}
                 >
                   <span>{wallet?.available_credits ?? '—'}</span>
-                  <IndustrialCreditsIcon className="sx-top-btn-svg" />
+                  <NAV.credits.Icon className="sx-top-btn-svg" />
                 </NavLink>
                 <IconButton
                   as={NavLink}
-                  to="/messages"
+                  to={NAV.messages.to}
                   title="Open messages"
-                  label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
+                  label={messaging.unread.total ? `${NAV.messages.label}, ${messaging.unread.total} unread` : NAV.messages.label}
                 >
-                  <IndustrialMessageIcon className="sx-top-btn-svg" />
+                  <NAV.messages.Icon className="sx-top-btn-svg" />
                   {messaging.unread.total ? (
                     <span className="sx-top-badge">
                       {messaging.unread.total > 99 ? '99+' : messaging.unread.total}
@@ -513,12 +510,8 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                           ⚡ {wallet?.available_credits ?? 0} CREDITS
                         </span>
                       </div>
-                      <Link to={'/profile/' + user.username}>PROFILE</Link>
-                      <Link to={'/profile/' + user.username + '?tab=saved'}>SAVED</Link>
-                      <Link to="/settings/profile">SETTINGS</Link>
-                      <Link to="/wallet">CREDITS / FAL KEY</Link>
-                      {user.can_moderate ? <Link to="/moderation">STAFF</Link> : null}
-                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>LOG OUT</button>
+                      {accountNav(user).map(({ to, label }) => <Link key={to} to={to}>{label}</Link>)}
+                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>Log out</button>
                     </div>
                   ) : null}
                 </>

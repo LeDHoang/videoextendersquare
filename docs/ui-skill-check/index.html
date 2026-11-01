@@ -1029,7 +1029,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-18">
   <h4>Fix 18 · Attempted fix · verified locally (account menu and tab titles at 1280px; dev flag by unit test)</h4>
   <p><strong>Dev telemetry:</strong> <code>utils/devTools.js</code> already had a flag (<code>VITE_SX_HIDE_DEV_TOOLS</code>), but it was off unless set, and no deploy config set it. Production builds (<code>import.meta.env.PROD</code>) now hide the probe card and telemetry bar by default. <code>true</code> or <code>false</code> still forces either way, and dev and tests are unchanged. The "TELEMETRY / V2.0" subtitle in <code>Sidebar.jsx</code> is now behind the same flag. <code>devTools.test.js</code> gained a production-default case, and the flag's row in <code>RUNNING.md</code> was updated. <strong>Location title:</strong> <code>LocationExplorePage.jsx</code> sets the tab title from the place name, and the route fallback in <code>useDocumentTitle.js</code> no longer uses the slug. /explore/location/tokyo--japan now reads "Tokyo, Japan · ECHO" (it was "tokyo--japan"). <strong>Account menu:</strong> PROFILE, SAVED, SETTINGS, CREDITS / FAL KEY and STAFF are now <code>&lt;Link&gt;</code>s with real <code>href</code>s, so they can be opened in a new tab. LOG OUT stays a button (<code>HeaderBar.jsx</code>, popover CSS widened to <code>:is(a, button)</code>).</p>
-  <p><strong>Not done:</strong> one nav source shared by the header, drawer and sidebar. The header's CREDITS, UPLOAD and MESSAGES buttons still navigate with <code>navigate()</code>. Hiding the telemetry in production was checked by unit test, not in a production build. <strong>Since done:</strong> header links in fix <a href="#fix-35">35</a>, production build checked in fix <a href="#fix-42">42</a>.</p>
+  <p><strong>Not done:</strong> one nav source shared by the header, drawer and sidebar. The header's CREDITS, UPLOAD and MESSAGES buttons still navigate with <code>navigate()</code>. Hiding the telemetry in production was checked by unit test, not in a production build. <strong>Since done:</strong> header links in fix <a href="#fix-35">35</a>, production build checked in fix <a href="#fix-42">42</a>, one nav source in fix <a href="#fix-53">53</a>.</p>
   <figure>
     <img src="img/fix18-account-menu-after.jpg" alt="Account menu open under the avatar: PROFILE, SAVED, SETTINGS and CREDITS / FAL KEY rows, now links, above a LOG OUT button." loading="lazy" style="max-width:380px">
     <figcaption>After: account menu items that navigate are links.</figcaption>
@@ -1730,11 +1730,60 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <ul>
       <li><strong>Button <code>variant</code> and <code>size</code>.</strong> Merging <code>.sx-btn</code>, <code>.sx-pill</code> and the sidebar's primary button changes how every page looks, so it needs its own visual pass.</li>
       <li><strong>The rest of Phase 2:</strong> Tabs, Chip, Toast and EmptyState.</li>
-      <li><strong>The sidebar drawer as a Dialog.</strong> It is a navigation panel, and it moves with the single navigation source.</li>
+      <li><strong>The sidebar drawer as a Dialog.</strong> It is a navigation panel, and it moves with the single navigation source. <strong>Update:</strong> fix <a href="#fix-53">53</a> kept the drawer's own handling; see there for why.</li>
       <li><strong>The sign-in forms' <code>AuthField</code> and the studio <code>Field</code>.</strong> Both already link their labels; their hints and errors are not on FormField yet.</li>
       <li><strong>The credits pill on phones</strong> is still 38px tall.</li>
       <li><strong>Hints outside a field are not linked to it:</strong> the Fal key's "Stored encrypted…" line and the password notes in settings.</li>
       <li><strong>A global <code>.sx-primary</code> rule with <code>!important</code></strong> (from the messaging styles) fixes every primary button's colours, so the primary hover colour never shows. It was like this before; changing it changes every primary button.</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-53">
+    <h4>Fix 53 · Follow-up fix · One navigation source for the header, account menu, sidebar/drawer and phone tab bar, verified locally (all five places at 1280 and 375px, pixel-compared before and after)</h4>
+    <p>Before this, four places each had their own copy of the app's destinations:</p>
+    <ul>
+      <li>the header's REELS/VR and EXPLORE links and its upload, credits and messages buttons;</li>
+      <li>the account menu;</li>
+      <li>the sidebar, which is also the drawer below 900px;</li>
+      <li>the phone tab bar.</li>
+    </ul>
+    <p>The copies had drifted. The wallet was "CREDITS" in the sidebar, "CREDITS / FAL KEY" in the account menu and "Wallet" in the browser tab. Reels was "Reels/VR" everywhere except the tab bar, which screen readers read as "Reels".</p>
+    <p>Now <code>web/src/components/layout/nav.js</code> lists each destination once, with its path, its one label and its icon. Each place picks the ones it shows, in its own order:</p>
+    <ul>
+      <li><code>HEADER_NAV</code>: Reels/VR and Explore. The header's upload, credits and messages buttons read <code>NAV.upload</code>, <code>NAV.credits</code> and <code>NAV.messages</code>.</li>
+      <li><code>SIDEBAR_NAV</code>: the sidebar's eight tiles. Its own copy is gone.</li>
+      <li><code>BOTTOM_NAV</code>: the tab bar's four tabs. The avatar tab is still built in place, because it depends on who is signed in.</li>
+      <li><code>accountNav(user)</code>: Profile, Saved, Settings, Credits, and Staff for moderators.</li>
+    </ul>
+    <p>Labels are written once in sentence case. CSS draws them in capitals as before; the account menu gains <code>text-transform: uppercase</code> to keep its look. Screen readers hear "Reels/VR" and "Log out", not letters in capitals.</p>
+    <p><strong>What changes:</strong></p>
+    <ul>
+      <li>The account menu's "CREDITS / FAL KEY" is now "CREDITS". The wallet page holds both, and every other place calls it Credits.</li>
+      <li>The phone tab bar's Reels tab is named "Reels/VR". The tab is icon-only, so this changes what is read, not what is seen.</li>
+      <li>The browser tab on /wallet reads "Credits · ECHO" (was "Wallet"), matching the links and the page's ECHO CREDITS heading.</li>
+    </ul>
+    <p><strong>What stays the same:</strong> header, sidebar, drawer and tab bar are pixel-identical to before at 1280 and 375px (0 pixels differ). The account menu differs only in that one item.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix53-account-before.jpg" alt="Account menu before: @webfix908775, Web Fix, 0 CREDITS, then PROFILE, SAVED, SETTINGS, CREDITS / FAL KEY and LOG OUT." loading="lazy" style="max-width:340px">
+        <figcaption>Before: the wallet is "CREDITS / FAL KEY" here, and "CREDITS" everywhere else.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix53-account-after.jpg" alt="The same account menu after: PROFILE, SAVED, SETTINGS, CREDITS and LOG OUT, in the same capitals and spacing." loading="lazy" style="max-width:340px">
+        <figcaption>After: "CREDITS", like the sidebar and the header's credits button.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>nav.test.jsx</code> renders the header (account menu open, as a moderator), the sidebar and the tab bar together. It checks that every link to a destination has that destination's one label, that every destination can be reached from one of them, and that the account menu reads Profile, Saved, Settings, Credits, Staff.</li>
+      <li><code>HeaderBar.test.jsx</code> and <code>MobileBottomNav.test.jsx</code> are updated for the new names.</li>
+      <li>Results: 512 vitest and 466 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>The drawer as a Dialog.</strong> It keeps its own Escape, Tab and inert handling from fix <a href="#fix-18">18</a>, which leaves the header live so its menu button can close the drawer. A modal Dialog would make the header inert too, so the move needs its own design.</li>
+      <li><strong>The footer's legal links and the sidebar's billing card buttons</strong> are not destinations in the main navigation, so they are not in the list.</li>
+      <li><strong>Other browser-tab titles</strong> keep their own wording, for example /reels is still "Reels".</li>
     </ul>
   </section>
 
@@ -1781,7 +1830,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 52. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 53. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1795,7 +1844,6 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <ul>
         <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
         <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
-        <li>One navigation source for the header, drawer and sidebar.</li>
         <li>A keyboard path into the 3D preview canvas.</li>
       </ul>
     </div>

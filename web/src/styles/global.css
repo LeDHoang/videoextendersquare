@@ -5664,6 +5664,7 @@ button.sx-explore-loc-link:hover {
   cursor: pointer;
   font: 800 var(--sx-t-eyebrow)/1 'JetBrains Mono', monospace;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .sx-account-popover button:last-child {

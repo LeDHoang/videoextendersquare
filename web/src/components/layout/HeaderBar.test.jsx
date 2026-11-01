@@ -56,7 +56,7 @@ describe('HeaderBar responsive behavior', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getAllByText('UPLOAD').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Upload').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('3').length).toBeGreaterThanOrEqual(1); // Unread badge
     expect(screen.getByLabelText('Open account menu')).toBeInTheDocument();
   });
@@ -71,7 +71,7 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Global Routes' });
-    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['REELS/VR', 'EXPLORE']);
+    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Reels/VR', 'Explore']);
 
     const hrefs = [...container.querySelectorAll('.sx-top-right a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/upload', '/upload', '/wallet', '/messages']);
