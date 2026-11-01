@@ -22,12 +22,13 @@ import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
+import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
 
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
-  { label: 'BEST QUALITY', value: CODEC_DEFAULT },
-  { label: 'PLAYS EVERYWHERE', value: 'H264 (Browser/VR)' },
-  { label: 'ALL CODECS', value: 'ALL CODECS' },
+  { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
+  { label: FORMAT_FILTER_LABELS.h264, value: 'H264 (Browser/VR)' },
+  { label: FORMAT_FILTER_LABELS.all, value: 'ALL CODECS' },
 ];
 const CONTENT_OPTS = [
   { label: 'ALL', value: 'all' },
@@ -302,7 +303,7 @@ export default function ExplorePage() {
                 <div style={{ flex: '1 1 150px', minWidth: 0, maxWidth: 260 }}>
                   <Dropdown value={folder} options={folderOptions} onChange={setFolder} placeholder="Target folder…" />
                 </div>
-                <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} ariaLabel="Codec" />
+                <Pills options={CODEC_OPTS} value={codec} onChange={setCodec} ariaLabel="Format" />
               </>
             ) : null}
             <div style={{ flex: '2 1 200px', minWidth: 0, position: 'relative' }}>

@@ -766,15 +766,17 @@
     opacity: 0;
     transform: translateY(8px);
   }
+  /* Same media chip as the Explore tiles (near-black backing, white text), so it reads
+     on any frame; accent text on it would be about 4:1 over a white frame. */
   .meta-folder {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
-    color: var(--sx-accent);
-    background: color-mix(in srgb, var(--sx-accent) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--sx-accent) 30%, transparent);
+    color: var(--sx-ink);
+    background: rgba(8, 9, 10, 0.86);
+    border: 1px solid color-mix(in srgb, var(--sx-accent) 45%, transparent);
     padding: 3px 8px;
     border-radius: 0px;
     width: fit-content;
@@ -791,7 +793,8 @@
   }
   .meta-sub {
     font-size: 13px;
-    color: var(--sx-ink-2);
+    /* ink, not ink-2: over a white frame the scrim leaves a mid-grey, where ink-2 is about 2.5:1. */
+    color: var(--sx-ink);
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
     display: flex;
     gap: 8px;
@@ -864,14 +867,17 @@
   .reels-progress-wrap:hover .reels-progress-fill::after {
     transform: scale(1.2);
   }
+  /* Own backing: in the docked layout there is no scrim under it. */
   .reels-time-display {
     position: absolute;
-    bottom: 16px;
+    bottom: 14px;
     right: 14px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
-    color: var(--sx-ink-2);
+    color: var(--sx-ink);
+    background: rgba(8, 9, 10, 0.86);
+    padding: 2px 6px;
     pointer-events: none;
     letter-spacing: 0.05em;
   }
@@ -2207,7 +2213,7 @@
 
     <div class="video-error-overlay" id="errorOverlay" role="alert">
       <div style="font-size: 32px; color: #FF3B1F;">⚠️</div>
-      <div style="font-weight: 700; color: #FFF; font-size: 16px;">CAN'T PLAY THIS VIDEO</div>
+      <div style="font-weight: 700; color: #FFF; font-size: 16px;" id="errorTitle">CAN'T PLAY THIS REEL</div>
       <div style="font-size: 14px; line-height: 1.4; color: #C4C9CF; max-width: 340px;" id="errorText">
         This video could not be played.
       </div>
@@ -2971,9 +2977,21 @@
       errorOverlay.classList.remove('show');
     }
 
-    function showError(msg) {
+    function showError(msg, title) {
+      document.getElementById('errorTitle').textContent = title || "CAN'T PLAY THIS REEL";
       if (msg) document.getElementById('errorText').textContent = msg;
       errorOverlay.classList.add('show');
+    }
+
+    // MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) covers both a missing file and a format the
+    // browser can't decode. A HEAD request tells them apart: the HTTP status, or 0 when
+    // it can't answer (offline, blocked by CORS, or slower than 2 s).
+    function sourceStatus(src) {
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), 2000) : 0;
+      return fetch(src, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+        .then((res) => res.status, () => 0)
+        .finally(() => clearTimeout(timer));
     }
 
     const preloadVideo = document.getElementById('preloadVideo');
@@ -4794,7 +4812,7 @@
       clearBlobCache();
       if (!videoData.length && feedHasMore) await fetchNextPage();
       if (!videoData.length) {
-        showError('No more recommendations match your preferences.');
+        showError('No more recommendations match your preferences.', 'NO MORE REELS');
         if (counter) counter.textContent = '0 / 0';
         return;
       }
@@ -5707,7 +5725,7 @@
       renderSlideProgress();
       if (typeof resetPan === 'function') resetPan();
       if (!videoData.length) {
-        showError('No recommendations are currently available.');
+        showError('No recommendations are available right now.', 'NO REELS YET');
         if (counter) counter.textContent = '0 / 0';
         return;
       }
@@ -5907,12 +5925,23 @@
       } else if (isProxy) {
         console.warn('[ReelsPlayer] Transient error on H.264 proxy stream:', video.src);
       } else if (err && err.code === 4 /* MEDIA_ERR_SRC_NOT_SUPPORTED */) {
-        // Code 4 also covers a missing file (404), so the copy cannot blame the format alone.
-        showError('This video could not be loaded. It may have been removed, or your browser may not support its format. Try "H.264 4K (Web & VR)" in the Codec filter.');
+        // Show the overlay once the source has been checked, so it is announced once
+        // with the real reason. Ignore the answer if the viewer has moved on.
+        const failedSrc = video.src;
+        sourceStatus(failedSrc).then((status) => {
+          if (video.src !== failedSrc) return;
+          if (status === 404 || status === 410) {
+            showError('It may have been removed. Skip to the next reel.', 'REEL NOT AVAILABLE');
+          } else if (status >= 200 && status < 300) {
+            showError("Your browser can't play this reel's format. Choose PLAYS EVERYWHERE in the format filter, or skip to the next reel.");
+          } else {
+            showError("This reel couldn't be loaded. It may have been removed, or your browser may not support its format.");
+          }
+        });
       } else if (err && err.code === 2 /* MEDIA_ERR_NETWORK */) {
-        showError('The connection dropped while loading this video. Check your network and try again.');
+        showError('The connection dropped while loading this reel. Check your network, then reload the page.');
       } else {
-        showError('This video could not be played. Skip to the next one.');
+        showError("This reel couldn't be played. Skip to the next one.");
       }
     });
 
@@ -7469,7 +7498,7 @@
         recordPackEvent(resumeSeconds > 0 ? 'pack_resume' : 'pack_start');
       }
     } else if (videoData.length) loadVideo(0);
-    else showError('No recommendations are currently available.');
+    else showError('No recommendations are available right now.', 'NO REELS YET');
     loadCurrentUser();
   })();
 </script>

@@ -21,6 +21,7 @@ import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
+import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
 
 const SORT_OPTIONS = [
   { label: 'TOP', value: 'trending' },
@@ -30,9 +31,9 @@ const SORT_OPTIONS = [
 ];
 
 const CODEC_OPTIONS = [
-  { label: 'HEVC MASTER', value: 'hevc' },
-  { label: 'H264 / VR', value: 'h264' },
-  { label: 'ALL CODECS', value: 'all' },
+  { label: FORMAT_FILTER_LABELS.hevc, value: 'hevc' },
+  { label: FORMAT_FILTER_LABELS.h264, value: 'h264' },
+  { label: FORMAT_FILTER_LABELS.all, value: 'all' },
 ];
 
 function readableTag(value) {
@@ -211,7 +212,7 @@ export default function TagExplorePage() {
         <TabGroup tabs={tabs} value={contentType} onChange={setContentType} ariaLabel="Content type" />
         <div className="sx-xh-ctl-group">
           <Segmented label="RANK:" options={SORT_OPTIONS} value={sort} onChange={setSort} />
-          <Segmented label="SOURCE:" options={CODEC_OPTIONS} value={codec} onChange={setCodec} />
+          <Segmented label="FORMAT:" options={CODEC_OPTIONS} value={codec} onChange={setCodec} />
           <DensityToggle value={density} onChange={setDensity} />
         </div>
       </Toolbar>

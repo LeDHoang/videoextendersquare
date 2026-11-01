@@ -7,6 +7,7 @@ import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { ControlRailSkeleton, ReelsPlayerSkeleton } from '../components/ui/Skeleton.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { VrIcon } from '../components/icons/index.jsx';
+import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
 
 const SORTS = [
   { label: 'FOR YOU', value: 'for_you' },
@@ -21,9 +22,9 @@ const SORTS = [
 const VALID_SORTS = SORTS.map((option) => option.value);
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
-  { label: CODEC_DEFAULT, value: CODEC_DEFAULT },
-  { label: 'H264 (Browser/VR)', value: 'H264 (Browser/VR)' },
-  { label: 'ALL CODECS', value: 'ALL CODECS' },
+  { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
+  { label: FORMAT_FILTER_LABELS.h264, value: 'H264 (Browser/VR)' },
+  { label: FORMAT_FILTER_LABELS.all, value: 'ALL CODECS' },
 ];
 
 export default function ReelsPage() {
@@ -345,7 +346,7 @@ export default function ReelsPage() {
                 placeholder="Target folder…"
               />
             </div>
-            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} />
+            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} ariaLabel="Format" />
             <Button
               primary={only3d}
               onClick={toggle3d}
@@ -453,10 +454,15 @@ export default function ReelsPage() {
           <ControlRailSkeleton label="Loading reels controls" />
           <ReelsPlayerSkeleton label="Loading reels" />
         </>
+      ) : data !== null && !videos.length && deepPost ? (
+        // Opened from a link to one reel that no longer resolves: the filters are not the cause.
+        <EmptyState title="REEL NOT AVAILABLE" text="This reel may have been removed, or the link may be wrong.">
+          <Button onClick={clearDeepLink}>WATCH OTHER REELS</Button>
+        </EmptyState>
       ) : data !== null && !videos.length ? (
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
-          text="Try adjusting the folder, codec filter, or search query — or render new videos from the Video page."
+          text="Try adjusting the folder, format filter, or search query — or render new videos from the Video page."
           hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"' + (only3d ? ' media="stereo"' : '')}
         />
       ) : (

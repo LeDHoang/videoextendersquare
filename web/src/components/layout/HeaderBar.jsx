@@ -415,69 +415,66 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
               </svg>
             </button>
 
-            {/* Credits: full text on desktop, compact pill on tablet/mobile */}
+            {/* Credits: full text on desktop, compact pill on tablet/mobile. These header
+                actions are links, so they can open in a new tab and report aria-current.
+                UPLOAD is the one filled action; CREDITS and MESSAGES are outlined. */}
             {user ? (
               <>
-                <button
-                  type="button"
-                  className="sx-top-action-btn sx-desktop-only"
-                  onClick={() => navigate('/wallet')}
+                <NavLink
+                  to="/wallet"
+                  className="sx-top-action-btn sx-top-action-btn--ghost sx-desktop-only"
                   title="Open ECHO Credits wallet"
                 >
                   {wallet?.available_credits ?? '—'} CREDITS
-                </button>
-                <button
-                  type="button"
+                </NavLink>
+                <NavLink
+                  to="/wallet"
                   className="sx-top-credits-pill sx-mobile-tablet-only"
-                  onClick={() => navigate('/wallet')}
                   title="Open ECHO Credits wallet"
                   aria-label="ECHO Credits"
                 >
                   <IndustrialCreditsIcon className="sx-top-btn-svg" />
                   <span>{wallet?.available_credits ?? '—'}</span>
-                </button>
+                </NavLink>
               </>
             ) : null}
 
             {/* Upload: full text on desktop, icon button on tablet/mobile */}
-            <button
-              type="button"
+            <NavLink
+              to="/upload"
               className="sx-top-action-btn sx-desktop-only"
-              onClick={() => navigate('/upload')}
               title="Open the Upload page"
             >
               UPLOAD
-            </button>
-            <button
-              type="button"
+            </NavLink>
+            <NavLink
+              to="/upload"
               className="sx-top-icon-btn sx-mobile-tablet-only"
-              onClick={() => navigate('/upload')}
               title="Upload Video or Image"
               aria-label="Upload"
             >
               <IndustrialUploadIcon className="sx-top-btn-svg" />
-            </button>
+            </NavLink>
 
             {/* Messages: full text on desktop, icon with badge on tablet/mobile */}
             {user ? (
               <>
-                <button
-                  type="button"
-                  className="sx-top-action-btn sx-message-nav-btn sx-desktop-only"
-                  onClick={() => navigate('/messages')}
+                <NavLink
+                  to="/messages"
+                  className="sx-top-action-btn sx-top-action-btn--ghost sx-message-nav-btn sx-desktop-only"
                   title="Open messages"
+                  aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : undefined}
                 >
                   <span className="sx-message-nav-label">MESSAGES</span>
                   {messaging.unread.total ? (
                     <span className="sx-message-nav-badge"><span>{messaging.unread.total}</span></span>
                   ) : null}
-                </button>
-                <button
-                  type="button"
+                </NavLink>
+                <NavLink
+                  to="/messages"
                   className="sx-top-icon-btn sx-top-icon-btn--badge sx-mobile-tablet-only"
-                  onClick={() => navigate('/messages')}
                   title="Open messages"
-                  aria-label="Messages"
+                  aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
                 >
                   <IndustrialMessageIcon className="sx-top-btn-svg" />
                   {messaging.unread.total ? (
@@ -485,7 +482,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                       {messaging.unread.total > 99 ? '99+' : messaging.unread.total}
                     </span>
                   ) : null}
-                </button>
+                </NavLink>
               </>
             ) : null}
 

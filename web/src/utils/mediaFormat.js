@@ -22,6 +22,15 @@ export function formatResolution(width, height) {
   return w > 0 && h > 0 ? `${w}×${h}` : '';
 }
 
+// User-facing names for the format filter (HEVC master / H.264 rendition / both),
+// shared so Reels, Explore, tag and location pages say the same thing.
+// reels.html names PLAYS EVERYWHERE in its unsupported-format message.
+export const FORMAT_FILTER_LABELS = {
+  hevc: 'BEST QUALITY',
+  h264: 'PLAYS EVERYWHERE',
+  all: 'ALL FORMATS',
+};
+
 // Image posts stay on screen this long in the player unless they set dwell_ms.
 export const IMAGE_POST_DWELL_MS = 15000;
 

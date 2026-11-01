@@ -4369,6 +4369,7 @@ body.sx-vr-active .sx-reels-mount,
   box-sizing: border-box;
   vertical-align: middle;
   align-self: center;
+  text-decoration: none;
 }
 
 .sx-top-action-btn:hover {
@@ -4379,6 +4380,23 @@ body.sx-vr-active .sx-reels-mount,
 .sx-top-action-btn:hover,
 .sx-top-action-btn:focus-visible {
   box-shadow: 0 0 12px var(--sx-accent-glow);
+}
+
+/* Secondary header actions (CREDITS, MESSAGES): outlined like the tablet/phone
+   header buttons, so UPLOAD stays the one filled action in the header. */
+.sx-top-action-btn--ghost {
+  background: var(--sx-surface-2);
+  border: 1px solid var(--sx-rule-strong);
+  color: var(--sx-ink);
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.sx-top-action-btn--ghost:hover {
+  opacity: 1;
+  background: var(--sx-surface-hover);
+  border-color: var(--sx-accent);
+  color: var(--sx-accent);
+  box-shadow: none;
 }
 
 .sx-top-action-btn.sx-message-nav-btn {
@@ -4401,6 +4419,12 @@ body.sx-vr-active .sx-reels-mount,
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0;
+}
+
+/* On the outlined button the unread count is the only accent, as on the phone badge. */
+.sx-top-action-btn--ghost.sx-message-nav-btn .sx-message-nav-badge {
+  background: var(--sx-accent);
+  color: var(--sx-on-accent);
 }
 
 /* Trim both texts to cap height so the label and the count centre on the same
@@ -4480,6 +4504,7 @@ body.sx-vr-active .sx-reels-mount,
   flex-shrink: 0;
   box-sizing: border-box;
   align-self: center;
+  text-decoration: none;
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
@@ -4530,6 +4555,7 @@ body.sx-vr-active .sx-reels-mount,
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
+  text-decoration: none;
   padding: 0 8px;
   cursor: pointer;
   flex-shrink: 0;
