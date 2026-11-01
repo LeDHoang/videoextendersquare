@@ -558,7 +558,8 @@ describe('PackPage', () => {
       fireEvent.mouseDown(document.querySelector('.sx-pk-modal'));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       open();
-      fireEvent.mouseDown(screen.getByRole('dialog'));
+      // The <dialog> is the backdrop; a press inside the panel keeps it open.
+      fireEvent.mouseDown(document.querySelector('.sx-pk-dialog'));
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       fireEvent.change(screen.getByLabelText('Report details'), { target: { value: 'draft text' } });
       fireEvent.keyDown(document, { key: 'Escape' });

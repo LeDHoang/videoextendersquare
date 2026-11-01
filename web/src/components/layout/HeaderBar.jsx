@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
+import IconButton from '../ui/IconButton.jsx';
 import {
   IndustrialUploadIcon,
   IndustrialMessageIcon,
@@ -324,19 +325,18 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
     >
       {mobileSearchOpen ? (
         <div className="sx-mobile-search-row" ref={searchBoxRef}>
-          <button
-            type="button"
+          <IconButton
             className="sx-mobile-search-back-btn"
             onClick={() => {
               setMobileSearchOpen(false);
               setSearchOpen(false);
               setActiveIndex(-1);
             }}
-            aria-label="Close search"
+            label="Close search"
             title="Close Search"
           >
             ←
-          </button>
+          </IconButton>
           <div className="sx-command-box sx-command-box--mobile-active sx-command-box--open">
             <span className="sx-command-icon" aria-hidden="true">⌕</span>
             <input
@@ -378,11 +378,11 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
       ) : (
         <>
           <div className="sx-top-left">
-            <button type="button" className="sx-icon-btn" onClick={onToggleSidebar} title="Open/Close Sidebar" aria-label="Toggle Sidebar" aria-expanded={sidebarOpen}>
+            <IconButton onClick={onToggleSidebar} title="Open/Close Sidebar" label="Toggle Sidebar" aria-expanded={sidebarOpen}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
-            </button>
+            </IconButton>
             <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
               <AnimatedEchoLogo className="sx-top-logo" title="ECHO Logo" />
               <span>ECHO</span>
@@ -426,21 +426,20 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
 
           <div className="sx-top-right">
             {/* Mobile-only Search Trigger Button */}
-            <button
-              type="button"
-              className="sx-top-icon-btn sx-top-search-trigger"
+            <IconButton
+              className="sx-top-search-trigger"
               onClick={() => {
                 setMobileSearchOpen(true);
                 setSearchOpen(true);
               }}
               title="Search"
-              aria-label="Open Search"
+              label="Open Search"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6" />
                 <path d="M15 15l5 5" />
               </svg>
-            </button>
+            </IconButton>
 
             {/* Right-side actions, in this order: UPLOAD (the one filled action), credits,
                 messages, then the account avatar. They are links, so they can open in a new
@@ -452,14 +451,16 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             >
               UPLOAD
             </NavLink>
-            <NavLink
+            <IconButton
+              as={NavLink}
               to="/upload"
-              className="sx-top-icon-btn sx-top-icon-btn--primary sx-mobile-tablet-only"
+              variant="primary"
+              className="sx-mobile-tablet-only"
               title="Upload Video or Image"
-              aria-label="Upload"
+              label="Upload"
             >
               <IndustrialUploadIcon className="sx-top-btn-svg" />
-            </NavLink>
+            </IconButton>
 
             {user ? (
               <>
@@ -472,11 +473,11 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                   <span>{wallet?.available_credits ?? '—'}</span>
                   <IndustrialCreditsIcon className="sx-top-btn-svg" />
                 </NavLink>
-                <NavLink
+                <IconButton
+                  as={NavLink}
                   to="/messages"
-                  className="sx-top-icon-btn sx-top-icon-btn--badge"
                   title="Open messages"
-                  aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
+                  label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
                 >
                   <IndustrialMessageIcon className="sx-top-btn-svg" />
                   {messaging.unread.total ? (
@@ -484,7 +485,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                       {messaging.unread.total > 99 ? '99+' : messaging.unread.total}
                     </span>
                   ) : null}
-                </NavLink>
+                </IconButton>
               </>
             ) : null}
 
@@ -494,15 +495,15 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                 <span className="sx-account-loading">…</span>
               ) : user ? (
                 <>
-                  <button
-                    type="button"
+                  <IconButton
+                    variant="plain"
                     className="sx-account-trigger"
                     onClick={() => setAccountOpen((open) => !open)}
                     aria-expanded={accountOpen}
-                    aria-label="Open account menu"
+                    label="Open account menu"
                   >
                     <AccountAvatar user={user} />
-                  </button>
+                  </IconButton>
                   {accountOpen ? (
                     <div className="sx-account-popover">
                       <div className="sx-account-popover-head">

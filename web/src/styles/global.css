@@ -2357,13 +2357,13 @@ button:hover .sx-sidebar-hero-logo,
               box-shadow var(--sx-duration-fast) var(--sx-ease-out);
 }
 
-.sx-btn:hover:not(:disabled) {
+.sx-btn:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--sx-ink);
   background: var(--sx-surface-hover);
   transform: translateY(-1px);
 }
 
-.sx-btn:active:not(:disabled) {
+.sx-btn:active:not(:disabled, [aria-disabled='true']) {
   transform: translateY(0);
 }
 
@@ -2380,7 +2380,7 @@ button:hover .sx-sidebar-hero-logo,
   box-shadow: var(--sx-glow-accent);
 }
 
-.sx-btn.sx-primary:hover:not(:disabled) {
+.sx-btn.sx-primary:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--sx-accent-hi);
   border-color: var(--sx-accent-hi);
   box-shadow: var(--sx-glow-accent-strong);
@@ -2391,7 +2391,7 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-danger-hi);
 }
 
-.sx-btn.sx-danger:hover:not(:disabled) {
+.sx-btn.sx-danger:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--sx-danger-hi);
   background: var(--sx-danger-dim);
 }
@@ -2408,11 +2408,89 @@ button:hover .sx-sidebar-hero-logo,
   }
 }
 
-.sx-btn:disabled {
+/* A Button with disabledReasons uses aria-disabled so it stays focusable; it looks the same. */
+.sx-btn:disabled,
+.sx-btn[aria-disabled='true'] {
   opacity: var(--sx-opacity-disabled, 0.4);
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+/* The opacity dims its focus ring too: an accent ring drops to 1.7:1, an ink ring keeps 3.5:1. */
+.sx-btn[aria-disabled='true']:focus-visible {
+  outline-color: var(--sx-ink);
+}
+
+/* Icon-only buttons (components/ui/IconButton.jsx): a 44px box. Where a context draws the
+   box smaller, ::after still gives a 44px hit area around it. */
+.sx-icon-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: var(--sx-control-h-lg);
+  height: var(--sx-control-h-lg);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sx-ink);
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--sx-duration-fast) var(--sx-ease-out),
+              border-color var(--sx-duration-fast) var(--sx-ease-out),
+              color var(--sx-duration-fast) var(--sx-ease-out);
+}
+
+.sx-icon-button::after {
+  content: '';
+  position: absolute;
+  inset: min(0px, (100% - var(--sx-control-h-lg)) / 2);
+}
+
+.sx-icon-button:disabled {
+  opacity: var(--sx-opacity-disabled);
+  cursor: not-allowed;
+}
+
+.sx-icon-button--outline {
+  background: var(--sx-bg);
+  border-color: var(--sx-rule-strong);
+}
+
+.sx-icon-button--outline:hover:not(:disabled) {
+  background: var(--sx-surface-hover);
+  border-color: var(--sx-accent);
+  color: var(--sx-accent);
+}
+
+.sx-icon-button--primary {
+  background: var(--sx-accent);
+  border-color: var(--sx-accent);
+  color: var(--sx-on-accent);
+}
+
+.sx-icon-button--primary:hover:not(:disabled) {
+  background: var(--sx-accent-hi);
+  border-color: var(--sx-accent-hi);
+}
+
+/* On the accent fill an icon's own accent parts would vanish: draw it in one colour,
+   near-black, as text on the accent is. */
+.sx-icon-button--primary svg [stroke] {
+  stroke: currentColor;
+}
+
+.sx-icon-button--primary svg [fill]:not([fill='none']) {
+  fill: currentColor;
+}
+
+.sx-icon-button--plain {
+  border: 0;
 }
 
 /* Segmented control */
@@ -4241,7 +4319,7 @@ body.sx-vr-active .sx-reels-mount,
   position: relative;
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: var(--sx-control-h-lg);
   display: flex;
   align-items: center;
   background: var(--sx-surface-2);
@@ -4277,6 +4355,7 @@ body.sx-vr-active .sx-reels-mount,
   line-height: 34px;
   padding: 0 8px;
   outline: none;
+  text-overflow: ellipsis;
 }
 
 .sx-command-input::placeholder {
@@ -4359,8 +4438,7 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-top-action-btn {
-  height: 36px;
-  max-height: 36px;
+  height: var(--sx-control-h-lg);
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   font-family: 'Archivo Black', Archivo, sans-serif;
@@ -4399,36 +4477,6 @@ body.sx-vr-active .sx-reels-mount,
   gap: var(--sx-2);
 }
 
-.sx-icon-btn {
-  height: 36px;
-  width: 36px;
-  min-width: 36px;
-  max-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  /* Outlined like the other header icon buttons; UPLOAD is the one filled button. */
-  background: var(--sx-bg);
-  border: 1px solid var(--sx-rule-strong);
-  border-radius: 0;
-  color: var(--sx-ink);
-  cursor: pointer;
-  font-family: 'Archivo Black', Archivo, sans-serif;
-  font-size: 0.95rem;
-  font-weight: 900;
-  line-height: 1;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  align-self: center;
-}
-
-.sx-icon-btn:hover {
-  background: var(--sx-surface-hover);
-  border-color: var(--sx-accent);
-  color: var(--sx-accent);
-}
-
 /* Responsive visibility utilities */
 .sx-desktop-only {
   display: inline-flex !important;
@@ -4440,60 +4488,9 @@ body.sx-vr-active .sx-reels-mount,
   display: none !important;
 }
 
-/* Brutalist Header Icon Buttons (for mobile & tablet) */
-.sx-top-icon-btn {
-  position: relative;
-  height: 36px;
-  width: 36px;
-  min-width: 36px;
-  max-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--sx-bg);
-  border: 1px solid var(--sx-rule-strong);
-  color: var(--sx-ink);
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  align-self: center;
-  text-decoration: none;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.sx-top-icon-btn:hover {
-  background: var(--sx-surface-hover);
-  border-color: var(--sx-accent);
-  color: var(--sx-accent);
-}
-
-/* UPLOAD as an icon (tablet/phone): filled like the desktop UPLOAD, the one filled action. */
-.sx-top-icon-btn--primary {
-  background: var(--sx-accent);
-  border-color: var(--sx-accent);
-  color: var(--sx-on-accent);
-}
-
-.sx-top-icon-btn--primary:hover {
-  background: var(--sx-accent-hi);
-  border-color: var(--sx-accent-hi);
-  color: var(--sx-on-accent);
-}
-
-/* On the vermilion fill the icon's own vermilion parts would vanish: draw it
-   in one colour, near-black, as text on vermilion is. */
-.sx-top-icon-btn--primary .sx-top-btn-svg [stroke] {
-  stroke: currentColor;
-}
-
-.sx-top-icon-btn--primary .sx-top-btn-svg [fill]:not([fill='none']) {
-  fill: currentColor;
-}
-
 /* The header icons are outline drawings with their own colours (ink lines, one
    vermilion detail); no fill override, or their closed shapes flood solid. */
-.sx-top-icon-btn .sx-top-btn-svg {
+.sx-icon-button .sx-top-btn-svg {
   width: 20px;
   height: 20px;
   display: block;
@@ -4521,8 +4518,7 @@ body.sx-vr-active .sx-reels-mount,
 
 /* Credits: the balance, then the credit icon, on a black fill. */
 .sx-top-credits-pill {
-  height: 36px;
-  max-height: 36px;
+  height: var(--sx-control-h-lg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4570,25 +4566,8 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-mobile-search-back-btn {
-  height: 36px;
-  width: 36px;
-  min-width: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   background: var(--sx-surface-2);
-  border: 1px solid var(--sx-rule-strong);
-  color: var(--sx-ink);
-  cursor: pointer;
   font-size: 1.15rem;
-  line-height: 1;
-  flex-shrink: 0;
-  transition: border-color 150ms ease, color 150ms ease;
-}
-
-.sx-mobile-search-back-btn:hover {
-  border-color: var(--sx-accent);
-  color: var(--sx-accent);
 }
 
 .sx-command-box.sx-command-box--mobile-active {
@@ -4693,31 +4672,15 @@ body.sx-vr-active .sx-reels-mount,
     display: inline-flex !important;
   }
 
-  /* Strict consistent height for EVERY interactive element in mobile top bar */
-  .sx-icon-btn,
-  .sx-top-search-trigger,
-  .sx-top-icon-btn,
-  .sx-top-credits-pill,
-  .sx-account-trigger,
-  .sx-mobile-search-back-btn {
-    height: 38px !important;
-    min-height: 38px !important;
-    max-height: 38px !important;
-    box-sizing: border-box !important;
-    align-self: center !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+  /* Phones: 38px boxes, so the five controls fit at 360px wide. Each icon button's
+     ::after keeps its hit area at 44px. */
+  .sx-top-bar .sx-icon-button {
+    width: var(--sx-control-h);
+    height: var(--sx-control-h);
   }
 
-  .sx-icon-btn,
-  .sx-top-search-trigger,
-  .sx-top-icon-btn,
-  .sx-account-trigger,
-  .sx-mobile-search-back-btn {
-    width: 38px !important;
-    min-width: 38px !important;
-    max-width: 38px !important;
+  .sx-top-credits-pill {
+    height: var(--sx-control-h);
   }
 
   .sx-top-bar .sx-account-avatar {
@@ -5578,37 +5541,9 @@ button.sx-explore-loc-link:hover {
   align-self: center;
 }
 
-.sx-account-trigger {
-  min-width: 0;
-  height: auto;
-  display: inline-grid;
-  place-items: center;
-  border: none;
-  background: transparent;
-  color: var(--sx-ink);
-  cursor: pointer;
-  padding: 0;
-}
-
-.sx-top-bar .sx-account-trigger {
-  height: 36px;
-  width: 36px;
-  min-width: 36px;
-  max-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  padding: 0;
-  cursor: pointer;
-  box-sizing: border-box;
-  align-self: center;
-}
-
 .sx-top-bar .sx-account-avatar {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   box-sizing: border-box;
 }
@@ -5775,10 +5710,30 @@ button.sx-explore-loc-link:hover {
   padding: var(--sx-5);
 }
 
+/* ui/Dialog.jsx: the native <dialog> is the full-screen backdrop (.sx-modal-backdrop or
+   .sx-pk-modal paints it) and opens in the top layer, so it needs no z-index. Undo the
+   browser's own box for <dialog>. */
+.sx-dialog {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+}
+
+.sx-dialog:not([open]) {
+  display: none;
+}
+
+.sx-dialog::backdrop {
+  background: transparent;
+}
+
 .sx-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1300;
   display: grid;
   place-items: center;
   padding: var(--sx-4);
@@ -6410,11 +6365,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
     min-width: 34px;
     padding: 0 7px;
     font-size: var(--sx-t-eyebrow);
-  }
-
-  .sx-account-trigger {
-    min-width: 0;
-    width: auto;
   }
 
   .sx-account-avatar:not(.sx-top-bar *) {
@@ -7356,10 +7306,6 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 
 .sx-message-dock .sx-message-bubble { max-width: 88%; }
 .sx-message-dock .sx-message-hint-keys { display: none; }
-
-.sx-share-backdrop {
-  z-index: 100;
-}
 
 .sx-share-dialog {
   width: min(820px, calc(100vw - 28px));
@@ -10152,7 +10098,6 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-modal {
   position: fixed;
   inset: 0;
-  z-index: 200;
   display: grid;
   place-items: center;
   padding: var(--sx-4);
@@ -10167,10 +10112,6 @@ a.sx-xh-btn { text-decoration: none; }
   /* --pk-panel exists only inside .sx-pk; the dialog also opens on profile and moderation pages. */
   background: var(--pk-panel, var(--sx-surface));
   box-shadow: var(--sx-shadow-popover);
-}
-
-.sx-pk-dialog:focus {
-  outline: none;
 }
 
 .sx-pk-dialog > header {
@@ -11986,7 +11927,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   box-shadow: 0 0 28px var(--sx-accent-border);
 }
 
-.sx-studio-render:disabled {
+.sx-studio-render:disabled,
+.sx-studio-render[aria-disabled='true'] {
   box-shadow: none;
 }
 
@@ -12105,7 +12047,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
     border-color: Highlight;
   }
 
-  .sx-btn:disabled {
+  .sx-btn:disabled,
+  .sx-btn[aria-disabled='true'] {
     border-color: GrayText;
     color: GrayText;
   }

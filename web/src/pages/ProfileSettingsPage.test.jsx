@@ -280,6 +280,20 @@ describe('ProfileSettingsPage', () => {
     expect(mocks.api.delete).not.toHaveBeenCalled();
   });
 
+  it('opens the confirmation on the safe choice; Escape closes it and deletes nothing', () => {
+    renderPage();
+    const submit = armDelete();
+    submit.focus();
+    fireEvent.click(submit);
+    const dialog = screen.getByRole('alertdialog', { name: /DELETE @/ });
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(within(dialog).getByRole('button', { name: 'CANCEL, KEEP MY ACCOUNT' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(submit).toHaveFocus();
+    expect(mocks.api.delete).not.toHaveBeenCalled();
+  });
+
   it('stays on the page and explains a wrong password without signing the user out', async () => {
     mocks.api.delete.mockRejectedValue(new Error('Current password is incorrect.'));
     renderPage();

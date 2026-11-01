@@ -127,10 +127,10 @@ export function ResultHeader({ title, meta }) {
   );
 }
 
-export function GatedReason({ children }) {
+export function GatedReason({ id, children }) {
   return (
-    <div className="sx-gated-reason" role="status">
-      <span>⚠</span>
+    <div id={id} className="sx-gated-reason" role="status">
+      <span aria-hidden="true">⚠</span>
       <span>{children}</span>
     </div>
   );

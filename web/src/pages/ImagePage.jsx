@@ -336,10 +336,14 @@ export default function ImagePage() {
               byokOnly={byokOnly}
             />
 
-            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-
             <div style={{ marginTop: 'var(--sx-2)' }}>
-              <Button primary disabled={disabled} loading={busy} onClick={render}>
+              <Button
+                primary
+                disabled={disabled}
+                disabledReasons={[blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES']}
+                loading={busy}
+                onClick={render}
+              >
                 {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}IMAGE(S) 4K SQUARE`}
               </Button>
             </div>

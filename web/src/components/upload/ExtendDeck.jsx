@@ -384,11 +384,17 @@ export function ExecuteSection({
         quoteState={funding.quoteState}
         byokOnly={funding.byokOnly}
       />
-      {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-      {!blocked.length && cfg.kind === 'video' && cfg.studioPicked && !studioOk ? (
-        <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-      ) : null}
-      <Button primary className="sx-studio-render" disabled={disabled} loading={busy} onClick={onRender}>
+      <Button
+        primary
+        className="sx-studio-render"
+        disabled={disabled}
+        disabledReasons={[
+          blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES',
+          !blocked.length && cfg.kind === 'video' && cfg.studioPicked && !studioOk && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
+        ]}
+        loading={busy}
+        onClick={onRender}
+      >
         {funding.quoteStale ? '↻ RETRY QUOTE & RENDER' : label}
       </Button>
       {error ? (

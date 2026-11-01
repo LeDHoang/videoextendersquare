@@ -6,6 +6,8 @@ import { DensityToggle, gridClassName, useGridDensity } from '../components/expl
 import PackTile, { packCoverMembers } from '../components/packs/PackTile.jsx';
 import ReportDialog from '../components/ReportDialog.jsx';
 import { Button, Field } from '../components/ui/controls.jsx';
+import Dialog from '../components/ui/Dialog.jsx';
+import IconButton from '../components/ui/IconButton.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState, Mono } from '../components/ui/primitives.jsx';
@@ -83,11 +85,11 @@ function PeopleDialog({ title, username, kind, onClose }) {
   }, [load]);
 
   return (
-    <div className="sx-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sx-people-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+    <Dialog className="sx-modal-backdrop" aria-label={title} onClose={onClose}>
+      <section className="sx-people-dialog">
         <div className="sx-people-dialog-head">
           <strong>{title}</strong>
-          <button type="button" onClick={onClose} aria-label="Close">×</button>
+          <IconButton variant="plain" label="Close" data-dialog-close onClick={onClose}>×</IconButton>
         </div>
         <div className="sx-people-list">
           {rows === null ? <span>LOADING…</span> : rows.map((person) => (
@@ -104,7 +106,7 @@ function PeopleDialog({ title, username, kind, onClose }) {
           ) : null}
         </div>
       </section>
-    </div>
+    </Dialog>
   );
 }
 
@@ -581,11 +583,11 @@ export default function ProfilePage() {
           )}
 
           {editing ? (
-            <div className="sx-modal-backdrop" role="presentation" onMouseDown={() => setEditing(null)}>
-              <section className="sx-people-dialog sx-post-editor" role="dialog" aria-modal="true" aria-label="Edit post" onMouseDown={(event) => event.stopPropagation()}>
+            <Dialog className="sx-modal-backdrop" aria-label="Edit post" onClose={() => setEditing(null)}>
+              <section className="sx-people-dialog sx-post-editor">
                 <div className="sx-people-dialog-head">
                   <strong>EDIT POST</strong>
-                  <button type="button" onClick={() => setEditing(null)} aria-label="Close">×</button>
+                  <IconButton variant="plain" label="Close" data-dialog-close onClick={() => setEditing(null)}>×</IconButton>
                 </div>
                 <div className="sx-post-editor-fields">
                   <Field label="TITLE">
@@ -603,7 +605,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </section>
-            </div>
+            </Dialog>
           ) : null}
 
           {reportOpen ? (

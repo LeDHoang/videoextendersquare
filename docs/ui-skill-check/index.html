@@ -1373,7 +1373,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
     <p><strong>Also fixed:</strong> on tablet and phone, a <code>fill: currentColor</code> rule flooded the closed shapes of the outline icons, so the credit coin and the envelope showed as solid blobs (see the 768px "before"). The icons now keep their own outline colours. Only the red UPLOAD icon is recoloured, to the on-accent ink.</p>
     <p>Measured at 1280px: UPLOAD 88×36, credits 51×36, messages 36×36 with an 18×18 badge, then the avatar, in that order. A new test in <code>HeaderBar.test.jsx</code> checks the order (/upload, /wallet, /messages), that UPLOAD is not in the nav, and the two accessible names. The CSS for the old ghost text buttons is removed.</p>
-    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton). <strong>Since done:</strong> fix <a href="#fix-50">50</a> makes the hamburger plain, keeps the avatar accent (your choice), and takes COMPARE out of the nav.</p>
+    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton). <strong>Since done:</strong> fix <a href="#fix-50">50</a> makes the hamburger plain, keeps the avatar accent (your choice), and takes COMPARE out of the nav. Fix <a href="#fix-52">52</a> makes the header icon buttons 44px.</p>
     <figure>
       <img src="img/fix47-header-1280-before.jpg" alt="Header at 1280px before: nav REELS/VR, EXPLORE, UPLOAD, COMPARE; then 0 CREDITS outlined, UPLOAD filled, MESSAGES outlined with a 1 badge." loading="lazy">
       <figcaption>Before, 1280px: UPLOAD in the nav and as the button.</figcaption>
@@ -1404,7 +1404,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Fix:</strong> <code>AccountAvatar</code> in <code>HeaderBar.jsx</code> measures the initials' ink once the web font has loaded (canvas <code>measureText</code> at 100× size, so the bounds are precise to about 0.01px). It then shifts them by the difference, for example 0.32px right for "WE". The same avatar is used in the header search results, so those initials are centred too. In a browser without <code>document.fonts</code> nothing moves.</p>
     <p><strong>Measured</strong> on the rendered pixels, against the exact centre of the disc: "WE" and three other pairs that skew either way (LA, KW, JO) are all 0.00px off, horizontally and vertically, at 1x and 2x, at 1280 and 375px. Before, "WE" was 0.25–0.5px left in the same check. At 1280px the order is UPLOAD 88×36, credits 54×36, messages 36×36, then the avatar. The search box shifts left into the space COMPARE left. At 375px the credits button is still hidden, as before.</p>
     <p><strong>Tests:</strong> <code>HeaderBar.test.jsx</code> checks that the nav is exactly REELS/VR and EXPLORE. A new test fakes the font and the canvas measurement and checks that the initials shift by the measured amount (0.32px for "WE").</p>
-    <p><strong>Not changed:</strong> button sizes. The hamburger and the icon buttons are still under the 44px target (Phase 2 IconButton).</p>
+    <p><strong>Not changed:</strong> button sizes. The hamburger and the icon buttons are still under the 44px target (Phase 2 IconButton). <strong>Since done:</strong> 44px in fix <a href="#fix-52">52</a>.</p>
     <figure>
       <img src="img/fix50-header-1280-before.jpg" alt="Header at 1280px before: a red-filled hamburger, nav REELS/VR, EXPLORE, COMPARE, then UPLOAD, credits, messages and a red avatar circle with WE." loading="lazy">
       <figcaption>Before, 1280px: red hamburger, COMPARE in the nav.</figcaption>
@@ -1513,7 +1513,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 
   <section class="attempt" id="fix-33">
     <h4>Fix 33 · Not attempted · Phase 2 primitives</h4>
-    <p>The Button / IconButton / FormField primitives in the table below are a new component layer that every page would migrate to. This pass only made local fixes on the screens with findings (inline errors with <code>aria-describedby</code> and disabled-reason text on the forms; see the forms finding), without adding the shared primitives.</p>
+    <p>The Button / IconButton / FormField primitives in the table below are a new component layer that every page would migrate to. This pass only made local fixes on the screens with findings (inline errors with <code>aria-describedby</code> and disabled-reason text on the forms; see the forms finding), without adding the shared primitives. <strong>Since done:</strong> Dialog, IconButton, FormField and the Button's disabled reasons in fix <a href="#fix-52">52</a>.</p>
   </section>
 
 
@@ -1585,7 +1585,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
           <tr><td style="white-space:nowrap">Hex colours</td><td>72</td><td>53</td><td rowspan="2">37 are pure white or black. Black sits behind video and iframes. White is used for text over photos and video on Explore cards, the sidebar buttons' hover, the QR code's backing and some studio labels. Neither colour is a token (ink is <code>#f2f3f5</code>), so each one needs a choice: move to ink, which is a visible change, or add a media token. The rest are one-off shades with no token.</td></tr>
           <tr><td style="white-space:nowrap"><code>rgb()</code>/<code>rgba()</code></td><td>98</td><td>48</td></tr>
           <tr><td style="white-space:nowrap"><code>!important</code></td><td>163</td><td>163</td><td>Each one has to be checked against the specificity it fights, so none is mechanical.</td></tr>
-          <tr><td style="white-space:nowrap">z-index<br>off the scale</td><td>29</td><td>28</td><td>The share and pack dialogs sit under the 1000 top bar, while the phone tab bar is at 100000. That layering moves to one modal layer with the Dialog primitive, where it can be checked on screen.</td></tr>
+          <tr><td style="white-space:nowrap">z-index<br>off the scale</td><td>29</td><td>28</td><td>The share and pack dialogs sit under the 1000 top bar, while the phone tab bar is at 100000. That layering moves to one modal layer with the Dialog primitive, where it can be checked on screen. <strong>Since done:</strong> fix <a href="#fix-52">52</a>.</td></tr>
           <tr><td style="white-space:nowrap"><code>outline: none</code></td><td>15</td><td>15</td><td>Audited in <a href="#fix-38">fix 38</a>: each one sits beside its own focus style.</td></tr>
         </tbody>
       </table>
@@ -1625,6 +1625,117 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <figcaption>After: the same pixels. 0 of the capture's 1,152,000 pixels differ.</figcaption>
       </figure>
     </div>
+  </section>
+
+  <section class="attempt" id="fix-52">
+    <h4>Fix 52 · Follow-up fix · Phase 2 primitives: Dialog, IconButton, FormField and the Button's disabled reasons, verified locally (five dialogs at 1280 and 375px, the header at nine widths, the blocked share button)</h4>
+    <p>Four shared components in <code>web/src/components/ui/</code>, with the screens that had their own copies moved onto them.</p>
+
+    <p><strong>Dialog</strong> (<code>Dialog.jsx</code>) is a native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>:</p>
+    <ul>
+      <li>It opens in the browser's top layer, so it sits above the 1000 top bar and the phone tab bar with no z-index. The page behind it is inert: Tab cannot reach it and screen readers do not read it.</li>
+      <li>On open, focus goes to the control marked <code>data-autofocus</code>. Without one, it goes to the first control that is not the close button, or to the close button if there is nothing else.</li>
+      <li>Escape, the browser's own close request and a press on the dimmed backdrop all call <code>onClose</code>. While the dialog is busy (a report being sent), none of them close it.</li>
+      <li>Tab wraps from the last control to the first and back. On close, focus returns to the button that opened it.</li>
+    </ul>
+    <p>The report dialog (so also the staff action and pack dialogs, which use it), share, followers/following, edit post and the delete-account confirmation now use it. The hand-written focus traps in the report and share dialogs are gone, and so are the z-index 1300 and 200 that kept the share and pack dialogs under the top bar.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Dialog</th><th scope="col">Before</th><th scope="col">After (1280 and 375px)</th></tr></thead>
+        <tbody>
+          <tr><td>Share</td><td>At 375px the top bar covered the title and the close button.</td><td rowspan="5">A native modal; focus starts inside; Tab escapes 0; Escape closes it and focus returns to the opener.</td></tr>
+          <tr><td>Edit post</td><td>Focus stayed on the EDIT button behind it. On 6 of 12 Tab presses, focus was outside the dialog. Escape did nothing.</td></tr>
+          <tr><td>Followers</td><td>Focus stayed on the FOLLOWERS stat. Outside on 11 of 12 Tab presses. Escape did nothing.</td></tr>
+          <tr><td>Delete account</td><td>Outside on 11 of 12 Tab presses. Escape did nothing.</td></tr>
+          <tr><td>Report</td><td>Already correct (it was the model for the primitive).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Each panel keeps its exact box: the same position and size at both widths, read from the page before and after.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix52-share-375-before.jpg" alt="Share dialog at 375px before: the ECHO top bar with its search, upload, messages and avatar buttons sits over the top of the dialog, hiding the SHARE REEL title and the close button." loading="lazy" style="max-width:340px">
+        <figcaption>Before, 375px: the top bar covers the dialog's title and close button.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix52-share-375-after.jpg" alt="The same share dialog after: SHARE REEL, the reel title and the close button are visible at the top; the top bar is behind the dim backdrop." loading="lazy" style="max-width:340px">
+        <figcaption>After: the dialog is above everything, close button included.</figcaption>
+      </figure>
+    </div>
+
+    <p><strong>IconButton</strong> (<code>IconButton.jsx</code>) needs a <code>label</code>, which is also its tooltip unless a <code>title</code> is given. It has three looks (outline, primary, plain) and can render a link (<code>as={NavLink}</code>). The box is 44px. Where a screen draws it smaller, an invisible <code>::after</code> still gives it a 44px hit area.</p>
+    <ul>
+      <li>All six header icon controls use it: hamburger, search, the phone search's back button, upload, messages and the account avatar. The UPLOAD and credits buttons and the search box are now 44px tall too.</li>
+      <li>From 641px up, every one is 44×44 (was 36–38px).</li>
+      <li>At 640px and below the boxes stay 38px, in the same places, so the bar still fits at 320px. Each has a 44px hit area there, checked at 640, 414, 390, 375, 360 and 320px. No width scrolls sideways.</li>
+      <li>The avatar picture is 40px inside the 44px button (was 32px).</li>
+      <li>The close buttons in the five dialogs above use it too. They keep their size on screen and gain the hit area.</li>
+    </ul>
+    <p>The 11 <code>!important</code> rules that used to size the phone header are replaced by two plain rules.</p>
+    <figure>
+      <img src="img/fix52-header-compare.jpg" alt="Header strips in pairs, before then after, at 1280, 768 and 375px. At 1280 and 768 the hamburger, upload, credits, messages and avatar buttons are visibly larger after. At 375 the two strips are the same." loading="lazy">
+      <figcaption>Each pair is before, then after, at 1280, 768 and 375px. At 375px nothing moves; only the tap areas grow.</figcaption>
+    </figure>
+
+    <p><strong>FormField</strong> (<code>FormField.jsx</code>) renders the label (with an optional note on the right), the control, an optional hint and an optional error. It links them for you:</p>
+    <ul>
+      <li>The label points at the control.</li>
+      <li>The control is described by the hint and the error.</li>
+      <li>The control is <code>aria-invalid</code> while there is an error.</li>
+    </ul>
+    <p>A control wrapped in other markup, such as an input with a SHOW button beside it, takes these props through a function. The support form, every field in profile settings and the wallet's Fal key now use it. Three hand-rolled copies are gone: the support form's <code>Field</code>, and settings' <code>FieldRow</code>, <code>FieldError</code> and <code>fieldErrorProps</code>. Two changes you can hear or see:</p>
+    <ul>
+      <li>The wallet's "Keys are at least 8 characters" hint was visible but not linked; the key field is now described by it.</li>
+      <li>In settings, the bio's error now shows under the preview or tip instead of between the box and the preview.</li>
+    </ul>
+
+    <p><strong>Button</strong> takes <code>disabledReasons</code>, a list of reasons it is blocked:</p>
+    <ul>
+      <li>The reasons show above the button, as the warning lines did before, and describe it.</li>
+      <li>A blocked button with reasons uses <code>aria-disabled</code> instead of <code>disabled</code>. So keyboard and screen-reader users can Tab to it and hear why, and a click does nothing.</li>
+      <li>With no reason listed, for example while a 3D job is running, it stays plainly disabled.</li>
+      <li>While <code>loading</code>, it is <code>aria-busy</code>.</li>
+    </ul>
+    <p>The Upload share and render buttons and the Image and Video render buttons use it. On /upload with the title cleared, Tab from the title used to go past SHARE REEL TO UPLOADS to the footer links. Now it stops on the button, which reads "TITLE IS REQUIRED BEFORE SHARING".</p>
+    <p>The button's 40% opacity also dims its focus ring: the accent ring drops to 1.7:1 against the page. A blocked button therefore gets an ink ring, which keeps 3.5:1 at that opacity.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix52-button-before.jpg" alt="Upload's SHARE section before: the warning TITLE IS REQUIRED BEFORE SHARING above a dimmed SHARE REEL TO UPLOADS button with no focus ring; keyboard focus has moved on to the footer." loading="lazy">
+        <figcaption>Before: after Tab from the title, focus skips the dimmed button.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix52-button-after.jpg" alt="The same section after: the same warning and dimmed button, now with a light grey focus ring around the button." loading="lazy">
+        <figcaption>After: the same look, with focus on the button and a ring that stays visible.</figcaption>
+      </figure>
+    </div>
+
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>Dialog.test.jsx</code> (8 tests): native modal, where focus starts, Escape, backdrop and cancel, busy, Tab wrapping, and focus return on close.</li>
+      <li><code>IconButton.test.jsx</code> (3): label and tooltip, variants, link mode.</li>
+      <li><code>FormField.test.jsx</code> (3): label, hint and error descriptions, <code>aria-invalid</code>, function children.</li>
+      <li><code>Button.test.jsx</code> (3): reasons describe a focusable blocked button that ignores clicks; with no reason it is plainly disabled; a reason appearing does not remount the button, so focus is kept.</li>
+      <li>New page tests:
+        <ul>
+          <li>The followers dialog closes on Escape and returns focus.</li>
+          <li>The delete-account confirmation opens on Cancel, Escape deletes nothing, and focus returns.</li>
+          <li>The wallet key is described by its hint.</li>
+          <li>The Upload share and render buttons are described by their reasons, and a click on a blocked share sends nothing.</li>
+        </ul>
+      </li>
+      <li>Results: 511 vitest, 466 node and 762 pytest tests pass, and the production build passes.</li>
+      <li>The stylelint ratchet goes down: <code>!important</code> 163 → 152, off-scale z-index 28 → 25, <code>outline: none</code> 15 → 14.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>Button <code>variant</code> and <code>size</code>.</strong> Merging <code>.sx-btn</code>, <code>.sx-pill</code> and the sidebar's primary button changes how every page looks, so it needs its own visual pass.</li>
+      <li><strong>The rest of Phase 2:</strong> Tabs, Chip, Toast and EmptyState.</li>
+      <li><strong>The sidebar drawer as a Dialog.</strong> It is a navigation panel, and it moves with the single navigation source.</li>
+      <li><strong>The sign-in forms' <code>AuthField</code> and the studio <code>Field</code>.</strong> Both already link their labels; their hints and errors are not on FormField yet.</li>
+      <li><strong>The credits pill on phones</strong> is still 38px tall.</li>
+      <li><strong>Hints outside a field are not linked to it:</strong> the Fal key's "Stored encrypted…" line and the password notes in settings.</li>
+      <li><strong>A global <code>.sx-primary</code> rule with <code>!important</code></strong> (from the messaging styles) fixes every primary button's colours, so the primary hover colour never shows. It was like this before; changing it changes every primary button.</li>
+    </ul>
   </section>
 
 </section>
@@ -1670,7 +1781,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 51. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 52. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -1682,7 +1793,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <div class="box">
       <h3>Larger pieces of work</h3>
       <ul>
-        <li>The shared Dialog, Button, IconButton and FormField primitives (Phase 2). These would also bring the header icon buttons from 36–38px to 44px.</li>
+        <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
         <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
         <li>One navigation source for the header, drawer and sidebar.</li>
         <li>A keyboard path into the 3D preview canvas.</li>

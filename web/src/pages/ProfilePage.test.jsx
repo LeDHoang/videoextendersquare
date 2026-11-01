@@ -79,3 +79,30 @@ describe('ProfilePage report', () => {
     expect(promptSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('ProfilePage followers dialog', () => {
+  beforeEach(() => {
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.auth.user = { id: 'viewer', username: 'viewer' };
+    mocks.api.get.mockImplementation(async (url) => {
+      if (url === '/api/users/maker') return { user: profile };
+      if (url === '/api/users/maker/followers') return { users: [], next_cursor: null };
+      return { items: [], next_cursor: null };
+    });
+  });
+  afterEach(cleanup);
+
+  it('is a modal that takes focus, closes on Escape and gives focus back', async () => {
+    renderPage();
+    const stat = await screen.findByRole('button', { name: /FOLLOWERS/ });
+    stat.focus();
+    fireEvent.click(stat);
+    const dialog = screen.getByRole('dialog', { name: 'FOLLOWERS' });
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
+    expect(await within(dialog).findByText('NO USERS YET')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(stat).toHaveFocus();
+  });
+});

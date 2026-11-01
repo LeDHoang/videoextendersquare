@@ -626,13 +626,17 @@ export default function VideoPage() {
               byokOnly={byokOnly}
             />
 
-            {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-            {!blocked.length && studioPicked && !studioOk ? (
-              <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-            ) : null}
-
             <div style={{ marginTop: 'var(--sx-2)' }}>
-              <Button primary disabled={disabled} loading={busy} onClick={render}>
+              <Button
+                primary
+                disabled={disabled}
+                disabledReasons={[
+                  blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES',
+                  !blocked.length && studioPicked && !studioOk && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
+                ]}
+                loading={busy}
+                onClick={render}
+              >
                 {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE`}
               </Button>
             </div>

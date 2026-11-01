@@ -1,5 +1,6 @@
 import { Children, cloneElement, isValidElement, useEffect, useRef, useState, useId } from 'react';
 import Emoji from './Emoji.jsx';
+import { GatedReason } from './primitives.jsx';
 
 // Accessible Combobox Dropdown — WAI-ARIA compliant with full keyboard navigation:
 // ArrowDown / ArrowUp to move, Enter to select, Escape to close, Home / End.
@@ -175,27 +176,42 @@ export function Pills({ options = [], value, onChange, ariaLabel }) {
   );
 }
 
+// `disabledReasons` lists why the button is blocked (falsy entries are skipped). They show above
+// the button and describe it; a disabled button that has reasons stays focusable
+// (aria-disabled) so keyboard and screen-reader users can reach it and hear why.
 export function Button({
   children,
   onClick,
   primary = false,
   disabled = false,
   loading = false,
+  disabledReasons,
   className = '',
   type = 'button',
   ...props
 }) {
+  const reasonId = useId();
+  const reasons = (disabledReasons || []).filter(Boolean);
+  const explained = disabled && !loading && reasons.length > 0;
+  // The reasons sit in their own slot before the button, so adding or removing one never
+  // remounts the button (a focused button keeps focus).
   return (
-    <button
-      type={type}
-      className={`sx-btn ${primary ? 'sx-primary' : ''} ${className}`}
-      onClick={onClick}
-      disabled={disabled || loading}
-      {...props}
-    >
-      {loading ? <Spinner /> : null}
-      <Emoji text={children} />
-    </button>
+    <>
+      {reasons.map((reason, index) => <GatedReason key={index} id={reasonId + index}>{reason}</GatedReason>)}
+      <button
+        type={type}
+        className={`sx-btn ${primary ? 'sx-primary' : ''} ${className}`}
+        onClick={explained ? (event) => event.preventDefault() : onClick}
+        disabled={(disabled || loading) && !explained}
+        aria-disabled={explained || undefined}
+        aria-busy={loading || undefined}
+        aria-describedby={reasons.length ? reasons.map((_, index) => reasonId + index).join(' ') : undefined}
+        {...props}
+      >
+        {loading ? <Spinner /> : null}
+        <Emoji text={children} />
+      </button>
+    </>
   );
 }
 

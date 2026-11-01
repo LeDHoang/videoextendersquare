@@ -10,9 +10,9 @@ const BASELINE = {
   'src/styles/global.css': {
     'color-no-hex': 53,
     'function-disallowed-list': 48,
-    'declaration-no-important': 163,
-    'declaration-property-value-allowed-list': 28,
-    'declaration-property-value-disallowed-list': 15,
+    'declaration-no-important': 152,
+    'declaration-property-value-allowed-list': 25,
+    'declaration-property-value-disallowed-list': 14,
   },
 };
 

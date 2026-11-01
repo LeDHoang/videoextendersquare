@@ -228,6 +228,8 @@ describe('WalletPage', () => {
       fireEvent.change(keyInput(), { target: { value: 'short' } });
       expect(save).toBeDisabled();
       expect(screen.getByText(/at least 8 characters/)).toBeInTheDocument();
+      expect(keyInput()).toHaveAccessibleDescription('Keys are at least 8 characters.');
+      expect(keyInput()).toHaveAttribute('aria-invalid', 'true');
       fireEvent.change(keyInput(), { target: { value: '  fal-12345678  ' } });
       expect(save).toBeEnabled();
     });
