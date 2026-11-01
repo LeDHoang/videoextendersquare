@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from pipeline import spatial_worker as sw
 from server import media as SM
-from server import kill_switch, output, quotas
+from server import kill_switch, output, quotas, trust
 from server.features import feature_enabled, stereo_convert_installed
 from server.jobs import QueueFull, job_manager
 from server.routers.uploads import _resolve_source
@@ -77,7 +77,9 @@ def convert_to_3d(
     kill_switch.require_open(db, paid=False)
     quotas.check_identity(db, request, context, "stereo-convert", CONVERTS_PER_HOUR, 60 * 60)
     try:
-        job_id = job_manager.reserve_job(kind=req.kind, owner_id=context.user.id)
+        job_id = job_manager.reserve_job(
+            kind=req.kind, owner_id=context.user.id, max_per_user=trust.limit(db, context.user, "jobs_per_user"),
+        )
     except QueueFull as ex:
         raise quotas.queue_full_error(ex) from ex
 

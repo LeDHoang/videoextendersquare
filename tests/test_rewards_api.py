@@ -123,3 +123,17 @@ def test_reward_claim_requires_auth_and_accepts_server_attributed_foreground_eve
         assert claim.status_code == 200, claim.text
         assert claim.json()["progress"] == 1
         assert claim.json()["credit_awarded"] is False
+
+
+def test_a_new_account_cannot_claim_rewards(app, monkeypatch):
+    monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "72")
+    with TestClient(app) as client:
+        register(client, "reward_api_newcomer")
+        claim = client.post(
+            "/api/rewards/reels/claim",
+            headers=csrf_headers(client),
+            json={"post_id": "post", "recommendation_impression_id": "impression"},
+        )
+    assert claim.status_code == 422
+    assert claim.json()["detail"]["code"] == "REWARD_INELIGIBLE"
+    assert claim.json()["detail"]["reason"] == "account_too_new"

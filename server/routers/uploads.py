@@ -10,7 +10,6 @@ zeroed engagement instead of fake seeded numbers.
 """
 
 import logging
-import os
 import re
 import shutil
 import uuid
@@ -26,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import kill_switch, media_store, metrics, output, quotas
+from server import kill_switch, media_store, metrics, output, quotas, trust
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -468,14 +467,8 @@ def publish_upload(
     from server.routers import reels as reels_router
 
     kill_switch.require_open(db, paid=False)
-    try:
-        hourly_cap = max(1, int(os.environ.get("SX_PUBLISH_HOURLY_MAX", "5")))
-    except (TypeError, ValueError):
-        hourly_cap = 5
-    try:
-        daily_cap = max(1, int(os.environ.get("SX_PUBLISH_DAILY_MAX", "20")))
-    except (TypeError, ValueError):
-        daily_cap = 20
+    hourly_cap = trust.limit(db, context.user, "publish_hourly")
+    daily_cap = trust.limit(db, context.user, "publish_daily")
     quotas.check_identity(db, request, context, "publish-hour", hourly_cap, 60 * 60)
     quotas.check_identity(db, request, context, "publish-day", daily_cap, 24 * 60 * 60)
     _check_stereo_pointer(req, context)

@@ -162,15 +162,19 @@ class JobManager:
             self._jobs[job_id] = record
         return job_id
 
-    def reserve_job(self, kind: str, owner_id: str, job_id: str | None = None, *, paid: bool = False) -> str:
+    def reserve_job(
+        self, kind: str, owner_id: str, job_id: str | None = None, *, paid: bool = False, max_per_user: int | None = None,
+    ) -> str:
         """Create a counted job, or raise QueueFull when a cap is reached.
 
         The check and the insert happen under one lock, so two concurrent
         submits can never both take the last slot. Callers reserve before
-        any billing and discard the job if a later step fails.
+        any billing and discard the job if a later step fails. Routers pass
+        the owner's trust-tier ``max_per_user``.
         """
         max_pending = env_int("SX_MAX_PENDING_JOBS", 6, minimum=1)
-        max_per_user = env_int("SX_MAX_JOBS_PER_USER", 2, minimum=1)
+        if max_per_user is None:
+            max_per_user = env_int("SX_MAX_JOBS_PER_USER", 2, minimum=1)
         job_id = job_id or uuid.uuid4().hex[:12]
         record = JobRecord(job_id=job_id, kind=kind, owner_id=owner_id, counted=True, paid=paid)
         with self._lock:

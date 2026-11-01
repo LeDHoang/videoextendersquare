@@ -54,3 +54,11 @@ def _roomy_device_limits(monkeypatch):
     device; tests/test_device_limits.py lowers these again."""
     monkeypatch.setenv("SX_REGISTER_DEVICE_HOURLY", "1000")
     monkeypatch.setenv("SX_REGISTER_DEVICE_DAILY", "1000")
+
+
+@pytest.fixture(autouse=True)
+def _no_new_account_tier(monkeypatch):
+    """Test accounts are seconds old; without this every one would get the
+    lower ``new`` tier limits. tests/test_trust_tiers.py sets these again."""
+    monkeypatch.setenv("SX_TRUST_NEW_HOURS", "0")
+    monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "0")

@@ -146,6 +146,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_REGISTER_DEVICE_HOURLY` / `SX_REGISTER_DEVICE_DAILY` | `3` / `5` | Signups per browser (`sx_device` cookie) per hour / day, on top of 5/hour per IP |
 | `SX_VIDEO_WORKERS` / `SX_IMAGE_WORKERS` | `1` / `2` | Job concurrency |
 | `SX_MAX_PENDING_JOBS` / `SX_MAX_JOBS_PER_USER` | `6` / `2` | Queue caps (429 when full) |
+| `SX_TRUST_NEW_HOURS` / `SX_TRUST_TRUSTED_DAYS` | `72` / `30` | Trust tiers (`server/trust.py`). Accounts younger than the first are `new`; older than the second with a fulfilled purchase are `trusted`; a suspension, removed content or reversed purchase in 30 days makes them `restricted`. `SX_UPLOAD_HOURLY_MAX`, `SX_PUBLISH_HOURLY_MAX`, `SX_PUBLISH_DAILY_MAX` and `SX_MAX_JOBS_PER_USER` are the `standard` values; set the same name with the tier after `SX_` (for example `SX_NEW_UPLOAD_HOURLY_MAX`) for another tier. Defaults: restricted 5/1/3/1, new 10/2/5/1, trusted 60/10/40/3 |
 | `SX_STAGED_BYTES_MAX` | e.g. `2147483648` | Total bytes held in staged uploads |
 | `SX_DISK_MIN_FREE_GB` | `5` | Refuse new work below this free space |
 | `SX_JOB_RETENTION_S` | `21600` | Finished-job retention (6 h) |
@@ -171,6 +172,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_PUBLIC_BASE_URL` | Browser origin used for Stripe Checkout return URLs (required for Checkout; no `Host` fallback) | — |
 | `SX_BILLING_RESERVED_TTL_MIN` | Age after which never-submitted credit reservations are reaped (minimum 5) | `30` |
 | `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `1`) |
+| `SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS` | Account age before reel rewards can be claimed (422 `REWARD_INELIGIBLE`, reason `account_too_new`) | `72` |
 | `SX_FAL_MAX_QUOTE_USD` | Per-job fal spend cap enforced at quote time (`0` disables) | `10` |
 | `SX_STRIPE_WEBHOOK_MAX_BYTES` | Max Stripe webhook body (minimum 1024) | `1048576` |
 | `SX_STRIPE_WEBHOOK_RPM` | Stripe webhook requests per IP per minute | `120` |

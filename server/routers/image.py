@@ -17,7 +17,7 @@ from server.billing.service import BillingError, create_billing_job, finalize_jo
 from pipeline.utils import calculate_square_padding, get_image_dimensions, shown_image_size
 from server import media as SM
 from server import output
-from server import kill_switch, quotas
+from server import kill_switch, quotas, trust
 from server.jobs import JobStatus, QueueFull, job_manager, public_result
 from server.sse import job_progress_stream
 from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf, stage_owner_identity, stage_owner_matches, validate_origin
@@ -166,7 +166,10 @@ def start_image_process(
     # Take a queue slot before any billing; every exit below that does not
     # hand the job to the executor gives the slot back.
     try:
-        job_id = job_manager.reserve_job(kind="image", owner_id=owner_id, paid=cloud_required)
+        job_id = job_manager.reserve_job(
+            kind="image", owner_id=owner_id, paid=cloud_required,
+            max_per_user=trust.limit(db, context.user, "jobs_per_user"),
+        )
     except QueueFull as ex:
         raise quotas.queue_full_error(ex) from ex
     try:

@@ -1,11 +1,15 @@
 """Reward claims for qualified reel viewing."""
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from server import trust
 from server.billing.service import BillingError, RewardError, claim_reel_reward, flag_enabled, require_billing_secrets
+from server.settings import env_int
 from server.social.auth import AuthContext, keyed_hash, request_identity, require_auth_csrf, validate_origin
 from server.social.database import get_db
 
@@ -27,6 +31,13 @@ def claim_reel(
     validate_origin(request)
     if not flag_enabled("SX_REEL_REWARDS_ENABLED"):
         raise HTTPException(status_code=503, detail={"code": "REWARDS_DISABLED", "message": "Reel rewards are disabled."})
+    min_age_hours = env_int("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", 72, minimum=0)
+    if trust.account_age(context.user) < timedelta(hours=min_age_hours):
+        raise HTTPException(status_code=422, detail={
+            "code": "REWARD_INELIGIBLE",
+            "reason": "account_too_new",
+            "message": f"New accounts can earn reel rewards after {min_age_hours} hours.",
+        })
     ip_hash = keyed_hash("reel-reward:" + request_identity(request))
     try:
         require_billing_secrets()
