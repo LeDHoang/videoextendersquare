@@ -117,6 +117,29 @@ describe('ProfileSettingsPage', () => {
     expect(screen.queryByText('Enter your password and type your username to delete.')).not.toBeInTheDocument();
   });
 
+  it('says why UPDATE PASSWORD is locked, naming the first unmet requirement', () => {
+    renderPage();
+    const change = screen.getByRole('button', { name: 'UPDATE PASSWORD' });
+    expect(change).toHaveAccessibleDescription('Enter your current password to change it.');
+    fireEvent.change(screen.getByLabelText('CURRENT PASSWORD', { selector: '#ps-current-password' }), { target: { value: 'old-password-1' } });
+    fireEvent.change(screen.getByLabelText('NEW PASSWORD'), { target: { value: 'short' } });
+    expect(change).toHaveAccessibleDescription(/^Your new password needs \d+–\d+ characters\.$/);
+    fireEvent.change(screen.getByLabelText('NEW PASSWORD'), { target: { value: 'old-password-1' } });
+    expect(change).toHaveAccessibleDescription('Your new password must be different from the current one.');
+    fireEvent.change(screen.getByLabelText('NEW PASSWORD'), { target: { value: 'a-much-longer-1!' } });
+    expect(change).toBeEnabled();
+    expect(change).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('says why SAVE KEY is locked until the key is long enough', () => {
+    renderPage();
+    const save = screen.getByRole('button', { name: 'SAVE KEY' });
+    expect(save).toHaveAccessibleDescription('Paste a key of at least 8 characters to save it.');
+    fireEvent.change(screen.getByPlaceholderText('Paste your Fal.ai key'), { target: { value: 'fal-key-12345' } });
+    expect(save).toBeEnabled();
+    expect(screen.queryByText('Paste a key of at least 8 characters to save it.')).not.toBeInTheDocument();
+  });
+
   it('restricts a handle (stripping @) and refreshes the blocked list', async () => {
     mocks.api.put.mockResolvedValue({ blocked: true });
     renderPage();

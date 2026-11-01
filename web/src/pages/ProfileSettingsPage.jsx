@@ -244,6 +244,14 @@ export default function ProfileSettingsPage() {
     mixed: /\d/.test(newPassword) && /[^A-Za-z0-9]/.test(newPassword),
   };
   const canChangePassword = Boolean(passwords.current_password) && passwordRules.length && passwordRules.different;
+  // Why UPDATE PASSWORD is disabled: the first unmet requirement, in words.
+  const passwordWhy = !passwords.current_password
+    ? 'Enter your current password to change it.'
+    : !passwordRules.length
+      ? `Your new password needs ${PASSWORD_MIN}–${PASSWORD_MAX} characters.`
+      : !passwordRules.different
+        ? 'Your new password must be different from the current one.'
+        : '';
 
   const changePassword = (event) => {
     event.preventDefault();
@@ -425,9 +433,15 @@ export default function ProfileSettingsPage() {
               </FieldRow>
               <p className="sx-ps-hint">Stored encrypted and bound to your account. It is never shown again, only its last four characters.</p>
               <div className="sx-ps-actions">
-                <button type="submit" className="sx-ps-btn" disabled={busy === 'key' || keyValue.trim().length < 8}>SAVE KEY</button>
+                <button
+                  type="submit"
+                  className="sx-ps-btn"
+                  disabled={busy === 'key' || keyValue.trim().length < 8}
+                  aria-describedby={keyValue.trim().length < 8 ? 'ps-key-why' : undefined}
+                >SAVE KEY</button>
                 <button type="button" className="sx-ps-btn sx-ps-btn--quiet" disabled={busy === 'key' || !falKey?.configured} onClick={removeKey}>REMOVE KEY</button>
               </div>
+              {keyValue.trim().length < 8 ? <p id="ps-key-why" className="sx-ps-hint">Paste a key of at least 8 characters to save it.</p> : null}
               <Feedback state={keyStatus} />
             </form>
           </Panel>
@@ -448,9 +462,15 @@ export default function ProfileSettingsPage() {
                 <Check pass={passwordRules.different}>DIFFERENT FROM CURRENT</Check>
                 <Check pass={passwordRules.mixed} advisory>NUMBER &amp; SYMBOL</Check>
               </ul>
-              <button type="submit" className="sx-ps-btn sx-ps-btn--block" disabled={busy === 'password' || !canChangePassword}>
+              <button
+                type="submit"
+                className="sx-ps-btn sx-ps-btn--block"
+                disabled={busy === 'password' || !canChangePassword}
+                aria-describedby={passwordWhy ? 'ps-password-why' : undefined}
+              >
                 {busy === 'password' ? 'UPDATING…' : 'UPDATE PASSWORD'}
               </button>
+              {passwordWhy ? <p id="ps-password-why" className="sx-ps-hint">{passwordWhy}</p> : null}
               <Feedback state={passwordStatus} />
             </form>
           </Panel>

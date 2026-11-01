@@ -30,7 +30,7 @@ function decode(part) {
   try { return decodeURIComponent(part); } catch (_) { return part; }
 }
 
-// Page name for a pathname, or '' for the bare brand title.
+// Page name for a pathname, or '' for the bare brand title (only the root redirect).
 export function routeTitle(pathname) {
   const path = (pathname || '/').replace(/\/+$/, '') || '/';
   if (STATIC_TITLES[path]) return STATIC_TITLES[path];
@@ -42,7 +42,9 @@ export function routeTitle(pathname) {
   if (parts[0] === 'packs' && parts[2] === 'edit') return 'Edit reel pack';
   if (parts[0] === 'packs' && parts[1]) return 'Reel pack';
   if (parts[0] === 'messages' && parts[1]) return 'Messages';
-  return '';
+  // Every route in App.jsx is named above, so anything else is the catch-all 404 page.
+  // NotFoundPage cannot set this itself: App's effect runs after its child's and would overwrite it.
+  return path === '/' ? '' : 'Page not found';
 }
 
 // Sets "<title> · ECHO" while mounted; an empty title keeps the bare brand.

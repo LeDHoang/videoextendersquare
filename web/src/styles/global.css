@@ -288,6 +288,12 @@
   outline: none;
 }
 
+/* The selected tab is where keyboard focus lands, and the rule above drops its
+   outline: give it the inset ink ring used for focus on accent fills. */
+.sx-profile-saved-tabs button.sx-active:focus-visible {
+  box-shadow: var(--sx-focus-halo);
+}
+
 /* Collection tiles mirror the reel-tile chrome so collections and reels read
    as one gallery. A transparent offset frame plus the REEL PACK badge keep
    them visually distinct without hiding the autoplaying thumbnail. */
@@ -595,6 +601,11 @@
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   outline: none;
+}
+
+/* Keyboard focus must not look like hover: add the inset ink ring. */
+.sx-message-pack-open:focus-visible {
+  box-shadow: var(--sx-focus-halo);
 }
 
 .sx-message-pack-card > p {
