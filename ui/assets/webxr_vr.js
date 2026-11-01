@@ -7135,9 +7135,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (!activeRayDir) activeRayDir = new THREE.Vector3();
       const session = sessionOverride || xrSession;
       let origin = null, direction = null, handedness = '';
+      let noInputSources = false;
       if (session) {
         let sources = [];
         try { sources = Array.from(session.inputSources || []); } catch (e) {}
+        noInputSources = sources.length === 0;
         const preferred = pickPointerSource(sources);
         activeRayInputSource = preferred || null;
         if (preferred) {
@@ -7149,6 +7151,15 @@ window.WebXRVR = window.WebXRVR || (function () {
           }
         }
       }
+      // No controller or hand in the session: the controller object still sits at the
+      // identity pose, so a ray from it would draw a laser out of the world origin.
+      if (noInputSources) {
+        if (laserLine) laserLine.visible = false;
+        if (reticleMesh) reticleMesh.visible = false;
+        return;
+      }
+      if (laserLine && !laserLine.visible) laserLine.visible = true;
+      if (reticleMesh && !reticleMesh.visible) reticleMesh.visible = true;
       if ((!origin || !direction) && vrControllers.length > 0) {
         // Fallback: first tracked controller matrix (frame pose unavailable).
         const controller = vrControllers[0];

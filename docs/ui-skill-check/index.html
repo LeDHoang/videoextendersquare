@@ -300,6 +300,12 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </dl>
   </article>
 
+  <section class="attempt">
+    <h4>Attempted fix · logic checked in the desktop preview, not yet on the headset</h4>
+    <p><strong>Changed</strong> (<code>updateControllerLasers</code> in <code>webxr_vr.js</code>): when the XR session reports no input sources, the laser and reticle are hidden and the frame returns before the identity-pose fallback runs. They show again on the first frame that has an input source. With the laser forced visible and a stub session with an empty <code>inputSources</code>, the call hid it. The 481 unit tests pass (none cover this file).</p>
+    <p><strong>Not verified:</strong> on the Quest. The headset was waiting for a physical power-button press ("Press the power button to enable cameras and microphones"), which cannot be done over USB, so the check needs a person to wake it. There is no screenshot because the fixed state is the absence of the laser. <strong>Not done:</strong> the dock height, panel placement, text size and hand-tracking items, which all need the headset to judge by eye.</p>
+  </section>
+
   <article class="finding med">
     <h3><span class="chip">Medium</span>Enter VR is hidden two taps deep</h3>
     <dl>
