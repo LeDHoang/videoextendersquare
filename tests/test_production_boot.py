@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import uuid
 from unittest.mock import patch
 
 import pytest
@@ -80,6 +82,54 @@ def test_sentry_drops_query_strings():
     assert scrubbed["spans"][0]["data"] == {"url": "https://tenor.googleapis.com/v2/search"}
     crumb = app_module._sentry_before_breadcrumb({"data": {"url": "u", "http.query": "key=k"}}, None)
     assert crumb["data"] == {"url": "u"}
+
+
+def test_sentry_event_carries_no_credentials(monkeypatch):
+    """End to end through the SDK: frame locals would otherwise ship the raw
+    ASGI scope, which before_send never sees."""
+    import sentry_sdk
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("SENTRY_DSN", "https://key@o1.ingest.sentry.io/1")
+    monkeypatch.setenv("GIT_SHA", "abc123")
+    # Built at runtime: the frames' source-context lines quote this file.
+    session, auth, token, ip, search = (f"{name}-{uuid.uuid4().hex}" for name in ("s", "a", "t", "ip", "q"))
+    sent = []
+
+    class Capture(sentry_sdk.transport.Transport):
+        def capture_envelope(self, envelope):
+            sent.extend(item.payload.json for item in envelope.items if item.type == "event")
+
+        def flush(self, *args, **kwargs):
+            pass
+
+    app_module._init_sentry()
+    try:
+        client = sentry_sdk.get_client()
+        client.transport = Capture(client.options)
+        probe = FastAPI()
+
+        @probe.get("/boom")
+        def boom():
+            raise RuntimeError("boom")
+
+        TestClient(probe, raise_server_exceptions=False).get(
+            f"/boom?q={search}",
+            headers={
+                "cookie": f"echo_session={session}",
+                "authorization": f"Bearer {auth}",
+                "x-csrf-token": token,
+                "cf-connecting-ip": ip,
+            },
+        )
+    finally:
+        monkeypatch.delenv("SENTRY_DSN")
+        sentry_sdk.init()
+    assert len(sent) == 1
+    assert sent[0]["release"] == "abc123"
+    blob = json.dumps(sent[0])
+    for secret in (session, auth, token, ip, search):
+        assert secret not in blob
 
 
 def test_sentry_skips_health_checks(monkeypatch):

@@ -104,6 +104,9 @@ def _init_sentry() -> None:
         traces_sampler=_sentry_traces_sampler,
         enable_logs=True,
         max_request_body_size="never",
+        # Frame locals hold the raw ASGI scope (cookies, auth, CSRF, client IP,
+        # query string), which before_send never sees.
+        include_local_variables=False,
         before_send=_sentry_before_send,
         before_send_transaction=_sentry_before_send,
         before_breadcrumb=_sentry_before_breadcrumb,
