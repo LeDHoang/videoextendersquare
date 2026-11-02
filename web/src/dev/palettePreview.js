@@ -3,7 +3,7 @@
 // Not wired to the backend or user settings: the choice lives in sessionStorage only.
 import './palettes.css';
 
-const PALETTES = ['current', 'violet', 'plum', 'lavender', 'periwinkle', 'wine', 'mulberry'];
+const PALETTES = ['current', 'violet', 'plum', 'lavender', 'periwinkle', 'wine', 'mulberry', 'indigo', 'slate', 'oxblood', 'cocoa', 'graphite'];
 const KEY = 'sx-palette-preview';
 const VERMILION = /rgba?\(\s*255,\s*59,\s*31(\s*,\s*([\d.]+))?\s*\)/g;
 

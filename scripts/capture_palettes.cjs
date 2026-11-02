@@ -1,6 +1,7 @@
 // Captures every preview palette (web/src/dev/palettes.css) on a few public screens for
 // docs/palette-test/index.html. Needs the Vite dev server on :5173 and the API on :8000.
-//   node scripts/capture_palettes.cjs
+//   node scripts/capture_palettes.cjs            (all palettes)
+//   node scripts/capture_palettes.cjs indigo     (only the named ones)
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -10,7 +11,7 @@ const DEBUG_PORT = 9223;
 const USER_DATA_DIR = '/tmp/echo_chrome_palette_profile';
 const OUT_DIR = path.resolve(__dirname, '../docs/palette-test/img');
 
-const PALETTES = ['current', 'violet', 'plum', 'lavender', 'periwinkle', 'wine', 'mulberry'];
+const PALETTES = ['current', 'violet', 'plum', 'lavender', 'periwinkle', 'wine', 'mulberry', 'indigo', 'slate', 'oxblood', 'cocoa', 'graphite'];
 const SCREENS = [
   { id: 'explore', path: '/explore', width: 1280, height: 800 },
   { id: 'profile', path: '/profile/auravibe', width: 1280, height: 800 },
@@ -78,7 +79,7 @@ async function main() {
       await call('Emulation.setDeviceMetricsOverride', {
         width: screen.width, height: screen.height, deviceScaleFactor: screen.mobile ? 2 : 1, mobile: !!screen.mobile,
       });
-      for (const palette of PALETTES) {
+      for (const palette of PALETTES.filter((p) => process.argv.length < 3 || process.argv.includes(p))) {
         await call('Page.navigate', { url: `http://localhost:5173${screen.path}?palette=${palette}` });
         await sleep(3500);
         await call('Runtime.evaluate', {

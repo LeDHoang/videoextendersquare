@@ -93,8 +93,6 @@ code { font-family: var(--font-mono); font-size: .82em; background: var(--code-b
 .switch button[aria-pressed="true"] { color: var(--surface); background: var(--ink); border-color: var(--ink); }
 .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .shots.narrow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.shots figure:first-child { grid-column: 1 / -1; }
-.shots.narrow figure:first-child { grid-column: auto; }
 figure { margin: 0; min-width: 0; }
 figure img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); background: #000; }
 figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -133,7 +131,8 @@ tr:last-child td { border-bottom: 0; }
   <span class="label">Contents</span>
   <ol>
     <li><a href="#summary">Summary</a></li>
-    <li><a href="#palettes">The six palettes</a></li>
+    <li><a href="#rules">Design-system check</a></li>
+    <li><a href="#palettes">The eleven palettes</a></li>
     <li><a href="#compare">Side by side</a></li>
     <li><a href="#contrast">Contrast</a></li>
     <li><a href="#picks">Recommendation</a></li>
@@ -150,13 +149,13 @@ tr:last-child td { border-bottom: 0; }
     <span>branch <code>palette-test</code> from <code>UI-skill-check</code> @ 04a8c40</span>
     <span>Vite :5173 · headless Chrome · 1280 and 375 px</span>
   </div>
-  <p class="lede">Six purple and plum palettes from coolors, applied to the real web app by swapping only the colour tokens. Layout, type and spacing are unchanged, so every difference below is colour. Nothing is wired to the backend or to user settings: the switch is a dev-only query parameter.</p>
+  <p class="lede">Eleven palettes from coolors, seven purple and four red, applied to the real web app by swapping only the colour tokens. Layout, type and spacing are unchanged, so every difference below is colour. Every palette is checked against the ECHO design-system colour rules. Nothing is wired to the backend or to user settings: the switch is a dev-only query parameter.</p>
   <div class="cols" style="margin-top:22px">
     <div class="box">
       <h3>Try it live</h3>
       <ol>
         <li>Run <code>npm --prefix web run dev</code>.</li>
-        <li>Open any page with <code>?palette=violet</code> (or <code>plum</code>, <code>lavender</code>, <code>periwinkle</code>, <code>wine</code>, <code>mulberry</code>, <code>current</code>).</li>
+        <li>Open any page with <code>?palette=violet</code> (or <code>plum</code>, <code>lavender</code>, <code>periwinkle</code>, <code>wine</code>, <code>mulberry</code>, <code>indigo</code>, <code>slate</code>, <code>oxblood</code>, <code>cocoa</code>, <code>graphite</code>, <code>current</code>).</li>
         <li>Or use the picker in the bottom-left corner. The choice sticks for the tab.</li>
       </ol>
     </div>
@@ -165,20 +164,47 @@ tr:last-child td { border-bottom: 0; }
       <ul>
         <li>Web UI only. The WebXR scene (three.js) keeps its own colours.</li>
         <li>Public pages only: Explore, a profile and Sign in. Signed-in pages use the same tokens.</li>
-        <li>Status colours (success, warning, danger, info) are not changed.</li>
+        <li>Status colours (success, warning, danger, info) are not changed, except the light danger and info text on three purple palettes, so it stays readable on their top cards.</li>
       </ul>
     </div>
   </div>
   <div class="stats" aria-label="Test size">
-    <div class="stat"><b>6</b><span>Palettes, plus the current one</span></div>
+    <div class="stat"><b>11</b><span>Palettes, plus the current one</span></div>
     <div class="stat"><b>4</b><span>Screens per palette</span></div>
-    <div class="stat"><b>28</b><span>Screenshots</span></div>
+    <div class="stat"><b>48</b><span>Screenshots</span></div>
     <div class="stat"><b>0</b><span>Backend changes</span></div>
   </div>
 </header>
 
+<section id="rules" aria-labelledby="rules-h">
+  <h2 id="rules-h">Design-system check<small>Every palette follows the colour rules of the ECHO design system. The first seven were redone to fit.</small></h2>
+  <div class="cols">
+    <div class="box">
+      <h3>The rules</h3>
+      <ul>
+        <li><b>Dark only.</b> There is no light theme.</li>
+        <li><b>Surfaces get lighter as they rise:</b> page, card, raised card, top card. Hover sits between the raised and top cards.</li>
+        <li><b>Text and accent reach 4.5:1 on every surface</b>, the top card included. Muted text reaches 3:1.</li>
+        <li><b>Button text on the accent is dark</b>, never white.</li>
+        <li><b>Status text</b> (the light success, warning, danger and info) also reaches 4.5:1 on every surface.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>What was redone</h3>
+      <ul>
+        <li><b>Lavender</b> was a light theme. It is now <b>Lavender dusk</b>, a dark theme from the same five colours.</li>
+        <li><b>Accent too dark on the top card:</b> Plum (now <code>#ff6b54</code>) and Wine (now <code>#de6fac</code>).</li>
+        <li><b>Top card too light:</b> Plum and Periwinkle surfaces moved one step darker.</li>
+        <li><b>Text a little too dark:</b> Indigo ink-3, and muted text in most of the seven. Hover moved between the card steps where it was out of order.</li>
+        <li><b>Status text:</b> Periwinkle and Indigo use lighter danger and info text.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="note">Red accents (Plum and the four red palettes) are close in hue to the danger rose <code>#f43f5e</code>. The app always pairs status colour with an icon or a word, so meaning is not lost, but errors stand out less. One of the links was sent three times; it is one palette, Oxblood.</p>
+</section>
+
 <section id="palettes" aria-labelledby="pal-h">
-  <h2 id="pal-h">The six palettes<small>Top strip: the coolors source colours. Mock row: the tokens as the app uses them.</small></h2>
+  <h2 id="pal-h">The eleven palettes<small>Top strip: the coolors source colours. Mock row: the tokens as the app uses them.</small></h2>
   <p class="intro">Where a palette has no colour light enough for text and buttons, the accent was lifted or derived. Each card says which.</p>
   <div class="palettes">
 
@@ -201,60 +227,60 @@ tr:last-child td { border-bottom: 0; }
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>Deep indigo page, violet cards, lavender accent with dark button text. The most even ramp of the six, so surfaces step cleanly.</p>
+        <p>Deep indigo page, violet cards, lavender accent with dark button text. The most even ramp of the set, so surfaces step cleanly.</p>
         <div class="roles"><span><b style="background:#10002b"></b>bg 10002b</span><span><b style="background:#240046"></b>surface-2 240046</span><span><b style="background:#3c096c"></b>rule 3c096c</span><span><b style="background:#c77dff"></b>accent c77dff</span></div>
         <div class="tags"><span class="tag good">Dark</span><span class="tag good">Accent from palette</span></div>
       </div>
     </article>
 
-    <article class="pal" style="--p-bg:#221e22;--p-s2:#31263e;--p-rule:#44355b;--p-ink:#f3eef7;--p-ink2:#c9bdd8;--p-ink3:#a99bbb;--p-accent:#ff5c42;--p-on:#0a0a0a">
+    <article class="pal" style="--p-bg:#221e22;--p-s2:#31263e;--p-rule:#44355b;--p-ink:#f3eef7;--p-ink2:#c9bdd8;--p-ink3:#a99bbb;--p-accent:#ff6b54;--p-on:#0a0a0a">
       <div class="swatches" aria-hidden="true"><i style="background:#44355b"></i><i style="background:#31263e"></i><i style="background:#221e22"></i></div>
       <div class="pal-hero">
         <h3>2 · Shadow plum <span>44355b 31263e 221e22</span></h3>
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>Neutrals only, so it keeps the brand vermilion, one step lighter (<code>#ff5c42</code>, today's accent-hi) to clear 4.5:1 on the plum cards. A quiet warm-grey shift of the current look.</p>
-        <div class="roles"><span><b style="background:#221e22"></b>bg 221e22</span><span><b style="background:#31263e"></b>surface-2 31263e</span><span><b style="background:#44355b"></b>rule 44355b</span><span><b style="background:#ff5c42"></b>accent ff5c42</span></div>
+        <p>Neutrals only, so it keeps the brand vermilion, lifted to <code>#ff6b54</code> to clear 4.5:1 on every plum surface. The top card is a step darker than <code>#44355b</code>, which stays as the rule. A quiet warm-grey shift of the current look.</p>
+        <div class="roles"><span><b style="background:#221e22"></b>bg 221e22</span><span><b style="background:#31263e"></b>surface-2 31263e</span><span><b style="background:#44355b"></b>rule 44355b</span><span><b style="background:#ff6b54"></b>accent ff6b54</span></div>
         <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent kept from brand</span></div>
       </div>
     </article>
 
-    <article class="pal" style="--p-bg:#f4effa;--p-s2:#ece3f6;--p-rule:#c8b1e4;--p-ink:#2f184b;--p-ink2:#532b88;--p-ink3:#6a4f8e;--p-accent:#532b88;--p-on:#f4effa">
+    <article class="pal" style="--p-bg:#2f184b;--p-s2:#3c1f5f;--p-rule:#532b88;--p-ink:#f4effa;--p-ink2:#c8b1e4;--p-ink3:#ab9fc4;--p-accent:#b698dc;--p-on:#2f184b">
       <div class="swatches" aria-hidden="true"><i style="background:#f4effa"></i><i style="background:#2f184b"></i><i style="background:#532b88"></i><i style="background:#9b72cf"></i><i style="background:#c8b1e4"></i></div>
       <div class="pal-hero">
-        <h3>3 · Lavender light <span>f4effa 2f184b 532b88 9b72cf c8b1e4</span></h3>
+        <h3>3 · Lavender dusk <span>f4effa 2f184b 532b88 9b72cf c8b1e4</span></h3>
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>The only light theme. Clean and calm, with the highest accent contrast (9:1). It also breaks the most, because parts of the app assume a dark page. See <a href="#breaks">What breaks</a>.</p>
-        <div class="roles"><span><b style="background:#f4effa"></b>bg f4effa</span><span><b style="background:#ece3f6"></b>surface-2 ece3f6</span><span><b style="background:#c8b1e4"></b>rule c8b1e4</span><span><b style="background:#532b88"></b>accent 532b88</span></div>
-        <div class="tags"><span class="tag warn">Light</span><span class="tag good">Accent from palette</span><span class="tag bad">Needs fixes</span></div>
+        <p>Was the only light theme. The design system is dark only, and on the light page the logo vanished and warning chips fell to 1.3:1. Now the same colours run dark: <code>#2f184b</code> page, <code>#f4effa</code> text, <code>#c8b1e4</code> secondary text, <code>#532b88</code> strong rule. The accent <code>#b698dc</code> is <code>#9b72cf</code> lifted, which is 4.2:1 raw on the page and less on the cards.</p>
+        <div class="roles"><span><b style="background:#2f184b"></b>bg 2f184b</span><span><b style="background:#3c1f5f"></b>surface-2 3c1f5f</span><span><b style="background:#532b88"></b>rule-strong 532b88</span><span><b style="background:#b698dc"></b>accent b698dc</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span><span class="tag warn">Redone</span></div>
       </div>
     </article>
 
-    <article class="pal" style="--p-bg:#431259;--p-s2:#60308c;--p-rule:#6f46a6;--p-ink:#ffffff;--p-ink2:#e6f2ff;--p-ink3:#ccdcff;--p-accent:#b3beff;--p-on:#431259">
+    <article class="pal" style="--p-bg:#431259;--p-s2:#511f73;--p-rule:#6f46a6;--p-ink:#ffffff;--p-ink2:#e6f2ff;--p-ink3:#ccdcff;--p-accent:#b3beff;--p-on:#431259">
       <div class="swatches" aria-hidden="true"><i style="background:#e6f2ff"></i><i style="background:#ccdcff"></i><i style="background:#b3beff"></i><i style="background:#9a99f2"></i><i style="background:#8b79d9"></i><i style="background:#805ebf"></i><i style="background:#6f46a6"></i><i style="background:#60308c"></i><i style="background:#511f73"></i><i style="background:#431259"></i></div>
       <div class="pal-hero">
         <h3>4 · Periwinkle on plum <span>e6f2ff → 431259</span></h3>
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>The loudest: the whole page is saturated purple, with a cool periwinkle accent. Readable, but the accent sits close to the secondary text colour, so links and active tabs stand out less.</p>
-        <div class="roles"><span><b style="background:#431259"></b>bg 431259</span><span><b style="background:#60308c"></b>surface-2 60308c</span><span><b style="background:#6f46a6"></b>rule 6f46a6</span><span><b style="background:#b3beff"></b>accent b3beff</span></div>
+        <p>The loudest: the whole page is saturated purple, with a cool periwinkle accent. Readable, but the accent sits close to the secondary text colour, so links and active tabs stand out less. Cards sit one step darker than first tried, so the accent still clears 4.5:1 on the top card <code>#60308c</code>.</p>
+        <div class="roles"><span><b style="background:#431259"></b>bg 431259</span><span><b style="background:#511f73"></b>surface-2 511f73</span><span><b style="background:#6f46a6"></b>rule 6f46a6</span><span><b style="background:#b3beff"></b>accent b3beff</span></div>
         <div class="tags"><span class="tag good">Dark</span><span class="tag good">Accent from palette</span></div>
       </div>
     </article>
 
-    <article class="pal" style="--p-bg:#050404;--p-s2:#2e1c2b;--p-rule:#3a2236;--p-ink:#eaeaea;--p-ink2:#c9bcc5;--p-ink3:#a9969f;--p-accent:#dc68a8;--p-on:#050404">
+    <article class="pal" style="--p-bg:#050404;--p-s2:#2e1c2b;--p-rule:#3a2236;--p-ink:#eaeaea;--p-ink2:#c9bcc5;--p-ink3:#a9969f;--p-accent:#de6fac;--p-on:#050404">
       <div class="swatches" aria-hidden="true"><i style="background:#eaeaea"></i><i style="background:#893168"></i><i style="background:#4a1942"></i><i style="background:#2e1c2b"></i><i style="background:#050404"></i></div>
       <div class="pal-hero">
         <h3>5 · Wine noir <span>eaeaea 893168 4a1942 2e1c2b 050404</span></h3>
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>Closest to today's mood: near-black page, wine-tinted cards, rose accent. The source wine <code>#893168</code> is only 2.6:1 on black, so the accent is lifted to <code>#dc68a8</code> (6.4:1); the original wine stays as the strong rule colour.</p>
-        <div class="roles"><span><b style="background:#050404"></b>bg 050404</span><span><b style="background:#2e1c2b"></b>surface-2 2e1c2b</span><span><b style="background:#893168"></b>rule-strong 893168</span><span><b style="background:#dc68a8"></b>accent dc68a8</span></div>
+        <p>Closest to today's mood: near-black page, wine-tinted cards, rose accent. The source wine <code>#893168</code> is only 2.6:1 on black, so the accent is lifted to <code>#de6fac</code> (6.8:1 on the page, 4.6:1 on the top card <code>#4a1942</code>); the original wine stays as the strong rule colour.</p>
+        <div class="roles"><span><b style="background:#050404"></b>bg 050404</span><span><b style="background:#2e1c2b"></b>surface-2 2e1c2b</span><span><b style="background:#893168"></b>rule-strong 893168</span><span><b style="background:#de6fac"></b>accent de6fac</span></div>
         <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span></div>
       </div>
     </article>
@@ -269,6 +295,71 @@ tr:last-child td { border-bottom: 0; }
         <p>Dark magenta throughout. The palette has no light colour, so the accent <code>#e77fd6</code> is a lifted tint of <code>#531253</code>. Warmer and moodier than Violet.</p>
         <div class="roles"><span><b style="background:#170312"></b>bg 170312</span><span><b style="background:#33032f"></b>surface-2 33032f</span><span><b style="background:#531253"></b>surface-3 531253</span><span><b style="background:#e77fd6"></b>accent e77fd6</span></div>
         <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent derived</span></div>
+      </div>
+    </article>
+
+    <article class="pal" style="--p-bg:#1f185b;--p-s2:#281b60;--p-rule:#3a2378;--p-ink:#e8e8e8;--p-ink2:#c9c2e6;--p-ink3:#aca2d3;--p-accent:#b69cf5;--p-on:#1f185b">
+      <div class="swatches" aria-hidden="true"><i style="background:#e8e8e8"></i><i style="background:#47268f"></i><i style="background:#1f185b"></i><i style="background:#281b60"></i><i style="background:#552d9d"></i></div>
+      <div class="pal-hero">
+        <h3>7 · Indigo night <span>e8e8e8 47268f 1f185b 281b60 552d9d</span></h3>
+        <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
+      </div>
+      <div class="pal-body">
+        <p>Navy-indigo page with soft grey <code>#e8e8e8</code> text. Bluer and a step lighter than Violet, so it reads calmer. The source <code>#552d9d</code> is 1.7:1 on the page, so the accent is lifted to <code>#b69cf5</code>; the original stays as the strong rule colour.</p>
+        <div class="roles"><span><b style="background:#1f185b"></b>bg 1f185b</span><span><b style="background:#281b60"></b>surface-2 281b60</span><span><b style="background:#47268f"></b>surface-3 47268f</span><span><b style="background:#b69cf5"></b>accent b69cf5</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span></div>
+      </div>
+    </article>
+
+    <article class="pal" style="--p-bg:#17182a;--p-s2:#232539;--p-rule:#4b5068;--p-ink:#edf2f4;--p-ink2:#bec6d3;--p-ink3:#8d99ae;--p-accent:#f46879;--p-on:#17182a">
+      <div class="swatches" aria-hidden="true"><i style="background:#2b2d42"></i><i style="background:#8d99ae"></i><i style="background:#edf2f4"></i><i style="background:#ef233c"></i><i style="background:#d90429"></i></div>
+      <div class="pal-hero">
+        <h3>8 · Slate red <span>2b2d42 8d99ae edf2f4 ef233c d90429</span></h3>
+        <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
+      </div>
+      <div class="pal-body">
+        <p>Cool blue-slate page with <code>#edf2f4</code> text and <code>#8d99ae</code> as tertiary text. <code>#2b2d42</code> is the top card, with darker steps below it. The source reds are 3.2:1 and 2.6:1 on that card, so the accent is lifted to <code>#f46879</code>.</p>
+        <div class="roles"><span><b style="background:#17182a"></b>bg 17182a</span><span><b style="background:#232539"></b>surface-2 232539</span><span><b style="background:#2b2d42"></b>surface-3 2b2d42</span><span><b style="background:#f46879"></b>accent f46879</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span><span class="tag warn">Near danger red</span></div>
+      </div>
+    </article>
+
+    <article class="pal" style="--p-bg:#250902;--p-s2:#38040e;--p-rule:#800e13;--p-ink:#f6e7e4;--p-ink2:#dcbcb7;--p-ink3:#c2958f;--p-accent:#da6169;--p-on:#250902">
+      <div class="swatches" aria-hidden="true"><i style="background:#250902"></i><i style="background:#38040e"></i><i style="background:#640d14"></i><i style="background:#800e13"></i><i style="background:#ad2831"></i></div>
+      <div class="pal-hero">
+        <h3>9 · Oxblood <span>250902 38040e 640d14 800e13 ad2831</span></h3>
+        <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
+      </div>
+      <div class="pal-body">
+        <p>All five colours are dark reds, so the text <code>#f6e7e4</code> is a warm tint derived from them. <code>#250902</code> and <code>#38040e</code> are page and card, <code>#640d14</code> and <code>#800e13</code> the rules. The accent <code>#da6169</code> is <code>#ad2831</code> lifted, which is 2.8:1 raw. The most intense of the set.</p>
+        <div class="roles"><span><b style="background:#250902"></b>bg 250902</span><span><b style="background:#38040e"></b>surface-2 38040e</span><span><b style="background:#800e13"></b>rule-strong 800e13</span><span><b style="background:#da6169"></b>accent da6169</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Text and accent derived</span><span class="tag warn">Near danger red</span></div>
+      </div>
+    </article>
+
+    <article class="pal" style="--p-bg:#1c1412;--p-s2:#2b1f1b;--p-rule:#735751;--p-ink:#e7d7c1;--p-ink2:#cbb8a6;--p-ink3:#a78a7f;--p-accent:#d07675;--p-on:#1c1412">
+      <div class="swatches" aria-hidden="true"><i style="background:#8c1c13"></i><i style="background:#bf4342"></i><i style="background:#e7d7c1"></i><i style="background:#a78a7f"></i><i style="background:#735751"></i></div>
+      <div class="pal-hero">
+        <h3>10 · Cocoa brick <span>8c1c13 bf4342 e7d7c1 a78a7f 735751</span></h3>
+        <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
+      </div>
+      <div class="pal-body">
+        <p>Brown page deepened from <code>#735751</code>, which stays as the strong rule. Cream <code>#e7d7c1</code> text and <code>#a78a7f</code> tertiary text make it the warmest and softest. The accent <code>#d07675</code> is <code>#bf4342</code> lifted (2.8:1 raw on the top card). <code>#8c1c13</code> has no role: too dark for text, too red for a surface.</p>
+        <div class="roles"><span><b style="background:#1c1412"></b>bg 1c1412</span><span><b style="background:#2b1f1b"></b>surface-2 2b1f1b</span><span><b style="background:#735751"></b>rule-strong 735751</span><span><b style="background:#d07675"></b>accent d07675</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span><span class="tag warn">One colour unused</span></div>
+      </div>
+    </article>
+
+    <article class="pal" style="--p-bg:#141414;--p-s2:#222222;--p-rule:#4a4a4a;--p-ink:#f6f6f6;--p-ink2:#c4c4c4;--p-ink3:#9e9e9e;--p-accent:#fc5e5d;--p-on:#141414">
+      <div class="swatches" aria-hidden="true"><i style="background:#f6f6f6"></i><i style="background:#e8e8e8"></i><i style="background:#333333"></i><i style="background:#990100"></i><i style="background:#b90504"></i></div>
+      <div class="pal-hero">
+        <h3>11 · Graphite red <span>f6f6f6 e8e8e8 333333 990100 b90504</span></h3>
+        <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
+      </div>
+      <div class="pal-body">
+        <p>Neutral greys with a red accent: the closest to today's matte black and vermilion. <code>#f6f6f6</code> text, <code>#333333</code> rule. The accent <code>#fc5e5d</code> is <code>#b90504</code> lifted (2.7:1 raw on the page). <code>#e8e8e8</code> and <code>#990100</code> have no role: each is too close to another colour in the set.</p>
+        <div class="roles"><span><b style="background:#141414"></b>bg 141414</span><span><b style="background:#222222"></b>surface-2 222222</span><span><b style="background:#333333"></b>rule 333333</span><span><b style="background:#fc5e5d"></b>accent fc5e5d</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span><span class="tag warn">Two colours unused</span></div>
       </div>
     </article>
 
@@ -287,10 +378,15 @@ tr:last-child td { border-bottom: 0; }
     <figure data-p="current"><a href="img/current-explore.jpg"><img src="img/current-explore.jpg" alt="Current palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>Current</b>matte black + vermilion</figcaption></figure>
     <figure data-p="violet"><a href="img/violet-explore.jpg"><img src="img/violet-explore.jpg" alt="Violet ramp palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>1 · Violet ramp</b></figcaption></figure>
     <figure data-p="plum"><a href="img/plum-explore.jpg"><img src="img/plum-explore.jpg" alt="Shadow plum palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>2 · Shadow plum</b></figcaption></figure>
-    <figure data-p="lavender"><a href="img/lavender-explore.jpg"><img src="img/lavender-explore.jpg" alt="Lavender light palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>3 · Lavender light</b></figcaption></figure>
+    <figure data-p="lavender"><a href="img/lavender-explore.jpg"><img src="img/lavender-explore.jpg" alt="Lavender dusk palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>3 · Lavender dusk</b></figcaption></figure>
     <figure data-p="periwinkle"><a href="img/periwinkle-explore.jpg"><img src="img/periwinkle-explore.jpg" alt="Periwinkle on plum palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>4 · Periwinkle on plum</b></figcaption></figure>
     <figure data-p="wine"><a href="img/wine-explore.jpg"><img src="img/wine-explore.jpg" alt="Wine noir palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>5 · Wine noir</b></figcaption></figure>
     <figure data-p="mulberry"><a href="img/mulberry-explore.jpg"><img src="img/mulberry-explore.jpg" alt="Mulberry palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>6 · Mulberry</b></figcaption></figure>
+    <figure data-p="indigo"><a href="img/indigo-explore.jpg"><img src="img/indigo-explore.jpg" alt="Indigo night palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>7 · Indigo night</b></figcaption></figure>
+    <figure data-p="slate"><a href="img/slate-explore.jpg"><img src="img/slate-explore.jpg" alt="Slate red palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>8 · Slate red</b></figcaption></figure>
+    <figure data-p="oxblood"><a href="img/oxblood-explore.jpg"><img src="img/oxblood-explore.jpg" alt="Oxblood palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>9 · Oxblood</b></figcaption></figure>
+    <figure data-p="cocoa"><a href="img/cocoa-explore.jpg"><img src="img/cocoa-explore.jpg" alt="Cocoa brick palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>10 · Cocoa brick</b></figcaption></figure>
+    <figure data-p="graphite"><a href="img/graphite-explore.jpg"><img src="img/graphite-explore.jpg" alt="Graphite red palette, Explore at 1280 px" loading="lazy"></a><figcaption><b>11 · Graphite red</b></figcaption></figure>
   </div>
 </section>
 
@@ -298,19 +394,24 @@ tr:last-child td { border-bottom: 0; }
   <h2 id="con-h">Contrast<small>WCAG ratios for the pairs the app uses most. 4.5:1 is the bar for body text.</small></h2>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Palette</th><th>Ink on page</th><th>Ink-2 on card</th><th>Ink-3 on card</th><th>Accent on page</th><th>Accent on card</th><th>Button text</th><th>Warning on card</th></tr></thead>
+      <thead><tr><th>Palette</th><th>Ink on page</th><th>Ink-2 on card</th><th>Ink-3 on card</th><th>Accent on page</th><th>Accent on card</th><th>Accent, worst surface</th><th>Button text</th><th>Warning on card</th></tr></thead>
       <tbody>
-        <tr><td>Current</td><td class="n">17.9</td><td class="n">7.6</td><td class="n">5.8</td><td class="n">5.6</td><td class="n">5.0</td><td class="n">5.6</td><td class="n">10.9</td></tr>
-        <tr><td>1 · Violet ramp</td><td class="n">17.7</td><td class="n">9.8</td><td class="n">7.1</td><td class="n">7.4</td><td class="n">6.7</td><td class="n">7.4</td><td class="n">11.2</td></tr>
-        <tr><td>2 · Shadow plum</td><td class="n">14.4</td><td class="n">8.0</td><td class="n">5.5</td><td class="n">5.4</td><td class="n edge">4.6</td><td class="n">6.5</td><td class="n">8.8</td></tr>
-        <tr><td>3 · Lavender light</td><td class="n">13.7</td><td class="n">8.2</td><td class="n">5.4</td><td class="n">9.0</td><td class="n">8.2</td><td class="n">9.0</td><td class="n fail">1.3</td></tr>
-        <tr><td>4 · Periwinkle on plum</td><td class="n">14.3</td><td class="n">8.1</td><td class="n">6.6</td><td class="n">8.0</td><td class="n">5.1</td><td class="n">8.0</td><td class="n">5.7</td></tr>
-        <tr><td>5 · Wine noir</td><td class="n">17.0</td><td class="n">8.7</td><td class="n">5.7</td><td class="n">6.4</td><td class="n">5.0</td><td class="n">6.4</td><td class="n">9.9</td></tr>
-        <tr><td>6 · Mulberry</td><td class="n">17.7</td><td class="n">10.5</td><td class="n">6.8</td><td class="n">7.9</td><td class="n">7.0</td><td class="n">7.9</td><td class="n">10.9</td></tr>
+        <tr><td>Current</td><td class="n">17.9</td><td class="n">7.6</td><td class="n">5.8</td><td class="n">5.5</td><td class="n">4.9</td><td class="n edge">4.5</td><td class="n">5.5</td><td class="n">10.9</td></tr>
+        <tr><td>1 · Violet ramp</td><td class="n">17.7</td><td class="n">9.7</td><td class="n">7.1</td><td class="n">7.3</td><td class="n">6.7</td><td class="n">5.3</td><td class="n">7.3</td><td class="n">11.1</td></tr>
+        <tr><td>2 · Shadow plum</td><td class="n">14.3</td><td class="n">7.9</td><td class="n">5.4</td><td class="n">5.8</td><td class="n">5.0</td><td class="n edge">4.5</td><td class="n">7.0</td><td class="n">8.8</td></tr>
+        <tr><td>3 · Lavender dusk</td><td class="n">13.7</td><td class="n">6.9</td><td class="n">5.4</td><td class="n">6.2</td><td class="n">5.4</td><td class="n edge">4.5</td><td class="n">6.2</td><td class="n">8.3</td></tr>
+        <tr><td>4 · Periwinkle on plum</td><td class="n">14.2</td><td class="n">10.3</td><td class="n">8.5</td><td class="n">7.9</td><td class="n">6.5</td><td class="n">5.1</td><td class="n">7.9</td><td class="n">7.2</td></tr>
+        <tr><td>5 · Wine noir</td><td class="n">17.0</td><td class="n">8.7</td><td class="n">5.7</td><td class="n">6.8</td><td class="n">5.2</td><td class="n edge">4.6</td><td class="n">6.8</td><td class="n">9.8</td></tr>
+        <tr><td>6 · Mulberry</td><td class="n">17.6</td><td class="n">10.4</td><td class="n">6.7</td><td class="n">7.9</td><td class="n">7.0</td><td class="n">5.3</td><td class="n">7.9</td><td class="n">10.9</td></tr>
+        <tr><td>7 · Indigo night</td><td class="n">12.7</td><td class="n">8.7</td><td class="n">6.2</td><td class="n">6.7</td><td class="n">6.4</td><td class="n edge">4.6</td><td class="n">6.7</td><td class="n">9.2</td></tr>
+        <tr><td>8 · Slate red</td><td class="n">15.5</td><td class="n">8.7</td><td class="n">5.2</td><td class="n">5.9</td><td class="n">5.0</td><td class="n edge">4.5</td><td class="n">5.9</td><td class="n">9.3</td></tr>
+        <tr><td>9 · Oxblood</td><td class="n">15.6</td><td class="n">10.0</td><td class="n">6.7</td><td class="n">5.2</td><td class="n">4.9</td><td class="n edge">4.5</td><td class="n">5.2</td><td class="n">10.9</td></tr>
+        <tr><td>10 · Cocoa brick</td><td class="n">12.8</td><td class="n">8.3</td><td class="n">5.0</td><td class="n">5.6</td><td class="n">4.9</td><td class="n edge">4.5</td><td class="n">5.6</td><td class="n">9.9</td></tr>
+        <tr><td>11 · Graphite red</td><td class="n">17.0</td><td class="n">9.1</td><td class="n">5.9</td><td class="n">6.0</td><td class="n">5.2</td><td class="n edge">4.6</td><td class="n">6.0</td><td class="n">9.8</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="note">"Card" is <code>--sx-surface-2</code>. "Warning" is the unchanged <code>--sx-warn</code> yellow, used for chips like DEMO PROFILE. Plum's vermilion with no lift would be 4.0:1 on its cards, and Wine's raw <code>#893168</code> 2.6:1 on the page; both fail, which is why they were lifted.</p>
+  <p class="note">Ratios are rounded down. "Card" is <code>--sx-surface-2</code>; "worst surface" is the lowest over page, card, raised card, hover and top card, which is where the design system sets the bar. "Warning" is the unchanged <code>--sx-warn</code> yellow, used for chips like DEMO PROFILE. Each lifted accent was tuned to land just above 4.5:1 on the top card, so it stays as close to the source colour as the rule allows.</p>
 </section>
 
 <section id="picks" aria-labelledby="pick-h">
@@ -319,25 +420,27 @@ tr:last-child td { border-bottom: 0; }
     <li><div><b>Violet ramp, if the goal is a clear new identity.</b><p>Best contrast of the set, cleanest surface steps, and it needs no extra fixes. The lavender buttons with dark text read as one system.</p></div></li>
     <li><div><b>Wine noir, if the goal is to keep today's mood.</b><p>Same near-black page, so photos and video still pop; only the accent and card tint change. Needs the lifted accent, not the raw <code>#893168</code>.</p></div></li>
     <li><div><b>Mulberry as the warmer alternative to Violet.</b><p>Equally readable. The derived pink accent is the one choice here not taken from the palette.</p></div></li>
-    <li><div><b>Shadow plum is the safest step, Periwinkle the boldest, Lavender the most work.</b><p>Plum barely changes the brand. Periwinkle turns every page purple, which may tire on long sessions. Lavender needs the fixes below before it is usable.</p></div></li>
+    <li><div><b>Indigo night if Violet feels too dark.</b><p>Same lavender accent, but on a bluer, lighter page with grey instead of lilac text. Calmer; slightly less contrast for body text (12.7:1 against Violet's 17.7:1), still well above the bar.</p></div></li>
+    <li><div><b>Graphite red or Slate red, if the brand stays red.</b><p>Graphite is today's look with a softer red; Slate adds a cool blue cast. Both keep photos neutral. Any red accent sits near the danger colour, so errors stand out less.</p></div></li>
+    <li><div><b>Shadow plum is the safest step, Periwinkle and Oxblood the boldest.</b><p>Plum barely changes the brand. Periwinkle turns every page purple and Oxblood every page deep red, which may tire on long sessions. Lavender dusk and Cocoa brick are soft, low-energy options.</p></div></li>
   </ol>
 </section>
 
 <section id="breaks" aria-labelledby="brk-h">
-  <h2 id="brk-h">What breaks<small>Found in the screenshots. All of it is in the light theme.</small></h2>
+  <h2 id="brk-h">What breaks<small>Found in the screenshots. With every palette now dark, nothing breaks outright.</small></h2>
   <div class="cols">
     <div class="box">
-      <h3>Lavender light</h3>
+      <h3>Fixed by going dark only</h3>
       <ul>
-        <li><b>Logo mark disappears.</b> The hourglass outline in the header and on Sign in is drawn in white, so only the centre diamond shows on the light page.</li>
-        <li><b>Warning chips fail.</b> DEMO PROFILE is yellow <code>#f2c744</code> on a light card, 1.3:1. Success, danger and info need light-theme values too.</li>
-        <li><b>Overlays on thumbnails stay dark.</b> Creator, location and title chips on tiles keep their black glass. That is on purpose (white text over photos), but they look heavier on a light page.</li>
+        <li><b>Logo mark.</b> The white hourglass outline vanished on the old light Lavender page. It shows on every palette now.</li>
+        <li><b>Warning chips.</b> DEMO PROFILE yellow was 1.3:1 on the light card. It is 7.2:1 or more on every palette now.</li>
+        <li><b>Red accents near danger.</b> Not a break, but a watch point: in the four red palettes and Plum, the accent and the danger rose are similar hues.</li>
       </ul>
     </div>
     <div class="box">
       <h3>Every palette</h3>
       <ul>
-        <li><b>Avatars keep their own colours.</b> The purple AU avatar is user data, not a token, so it clashes with Wine and Plum.</li>
+        <li><b>Avatars keep their own colours.</b> The purple AU avatar is user data, not a token, so it clashes with Wine, Plum and the four red palettes.</li>
         <li><b>The VR session is unchanged.</b> The three.js dock and panels have their own colours; a real switch would need a pass there too.</li>
         <li><b>Signed-in pages not captured.</b> Upload, Wallet, Messages and Settings use the same tokens but were not checked by eye.</li>
       </ul>
@@ -354,7 +457,7 @@ tr:last-child td { border-bottom: 0; }
         <tr><td><code>web/src/dev/palettes.css</code></td><td style="white-space:normal">One block per palette that re-points the <code>--sx-*</code> colour tokens. Also re-skins the header, popovers and empty states that hard-code the old near-black, and the SVG icons that carry <code>fill="#ff3b1f"</code>.</td></tr>
         <tr><td><code>web/src/dev/palettePreview.js</code></td><td style="white-space:normal">Reads <code>?palette=</code>, sets <code>data-palette</code> on <code>&lt;html&gt;</code>, keeps the choice in sessionStorage, and adds the corner picker. It also points the ~40 hard-coded vermilion <code>rgba(255, 59, 31, …)</code> glows in global.css at the active accent.</td></tr>
         <tr><td><code>web/src/main.jsx</code></td><td style="white-space:normal">Loads the preview module only when <code>import.meta.env.DEV</code>, so production builds never include it.</td></tr>
-        <tr><td><code>scripts/capture_palettes.cjs</code></td><td style="white-space:normal">Re-takes all 28 screenshots into <code>docs/palette-test/img</code>. Needs Vite on :5173 and the API on :8000.</td></tr>
+        <tr><td><code>scripts/capture_palettes.cjs</code></td><td style="white-space:normal">Re-takes all 48 screenshots into <code>docs/palette-test/img</code>, or only the palettes named on the command line. Needs Vite on :5173 and the API on :8000.</td></tr>
       </tbody>
     </table>
   </div>
