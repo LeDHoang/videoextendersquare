@@ -1126,9 +1126,9 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   closeTo(dock.pos.x, 0);
   // The dock sits at the open shell's 2.2 m radius, its bottom edge on the
   // top of the nav strip under the Explore panel: eye 1.52 - 0.15 drop -
-  // 1.125 / 2 panel - half of the 0.16 * 3.28 / 1.5 m strip.
+  // 1.125 / 2 panel - 0.35 nav drop - half of the 0.16 * 3.28 / 1.5 m strip.
   const navH = 0.16 * 3.28 / 1.5;
-  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - navH / 2 + 1.23 / 2);
+  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - 0.35 - navH / 2 + 1.23 / 2);
   closeTo(dock.pos.z, -2.2);
   closeTo(dock.pitch, 0);
   const comments = api.getCommentsPanelLayout();
@@ -6131,6 +6131,10 @@ test('VR shell: nav bar sits under the dock, or under the main panel when open',
   renderer.shell.open('/explore');
   let p = local(main);
   assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -1.125 / 2, `under the main panel (${p.y})`);
+  // The main panel grows 0.35 m downward from its old top edge, so the nav drops with it.
+  const s = (1.125 + 0.35) / 1.125;
+  closeTo(main.scale.y, s);
+  closeTo(main.position.y + 1.125 * s / 2, renderer.__test.getHeadPosition().y - 0.15 + 1.125 / 2);
   renderer.shell.close();
   p = local(dock);
   assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3 + 1e-9, `under the dock (${p.y})`);

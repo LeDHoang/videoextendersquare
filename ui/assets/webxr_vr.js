@@ -951,7 +951,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const full = dockTargetSize(layoutTuning.screenScale);
       const fit = dockTargetSize(layoutTuning.screenScale, controlsLogicalW, controlsLogicalH);
       const navH = SHELL_NAV_SIZE.h * fit.w / SHELL_NAV_SIZE.w;
-      const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - navH / 2;
+      const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - SHELL_NAV_DROP - navH / 2;
       pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
       const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
@@ -6278,6 +6278,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   const SHELL_MAIN_RADIUS = 2.2;
   const SHELL_MAIN_DROP = 0.15;
   const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
+  // The nav sits this far lower than flush under a 1.125 m panel (about 10% of
+  // the Quest's view height at the bend radius); the main panel keeps its top
+  // edge and scales up to fill the gap.
+  const SHELL_NAV_DROP = 0.35;
+  const SHELL_MAIN_SCALE = (SHELL_MAIN_SIZE.h + SHELL_NAV_DROP) / SHELL_MAIN_SIZE.h;
   const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
   const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
   const SHELL_IMAGE_CAP = 96;
@@ -6540,9 +6545,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     const yaw = headYaw();
     shellMainMesh.position.set(
       headPos.x - Math.sin(yaw) * SHELL_MAIN_RADIUS,
-      headPos.y - SHELL_MAIN_DROP,
+      headPos.y - SHELL_MAIN_DROP - SHELL_NAV_DROP / 2,
       headPos.z - Math.cos(yaw) * SHELL_MAIN_RADIUS
     );
+    shellMainMesh.scale.set(SHELL_MAIN_SCALE, SHELL_MAIN_SCALE, SHELL_MAIN_SCALE);
     faceViewerLevel(shellMainMesh, headPos, 0);
   }
 
@@ -6559,7 +6565,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const head = getHeadPosition();
     // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
     if (!open) shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
-    const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
+    const anchorH = open ? SHELL_MAIN_SIZE.h * anchor.scale.y : 0.6 * anchor.scale.y;
     const place = (k) => {
       const navH = SHELL_NAV_SIZE.h * k;
       const gap = open ? navH * 0.5 : 0;
@@ -10642,6 +10648,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHeatStyle,
       earthHeatRamp,
       computeDockPose,
+      getHeadPosition,
       captureSessionEye,
       controlIndexFromUV,
       // v8.3 lock/scale/distance/panel seams.
