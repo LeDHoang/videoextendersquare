@@ -36,7 +36,7 @@ describe('HeaderBar responsive behavior', () => {
     cleanup();
   });
 
-  it('renders brand and guest sign-in button when logged out', () => {
+  it('renders brand and one SIGN UP / SIGN IN action, with no Upload, when logged out', () => {
     render(
       <MemoryRouter>
         <HeaderBar onToggleSidebar={vi.fn()} />
@@ -44,7 +44,8 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     expect(screen.getByText('ECHO')).toBeInTheDocument();
-    expect(screen.getByText('SIGN IN')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SIGN UP / SIGN IN' })).toBeInTheDocument();
+    expect(screen.queryByText('Upload')).not.toBeInTheDocument();
   });
 
   it('renders action buttons and unread count badge when authenticated', () => {

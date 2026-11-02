@@ -438,7 +438,7 @@ export default function ProfilePage() {
               )}
             </div>
             <div className="sx-pf-stats" role="group" aria-label="Profile statistics">
-              <button type="button" className="sx-pf-stat sx-pf-stat--link sx-pf-stat--lead" onClick={() => setDialog('followers')}>
+              <button type="button" className="sx-pf-stat sx-pf-stat--link" onClick={() => setDialog('followers')}>
                 <span className="sx-pf-stat-value">{formatCompactCount(profile.follower_count)}</span>
                 <span className="sx-pf-stat-label">FOLLOWERS</span>
               </button>

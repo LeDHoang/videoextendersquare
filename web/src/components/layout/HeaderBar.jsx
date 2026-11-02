@@ -440,24 +440,37 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
 
             {/* Right-side actions, in this order: UPLOAD (the one filled action), credits,
                 messages, then the account avatar. They are links, so they can open in a new
-                tab and report aria-current. */}
-            <NavLink
-              to={NAV.upload.to}
-              className="sx-top-action-btn sx-desktop-only"
-              title="Open the Upload page"
-            >
-              {NAV.upload.label}
-            </NavLink>
-            <IconButton
-              as={NavLink}
-              to={NAV.upload.to}
-              variant="primary"
-              className="sx-mobile-tablet-only"
-              title="Upload Video or Image"
-              label={NAV.upload.label}
-            >
-              <NAV.upload.Icon className="sx-top-btn-svg" />
-            </IconButton>
+                tab and report aria-current. Signed out, upload needs an account, so the one
+                filled action is SIGN UP / SIGN IN instead. */}
+            {user ? (
+              <>
+                <NavLink
+                  to={NAV.upload.to}
+                  className="sx-top-action-btn sx-desktop-only"
+                  title="Open the Upload page"
+                >
+                  {NAV.upload.label}
+                </NavLink>
+                <IconButton
+                  as={NavLink}
+                  to={NAV.upload.to}
+                  variant="primary"
+                  className="sx-mobile-tablet-only"
+                  title="Upload Video or Image"
+                  label={NAV.upload.label}
+                >
+                  <NAV.upload.Icon className="sx-top-btn-svg" />
+                </IconButton>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="sx-top-action-btn"
+                onClick={() => navigate('/signup?next=' + encodeURIComponent(location.pathname + location.search))}
+              >
+                SIGN UP / SIGN IN
+              </button>
+            )}
 
             {user ? (
               <>
@@ -515,15 +528,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                     </div>
                   ) : null}
                 </>
-              ) : (
-                <button
-                  type="button"
-                  className="sx-account-signin"
-                  onClick={() => navigate('/login?next=' + encodeURIComponent(location.pathname + location.search))}
-                >
-                  SIGN IN
-                </button>
-              )}
+              ) : null}
             </div>
           </div>
         </>

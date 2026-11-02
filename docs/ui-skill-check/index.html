@@ -2228,6 +2228,27 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Not done:</strong> the empty pack's EmptyState was checked in the test, not in the browser.</p>
   </section>
 
+  <section class="attempt" id="fix-75">
+    <h4>Fix 75 · Follow-up fix · The profile's four stats are one line of "number label", not boxes, verified locally (375 wide)</h4>
+    <p>FOLLOWERS, FOLLOWING, LIKES and POSTS were four boxes: two rows on a phone, about 136px tall. They are now one borderless line under a thin rule, each stat read as "0 FOLLOWERS": the number in the display font, then its label in small mono type. LIKES keeps the accent colour. FOLLOWERS and FOLLOWING are still buttons; the number and label both turn bright on hover. The line is about 43px tall on a phone and the same line on wider screens, so the hero card is shorter everywhere.</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix75-profile-stats-phone.png" alt="The profile stats on a phone as one line: 0 followers, 0 following, 0 likes, 1 posts." loading="lazy" style="max-width:375px">
+        <figcaption>375 wide: all four stats on one line, no boxes.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser at 375: all four sit on one row inside the card with no horizontal scroll. On phones the gap and label spacing are tighter, because the first version wrapped POSTS alone onto a second row. I also removed a leftover duplicate <code>.sx-pf-stat-value</code> rule and the unused <code>--lead</code> class.</p>
+    <p><strong>Not done:</strong> hover and keyboard focus on the two buttons were not re-tested after the restyle. With 4-digit counts (tested by swapping in "12.4K", "3,210", "98.7K", "1,204") the line wraps to two rows of two, with no overflow; it was not tuned further.</p>
+  </section>
+
+  <section class="attempt" id="fix-76">
+    <h4>Fix 76 · Follow-up fix · One SIGN UP / SIGN IN action before login, and a smaller time readout, verified locally</h4>
+    <p><strong>Header before login:</strong> UPLOAD and SIGN IN sat side by side at different heights (44px and 38px), and uploading needs an account anyway. Signed out, the header now has one filled action in the old UPLOAD style, labelled <code>SIGN UP / SIGN IN</code>. It opens the sign-up page (with the tabs to switch to sign in) and returns to the current page afterwards. Signed in, nothing changes. On a phone the label wraps to two lines in a 38px button so the bar still fits 375 wide (no horizontal scroll). The old <code>.sx-account-signin</code> styles are deleted.</p>
+    <p><strong>Time readout in the docked reel player:</strong> the <code>0:12 / 0:30</code> chip went from 12px to 11px with less padding and no letter spacing, the same as in fullscreen.</p>
+    <p><strong>Checked:</strong> at 1280 the button is 162 by 44px; at 375 it is 82 by 38px. I could not get a real signed-out session in the browser, so I measured a copy of the button placed in the header. The header test now expects the single action and no Upload. Results: 485 node and 526 vitest pass.</p>
+    <p><strong>Not done:</strong> the sign-up page after clicking was not walked through in the browser, and the time readout was not seen on a video reel (the page showed an image post).</p>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -2271,7 +2292,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 74. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 75. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>

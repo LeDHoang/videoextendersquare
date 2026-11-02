@@ -5560,29 +5560,9 @@ button.sx-explore-loc-link:hover {
   box-shadow: 0 0 10px var(--sx-accent-glow);
 }
 
-.sx-account-signin {
-  min-width: 38px;
-  height: 38px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--sx-rule-strong);
-  background: var(--sx-surface-2);
-  color: var(--sx-ink);
-  cursor: pointer;
-}
-
 .sx-account-trigger:hover,
-.sx-account-trigger[aria-expanded='true'],
-.sx-account-signin:hover {
+.sx-account-trigger[aria-expanded='true'] {
   border-color: var(--sx-accent);
-}
-
-.sx-account-signin {
-  padding: 0 12px;
-  color: var(--sx-accent-hi);
-  font: 800 var(--sx-t-eyebrow)/1 'JetBrains Mono', monospace;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
 }
 
 .sx-account-loading {
@@ -6368,10 +6348,15 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   overflow-wrap: anywhere;
 }
 @media (max-width: 700px) {
-  .sx-account-signin {
-    min-width: 34px;
-    padding: 0 7px;
-    font-size: var(--sx-t-eyebrow);
+  /* Signed out, SIGN UP / SIGN IN is the one top action: two short lines so the bar fits 375. */
+  .sx-top-action-btn {
+    height: var(--sx-control-h);
+    width: 5.5rem;
+    padding: 0 6px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
   }
 
   .sx-account-avatar:not(.sx-top-bar *) {
@@ -8318,41 +8303,39 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 
 .sx-pf-stats {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sx-3);
-  padding-top: var(--sx-5);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sx-2) var(--sx-5);
+  padding-top: var(--sx-4);
   border-top: 1px solid var(--sx-rule);
 }
 
+/* One stat reads as "12 FOLLOWERS": the number, then its label, on one line. */
 .sx-pf-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sx-2);
+  padding: 0;
   border: 0;
-  border-left: 2px solid var(--sx-rule);
-  background: var(--sx-surface-2);
+  background: none;
   color: inherit;
   text-align: left;
   font: inherit;
-}
-
-.sx-pf-stat--lead {
-  border-left-color: var(--sx-accent);
 }
 
 .sx-pf-stat--link {
   cursor: pointer;
 }
 
-.sx-pf-stat--link:hover .sx-pf-stat-value {
+.sx-pf-stat--link:hover .sx-pf-stat-value,
+.sx-pf-stat--link:hover .sx-pf-stat-label {
   color: var(--sx-accent-hi);
 }
 
 .sx-pf-stat-value {
   font-family: var(--sx-font-display);
-  font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+  font-size: 1.15rem;
   font-weight: 900;
   color: var(--sx-ink);
 }
@@ -8638,10 +8621,6 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
     align-items: flex-start;
   }
 
-  .sx-pf-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .sx-pf-tools .sx-xh-density {
     display: none;
   }
@@ -8650,6 +8629,20 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 @media (max-width: 480px) {
   .sx-pf-hero-main {
     flex-direction: column;
+  }
+
+  /* Four stats on one 309px line at 375: tighter gaps and label tracking. */
+  .sx-pf-stats {
+    column-gap: var(--sx-2);
+    justify-content: space-between;
+  }
+
+  .sx-pf-stat {
+    gap: var(--sx-1);
+  }
+
+  .sx-pf-stat-label {
+    letter-spacing: 0.04em;
   }
 }
 
