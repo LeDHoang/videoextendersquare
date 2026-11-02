@@ -1,0 +1,185 @@
+/* Palette preview themes (dev only, loaded by palettePreview.js).
+   Each block re-points the colour tokens from tokens.css; nothing else changes.
+   Hard-coded vermilion rgba() in global.css is re-tinted at runtime from --sx-accent-rgb. */
+
+:root {
+  --sx-accent-rgb: 255, 59, 31;
+}
+
+/* 1. Violet ramp — coolors 10002b 240046 3c096c 5a189a 7b2cbf 9d4edd c77dff e0aaff */
+:root[data-palette="violet"] {
+  --sx-accent-rgb: 199, 125, 255;
+  --sx-bg: #10002b;
+  --sx-surface: #1a0036;
+  --sx-surface-2: #240046;
+  --sx-surface-3: #3c096c;
+  --sx-surface-hover: #2e0458;
+  --sx-surface-glass: rgba(16, 0, 43, 0.82);
+  --sx-surface-glass-border: rgba(224, 170, 255, 0.12);
+  --sx-surface-overlay: rgba(16, 0, 43, 0.75);
+  --sx-rule: #3c096c;
+  --sx-rule-strong: #5a189a;
+  --sx-rule-subtle: rgba(224, 170, 255, 0.08);
+  --sx-ink: #f7efff;
+  --sx-ink-2: #e0aaff;
+  --sx-ink-3: #b893e0;
+  --sx-ink-muted: #7b2cbf;
+  --sx-accent: #c77dff;
+  --sx-accent-hi: #e0aaff;
+  --sx-on-accent: #10002b;
+}
+
+/* 2. Shadow plum — coolors 44355b 31263e 221e22 (neutrals only; keeps the brand vermilion at its -hi value) */
+:root[data-palette="plum"] {
+  --sx-accent-rgb: 255, 92, 66;
+  --sx-bg: #221e22;
+  --sx-surface: #2a2230;
+  --sx-surface-2: #31263e;
+  --sx-surface-3: #44355b;
+  --sx-surface-hover: #3a2d4b;
+  --sx-surface-glass: rgba(34, 30, 34, 0.82);
+  --sx-surface-glass-border: rgba(255, 255, 255, 0.08);
+  --sx-surface-overlay: rgba(34, 30, 34, 0.75);
+  --sx-rule: #44355b;
+  --sx-rule-strong: #5c4a78;
+  --sx-rule-subtle: rgba(255, 255, 255, 0.06);
+  --sx-ink: #f3eef7;
+  --sx-ink-2: #c9bdd8;
+  --sx-ink-3: #a99bbb;
+  --sx-ink-muted: #776a88;
+  --sx-accent: #ff5c42;
+  --sx-accent-hi: #ff7a63;
+  --sx-on-accent: #0a0a0a;
+}
+
+/* 3. Lavender light — coolors f4effa 2f184b 532b88 9b72cf c8b1e4 (the only light theme) */
+:root[data-palette="lavender"] {
+  color-scheme: light;
+  --sx-accent-rgb: 83, 43, 136;
+  --sx-bg: #f4effa;
+  --sx-surface: #fbf8fe;
+  --sx-surface-2: #ece3f6;
+  --sx-surface-3: #e0d0f0;
+  --sx-surface-hover: #e6daf3;
+  --sx-surface-glass: rgba(244, 239, 250, 0.86);
+  --sx-surface-glass-border: rgba(47, 24, 75, 0.12);
+  --sx-surface-overlay: rgba(47, 24, 75, 0.45);
+  --sx-rule: #c8b1e4;
+  --sx-rule-strong: #9b72cf;
+  --sx-rule-subtle: rgba(47, 24, 75, 0.08);
+  --sx-ink: #2f184b;
+  --sx-ink-2: #532b88;
+  --sx-ink-3: #6a4f8e;
+  --sx-ink-muted: #9b72cf;
+  --sx-accent: #532b88;
+  --sx-accent-hi: #6c3daa;
+  --sx-on-accent: #f4effa;
+  --sx-shadow-sm: 0 2px 8px rgba(47, 24, 75, 0.12);
+  --sx-shadow-card: 0 4px 20px rgba(47, 24, 75, 0.14);
+  --sx-shadow-popover: 0 16px 40px rgba(47, 24, 75, 0.22);
+}
+
+/* 4. Periwinkle on plum — coolors e6f2ff ccdcff b3beff 9a99f2 8b79d9 805ebf 6f46a6 60308c 511f73 431259 */
+:root[data-palette="periwinkle"] {
+  --sx-accent-rgb: 179, 190, 255;
+  --sx-bg: #431259;
+  --sx-surface: #511f73;
+  --sx-surface-2: #60308c;
+  --sx-surface-3: #6f46a6;
+  --sx-surface-hover: #5a2a82;
+  --sx-surface-glass: rgba(67, 18, 89, 0.84);
+  --sx-surface-glass-border: rgba(230, 242, 255, 0.12);
+  --sx-surface-overlay: rgba(67, 18, 89, 0.75);
+  --sx-rule: #6f46a6;
+  --sx-rule-strong: #8b79d9;
+  --sx-rule-subtle: rgba(230, 242, 255, 0.08);
+  --sx-ink: #ffffff;
+  --sx-ink-2: #e6f2ff;
+  --sx-ink-3: #ccdcff;
+  --sx-ink-muted: #9a99f2;
+  --sx-accent: #b3beff;
+  --sx-accent-hi: #ccdcff;
+  --sx-on-accent: #431259;
+}
+
+/* 5. Wine noir — coolors eaeaea 893168 4a1942 2e1c2b 050404 (accent lifted from #893168, which is 2.6:1 on black) */
+:root[data-palette="wine"] {
+  --sx-accent-rgb: 220, 104, 168;
+  --sx-bg: #050404;
+  --sx-surface: #140c12;
+  --sx-surface-2: #2e1c2b;
+  --sx-surface-3: #4a1942;
+  --sx-surface-hover: #24151f;
+  --sx-surface-glass: rgba(5, 4, 4, 0.84);
+  --sx-surface-glass-border: rgba(234, 234, 234, 0.08);
+  --sx-surface-overlay: rgba(5, 4, 4, 0.75);
+  --sx-rule: #3a2236;
+  --sx-rule-strong: #893168;
+  --sx-rule-subtle: rgba(234, 234, 234, 0.06);
+  --sx-ink: #eaeaea;
+  --sx-ink-2: #c9bcc5;
+  --sx-ink-3: #a9969f;
+  --sx-ink-muted: #6d5a68;
+  --sx-accent: #dc68a8;
+  --sx-accent-hi: #e98cbf;
+  --sx-on-accent: #050404;
+}
+
+/* 6. Mulberry — coolors 170312 33032f 531253 (no light colour in the palette; accent is a lifted tint of #531253) */
+:root[data-palette="mulberry"] {
+  --sx-accent-rgb: 231, 127, 214;
+  --sx-bg: #170312;
+  --sx-surface: #22041d;
+  --sx-surface-2: #33032f;
+  --sx-surface-3: #531253;
+  --sx-surface-hover: #2b0327;
+  --sx-surface-glass: rgba(23, 3, 18, 0.84);
+  --sx-surface-glass-border: rgba(251, 238, 250, 0.08);
+  --sx-surface-overlay: rgba(23, 3, 18, 0.75);
+  --sx-rule: #42093e;
+  --sx-rule-strong: #6a1a69;
+  --sx-rule-subtle: rgba(251, 238, 250, 0.06);
+  --sx-ink: #fbeefa;
+  --sx-ink-2: #dcbfd8;
+  --sx-ink-3: #bd94b7;
+  --sx-ink-muted: #7d5577;
+  --sx-accent: #e77fd6;
+  --sx-accent-hi: #f3a6e6;
+  --sx-on-accent: #170312;
+}
+
+/* Derived accent tints, shared by every palette. */
+:root[data-palette] {
+  --sx-accent-dim: rgba(var(--sx-accent-rgb), 0.12);
+  --sx-accent-glow: rgba(var(--sx-accent-rgb), 0.35);
+  --sx-accent-border: rgba(var(--sx-accent-rgb), 0.45);
+  --sx-glow-accent-strong: 0 0 36px rgba(var(--sx-accent-rgb), 0.55);
+}
+
+/* App chrome that hard-codes the old near-black surfaces in global.css.
+   Overlays that sit on thumbnails (.sx-explore-title, -loc, -creator…) stay dark on purpose. */
+:root[data-palette] .sx-top-bar,
+:root[data-palette] .sx-explore-stats { background: var(--sx-surface-glass); }
+:root[data-palette] .sx-command-results,
+:root[data-palette] .sx-account-popover,
+:root[data-palette] .sx-empty-state,
+:root[data-palette] .sx-upload-zone,
+:root[data-palette] .sx-pack-track-placeholder,
+:root[data-palette] .sx-pack-editor-row label { background: var(--sx-surface); }
+
+/* Inline SVG icons and the logo carry fill="#ff3b1f" / stroke="#ff3b1f" attributes. */
+:root[data-palette] [fill="#ff3b1f"] { fill: var(--sx-accent); }
+:root[data-palette] [stroke="#ff3b1f"] { stroke: var(--sx-accent); }
+
+.sx-palette-picker {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 1000;
+  font: 12px var(--sx-font-mono);
+  color: var(--sx-ink);
+  background: var(--sx-surface-2);
+  border: 1px solid var(--sx-rule-strong);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
