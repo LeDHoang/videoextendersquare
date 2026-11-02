@@ -75,6 +75,15 @@ def test_long_segments_split_at_word_timings_into_two_line_cues():
     assert cues[0][2].startswith("word00 word01") and cues[-1][2] == "No word timings"
 
 
+def test_words_keep_whispers_own_spacing():
+    def segment(*words):
+        timed = [SimpleNamespace(start=i * 0.5, end=i * 0.5 + 0.4, word=word) for i, word in enumerate(words)]
+        return SimpleNamespace(start=0.0, end=len(words) * 0.5, text="".join(words), words=timed)
+
+    cues = SM.caption_cues([segment("สวัสดี", "ครับ"), segment("曼谷", "很", "热"), segment(" Hello", " there.")])
+    assert [text for _start, _end, text in cues] == ["สวัสดีครับ", "曼谷很热", "Hello there."]
+
+
 def test_the_captions_sit_next_to_the_original():
     assert SM.captions_path("output/uploads/clip.mp4") == Path("output/uploads/clip.vtt")
     assert SM.captions_path("output/uploads/clip.mp4") in SM.derived_files(Path("output/uploads/clip.mp4"))

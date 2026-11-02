@@ -893,18 +893,21 @@ def caption_cues(segments) -> list[tuple[float, float, str]]:
     """
     cues = []
     for seg in segments:
-        words = [(w.start, w.end, w.word.strip()) for w in (seg.words or []) if w.word.strip()]
+        # Whisper words carry their own leading space (" Hello") in languages
+        # written with spaces, and none in Chinese, Japanese or Thai.
+        words = [(w.start, w.end, w.word.rstrip()) for w in (seg.words or []) if w.word.strip()]
         if not words:
             if seg.text.strip():
                 cues.append((seg.start, seg.end, seg.text.strip()))
             continue
         start, end, text = words[0]
+        text = text.lstrip()
         for w_start, w_end, word in words[1:]:
-            if len(text) + 1 + len(word) > CAPTION_MAX_CHARS:
+            if len(text) + len(word) > CAPTION_MAX_CHARS:
                 cues.append((start, end, text))
-                start, text = w_start, word
+                start, text = w_start, word.lstrip()
             else:
-                text += " " + word
+                text += word
             end = w_end
         cues.append((start, end, text))
     return cues
