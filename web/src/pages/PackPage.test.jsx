@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../components/ui/Toast.jsx';
 import PackPage from './PackPage.jsx';
 
 const mocks = vi.hoisted(() => ({
@@ -106,13 +107,15 @@ function Where() {
 function renderPage(path = '/packs/pack-1') {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/packs/:packId" element={<PackPage />} />
-        <Route path="/login" element={<div>LOGIN SCREEN</div>} />
-        <Route path="/profile/:name" element={<div>PROFILE SCREEN</div>} />
-        <Route path="/packs/:packId/edit" element={<div>EDITOR SCREEN</div>} />
-      </Routes>
-      <Where />
+      <ToastProvider>
+        <Routes>
+          <Route path="/packs/:packId" element={<PackPage />} />
+          <Route path="/login" element={<div>LOGIN SCREEN</div>} />
+          <Route path="/profile/:name" element={<div>PROFILE SCREEN</div>} />
+          <Route path="/packs/:packId/edit" element={<div>EDITOR SCREEN</div>} />
+        </Routes>
+        <Where />
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
@@ -188,7 +191,7 @@ describe('PackPage', () => {
     it('says so when a pack has no reels', async () => {
       mocks.api.get.mockResolvedValue({ pack: makePack({ items: [], reel_count: 0, playable_count: 0 }) });
       await loaded();
-      expect(screen.getByRole('status')).toHaveTextContent('This pack has no reels yet.');
+      expect(screen.getByText('This pack has no reels yet.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Play Neon Collection' })).toBeDisabled();
     });
 

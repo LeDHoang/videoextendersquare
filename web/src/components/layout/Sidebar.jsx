@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
-import { Field } from '../ui/controls.jsx';
+import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import { IndustrialCreditsIcon } from '../icons/index.jsx';
@@ -408,22 +408,12 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             </div>
           ) : null}
           <div className="sx-sidebar-btn-grid" style={{ marginTop: 12 }}>
-            <button
-              type="button"
-              className="sx-sidebar-btn-secondary"
-              onClick={resetModels}
-              disabled={saving}
-            >
+            <Button size="md" onClick={resetModels} disabled={saving}>
               RESET
-            </button>
-            <button
-              type="button"
-              className="sx-sidebar-btn-primary"
-              onClick={saveModels}
-              disabled={saving}
-            >
+            </Button>
+            <Button variant="primary" size="md" onClick={saveModels} disabled={saving}>
               {saving ? 'SAVING…' : 'SAVE'}
-            </button>
+            </Button>
           </div>
         </div>
       </details>

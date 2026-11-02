@@ -310,6 +310,46 @@ def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
     return queued
 
 
+def backfill_captions(limit: int | None = None) -> int:
+    """Caption live videos published before auto captions ran here; returns how many got captions.
+
+    For scripts/batch_backfill_captions.py, not the boot task: the speech model
+    can take minutes per reel, so each video runs here, one after another. A
+    video whose captions are recorded is skipped. One with no speech is
+    transcribed again on every run, since nothing marks it as checked.
+    """
+    from server.social.database import SessionLocal
+    from server.social.models import Post
+
+    root = UPLOAD_DIR.resolve()
+    with SessionLocal() as db:
+        rows = (
+            db.query(Post.media_path, Post.media_files)
+            .filter(Post.media_type == "video", Post.status == "published", Post.deleted_at.is_(None))
+            .order_by(Post.created_at.desc())
+            .all()
+        )
+    captioned = 0
+    for rel, files in rows:
+        if limit is not None and captioned >= limit:
+            break
+        dest = OUTPUT_DIR / rel
+        try:
+            # A recorded original may live only in R2; the job fetches it.
+            if dest.resolve().parent != root or (files is None and not dest.is_file()):
+                continue
+        except OSError:
+            continue
+        if SM.derived_pending(dest) or SM.has_media_file(SM.captions_path(dest), files):
+            continue
+        built = []
+        # Pending keeps the boot requeue off this file while it is fetched and transcribed.
+        SM.mark_derived_pending(dest)
+        _run_derived_job(dest, rel, lambda: built.append(_build_captions(dest)))
+        captioned += bool(built and built[0])
+    return captioned
+
+
 def _derived_step(label: str, dest: Path, make, *args, **kwargs) -> str | None:
     """Run one generator; a failure is logged and leaves the post on its original."""
     try:
@@ -362,20 +402,22 @@ def _build_stereo_video_assets(dest: Path, layout: str) -> None:
     _submit_captions(dest)
 
 
-def _build_captions(dest: Path) -> None:
+def _build_captions(dest: Path) -> bool:
     """Background, last, on the captions worker: auto captions, when the speech model can run here.
 
     Unlike the steps above, no file is the usual outcome (no model, no
-    audio, no speech), so only an error counts as a failure.
+    audio, no speech), so only an error counts as a failure. True when
+    captions were written.
     """
     try:
         built = SM.make_captions(str(dest))
     except Exception:
         logger.exception("Building the captions of %s raised", dest.name)
         metrics.incr("derived_failed")
-        return
+        return False
     if built:
         _record_files(dest)
+    return bool(built)
 
 
 def _fetch_inputs(dest: Path, rel: str) -> bool:

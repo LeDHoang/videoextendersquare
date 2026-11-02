@@ -232,7 +232,7 @@ export default function TagExplorePage() {
         <EmptyState
           title={'NO CONTENT TAGGED #' + displayTag.toUpperCase()}
           text="This tag exists as a valid destination, but no current reels or Reel Packs use it. Try a related search from the header."
-          hint="Tag matching is exact after case and punctuation normalization."
+          hint="Tags match exactly, ignoring case and punctuation."
         />
       ) : (
         <>

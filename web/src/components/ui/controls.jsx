@@ -1,6 +1,7 @@
 import { Children, cloneElement, isValidElement, useEffect, useRef, useState, useId } from 'react';
 import Emoji from './Emoji.jsx';
 import { GatedReason } from './primitives.jsx';
+import { onRovingKeyDown, tabStop } from './roving.js';
 
 // Accessible Combobox Dropdown — WAI-ARIA compliant with full keyboard navigation:
 // ArrowDown / ArrowUp to move, Enter to select, Escape to close, Home / End.
@@ -142,14 +143,16 @@ export function Dropdown({ label, value, options = [], onChange, placeholder = '
 }
 
 export function Segmented({ options = [], value, onChange, disabled = false, disabledOptions = [], ariaLabel }) {
+  const stop = tabStop(options.map((opt) => opt === value), options.map((opt) => disabled || disabledOptions.includes(opt)));
   return (
-    <div className="sx-seg" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((opt) => (
+    <div className="sx-seg" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
+      {options.map((opt, index) => (
         <button
           type="button"
           key={opt}
           role="radio"
           aria-checked={opt === value}
+          tabIndex={index === stop ? 0 : -1}
           className={opt === value ? 'sx-selected' : ''}
           disabled={disabled || disabledOptions.includes(opt)}
           onClick={() => onChange(opt)}
@@ -161,15 +164,19 @@ export function Segmented({ options = [], value, onChange, disabled = false, dis
   );
 }
 
+// Choice chips: a row of filters where exactly one is on (`.sx-pill`). Not a Button: a chip
+// shows a state, so it keeps its own small mono look.
 export function Pills({ options = [], value, onChange, ariaLabel }) {
+  const stop = tabStop(options.map((opt) => opt.value === value));
   return (
-    <div className="sx-pills" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((opt) => (
+    <div className="sx-pills" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
+      {options.map((opt, index) => (
         <button
           type="button"
           key={opt.label}
           role="radio"
           aria-checked={opt.value === value}
+          tabIndex={index === stop ? 0 : -1}
           className={`sx-pill ${opt.value === value ? 'sx-selected' : ''}`}
           onClick={() => onChange(opt.value)}
         >
@@ -180,13 +187,41 @@ export function Pills({ options = [], value, onChange, ariaLabel }) {
   );
 }
 
+// Tabs switch what the page below shows. `tabs` is [{ value, label }]; a label can hold
+// markup such as an unread count. `className` keeps each list's own look.
+export function Tabs({ tabs = [], value, onChange, ariaLabel, className = '' }) {
+  const stop = tabStop(tabs.map((tab) => tab.value === value));
+  return (
+    <div className={className || undefined} role="tablist" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
+      {tabs.map((tab, index) => (
+        <button
+          type="button"
+          key={tab.value}
+          role="tab"
+          aria-selected={tab.value === value}
+          tabIndex={index === stop ? 0 : -1}
+          className={tab.value === value ? 'sx-active' : ''}
+          onClick={() => onChange(tab.value)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// `variant` is 'secondary' (outline), 'primary' (accent, full width) or 'danger'. `size` is
+// 'sm' (34px), 'md' (38px) or 'lg' (44px); without one the variant sets it (primary is 44px).
+// `as` renders another element, e.g. a Link, with the same look.
 // `disabledReasons` lists why the button is blocked (falsy entries are skipped). They show above
 // the button and describe it; a disabled button that has reasons stays focusable
 // (aria-disabled) so keyboard and screen-reader users can reach it and hear why.
 export function Button({
   children,
   onClick,
-  primary = false,
+  as: Component = 'button',
+  variant = 'secondary',
+  size,
   disabled = false,
   loading = false,
   disabledReasons,
@@ -197,16 +232,16 @@ export function Button({
   const reasonId = useId();
   const reasons = (disabledReasons || []).filter(Boolean);
   const explained = disabled && !loading && reasons.length > 0;
+  const classes = ['sx-btn', variant !== 'secondary' && `sx-${variant}`, size && `sx-btn--${size}`, className];
   // The reasons sit in their own slot before the button, so adding or removing one never
   // remounts the button (a focused button keeps focus).
   return (
     <>
       {reasons.map((reason, index) => <GatedReason key={index} id={reasonId + index}>{reason}</GatedReason>)}
-      <button
-        type={type}
-        className={`sx-btn ${primary ? 'sx-primary' : ''} ${className}`}
+      <Component
+        {...(Component === 'button' ? { type, disabled: (disabled || loading) && !explained } : null)}
+        className={classes.filter(Boolean).join(' ')}
         onClick={explained ? (event) => event.preventDefault() : onClick}
-        disabled={(disabled || loading) && !explained}
         aria-disabled={explained || undefined}
         aria-busy={loading || undefined}
         aria-describedby={reasons.length ? reasons.map((_, index) => reasonId + index).join(' ') : undefined}
@@ -214,7 +249,7 @@ export function Button({
       >
         {loading ? <Spinner /> : null}
         <Emoji text={children} />
-      </button>
+      </Component>
     </>
   );
 }

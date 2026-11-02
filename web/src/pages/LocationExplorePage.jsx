@@ -238,7 +238,7 @@ export default function LocationExplorePage() {
         <EmptyState
           title={'NO CONTENT FROM ' + displayName}
           text="This place exists as a valid destination, but no current reels or Reel Packs use it. Try a related place from above."
-          hint="Location matching is exact on city and country."
+          hint="Places match on the exact city and country."
         />
       ) : (
         <>

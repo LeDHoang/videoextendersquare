@@ -338,7 +338,7 @@ export default function ImagePage() {
 
             <div style={{ marginTop: 'var(--sx-2)' }}>
               <Button
-                primary
+                variant="primary"
                 disabled={disabled}
                 disabledReasons={[blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES']}
                 loading={busy}

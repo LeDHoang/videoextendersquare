@@ -99,7 +99,7 @@ export function ShareSection({ num, user, title, path, jobDone, shareDisabled, p
             </div>
           </div>
           <div className="sx-studio-actions">
-            <Button primary onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(published.rel_path)}`)}>
+            <Button variant="primary" onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(published.rel_path)}`)}>
               ▶ PLAY IN REELS
             </Button>
             <Button onClick={() => navigate('/explore')}>EXPLORE GRID</Button>
@@ -111,7 +111,7 @@ export function ShareSection({ num, user, title, path, jobDone, shareDisabled, p
       ) : (
         <>
           <Button
-            primary
+            variant="primary"
             className="sx-studio-render"
             disabled={shareDisabled}
             disabledReasons={[

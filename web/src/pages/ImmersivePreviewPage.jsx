@@ -243,21 +243,21 @@ export default function ImmersivePreviewPage() {
               <div className="sx-immersive-preview-toolbar" aria-label="Immersive preview controls">
                 <div className="sx-control-group" role="group" aria-label="Curvature Mode">
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'dome')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'dome') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'dome')}
                   >
                     DOME
                   </Button>
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'sq_curve')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'sq_curve') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'sq_curve')}
                   >
                     SQ CURVE
                   </Button>
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'flat')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'flat') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'flat')}
                   >
@@ -268,7 +268,7 @@ export default function ImmersivePreviewPage() {
                   {SHELL_PAGES.map(([label, path]) => (
                     <Button
                       key={label}
-                      primary={shellTab(previewState.shell) === label}
+                      variant={shellTab(previewState.shell) === label ? 'primary' : 'secondary'}
                       disabled={!renderer?.shell}
                       onClick={() => { renderer.shell.open(path(user)); syncState(); }}
                     >

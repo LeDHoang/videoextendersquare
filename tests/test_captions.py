@@ -65,15 +65,26 @@ def test_long_segments_split_at_word_timings_into_two_line_cues():
     untimed = SimpleNamespace(start=20.0, end=21.0, text=" No word timings ", words=None)
     silent = SimpleNamespace(start=22.0, end=23.0, text=" ", words=[SimpleNamespace(start=22.0, end=22.5, word=" ")])
     cues = SM.caption_cues([long, untimed, silent])
-    # 6-character words: 12 fit in 84 characters (12 * 6 + 11 spaces = 83).
+    # 209 characters need 3 cues of 84, so each takes about 70: 11, 11 and 8 words.
     assert [(start, end, len(text.split())) for start, end, text in cues] == [
-        (0.0, 5.9, 12),
-        (6.0, 11.9, 12),
-        (12.0, 14.9, 6),
+        (0.0, 5.4, 11),
+        (5.5, 10.9, 11),
+        (11.0, 14.9, 8),
         (20.0, 21.0, 3),
     ]
     assert all(len(text) <= SM.CAPTION_MAX_CHARS for _start, _end, text in cues)
     assert cues[0][2].startswith("word00 word01") and cues[-1][2] == "No word timings"
+
+
+def test_a_segment_just_over_the_limit_does_not_leave_one_word_alone():
+    # The real speech check: Whisper heard this as one 89-character segment.
+    said = "Welcome to the reef, today we swim with the turtles near the coral wall, watch how they"
+    words = [SimpleNamespace(start=i * 0.3, end=i * 0.3 + 0.25, word=f" {w}") for i, w in enumerate(said.split())]
+    cues = SM.caption_cues([SimpleNamespace(start=0.0, end=5.0, text=said, words=words)])
+    assert [text for _start, _end, text in cues] == [
+        "Welcome to the reef, today we swim with the turtles",
+        "near the coral wall, watch how they",
+    ]
 
 
 def test_words_keep_whispers_own_spacing():

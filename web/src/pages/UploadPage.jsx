@@ -767,7 +767,7 @@ export default function UploadPage() {
             </p>
             {!convertJob || (convertSettled && !convertDone) ? (
               <div className="sx-studio-actions">
-                <Button primary onClick={startConvert} loading={convertBusy} disabled={convertBusy || blocked.length > 0}>▶ MAKE 3D</Button>
+                <Button variant="primary" onClick={startConvert} loading={convertBusy} disabled={convertBusy || blocked.length > 0}>▶ MAKE 3D</Button>
               </div>
             ) : null}
             {convertError ? (

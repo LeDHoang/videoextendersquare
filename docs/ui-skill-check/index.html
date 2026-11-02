@@ -1729,7 +1729,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Not done:</strong></p>
     <ul>
       <li><strong>Button <code>variant</code> and <code>size</code>.</strong> Merging <code>.sx-btn</code>, <code>.sx-pill</code> and the sidebar's primary button changes how every page looks, so it needs its own visual pass.</li>
-      <li><strong>The rest of Phase 2:</strong> Tabs, Chip, Toast and EmptyState.</li>
+      <li><strong>The rest of Phase 2:</strong> Tabs, Chip, Toast and EmptyState. <strong>Since done:</strong> fixes <a href="#fix-72">72</a>–<a href="#fix-74">74</a>.</li>
       <li><strong>The sidebar drawer as a Dialog.</strong> It is a navigation panel, and it moves with the single navigation source. <strong>Update:</strong> fix <a href="#fix-53">53</a> kept the drawer's own handling; see there for why.</li>
       <li><strong>The sign-in forms' <code>AuthField</code> and the studio <code>Field</code>.</strong> Both already link their labels; their hints and errors are not on FormField yet.</li>
       <li><strong>The credits pill on phones</strong> is still 38px tall.</li>
@@ -2159,6 +2159,75 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Not done:</strong> nothing. The /reels page's folder filter is unchanged.</p>
   </section>
 
+  <section class="attempt" id="fix-71">
+    <h4>Fix 71 · Follow-up fix · Auto captions checked on real speech: the model loads, a real clip is captioned, and older videos can be backfilled (verified locally)</h4>
+    <p>The speech model could not be downloaded when <a href="#fix-56">fix 56</a> shipped. With it installed, a real clip ("reef square" in the dev library) was transcribed and the captions showed in the player. Three things came out of that check:</p>
+    <ul>
+      <li><strong>Every transcription failed.</strong> The newest PyAV dropped an argument that faster-whisper passes when it decodes audio, so each call raised <code>TypeError</code>. <code>requirements-captions.txt</code> now pins <code>av&lt;19</code>.</li>
+      <li><strong>A last word could flash alone.</strong> Whisper heard one 89-character segment; the 84-character limit left "they" as its own cue. Long segments now split into cues of about even length (89 characters become 51 and 35).</li>
+      <li><strong>Older videos had no captions.</strong> <code>scripts/batch_backfill_captions.py</code> captions every published video that has none, one after another, and skips those already done.</li>
+    </ul>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix71-speech-captions.jpg" alt="The reef square clip playing with a two-line caption of the speech at the bottom of the player." loading="lazy" style="max-width:375px">
+        <figcaption>A caption made from real speech.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>tests/test_captions.py</code> adds the split case and updates the long-segment case; <code>tests/test_graceful_shutdown.py</code> adds the backfill test (older videos captioned once, finished ones skipped).</p>
+    <p><strong>Not done:</strong> the backfill has not been run on the whole library, and a video with no speech is transcribed again on each run, since nothing marks it as checked.</p>
+  </section>
+
+  <section class="attempt" id="fix-72">
+    <h4>Fix 72 · Follow-up fix · Phase 2: Button has <code>variant</code>, <code>size</code> and <code>as</code>, and replaces the sidebar's own buttons, verified locally (1280 wide)</h4>
+    <p>The Button now takes <code>variant</code> (<code>secondary</code>, <code>primary</code>, <code>danger</code>), <code>size</code> (<code>sm</code> 34px, <code>md</code> 38px, <code>lg</code> 44px) and <code>as</code>, so a link can look like a button (the 404 page's two actions). The old boolean <code>primary</code> is gone; the dozen places that used it moved to <code>variant</code>. It had also been reaching the DOM as an unknown attribute, which React warned about.</p>
+    <p>The sidebar's model settings had their own two button styles (<code>.sx-sidebar-btn-primary</code>, <code>.sx-sidebar-btn-secondary</code>, about 60 lines). RESET and SAVE are now a Button each, and those rules are deleted. They are square with the same hover as every other button. Compare's two hand-sized buttons use <code>size="sm"</code> instead of inline heights.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix72-sidebar-before.png" alt="The sidebar model settings before: rounded RESET and SAVE buttons in a style used nowhere else." loading="lazy">
+        <figcaption>Before: a third button style.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix72-sidebar-after.png" alt="The sidebar model settings after: square RESET and SAVE buttons that match the rest of the app." loading="lazy">
+        <figcaption>After: the shared Button, 38px tall.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser: primary SAVE is 38px tall with square corners and its hover is the lighter accent. The global <code>.sx-primary</code> rule is now scoped to raw buttons so it no longer fights the Button's own.</p>
+    <p><strong>Tests:</strong> <code>Button.test.jsx</code> checks the variant and size classes and that <code>as={Link}</code> renders a link with its href, the Button class and no <code>type</code>.</p>
+    <p><strong>Not done:</strong> the <code>.sx-pill</code> filter chips stay their own component (see fix 73), and a few raw <code>.sx-btn</code> buttons in pages not touched here were not moved.</p>
+  </section>
+
+  <section class="attempt" id="fix-73">
+    <h4>Fix 73 · Follow-up fix · Phase 2: Tabs and Chip with roving focus, and a Toast for "it worked" notes, verified locally (1280 and 375 wide)</h4>
+    <p><strong>Roving focus.</strong> The segmented controls, pills and the Explore tabs were a Tab stop each. They now follow the WAI-ARIA pattern: Tab enters the group once, on the selected option (or the first enabled one); the arrows, Home and End move to the next enabled option and select it. This is one small helper, <code>roving.js</code>, used by Tabs, the segmented control, the pills and the Explore tab rows. A new <code>Tabs</code> component replaces the hand-built tab list in messaging. On a profile, ArrowRight moved focus and selection to REELS, the URL became <code>?tab=video</code>, and only one tab had <code>tabIndex 0</code>.</p>
+    <p><strong>Toast.</strong> "Link copied." and "Report submitted." used a notice banner that pushed the page down (profile, pack) and a share button that changed its own label. Both now call <code>toast(message)</code>: one note at the bottom of the screen for 4 seconds, in an <code>aria-live="polite"</code> region that is always on the page. A new message replaces the old one. Errors are not toasts; they stay inline with <code>role="alert"</code> next to what failed. On phones the toast sits above the tab bar and above the MESSAGE button (the first version covered it).</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix73-toast-desktop.png" alt="Profile page at 1280 wide with a Link copied note at the bottom centre." loading="lazy">
+        <figcaption>1280 wide.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix73-toast-phone.jpg" alt="Profile page at 375 wide with a Link copied note above the MESSAGE button." loading="lazy" style="max-width:375px">
+        <figcaption>375 wide: clear of the MESSAGE button.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>roving.test.jsx</code> (4: Tabs arrows, Home, End and a single tab stop; pills ignore Enter; a disabled option is skipped; the stop falls on the first enabled option with nothing selected) and <code>Toast.test.jsx</code> (3: the live region is always there and the note leaves after 4 seconds; a new note replaces the old one and restarts the timer; no provider means no effect). The profile and pack tests now render inside a <code>ToastProvider</code>.</p>
+    <p><strong>Not done:</strong> the toast has no close button or undo; it is for short confirmations only. Other success banners (for example in the studio) were not moved.</p>
+  </section>
+
+  <section class="attempt" id="fix-74">
+    <h4>Fix 74 · Follow-up fix · Phase 2: EmptyState used for the empty pack, and its hints now say something a viewer can use, verified locally (375 wide)</h4>
+    <p>EmptyState already existed; two things were off around it. An empty pack still used its own paragraph style, and some hints were debug text. The empty pack is now an EmptyState ("THIS PACK IS EMPTY", with "Use EDIT PACK to add some." for the owner), and the hint has its own style. The /reels empty state no longer prints <code>folder="…" codec=…</code>. Explore, tag and place searches say what the match rule is ("Tags match exactly, ignoring case and punctuation.").</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix74-empty-notfound.jpg" alt="The 404 page at 375 wide: a title, one line of explanation, the address, and two actions." loading="lazy" style="max-width:375px">
+        <figcaption>The 404 page: title, text, address as the hint, two Button links.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Kept on purpose:</strong> the small "nothing here" rows inside narrow lists (messages, a picker list, the command palette). They are one line in a panel, and a title plus action would not fit.</p>
+    <p><strong>Tests:</strong> the pack test now looks for "This pack has no reels yet." <strong>Results for fixes 71–74:</strong> 786 pytest tests pass (12 skipped), 485 node and 526 vitest. The CSS guardrail baselines were lowered (hex colours 53 to 49, <code>!important</code> 152 to 150, disallowed functions 48 to 47) because the deleted sidebar rules removed those findings, and the 3D-filter source test now looks for the Button's <code>variant</code>.</p>
+    <p><strong>Not done:</strong> the empty pack's EmptyState was checked in the test, not in the browser.</p>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -2202,7 +2271,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 70. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 74. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -2216,8 +2285,8 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <div class="box">
       <h3>Larger pieces of work</h3>
       <ul>
-        <li>The rest of Phase 2: Button <code>variant</code> and <code>size</code>, Tabs, Chip, Toast and EmptyState. Dialog, IconButton, FormField and the Button's disabled reasons are done (<a href="#fix-52">fix 52</a>).</li>
-        <li><strong>Auto captions on real speech</strong> (<a href="#fix-56">fix 56</a>): the speech model could not be downloaded here, so a first publish with the model installed is still to check. Older videos need a backfill to get captions.</li>
+        <li><strong>Phase 2 follow-ups:</strong> a few raw <code>.sx-btn</code> buttons in pages not touched yet, and success banners outside profile and pack (for example in the studio), still need moving onto Button and Toast (<a href="#fix-72">fix 72</a>, <a href="#fix-73">73</a>).</li>
+        <li><strong>Backfill of older videos' captions</strong> (<a href="#fix-71">fix 71</a>): the script is written and tested but not yet run on the whole library. Run <code>.venv/bin/python scripts/batch_backfill_captions.py</code>.</li>
       </ul>
     </div>
     <div class="box">

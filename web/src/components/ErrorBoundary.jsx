@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { Button } from './ui/controls.jsx';
 
 // There was no error boundary anywhere in this app, so a single bad render
 // (e.g. Progress.jsx calling status.toUpperCase() on a malformed SSE frame)
@@ -25,7 +26,7 @@ export default class ErrorBoundary extends Component {
         <div className="sx-error-box" role="alert">
           <div className="sx-error-title">SOMETHING WENT WRONG</div>
           <p>This part of the page stopped working. Reloading usually fixes it.</p>
-          <button type="button" className="sx-btn" onClick={() => window.location.reload()}>RELOAD PAGE</button>
+          <Button onClick={() => window.location.reload()}>RELOAD PAGE</Button>
         </div>
       );
     }

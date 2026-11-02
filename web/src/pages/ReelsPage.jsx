@@ -350,7 +350,7 @@ export default function ReelsPage() {
             </div>
             <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} ariaLabel="Format" />
             <Button
-              primary={only3d}
+              variant={only3d ? 'primary' : 'secondary'}
               onClick={toggle3d}
               aria-pressed={only3d}
               title="Show only 3D (SBS/TB) reels. Testing filter."
@@ -396,7 +396,7 @@ export default function ReelsPage() {
               ↻
             </Button>
             <Button
-              primary={showTunnel}
+              variant={showTunnel ? 'primary' : 'secondary'}
               onClick={() => setShowTunnel((s) => !s)}
             >
               {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
@@ -406,7 +406,7 @@ export default function ReelsPage() {
             </Button>
             {needsProxy ? (
               <Button
-                primary
+                variant="primary"
                 disabled={proxyBusy}
                 loading={proxyBusy}
                 onClick={generateProxy}
@@ -465,7 +465,6 @@ export default function ReelsPage() {
         <EmptyState
           title="NO VIDEOS MATCH CURRENT FILTERS"
           text="Try adjusting the folder, format filter, or search query — or render new videos from the Video page."
-          hint={'folder="' + folder + '" codec="' + codecParam + '" search="' + debouncedSearch + '" tag="' + activeTag + '" location="' + activeLocation + '" feed="' + feedScope + '"' + (only3d ? ' media="stereo"' : '')}
         />
       ) : (
         <div>

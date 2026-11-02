@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
 import { AccentBlock } from '../ui/primitives.jsx';
+import { onRovingKeyDown } from '../ui/roving.js';
 import { MASTER_SIDE, formatClock, stageLayout } from './stageGeometry.js';
 import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 
@@ -219,13 +220,14 @@ export default function StudioStage({
     <div className="sx-studio-stage-col">
       <div className="sx-studio-stage-wrap">
         <div className="sx-studio-toolbar">
-          <div className="sx-seg sx-studio-view" role="radiogroup" aria-label="Stage view">
+          <div className="sx-seg sx-studio-view" role="radiogroup" aria-label="Stage view" onKeyDown={onRovingKeyDown}>
             {['original', 'extended'].map((option) => (
               <button
                 type="button"
                 key={option}
                 role="radio"
                 aria-checked={(showExtended ? 'extended' : 'original') === option}
+                tabIndex={(showExtended ? 'extended' : 'original') === option ? 0 : -1}
                 className={(showExtended ? 'extended' : 'original') === option ? 'sx-selected' : ''}
                 disabled={option === 'extended' && !resultUrl}
                 onClick={() => setView(option)}

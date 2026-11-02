@@ -13,6 +13,7 @@ import {
   matchesConversation,
 } from '../../utils/messageFormat.js';
 import PackCover from '../packs/PackCover.jsx';
+import { Tabs } from '../ui/controls.jsx';
 
 const TEXT_LIMIT = 2000;
 const COUNTER_FROM = 1600;
@@ -478,14 +479,16 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
   return (
     <section className={`sx-messaging-panel ${compact ? 'sx-messaging-panel--compact' : ''}`} data-pane={threadOpen ? 'thread' : 'list'}>
       <aside className="sx-message-sidebar" aria-label="Conversations">
-        <div className="sx-message-tabs" role="tablist" aria-label="Message boxes">
-          <button type="button" role="tab" aria-selected={box === 'inbox'} className={box === 'inbox' ? 'sx-active' : ''} onClick={() => setBox('inbox')}>
-            INBOX {messaging.unread.inbox ? <span>{messaging.unread.inbox}</span> : null}
-          </button>
-          <button type="button" role="tab" aria-selected={box === 'requests'} className={box === 'requests' ? 'sx-active' : ''} onClick={() => setBox('requests')}>
-            REQUESTS {messaging.unread.requests ? <span>{messaging.unread.requests}</span> : null}
-          </button>
-        </div>
+        <Tabs
+          className="sx-message-tabs"
+          ariaLabel="Message boxes"
+          tabs={[
+            { value: 'inbox', label: <>INBOX {messaging.unread.inbox ? <span>{messaging.unread.inbox}</span> : null}</> },
+            { value: 'requests', label: <>REQUESTS {messaging.unread.requests ? <span>{messaging.unread.requests}</span> : null}</> },
+          ]}
+          value={box}
+          onChange={setBox}
+        />
         <button type="button" className="sx-message-new" aria-expanded={newMessage} onClick={() => setNewMessage((value) => !value)}>
           <b aria-hidden="true">{newMessage ? '×' : '+'}</b> NEW MESSAGE
         </button>

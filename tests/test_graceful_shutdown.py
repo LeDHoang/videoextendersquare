@@ -292,6 +292,36 @@ def test_boot_task_logs_the_count(library, caplog):
     assert "Re-queued derived assets for 1 posts at boot" in caplog.text
 
 
+def test_backfill_captions_older_videos_once(library, monkeypatch):
+    add_post, _encodes, _futures = library
+    transcribed = []
+
+    def fake_captions(src):
+        transcribed.append(Path(src).name)
+        if "quiet" in src:
+            return None  # no speech: nothing is written
+        dest = SM.captions_path(src)
+        dest.write_text("WEBVTT\n")
+        return str(dest)
+
+    # Earlier tests' publishes may still have captions queued on the one worker.
+    uploads._captions_pool.submit(lambda: None).result(timeout=30)
+    monkeypatch.setattr(SM, "make_captions", fake_captions)
+    spoken = add_post("spoken", poster=True)
+    add_post("quiet", poster=True)
+    add_post("hidden-talk", poster=True, status="hidden")
+
+    assert uploads.backfill_captions() == 1
+    assert sorted(transcribed) == ["quiet.mp4", "spoken.mp4"]
+    assert not SM.derived_pending(spoken)
+    with database.SessionLocal() as db:
+        assert "uploads/spoken.vtt" in db.query(Post).filter_by(title="spoken").one().media_files
+    # Recorded captions are skipped next time; the reel without speech is checked again.
+    transcribed.clear()
+    assert uploads.backfill_captions() == 0
+    assert transcribed == ["quiet.mp4"]
+
+
 def test_derived_pool_drains_and_reopens(monkeypatch):
     started, gate = threading.Event(), threading.Event()
     monkeypatch.setattr(uploads, "_derived_pool", uploads.ThreadPoolExecutor(max_workers=1))

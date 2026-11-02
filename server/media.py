@@ -904,7 +904,9 @@ def caption_cues(segments) -> list[tuple[float, float, str]]:
     """(start, end, text) cues of at most CAPTION_MAX_CHARS, split at word timings.
 
     A Whisper segment can run to a long sentence, too much to read at once
-    over a reel; a segment without word timings stays one cue.
+    over a reel; a segment without word timings stays one cue. A long segment
+    splits into cues of about even length, so a segment just over the limit
+    does not leave its last word flashing alone on screen.
     """
     cues = []
     for seg in segments:
@@ -915,10 +917,12 @@ def caption_cues(segments) -> list[tuple[float, float, str]]:
             if seg.text.strip():
                 cues.append((seg.start, seg.end, seg.text.strip()))
             continue
+        total = len("".join(word for _s, _e, word in words).strip())
+        target = total / -(-total // CAPTION_MAX_CHARS)
         start, end, text = words[0]
         text = text.lstrip()
         for w_start, w_end, word in words[1:]:
-            if len(text) + len(word) > CAPTION_MAX_CHARS:
+            if len(text) >= target or len(text) + len(word) > CAPTION_MAX_CHARS:
                 cues.append((start, end, text))
                 start, text = w_start, word.lstrip()
             else:

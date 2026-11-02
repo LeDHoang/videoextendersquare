@@ -356,7 +356,7 @@ export default function ExplorePage() {
         <EmptyState
           title="NO CONTENT MATCHES CURRENT FILTERS"
           text="Try another title, creator, place, or tag, or publish new reels and packs."
-          hint={'search="' + debouncedSearch + '"'}
+          hint={debouncedSearch ? 'Searched for “' + debouncedSearch + '”' : ''}
         />
       ) : (
         <>

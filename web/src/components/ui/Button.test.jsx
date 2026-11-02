@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, Link } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Button } from './controls.jsx';
 
@@ -45,5 +46,26 @@ describe('Button', () => {
     expect(button).not.toHaveAttribute('aria-busy');
     fireEvent.click(button);
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes its look from variant and size', () => {
+    render(
+      <>
+        <Button>BACK</Button>
+        <Button variant="primary">SAVE</Button>
+        <Button variant="danger" size="sm">DELETE</Button>
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'BACK' })).toHaveClass('sx-btn', { exact: true });
+    expect(screen.getByRole('button', { name: 'SAVE' })).toHaveClass('sx-btn sx-primary', { exact: true });
+    expect(screen.getByRole('button', { name: 'DELETE' })).toHaveClass('sx-btn sx-danger sx-btn--sm', { exact: true });
+  });
+
+  it('renders a link with the same look', () => {
+    render(<MemoryRouter><Button as={Link} to="/explore">BACK TO EXPLORE</Button></MemoryRouter>);
+    const link = screen.getByRole('link', { name: 'BACK TO EXPLORE' });
+    expect(link).toHaveAttribute('href', '/explore');
+    expect(link).toHaveClass('sx-btn');
+    expect(link).not.toHaveAttribute('type');
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { EmptyState, Mono, GatedReason, Hero } from '../components/ui/primitives.jsx';
-import { Spinner } from '../components/ui/controls.jsx';
+import { Button, Spinner } from '../components/ui/controls.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import Emoji from '../components/ui/Emoji.jsx';
 
@@ -181,23 +181,23 @@ export default function ComparePage() {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className={`sx-btn ${showDownload ? 'sx-primary' : ''}`}
-                style={{ height: 34, padding: '0 12px', fontSize: 'var(--sx-t-eyebrow)', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
+              <Button
+                size="sm"
+                variant={showDownload ? 'primary' : 'secondary'}
+                aria-pressed={showDownload}
                 onClick={() => setShowDownload((prev) => !prev)}
               >
                 ↓ DOWNLOAD
-              </button>
-              <button
-                type="button"
-                className="sx-btn"
-                style={{ height: 34, padding: '0 10px', fontSize: 'var(--sx-t-eyebrow)', flexShrink: 0 }}
+              </Button>
+              <Button
+                size="sm"
+                style={{ padding: '0 10px', flexShrink: 0 }}
                 onClick={() => setRefreshKey((k) => k + 1)}
                 title="Rescan output folder"
+                aria-label="Rescan output folder"
               >
                 ↻
-              </button>
+              </Button>
             </div>
           </div>
 

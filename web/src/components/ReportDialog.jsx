@@ -79,7 +79,7 @@ export default function ReportDialog({ title = 'REPORT', onSubmit, onClose }) {
         {error ? <div className="sx-pk-dialog-error" role="alert">{error}</div> : null}
         <div className="sx-pk-dialog-actions">
           <Button onClick={onClose} disabled={busy}>CANCEL</Button>
-          <Button primary type="submit" loading={busy}>SUBMIT REPORT</Button>
+          <Button variant="primary" type="submit" loading={busy}>SUBMIT REPORT</Button>
         </div>
       </form>
     </Dialog>

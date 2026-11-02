@@ -1193,67 +1193,6 @@ button:hover .sx-sidebar-hero-logo,
   gap: 8px;
 }
 
-.sx-sidebar-btn-secondary {
-  height: 36px;
-  border: 1px solid var(--sx-rule-strong);
-  background: var(--sx-bg);
-  color: var(--sx-ink-2);
-  font-family: Archivo, sans-serif;
-  font-weight: 700;
-  font-size: var(--sx-t-eyebrow);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: all 180ms ease;
-  border-radius: 3px;
-}
-
-.sx-sidebar-btn-secondary:hover:not(:disabled) {
-  background: var(--sx-surface-hover);
-  color: var(--sx-ink);
-  border-color: var(--sx-accent);
-}
-
-.sx-sidebar-btn-secondary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.sx-sidebar-btn-primary {
-  height: 38px;
-  border: 1px solid var(--sx-accent);
-  background: var(--sx-accent);
-  color: #000;
-  font-family: Archivo, sans-serif;
-  font-weight: 800;
-  font-size: var(--sx-t-eyebrow);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  text-decoration: none !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 180ms ease;
-  border-radius: 3px;
-  box-sizing: border-box;
-  line-height: 1;
-}
-
-.sx-sidebar-btn-primary:hover:not(:disabled) {
-  background: #fff;
-  border-color: #fff;
-  color: #000;
-  text-decoration: none !important;
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.4);
-}
-
-.sx-sidebar-btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* ─── Sidebar Billing & Engine Card ──────────────────────── */
 .sx-sidebar-billing-card {
   position: relative;
@@ -2218,6 +2157,13 @@ button:hover .sx-sidebar-hero-logo,
   margin-right: auto;
 }
 
+.sx-empty-state-hint {
+  margin-top: var(--sx-2);
+  color: var(--sx-ink-3);
+  font: 600 var(--sx-t-small)/1.5 'JetBrains Mono', monospace;
+  overflow-wrap: anywhere;
+}
+
 .sx-empty-state-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2394,6 +2340,58 @@ button:hover .sx-sidebar-hero-logo,
 .sx-btn.sx-danger:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--sx-danger-hi);
   background: var(--sx-danger-dim);
+}
+
+/* Toast (Toast.jsx): bottom centre, clear of the phone tab bar and the MESSAGE launcher. */
+.sx-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--sx-bottom-nav, 0px) + var(--sx-5));
+  z-index: var(--sx-z-toast);
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--sx-4));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  body:has(.sx-message-launcher) .sx-toasts { bottom: calc(var(--sx-bottom-nav, 0px) + 64px + var(--sx-3)); }
+}
+
+.sx-toast {
+  padding: var(--sx-3) var(--sx-4);
+  border: 1px solid var(--sx-surface-glass-border);
+  border-left: 3px solid var(--sx-accent);
+  border-radius: 0;
+  background: var(--sx-surface-3);
+  box-shadow: var(--sx-shadow-popover);
+  color: var(--sx-ink);
+  font: 700 var(--sx-t-small)/1.4 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  animation: sx-toast-in var(--sx-duration-normal) var(--sx-ease-out);
+}
+
+@keyframes sx-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-toast { animation: none; }
+}
+
+/* Button `size` (controls.jsx): without one, a Button takes its variant's height. */
+.sx-btn.sx-btn--sm {
+  height: 34px;
+  padding: 0 var(--sx-3);
+  font-size: var(--sx-t-eyebrow);
+}
+
+.sx-btn.sx-btn--md {
+  height: var(--sx-control-h, 38px);
+}
+
+.sx-btn.sx-btn--lg {
+  height: var(--sx-control-h-lg, 44px);
 }
 
 .sx-btn--icon {
@@ -6843,8 +6841,9 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   text-transform: uppercase;
 }
 
+/* Raw buttons only: a Button's primary look (and its hover) is set by .sx-btn.sx-primary. */
 .sx-message-request-actions button:last-child,
-.sx-primary {
+.sx-primary:not(.sx-btn) {
   background: var(--sx-accent) !important;
   border-color: var(--sx-accent) !important;
   color: var(--sx-on-accent) !important;
@@ -9472,17 +9471,6 @@ a.sx-xh-btn { text-decoration: none; }
   margin: 0 auto;
 }
 
-.sx-pk-notice {
-  margin-bottom: var(--sx-4);
-  padding: var(--sx-3) var(--sx-4);
-  border: 1px solid var(--sx-rule);
-  border-left: 3px solid var(--sx-accent);
-  background: var(--pk-panel-2);
-  color: var(--sx-ink);
-  font: 700 var(--sx-t-small)/1.4 'JetBrains Mono', monospace;
-  letter-spacing: 0.04em;
-}
-
 .sx-pk-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -9838,15 +9826,6 @@ a.sx-xh-btn { text-decoration: none; }
   border: 1px solid var(--sx-rule);
 }
 
-.sx-btn.sx-pk-danger {
-  border-color: var(--sx-danger-border);
-  color: var(--sx-danger-hi);
-}
-
-.sx-btn.sx-pk-danger:hover:not(:disabled) {
-  background: var(--sx-danger-dim);
-}
-
 /* List header + view toggle */
 .sx-pk-list-head {
   display: flex;
@@ -10079,15 +10058,6 @@ a.sx-xh-btn { text-decoration: none; }
 .sx-pk-gone small {
   font: 700 var(--sx-t-eyebrow)/1 'JetBrains Mono', monospace;
   letter-spacing: 0.1em;
-}
-
-.sx-pk-empty {
-  margin: 0;
-  padding: var(--sx-6) var(--sx-4);
-  border: 1px dashed var(--sx-rule);
-  color: var(--sx-ink-2);
-  font: 600 var(--sx-t-small)/1.5 'JetBrains Mono', monospace;
-  text-align: center;
 }
 
 .sx-pk-foot {

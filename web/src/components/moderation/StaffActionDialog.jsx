@@ -100,7 +100,7 @@ export default function StaffActionDialog({ title, text, confirmLabel = 'CONFIRM
         {error ? <div className="sx-pk-dialog-error" role="alert">{error}</div> : null}
         <div className="sx-pk-dialog-actions">
           <Button onClick={onClose} disabled={busy}>CANCEL</Button>
-          <Button primary type="submit" loading={busy} disabled={!ready}>{confirmLabel}</Button>
+          <Button variant="primary" type="submit" loading={busy} disabled={!ready}>{confirmLabel}</Button>
         </div>
       </form>
     </Dialog>

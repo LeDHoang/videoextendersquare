@@ -5,3 +5,6 @@
 # publish and runs on the CPU in the background worker.
 -r requirements.txt
 faster-whisper>=1.1,<2
+# PyAV 19 dropped the open(metadata_errors=...) argument faster-whisper 1.2
+# passes when it decodes the audio, so every transcription raised TypeError.
+av<19

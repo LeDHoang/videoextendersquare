@@ -124,6 +124,7 @@
   --sx-z-dock: 80;
   --sx-z-fullscreen: 90;
   --sx-z-modal: 100;
+  --sx-z-toast: 150;
   --sx-z-xr-overlay: 200;
   --sx-z-skip-link: 999;
 
