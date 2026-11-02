@@ -219,6 +219,17 @@
     z-index: 26 !important;
   }
 
+  /* The rail ends 36px up; the time readout sits smaller in the corner under it with a gap. */
+  .reels-phone-frame:fullscreen .reels-time-display,
+  .reels-phone-frame:-webkit-full-screen .reels-time-display,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-time-display {
+    bottom: max(10px, calc(4px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom))));
+    right: max(10px, env(safe-area-inset-right));
+    font-size: 11px;
+    padding: 1px 5px;
+    letter-spacing: 0;
+  }
+
   .reels-phone-frame:fullscreen .reels-twitch-ticker,
   .reels-phone-frame:-webkit-full-screen .reels-twitch-ticker,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-twitch-ticker {
@@ -793,6 +804,7 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
+  .meta-folder[hidden] { display: none; }
   .meta-title {
     font-size: 14px;
     font-weight: 700;
@@ -2444,7 +2456,7 @@
   <template id="timesyncIconTpl">__ICON_TIMESYNC__</template>
 
   <div class="reels-meta" id="reelsMeta">
-    <div class="meta-folder" id="metaFolder">📁 root</div>
+    <div class="meta-folder" id="metaFolder" hidden></div>
     <div class="meta-creator-row">
       <button type="button" class="meta-creator" id="metaCreator" hidden></button>
       <button type="button" class="follow-pill" id="followPill" hidden><span class="follow-pill-icon" aria-hidden="true">__ICON_FOLLOW__</span><span id="followPillLabel">FOLLOW</span></button>
@@ -5857,6 +5869,8 @@
       pruneBlobCache(idx);
 
       const item = videoData[idx];
+      // Only a pack shows the chip, as its place in the pack; a feed reel's folder is not shown.
+      metaFolder.hidden = !isPackMode;
       if (isPackMode) {
         packState.index = idx;
         packState.phase = 'playing';
@@ -5884,7 +5898,7 @@
         hidePackStage();
       }
       if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length + (feedHasMore ? '+' : '');
-      metaFolder.textContent = isPackMode ? '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length : '📁 ' + (item.folder || 'root');
+      if (isPackMode) metaFolder.textContent = '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length;
       metaTitle.textContent = item.title || item.filename;
       try {
         metaTitle.title = item.title || item.filename;

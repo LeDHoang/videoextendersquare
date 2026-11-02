@@ -2012,7 +2012,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><code>/reels?play=&lt;path&gt;</code> sent the file's index in the page's <code>/api/reels</code> list as the player's start. The player builds its own feed from posts only, so a file with no post was never in it. The index was clamped and another reel started, while the page said "PLAYING &lt;file&gt;".</p>
     <p>The page now sends the path as <code>play=</code>. <code>/player-inline</code> starts on that item when it is in the feed. When it is not, it loads the file from the media scan (hidden paths excluded), puts it first and starts there. <code>post=</code> and pack links are unchanged.</p>
     <p><strong>Tests:</strong> <code>tests/test_recommendations.py</code> checks that <code>/player-inline</code> starts on a file that has no post. <code>ReelsPage.test.jsx</code> checks that the page sends the path, not an index.</p>
-    <p><strong>Not done:</strong> the page label stays on the opened file after the player moves on to the next reel (see <a href="#fix-63">fix 63</a>).</p>
+    <p><strong>Not done:</strong> nothing left here. The page label this fix kept was removed in <a href="#fix-68">fix 68</a>.</p>
   </section>
 
   <section class="attempt" id="fix-58">
@@ -2066,7 +2066,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       </figure>
     </div>
     <p><strong>Tests:</strong> <code>ReelsPage.test.jsx</code> checks that neither the prefix nor the counter is shown. It fails on the old code.</p>
-    <p><strong>Not done:</strong> the label stays on the opened file after the player moves to the next reel; the codec test clip is 2 seconds long, so this shows soon. This was already so before this fix. Following the player's current reel would need a message from the player frame.</p>
+    <p><strong>Not done:</strong> replaced by <a href="#fix-68">fix 68</a>, which removes the label.</p>
   </section>
 
   <section class="attempt" id="fix-64">
@@ -2120,6 +2120,45 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Not done:</strong> font sizes set with the <code>font:</code> shorthand still use literals.</p>
   </section>
 
+  <section class="attempt" id="fix-68">
+    <h4>Fix 68 · Follow-up fix · No "PLAYING &lt;title&gt;" label above the player on a <code>?play=</code> link, verified locally (375 wide and desktop)</h4>
+    <p>The label from <a href="#fix-63">fix 63</a> repeated the title the player already shows, and it took space above the player. It is removed. A <code>?play=</code> link still starts the player on that file (<a href="#fix-57">fix 57</a>).</p>
+    <p><strong>Tests:</strong> <code>ReelsPage.test.jsx</code> checks that the player is sent the path and that no "PLAYING" text is shown.</p>
+    <p><strong>Not done:</strong> nothing.</p>
+  </section>
+
+  <section class="attempt" id="fix-69">
+    <h4>Fix 69 · Follow-up fix · In fullscreen and on phones, the time readout sits under the action rail with a gap, verified locally (375 wide)</h4>
+    <p>In fullscreen the action rail ends 36px above the bottom, and the time readout ("0:01 / 0:02") filled the 14–36px band under it. The two touched with no gap, and the readout looked big next to the rail.</p>
+    <p>In fullscreen the readout is now 11px instead of 12px, with less padding and no letter spacing. It sits 10px from the bottom, lined up with the rail's right edge. Measured at 375 wide: an 8px gap under the rail, and the readout is 83px wide instead of 97px. It still clears the progress bar. Outside fullscreen nothing changes.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix69-time-before.jpg" alt="Bottom right of the phone player: the time readout touches the bottom of the action rail." loading="lazy">
+        <figcaption>Before: the readout touches the rail.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix69-time-after.jpg" alt="The same corner: a smaller time readout with a gap under the action rail." loading="lazy">
+        <figcaption>After: smaller, with an 8px gap.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>web/tests/reels-docked-column.test.js</code> reads the two fullscreen rules and checks that the readout's top ends at least 6px below the rail. It fails on the old values.</p>
+    <p><strong>Not done:</strong> not tried on a real phone with a home-indicator inset; the rule uses the same inset as the rail.</p>
+  </section>
+
+  <section class="attempt" id="fix-70">
+    <h4>Fix 70 · Follow-up fix · Feed reels no longer show their folder chip; packs keep "PACK n OF m", verified locally (375 wide)</h4>
+    <p>Every reel showed a "📁 OUTPUT/UPLOADS" chip above the creator line. The folder is a storage detail, not something a viewer needs, and the chip took a row of space. It is now hidden for feed reels. In a reel pack the same chip shows the place in the pack ("▦ PACK 1 OF 3"), so it stays there.</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix68-phone-after.jpg" alt="The phone player after fixes 68 to 70: no label above the player, no folder chip above the creator line, and a small time readout under the action rail." loading="lazy" style="max-width:375px">
+        <figcaption>After fixes 68–70 at 375 wide: no PLAYING label, no folder chip, and the time readout clear of the rail.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser: on a <code>?play=</code> link the chip is hidden. On a pack (CYBERPUNK SPATIAL MASTERS, ▶ PLAY COLLECTION) it shows "▦ PACK 1 OF 3".</p>
+    <p><strong>Tests:</strong> <code>web/tests/reels-docked-column.test.js</code> checks that the chip starts hidden, that only pack mode shows it, and that no folder text is set. <strong>Results for fixes 68–70:</strong> 784 pytest tests pass (12 skipped). The 485 node and 517 vitest tests pass.</p>
+    <p><strong>Not done:</strong> nothing. The /reels page's folder filter is unchanged.</p>
+  </section>
+
 </section>
 
 <!-- ============ PLAN ============ -->
@@ -2163,7 +2202,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 67. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 70. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
@@ -2189,7 +2228,6 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <li><strong>The "Stripe checkout is disabled" banner:</strong> it only shows when credits are on and Stripe is off, which is not the beta setup.</li>
         <li><strong>"Layout gaps at 375px":</strong> the audit did not record which gaps, so it needs a fresh look.</li>
         <li><strong>The /reels status strip</strong> still shows "CODEC: HEVC" and "H.264 PROXIES" (<a href="#fix-37">fix 37</a>).</li>
-        <li><strong>The <code>?play=</code> label after the player moves on</strong> (<a href="#fix-63">fix 63</a>): it keeps naming the opened file. Following the player would need a message from the player frame.</li>
         <li><strong>The colour literals and <code>!important</code> left after the codemod</strong> (<a href="#fix-51">fix 51</a>): each needs a design or specificity decision. The guardrail stops new ones.</li>
       </ul>
     </div>

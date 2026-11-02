@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ReelsPage from './ReelsPage.jsx';
@@ -47,13 +47,10 @@ describe('ReelsPage ?play= deep link', () => {
     });
     renderAt('/reels?play=bright_test_reel.mp4');
 
-    expect(await screen.findByText(/PLAYING bright_test_reel\.mp4/)).toBeTruthy();
-    // ?play= links also come from profiles, search and publishing, and the player's
-    // feed is not the page list, so neither the source nor an n/total count is claimed.
-    expect(screen.queryByText(/OPENED FROM EXPLORE/)).toBeNull();
-    expect(screen.queryByText(/\(2\/2\)/)).toBeNull();
     // The player's feed is not the page list, so an index into the page list starts the wrong reel.
-    expect(mocks.playerProps.params.play).toBe('bright_test_reel.mp4');
+    await waitFor(() => expect(mocks.playerProps?.params.play).toBe('bright_test_reel.mp4'));
+    // The player already shows the reel's title, so the page adds no label of its own.
+    expect(screen.queryByText(/PLAYING/)).toBeNull();
     expect(mocks.playerProps.initialIndex ?? 0).toBe(0);
   });
 });

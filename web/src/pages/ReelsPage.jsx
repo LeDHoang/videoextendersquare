@@ -469,9 +469,6 @@ export default function ReelsPage() {
         />
       ) : (
         <div>
-          {deepIndex >= 0 ? (
-            <Mono>PLAYING {videos[deepIndex]?.title || videos[deepIndex]?.filename}</Mono>
-          ) : null}
           <ReelsPlayer params={playerParams} revealOnLoad />
           {videos.some((v) => v.tunnel_url) ? (
             <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
