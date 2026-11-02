@@ -5537,6 +5537,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ready yet, or stalls mid-play, shows 'loading' after LOAD_SPINNER_DELAY_MS.
   const LOAD_SPINNER_DELAY_MS = 500;
   let loadWaitSince = -1;
+  let loadWaitEl = null;
+  let loadWaitReel = '';
   function reelLoadState(source) {
     if (!source || source.kind !== 'video' || !source.element) {
       loadWaitSince = -1;
@@ -5544,6 +5546,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     const el = source.element;
     trackStalls(el);
+    // Each reel waits from its own start: another reel (or another source on
+    // the same element) must not inherit a failed reel's wait.
+    const reel = String(source.version || '');
+    if (el !== loadWaitEl || reel !== loadWaitReel) loadWaitSince = -1;
+    loadWaitEl = el;
+    loadWaitReel = reel;
     const failed = !!el.error || el.networkState === 3; // NETWORK_NO_SOURCE
     if (!failed && source.ready !== false && stallStart < 0) {
       loadWaitSince = -1;
@@ -5560,6 +5568,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // pop-up comment id and opens the comments panel at it.
   function handleOverlayHit(id) {
     if (id === 'load:skip') {
+      loadWaitSince = -1;
       if (callbacks.onNext) callbacks.onNext();
     } else if (id === 'load:retry') {
       const el = getVisualSource().element;

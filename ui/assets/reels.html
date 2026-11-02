@@ -3086,7 +3086,10 @@
 
     const motionPlayBtn = document.getElementById('motionPlayBtn');
     function setMotionPlay(show) {
-      if (motionPlayBtn) motionPlayBtn.hidden = !show;
+      if (!motionPlayBtn) return;
+      // Hiding the focused button would drop focus to <body>; keep it on the player.
+      if (!show && document.activeElement === motionPlayBtn) document.getElementById('reelsFrame').focus({ preventScroll: true });
+      motionPlayBtn.hidden = !show;
     }
 
     function showError(msg, title) {

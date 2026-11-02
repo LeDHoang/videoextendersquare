@@ -11,6 +11,7 @@ const FOCUSABLE = 'a[href], button:not(:disabled), select:not(:disabled), textar
  *   ([data-dialog-close]), else to the close button. It returns to the opener on close.
  * - Tab and Shift+Tab wrap inside the dialog.
  * - Escape, other close requests and a press on the backdrop call onClose, unless `busy`.
+ *   A control inside that handles Escape itself (preventDefault) keeps the dialog open.
  *
  * The <dialog> is the full-screen backdrop and carries `className`; put the visible panel
  * inside it. Name it with aria-labelledby or aria-label, and pass role="alertdialog" for a
@@ -36,6 +37,7 @@ export default function Dialog({ onClose, busy = false, className = '', children
   useEffect(() => {
     const onKey = (event) => {
       if (event.key === 'Escape') {
+        if (event.defaultPrevented) return;
         // Handled here instead of by the native cancel, so `busy` can keep the dialog open.
         event.preventDefault();
         if (!busy) onClose();
@@ -63,15 +65,20 @@ export default function Dialog({ onClose, busy = false, className = '', children
   return (
     <dialog
       ref={ref}
+      {...props}
       className={'sx-dialog' + (className ? ' ' + className : '')}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
       }}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+        const dialog = event.currentTarget;
+        if (event.target !== dialog || busy) return;
+        // A tall panel on a short screen scrolls the backdrop; a press on its scrollbar is not a press on the backdrop.
+        const scrollbar = dialog.offsetWidth - dialog.clientWidth;
+        if (scrollbar > 0 && event.clientX >= dialog.getBoundingClientRect().right - scrollbar) return;
+        onClose();
       }}
-      {...props}
     >
       {children}
     </dialog>

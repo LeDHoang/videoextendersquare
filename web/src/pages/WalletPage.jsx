@@ -310,7 +310,7 @@ export default function WalletPage() {
             {packs.map((pack) => {
               const bonus = Math.max(0, Number(pack.credits) - Number(pack.amount_cents));
               const featured = pack.id === featuredId;
-              const unavailable = !stripeReady || !pack.configured || !creditsReady;
+              const unavailable = !stripeReady || !pack.configured;
               const price = `$${(pack.amount_cents / 100).toFixed(2)}`;
               return (
                 <article className={'sx-cr-pack' + (featured ? ' sx-cr-pack--featured' : '')} key={pack.id}>
@@ -332,7 +332,7 @@ export default function WalletPage() {
                   >
                     {busy === pack.id ? 'OPENING CHECKOUT…' : `BUY ${formatCredits(pack.credits)}`}
                   </button>
-                  {stripeReady && creditsReady && !pack.configured ? <div className="sx-ps-hint">NOT CONFIGURED</div> : null}
+                  {stripeReady && !pack.configured ? <div className="sx-ps-hint">NOT CONFIGURED</div> : null}
                 </article>
               );
             })}

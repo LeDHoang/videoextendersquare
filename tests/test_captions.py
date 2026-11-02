@@ -32,10 +32,11 @@ class FakeSpeech:
 
 
 @pytest.fixture
-def fresh_model_cache():
-    SM._caption_model.cache_clear()
+def fresh_model_cache(monkeypatch):
+    SM._load_caption_model.cache_clear()
+    monkeypatch.setattr(SM, "_caption_retry_at", 0.0)
     yield
-    SM._caption_model.cache_clear()
+    SM._load_caption_model.cache_clear()
 
 
 def _clip(path: Path, audio: bool) -> Path:
@@ -169,6 +170,32 @@ def test_the_model_loads_once_on_the_cpu(monkeypatch, fresh_model_cache):
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=whisper))
     assert SM._caption_model() is SM._caption_model()
     assert loads == [(("base",), {"device": "cpu", "compute_type": "int8"})]
+
+
+def test_a_failed_load_is_retried_after_a_cool_down(monkeypatch, fresh_model_cache):
+    now = [1000.0]
+    online = [False]
+    loads = []
+
+    def whisper(*args, **kwargs):
+        loads.append(now[0])
+        if not online[0]:
+            raise OSError("huggingface.co is unreachable")
+        return SimpleNamespace(name="whisper")
+
+    monkeypatch.setattr(SM.time, "monotonic", lambda: now[0])
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=whisper))
+    assert SM._caption_model() is None
+    online[0] = True
+    # Inside the cool-down every publish skips captions without trying again.
+    now[0] += SM.CAPTIONS_RETRY_S - 1
+    assert SM._caption_model() is None
+    assert loads == [1000.0]
+    # After it, the next publish loads the model, and keeps it.
+    now[0] += 1
+    model = SM._caption_model()
+    assert model is not None and SM._caption_model() is model
+    assert len(loads) == 2
 
 
 @needs_ffmpeg

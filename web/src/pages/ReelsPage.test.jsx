@@ -48,6 +48,10 @@ describe('ReelsPage ?play= deep link', () => {
     renderAt('/reels?play=bright_test_reel.mp4');
 
     expect(await screen.findByText(/PLAYING bright_test_reel\.mp4/)).toBeTruthy();
+    // ?play= links also come from profiles, search and publishing, and the player's
+    // feed is not the page list, so neither the source nor an n/total count is claimed.
+    expect(screen.queryByText(/OPENED FROM EXPLORE/)).toBeNull();
+    expect(screen.queryByText(/\(2\/2\)/)).toBeNull();
     // The player's feed is not the page list, so an index into the page list starts the wrong reel.
     expect(mocks.playerProps.params.play).toBe('bright_test_reel.mp4');
     expect(mocks.playerProps.initialIndex ?? 0).toBe(0);

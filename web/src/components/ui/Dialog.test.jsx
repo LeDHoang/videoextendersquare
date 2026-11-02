@@ -58,6 +58,26 @@ describe('Dialog', () => {
     expect(escape.defaultPrevented).toBe(true);
   });
 
+  it('leaves Escape to a control inside that handled it, like an open dropdown', () => {
+    const { onClose } = setup({
+      children: <input aria-label="Combo" onKeyDown={(event) => event.key === 'Escape' && event.preventDefault()} />,
+    });
+    fireEvent.keyDown(screen.getByLabelText('Combo'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not close on a press on the backdrop\'s own scrollbar', () => {
+    const { dialog, onClose } = setup();
+    // A 400px-wide backdrop that scrolls, with a 15px scrollbar on its right edge.
+    Object.defineProperty(dialog, 'offsetWidth', { value: 400 });
+    Object.defineProperty(dialog, 'clientWidth', { value: 385 });
+    dialog.getBoundingClientRect = () => ({ left: 0, right: 400, top: 0, bottom: 600 });
+    fireEvent.mouseDown(dialog, { clientX: 390, clientY: 300 });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.mouseDown(dialog, { clientX: 380, clientY: 300 });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('treats other close requests (the cancel event) like Escape', () => {
     const { dialog, onClose } = setup();
     const cancel = createEvent('cancel', dialog, { cancelable: true });

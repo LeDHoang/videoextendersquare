@@ -353,9 +353,9 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             <summary>▸ {degraded.length} DEGRADED ISSUE(S)</summary>
             <div className="sx-expander-body">
               {degraded.map((p) => (
-                <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
+                <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: 'var(--sx-t-eyebrow)' }}>
                   <b style={{ color: 'var(--sx-ink)' }}>{p.label}</b> — {p.detail}
-                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.8rem', marginTop: 2 }}>
+                  <div style={{ color: 'var(--sx-warn)', fontSize: 'var(--sx-t-eyebrow)', marginTop: 2 }}>
                     {p.fix}
                   </div>
                 </div>
@@ -383,7 +383,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
               <Field key={key} label={`${label}${customLabel ? ` · ${customLabel}` : ''}`}>
                 <input
                   className="sx-input"
-                  style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                  style={{ fontSize: 'var(--sx-t-eyebrow)', padding: '6px 10px' }}
                   placeholder={modelDefaults[key] || ''}
                   value={current}
                   onChange={(e) => {

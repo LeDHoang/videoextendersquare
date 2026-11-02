@@ -35,13 +35,15 @@ export function routeTitle(pathname) {
   const path = (pathname || '/').replace(/\/+$/, '') || '/';
   if (STATIC_TITLES[path]) return STATIC_TITLES[path];
   const parts = path.split('/').filter(Boolean).map(decode);
-  if (parts[0] === 'explore' && parts[1] === 'tag' && parts[2]) return `#${parts[2]}`;
+  // Each route has an exact depth; a deeper path is the 404 page.
+  const depth = parts.length;
+  if (depth === 3 && parts[0] === 'explore' && parts[1] === 'tag') return `#${parts[2]}`;
   // The slug is not a name; LocationExplorePage sets the place name once it loads.
-  if (parts[0] === 'explore' && parts[1] === 'location' && parts[2]) return 'Location';
-  if (parts[0] === 'profile' && parts[1]) return `@${parts[1]}`;
-  if (parts[0] === 'packs' && parts[2] === 'edit') return 'Edit reel pack';
-  if (parts[0] === 'packs' && parts[1]) return 'Reel pack';
-  if (parts[0] === 'messages' && parts[1]) return 'Messages';
+  if (depth === 3 && parts[0] === 'explore' && parts[1] === 'location') return 'Location';
+  if (depth === 2 && parts[0] === 'profile') return `@${parts[1]}`;
+  if (depth === 3 && parts[0] === 'packs' && parts[2] === 'edit') return 'Edit reel pack';
+  if (depth === 2 && parts[0] === 'packs') return 'Reel pack';
+  if (depth === 2 && parts[0] === 'messages') return 'Messages';
   // Every route in App.jsx is named above, so anything else is the catch-all 404 page.
   // NotFoundPage cannot set this itself: App's effect runs after its child's and would overwrite it.
   return path === '/' ? '' : 'Page not found';

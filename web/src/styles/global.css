@@ -1134,7 +1134,7 @@ button:hover .sx-sidebar-hero-logo,
   width: 100%;
   padding-right: 36px !important;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   background: var(--sx-bg) !important;
   border-color: var(--sx-rule-strong) !important;
 }
@@ -1581,7 +1581,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-telemetry-val {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
 }
 
@@ -1873,7 +1873,7 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink-2);
   text-decoration: none;
   font-family: var(--sx-font-display);
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2337,7 +2337,7 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink);
   font-family: 'Archivo', sans-serif;
   font-weight: 700;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   height: var(--sx-control-h, 38px);
@@ -2601,7 +2601,7 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink);
   padding: 0 var(--sx-3);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   border-radius: 0;
   transition: border-color var(--sx-duration-fast) ease,
               box-shadow var(--sx-duration-fast) ease;
@@ -3266,7 +3266,7 @@ code {
   font-weight: 700;
   letter-spacing: 0.05em;
   color: var(--sx-ink);
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 .sx-metrics-badge {
@@ -4280,7 +4280,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-top-link {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4349,7 +4349,7 @@ body.sx-vr-active .sx-reels-mount,
   border: none;
   color: var(--sx-ink);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 600;
   letter-spacing: 0.08em;
   line-height: 34px;
@@ -4422,7 +4422,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-k {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--sx-ink-3);
@@ -4432,7 +4432,7 @@ body.sx-vr-active .sx-reels-mount,
 
 .sx-tel-v {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 700;
   color: var(--sx-ink);
 }
@@ -4442,7 +4442,7 @@ body.sx-vr-active .sx-reels-mount,
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   font-family: 'Archivo Black', Archivo, sans-serif;
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4507,7 +4507,7 @@ body.sx-vr-active .sx-reels-mount,
   background: var(--sx-accent);
   color: var(--sx-on-accent);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 800;
   line-height: 18px;
   text-align: center;
@@ -4527,7 +4527,7 @@ body.sx-vr-active .sx-reels-mount,
   border: 1px solid var(--sx-rule-strong);
   color: var(--sx-ink);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8667rem;
+  font-size: var(--sx-t-small);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -4537,7 +4537,15 @@ body.sx-vr-active .sx-reels-mount,
   flex-shrink: 0;
   box-sizing: border-box;
   align-self: center;
+  position: relative;
   transition: border-color 150ms ease, background 150ms ease;
+}
+
+/* Phones shrink the pill to 38px; the hit area stays 44px tall, like .sx-icon-button. */
+.sx-top-credits-pill::after {
+  content: '';
+  position: absolute;
+  inset: min(0px, (100% - var(--sx-control-h-lg)) / 2);
 }
 
 .sx-top-credits-pill:hover {
@@ -4785,7 +4793,7 @@ body.sx-vr-active .sx-reels-mount,
   align-items: center;
   gap: var(--sx-2);
   font-family: var(--sx-font-mono);
-  font-size: 0.8125rem;
+  font-size: var(--sx-t-mono);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--sx-ink-2);
@@ -5146,7 +5154,7 @@ button.sx-explore-loc-link:hover {
   max-width: calc(100% - 16px);
   background: rgba(18, 19, 21, 0.88);
   color: #fff;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   line-height: 1.25;
   padding: 3px 9px;
@@ -5208,7 +5216,7 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-surface-3);
   border: 1px solid var(--sx-accent);
   color: var(--sx-ink);
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   font-weight: 700;
   padding: 4px 10px;
   cursor: pointer;
@@ -5247,7 +5255,7 @@ button.sx-explore-loc-link:hover {
   border: none;
   border-bottom: 1px solid var(--sx-rule);
   color: var(--sx-ink);
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   padding: 8px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -5367,7 +5375,7 @@ button.sx-explore-loc-link:hover {
   overflow: hidden;
   color: var(--sx-ink);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6120,7 +6128,7 @@ button.sx-explore-loc-link:hover {
   border-bottom: 1px solid var(--sx-rule);
 }
 
-.sx-ov-sec > p { margin: var(--sx-2) 0 var(--sx-4); color: var(--sx-ink-3); font-size: 0.8125rem; }
+.sx-ov-sec > p { margin: var(--sx-2) 0 var(--sx-4); color: var(--sx-ink-3); font-size: var(--sx-t-mono); }
 
 .sx-ov-health {
   display: grid;
@@ -11751,7 +11759,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 .sx-studio-card .sx-textarea {
   min-height: 0;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
   resize: vertical;
 }
 
@@ -11843,7 +11851,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 .sx-studio-toggles .sx-toggle-row label {
-  font-size: 0.8rem;
+  font-size: var(--sx-t-eyebrow);
 }
 
 .sx-studio-inset {

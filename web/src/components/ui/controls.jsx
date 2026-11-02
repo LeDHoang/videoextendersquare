@@ -65,6 +65,10 @@ export function Dropdown({ label, value, options = [], onChange, placeholder = '
         }
         break;
       case 'Escape':
+        // Handled: an enclosing Dialog must not close too.
+        e.preventDefault();
+        setOpen(false);
+        break;
       case 'Tab':
         setOpen(false);
         break;

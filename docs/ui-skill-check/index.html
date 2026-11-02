@@ -1997,7 +1997,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <ul>
       <li>No real transcription ran, so accuracy, speed on the server's CPU and memory use are untested. The code follows faster-whisper 1.2's API and is tested with a fake model.</li>
       <li>Videos published before this change have no captions, and there is no backfill job.</li>
-      <li>If the model fails to load, captions stay off until the server restarts.</li>
+      <li>If the model fails to load, captions stay off until the server restarts. <strong>Since done:</strong> it is tried again after 10 minutes (fix <a href="#fix-64">64</a>).</li>
       <li>The track has no language label. Whisper detects the language, but it is not stored.</li>
       <li>Creators cannot edit their captions.</li>
       <li>VR has no CC button of its own; it follows the 2D switch. The VR caption's position is set for the default locked layout, so in other layouts it may not sit just above the dock.</li>
@@ -2005,6 +2005,119 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li>At 375×667 the More menu of a captioned reel is 12px too tall for the space, so it scrolls.</li>
       <li>Moving from one reel to the next was not tried in the browser, because the local feed has one reel. The node test covers the track swap.</li>
     </ul>
+  </section>
+
+  <section class="attempt" id="fix-57">
+    <h4>Fix 57 · Follow-up fix · A <code>?play=</code> deep link to a file with no post plays that file, verified locally (tests)</h4>
+    <p><code>/reels?play=&lt;path&gt;</code> sent the file's index in the page's <code>/api/reels</code> list as the player's start. The player builds its own feed from posts only, so a file with no post was never in it. The index was clamped and another reel started, while the page said "PLAYING &lt;file&gt;".</p>
+    <p>The page now sends the path as <code>play=</code>. <code>/player-inline</code> starts on that item when it is in the feed. When it is not, it loads the file from the media scan (hidden paths excluded), puts it first and starts there. <code>post=</code> and pack links are unchanged.</p>
+    <p><strong>Tests:</strong> <code>tests/test_recommendations.py</code> checks that <code>/player-inline</code> starts on a file that has no post. <code>ReelsPage.test.jsx</code> checks that the page sends the path, not an index.</p>
+    <p><strong>Not done:</strong> the page label stays on the opened file after the player moves on to the next reel (see <a href="#fix-63">fix 63</a>).</p>
+  </section>
+
+  <section class="attempt" id="fix-58">
+    <h4>Fix 58 · Follow-up fix · Captions keep Whisper's own word spacing for Chinese, Japanese and Thai, verified locally (tests)</h4>
+    <p>Captions were made by joining Whisper's words with a space. Whisper already puts a leading space on each word in languages written with spaces (" Hello"), and none in Chinese, Japanese or Thai. So "曼谷很热" came out as "曼谷 很 热", and Thai words were split the same way.</p>
+    <p>Words are now joined as Whisper gives them. Only the start of each caption is trimmed. The 84-character limit counts the real text, with no extra space per word.</p>
+    <p><strong>Tests:</strong> <code>test_words_keep_whispers_own_spacing</code> covers Thai, Chinese and English.</p>
+    <p><strong>Not done:</strong> no real transcription in these languages was run.</p>
+  </section>
+
+  <section class="attempt" id="fix-59">
+    <h4>Fix 59 · Follow-up fix · Captions run on their own worker, so the next post's poster is not held up, verified locally (tests)</h4>
+    <p>Captions ran last on the one background worker that also builds posters and previews. A long reel, or the first download of the model weights, could take minutes, and every post published after it waited for its poster.</p>
+    <p>Captions now have a worker of their own. Server shutdown drains both workers, and a new server start reopens both.</p>
+    <p><strong>Tests:</strong> <code>tests/test_graceful_shutdown.py</code> holds a caption job open and checks that the next post's poster still runs. It also checks that shutdown lets the running job finish and drops the queued one, and that the next start reopens the worker. <code>tests/test_publish_background.py</code> waits for the captions worker.</p>
+    <p><strong>Not done:</strong> captions still run one at a time, so a queue of long videos gets its captions in turn.</p>
+  </section>
+
+  <section class="attempt" id="fix-60">
+    <h4>Fix 60 · Follow-up fix · The locked VR comments panel sits in front of the screen it covers, at the same size in view, verified locally (tests)</h4>
+    <p>Fix 25 swung the locked comments panel in to no more than 25° off straight ahead. Swung in, it overlaps the reel screen, but it stayed 3.8 m away, behind the screen at 2.24 m. So the screen hid the part of the panel it covered.</p>
+    <p>The panel now also moves toward the viewer until its inner edge is 0.1 m in front of the screen. It shrinks by the same factor, so it looks the same size as before.</p>
+    <p><strong>Tests:</strong> <code>web/tests/webxr-earth.test.js</code> checks that the panel's inner edge is 0.1 m in front of the screen plane, and that its width shrinks with its distance.</p>
+    <p><strong>Not done:</strong> not checked on the Quest. The panel still covers part of the reel; whether it should sit beside the dock instead needs a design call.</p>
+  </section>
+
+  <section class="attempt" id="fix-61">
+    <h4>Fix 61 · Follow-up fix · VR loading screen: no caption over "Loading…", and each reel waits from its own start, verified locally (tests)</h4>
+    <ul>
+      <li><strong>The caption covered the loading label.</strong> While a reel loaded, the overlay drew the "Loading…" label and the last caption. The caption's last line sat on top of the label. The caption is now hidden while the reel is loading or has failed.</li>
+      <li><strong>A failed reel passed its wait on to the next reel.</strong> The wait only reset when a reel became ready. After a reel that never loaded, the next reel began with the old wait already counted. It could show "Couldn't load" at once, without its own chance to load. The wait now resets when the video element or the reel changes, and on SKIP.</li>
+    </ul>
+    <p><strong>Tests:</strong> <code>web/tests/webxr-earth.test.js</code> adds a check that no caption is drawn while loading. It also adds "fix26: the next reel waits from its own start, not the failed reel's": after SKIP onto a reel that fails too, that reel gets its own 2.5-second wait before SKIP shows. Both fail on the old code.</p>
+    <p><strong>Not done:</strong> not checked on the Quest or in the immersive preview; the change is in the overlay drawing and the load-state timer, which the tests run directly.</p>
+  </section>
+
+  <section class="attempt" id="fix-62">
+    <h4>Fix 62 · Follow-up fix · The reduced-motion ▶ PLAY button keeps keyboard focus on the player, verified locally (tests)</h4>
+    <p>Under reduced motion the reel starts paused with a ▶ PLAY button (fix 46). Pressing it with Enter or Space hid the button while it had focus, so focus fell to the page body. A keyboard user lost their place. Focus now moves to the player before the button hides.</p>
+    <p><strong>Tests:</strong> <code>web/tests/reels-keyboard.test.js</code> presses PLAY with focus on it and checks that focus ends on the player. It fails on the old code.</p>
+    <p><strong>Not done:</strong> not tried in a browser with reduced motion on, or with a screen reader.</p>
+  </section>
+
+  <section class="attempt" id="fix-63">
+    <h4>Fix 63 · Follow-up fix · The <code>?play=</code> label reads "PLAYING &lt;title&gt;", with no Explore prefix and no counter, verified locally (390–420 wide)</h4>
+    <p>The label above the player read "OPENED FROM EXPLORE — PLAYING &lt;title&gt; (n/total)". The link is not always from Explore, and after fix 57 the count was the page's list, not the player's feed. It now reads "PLAYING &lt;title&gt;".</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix63-play-label-after.jpg" alt="Above the reel player, the label reads PLAYING Codec test H264 9.7MB, with no Explore prefix and no counter." loading="lazy">
+        <figcaption>After: "PLAYING Codec test H264 9.7MB".</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>ReelsPage.test.jsx</code> checks that neither the prefix nor the counter is shown. It fails on the old code.</p>
+    <p><strong>Not done:</strong> the label stays on the opened file after the player moves to the next reel; the codec test clip is 2 seconds long, so this shows soon. This was already so before this fix. Following the player's current reel would need a message from the player frame.</p>
+  </section>
+
+  <section class="attempt" id="fix-64">
+    <h4>Fix 64 · Follow-up fix · A caption model that failed to load is tried again after 10 minutes, verified locally (tests)</h4>
+    <p>The caption model was loaded once and the result kept, including a failure. If the weights could not download the first time, for example while offline, captions stayed off until the server restarted.</p>
+    <p>A failed load is now kept for 10 minutes only. Publishes during that time skip captions without trying again. The first publish after it tries again, and a model that loads is kept.</p>
+    <p><strong>Tests:</strong> <code>test_a_failed_load_is_retried_after_a_cool_down</code> moves the clock forward and checks that there is no second try inside the 10 minutes, a second try after it, and that the model is then kept. All 25 caption tests pass.</p>
+    <p><strong>Not done:</strong> a real download that fails and then works was not tried.</p>
+  </section>
+
+  <section class="attempt" id="fix-65">
+    <h4>Fix 65 · Follow-up fix · The credits pill's tap area stays 44px tall on phones; wallet dead conditions removed, verified locally (420 wide)</h4>
+    <p>On phones the header's credits pill shrinks to 38px. Its neighbours, the icon buttons, keep a 44px tap area with an invisible layer, but the pill did not. It now has the same layer, so its tap area is 44px tall like theirs. It looks the same.</p>
+    <p>Checked in the browser at 420 wide: the layer reaches 3px above and below the pill. A press 2px outside the pill's edge hits it, and a press 4px outside does not.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix65-pill-hit-before.jpg" alt="The phone header with dashed outlines on each tap area: the credits pill's outline is shorter than the icon buttons' on either side." loading="lazy">
+        <figcaption>Before: the pill's tap area (dashed) is 38px, shorter than its neighbours.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix65-pill-hit-after.jpg" alt="The same header: the credits pill's dashed tap area is now as tall as the icon buttons' on either side." loading="lazy">
+        <figcaption>After: 44px, the same as the icon buttons.</figcaption>
+      </figure>
+    </div>
+    <p>The wallet's pack buttons also checked <code>creditsReady</code>, which is always true where the packs are shown. The check is removed. The behaviour is the same.</p>
+    <p><strong>Tests:</strong> the 28 WalletPage tests pass. The tap area was checked in the browser only.</p>
+    <p><strong>Not done:</strong> not tried on a real touch phone.</p>
+  </section>
+
+  <section class="attempt" id="fix-66">
+    <h4>Fix 66 · Follow-up fix · Dialog: Escape inside a dropdown, a press on the scrollbar, and page titles for deeper paths, verified locally (tests and 1280 wide)</h4>
+    <ul>
+      <li><strong>Escape in an open dropdown closed the whole dialog.</strong> The Dropdown now marks Escape as handled, and the Dialog ignores an Escape that a control inside has handled. The first Escape closes the dropdown, and the second closes the dialog.</li>
+      <li><strong>A press on the backdrop's scrollbar closed the dialog.</strong> On a short screen a tall dialog scrolls its backdrop. Dragging that scrollbar counted as a press outside the dialog. The Dialog now ignores a press on the scrollbar.</li>
+      <li><strong>A caller's props could replace the Dialog's own handlers.</strong> The Dialog's <code>onCancel</code> and <code>onMouseDown</code> now come after the caller's props, so they cannot be overridden.</li>
+      <li><strong>Page titles for deeper paths.</strong> <code>/profile/pixelnomad/extra</code> showed "@pixelnomad" over the 404 page. Each route now matches its exact depth, and anything deeper is titled "Page not found".</li>
+    </ul>
+    <p>Checked in the browser on <code>/profile/pixelnomad</code>: the report dialog opens with focus on the reason. Escape closes it and focus returns to REPORT. A press on the backdrop closes it. <code>/profile/pixelnomad/extra</code> is titled "Page not found · ECHO".</p>
+    <p><strong>Tests:</strong> <code>Dialog.test.jsx</code> adds "Escape handled inside" and "a press on the scrollbar". <code>useDocumentTitle.test.js</code> adds the deeper paths. All three fail on the old code.</p>
+    <p><strong>Not done:</strong> the scrollbar case was not tried in the browser, because macOS shows overlay scrollbars. It is covered by the test.</p>
+  </section>
+
+  <section class="attempt" id="fix-67">
+    <h4>Fix 67 · Follow-up fix · Font sizes on the type tokens, and the stylelint gaps closed, verified locally (tests)</h4>
+    <ul>
+      <li><strong>Font sizes:</strong> every <code>font-size</code> of 0.8rem, 0.8667rem or 0.8125rem in <code>global.css</code> now uses <code>--sx-t-eyebrow</code>, <code>--sx-t-small</code> or <code>--sx-t-mono</code>. The values are the same, so nothing moves. The same goes for the inline 0.8rem in the sidebar, the custom model panel and the compare page. Shorthand <code>font:</code> values are left as they are.</li>
+      <li><strong>Stylelint:</strong> the guardrail let through named colours (<code>red</code>), the newer colour functions (<code>oklch()</code> and others), and <code>outline: 0px</code>. All three are now caught outside <code>tokens.css</code>. The baseline counts are unchanged, so no existing code is flagged.</li>
+    </ul>
+    <p><strong>Tests:</strong> <code>web/tests/css-guardrails.test.js</code> lints a sample with each of the three and expects each to be caught. It fails on the old config.</p>
+    <p><strong>Results for fixes 61–67:</strong> 784 pytest tests pass (12 skipped). The 483 node and 517 vitest tests pass. One UploadPage test ("sends every video setting…") takes about 5 seconds and once timed out under load; it passes on its own and in the full run.</p>
+    <p><strong>Not done:</strong> font sizes set with the <code>font:</code> shorthand still use literals.</p>
   </section>
 
 </section>
@@ -2050,13 +2163,15 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 56. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 67. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
       <ul>
         <li><strong>UI depth and the head-locked 89° screen</strong> (<a href="#fix-29">fix 29</a>, <a href="#fix-30">30</a>). Proposed changes are written up but not made.</li>
         <li><strong>A check on device of fixes 24–28</strong>, including flashes after hand tracking was requested (<a href="#fix-27">fix 27</a>).</li>
+        <li><strong>A check on device of fixes 60 and 61</strong>: the comments panel in front of the screen, and the VR loading screen.</li>
+        <li><strong>Where the locked comments panel should sit</strong> (<a href="#fix-60">fix 60</a>): it now sits in front of the screen, but it still covers part of the reel. Moving it beside the dock instead is a design call.</li>
       </ul>
     </div>
     <div class="box">
@@ -2074,6 +2189,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <li><strong>The "Stripe checkout is disabled" banner:</strong> it only shows when credits are on and Stripe is off, which is not the beta setup.</li>
         <li><strong>"Layout gaps at 375px":</strong> the audit did not record which gaps, so it needs a fresh look.</li>
         <li><strong>The /reels status strip</strong> still shows "CODEC: HEVC" and "H.264 PROXIES" (<a href="#fix-37">fix 37</a>).</li>
+        <li><strong>The <code>?play=</code> label after the player moves on</strong> (<a href="#fix-63">fix 63</a>): it keeps naming the opened file. Following the player would need a message from the player frame.</li>
         <li><strong>The colour literals and <code>!important</code> left after the codemod</strong> (<a href="#fix-51">fix 51</a>): each needs a design or specificity decision. The guardrail stops new ones.</li>
       </ul>
     </div>

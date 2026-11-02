@@ -98,3 +98,20 @@ test('Esc inside a text field only acts for fields that belong to the player', (
   assert.match(body, /e\.key === 'Escape' && keyHost\.contains\(e\.target\)/);
   assert.match(body, /\[role="dialog"\]\[aria-modal="true"\]/);
 });
+
+test('hiding the focused ▶ PLAY button (reduced motion) keeps focus on the player', () => {
+  const match = html.match(/\n( {4}function setMotionPlay\(show\) \{[\s\S]*?\n {4}\})/);
+  assert.ok(match, 'setMotionPlay present');
+  const frame = { focused: 0, focus() { this.focused += 1; } };
+  const context = { motionPlayBtn: { hidden: false }, document: { activeElement: null, getElementById: (id) => (id === 'reelsFrame' ? frame : null) } };
+  vm.createContext(context);
+  vm.runInContext(match[1] + '\nthis.setMotionPlay = setMotionPlay;', context);
+  context.setMotionPlay(false);
+  assert.equal(context.motionPlayBtn.hidden, true);
+  assert.equal(frame.focused, 0, 'an unfocused button just hides');
+  context.motionPlayBtn.hidden = false;
+  context.document.activeElement = context.motionPlayBtn;
+  context.setMotionPlay(false);
+  assert.equal(context.motionPlayBtn.hidden, true);
+  assert.equal(frame.focused, 1, 'focus moves to the player frame');
+});

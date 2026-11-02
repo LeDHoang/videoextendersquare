@@ -34,3 +34,15 @@ test('stylelint findings in web/src never exceed the baseline, and the baseline 
     }
   }
 });
+
+test('the colour and outline rules also catch named colours, newer colour functions and outline: 0px', async () => {
+  const code = 'a { color: red; background: oklch(0.7 0.1 200); border-color: lab(50 20 10); outline: 0px; }';
+  const { results } = await stylelint.lint({ code, codeFilename: 'src/styles/new.css', cwd });
+  const rules = results[0].warnings.map((w) => w.rule).sort();
+  assert.deepEqual(rules, [
+    'color-named',
+    'declaration-property-value-disallowed-list',
+    'function-disallowed-list',
+    'function-disallowed-list',
+  ]);
+});

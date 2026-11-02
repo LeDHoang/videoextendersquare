@@ -6,9 +6,10 @@ export default {
     'declaration-no-important': true,
     // Colours come from tokens.css.
     'color-no-hex': true,
-    'function-disallowed-list': ['rgb', 'rgba', 'hsl', 'hsla'],
+    'color-named': 'never',
+    'function-disallowed-list': ['rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch'],
     // A focus style replaces the outline; it is never just removed.
-    'declaration-property-value-disallowed-list': { outline: ['none', '0'] },
+    'declaration-property-value-disallowed-list': { outline: ['none', '/^0[a-z]*$/'] },
     // Page-level layers use the --sx-z-* scale; small numbers stack inside a component.
     'declaration-property-value-allowed-list': {
       'z-index': ['/^var\\(--sx-z-[a-z-]+\\)$/', '/^-?[0-9]$/', 'auto'],
@@ -17,7 +18,7 @@ export default {
   overrides: [
     {
       files: ['src/styles/tokens.css'],
-      rules: { 'color-no-hex': null, 'function-disallowed-list': null },
+      rules: { 'color-no-hex': null, 'color-named': null, 'function-disallowed-list': null },
     },
   ],
 };

@@ -2314,6 +2314,31 @@ test('fix26: a reel with a media error shows SKIP / RETRY after the hold', () =>
   renderer.stopPreview();
 });
 
+test('fix26: the next reel waits from its own start, not the failed reel\'s', () => {
+  const clock = { t: 0 };
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, now: () => clock.t });
+  const video = {
+    paused: false, readyState: 0, currentTime: 0, duration: 0, muted: true, error: { code: 4 },
+    currentSrc: 'broken.mp4', addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.refreshOverlayTexture(1000, true);
+  clock.t = 2600;
+  api.refreshOverlayTexture(2000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), 'load:skip');
+  // SKIP lands on a reel that fails too: it gets its own 2.5 s hold first.
+  video.currentSrc = 'next.mp4';
+  api.refreshOverlayTexture(3000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), null, 'held again for the next reel');
+  clock.t = 5200;
+  api.refreshOverlayTexture(4000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), 'load:skip');
+  renderer.stopPreview();
+});
+
 test('A and B buttons toggle playback and the control panels', () => {
   const toggles = [];
   const renderer = loadRenderer();
@@ -2648,6 +2673,12 @@ test('the overlay caption sits above the dock, wraps to three lines, and lifts t
   const none = render('');
   assert.equal(none.boxes.length, 0);
   assert.equal(none.regions[0].y + 6, 512 - (3 * 60 + 2 * 11) / 2);
+
+  // While the reel loads, the caption waits: it would cover the "Loading…" label.
+  const { ctx, texts } = makeRecordingCtx();
+  ui.renderOverlayCanvas(ctx, { caption: 'Fish & chips', loadState: 'loading' });
+  assert.ok(texts.some((t) => t.startsWith('Loading…')));
+  assert.ok(!texts.some((t) => t.startsWith('Fish & chips')));
 });
 
 test('video and overlay textures use legacy linear sampling without mipmaps', () => {

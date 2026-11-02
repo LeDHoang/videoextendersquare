@@ -1536,7 +1536,8 @@
     ctx.clearRect(0, 0, OVERLAY_W, OVERLAY_H);
     if (loadState === 'failed') return renderLoadState(ctx, loadState, overlayHoverId, nowMs);
     if (loadState === 'loading') renderLoadState(ctx, loadState, overlayHoverId, nowMs);
-    const captionTop = caption ? renderOverlayCaption(ctx, caption) : OVERLAY_H;
+    // No caption while loading: its last line would cover the "Loading…" label.
+    const captionTop = caption && !loadState ? renderOverlayCaption(ctx, caption) : OVERLAY_H;
     if (active.length === 0) return regions;
 
     // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas,

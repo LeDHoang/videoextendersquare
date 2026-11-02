@@ -11,6 +11,7 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -849,19 +850,33 @@ def make_explore_poster(src: str, height: int = 720, crop: str | None = None) ->
 CAPTIONS_MODEL = "base"
 
 
+# A failed load (no install yet, Hugging Face unreachable) is tried again after
+# this long, not on every publish and not only after a restart.
+CAPTIONS_RETRY_S = 600
+_caption_retry_at = 0.0
+
+
 @functools.lru_cache(maxsize=1)
+def _load_caption_model():
+    """The speech model, loaded once per process. A failure raises, so it is not cached."""
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(CAPTIONS_MODEL, device="cpu", compute_type="int8")
+
+
 def _caption_model():
-    """The speech model, loaded once per process; None when it cannot load here."""
+    """The speech model; None when it cannot load here."""
+    global _caption_retry_at
+    if time.monotonic() < _caption_retry_at:
+        return None
     try:
-        from faster_whisper import WhisperModel
+        return _load_caption_model()
     except ImportError:
         logger.info("Auto captions are off: faster-whisper is not installed (requirements-captions.txt)")
-        return None
-    try:
-        return WhisperModel(CAPTIONS_MODEL, device="cpu", compute_type="int8")
     except Exception:
         logger.exception("Auto captions are off: the %s speech model could not load", CAPTIONS_MODEL)
-        return None
+    _caption_retry_at = time.monotonic() + CAPTIONS_RETRY_S
+    return None
 
 
 def has_audio(src: str) -> bool:
