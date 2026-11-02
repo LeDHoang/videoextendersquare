@@ -98,6 +98,23 @@ figure img { display: block; width: 100%; height: auto; border-radius: 4px; bord
 figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 figcaption b { color: var(--ink); font: 700 15px var(--font-display); font-stretch: 112%; }
 
+/* Before/after slider: copies the app's compare player (ui/assets/compare.html), so the bar, knob
+   and labels use the app's literal colours. Before = current (vermilion), after = Graphite red. */
+.cmp { position: relative; overflow: hidden; background: #000; border: 1px solid var(--line); border-radius: 4px; touch-action: pan-y; user-select: none; cursor: ew-resize; }
+.cmp.narrow { max-width: 375px; margin: 0 auto; }
+.cmp img { display: block; width: 100%; height: auto; pointer-events: none; }
+.cmp .after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--pos, 50%)); }
+.cmp-handle { position: absolute; top: 0; bottom: 0; left: var(--pos, 50%); width: 3px; background: #ff3b1f; transform: translateX(-50%); z-index: 2; }
+.cmp-handle::after { content: "↔"; position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: #ff3b1f; color: #0a0a0a; font: 700 17px var(--font-mono); transform: translate(-50%, -50%); }
+.cmp-handle:focus-visible { outline: 0; }
+.cmp-handle:focus-visible::after { outline: 2px solid #fff; outline-offset: 2px; }
+.cmp-labels { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; z-index: 1; }
+.cmp-labels span { font: 700 11px var(--font-mono); letter-spacing: .16em; text-transform: uppercase; padding: 4px 10px; color: #0a0a0a; }
+.cmp-labels span:first-child { background: #ff3b1f; }
+.cmp-labels span:last-child { background: #fc5e5d; color: #141414; }
+.cmp.narrow .cmp-labels { top: 8px; left: 8px; right: 8px; }
+.cmp.narrow .cmp-labels span { letter-spacing: .08em; padding: 3px 7px; }
+
 .tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 15px; }
 th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
@@ -134,6 +151,7 @@ tr:last-child td { border-bottom: 0; }
     <li><a href="#rules">Design-system check</a></li>
     <li><a href="#palettes">The eleven palettes</a></li>
     <li><a href="#compare">Side by side</a></li>
+    <li><a href="#slider">Before and after</a></li>
     <li><a href="#contrast">Contrast</a></li>
     <li><a href="#picks">Recommendation</a></li>
     <li><a href="#breaks">What breaks</a></li>
@@ -390,6 +408,22 @@ tr:last-child td { border-bottom: 0; }
   </div>
 </section>
 
+<section id="slider" aria-labelledby="sld-h">
+  <h2 id="sld-h">Before and after<small>Current palette against Graphite red, styled like the app's compare slider. Drag, click, or use the arrow keys.</small></h2>
+  <div class="switch" role="group" aria-label="Screen">
+    <button type="button" data-screen="explore" aria-pressed="true">Explore</button>
+    <button type="button" data-screen="profile" aria-pressed="false">Profile</button>
+    <button type="button" data-screen="login" aria-pressed="false">Sign in</button>
+    <button type="button" data-screen="explore-375" aria-pressed="false">Explore 375</button>
+  </div>
+  <div class="cmp" id="cmp">
+    <img class="before" src="img/current-explore.jpg" alt="Current palette, Explore" loading="lazy">
+    <img class="after" src="img/graphite-explore.jpg" alt="Graphite red palette, Explore" loading="lazy">
+    <div class="cmp-labels" aria-hidden="true"><span>Original</span><span>Graphite red</span></div>
+    <div class="cmp-handle" role="slider" tabindex="0" aria-label="Reveal Graphite red" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
+  </div>
+</section>
+
 <section id="contrast" aria-labelledby="con-h">
   <h2 id="con-h">Contrast<small>WCAG ratios for the pairs the app uses most. 4.5:1 is the bar for body text.</small></h2>
   <div class="tablewrap">
@@ -468,7 +502,7 @@ tr:last-child td { border-bottom: 0; }
 
 <script>
 const shots = document.getElementById("shots");
-const buttons = document.querySelectorAll(".switch button");
+const buttons = document.querySelectorAll("#compare .switch button");
 for (const btn of buttons) {
   btn.addEventListener("click", () => {
     const screen = btn.dataset.screen;
@@ -480,6 +514,44 @@ for (const btn of buttons) {
       img.src = src;
       img.alt = `${fig.querySelector("b").textContent} palette, ${btn.dataset.label}`;
       fig.querySelector("a").href = src;
+    }
+  });
+}
+
+const cmp = document.getElementById("cmp");
+const handle = cmp.querySelector(".cmp-handle");
+const setPos = (pct) => {
+  pct = Math.max(0, Math.min(100, pct));
+  cmp.style.setProperty("--pos", pct + "%");
+  handle.setAttribute("aria-valuenow", String(Math.round(pct)));
+};
+const fromPointer = (e) => {
+  const rect = cmp.getBoundingClientRect();
+  setPos(((e.clientX - rect.left) / rect.width) * 100);
+};
+cmp.addEventListener("pointerdown", (e) => {
+  cmp.setPointerCapture(e.pointerId);
+  fromPointer(e);
+  handle.focus({ preventScroll: true });
+});
+cmp.addEventListener("pointermove", (e) => { if (cmp.hasPointerCapture(e.pointerId)) fromPointer(e); });
+handle.addEventListener("keydown", (e) => {
+  const now = Number(handle.getAttribute("aria-valuenow"));
+  const step = { ArrowLeft: -5, ArrowRight: 5, Home: -100, End: 100 }[e.key];
+  if (step === undefined) return;
+  e.preventDefault();
+  setPos(now + step);
+});
+const cmpButtons = document.querySelectorAll("#slider .switch button");
+for (const btn of cmpButtons) {
+  btn.addEventListener("click", () => {
+    const screen = btn.dataset.screen;
+    for (const b of cmpButtons) b.setAttribute("aria-pressed", String(b === btn));
+    cmp.classList.toggle("narrow", screen === "explore-375");
+    for (const [cls, p, name] of [["before", "current", "Current"], ["after", "graphite", "Graphite red"]]) {
+      const img = cmp.querySelector("." + cls);
+      img.src = `img/${p}-${screen}.jpg`;
+      img.alt = `${name} palette, ${btn.textContent}`;
     }
   });
 }
