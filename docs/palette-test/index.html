@@ -111,7 +111,7 @@ figcaption b { color: var(--ink); font: 700 15px var(--font-display); font-stret
 .cmp-labels { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; z-index: 1; }
 .cmp-labels span { font: 700 11px var(--font-mono); letter-spacing: .16em; text-transform: uppercase; padding: 4px 10px; color: #0a0a0a; }
 .cmp-labels span:first-child { background: #ff3b1f; }
-.cmp-labels span:last-child { background: #fc5e5d; color: #141414; }
+.cmp-labels span:last-child { background: #ba0001; color: #f6f6f6; }
 .cmp.narrow .cmp-labels { top: 8px; left: 8px; right: 8px; }
 .cmp.narrow .cmp-labels span { letter-spacing: .08em; padding: 3px 7px; }
 
@@ -195,7 +195,7 @@ tr:last-child td { border-bottom: 0; }
 </header>
 
 <section id="rules" aria-labelledby="rules-h">
-  <h2 id="rules-h">Design-system check<small>Every palette follows the colour rules of the ECHO design system. The first seven were redone to fit.</small></h2>
+  <h2 id="rules-h">Design-system check<small>Every palette but Graphite red follows the colour rules of the ECHO design system. The first seven were redone to fit.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>The rules</h3>
@@ -219,6 +219,7 @@ tr:last-child td { border-bottom: 0; }
     </div>
   </div>
   <p class="note">Red accents (Plum and the four red palettes) are close in hue to the danger rose <code>#f43f5e</code>. The app always pairs status colour with an icon or a word, so meaning is not lost, but errors stand out less. One of the links was sent three times; it is one palette, Oxblood.</p>
+  <p class="note">Graphite red is the exception: it uses <code>#ba0001</code> by request, near the source <code>#b90504</code>, with light button text. Red text and links on it fail 4.5:1.</p>
 </section>
 
 <section id="palettes" aria-labelledby="pal-h">
@@ -368,16 +369,16 @@ tr:last-child td { border-bottom: 0; }
       </div>
     </article>
 
-    <article class="pal" style="--p-bg:#141414;--p-s2:#222222;--p-rule:#4a4a4a;--p-ink:#f6f6f6;--p-ink2:#c4c4c4;--p-ink3:#9e9e9e;--p-accent:#fc5e5d;--p-on:#141414">
+    <article class="pal" style="--p-bg:#141414;--p-s2:#222222;--p-rule:#4a4a4a;--p-ink:#f6f6f6;--p-ink2:#c4c4c4;--p-ink3:#9e9e9e;--p-accent:#ba0001;--p-on:#f6f6f6">
       <div class="swatches" aria-hidden="true"><i style="background:#f6f6f6"></i><i style="background:#e8e8e8"></i><i style="background:#333333"></i><i style="background:#990100"></i><i style="background:#b90504"></i></div>
       <div class="pal-hero">
         <h3>11 · Graphite red <span>f6f6f6 e8e8e8 333333 990100 b90504</span></h3>
         <div class="mock"><span class="btn">Sign in</span><span class="ghost">Share</span><span class="txt">Secondary text</span><span class="lnk">Create one</span></div>
       </div>
       <div class="pal-body">
-        <p>Neutral greys with a red accent: the closest to today's matte black and vermilion. <code>#f6f6f6</code> text, <code>#333333</code> rule. The accent <code>#fc5e5d</code> is <code>#b90504</code> lifted (2.7:1 raw on the page). <code>#e8e8e8</code> and <code>#990100</code> have no role: each is too close to another colour in the set.</p>
-        <div class="roles"><span><b style="background:#141414"></b>bg 141414</span><span><b style="background:#222222"></b>surface-2 222222</span><span><b style="background:#333333"></b>rule 333333</span><span><b style="background:#fc5e5d"></b>accent fc5e5d</span></div>
-        <div class="tags"><span class="tag good">Dark</span><span class="tag warn">Accent lifted</span><span class="tag warn">Two colours unused</span></div>
+        <p>Neutral greys with a red accent: the closest to today's matte black and vermilion. <code>#f6f6f6</code> text, <code>#333333</code> rule. The accent is <code>#ba0001</code> by request, near the source <code>#b90504</code>: it is 2.7:1 on the page, so red text and links fail 4.5:1. Button text is light <code>#f6f6f6</code> (6.2:1), against the design-system rule. <code>#e8e8e8</code> and <code>#990100</code> have no role: each is too close to another colour in the set.</p>
+        <div class="roles"><span><b style="background:#141414"></b>bg 141414</span><span><b style="background:#222222"></b>surface-2 222222</span><span><b style="background:#333333"></b>rule 333333</span><span><b style="background:#ba0001"></b>accent ba0001</span></div>
+        <div class="tags"><span class="tag good">Dark</span><span class="tag bad">Accent 2.7:1</span><span class="tag warn">Light button text</span><span class="tag warn">Two colours unused</span></div>
       </div>
     </article>
 
@@ -441,7 +442,7 @@ tr:last-child td { border-bottom: 0; }
         <tr><td>8 · Slate red</td><td class="n">15.5</td><td class="n">8.7</td><td class="n">5.2</td><td class="n">5.9</td><td class="n">5.0</td><td class="n edge">4.5</td><td class="n">5.9</td><td class="n">9.3</td></tr>
         <tr><td>9 · Oxblood</td><td class="n">15.6</td><td class="n">10.0</td><td class="n">6.7</td><td class="n">5.2</td><td class="n">4.9</td><td class="n edge">4.5</td><td class="n">5.2</td><td class="n">10.9</td></tr>
         <tr><td>10 · Cocoa brick</td><td class="n">12.8</td><td class="n">8.3</td><td class="n">5.0</td><td class="n">5.6</td><td class="n">4.9</td><td class="n edge">4.5</td><td class="n">5.6</td><td class="n">9.9</td></tr>
-        <tr><td>11 · Graphite red</td><td class="n">17.0</td><td class="n">9.1</td><td class="n">5.9</td><td class="n">6.0</td><td class="n">5.2</td><td class="n edge">4.6</td><td class="n">6.0</td><td class="n">9.8</td></tr>
+        <tr><td>11 · Graphite red</td><td class="n">17.0</td><td class="n">9.1</td><td class="n">5.9</td><td class="n fail">2.7</td><td class="n fail">2.3</td><td class="n fail">2.0</td><td class="n">6.2</td><td class="n">9.8</td></tr>
       </tbody>
     </table>
   </div>
@@ -455,7 +456,7 @@ tr:last-child td { border-bottom: 0; }
     <li><div><b>Wine noir, if the goal is to keep today's mood.</b><p>Same near-black page, so photos and video still pop; only the accent and card tint change. Needs the lifted accent, not the raw <code>#893168</code>.</p></div></li>
     <li><div><b>Mulberry as the warmer alternative to Violet.</b><p>Equally readable. The derived pink accent is the one choice here not taken from the palette.</p></div></li>
     <li><div><b>Indigo night if Violet feels too dark.</b><p>Same lavender accent, but on a bluer, lighter page with grey instead of lilac text. Calmer; slightly less contrast for body text (12.7:1 against Violet's 17.7:1), still well above the bar.</p></div></li>
-    <li><div><b>Graphite red or Slate red, if the brand stays red.</b><p>Graphite is today's look with a softer red; Slate adds a cool blue cast. Both keep photos neutral. Any red accent sits near the danger colour, so errors stand out less.</p></div></li>
+    <li><div><b>Graphite red or Slate red, if the brand stays red.</b><p>Graphite is today's look with a deeper red, but its raw accent is too dark for red text; Slate adds a cool blue cast. Both keep photos neutral. Any red accent sits near the danger colour, so errors stand out less.</p></div></li>
     <li><div><b>Shadow plum is the safest step, Periwinkle and Oxblood the boldest.</b><p>Plum barely changes the brand. Periwinkle turns every page purple and Oxblood every page deep red, which may tire on long sessions. Lavender dusk and Cocoa brick are soft, low-energy options.</p></div></li>
   </ol>
 </section>

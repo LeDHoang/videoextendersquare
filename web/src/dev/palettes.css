@@ -243,9 +243,9 @@
   --sx-on-accent: #1c1412;
 }
 
-/* 11. Graphite red — coolors f6f6f6 e8e8e8 333333 990100 b90504 (light greys become the text; accent lifted from #b90504) */
+/* 11. Graphite red — coolors f6f6f6 e8e8e8 333333 990100 b90504 (light greys become the text; #ba0001 accent, near source #b90504, with light button text) */
 :root[data-palette="graphite"] {
-  --sx-accent-rgb: 252, 94, 93;
+  --sx-accent-rgb: 186, 0, 1;
   --sx-bg: #141414;
   --sx-surface: #1b1b1b;
   --sx-surface-2: #222222;
@@ -261,9 +261,9 @@
   --sx-ink-2: #c4c4c4;
   --sx-ink-3: #9e9e9e;
   --sx-ink-muted: #7d7d7d;
-  --sx-accent: #fc5e5d;
-  --sx-accent-hi: #fc7c7b;
-  --sx-on-accent: #141414;
+  --sx-accent: #ba0001;
+  --sx-accent-hi: #d61f1a;
+  --sx-on-accent: #f6f6f6;
 }
 
 /* Derived accent tints, shared by every palette. */
