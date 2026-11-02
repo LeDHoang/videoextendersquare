@@ -32,6 +32,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
   useEffect(() => {
     if (!model) return undefined;
     let alive = true;
+    setInfo(null);
     setLoading(true);
     setError('');
     api

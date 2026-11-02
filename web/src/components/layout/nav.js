@@ -20,9 +20,9 @@ export const NAV = {
   upload: { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
   messages: { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
   credits: { to: '/wallet', label: 'Credits', Icon: IndustrialCreditsIcon }, // TEMP glyph — final art to follow
-  image: { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
-  video: { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
-  compare: { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
+  image: { to: '/image', label: 'Image', Icon: IndustrialImageIcon, adminOnly: true },
+  video: { to: '/video', label: 'Video', Icon: IndustrialVideoIcon, adminOnly: true },
+  compare: { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon, adminOnly: true },
   settings: { to: '/settings/profile', label: 'Settings' },
   staff: { to: '/moderation', label: 'Staff' },
 };

@@ -177,7 +177,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
       <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
-        {SIDEBAR_NAV.map(({ to, label, Icon }) => (
+        {SIDEBAR_NAV.filter((item) => !item.adminOnly || user?.role === 'admin').map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}

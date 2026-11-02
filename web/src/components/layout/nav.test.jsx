@@ -44,8 +44,9 @@ describe('one navigation source', () => {
     for (const item of Object.values(NAV)) {
       if (labels[item.to]) expect([...labels[item.to]], item.to).toEqual([item.label]);
     }
-    // Every destination in the list is reachable from at least one of these places.
-    expect(Object.values(NAV).filter((item) => !labels[item.to]).map((item) => item.to)).toEqual([]);
+    // Every destination in the list is reachable from at least one of these places
+    // (the admin-only tools only for admins; Sidebar.test.jsx covers those).
+    expect(Object.values(NAV).filter((item) => !item.adminOnly && !labels[item.to]).map((item) => item.to)).toEqual([]);
     expect(within(places[1]).getAllByRole('link').map(name)).toEqual(['Profile', 'Saved', 'Settings', 'Credits', 'Staff']);
   });
 });

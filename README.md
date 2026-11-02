@@ -23,7 +23,7 @@ Full outpaint + upscale pipeline featuring Bytedance Video Upscaler, LTX 2.3, Lu
 ![Video Processing Interface](docs/images/video_extender.png)
 
 ### 3. WebXR 4K Reels Player (Desktop Viewport with Dynamic Glow)
-Ultra-smooth 1:1 square reels player with synchronized dynamic ambient glow (Ambilight), time-synced pinned spatial comments, instant folder / codec switching, and search filtering.
+Ultra-smooth 1:1 square reels player with synchronized dynamic ambient glow (Ambilight), time-synced pinned spatial comments, search filtering, and instant folder / codec switching for admins.
 ![Reels Player Interface](docs/images/reels_player.png)
 
 ### 4. WebXR Immersive Cosmic VR Mode (Meta Quest 3 / Apple Vision Pro)
@@ -110,7 +110,7 @@ Diagnostic desktop tool replicating the exact Three.js 3D WebXR coordinate space
 - Pack- and reel-level reports, moderation queue (`/moderation` for staff in `SX_ADMIN_USERS` / `SX_MODERATOR_USERS`), user blocking enforced across profiles, Packs, and messaging, and generic unavailable responses that never reveal whether deletion, moderation, blocking, or visibility caused them.
 
 ### 🖥️ Desktop Immersive Scene Inspector & Creator Upload Portal
-- **Desktop WebXR Parity Inspector** (`/reels/immersive-preview`): Orbit inspection and headset POV modes using the shared Three.js scene geometry, shaders, starfield, and controller guides to test VR layout parity on standard desktop browsers with live draw-call and video texture upload counters.
+- **Desktop WebXR Parity Inspector** (`/reels/immersive-preview`, admin-only): Orbit inspection and headset POV modes using the shared Three.js scene geometry, shaders, starfield, and controller guides to test VR layout parity on standard desktop browsers with live draw-call and video texture upload counters.
 - **Creator Upload Portal** (`/upload`): Direct video and image publishing interface with metadata tagging (title, caption, hashtags), location tagging (city and country for Earth heat map discovery), and instant reel vault ingestion.
 
 ---

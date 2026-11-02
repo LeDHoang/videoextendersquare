@@ -448,6 +448,44 @@ def test_sse_slot_released_after_stream(app, monkeypatch):
     asyncio.run(exercise())
 
 
+def test_sse_headers_disable_buffering_and_idle_stream_sends_keep_alive(app, monkeypatch):
+    monkeypatch.setattr(messages_router, "SessionLocal", app.state.testing_session)
+    real_sleep = asyncio.sleep
+    sleeps = []
+
+    async def no_wait(seconds):
+        sleeps.append(seconds)
+        await real_sleep(0)
+
+    # The stream sleeps 1 s per idle poll; skip the wait so 15 polls are instant.
+    monkeypatch.setattr(messages_router.asyncio, "sleep", no_wait)
+
+    async def exercise():
+        async def _receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = StarletteRequest({"type": "http", "headers": []}, _receive)
+        user_id = 987654  # no events exist for this id, so every poll is idle
+        context = AuthContext(user=type("U", (), {"id": user_id, "status": "active", "account_type": "real"})(), session=None)
+        messages_router._SSE_STREAMS.pop(user_id, None)
+        response = await messages_router.message_events(request, 0, context)
+        try:
+            assert response.media_type == "text/event-stream"
+            assert response.headers["x-accel-buffering"] == "no"
+            assert response.headers["cache-control"] == "no-cache, no-transform"
+            assert response.headers["connection"] == "keep-alive"
+            first = await asyncio.wait_for(response.body_iterator.__anext__(), timeout=10)
+            assert first == ": keep-alive\n\n"
+            # 15 idle polls 1 s apart: the comment goes out on the 15th poll,
+            # after 14 sleeps, so a proxy sees traffic at least every 15 s.
+            assert sleeps == [1] * 14
+        finally:
+            await response.body_iterator.aclose()
+        assert messages_router._SSE_STREAMS.get(user_id, 0) == 0
+
+    asyncio.run(exercise())
+
+
 # ─── H: login timing, pixel ceiling, key entropy ────────────────────────────
 
 

@@ -30,6 +30,9 @@ const CODEC_OPTS = [
 export default function ReelsPage() {
   const navigate = useNavigate();
   const { user, loading: authLoading, setUser } = useAuth();
+  // Beta: regular users get search plus the feed switch; the library filters,
+  // utilities and immersive preview stay with admins.
+  const isAdmin = user?.role === 'admin';
   // Deep-link support (Explore → Reels): ?folder&codec(h264|hevc|all)
   // &search&tag&sort&play=<video path> preselects filters and starts the
   // player at that exact reel. `deepPlay` is consumed (cleared) as soon as
@@ -274,10 +277,10 @@ export default function ReelsPage() {
       <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
         <div className="sx-stats-pill">
           <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
-          <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
-          <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
+          {isAdmin ? <span>FOLDERS: <strong>{(folders || []).length}</strong></span> : null}
+          {isAdmin ? <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span> : null}
           <span>FEED: <strong>{activeAuthor ? '@' + activeAuthor : feedScope.toUpperCase()}</strong></span>
-          <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
+          {isAdmin ? <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span> : null}
         </div>
       </Hero>
 
@@ -340,23 +343,27 @@ export default function ReelsPage() {
               value={feedScope}
               onChange={changeFeed}
             />
-            <div style={{ flex: '1 1 150px', minWidth: 0 }}>
-              <Dropdown
-                value={folder}
-                options={folderOpts}
-                onChange={(v) => { clearDeepLink(); setFolder(v); }}
-                placeholder="Target folder…"
-              />
-            </div>
-            <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} ariaLabel="Format" />
-            <Button
-              variant={only3d ? 'primary' : 'secondary'}
-              onClick={toggle3d}
-              aria-pressed={only3d}
-              title="Show only 3D (SBS/TB) reels. Testing filter."
-            >
-              3D
-            </Button>
+            {isAdmin ? (
+              <>
+                <div style={{ flex: '1 1 150px', minWidth: 0 }}>
+                  <Dropdown
+                    value={folder}
+                    options={folderOpts}
+                    onChange={(v) => { clearDeepLink(); setFolder(v); }}
+                    placeholder="Target folder…"
+                  />
+                </div>
+                <Pills options={CODEC_OPTS} value={codec} onChange={(v) => { clearDeepLink(); setCodec(v); }} ariaLabel="Format" />
+                <Button
+                  variant={only3d ? 'primary' : 'secondary'}
+                  onClick={toggle3d}
+                  aria-pressed={only3d}
+                  title="Show only 3D (SBS/TB) reels. Testing filter."
+                >
+                  3D
+                </Button>
+              </>
+            ) : null}
             <div style={{ flex: '2 1 160px', minWidth: 0, position: 'relative' }}>
               <input
                 ref={searchRef}
@@ -378,49 +385,53 @@ export default function ReelsPage() {
                 </button>
               ) : null}
             </div>
-            <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-              <Dropdown
-                value={sort}
-                options={SORTS}
-                onChange={(v) => { clearDeepLink(); setSort(v); }}
-                placeholder="Sort by…"
-              />
-            </div>
+            {isAdmin ? (
+              <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                <Dropdown
+                  value={sort}
+                  options={SORTS}
+                  onChange={(v) => { clearDeepLink(); setSort(v); }}
+                  placeholder="Sort by…"
+                />
+              </div>
+            ) : null}
           </div>
         </div>
 
         {/* Row 2: Actions & Utilities (Reset, Quest & Tools, Proxy, Spatialize) */}
-        <div className="sx-control-rail-row">
-          <div className="sx-control-group" style={{ flexWrap: 'wrap' }}>
-            <Button onClick={() => setRefreshKey((k) => k + 1)} title="Rescan video library">
-              ↻
-            </Button>
-            <Button
-              variant={showTunnel ? 'primary' : 'secondary'}
-              onClick={() => setShowTunnel((s) => !s)}
-            >
-              {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
-            </Button>
-            <Button onClick={() => navigate('/reels/immersive-preview')}>
-              <VrIcon /> IMMERSIVE PREVIEW
-            </Button>
-            {needsProxy ? (
+        {isAdmin ? (
+          <div className="sx-control-rail-row">
+            <div className="sx-control-group" style={{ flexWrap: 'wrap' }}>
+              <Button onClick={() => setRefreshKey((k) => k + 1)} title="Rescan video library">
+                ↻
+              </Button>
               <Button
-                variant="primary"
-                disabled={proxyBusy}
-                loading={proxyBusy}
-                onClick={generateProxy}
+                variant={showTunnel ? 'primary' : 'secondary'}
+                onClick={() => setShowTunnel((s) => !s)}
               >
-                {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+                {showTunnel ? '▾ Hide Tools' : '▸ Quest & Tools'}
               </Button>
-            ) : null}
-            {folder === 'testpipeline' && !has3d ? (
-              <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
-                <VrIcon /> Spatialize (2D→3D)
+              <Button onClick={() => navigate('/reels/immersive-preview')}>
+                <VrIcon /> IMMERSIVE PREVIEW
               </Button>
-            ) : null}
+              {needsProxy ? (
+                <Button
+                  variant="primary"
+                  disabled={proxyBusy}
+                  loading={proxyBusy}
+                  onClick={generateProxy}
+                >
+                  {proxyBusy ? '…' : `▶ Proxy (${needsProxy})`}
+                </Button>
+              ) : null}
+              {folder === 'testpipeline' && !has3d ? (
+                <Button disabled={!!spatJob} loading={!!spatJob} onClick={spatialize}>
+                  <VrIcon /> Spatialize (2D→3D)
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
       {proxyMsg ? <Mono>{proxyMsg}</Mono> : null}
@@ -462,10 +473,17 @@ export default function ReelsPage() {
           <Button onClick={clearDeepLink}>WATCH OTHER REELS</Button>
         </EmptyState>
       ) : data !== null && !videos.length ? (
-        <EmptyState
-          title="NO VIDEOS MATCH CURRENT FILTERS"
-          text="Try adjusting the folder, format filter, or search query — or render new videos from the Video page."
-        />
+        isAdmin ? (
+          <EmptyState
+            title="NO VIDEOS MATCH CURRENT FILTERS"
+            text="Try adjusting the folder, format filter, or search query — or render new videos from the Video page."
+          />
+        ) : (
+          <EmptyState
+            title="NO REELS FOUND"
+            text="Try another search, or clear the creator, tag, or location filter above."
+          />
+        )
       ) : (
         <div>
           <ReelsPlayer params={playerParams} revealOnLoad />
