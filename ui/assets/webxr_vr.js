@@ -762,6 +762,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   const DOCK_MAX_DROP_DEG = 25;
   const DOCK_MIN_FLOOR_Y = 0.6;
   const SIDE_PANEL_MAX_YAW_DEG = 25; // fix25
+  const SIDE_PANEL_FRONT_GAP = 0.1;
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -967,12 +968,18 @@ window.WebXRVR = window.WebXRVR || (function () {
   // straight ahead so it sits no more than SIDE_PANEL_MAX_YAW_DEG off it
   // (the comments panel opened at about 52 deg, out of view). The panel keeps
   // its distance from the viewer; d is the viewer's distance to the anchor.
-  function clampSideOffset(x, z, d) {
+  // Swung in, it overlaps the screen, so it also moves toward the viewer until
+  // its inner edge (w wide) is SIDE_PANEL_FRONT_GAP in front of the screen
+  // plane, shrinking by k to keep its size in view (it sat 3.8 m out, behind
+  // the 2.24 m screen it covered).
+  function clampSideOffset(x, z, d, w) {
     const back = d - z;
     const r = Math.hypot(x, back);
     const lim = SIDE_PANEL_MAX_YAW_DEG * Math.PI / 180;
     const yaw = Math.max(-lim, Math.min(lim, Math.atan2(x, back)));
-    return { x: r * Math.sin(yaw), z: d - r * Math.cos(yaw) };
+    const innerDepth = r * Math.cos(yaw) + w / 2 * Math.sin(Math.abs(yaw));
+    const k = Math.min(1, (d - SIDE_PANEL_FRONT_GAP) / innerDepth);
+    return { x: k * r * Math.sin(yaw), z: d - k * r * Math.cos(yaw), k };
   }
 
   // Side-panel world layout (upstream getCommentsPanelCenter/Size +
@@ -984,10 +991,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
     let center;
+    let k = 1;
     if (lockToViewer) {
       const a = getLockedAnchor();
       const c = clampSideOffset(-base / 2 - size.w / 2 - layoutTuning.panelSideGap,
-        layoutTuning.panelFwdOffset, layoutTuning.screenDistance);
+        layoutTuning.panelFwdOffset, layoutTuning.screenDistance, size.w);
+      k = c.k;
       center = {
         x: a.x + c.x,
         y: a.y,
@@ -999,7 +1008,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w, h: size.h };
+    return { center, w: size.w * k, h: size.h * k };
   }
 
   function getGuidePanelLayout() {

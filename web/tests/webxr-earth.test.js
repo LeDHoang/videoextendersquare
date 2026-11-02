@@ -1133,11 +1133,15 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
   closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
-  // fix25: the comments panel keeps its distance from the viewer but swings
-  // in to 25 deg left of straight ahead (it sat at about 52 deg).
-  const sideX = 2 + comments.w / 2 + 0.445;
-  closeTo(Math.hypot(comments.center.x, comments.center.z), Math.hypot(sideX, 2.58));
+  // fix25: the comments panel swings in to 25 deg left of straight ahead (it
+  // sat at about 52 deg). That overlaps the screen, so it comes toward the
+  // viewer until its inner edge is 0.1 m in front of the 2.24 m screen plane,
+  // shrinking to keep its size in view.
+  const sideX = 2 + 4 * 0.432 / 2 + 0.445;
+  const k = Math.hypot(comments.center.x, comments.center.z) / Math.hypot(sideX, 2.58);
+  closeTo(comments.w, 4 * 0.432 * k);
   closeTo(Math.atan2(-comments.center.x, -comments.center.z) * 180 / Math.PI, 25);
+  closeTo(-comments.center.z + comments.w / 2 * Math.sin(25 * Math.PI / 180), 2.14);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -2760,7 +2764,8 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
   assert.equal(tuned.screenScale, 10, 'screen size uses the gesture clamp');
   assert.equal('bogus' in tuned, false);
   assert.equal(api.getScreenState().scale, 10);
-  assert.ok(api.getCommentsPanelLayout().center.x < before.center.x, 'bigger screen + gap push the panel left');
+  const inView = (layout) => layout.w / Math.hypot(layout.center.x, layout.center.z);
+  assert.ok(inView(api.getCommentsPanelLayout()) > inView(before), 'bigger screen grows the panel in view');
 
   renderer.stopPreview();
   assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
