@@ -24,6 +24,7 @@ test('parseRoute maps site paths to shell sections', () => {
   assert.equal(section('/packs/abc'), 'pack');
   assert.equal(section('/messages'), 'messages');
   assert.equal(section('/messages/42'), 'thread');
+  assert.equal(section('/messages/new'), 'newchat');
   assert.equal(section('/wallet'), 'wallet');
 });
 
@@ -361,6 +362,12 @@ function messagingShell(send, user = { username: 'me' }) {
     request: (path, query) => {
       asked.push([path, { ...query }]);
       if (path === '/api/messages/unread-count') return Promise.resolve({ unread_count: 3, inbox: 2, requests: 1 });
+      if (path === '/api/search/suggestions') {
+        return Promise.resolve({ users: [
+          { username: 'amy', account_type: 'real' }, { username: 'me', is_me: true, account_type: 'real' },
+          { username: 'bot', account_type: 'demo' }, { username: 'ana', account_type: 'real' },
+        ] });
+      }
       if (path.endsWith('/messages')) {
         return Promise.resolve({
           conversation: { id: 'c1', can_message: true, can_accept: true, can_decline: true, participant: { id: 'u-amy', username: 'amy' } },
@@ -462,6 +469,38 @@ test('accept reloads the thread; decline leaves it', async () => {
   await tick(); await tick();
   assert.ok(sent.includes('/api/messages/conversations/c1/decline'));
   assert.equal(s.section(), 'messages');
+});
+
+test('new message: inbox button opens a people search; picking someone opens the chat', async () => {
+  const sent = [];
+  const { s, asked } = messagingShell((m, p, b) => {
+    sent.push([m, p, b]);
+    return Promise.resolve(p === '/api/messages/conversations' ? { conversation: { id: 'c1' } } : {});
+  });
+  s.open('/messages');
+  await tick();
+  assert.equal(s.handleHit({ action: 'new-message' }), true);
+  let st = s.getRenderState();
+  assert.equal(st.route.section, 'newchat');
+  assert.equal(st.tab, 'messages');
+  assert.equal(st.route.status, 'idle');
+  assert.deepEqual({ id: st.field.id, focused: st.field.focused }, { id: 'people', focused: true }, 'keyboard opens on the search');
+  s.type('a');
+  await tick();
+  assert.deepEqual(asked.filter((a) => a[0] === '/api/search/suggestions').map((a) => a[1].q), ['a']);
+  assert.deepEqual(s.getRenderState().route.items.map((u) => u.username), ['amy', 'ana'], 'real accounts other than me');
+  s.type('enter');
+  assert.equal(s.getRenderState().field.focused, false);
+  assert.equal(s.handleHit({ action: 'new-to', arg: 0 }), true);
+  assert.equal(s.getRenderState().route.opening.amy, 'opening');
+  await tick(); await tick();
+  assert.deepEqual(sent[0].slice(0, 2), ['POST', '/api/messages/conversations']);
+  assert.equal(sent[0][2].username, 'amy');
+  st = s.getRenderState();
+  assert.equal(st.route.section, 'thread');
+  assert.equal(st.route.arg, 'c1');
+  s.back();
+  assert.equal(s.getRenderState().route.section, 'messages', 'back skips the people search');
 });
 
 test('share sheet lists chats you can message and sends to one', async () => {

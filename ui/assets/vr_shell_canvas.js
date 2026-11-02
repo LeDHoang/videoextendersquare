@@ -92,6 +92,9 @@
     return { x: 48 + i * (BOX_TAB_W + 16), y: SEARCH_BAR.y, w: BOX_TAB_W, h: SEARCH_BAR.h };
   }
 
+  // Inbox: NEW MESSAGE at the right end of the box-tab row.
+  const NEW_MSG_BTN = { x: SEARCH_BAR.x + SEARCH_BAR.w - BOX_TAB_W, y: SEARCH_BAR.y, w: BOX_TAB_W, h: SEARCH_BAR.h };
+
   // Thread: bubbles, quick replies, then the compose bar with SEND.
   const THREAD_ROWS = 6;
   const THREAD_ROW_H = 84;
@@ -315,12 +318,12 @@
 
   const SECTION_TITLES = {
     explore: 'EXPLORE', search: 'SEARCH', tag: 'TAG', location: 'LOCATION', profile: 'PROFILE',
-    pack: 'PACK', messages: 'MESSAGES', thread: 'CHAT', share: 'SHARE', wallet: 'CREDITS', rewards: 'REWARDS',
+    pack: 'PACK', messages: 'MESSAGES', thread: 'CHAT', share: 'SHARE', newchat: 'NEW MESSAGE', wallet: 'CREDITS', rewards: 'REWARDS',
   };
   // Header icon per section (VRUICanvas dock icons).
   const SECTION_ICONS = {
     explore: 'compass', search: 'compass', tag: 'compass', location: 'location', profile: 'profile', pack: 'reels',
-    messages: 'message', thread: 'message', share: 'share', wallet: 'credits', rewards: 'credits',
+    messages: 'message', thread: 'message', share: 'share', newchat: 'message', wallet: 'credits', rewards: 'credits',
   };
 
   // Comments/guide panel shades: header band, row, hovered row.
@@ -789,8 +792,8 @@
     const t = tokens();
     ctx.fillStyle = t.hex.surface3;
     ctx.fillRect(r.x, r.y, r.w, r.h);
-    const iw = img && (img.naturalWidth || img.width);
-    const ih = img && (img.naturalHeight || img.height);
+    const iw = img && (img.videoWidth || img.naturalWidth || img.width);
+    const ih = img && (img.videoHeight || img.naturalHeight || img.height);
     if (iw && ih) {
       // Cover-fit crop.
       const scale = Math.max(r.w / iw, r.h / ih);
@@ -874,7 +877,9 @@
     ctx.save();
     shape(ctx, r, TILE_C);
     ctx.clip();
-    drawThumb(ctx, r, url && getImage ? getImage(url) : null, item);
+    // A video reel plays its muted preview loop once the host has a frame, like the 2D tile.
+    const vid = item.media_type !== 'image' && item.preview_url && getImage ? getImage(item.preview_url, 'video') : null;
+    drawThumb(ctx, r, vid || (url && getImage ? getImage(url) : null), item);
     ctx.restore();
     const pill = (q, on) => tile(ctx, q, 8, 'rgba(8,9,10,0.86)', on ? T.accent : T.ruleStrong, 2);
     const p = tilePills(r, item);
@@ -1057,6 +1062,7 @@
         drawButton(ctx, r, b.label, { active: (route.box || 'inbox') === b.arg, hover: hover === 'box:' + b.arg });
         if (counts[b.arg]) drawPill(ctx, r.x + r.w - 20, r.y + r.h / 2, counts[b.arg] > 99 ? '99+' : String(counts[b.arg]), 'fill');
       });
+      drawButton(ctx, NEW_MSG_BTN, '+ NEW MESSAGE', { hover: hover === 'new-message' });
     }
     if (renderStatus(ctx, route, sharing ? 'No chats to share to yet' : (route.box === 'requests' ? 'No message requests' : 'No messages yet'))) return;
     const items = route.items || [];
@@ -1077,6 +1083,32 @@
       }
       const key = sharing ? 'share-to:' + (first + slot) : 'chip:/messages/' + conv.id;
       renderConversationRow(ctx, r, conv, messagePreview(conv.last_message, conv.participant), pill, hover === key);
+    }
+    renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
+  }
+
+  // New message: people search field over the matching people, MESSAGE on each row.
+  function renderPeopleList(ctx, state, hover) {
+    const route = state.route;
+    const f = state.field || {};
+    const typing = f.focused && f.id === 'people';
+    drawField(ctx, SEARCH_BAR, typing ? f.text : (route.query || ''), 'Search people by name or @handle', typing, hover === 'people-focus');
+    let text = '';
+    if (route.status === 'idle') text = 'Type a name to find someone to message';
+    else if (route.status === 'loading' && !(route.items || []).length) text = 'Searching…';
+    else if (route.status === 'error') text = "Couldn't search people";
+    else if (!(route.items || []).length) text = 'No people found';
+    if (text) { drawStatus(ctx, text, 620); return; }
+    const items = route.items || [];
+    const first = route.scroll || 0;
+    for (let slot = 0; slot < LIST_ROWS; slot++) {
+      const u = items[first + slot];
+      if (!u) break;
+      const state2 = (route.opening || {})[u.username];
+      const pill = state2 === 'opening' ? { label: 'OPENING…' }
+        : (state2 === 'failed' ? { label: 'RETRY', style: 'accent' } : { label: 'MESSAGE', style: 'fill' });
+      const sub = u.bio || ((u.post_count | 0) + ' posts · ' + (u.follower_count | 0) + ' followers');
+      renderConversationRow(ctx, listRowRect(slot), { participant: u }, sub, pill, hover === 'new-to:' + (first + slot));
     }
     renderScrollRail(ctx, route, SCROLL_BTNS, Math.max(0, items.length - LIST_ROWS), hover);
   }
@@ -1261,7 +1293,8 @@
     if (route.path) pathPill(ctx, cx, MAIN_H / 2 + 116, route.path);
   }
 
-  // getImage(url) → a loaded image or null (the host owns loading and caching).
+  // getImage(url) → a loaded image or null; getImage(url, 'video') → a playing preview video
+  // with a frame, or null (the host owns loading, caching and playback).
   function renderMainPanel(ctx, state, hover, getImage) {
     const t = tokens();
     const s = state || {};
@@ -1281,6 +1314,7 @@
     renderHeader(ctx, SECTION_TITLES[section] || 'ECHO', route.label || route.arg || '', hover, SECTION_ICONS[section]);
     if (section === 'messages' || section === 'share') { renderConversationList(ctx, s, hover); return; }
     if (section === 'thread') { renderThread(ctx, s, hover); return; }
+    if (section === 'newchat') { renderPeopleList(ctx, s, hover); return; }
     if (section === 'wallet') { renderWallet(ctx, s, hover); return; }
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
     if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
@@ -1297,7 +1331,7 @@
       return b ? { action: b.action } : null;
     }
     const route = state && state.route;
-    if (route && (route.section === 'messages' || route.section === 'share')) return resolveListHit(route, x, y);
+    if (route && (route.section === 'messages' || route.section === 'share' || route.section === 'newchat')) return resolveListHit(route, x, y);
     if (route && route.section === 'thread') return resolveThreadHit(route, x, y);
     if (route && route.section === 'wallet') {
       if (detailButtons(route).some((b) => inRect(b, x, y))) return { action: 'buy' };
@@ -1340,7 +1374,9 @@
     if (route.section === 'messages') {
       const tab = BOX_TABS.find((b, i) => inRect(boxTabRect(i), x, y));
       if (tab) return { action: 'box', arg: tab.arg };
+      if (inRect(NEW_MSG_BTN, x, y)) return { action: 'new-message' };
     }
+    if (route.section === 'newchat' && inRect(SEARCH_BAR, x, y)) return { action: 'people-focus' };
     const sb = SCROLL_BTNS.find((r) => inRect(r, x, y));
     if (sb) return { action: 'scroll', arg: sb.arg };
     const items = route.items || [];
@@ -1348,6 +1384,7 @@
       if (!inRect(listRowRect(slot), x, y)) continue;
       const i = (route.scroll || 0) + slot;
       if (i >= items.length) return null;
+      if (route.section === 'newchat') return { action: 'new-to', arg: i };
       return route.section === 'share' ? { action: 'share-to', arg: i } : { action: 'chip', arg: '/messages/' + items[i].id };
     }
     return null;

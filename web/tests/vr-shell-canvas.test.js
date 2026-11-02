@@ -234,6 +234,10 @@ test('inbox rows open threads, tabs switch boxes, share rows send', () => {
   const r0 = sc.listRowRect(0);
   assert.deepEqual({ ...sc.resolveMainHit({ route }, r0.x + 10, r0.y + 10) }, { action: 'chip', arg: '/messages/c1' });
   assert.deepEqual({ ...sc.resolveMainHit({ route }, 300, 200) }, { action: 'box', arg: 'inbox' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, 1700, 200) }, { action: 'new-message' });
+  const people = { section: 'newchat', status: 'ready', items: [{ username: 'amy' }], scroll: 0 };
+  assert.deepEqual({ ...sc.resolveMainHit({ route: people }, 300, 200) }, { action: 'people-focus' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route: people }, r0.x + 10, r0.y + 10) }, { action: 'new-to', arg: 0 });
   const last = sc.listRowRect(sc.LIST_ROWS - 1);
   assert.equal(sc.resolveMainHit({ route: { ...route, scroll: 3 } }, last.x + 10, last.y + 10), null, 'past the end');
   let rec = recordingCtx();
@@ -303,4 +307,23 @@ test('wallet: balance, reward progress, ledger rows and BUY', () => {
   const empty = recordingCtx();
   sc.renderMainPanel(empty.ctx, { route: { section: 'wallet', items: [], status: 'ready' } }, '');
   assert.ok(empty.texts.includes('NO CREDIT ACTIVITY YET'));
+});
+
+test('grid tiles draw the playing preview video, else the poster', () => {
+  const sc = loadCanvas();
+  const asked = [];
+  const drawn = [];
+  const rec = recordingCtx();
+  rec.ctx.drawImage = (src) => drawn.push(src.name);
+  const video = { name: 'video', videoWidth: 720, videoHeight: 1280 };
+  const poster = { name: 'poster', naturalWidth: 720, naturalHeight: 1280 };
+  const getImage = (url, kind) => { asked.push([url, kind || 'image']); return kind === 'video' ? (url === '/p1.mp4' ? video : null) : poster; };
+  const items = [
+    { id: 1, poster_url: '/a.jpg', preview_url: '/p1.mp4' },
+    { id: 2, poster_url: '/b.jpg', preview_url: '/p2.mp4' },
+    { id: 3, media_type: 'image', poster_url: '/c.jpg', preview_url: '/c.jpg' },
+  ];
+  sc.renderMainPanel(rec.ctx, { route: { section: 'explore', status: 'ready', items, scroll: 0 } }, '', getImage);
+  assert.deepEqual(drawn.slice(0, 3), ['video', 'poster', 'poster'], 'no frame yet falls back to the poster');
+  assert.equal(asked.filter((a) => a[1] === 'video').length, 2, 'image reels never ask for a video');
 });

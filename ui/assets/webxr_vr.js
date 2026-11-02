@@ -6287,6 +6287,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
   const SHELL_IMAGE_CAP = 96;
   const SHELL_TYPING_IDLE_MS = 400;
+  // While grid tiles play their preview loops, the main panel repaints at about 12 fps.
+  const SHELL_VIDEO_FRAME_MS = 80;
   let shell = null;
   let shellWasOpen = false;
   let shellDirtyContent = -1;
@@ -6298,6 +6300,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
   const shellImages = new Map();
+  // Tile preview loops: url → { vid, ok, used }. A paint that no longer draws one releases it.
+  const shellVideos = new Map();
+  let shellVideoPaintAt = 0;
   let shellStick = { dir: 0, t: 0 };
   let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
@@ -6357,7 +6362,8 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // LRU thumbnail cache; a finished load redraws the grid. Cross-origin
   // images without CORS fail to load and fall back to initials.
-  function getShellImage(url) {
+  function getShellImage(url, kind) {
+    if (kind === 'video') return getShellVideo(url);
     let entry = shellImages.get(url);
     if (entry) {
       shellImages.delete(url);
@@ -6374,6 +6380,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellImages.set(url, entry);
     while (shellImages.size > SHELL_IMAGE_CAP) shellImages.delete(shellImages.keys().next().value);
     return null;
+  }
+
+  // Muted looping preview for a tile on screen, as the 2D ExploreTile plays it. null until it
+  // has a frame (the tile shows its poster meanwhile) and always null under reduced motion.
+  function getShellVideo(url) {
+    if (reducedMotion || typeof document === 'undefined') return null;
+    let entry = shellVideos.get(url);
+    if (!entry) {
+      const vid = document.createElement('video');
+      entry = { vid, ok: false, used: false };
+      vid.crossOrigin = 'anonymous';
+      vid.muted = true;
+      vid.loop = true;
+      vid.playsInline = true;
+      vid.preload = 'auto';
+      vid.onloadeddata = () => { entry.ok = true; if (shell && shellVideos.get(url) === entry) shell.touch(); };
+      vid.src = url;
+      shellVideos.set(url, entry);
+    }
+    entry.used = true;
+    if (entry.vid.paused) entry.vid.play().catch(() => {});
+    return entry.ok ? entry.vid : null;
+  }
+
+  // After a main-panel paint: stop and drop the previews it did not draw.
+  function sweepShellVideos(all) {
+    shellVideos.forEach((entry, url) => {
+      if (!all && entry.used) { entry.used = false; return; }
+      try { entry.vid.pause(); entry.vid.removeAttribute('src'); entry.vid.load(); } catch (e) {}
+      shellVideos.delete(url);
+    });
   }
 
   // Thumbstick Y scrolls the grid one row per flick, repeating while held.
@@ -6695,10 +6732,16 @@ window.WebXRVR = window.WebXRVR || (function () {
       shellPainted.navHover = navHover;
       shellPainted.navVersion = state.contentVersion;
     }
-    if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const mainShown = !!(shellMainCtx && shellMainMesh && shellMainMesh.visible);
+    if (!mainShown && shellVideos.size) sweepShellVideos(true);
+    if (mainShown &&
         (shellPainted.mainContent !== state.contentVersion || shellPainted.mainHover !== mainHover ||
-          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS))) {
+          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS) ||
+          (shellVideos.size && now - shellVideoPaintAt >= SHELL_VIDEO_FRAME_MS))) {
       sc.renderMainPanel(shellMainCtx, state, mainHover, getShellImage);
+      sweepShellVideos(false);
+      shellVideoPaintAt = now;
       shellMainTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.mainHover = mainHover;
@@ -6726,6 +6769,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
     shellKbWasShown = false;
     shellImages.clear();
+    sweepShellVideos(true);
   }
 
   const shellFacade = {

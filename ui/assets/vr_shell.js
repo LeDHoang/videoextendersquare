@@ -25,12 +25,12 @@
   // Nav tab each section highlights.
   const SECTION_TAB = {
     explore: 'explore', search: 'explore', tag: 'explore', location: 'explore',
-    profile: 'profile', pack: 'explore', messages: 'messages', thread: 'messages', share: 'messages',
+    profile: 'profile', pack: 'explore', messages: 'messages', thread: 'messages', share: 'messages', newchat: 'messages',
     wallet: 'wallet', rewards: 'wallet',
   };
 
   // Sections that need a signed-in viewer; signed out they show the sign-in handoff.
-  const NEEDS_USER = { messages: 1, thread: 1, share: 1, wallet: 1 };
+  const NEEDS_USER = { messages: 1, thread: 1, share: 1, newchat: 1, wallet: 1 };
 
   function decode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
@@ -57,6 +57,7 @@
     if ((m = /^\/profile\/([^/]+)$/.exec(pathname))) return out('profile', decode(m[1]));
     if ((m = /^\/packs\/([^/]+)$/.exec(pathname))) return out('pack', decode(m[1]));
     if (pathname === '/messages') return out('messages');
+    if (pathname === '/messages/new') return out('newchat');
     if ((m = /^\/messages\/([^/]+)$/.exec(pathname))) return out('thread', decode(m[1]));
     if (pathname === '/wallet') return out('wallet');
     return out('handoff');
@@ -71,7 +72,7 @@
   const LIST_ROWS = 6;
   const THREAD_ROWS = 6;
   const PAGE = {
-    messages: [1, LIST_ROWS], share: [1, LIST_ROWS], thread: [1, THREAD_ROWS], wallet: [1, LIST_ROWS],
+    messages: [1, LIST_ROWS], share: [1, LIST_ROWS], newchat: [1, LIST_ROWS], thread: [1, THREAD_ROWS], wallet: [1, LIST_ROWS],
     profile: [PROFILE_COLS, GRID_ROWS],
   };
 
@@ -217,7 +218,7 @@
     const d = deps || {};
     let stack = [];
     let handoff = null;
-    // The focused text field: 'search' or 'compose' (the open thread). focused shows the keyboard;
+    // The focused text field: 'search', 'compose' (the open thread) or 'people' (new message). focused shows the keyboard;
     // layout is the keyboard page (alpha | symbols | emoji); shift capitalises the next letter.
     let field = { id: 'search', text: '', focused: false, layout: 'alpha', shift: false };
     let unread = { total: 0, inbox: 0, requests: 0 };
@@ -276,6 +277,8 @@
       field.focused = false;
       const cur = top();
       if (!cur || cur.path !== route.path) { stack.push(route); load(route); }
+      // New message opens with the keyboard up on the people search.
+      if (route.section === 'newchat' && top() === route) focusField(true, 'people');
       dirty();
       return route;
     }
@@ -310,6 +313,7 @@
 
     // Fills route.items/related/status; a reply for a route no longer on the stack is dropped.
     function load(route) {
+      if (route.section === 'newchat') { findPeople(route, route.query || ''); return; }
       const src = sourceFor(route);
       if (!src) return;
       route.items = [];
@@ -363,14 +367,58 @@
       return true;
     }
 
-    // id: 'search' (default) or 'compose'. Compose keeps an unsent draft on the thread route.
+    // New message: people matching the typed name, as the 2D NEW MESSAGE search lists them
+    // (real accounts other than you). A reply for an older query is dropped.
+    function findPeople(route, q) {
+      route.query = q;
+      route.scroll = 0;
+      route.opening = route.opening || {};
+      if (!q.trim() || !d.request) { route.items = []; route.status = 'idle'; return; }
+      route.status = 'loading';
+      Promise.resolve().then(() => d.request('/api/search/suggestions', { q: q.trim(), limit: 8 })).then((r) => {
+        if (!onStack(route) || route.query !== q) return;
+        route.items = ((r && r.users) || []).filter((u) => u && !u.is_me && u.account_type === 'real');
+        route.status = 'ready';
+        dirty();
+      }, () => {
+        if (!onStack(route) || route.query !== q) return;
+        route.items = [];
+        route.status = 'error';
+        dirty();
+      });
+    }
+
+    // Opens (or creates) the chat with one person from the new-message list, in its place.
+    function startChat(index) {
+      const route = top();
+      const person = route && route.section === 'newchat' && route.items && route.items[index];
+      if (!person || !d.send || route.opening[person.username] === 'opening') return false;
+      route.opening = Object.assign({}, route.opening, { [person.username]: 'opening' });
+      dirty();
+      Promise.resolve().then(() => d.send('POST', '/api/messages/conversations', { username: person.username }))
+        .then((res) => {
+          const id = res && res.conversation && res.conversation.id;
+          if (!id) throw new Error('no conversation');
+          if (top() !== route) return;
+          focusField(false);
+          stack.pop();
+          open('/messages/' + enc(id));
+        }).catch(() => {
+          route.opening = Object.assign({}, route.opening, { [person.username]: 'failed' });
+          if (onStack(route)) dirty();
+        });
+      return true;
+    }
+
+    // id: 'search' (default), 'compose' or 'people'. Compose keeps an unsent draft on the thread route.
     function focusField(focused, id) {
       const route = top();
       if (focused && !field.focused) {
-        field.id = id === 'compose' ? 'compose' : 'search';
+        field.id = id === 'compose' || id === 'people' ? id : 'search';
         field.layout = 'alpha';
         field.shift = false;
         if (field.id === 'compose') field.text = (route && route.draft) || '';
+        else if (field.id === 'people') field.text = (route && route.query) || '';
         else field.text = route && route.section === 'search' ? route.arg : '';
       }
       if (!focused && field.focused && field.id === 'compose' && route && route.section === 'thread') {
@@ -381,7 +429,7 @@
     }
 
     const LAYOUT_KEYS = { 'layout:alpha': 'alpha', 'layout:symbols': 'symbols', 'layout:emoji': 'emoji' };
-    const FIELD_MAX = { search: 80, compose: 500 };
+    const FIELD_MAX = { search: 80, compose: 500, people: 40 };
 
     // key: one character (or emoji), 'backspace' | 'space' | 'enter' | 'close' | 'shift', or 'layout:<name>'.
     function type(key) {
@@ -397,6 +445,7 @@
           dirty();
           return true;
         }
+        if (field.id === 'people') { focusField(false); return true; }
         field.focused = false;
         if (q) open('/explore?q=' + enc(q)); else dirty();
         return true;
@@ -411,6 +460,9 @@
         field.text += add;
         if (key !== 'space') field.shift = false;
       }
+      // People search runs on every keystroke; laser typing is slow enough not to need a debounce.
+      const route = top();
+      if (field.id === 'people' && route && route.section === 'newchat') { findPeople(route, field.text); dirty(); return true; }
       dirty(true);
       return true;
     }
@@ -611,6 +663,14 @@
           return true;
         case 'share-to':
           return shareTo(hit.arg | 0);
+        case 'new-message':
+          open('/messages/new');
+          return true;
+        case 'people-focus':
+          focusField(true, 'people');
+          return true;
+        case 'new-to':
+          return startChat(hit.arg | 0);
         case 'buy':
           showHandoff('/wallet', 'BUY ON 2D', 'Buying credits needs the 2D site. Exit VR to continue.');
           return true;
