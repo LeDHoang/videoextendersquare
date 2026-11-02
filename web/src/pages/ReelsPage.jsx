@@ -187,7 +187,8 @@ export default function ReelsPage() {
   const videos = data?.videos || [];
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
   const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
-  const initialIndex = deepPostId ? 0 : (deepIndex >= 0 ? deepIndex : 0);
+  // The player builds its own feed, so a post-less file is sent by path, not by its index here.
+  const deepPath = !deepPostId && deepIndex >= 0 ? deepPlay : null;
   // Without a ?play= deep link the player's params do not depend on the list,
   // so it starts loading alongside /api/reels instead of after it.
   const playerEarly = !deepPlay && feedScope !== 'following' && debouncedSearch === search;
@@ -202,6 +203,7 @@ export default function ReelsPage() {
     ...(activeAuthor ? { author: activeAuthor } : {}),
     ...(only3d ? { media: 'stereo' } : {}),
     ...(deepPostId ? { post: deepPostId } : {}),
+    ...(deepPath ? { play: deepPath } : {}),
     ...(tunnel ? { tunnel } : {}),
   };
 
@@ -470,7 +472,7 @@ export default function ReelsPage() {
           {deepIndex >= 0 ? (
             <Mono>OPENED FROM EXPLORE — PLAYING {videos[deepIndex]?.title || videos[deepIndex]?.filename} ({deepIndex + 1}/{videos.length})</Mono>
           ) : null}
-          <ReelsPlayer params={playerParams} initialIndex={initialIndex} revealOnLoad />
+          <ReelsPlayer params={playerParams} revealOnLoad />
           {videos.some((v) => v.tunnel_url) ? (
             <GatedReason>TUNNEL ACTIVE — META QUEST WILL STREAM DIRECTLY OVER SECURE PROXY</GatedReason>
           ) : null}

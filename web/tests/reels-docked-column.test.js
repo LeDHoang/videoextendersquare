@@ -220,7 +220,7 @@ test('the Reels page has no Video Playlist section and lifts the 1440px content 
 
 test('the Reels page scrolls the square into view once on load, and other pages are not affected', () => {
   const page = read('web/src/pages/ReelsPage.jsx');
-  assert.match(page, /<ReelsPlayer params=\{playerParams\} initialIndex=\{initialIndex\} revealOnLoad \/>/);
+  assert.match(page, /<ReelsPlayer params=\{playerParams\} revealOnLoad \/>/);
   const player = read('web/src/components/ui/ReelsPlayer.jsx');
   assert.match(player, /revealOnLoad = false/);
   assert.match(player, /revealOnLoad && !previewMode && !revealedRef\.current/);
