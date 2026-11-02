@@ -306,3 +306,21 @@ def test_derived_pool_drains_and_reopens(monkeypatch):
         uploads._submit_derived_assets(lambda: None)
     uploads.start_derived_pool()
     assert uploads._submit_derived_assets(lambda: "ok").result(timeout=5) == "ok"
+
+
+def test_captions_do_not_hold_up_the_next_encode(monkeypatch):
+    started, gate = threading.Event(), threading.Event()
+    monkeypatch.setattr(uploads, "_derived_pool", uploads.ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(uploads, "_captions_pool", uploads.ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(uploads, "_build_captions", lambda dest: (started.set(), gate.wait(5)))
+    captions = uploads._submit_captions(Path("long.mp4"))
+    assert started.wait(5)
+    # The next post's poster runs while the speech model is still busy.
+    assert uploads._submit_derived_assets(lambda: "poster").result(timeout=5) == "poster"
+    queued = uploads._submit_captions(Path("next.mp4"))
+    threading.Timer(0.2, gate.set).start()
+    summary = uploads.shutdown_derived_pool(drain_s=5)
+    assert summary == {"dropped": 1, "running": 1, "unfinished": 0}
+    assert captions.done() and queued.cancelled()
+    uploads.start_derived_pool()
+    assert uploads._captions_pool.submit(lambda: "ok").result(timeout=5) == "ok"

@@ -74,6 +74,8 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(SM.subprocess, "run", ffmpeg)
     futures = []
     monkeypatch.setattr(uploads, "_submit_derived_assets", lambda fn: futures.append(uploads._derived_pool.submit(fn)))
+    # Captions run inline here, so futures[0] covers them; their own worker is tested in test_graceful_shutdown.
+    monkeypatch.setattr(uploads, "_submit_captions", uploads._build_captions)
 
     engine = create_engine("sqlite:///" + str(tmp_path / "publish.db"), connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)

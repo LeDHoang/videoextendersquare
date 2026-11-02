@@ -198,6 +198,10 @@ def _discard_stored(stored_files) -> None:
 # is a post serves its original with no poster (stereo: stereo_crop of the
 # raw file).
 _derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
+# Captions get a worker of their own: the speech model can take minutes on a
+# long reel (and downloads its weights on first use), which must not hold up
+# the next post's poster.
+_captions_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="captions")
 _derived_lock = threading.Lock()
 _derived_futures: set[Future] = set()
 # Most posts queued per boot by requeue_missing_derived.
@@ -212,17 +216,27 @@ def _submit_derived_assets(fn) -> Future:
     return future
 
 
+def _submit_captions(dest: Path) -> Future:
+    with _derived_lock:
+        future = _captions_pool.submit(_build_captions, dest)
+        _derived_futures.add(future)
+    future.add_done_callback(_forget_derived_future)
+    return future
+
+
 def _forget_derived_future(future: Future) -> None:
     with _derived_lock:
         _derived_futures.discard(future)
 
 
 def start_derived_pool() -> None:
-    """Reopen the derived-asset worker after shutdown_derived_pool (new lifespan)."""
-    global _derived_pool
+    """Reopen the derived-asset workers after shutdown_derived_pool (new lifespan)."""
+    global _derived_pool, _captions_pool
     with _derived_lock:
         if getattr(_derived_pool, "_shutdown", False):
             _derived_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets")
+        if getattr(_captions_pool, "_shutdown", False):
+            _captions_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="captions")
 
 
 def shutdown_derived_pool(drain_s: float = 15.0) -> dict:
@@ -234,9 +248,10 @@ def shutdown_derived_pool(drain_s: float = 15.0) -> dict:
     its .part file is swept at the next boot.
     """
     with _derived_lock:
-        pool = _derived_pool
+        pools = (_derived_pool, _captions_pool)
         futures = list(_derived_futures)
-    pool.shutdown(wait=False, cancel_futures=True)
+    for pool in pools:
+        pool.shutdown(wait=False, cancel_futures=True)
     running = [future for future in futures if not future.done()]
     _done, not_done = wait(running, timeout=max(0.0, drain_s)) if running else (set(), set())
     return {
@@ -334,7 +349,7 @@ def _build_video_assets(dest: Path) -> None:
     _derived_step("poster", dest, SM.make_explore_poster, str(dest))
     _derived_step("explore preview", dest, SM.make_explore_preview, str(dest))
     _derived_step("web preview", dest, SM.make_web_preview, str(dest))
-    _build_captions(dest)
+    _submit_captions(dest)
 
 
 def _build_stereo_video_assets(dest: Path, layout: str) -> None:
@@ -344,11 +359,11 @@ def _build_stereo_video_assets(dest: Path, layout: str) -> None:
     if mono:
         _derived_step("left-eye explore preview", dest, SM.make_explore_preview, mono)
         _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
-    _build_captions(dest)
+    _submit_captions(dest)
 
 
 def _build_captions(dest: Path) -> None:
-    """Background, last: auto captions, when the speech model can run on this host.
+    """Background, last, on the captions worker: auto captions, when the speech model can run here.
 
     Unlike the steps above, no file is the usual outcome (no model, no
     audio, no speech), so only an error counts as a failure.
