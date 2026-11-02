@@ -1124,24 +1124,20 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   api.setScreenState({ locked: true, pos: { x: 1, y: 1.5, z: -3 }, distance: 3.0 });
   const dock = api.computeDockPose({ x: 0, y: 1.6, z: 0 });
   closeTo(dock.pos.x, 0);
-  // fix7: the 25 deg drop cap lands below the floor clamp here, so the dock
-  // sits at DOCK_MIN_FLOOR_Y (0.6 m).
-  closeTo(dock.pos.y, 0.6);
-  closeTo(dock.pos.z, -2.24);
+  // The dock sits at the open shell's 2.2 m radius, its bottom edge on the
+  // top of the nav strip under the Explore panel: eye 1.52 - 0.15 drop -
+  // 1.125 / 2 panel - half of the 0.16 * 3.28 / 1.5 m strip.
+  const navH = 0.16 * 3.28 / 1.5;
+  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - navH / 2 + 1.23 / 2);
+  closeTo(dock.pos.z, -2.2);
+  closeTo(dock.pitch, 0);
   const comments = api.getCommentsPanelLayout();
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
   closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
-  // fix25: the comments panel swings in to 25 deg left of straight ahead (it
-  // sat at about 52 deg). That overlaps the screen, so it comes toward the
-  // viewer until its inner edge is 0.1 m in front of the 2.24 m screen plane,
-  // shrinking to keep its size in view.
-  const sideX = 2 + 4 * 0.432 / 2 + 0.445;
-  const k = Math.hypot(comments.center.x, comments.center.z) / Math.hypot(sideX, 2.58);
-  closeTo(comments.w, 4 * 0.432 * k);
-  closeTo(Math.atan2(-comments.center.x, -comments.center.z) * 180 / Math.PI, 25);
-  closeTo(-comments.center.z + comments.w / 2 * Math.sin(25 * Math.PI / 180), 2.14);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(comments.center.z, -2.58);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -1990,6 +1986,21 @@ test('fix27: the first VR entry shows the dock and guide once (localStorage flag
   assert.equal(second.renderer.__test.getScreenState().controlsVisible, false, 'later entries start hidden');
 });
 
+test('locked UI takes the eye height from the first XR viewer pose, not the default camera', async () => {
+  const { renderer } = await enterLiveSession();
+  const api = renderer.__test;
+  // Before a pose arrives the camera still sits at its default 1.6 m; the
+  // dock must not latch onto that.
+  const before = api.computeDockPose({ x: 0, y: 1.6, z: 0 }).pos.y;
+  api.captureSessionEye({ getViewerPose: () => null });
+  closeTo(api.computeDockPose({ x: 0, y: 1.6, z: 0 }).pos.y, before);
+  api.captureSessionEye({ getViewerPose: () => ({ transform: { position: { x: 0, y: 0.9, z: 0 } } }) });
+  closeTo(api.computeDockPose({ x: 0, y: 0.9, z: 0 }).pos.y, before - (1.52 - 0.9));
+  // Captured once per session.
+  api.captureSessionEye({ getViewerPose: () => ({ transform: { position: { x: 0, y: 1.7, z: 0 } } }) });
+  closeTo(api.computeDockPose({ x: 0, y: 1.7, z: 0 }).pos.y, before - (1.52 - 0.9));
+});
+
 test('exitVR resolves immediately when no session is active', async () => {
   const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
   renderer.init(null, {});
@@ -2405,9 +2416,7 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  // fix25: the locked comments panel swings in to 25 deg at the same
-  // viewer distance, so it moves back from the -2.58 m station.
-  closeTo(Math.atan2(-lockedComments.center.x, -lockedComments.center.z) * 180 / Math.PI, 25);
+  closeTo(lockedComments.center.z, -2.58);
   closeTo(lockedGuide.center.z, -2.58);
 });
 
@@ -2795,8 +2804,7 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
   assert.equal(tuned.screenScale, 10, 'screen size uses the gesture clamp');
   assert.equal('bogus' in tuned, false);
   assert.equal(api.getScreenState().scale, 10);
-  const inView = (layout) => layout.w / Math.hypot(layout.center.x, layout.center.z);
-  assert.ok(inView(api.getCommentsPanelLayout()) > inView(before), 'bigger screen grows the panel in view');
+  assert.ok(api.getCommentsPanelLayout().center.x < before.center.x, 'bigger screen + gap push the panel left');
 
   renderer.stopPreview();
   assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);

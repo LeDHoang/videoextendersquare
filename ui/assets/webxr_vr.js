@@ -759,10 +759,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // screenDistance and all sizes track the live screenScale, so scale +
   // distance changes keep the control panel on the reel player.
   const DOCK_GAP = 0.08;
-  const DOCK_MAX_DROP_DEG = 25;
-  const DOCK_MIN_FLOOR_Y = 0.6;
-  const SIDE_PANEL_MAX_YAW_DEG = 25; // fix25
-  const SIDE_PANEL_FRONT_GAP = 0.1;
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -819,14 +815,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   const MIN_EYE_Y = 0.3;
   function getLockedAnchor() {
     let y = layoutTuning.screenHeight;
-    if (y === DEFAULT_POS.y) {
-      if (sessionEyeY === null && xrSession) {
-        const eye = getHeadPosition().y;
-        if (Number.isFinite(eye) && eye >= MIN_EYE_Y) sessionEyeY = eye;
-      }
-      if (sessionEyeY !== null) y = sessionEyeY;
-    }
+    if (y === DEFAULT_POS.y && sessionEyeY !== null) y = sessionEyeY;
     return { x: DEFAULT_POS.x, y, z: -layoutTuning.screenDistance };
+  }
+
+  // Read from the frame's viewer pose: the camera still holds its default
+  // 1.6 m on the first XR frames, before three.js copies the headset pose in.
+  function captureSessionEye(frame) {
+    if (sessionEyeY !== null || !frame || !xrRefSpace || !frame.getViewerPose) return;
+    try {
+      const pose = frame.getViewerPose(xrRefSpace);
+      const eye = pose && pose.transform && pose.transform.position.y;
+      if (Number.isFinite(eye) && eye >= MIN_EYE_Y) sessionEyeY = eye;
+    } catch (e) {}
   }
 
   function ensureScreenQuat() {
@@ -938,15 +939,20 @@ window.WebXRVR = window.WebXRVR || (function () {
       const pin = earthPanelPins.dock || EARTH_DOCK_POS;
       pos = { x: pin.x, y: pin.y, z: pin.z };
     } else if (lockToViewer) {
-      // Legacy-exact: the transport panel stays fixed and level in the room
-      // at the default screen spot while the locked screen follows the gaze.
+      // The transport panel stays fixed in the room straight ahead while the
+      // locked screen follows the gaze. It sits at the open shell's radius,
+      // low enough that the nav strip under it lands where it sits under the
+      // shell panel (Explore), so the strip does not move between pages and
+      // the dock stays clear of the middle of the reel. pos is the full-height
+      // dock's centre and a fitted dock keeps its top edge, so the bottom edge
+      // is placed from the fitted height. It stays level, like the shell
+      // panel, so the strip hanging under it matches Explore's.
       const a = getLockedAnchor();
-      // The full screenScale/2 drop would put the dock ~33 deg below the eye
-      // line (near the floor); cap it at DOCK_MAX_DROP_DEG and keep it
-      // at least DOCK_MIN_FLOOR_Y above the floor (never above the eye line).
-      const drop = Math.min(layoutTuning.screenScale / 2 + layoutTuning.dockGap,
-        Math.abs(a.z) * Math.tan(DOCK_MAX_DROP_DEG * Math.PI / 180));
-      pos = { x: a.x, y: Math.max(a.y - drop, Math.min(DOCK_MIN_FLOOR_Y, a.y - 0.3)), z: a.z };
+      const full = dockTargetSize(layoutTuning.screenScale);
+      const fit = dockTargetSize(layoutTuning.screenScale, controlsLogicalW, controlsLogicalH);
+      const navH = SHELL_NAV_SIZE.h * fit.w / SHELL_NAV_SIZE.w;
+      const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - navH / 2;
+      pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
       const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
@@ -960,26 +966,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     return {
       pos,
       yaw: Math.atan2(dx, dz),
-      pitch: -Math.atan2(dy, Math.hypot(dx, dz)),
+      pitch: (lockToViewer && m !== 'earth') ? 0 : -Math.atan2(dy, Math.hypot(dx, dz)),
     };
-  }
-
-  // fix25: swing a side offset (x, z) from the locked anchor in toward
-  // straight ahead so it sits no more than SIDE_PANEL_MAX_YAW_DEG off it
-  // (the comments panel opened at about 52 deg, out of view). The panel keeps
-  // its distance from the viewer; d is the viewer's distance to the anchor.
-  // Swung in, it overlaps the screen, so it also moves toward the viewer until
-  // its inner edge (w wide) is SIDE_PANEL_FRONT_GAP in front of the screen
-  // plane, shrinking by k to keep its size in view (it sat 3.8 m out, behind
-  // the 2.24 m screen it covered).
-  function clampSideOffset(x, z, d, w) {
-    const back = d - z;
-    const r = Math.hypot(x, back);
-    const lim = SIDE_PANEL_MAX_YAW_DEG * Math.PI / 180;
-    const yaw = Math.max(-lim, Math.min(lim, Math.atan2(x, back)));
-    const innerDepth = r * Math.cos(yaw) + w / 2 * Math.sin(Math.abs(yaw));
-    const k = Math.min(1, (d - SIDE_PANEL_FRONT_GAP) / innerDepth);
-    return { x: k * r * Math.sin(yaw), z: d - k * r * Math.cos(yaw), k };
   }
 
   // Side-panel world layout (upstream getCommentsPanelCenter/Size +
@@ -991,16 +979,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
     let center;
-    let k = 1;
     if (lockToViewer) {
       const a = getLockedAnchor();
-      const c = clampSideOffset(-base / 2 - size.w / 2 - layoutTuning.panelSideGap,
-        layoutTuning.panelFwdOffset, layoutTuning.screenDistance, size.w);
-      k = c.k;
       center = {
-        x: a.x + c.x,
+        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + c.z,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
@@ -1008,7 +992,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w * k, h: size.h * k };
+    return { center, w: size.w, h: size.h };
   }
 
   function getGuidePanelLayout() {
@@ -6292,6 +6276,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // vr_shell.js (window.VRShell), drawing in vr_shell_canvas.js
   // (window.VRShellCanvas); this block only owns meshes, rays and visibility.
   const SHELL_MAIN_RADIUS = 2.2;
+  const SHELL_MAIN_DROP = 0.15;
   const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
   const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
   const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
@@ -6555,7 +6540,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const yaw = headYaw();
     shellMainMesh.position.set(
       headPos.x - Math.sin(yaw) * SHELL_MAIN_RADIUS,
-      headPos.y - 0.15,
+      headPos.y - SHELL_MAIN_DROP,
       headPos.z - Math.cos(yaw) * SHELL_MAIN_RADIUS
     );
     faceViewerLevel(shellMainMesh, headPos, 0);
@@ -6565,28 +6550,34 @@ window.WebXRVR = window.WebXRVR || (function () {
   // (same width and tilt, shared edge); open, the dock is hidden and the bar
   // keeps that same size under the main panel.
   let shellNavK = 1;
-  let shellNavDockDist = 0;
+  let shellNavDist = 0;
   function layoutShellNav() {
     if (!shellNavMesh || !THREE) return;
     const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
     if (!anchor) return;
     const open = anchor === shellMainMesh;
-    const dist = anchor.position.distanceTo(getHeadPosition());
+    const head = getHeadPosition();
     // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
-    if (!open) {
-      shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
-      shellNavDockDist = dist;
-    }
-    // Open, the bar keeps the angular size it has under the dock, so it reads
-    // the same on every page even though the main panel sits further away.
-    const k = open && shellNavDockDist > 0 ? shellNavK * dist / shellNavDockDist : shellNavK;
+    if (!open) shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
     const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
-    const navH = SHELL_NAV_SIZE.h * k;
-    const gap = open ? navH * 0.5 : 0;
-    shellNavMesh.scale.set(k, k, 1);
-    shellNavMesh.quaternion.copy(anchor.quaternion);
-    shellNavMesh.position.copy(anchor.position)
-      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+    const place = (k) => {
+      const navH = SHELL_NAV_SIZE.h * k;
+      const gap = open ? navH * 0.5 : 0;
+      shellNavMesh.scale.set(k, k, 1);
+      shellNavMesh.quaternion.copy(anchor.quaternion);
+      shellNavMesh.position.copy(anchor.position)
+        .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+    };
+    place(shellNavK);
+    const dist = shellNavMesh.position.distanceTo(head);
+    if (!open) {
+      shellNavDist = dist;
+    } else if (shellNavDist > 0) {
+      // Open, the bar keeps the angular size it has under the dock, so it reads
+      // the same on every page even though the main panel may sit further away.
+      // On a locked reel the closed bar already sits where this places it.
+      place(shellNavK * dist / shellNavDist);
+    }
   }
 
   // Keyboard: below the main panel, closer, tilted up toward the viewer.
@@ -9937,6 +9928,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (renderer.setAnimationLoop) renderer.setAnimationLoop(null);
       } catch (e) {}
       renderer.setAnimationLoop((time, frame) => {
+        captureSessionEye(frame);
         applySceneVisibility();
         if (sceneMode === 'reels') {
           updateVisualTexture(getVisualSource());
@@ -10650,6 +10642,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHeatStyle,
       earthHeatRamp,
       computeDockPose,
+      captureSessionEye,
       controlIndexFromUV,
       // v8.3 lock/scale/distance/panel seams.
       computeLockedPose,
