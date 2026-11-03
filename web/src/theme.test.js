@@ -82,6 +82,25 @@ describe('useTheme', () => {
     expect(result.current[0]).toBe('light');
   });
 
+  it('follows a data-theme change made elsewhere', async () => {
+    let onChange;
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      addEventListener: (_type, fn) => { onChange = fn; },
+      removeEventListener: () => {},
+    }));
+    const { result } = renderHook(() => useTheme());
+    expect(result.current[0]).toBe('light');
+    localStorage.setItem(THEME_KEY, 'dark');
+    await act(async () => { html.dataset.theme = 'dark'; });
+    expect(result.current[0]).toBe('dark');
+    expect(meta.getAttribute('content')).toBe('#0c0b09');
+    // The VR switch saved the choice, so the OS no longer steers the page.
+    act(() => onChange({ matches: false }));
+    expect(result.current[0]).toBe('dark');
+    expect(html.dataset.theme).toBe('dark');
+  });
+
   it('works without matchMedia', () => {
     expect(window.matchMedia).toBeUndefined();
     expect(() => renderHook(() => useTheme())).not.toThrow();

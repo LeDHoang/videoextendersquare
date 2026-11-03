@@ -41,6 +41,20 @@ export function useTheme() {
     return () => query.removeEventListener?.('change', onChange);
   }, []);
 
+  // Another switch (the VR nav bar) changed the attribute: follow it. Never write
+  // data-theme here, or the observer would loop.
+  useEffect(() => {
+    if (typeof MutationObserver !== 'function') return undefined;
+    const observer = new MutationObserver(() => {
+      const next = currentTheme();
+      if (savedTheme() !== null) picked.current = true;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[next]);
+      setThemeState(next);
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
   const setTheme = useCallback((next) => {
     picked.current = true;
     applyTheme(next);

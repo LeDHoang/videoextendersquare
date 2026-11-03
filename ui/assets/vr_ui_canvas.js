@@ -2479,6 +2479,36 @@
     return TOKENS === TOKEN_SETS.dark ? 'dark' : 'light';
   }
 
+  // The three paper faces the panels draw with.
+  const PAPER_FONTS = ['16px Fraunces', "16px 'Instrument Sans'", "600 16px 'IBM Plex Mono'"];
+
+  // Calls onPaint once the paper fonts settle or timeoutMs passes, whichever is first,
+  // and once more if the fonts arrive after the timeout. A failed load counts as
+  // settled. Without a font set (a bare VM) it paints at once. Never throws.
+  function waitForFonts(fontSet, timeoutMs, onPaint) {
+    const paint = () => { try { onPaint(); } catch (e) {} };
+    if (!fontSet || typeof fontSet.load !== 'function') {
+      paint();
+      return;
+    }
+    let settled = false;
+    let timer = null;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
+      paint();
+    };
+    if (typeof setTimeout === 'function') {
+      timer = setTimeout(() => { timer = null; if (!settled) paint(); }, timeoutMs);
+    }
+    try {
+      Promise.all(PAPER_FONTS.map((font) => fontSet.load(font))).then(settle, settle);
+    } catch (e) {
+      settle();
+    }
+  }
+
   // ─── Public Module API ──────────────────────────────────────────────
   return {
     CONTROLS_W,
@@ -2531,5 +2561,6 @@
     },
     setTheme,
     getTheme,
+    waitForFonts,
   };
 });

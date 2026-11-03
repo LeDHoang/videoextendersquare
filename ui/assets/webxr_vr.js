@@ -466,6 +466,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastOverlayKey = '';
   // Guide panel upload-once state
   let vrGuideUploaded = false;
+  // Canvases wait (at most 3 s) for the paper fonts; see initThreeScene.
+  let fontsSettled = false;
+  let fontGateStarted = false;
+  // Follows <html data-theme> while the renderer runs.
+  let themeObserver = null;
   // ?dockfreeze=1 painted flag (reset per session in cleanup).
   let dockFreezePainted = false;
   // VR comment keyboard (DOM overlay) state
@@ -666,6 +671,73 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     const v = ui && ui.TOKENS && ui.TOKENS.hex && ui.TOKENS.hex[name];
     return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+  }
+
+  // <html data-theme> is the one switch: 'dark' is dark, anything else light.
+  function readPageTheme() {
+    try {
+      const el = typeof document !== 'undefined' ? document.documentElement : null;
+      return el && typeof el.getAttribute === 'function' && el.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+      return 'light';
+    }
+  }
+
+  // Every canvas paints once more on its next update (no per-frame cost).
+  function markCanvasesDirty() {
+    shellPainted.mainContent = -1;
+    shellPainted.navVersion = -1;
+    shellPainted.kbVersion = -1;
+    shellPainted.kbHover = null;
+    vrGuideUploaded = false;
+    lastOverlayKey = '';
+    lastEarthLabelKey = '';
+    lastEarthPreviewUpdate = -1e9;
+    earthMapDirty = true;
+    // The dock and comments panel repaint on the next UI tick.
+    vrLastUiUploadT = -1;
+  }
+
+  function recolourScene() {
+    const bg = parseInt(echoHex('bg', '#f2ede3').slice(1), 16);
+    try { if (renderer && renderer.setClearColor) renderer.setClearColor(bg, 1); } catch (e) {}
+    try { if (scene && scene.background && scene.background.setHex) scene.background.setHex(bg); } catch (e) {}
+    try {
+      if (laserLine && laserLine.material && laserLine.material.color) {
+        laserLine.material.color.setHex(parseInt(echoHex('accent', '#c2250e').slice(1), 16));
+      }
+    } catch (e) {}
+    try {
+      const rx = reticleTexture && reticleTexture.image && reticleTexture.image.getContext
+        ? reticleTexture.image.getContext('2d') : null;
+      if (rx) {
+        paintReticle(rx);
+        reticleTexture.needsUpdate = true;
+      }
+    } catch (e) {}
+    styleDomInput();
+  }
+
+  // Switches the VR tokens; on a change every canvas repaints once and the scene recolours.
+  function applyVRTheme(mode) {
+    const ui = getUICanvas();
+    if (!ui || typeof ui.setTheme !== 'function' || !ui.setTheme(mode)) return;
+    markCanvasesDirty();
+    recolourScene();
+  }
+
+  // The nav bar's LIGHT / DARK switch: saves the choice and sets the page attribute
+  // (the 2D page follows it), then applies it here at once.
+  function setVRTheme(mode) {
+    const next = mode === 'dark' ? 'dark' : 'light';
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem('sx.theme', next);
+    } catch (e) { /* storage unavailable: the choice lasts for this visit */ }
+    try {
+      const el = typeof document !== 'undefined' ? document.documentElement : null;
+      if (el && typeof el.setAttribute === 'function') el.setAttribute('data-theme', next);
+    } catch (e) {}
+    applyVRTheme(next);
   }
 
   function ensureThree() {
@@ -2146,7 +2218,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function refreshEarthLabel() {
-    if (!earthLabelCtx || !earthLabelTexture) return;
+    if (!fontsSettled || !earthLabelCtx || !earthLabelTexture) return;
     const hovered = (earthHoveredIndex >= 0 && earthHoveredIndex < earthLocations.length)
       ? earthLocations[earthHoveredIndex]
       : null;
@@ -2349,6 +2421,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
     }
+    if (!fontsSettled) return;
     // Cycle the hero through the (≤3) previewed reels. With a live video the
     // clip's own end advances it (capped so one long reel can't hog the card);
     // otherwise a short poster rotation. Frozen under reduced motion.
@@ -3982,14 +4055,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     // callers, tests, and future miss branches.
     if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
     const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
-    ctx.strokeStyle = echoHex('ink', '#f2f3f5');
+    ctx.strokeStyle = echoHex('ink', '#17140f');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(left, 94); ctx.lineTo(right, 94);
     ctx.moveTo(left, 89); ctx.lineTo(left, 99);
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
-    ctx.fillStyle = echoHex('ink', '#f2f3f5');
+    ctx.fillStyle = echoHex('ink', '#17140f');
     ctx.font = '700 15px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
@@ -4945,10 +5018,51 @@ window.WebXRVR = window.WebXRVR || (function () {
     return delta;
   }
 
+  // The 64×64 reticle dot in the accent colour (repainted on a mode switch).
+  function paintReticle(rx) {
+    rx.clearRect(0, 0, 64, 64);
+    const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    rg.addColorStop(0, '#ffffff');
+    const reticleHex = echoHex('accent', '#c2250e');
+    const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
+    rg.addColorStop(0.25, reticleHex);
+    rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
+    rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
+    rx.fillStyle = rg;
+    rx.fillRect(0, 0, 64, 64);
+    rx.strokeStyle = reticleHex;
+    rx.lineWidth = 3;
+    rx.beginPath();
+    rx.arc(32, 32, 20, 0, Math.PI * 2);
+    rx.stroke();
+    rx.fillStyle = '#ffffff';
+    rx.beginPath();
+    rx.arc(32, 32, 5, 0, Math.PI * 2);
+    rx.fill();
+  }
+
   // ─── Three.js Scene Setup ───────────────────────────────────────────
   function initThreeScene(canvas, context) {
     ensureThree();
     if (!THREE) return null;
+
+    // The page's mode first, so nothing below paints or clears in the wrong one.
+    applyVRTheme(readPageTheme());
+    if (!themeObserver && typeof MutationObserver === 'function' &&
+        typeof document !== 'undefined' && document.documentElement) {
+      try {
+        themeObserver = new MutationObserver(() => applyVRTheme(readPageTheme()));
+        themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      } catch (e) { themeObserver = null; }
+    }
+    if (!fontGateStarted) {
+      fontGateStarted = true;
+      const ui = getUICanvas();
+      const onFonts = () => { fontsSettled = true; markCanvasesDirty(); };
+      const fontSet = typeof document !== 'undefined' ? document.fonts : undefined;
+      if (ui && typeof ui.waitForFonts === 'function') ui.waitForFonts(fontSet, 3000, onFonts);
+      else onFonts();
+    }
 
     if (context) {
       glContext = context;
@@ -4979,14 +5093,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       updatePreviewSize(canvas);
       if (renderer.xr) renderer.xr.enabled = true;
       try {
-        if (renderer.setClearColor) renderer.setClearColor(0x020612, 1);
+        if (renderer.setClearColor) renderer.setClearColor(parseInt(echoHex('bg', '#f2ede3').slice(1), 16), 1);
       } catch (e) {}
     }
 
     if (!scene) {
       scene = new THREE.Scene();
       try {
-        scene.background = new THREE.Color(0x020612);
+        scene.background = new THREE.Color(parseInt(echoHex('bg', '#f2ede3').slice(1), 16));
       } catch (e) {}
     }
 
@@ -5179,7 +5293,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       guideMesh.renderOrder = 4;
       guideMesh.visible = false;
       scene.add(guideMesh);
-      if (guideCtx && ui && typeof ui.renderGuideCanvas === 'function') {
+      if (fontsSettled && guideCtx && ui && typeof ui.renderGuideCanvas === 'function') {
         try {
           ui.renderGuideCanvas(guideCtx);
           guideTexture.needsUpdate = true;
@@ -5202,7 +5316,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const laserGeo = new THREE.BufferGeometry();
       laserGeo.setAttribute('position', new THREE.BufferAttribute(laserPositions, 3));
       const laserMat = new THREE.LineBasicMaterial({
-        color: parseInt(echoHex('accent', '#ff3b1f').slice(1), 16),
+        color: parseInt(echoHex('accent', '#c2250e').slice(1), 16),
         transparent: true,
         opacity: 0.8,
         // Legacy parity: the beam always paints over the scene (v5.2 drew
@@ -5223,24 +5337,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         rc.height = 64;
         const rx = rc.getContext('2d');
         if (rx) {
-          const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
-          rg.addColorStop(0, '#ffffff');
-          const reticleHex = echoHex('accent', '#ff3b1f');
-          const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
-          rg.addColorStop(0.25, reticleHex);
-          rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
-          rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
-          rx.fillStyle = rg;
-          rx.fillRect(0, 0, 64, 64);
-          rx.strokeStyle = reticleHex;
-          rx.lineWidth = 3;
-          rx.beginPath();
-          rx.arc(32, 32, 20, 0, Math.PI * 2);
-          rx.stroke();
-          rx.fillStyle = '#ffffff';
-          rx.beginPath();
-          rx.arc(32, 32, 5, 0, Math.PI * 2);
-          rx.fill();
+          paintReticle(rx);
           reticleTexture = applyLinearSampling(new THREE.CanvasTexture(rc));
         }
       } catch (e) {
@@ -6093,6 +6190,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       return false;
     }
+    if (!fontsSettled) return overlayHasPopups;
     if (!ui || !overlayCtx || typeof ui.renderOverlayCanvas !== 'function' ||
         typeof ui.filterOverlayComments !== 'function') {
       if (overlayHasPopups) {
@@ -6173,7 +6271,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       return {
         tier: tier.name,
-        tierColor: echoHex(tier.tone, '#ff3b1f'),
+        tierColor: echoHex(tier.tone, '#c2250e'),
         zoomPct: earthZoomPercent(),
         scaleCaption,
         mapStatus,
@@ -6187,7 +6285,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function updateUiTextures() {
     const ui = getUICanvas();
-    if (!ui) return;
+    if (!ui || !fontsSettled) return;
     const source = getVisualSource();
     let itemState = {};
     if (callbacks.getCurrentItemState) {
@@ -6328,6 +6426,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
       getScene: () => sceneMode,
       earthAvailable: () => !isPackExperience(),
+      setTheme: setVRTheme,
       // REELS from the open shell just returns to the feed; from the dock it
       // is the main feed, so it also leaves a location feed.
       setScene(mode, wasOpen) {
@@ -6836,7 +6935,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       pressedButton,
       renderStats: { ...renderStats },
       earthState: getEarthState(),
+      world: { theme: readVRTheme() },
     };
+  }
+
+  function readVRTheme() {
+    const ui = getUICanvas();
+    return ui && typeof ui.getTheme === 'function' ? ui.getTheme() : readPageTheme();
   }
 
   // ─── Frame Rendering Loop ───────────────────────────────────────────
@@ -10101,6 +10206,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       try { window.removeEventListener('resize', previewResizeHandler); } catch (e) {}
       previewResizeHandler = null;
     }
+    if (themeObserver) {
+      try { themeObserver.disconnect(); } catch (e) {}
+      themeObserver = null;
+    }
     // Dispose Three-managed GPU resources. Textures are nulled (not just
     // disposed) so the next startPreview() rebuilds them — reusing a
     // disposed CanvasTexture rendered black after restart.
@@ -10530,6 +10639,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
+  // Colours only, so a mode switch never touches the input's display or layout.
+  function styleDomInput() {
+    if (!domOverlayInput || !domOverlayInput.style) return;
+    domOverlayInput.style.color = echoHex('ink', '#17140f');
+    domOverlayInput.style.background = echoHex('surface', '#faf7f0');
+    domOverlayInput.style.border = '2px solid ' + echoHex('accent', '#c2250e');
+  }
+
   function initDomOverlay() {
     if (domOverlayRoot || typeof document === 'undefined') return;
     try {
@@ -10541,7 +10658,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.autocomplete = 'off';
       domOverlayInput.setAttribute('enterkeyhint', 'send');
       domOverlayInput.placeholder = 'Type a VR comment…';
-      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#f2f3f5;background:#101214;border:2px solid #ff5c42;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      styleDomInput();
       domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
       domOverlayInput.addEventListener('blur', onCommentInputBlur);
       domOverlayRoot.appendChild(domOverlayInput);
@@ -10685,6 +10803,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     getSourceStereo() { return sourceStereo; },
 
     __test: {
+      setVRTheme,
       postXRDiag,
       locationToUnit,
       earthZoneAngularRadius,

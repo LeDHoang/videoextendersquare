@@ -148,8 +148,15 @@ function loadRenderer(options = {}) {
   window.top = window;
   window.parent = window;
   window.self = window;
+  const documentElement = { classList: { add() {}, remove() {} } };
+  if (options.theme !== undefined) {
+    let theme = options.theme;
+    documentElement.getAttribute = (name) => (name === 'data-theme' ? theme : null);
+    documentElement.setAttribute = (name, value) => { if (name === 'data-theme') theme = String(value); };
+  }
   const mockDocument = {
-    documentElement: { classList: { add() {}, remove() {} } },
+    documentElement,
+    ...(options.fonts !== undefined ? { fonts: options.fonts } : {}),
     body: { classList: { add() {}, remove() {} }, appendChild() {} },
     getElementById() { return null; },
     addEventListener() {},
@@ -196,12 +203,14 @@ function loadRenderer(options = {}) {
     vm.runInContext(shellCanvasSource, context, { filename: 'vr_shell_canvas.js' });
     vm.runInContext(shellSource, context, { filename: 'vr_shell.js' });
   }
+  if (options.beforeRenderer) options.beforeRenderer(window);
   vm.runInContext(rendererSource, context, { filename: 'webxr_vr.js' });
   window.WebXRVR.__runScheduledFrame = (time) => {
     const callback = scheduledFrame;
     scheduledFrame = null;
     if (callback) callback(time);
   };
+  window.WebXRVR.__document = mockDocument;
   return window.WebXRVR;
 }
 
@@ -415,6 +424,134 @@ test('Reels frames skip Earth draws and Earth frames pause video texture uploads
   assert.ok(state.renderStats.earthDrawCalls > 0);
   assert.ok(state.renderStats.starDrawCalls > 0);
   assert.equal(state.renderStats.videoUploads, uploadsBeforeEarthFrame);
+  renderer.stopPreview();
+});
+
+// Wraps every render* painter on the two canvas modules. Each wrapper counts
+// its calls and records the VR mode in force when it ran.
+function countRenders() {
+  const counts = {};
+  const seen = {};
+  const beforeRenderer = (win) => {
+    for (const [prefix, lib] of [['ui', win.VRUICanvas], ['shell', win.VRShellCanvas]]) {
+      if (!lib) continue;
+      for (const name of Object.keys(lib)) {
+        if (!/^render/.test(name) || typeof lib[name] !== 'function') continue;
+        const key = prefix + '.' + name;
+        const fn = lib[name];
+        counts[key] = 0;
+        seen[key] = [];
+        lib[name] = function (...args) {
+          counts[key] += 1;
+          seen[key].push(win.VRUICanvas.getTheme());
+          return fn.apply(this, args);
+        };
+      }
+    }
+  };
+  const painted = () => Object.keys(counts).filter((k) => counts[k] > 0).sort();
+  return { counts, seen, beforeRenderer, painted };
+}
+
+function startCounted(options = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const rec = countRenders();
+  const renderer = loadRenderer({ gl, withShell: true, beforeRenderer: rec.beforeRenderer, ...options });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  // A fixed clock: nothing repaints on a timer, so every extra paint is the theme's.
+  const frames = (n) => { for (let i = 0; i < n; i += 1) renderer.__runScheduledFrame(16); };
+  return { renderer, rec, frames };
+}
+
+function memoryStorage(overrides = {}) {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    ...overrides,
+  };
+}
+
+test("VR starts in the page's mode", () => {
+  const { renderer, rec, frames } = startCounted({ theme: 'dark' });
+  frames(1);
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+  const modes = Object.values(rec.seen).flat();
+  assert.ok(modes.length > 0, 'something painted');
+  assert.ok(modes.every((m) => m === 'dark'), `every paint saw dark: ${modes}`);
+  renderer.stopPreview();
+});
+
+test('a data-theme change repaints each canvas once', () => {
+  const observers = [];
+  class FakeMutationObserver {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(target, options) { this.target = target; this.options = options; }
+    disconnect() { this.disconnected = true; }
+  }
+  const { renderer, rec, frames } = startCounted({ theme: 'light', globals: { MutationObserver: FakeMutationObserver } });
+  frames(5);
+  const visible = rec.painted();
+  assert.ok(visible.length > 0);
+  frames(5);
+  const base = { ...rec.counts };
+  assert.equal(observers.length, 1);
+  assert.equal(observers[0].target, renderer.__document.documentElement);
+  assert.deepEqual([...observers[0].options.attributeFilter], ['data-theme']);
+
+  observers[0].target.setAttribute('data-theme', 'dark');
+  observers[0].callback([]);
+  frames(5);
+  for (const key of Object.keys(rec.counts)) {
+    assert.equal(rec.counts[key] - base[key], visible.includes(key) ? 1 : 0, key);
+  }
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+
+  renderer.setSceneMode('earth');
+  frames(5);
+  assert.ok(rec.seen['ui.renderEarthLabelCanvas'].length > 0, 'the earth label painted');
+  for (const key of ['ui.renderEarthLabelCanvas', 'ui.renderEarthPreviewCanvas']) {
+    assert.ok(rec.seen[key].slice(base[key]).every((m) => m === 'dark'), key);
+  }
+  renderer.stopPreview();
+  assert.equal(observers[0].disconnected, true);
+});
+
+test('the VR switch writes the attribute and sx.theme', () => {
+  const localStorage = memoryStorage();
+  const renderer = loadRenderer({ theme: 'light', globals: { localStorage } });
+  renderer.__test.setVRTheme('dark');
+  assert.equal(renderer.__document.documentElement.getAttribute('data-theme'), 'dark');
+  assert.equal(localStorage.getItem('sx.theme'), 'dark');
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+});
+
+test('the VR switch works when storage throws', () => {
+  const localStorage = memoryStorage({ setItem() { throw new Error('blocked'); } });
+  const renderer = loadRenderer({ theme: 'light', globals: { localStorage } });
+  assert.doesNotThrow(() => renderer.__test.setVRTheme('dark'));
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+});
+
+test('canvases wait for the fonts', async () => {
+  const reference = startCounted();
+  reference.frames(1);
+  const visible = reference.rec.painted();
+  reference.renderer.stopPreview();
+  assert.ok(visible.length > 0);
+
+  let resolveFonts;
+  const arrived = new Promise((resolve) => { resolveFonts = resolve; });
+  const fonts = { load: () => arrived };
+  const { renderer, rec, frames } = startCounted({ fonts });
+  frames(5);
+  assert.deepEqual(rec.painted(), [], 'nothing paints before the fonts');
+  resolveFonts([]);
+  await new Promise((resolve) => setImmediate(resolve));
+  frames(1);
+  assert.deepEqual(rec.painted(), visible);
   renderer.stopPreview();
 });
 

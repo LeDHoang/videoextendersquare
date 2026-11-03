@@ -224,3 +224,82 @@ test('EARTH_TIERS carry tone, not colour', () => {
   assert.deepEqual([...api.EARTH_TIERS.map((t) => `${t.name}|${t.tone}`)], ['ORBIT|info', 'REGION|success', 'CITY|warn', 'STREET|accent']);
   for (const t of api.EARTH_TIERS) assert.equal(t.color, undefined);
 });
+
+// ─── Task 4: the font gate ──────────────────────────────────────────
+
+// The module sees the (mockable) global setTimeout through the context.
+function loadWithTimers() {
+  const window = {};
+  vm.runInNewContext(source, {
+    window,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+  }, { filename: 'vr_ui_canvas.js' });
+  return window.VRUICanvas;
+}
+
+// A font set whose load settles when the test says so.
+function deferredFonts() {
+  const loads = [];
+  let settle;
+  const done = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+  return {
+    loads,
+    settle,
+    fontSet: { load(font) { loads.push(font); return done; } },
+  };
+}
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('fonts: no font set paints at once', () => {
+  const api = load();
+  let calls = 0;
+  api.waitForFonts(undefined, 3000, () => { calls += 1; });
+  assert.equal(calls, 1);
+  api.waitForFonts({}, 3000, () => { calls += 1; });
+  assert.equal(calls, 2);
+});
+
+test('fonts: a fast load paints once', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const api = loadWithTimers();
+  const { loads, settle, fontSet } = deferredFonts();
+  let calls = 0;
+  api.waitForFonts(fontSet, 3000, () => { calls += 1; });
+  assert.deepEqual(loads, ['16px Fraunces', "16px 'Instrument Sans'", "600 16px 'IBM Plex Mono'"]);
+  assert.equal(calls, 0);
+  settle.resolve([]);
+  await flush();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(3000);
+  assert.equal(calls, 1);
+});
+
+test('fonts: a slow load paints at the timeout and again on arrival', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const api = loadWithTimers();
+  const { settle, fontSet } = deferredFonts();
+  let calls = 0;
+  api.waitForFonts(fontSet, 3000, () => { calls += 1; });
+  t.mock.timers.tick(2999);
+  assert.equal(calls, 0);
+  t.mock.timers.tick(1);
+  assert.equal(calls, 1);
+  settle.resolve([]);
+  await flush();
+  assert.equal(calls, 2);
+});
+
+test('fonts: a rejected load paints once and does not throw', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const api = loadWithTimers();
+  const { settle, fontSet } = deferredFonts();
+  let calls = 0;
+  assert.doesNotThrow(() => api.waitForFonts(fontSet, 3000, () => { calls += 1; }));
+  settle.reject(new Error('font blocked'));
+  await flush();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(3000);
+  assert.equal(calls, 1);
+});
