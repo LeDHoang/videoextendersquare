@@ -67,7 +67,7 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--sx-surface);
 }
 .sx-top-brand {
-  color: var(--sx-ink);
+  color: var(--sx-accent);
   font-weight: 800;
   font-style: italic;
   font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
@@ -75,6 +75,9 @@ h1, h2, h3, h4, h5, h6 {
   text-transform: none;
 }
 .sx-top-brand:hover {
+  color: var(--sx-accent-hi);
+}
+.sx-sidebar-hero-title {
   color: var(--sx-accent);
 }
 .sx-top-link {
@@ -313,9 +316,12 @@ h1, h2, h3, h4, h5, h6 {
 .sx-explore-grid {
   gap: 6px;
 }
+.sx-explore-kind,
+.sx-explore-order {
+  background: var(--sx-accent);
+  color: var(--sx-on-accent);
+}
 .sx-explore-kind {
-  background: var(--sx-spot);
-  color: var(--sx-on-spot);
   font-family: var(--sx-font-mono);
   font-weight: 600;
   letter-spacing: 0.06em;
