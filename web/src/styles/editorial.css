@@ -42,8 +42,8 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Page heroes read like section openers: big serif, heavy rule under. */
 .sx-hero {
-  font-weight: 800;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.035em;
   line-height: 0.92;
   text-transform: none;
@@ -68,9 +68,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 .sx-top-brand {
   color: var(--sx-accent);
-  font-weight: 800;
+  font-weight: 900;
   font-style: italic;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.03em;
   text-transform: none;
 }
@@ -134,6 +134,25 @@ h1, h2, h3, h4, h5, h6 {
   fill: var(--sx-ink);
 }
 
+/* The other icons are drawn for dark surfaces too: light lines, dark cut-outs. Off
+   the tiles (which sit on photos) and the reels player, the lines take the text
+   colour, the cut-outs take the paper and the vermilion takes the accent. */
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#f2f3f5'] {
+  stroke: currentColor;
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#f2f3f5'] {
+  fill: currentColor;
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#121315'] {
+  fill: var(--sx-bg);
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#ff3b1f'] {
+  stroke: var(--sx-accent);
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#ff3b1f'] {
+  fill: var(--sx-accent);
+}
+
 /* ─── Buttons ──────────────────────────────────────────────────────────── */
 .sx-btn {
   border-color: var(--sx-ink);
@@ -192,8 +211,8 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 3px 0 var(--sx-bg), 0 4px 0 var(--sx-ink);
 }
 .sx-xh-title {
-  font-weight: 800;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.04em;
   line-height: 0.88;
   text-transform: none;
