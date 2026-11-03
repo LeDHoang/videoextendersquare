@@ -609,3 +609,11 @@ test('drag scroll: a pause before release cancels the fling', () => {
   assert.equal(drag.end(400), true);
   assert.equal(drag.tick(416), 0);
 });
+
+test('a theme hit calls setTheme', () => {
+  const calls = [];
+  const s = loadShell().create({ setTheme: (m) => calls.push(m) });
+  s.handleHit({ action: 'theme', arg: 'dark' });
+  assert.deepEqual(calls, ['dark']);
+  assert.doesNotThrow(() => loadShell().create({}).handleHit({ action: 'theme', arg: 'dark' }));
+});

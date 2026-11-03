@@ -427,20 +427,6 @@
     ctx.restore();
   }
 
-  // Chamfered button outline: the bevelled corner of the ECHO icon set.
-  function chamferPath(ctx, x, y, w, h, c) {
-    ctx.beginPath();
-    ctx.moveTo(x + c, y);
-    ctx.lineTo(x + w - c, y);
-    ctx.lineTo(x + w, y + c);
-    ctx.lineTo(x + w, y + h - c);
-    ctx.lineTo(x + w - c, y + h);
-    ctx.lineTo(x + c, y + h);
-    ctx.lineTo(x, y + h - c);
-    ctx.lineTo(x, y + c);
-    ctx.closePath();
-  }
-
   function wrapTextLines(ctx, text, maxW, maxLines) {
     const words = String(text || '').split(/\s+/).filter(Boolean);
     const lines = [];
@@ -2538,7 +2524,6 @@
     renderEarthLabelCanvas,
     resolveEarthLabelHit,
     drawIcon,
-    chamferPath,
     roundRectPath,
     TOKEN_SETS,
     get TOKENS() {
