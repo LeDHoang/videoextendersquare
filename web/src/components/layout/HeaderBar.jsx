@@ -5,11 +5,8 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
-import {
-  IndustrialUploadIcon,
-  IndustrialMessageIcon,
-  IndustrialCreditsIcon,
-} from '../icons/index.jsx';
+import IconButton from '../ui/IconButton.jsx';
+import { HEADER_NAV, NAV, accountNav } from './nav.js';
 
 function compactCount(value) {
   const count = Number(value) || 0;
@@ -18,14 +15,15 @@ function compactCount(value) {
   return String(count);
 }
 
-function commandFallback(query) {
+// Compare, Video and Image are admin-only in the beta; others fall through to an Explore search.
+function commandFallback(query, isAdmin) {
   const value = query.toLowerCase();
-  if (value.includes('comp') || value === 'ab' || value.includes('diff')) return '/compare';
+  if (isAdmin && (value.includes('comp') || value === 'ab' || value.includes('diff'))) return '/compare';
   if (value.includes('upload') || value.includes('post') || value.includes('share') || value.includes('publish')) return '/upload';
   if (value === 'explore' || value === 'gallery' || value === 'browse') return '/explore';
   if (value === 'reels' || value === 'vr' || value === 'quest' || value === '3d') return '/reels';
-  if (value === 'video' || value === 'extend video') return '/video';
-  if (value === 'image' || value === 'photo' || value === 'picture') return '/image';
+  if (isAdmin && (value === 'video' || value === 'extend video')) return '/video';
+  if (isAdmin && (value === 'image' || value === 'photo' || value === 'picture')) return '/image';
   return '/explore?search=' + encodeURIComponent(query);
 }
 
@@ -69,6 +67,7 @@ function AccountAvatar({ user }) {
 
 export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden = false }) {
   const { user, loading: authLoading, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const messaging = useMessaging();
   const { wallet } = useWallet();
   const location = useLocation();
@@ -222,7 +221,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
       event.preventDefault();
       const selected = selectable[activeIndex] || selectable[0];
       if (selected) openResult(selected);
-      else closeSearchAndNavigate(commandFallback(searchVal.trim()));
+      else closeSearchAndNavigate(commandFallback(searchVal.trim(), isAdmin));
     }
   };
 
@@ -324,19 +323,18 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
     >
       {mobileSearchOpen ? (
         <div className="sx-mobile-search-row" ref={searchBoxRef}>
-          <button
-            type="button"
+          <IconButton
             className="sx-mobile-search-back-btn"
             onClick={() => {
               setMobileSearchOpen(false);
               setSearchOpen(false);
               setActiveIndex(-1);
             }}
-            aria-label="Close search"
+            label="Close search"
             title="Close Search"
           >
             ←
-          </button>
+          </IconButton>
           <div className="sx-command-box sx-command-box--mobile-active sx-command-box--open">
             <span className="sx-command-icon" aria-hidden="true">⌕</span>
             <input
@@ -378,18 +376,19 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
       ) : (
         <>
           <div className="sx-top-left">
-            <button type="button" className="sx-icon-btn" onClick={onToggleSidebar} title="Open/Close Sidebar" aria-label="Toggle Sidebar" aria-expanded={sidebarOpen}>
+            <IconButton onClick={onToggleSidebar} title="Open/Close Sidebar" label="Toggle Sidebar" aria-expanded={sidebarOpen}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
-            </button>
+            </IconButton>
             <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
               <AnimatedEchoLogo className="sx-top-logo" title="ECHO Logo" />
               <span>ECHO</span>
             </NavLink>
             <nav className="sx-top-nav" aria-label="Global Routes">
-              <NavLink to="/reels" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>REELS/VR</NavLink>
-              <NavLink to="/explore" className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>EXPLORE</NavLink>
+              {HEADER_NAV.map(({ to, label }) => (
+                <NavLink key={to} to={to} className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>{label}</NavLink>
+              ))}
             </nav>
           </div>
 
@@ -426,65 +425,79 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
 
           <div className="sx-top-right">
             {/* Mobile-only Search Trigger Button */}
-            <button
-              type="button"
-              className="sx-top-icon-btn sx-top-search-trigger"
+            <IconButton
+              className="sx-top-search-trigger"
               onClick={() => {
                 setMobileSearchOpen(true);
                 setSearchOpen(true);
               }}
               title="Search"
-              aria-label="Open Search"
+              label="Open Search"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6" />
                 <path d="M15 15l5 5" />
               </svg>
-            </button>
+            </IconButton>
 
             {/* Right-side actions, in this order: UPLOAD (the one filled action), credits,
                 messages, then the account avatar. They are links, so they can open in a new
-                tab and report aria-current. */}
-            <NavLink
-              to="/upload"
-              className="sx-top-action-btn sx-desktop-only"
-              title="Open the Upload page"
-            >
-              UPLOAD
-            </NavLink>
-            <NavLink
-              to="/upload"
-              className="sx-top-icon-btn sx-top-icon-btn--primary sx-mobile-tablet-only"
-              title="Upload Video or Image"
-              aria-label="Upload"
-            >
-              <IndustrialUploadIcon className="sx-top-btn-svg" />
-            </NavLink>
+                tab and report aria-current. Signed out, upload needs an account, so the one
+                filled action is SIGN UP / SIGN IN instead. */}
+            {user ? (
+              <>
+                <NavLink
+                  to={NAV.upload.to}
+                  className="sx-top-action-btn sx-desktop-only"
+                  title="Open the Upload page"
+                >
+                  {NAV.upload.label}
+                </NavLink>
+                <IconButton
+                  as={NavLink}
+                  to={NAV.upload.to}
+                  variant="primary"
+                  className="sx-mobile-tablet-only"
+                  title="Upload Video or Image"
+                  label={NAV.upload.label}
+                >
+                  <NAV.upload.Icon className="sx-top-btn-svg" />
+                </IconButton>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="sx-top-action-btn"
+                onClick={() => navigate('/signup?next=' + encodeURIComponent(location.pathname + location.search))}
+              >
+                SIGN UP / SIGN IN
+              </button>
+            )}
 
             {user ? (
               <>
                 <NavLink
-                  to="/wallet"
+                  to={NAV.credits.to}
                   className="sx-top-credits-pill"
                   title="Open ECHO Credits wallet"
-                  aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : 'Credits'}
+                  aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : NAV.credits.label}
                 >
                   <span>{wallet?.available_credits ?? '—'}</span>
-                  <IndustrialCreditsIcon className="sx-top-btn-svg" />
+                  <NAV.credits.Icon className="sx-top-btn-svg" />
                 </NavLink>
-                <NavLink
-                  to="/messages"
-                  className="sx-top-icon-btn sx-top-icon-btn--badge"
+                <IconButton
+                  as={NavLink}
+                  to={NAV.messages.to}
                   title="Open messages"
-                  aria-label={messaging.unread.total ? `Messages, ${messaging.unread.total} unread` : 'Messages'}
+                  label={messaging.unread.total ? `${NAV.messages.label}, ${messaging.unread.total} unread` : NAV.messages.label}
                 >
-                  <IndustrialMessageIcon className="sx-top-btn-svg" />
+                  <NAV.messages.Icon className="sx-top-btn-svg" />
                   {messaging.unread.total ? (
                     <span className="sx-top-badge">
                       {messaging.unread.total > 99 ? '99+' : messaging.unread.total}
                     </span>
                   ) : null}
-                </NavLink>
+                </IconButton>
               </>
             ) : null}
 
@@ -494,15 +507,15 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                 <span className="sx-account-loading">…</span>
               ) : user ? (
                 <>
-                  <button
-                    type="button"
+                  <IconButton
+                    variant="plain"
                     className="sx-account-trigger"
                     onClick={() => setAccountOpen((open) => !open)}
                     aria-expanded={accountOpen}
-                    aria-label="Open account menu"
+                    label="Open account menu"
                   >
                     <AccountAvatar user={user} />
-                  </button>
+                  </IconButton>
                   {accountOpen ? (
                     <div className="sx-account-popover">
                       <div className="sx-account-popover-head">
@@ -512,24 +525,12 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                           ⚡ {wallet?.available_credits ?? 0} CREDITS
                         </span>
                       </div>
-                      <Link to={'/profile/' + user.username}>PROFILE</Link>
-                      <Link to={'/profile/' + user.username + '?tab=saved'}>SAVED</Link>
-                      <Link to="/settings/profile">SETTINGS</Link>
-                      <Link to="/wallet">CREDITS / FAL KEY</Link>
-                      {user.can_moderate ? <Link to="/moderation">STAFF</Link> : null}
-                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>LOG OUT</button>
+                      {accountNav(user).map(({ to, label }) => <Link key={to} to={to}>{label}</Link>)}
+                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>Log out</button>
                     </div>
                   ) : null}
                 </>
-              ) : (
-                <button
-                  type="button"
-                  className="sx-account-signin"
-                  onClick={() => navigate('/login?next=' + encodeURIComponent(location.pathname + location.search))}
-                >
-                  SIGN IN
-                </button>
-              )}
+              ) : null}
             </div>
           </div>
         </>

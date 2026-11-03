@@ -96,7 +96,7 @@ export function EmptyState({ title, text, hint = '', children }) {
     <div className="sx-empty-state">
       <div className="sx-empty-state-title">{title}</div>
       <p className="sx-empty-state-body">{text}</p>
-      {hint ? <div className="sx-mono" style={{ color: 'var(--sx-ink-3)', marginTop: 8 }}>{hint}</div> : null}
+      {hint ? <div className="sx-empty-state-hint">{hint}</div> : null}
       {children ? <div className="sx-empty-state-actions">{children}</div> : null}
     </div>
   );
@@ -127,10 +127,10 @@ export function ResultHeader({ title, meta }) {
   );
 }
 
-export function GatedReason({ children }) {
+export function GatedReason({ id, children }) {
   return (
-    <div className="sx-gated-reason" role="status">
-      <span>⚠</span>
+    <div id={id} className="sx-gated-reason" role="status">
+      <span aria-hidden="true">⚠</span>
       <span>{children}</span>
     </div>
   );
@@ -155,6 +155,6 @@ export function HealthDot({ ok, severity, label, detail }) {
   );
 }
 
-export function Mono({ children }) {
-  return <div className="sx-mono">{children}</div>;
+export function Mono({ children, id }) {
+  return <div className="sx-mono" id={id}>{children}</div>;
 }

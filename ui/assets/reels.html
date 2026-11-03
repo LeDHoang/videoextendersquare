@@ -219,6 +219,17 @@
     z-index: 26 !important;
   }
 
+  /* The rail ends 36px up; the time readout sits smaller in the corner under it with a gap. */
+  .reels-phone-frame:fullscreen .reels-time-display,
+  .reels-phone-frame:-webkit-full-screen .reels-time-display,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-time-display {
+    bottom: max(10px, calc(4px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom))));
+    right: max(10px, env(safe-area-inset-right));
+    font-size: 11px;
+    padding: 1px 5px;
+    letter-spacing: 0;
+  }
+
   .reels-phone-frame:fullscreen .reels-twitch-ticker,
   .reels-phone-frame:-webkit-full-screen .reels-twitch-ticker,
   .reels-phone-frame.sx-pseudo-fullscreen .reels-twitch-ticker {
@@ -227,6 +238,14 @@
     left: max(16px, env(safe-area-inset-left)) !important;
     right: max(90px, calc(82px + env(safe-area-inset-right))) !important;
     z-index: 26 !important;
+  }
+
+  .reels-phone-frame:fullscreen .reels-captions,
+  .reels-phone-frame:-webkit-full-screen .reels-captions,
+  .reels-phone-frame.sx-pseudo-fullscreen .reels-captions {
+    bottom: max(152px, calc(144px + var(--sx-fs-safe-bottom, env(safe-area-inset-bottom))));
+    left: max(16px, env(safe-area-inset-left));
+    right: max(102px, calc(94px + env(safe-area-inset-right)));
   }
 
   /* Dynamic 2D Ambient Glow Backdrop */
@@ -494,6 +513,7 @@
     background: var(--sx-rule);
     margin: 0;
   }
+  .action-btn[hidden] { display: none; }
   .action-btn {
     width: 44px;
     height: 44px;
@@ -784,6 +804,7 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
+  .meta-folder[hidden] { display: none; }
   .meta-title {
     font-size: 14px;
     font-weight: 700;
@@ -871,16 +892,16 @@
   /* Own backing: in the docked layout there is no scrim under it. */
   .reels-time-display {
     position: absolute;
-    bottom: 14px;
-    right: 14px;
+    bottom: 10px;
+    right: 10px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--sx-ink);
     background: rgba(8, 9, 10, 0.86);
-    padding: 2px 6px;
+    padding: 1px 5px;
     pointer-events: none;
-    letter-spacing: 0.05em;
+    letter-spacing: 0;
   }
 
   /* SoundCloud-Style Comment Dots on Timeline */
@@ -952,6 +973,29 @@
     transform: translateY(8px);
     transition: opacity 0.16s cubic-bezier(0.16, 1, 0.3, 1), transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
     will-change: opacity, transform;
+  }
+  /* Auto captions: bottom-centre, above the bottom-left stack (the meta block, or at most two comment pills),
+     clear of the rail with a gap; each line on its own near-black backing so the text reads on any frame. */
+  .reels-captions {
+    position: absolute;
+    left: 16px;
+    right: 92px;
+    bottom: 152px;
+    z-index: 25;
+    text-align: center;
+    pointer-events: none;
+  }
+  .reels-captions[hidden] { display: none; }
+  .reels-captions span {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.55;
+    color: var(--sx-ink);
+    background: rgba(8, 9, 10, 0.86);
+    padding: 2px 8px;
+    white-space: pre-line;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
   .twitch-comment-pill {
     display: inline-flex;
@@ -2219,6 +2263,9 @@
     <!-- Chat/Annotations Overlay (Bottom) -->
     <div class="reels-twitch-ticker" id="twitchCommentTicker"></div>
 
+    <!-- Auto captions of the playing reel, drawn by the player (<auto-captions>); the audio already reaches screen readers. -->
+    <div class="reels-captions" id="reelsCaptions" aria-hidden="true" hidden><span></span></div>
+
     <div class="video-error-overlay" id="errorOverlay" role="alert">
       <div style="font-size: 32px; color: #FF3B1F;">⚠️</div>
       <div style="font-weight: 700; color: #FFF; font-size: 16px;" id="errorTitle">CAN'T PLAY THIS REEL</div>
@@ -2342,6 +2389,12 @@
         </span>
         <span class="action-btn-label" id="modeLabel">AUTO</span>
       </button>
+      <button class="action-btn active" id="captionsBtn" type="button" title="Captions" aria-label="Captions" aria-pressed="true" hidden>
+        <span class="btn-icon">
+          __ICON_CAPTIONS__
+        </span>
+        <span class="action-btn-label">CC</span>
+      </button>
       <button class="action-btn" id="fullBtn" type="button" title="Fullscreen" aria-label="Fullscreen">
         <span class="btn-icon">
           __ICON_FULLSCREEN__
@@ -2403,7 +2456,7 @@
   <template id="timesyncIconTpl">__ICON_TIMESYNC__</template>
 
   <div class="reels-meta" id="reelsMeta">
-    <div class="meta-folder" id="metaFolder">📁 root</div>
+    <div class="meta-folder" id="metaFolder" hidden></div>
     <div class="meta-creator-row">
       <button type="button" class="meta-creator" id="metaCreator" hidden></button>
       <button type="button" class="follow-pill" id="followPill" hidden><span class="follow-pill-icon" aria-hidden="true">__ICON_FOLLOW__</span><span id="followPillLabel">FOLLOW</span></button>
@@ -2692,6 +2745,64 @@
     const commentForm = document.getElementById('commentForm');
     const commentInput = document.getElementById('commentInput');
     const commentSubmitBtn = document.getElementById('commentSubmitBtn');
+
+    // <auto-captions>
+    // Captions made at publish (a WebVTT file, when the server could run the speech model). A hidden <track>
+    // loads the cues and fires cuechange; the player draws the active cue itself, above its own bottom
+    // overlays. On by default; CC in More turns them off in this browser. VR draws the same cue (getCaption).
+    const CAPTIONS_PREF_KEY = 'echo_reels_captions_v1';
+    const reelsCaptions = document.getElementById('reelsCaptions');
+    const captionsBtn = document.getElementById('captionsBtn');
+    let captionsOn = true;
+    try { captionsOn = window.localStorage.getItem(CAPTIONS_PREF_KEY) !== 'off'; } catch (e) {}
+    let captionTrack = null;
+
+    function currentCaption() {
+      const cues = captionsOn && captionTrack ? captionTrack.track.activeCues : null;
+      if (!cues || !cues.length) return '';
+      // getCueAsHTML decodes the file's escapes (&amp;, &lt;) back to the spoken text.
+      return Array.from(cues, (cue) => cue.getCueAsHTML().textContent).join('\n').trim();
+    }
+    function renderCaptions() {
+      if (!reelsCaptions) return;
+      const text = drawerBlocksPlayer() ? '' : currentCaption();
+      reelsCaptions.firstElementChild.textContent = text;
+      reelsCaptions.hidden = !text;
+    }
+    function updateCaptionsBtnUI() {
+      if (!captionsBtn) return;
+      captionsBtn.hidden = !captionTrack;
+      captionsBtn.classList.toggle('active', captionsOn);
+      captionsBtn.setAttribute('aria-pressed', captionsOn ? 'true' : 'false');
+    }
+    // The caption track of *item*: none for a still or a reel without captions.
+    function setCaptionTrack(item) {
+      if (captionTrack) {
+        captionTrack.remove();
+        captionTrack = null;
+      }
+      const url = item && item.captions_url ? resolveItemUrl({ url: item.captions_url, tunnel_url: item.tunnel_url }) : '';
+      if (url) {
+        captionTrack = document.createElement('track');
+        captionTrack.kind = 'captions';
+        captionTrack.label = 'Auto captions';
+        captionTrack.src = url;
+        video.appendChild(captionTrack);
+        // Hidden, not showing: the cues load and change, and the browser draws none of them.
+        captionTrack.track.mode = 'hidden';
+        captionTrack.track.addEventListener('cuechange', renderCaptions);
+      }
+      updateCaptionsBtnUI();
+      renderCaptions();
+    }
+    function toggleCaptions() {
+      captionsOn = !captionsOn;
+      try { window.localStorage.setItem(CAPTIONS_PREF_KEY, captionsOn ? 'on' : 'off'); } catch (e) {}
+      updateCaptionsBtnUI();
+      renderCaptions();
+    }
+    if (captionsBtn) captionsBtn.addEventListener('click', toggleCaptions);
+    // </auto-captions>
 
     const blobUrlMap = {};
     // Which URL each cached blob was fetched from: an index can hold the 2D
@@ -2987,7 +3098,10 @@
 
     const motionPlayBtn = document.getElementById('motionPlayBtn');
     function setMotionPlay(show) {
-      if (motionPlayBtn) motionPlayBtn.hidden = !show;
+      if (!motionPlayBtn) return;
+      // Hiding the focused button would drop focus to <body>; keep it on the player.
+      if (!show && document.activeElement === motionPlayBtn) document.getElementById('reelsFrame').focus({ preventScroll: true });
+      motionPlayBtn.hidden = !show;
     }
 
     function showError(msg, title) {
@@ -5503,6 +5617,7 @@
         drawerOpener = null;
       }
       updateTwitchTicker();
+      renderCaptions();
     }
 
     if (syncFilterBtn) syncFilterBtn.addEventListener('click', () => setSyncFilter(activeTab === 'general'));
@@ -5736,6 +5851,7 @@
       setMotionPlay(false);
       if (collectOpen) closeCollectOverlay();
       hideError();
+      setCaptionTrack(null);
       // Drop the previous image post's slideshow; showImage sets up the next one.
       resetImagePost(null);
       renderSlideProgress();
@@ -5753,6 +5869,8 @@
       pruneBlobCache(idx);
 
       const item = videoData[idx];
+      // Only a pack shows the chip, as its place in the pack; a feed reel's folder is not shown.
+      metaFolder.hidden = !isPackMode;
       if (isPackMode) {
         packState.index = idx;
         packState.phase = 'playing';
@@ -5768,6 +5886,7 @@
           if (progressWrap) progressWrap.classList.add('image-hidden');
           metaFolder.textContent = '▦ REEL PACK';
           metaTitle.textContent = 'Reel unavailable';
+          metaTitle.removeAttribute('title');
           metaSize.textContent = '';
           renderSidePanel();
           showPackStage('unavailable');
@@ -5779,10 +5898,10 @@
         hidePackStage();
       }
       if (counter) counter.textContent = (idx + 1) + ' / ' + videoData.length + (feedHasMore ? '+' : '');
-      metaFolder.textContent = isPackMode ? '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length : '📁 ' + (item.folder || 'root');
+      if (isPackMode) metaFolder.textContent = '▦ PACK ' + (idx + 1) + ' OF ' + videoData.length;
       metaTitle.textContent = item.title || item.filename;
       try {
-        metaTitle.title = item.caption || item.filename;
+        metaTitle.title = item.title || item.filename;
       } catch (e) {}
       metaSize.textContent = item.size || '';
       refreshEngagementUI();
@@ -5815,6 +5934,7 @@
       const itemUrl = blobFor(idx, playUrl) || playUrl;
       applyEntryStereo(playback);
       video.src = itemUrl;
+      setCaptionTrack(item);
       noteSwitchStart(itemUrl);
       video.muted = isMuted;
       const requestedTime = Number(loadOptions.seekTo);
@@ -6862,6 +6982,7 @@
       }
       positionEdgeNav();
       updateTwitchTicker();
+      renderCaptions();
     }
     function teardownDock() {
       if (dockObserver) { dockObserver.disconnect(); dockObserver = null; }
@@ -7162,6 +7283,7 @@
         onSeek: seekRelative,
         onToggleMute: toggleSound,
         getVisualSource: currentVisualSource,
+        getCaption: currentCaption,
         // 3D posts switch between their 2D rendition and stereo file.
         onEnterVR: () => {
           syncStereoSource();

@@ -220,7 +220,7 @@ test('the Reels page has no Video Playlist section and lifts the 1440px content 
 
 test('the Reels page scrolls the square into view once on load, and other pages are not affected', () => {
   const page = read('web/src/pages/ReelsPage.jsx');
-  assert.match(page, /<ReelsPlayer params=\{playerParams\} initialIndex=\{initialIndex\} revealOnLoad \/>/);
+  assert.match(page, /<ReelsPlayer params=\{playerParams\} revealOnLoad \/>/);
   const player = read('web/src/components/ui/ReelsPlayer.jsx');
   assert.match(player, /revealOnLoad = false/);
   assert.match(player, /revealOnLoad && !previewMode && !revealedRef\.current/);
@@ -258,4 +258,20 @@ test('browsing pages opt into the full-width layout, forms and settings keep the
   assert.doesNotMatch(read('web/src/pages/ComparePage.jsx'), /maxWidth: 1400/);
   assert.doesNotMatch(globalCss, /\.sx-pk \{\s*width: 100%;\s*max-width: 1560px;/);
   assert.match(globalCss, /@media \(min-width: 1700px\) \{\s*\.sx-pk-grid \{\s*grid-template-columns: minmax\(0, 760px\) minmax\(0, 1fr\);/);
+});
+
+test('the folder chip is a pack-only chip: hidden at load and outside a pack', () => {
+  assert.match(body, /<div class="meta-folder" id="metaFolder" hidden><\/div>/);
+  assert.match(html, /\.meta-folder\[hidden\] \{ display: none; \}/);
+  assert.match(html, /metaFolder\.hidden = !isPackMode;/);
+  assert.ok(!html.includes("'📁 '"), 'a feed reel never shows its folder');
+});
+
+test('in fullscreen the time readout sits under the rail, not against it', () => {
+  const rail = html.match(/\.reels-phone-frame\.sx-fs-active \.reels-actions \{[^}]*bottom: max\((\d+)px/);
+  const time = html.match(/\.reels-phone-frame\.sx-pseudo-fullscreen \.reels-time-display \{[^}]*bottom: max\((\d+)px[^}]*font-size: (\d+)px;\s*padding: (\d+)px/);
+  assert.ok(rail && time, 'both fullscreen rules exist');
+  // bottom + one line of mono text + padding must end below where the rail starts.
+  const [railBottom, timeBottom, font, pad] = [rail[1], time[1], time[2], time[3]].map(Number);
+  assert.ok(timeBottom + Math.ceil(font * 1.35) + 2 * pad <= railBottom - 6, 'leaves a gap under the rail');
 });

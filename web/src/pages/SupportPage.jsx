@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
+import FormField from '../components/ui/FormField.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { validateEmail } from '../utils/authForm.js';
 
@@ -20,18 +21,6 @@ export const SUPPORT_CATEGORIES = [
 const SUBJECT_MAX = 120;
 const BODY_MAX = 4000;
 const LINK_MAX = 500;
-
-function Field({ label, htmlFor, meta, children }) {
-  return (
-    <div className="sx-ps-field">
-      <div className="sx-ps-field-head">
-        <label className="sx-ps-label" htmlFor={htmlFor}>{label}</label>
-        {meta ? <span className="sx-ps-meta">{meta}</span> : null}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 export default function SupportPage() {
   const { user } = useAuth();
@@ -118,14 +107,13 @@ export default function SupportPage() {
             Suspended accounts can file an appeal here without signing in. Read the{' '}
             <Link to="/rules">community rules</Link> first if you are unsure why content was removed.
           </p>
-          <Field label="TOPIC" htmlFor="support-category">
-            <select id="support-category" className="sx-ps-input" value={form.category} onChange={set('category')}>
+          <FormField label="TOPIC" id="support-category">
+            <select className="sx-ps-input" value={form.category} onChange={set('category')}>
               {SUPPORT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
-          </Field>
-          <Field label="EMAIL" htmlFor="support-email" meta={user ? 'OPTIONAL · SIGNED IN AS @' + user.username : 'REQUIRED · WE REPLY HERE'}>
+          </FormField>
+          <FormField label="EMAIL" id="support-email" meta={user ? 'OPTIONAL · SIGNED IN AS @' + user.username : 'REQUIRED · WE REPLY HERE'} error={fieldError.email}>
             <input
-              id="support-email"
               className="sx-ps-input"
               type="email"
               autoComplete="email"
@@ -133,41 +121,30 @@ export default function SupportPage() {
               placeholder="you@example.com"
               value={form.email}
               onChange={set('email')}
-              aria-invalid={fieldError.email ? true : undefined}
-              aria-describedby={fieldError.email ? 'support-email-error' : undefined}
             />
-            {fieldError.email ? <div id="support-email-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.email}</div> : null}
-          </Field>
-          <Field label={isReport ? 'LINK TO THE CONTENT' : 'LINK (OPTIONAL)'} htmlFor="support-link" meta={isReport ? '/reels?post=… · /packs/… · /profile/…' : null}>
+          </FormField>
+          <FormField label={isReport ? 'LINK TO THE CONTENT' : 'LINK (OPTIONAL)'} id="support-link" meta={isReport ? '/reels?post=… · /packs/… · /profile/…' : null} error={fieldError.link}>
             <input
-              id="support-link"
               className="sx-ps-input"
               type="text"
               maxLength={LINK_MAX}
               value={form.link}
               onChange={set('link')}
-              aria-invalid={fieldError.link ? true : undefined}
-              aria-describedby={fieldError.link ? 'support-link-error' : undefined}
             />
-            {fieldError.link ? <div id="support-link-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.link}</div> : null}
-          </Field>
-          <Field label="SUBJECT" htmlFor="support-subject" meta={form.subject.length + ' / ' + SUBJECT_MAX}>
-            <input id="support-subject" className="sx-ps-input" type="text" maxLength={SUBJECT_MAX} value={form.subject} onChange={set('subject')} />
-          </Field>
-          <Field label="DETAILS" htmlFor="support-body" meta={form.body.length + ' / ' + BODY_MAX}>
+          </FormField>
+          <FormField label="SUBJECT" id="support-subject" meta={form.subject.length + ' / ' + SUBJECT_MAX}>
+            <input className="sx-ps-input" type="text" maxLength={SUBJECT_MAX} value={form.subject} onChange={set('subject')} />
+          </FormField>
+          <FormField label="DETAILS" id="support-body" meta={form.body.length + ' / ' + BODY_MAX} error={fieldError.body}>
             <textarea
-              id="support-body"
               className="sx-ps-input sx-ps-textarea"
               rows={7}
               maxLength={BODY_MAX}
               value={form.body}
               onChange={set('body')}
               placeholder={form.category === 'appeal' ? 'Your username, what was removed or limited, and why you think it was a mistake.' : ''}
-              aria-invalid={fieldError.body ? true : undefined}
-              aria-describedby={fieldError.body ? 'support-body-error' : undefined}
             />
-            {fieldError.body ? <div id="support-body-error" className="sx-ps-feedback sx-ps-feedback--err" role="alert">{fieldError.body}</div> : null}
-          </Field>
+          </FormField>
           {/* Honeypot: off-screen and hidden from assistive tech; only bots fill it. */}
           <div className="sx-support-trap" aria-hidden="true">
             <label htmlFor="support-website">Website</label>

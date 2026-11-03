@@ -2,8 +2,12 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { PasswordMeter } from '../components/auth/AuthKit.jsx';
+import Dialog from '../components/ui/Dialog.jsx';
+import FormField from '../components/ui/FormField.jsx';
+import IconButton from '../components/ui/IconButton.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { PASSWORD_MAX, PASSWORD_MIN } from '../utils/authForm.js';
@@ -37,18 +41,6 @@ function Panel({ title, note, tone, status, children, id }) {
   );
 }
 
-function FieldRow({ label, meta, htmlFor, children }) {
-  return (
-    <div className="sx-ps-field">
-      <div className="sx-ps-field-head">
-        <label className="sx-ps-label" htmlFor={htmlFor}>{label}</label>
-        {meta ? <span className="sx-ps-meta">{meta}</span> : null}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 // Password input with a SHOW/HIDE toggle; `name` makes the toggle's label specific ("Show new password").
 function PasswordInput({ name, ...inputProps }) {
   const [shown, setShown] = useState(false);
@@ -68,18 +60,10 @@ function PasswordInput({ name, ...inputProps }) {
   );
 }
 
-// Inline error under one field; the input points at it with aria-describedby.
-function FieldError({ id, text }) {
-  return text ? <div id={id} className="sx-ps-feedback sx-ps-feedback--err" role="alert">{text}</div> : null;
-}
-
-const fieldErrorProps = (id, text) => (text ? { 'aria-invalid': true, 'aria-describedby': id } : {});
-
+// Errors stay next to what failed; success is a toast.
 function Feedback({ state }) {
   if (!state) return null;
-  return state.ok
-    ? <div className="sx-ps-feedback sx-ps-feedback--ok" role="status">✓ {state.text}</div>
-    : <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{state.text}</div>;
+  return <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{state.text}</div>;
 }
 
 function Check({ pass, children, advisory = false }) {
@@ -100,6 +84,7 @@ function Check({ pass, children, advisory = false }) {
  */
 export default function ProfileSettingsPage() {
   const { user, loading, setUser } = useAuth();
+  const toast = useToast();
   const { falKey, saveFalKey, deleteFalKey } = useWallet();
   const navigate = useNavigate();
   const avatarInputRef = useRef(null);
@@ -157,7 +142,7 @@ export default function ProfileSettingsPage() {
       try {
         const result = await api.patch('/api/users/me', form);
         setUser(result.user);
-        setProfileStatus({ ok: true, text: 'PROFILE UPDATED' });
+        toast('Profile updated.');
       } catch (requestError) {
         // A rejected save changes nothing. A reason tied to one field (e.g. an
         // invalid website) goes under that field; anything else beside the button.
@@ -193,7 +178,7 @@ export default function ProfileSettingsPage() {
       try {
         const result = await api.upload('/api/users/me/avatar', file);
         setUser(result.user);
-        setAvatarStatus({ ok: true, text: 'AVATAR UPDATED' });
+        toast('Avatar updated.');
       } catch (requestError) {
         setAvatarStatus({ ok: false, text: AVATAR_ERRORS[requestError.code] || requestError.message || 'Could not update avatar.' });
       }
@@ -206,7 +191,7 @@ export default function ProfileSettingsPage() {
     try {
       const result = await api.delete('/api/users/me/avatar');
       setUser(result.user);
-      setAvatarStatus({ ok: true, text: 'AVATAR REMOVED' });
+      toast('Avatar removed.');
     } catch (requestError) {
       setAvatarStatus({ ok: false, text: requestError.message || 'Could not remove avatar.' });
     }
@@ -220,7 +205,7 @@ export default function ProfileSettingsPage() {
       try {
         await saveFalKey(keyValue.trim());
         setKeyValue('');
-        setKeyStatus({ ok: true, text: 'KEY SAVED' });
+        toast('Key saved.');
       } catch (requestError) {
         setKeyStatus({ ok: false, text: requestError.message || 'Could not save the key.' });
       }
@@ -231,7 +216,7 @@ export default function ProfileSettingsPage() {
     setKeyStatus(null);
     try {
       await deleteFalKey();
-      setKeyStatus({ ok: true, text: 'KEY REMOVED' });
+      toast('Key removed.');
     } catch (requestError) {
       setKeyStatus({ ok: false, text: requestError.message || 'Could not remove the key.' });
     }
@@ -261,7 +246,7 @@ export default function ProfileSettingsPage() {
       try {
         await api.patch('/api/auth/password', passwords);
         setPasswords({ current_password: '', new_password: '' });
-        setPasswordStatus({ ok: true, text: 'PASSWORD UPDATED · OTHER DEVICES SIGNED OUT' });
+        toast('Password updated. Other devices are signed out.');
       } catch (requestError) {
         setPasswordStatus({ ok: false, text: requestError.message || 'Could not update password.' });
       }
@@ -281,7 +266,7 @@ export default function ProfileSettingsPage() {
         // Keep anything the user already started typing for the next handle.
         setBlockHandle((current) => (current.trim().replace(/^@+/, '') === handle ? '' : current));
         setBlockedOpen(true);
-        setBlockStatus({ ok: true, text: '@' + handle + ' RESTRICTED' });
+        toast('@' + handle + ' restricted.');
       } catch (requestError) {
         setBlockStatus({ ok: false, text: BLOCK_ERRORS[requestError.code] || requestError.message || 'Could not restrict this account.' });
       }
@@ -293,7 +278,7 @@ export default function ProfileSettingsPage() {
     try {
       await api.delete('/api/users/' + encodeURIComponent(username) + '/block');
       setBlocked((current) => (current || []).filter((person) => person.username !== username));
-      setBlockStatus({ ok: true, text: '@' + username + ' UNBLOCKED' });
+      toast('@' + username + ' unblocked.');
     } catch (requestError) {
       setBlockStatus({ ok: false, text: requestError.message || 'Could not unblock this user.' });
     }
@@ -374,34 +359,41 @@ export default function ProfileSettingsPage() {
             </div>
 
             <form className="sx-ps-form" onSubmit={saveProfile} noValidate>
-              <FieldRow label="USERNAME" meta="[IMMUTABLE HANDLE]" htmlFor="ps-username">
-                <div className="sx-ps-locked">
-                  <input id="ps-username" className="sx-ps-input" value={user.username} readOnly aria-readonly="true" />
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              </FieldRow>
-              <FieldRow label="DISPLAY NAME" htmlFor="ps-display-name">
-                <input id="ps-display-name" className="sx-ps-input" maxLength={60} value={form.display_name} onChange={(event) => { setForm({ ...form, display_name: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-display-name-error', profileFieldError.display_name)} />
-                <FieldError id="ps-display-name-error" text={profileFieldError.display_name} />
-              </FieldRow>
-              <FieldRow label="CREATOR BIO" meta={form.bio.length + ' / ' + BIO_MAX + ' CHARS'} htmlFor="ps-bio">
-                <textarea id="ps-bio" className="sx-ps-input sx-ps-textarea" rows={3} maxLength={BIO_MAX} value={form.bio} onChange={(event) => { setForm({ ...form, bio: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-bio-error', profileFieldError.bio)} />
-                <FieldError id="ps-bio-error" text={profileFieldError.bio} />
-                {hasRichBio ? (
-                  <div className="sx-pf-bio-preview" aria-label="Bio preview">
-                    <span>PREVIEW</span>
-                    <p className="sx-pf-bio"><RichText text={form.bio} /></p>
+              <FormField label="USERNAME" meta="[IMMUTABLE HANDLE]" id="ps-username">
+                {(field) => (
+                  <div className="sx-ps-locked">
+                    <input {...field} className="sx-ps-input" value={user.username} readOnly aria-readonly="true" />
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </div>
-                ) : (
-                  <p className="sx-ps-hint">Tip: #tags, @mentions and links like example.com are styled on your profile.</p>
                 )}
-              </FieldRow>
-              <FieldRow label="WEBSITE / PORTFOLIO" htmlFor="ps-website">
-                <input id="ps-website" className="sx-ps-input" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="example.com or https://example.com" value={form.website} onChange={(event) => { setForm({ ...form, website: event.target.value }); setProfileFieldError({}); }} {...fieldErrorProps('ps-website-error', profileFieldError.website)} />
-                <FieldError id="ps-website-error" text={profileFieldError.website} />
-              </FieldRow>
+              </FormField>
+              <FormField label="DISPLAY NAME" id="ps-display-name" error={profileFieldError.display_name}>
+                <input className="sx-ps-input" maxLength={60} value={form.display_name} onChange={(event) => { setForm({ ...form, display_name: event.target.value }); setProfileFieldError({}); }} />
+              </FormField>
+              <FormField
+                label="CREATOR BIO"
+                meta={form.bio.length + ' / ' + BIO_MAX + ' CHARS'}
+                id="ps-bio"
+                hint={hasRichBio ? null : 'Tip: #tags, @mentions and links like example.com are styled on your profile.'}
+                error={profileFieldError.bio}
+              >
+                {(field) => (
+                  <>
+                    <textarea {...field} className="sx-ps-input sx-ps-textarea" rows={3} maxLength={BIO_MAX} value={form.bio} onChange={(event) => { setForm({ ...form, bio: event.target.value }); setProfileFieldError({}); }} />
+                    {hasRichBio ? (
+                      <div className="sx-pf-bio-preview" aria-label="Bio preview">
+                        <span>PREVIEW</span>
+                        <p className="sx-pf-bio"><RichText text={form.bio} /></p>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </FormField>
+              <FormField label="WEBSITE / PORTFOLIO" id="ps-website" error={profileFieldError.website}>
+                <input className="sx-ps-input" type="text" inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="example.com or https://example.com" value={form.website} onChange={(event) => { setForm({ ...form, website: event.target.value }); setProfileFieldError({}); }} />
+              </FormField>
               <div className="sx-ps-submit">
                 <button type="submit" className="sx-ps-btn sx-ps-btn--primary" disabled={busy === 'profile' || !dirty}>
                   <span>{busy === 'profile' ? 'SAVING…' : 'UPDATE PROFILE'}</span><span aria-hidden="true">→</span>
@@ -428,9 +420,9 @@ export default function ProfileSettingsPage() {
               {falKey?.configured ? <span className="sx-ps-badge">[SAVED]</span> : null}
             </div>
             <form className="sx-ps-form" onSubmit={submitKey}>
-              <FieldRow label={falKey?.configured ? 'REPLACE KEY' : 'PERSONAL FAL API KEY'} htmlFor="ps-fal-key">
-                <input id="ps-fal-key" className="sx-ps-input" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Fal.ai key" value={keyValue} onChange={(event) => setKeyValue(event.target.value)} />
-              </FieldRow>
+              <FormField label={falKey?.configured ? 'REPLACE KEY' : 'PERSONAL FAL API KEY'} id="ps-fal-key">
+                <input className="sx-ps-input" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Fal.ai key" value={keyValue} onChange={(event) => setKeyValue(event.target.value)} />
+              </FormField>
               <p className="sx-ps-hint">Stored encrypted and bound to your account. It is never shown again, only its last four characters.</p>
               <div className="sx-ps-actions">
                 <button
@@ -450,12 +442,12 @@ export default function ProfileSettingsPage() {
         <div className="sx-ps-col">
           <Panel title="PASSWORD MANAGEMENT" note={'MIN ' + PASSWORD_MIN + ' CHARACTERS'}>
             <form className="sx-ps-form" onSubmit={changePassword}>
-              <FieldRow label="CURRENT PASSWORD" htmlFor="ps-current-password">
-                <PasswordInput name="current password" id="ps-current-password" autoComplete="current-password" placeholder="••••••••••••" value={passwords.current_password} onChange={(event) => setPasswords({ ...passwords, current_password: event.target.value })} />
-              </FieldRow>
-              <FieldRow label="NEW PASSWORD" htmlFor="ps-new-password">
-                <PasswordInput name="new password" id="ps-new-password" autoComplete="new-password" maxLength={PASSWORD_MAX} placeholder="••••••••••••" value={newPassword} onChange={(event) => setPasswords({ ...passwords, new_password: event.target.value })} />
-              </FieldRow>
+              <FormField label="CURRENT PASSWORD" id="ps-current-password">
+                <PasswordInput name="current password" autoComplete="current-password" placeholder="••••••••••••" value={passwords.current_password} onChange={(event) => setPasswords({ ...passwords, current_password: event.target.value })} />
+              </FormField>
+              <FormField label="NEW PASSWORD" id="ps-new-password">
+                <PasswordInput name="new password" autoComplete="new-password" maxLength={PASSWORD_MAX} placeholder="••••••••••••" value={newPassword} onChange={(event) => setPasswords({ ...passwords, new_password: event.target.value })} />
+              </FormField>
               <PasswordMeter password={newPassword} />
               <ul className="sx-ps-checks" aria-label="Password requirements">
                 <Check pass={passwordRules.length}>{PASSWORD_MIN}–{PASSWORD_MAX} CHARACTERS</Check>
@@ -477,12 +469,14 @@ export default function ProfileSettingsPage() {
 
           <Panel title="BLOCKED ACCOUNTS" note="RESTRICTED PROFILES">
             <form className="sx-ps-form" onSubmit={addBlock}>
-              <FieldRow label="RESTRICT A HANDLE" meta={'[' + blockedCount + ' RESTRICTED]'} htmlFor="ps-block-handle">
-                <div className="sx-ps-inline">
-                  <input id="ps-block-handle" className="sx-ps-input" autoCapitalize="none" spellCheck={false} placeholder="@handle to restrict…" value={blockHandle} onChange={(event) => setBlockHandle(event.target.value)} />
-                  <button type="submit" className="sx-ps-btn" disabled={busy === 'block' || !blockHandle.trim().replace(/^@+/, '')}>RESTRICT</button>
-                </div>
-              </FieldRow>
+              <FormField label="RESTRICT A HANDLE" meta={'[' + blockedCount + ' RESTRICTED]'} id="ps-block-handle">
+                {(field) => (
+                  <div className="sx-ps-inline">
+                    <input {...field} className="sx-ps-input" autoCapitalize="none" spellCheck={false} placeholder="@handle to restrict…" value={blockHandle} onChange={(event) => setBlockHandle(event.target.value)} />
+                    <button type="submit" className="sx-ps-btn" disabled={busy === 'block' || !blockHandle.trim().replace(/^@+/, '')}>RESTRICT</button>
+                  </div>
+                )}
+              </FormField>
               <Feedback state={blockStatus} />
             </form>
             <div className="sx-ps-list">
@@ -518,12 +512,12 @@ export default function ProfileSettingsPage() {
               <p className="sx-ps-hint">
                 Permanently closes your account, hides all of your posts and comments, and removes your saved Fal.ai key. Messages you sent are hidden from the people you talked with and kept for moderation and safety. This cannot be undone.
               </p>
-              <FieldRow label="CURRENT PASSWORD" htmlFor="ps-delete-password">
-                <input id="ps-delete-password" className="sx-ps-input" type="password" autoComplete="current-password" value={deleteForm.current_password} onChange={(event) => setDeleteForm({ ...deleteForm, current_password: event.target.value })} />
-              </FieldRow>
-              <FieldRow label={'TYPE "' + user.username + '" TO AUTHORIZE'} htmlFor="ps-delete-confirm">
-                <input id="ps-delete-confirm" className="sx-ps-input sx-ps-input--danger" autoCapitalize="none" spellCheck={false} placeholder={user.username} value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} />
-              </FieldRow>
+              <FormField label="CURRENT PASSWORD" id="ps-delete-password">
+                <input className="sx-ps-input" type="password" autoComplete="current-password" value={deleteForm.current_password} onChange={(event) => setDeleteForm({ ...deleteForm, current_password: event.target.value })} />
+              </FormField>
+              <FormField label={'TYPE "' + user.username + '" TO AUTHORIZE'} id="ps-delete-confirm">
+                <input className="sx-ps-input sx-ps-input--danger" autoCapitalize="none" spellCheck={false} placeholder={user.username} value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} />
+              </FormField>
               <button
                 type="submit"
                 className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block"
@@ -536,19 +530,19 @@ export default function ProfileSettingsPage() {
               <Feedback state={deleteStatus} />
             </form>
             {deleteConfirmOpen ? (
-              <div className="sx-modal-backdrop" role="presentation" onMouseDown={() => setDeleteConfirmOpen(false)}>
-                <section className="sx-people-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ps-delete-confirm-title" aria-describedby="ps-delete-confirm-text" onMouseDown={(event) => event.stopPropagation()}>
+              <Dialog className="sx-modal-backdrop" role="alertdialog" aria-labelledby="ps-delete-confirm-title" aria-describedby="ps-delete-confirm-text" onClose={() => setDeleteConfirmOpen(false)}>
+                <section className="sx-people-dialog">
                   <div className="sx-people-dialog-head">
                     <strong id="ps-delete-confirm-title">DELETE @{user.username.toUpperCase()}?</strong>
-                    <button type="button" onClick={() => setDeleteConfirmOpen(false)} aria-label="Close">×</button>
+                    <IconButton variant="plain" label="Close" data-dialog-close onClick={() => setDeleteConfirmOpen(false)}>×</IconButton>
                   </div>
                   <div className="sx-post-editor-fields">
                     <p id="ps-delete-confirm-text" className="sx-ps-hint">Are you sure you want to delete your account? Your profile, posts, comments and viewing history are removed for good. This cannot be undone.</p>
-                    <button type="button" className="sx-ps-btn sx-ps-btn--block" autoFocus onClick={() => setDeleteConfirmOpen(false)}>CANCEL, KEEP MY ACCOUNT</button>
+                    <button type="button" className="sx-ps-btn sx-ps-btn--block" data-autofocus onClick={() => setDeleteConfirmOpen(false)}>CANCEL, KEEP MY ACCOUNT</button>
                     <button type="button" className="sx-ps-btn sx-ps-btn--danger sx-ps-btn--block" onClick={confirmDeleteAccount}>YES, DELETE MY ACCOUNT</button>
                   </div>
                 </section>
-              </div>
+              </Dialog>
             ) : null}
           </Panel>
         </div>

@@ -224,6 +224,7 @@ export default function ImmersivePreviewPage() {
             params={{ codec: 'h264', sort: 'for_you' }}
             previewMode
             previewOptions={{ cameraMode: 'headset', sceneMode: 'reels', showControls: true, hiFi }}
+            previewDescribedBy="sx-preview-keys"
             onPreviewReady={(api) => {
               api.setPreviewFov?.(FOV_PRESETS[fovRef.current]);
               if (tuningRef.current) api.setLayoutTuning?.(tuningRef.current);
@@ -233,6 +234,8 @@ export default function ImmersivePreviewPage() {
             }}
           />
           <Mono>DRAG TO LOOK OR ORBIT · DRAG THE EARTH TO ROTATE (SHIFT-DRAG TO LOOK) · CLICK A HEAT MARKER TO LOAD ITS RECENT TRENDING REELS</Mono>
+          {/* The keys the focused scene answers to (ui/assets/webxr_vr.js previewKeyDown, then the player's shortcuts). */}
+          <Mono id="sx-preview-keys">KEYS ON THE SCENE: ARROWS LOOK, ORBIT OR TURN THE EARTH (SHIFT TO LOOK) · + / − ZOOM · SPACE PLAY · N / P NEXT, PREVIOUS · A / D SEEK · M SOUND</Mono>
 
           <details className="sx-expander">
             <summary>▸ MORE CONTROLS · CURVATURE, SHELL PAGES, LAYOUT TUNING</summary>
@@ -240,21 +243,21 @@ export default function ImmersivePreviewPage() {
               <div className="sx-immersive-preview-toolbar" aria-label="Immersive preview controls">
                 <div className="sx-control-group" role="group" aria-label="Curvature Mode">
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'dome')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'dome') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'dome')}
                   >
                     DOME
                   </Button>
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'sq_curve')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'sq_curve') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'sq_curve')}
                   >
                     SQ CURVE
                   </Button>
                   <Button
-                    primary={isCurvatureActive(previewState.curvatureMode, 'flat')}
+                    variant={isCurvatureActive(previewState.curvatureMode, 'flat') ? 'primary' : 'secondary'}
                     disabled={!renderer}
                     onClick={() => invoke('setCurvatureMode', 'flat')}
                   >
@@ -265,7 +268,7 @@ export default function ImmersivePreviewPage() {
                   {SHELL_PAGES.map(([label, path]) => (
                     <Button
                       key={label}
-                      primary={shellTab(previewState.shell) === label}
+                      variant={shellTab(previewState.shell) === label ? 'primary' : 'secondary'}
                       disabled={!renderer?.shell}
                       onClick={() => { renderer.shell.open(path(user)); syncState(); }}
                     >

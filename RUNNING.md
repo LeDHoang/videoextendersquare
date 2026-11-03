@@ -56,6 +56,16 @@ smaller CPU wheels (see the notes in `requirements-3d.txt`). The first
 conversion downloads the depth checkpoint (about 110 MB) into `.models/` under
 the server's working directory.
 
+Auto captions need faster-whisper, which `make install` does not add either.
+With it installed, each published video with speech gets a caption file
+(`<name>.vtt`) after its previews are built. Without it, videos publish
+with no captions. The first publish downloads the free Whisper "base" model
+(about 150 MB) from Hugging Face:
+
+```bash
+.venv/bin/pip install -r requirements-captions.txt
+```
+
 ## Streamlit fallback
 
 ```bash

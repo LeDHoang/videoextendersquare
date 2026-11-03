@@ -1,6 +1,6 @@
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HeaderBar from './HeaderBar.jsx';
 
@@ -36,7 +36,7 @@ describe('HeaderBar responsive behavior', () => {
     cleanup();
   });
 
-  it('renders brand and guest sign-in button when logged out', () => {
+  it('renders brand and one SIGN UP / SIGN IN action, with no Upload, when logged out', () => {
     render(
       <MemoryRouter>
         <HeaderBar onToggleSidebar={vi.fn()} />
@@ -44,7 +44,8 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     expect(screen.getByText('ECHO')).toBeInTheDocument();
-    expect(screen.getByText('SIGN IN')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SIGN UP / SIGN IN' })).toBeInTheDocument();
+    expect(screen.queryByText('Upload')).not.toBeInTheDocument();
   });
 
   it('renders action buttons and unread count badge when authenticated', () => {
@@ -56,7 +57,7 @@ describe('HeaderBar responsive behavior', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getAllByText('UPLOAD').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Upload').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('3').length).toBeGreaterThanOrEqual(1); // Unread badge
     expect(screen.getByLabelText('Open account menu')).toBeInTheDocument();
   });
@@ -71,7 +72,7 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Global Routes' });
-    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['REELS/VR', 'EXPLORE']);
+    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Reels/VR', 'Explore']);
 
     const hrefs = [...container.querySelectorAll('.sx-top-right a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/upload', '/upload', '/wallet', '/messages']);
@@ -120,5 +121,44 @@ describe('HeaderBar responsive behavior', () => {
     // Closing search returns to normal header
     await user.click(backBtn);
     expect(screen.queryByLabelText('Close search')).not.toBeInTheDocument();
+  });
+});
+
+function Where() {
+  const location = useLocation();
+  return <div data-testid="where">{location.pathname + location.search}</div>;
+}
+
+describe('HeaderBar beta navigation', () => {
+  afterEach(() => {
+    cleanup();
+    mocks.user = null;
+  });
+
+  const searchFor = async (query) => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/reels']}>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+        <Where />
+      </MemoryRouter>
+    );
+    await user.type(screen.getByRole('combobox', { name: 'Search people, tags, and reels' }), query + '{Enter}');
+    return screen.getByTestId('where').textContent;
+  };
+
+  it('hides COMPARE from a regular user and sends tool shortcuts to an Explore search', async () => {
+    mocks.user = { id: 'usr-1', username: 'viewer', role: 'user' };
+    expect(await searchFor('compare')).toBe('/explore?search=compare');
+    expect(screen.queryByRole('link', { name: 'COMPARE' })).not.toBeInTheDocument();
+    cleanup();
+    expect(await searchFor('video')).toBe('/explore?search=video');
+    cleanup();
+    expect(await searchFor('image')).toBe('/explore?search=image');
+  });
+
+  it('keeps the tool shortcuts for an admin', async () => {
+    mocks.user = { id: 'usr-1', username: 'boss', role: 'admin' };
+    expect(await searchFor('compare')).toBe('/compare');
   });
 });

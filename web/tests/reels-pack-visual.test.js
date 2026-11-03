@@ -229,7 +229,7 @@ test('Phone tab bar marks the active tab by colour only (no strip that collides 
 
 test('Phone tab bar icons share one resting colour and recolour red when active', () => {
   const css = read('web/src/styles/global.css');
-  assert.match(css, /\.sx-bottom-nav-item \{[^}]*color: #f2f3f5/);
+  assert.match(css, /\.sx-bottom-nav-item \{[^}]*color: var\(--sx-ink\)/); // --sx-ink is #f2f3f5, the icons' resting stroke
   assert.match(css, /\.sx-bottom-nav-item\.sx-active \.sx-bottom-nav-svg \[stroke='#f2f3f5'\] \{\s*stroke: var\(--sx-accent/);
   assert.match(css, /\.sx-bottom-nav-item\.sx-active \.sx-bottom-nav-svg \[fill='#f2f3f5'\] \{\s*fill: var\(--sx-accent/);
 });

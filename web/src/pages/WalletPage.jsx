@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import FormField from '../components/ui/FormField.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { billingErrorMessage } from '../utils/billingErrors.js';
@@ -106,6 +108,7 @@ function TransactionRow({ row }) {
  */
 export default function WalletPage() {
   const { user, loading: authLoading } = useAuth();
+  const toast = useToast();
   const { wallet, catalog, catalogStatus, falKey, refresh, saveFalKey, deleteFalKey } = useWallet();
   const [ledger, setLedger] = useState({ rows: [], status: 'loading', hasMore: false, loadingMore: false, loadError: false });
   const [keyValue, setKeyValue] = useState('');
@@ -242,7 +245,7 @@ export default function WalletPage() {
       await saveFalKey(trimmedKey);
       setKeyValue('');
       setShowKey(false);
-      setKeyStatus({ ok: true, text: 'PERSONAL FAL KEY SAVED ENCRYPTED' });
+      toast('Personal fal key saved, encrypted.');
     } catch (error) {
       setKeyStatus({ ok: false, text: billingErrorMessage(error) });
     } finally {
@@ -257,7 +260,7 @@ export default function WalletPage() {
     try {
       await deleteFalKey();
       setKeyValue('');
-      setKeyStatus({ ok: true, text: 'PERSONAL FAL KEY REMOVED' });
+      toast('Personal fal key removed.');
     } catch (error) {
       setKeyStatus({ ok: false, text: billingErrorMessage(error) });
     } finally {
@@ -309,7 +312,7 @@ export default function WalletPage() {
             {packs.map((pack) => {
               const bonus = Math.max(0, Number(pack.credits) - Number(pack.amount_cents));
               const featured = pack.id === featuredId;
-              const unavailable = !stripeReady || !pack.configured || !creditsReady;
+              const unavailable = !stripeReady || !pack.configured;
               const price = `$${(pack.amount_cents / 100).toFixed(2)}`;
               return (
                 <article className={'sx-cr-pack' + (featured ? ' sx-cr-pack--featured' : '')} key={pack.id}>
@@ -331,7 +334,7 @@ export default function WalletPage() {
                   >
                     {busy === pack.id ? 'OPENING CHECKOUT…' : `BUY ${formatCredits(pack.credits)}`}
                   </button>
-                  {stripeReady && creditsReady && !pack.configured ? <div className="sx-ps-hint">NOT CONFIGURED</div> : null}
+                  {stripeReady && !pack.configured ? <div className="sx-ps-hint">NOT CONFIGURED</div> : null}
                 </article>
               );
             })}
@@ -355,28 +358,30 @@ export default function WalletPage() {
           {falKey?.configured ? <span className="sx-ps-badge">[SAVED]</span> : null}
         </div>
         <form className="sx-ps-form" onSubmit={saveKey}>
-          <div className="sx-ps-field">
-            <div className="sx-ps-field-head">
-              <label className="sx-ps-label" htmlFor="wallet-fal-key">{falKey?.configured ? 'REPLACE KEY' : 'PERSONAL FAL API KEY'}</label>
-              <span className="sx-ps-meta">MIN {FAL_KEY_MIN} CHARACTERS</span>
-            </div>
-            <div className="sx-ps-inline">
-              <input
-                id="wallet-fal-key"
-                className="sx-ps-input"
-                type={showKey ? 'text' : 'password'}
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={FAL_KEY_MAX}
-                placeholder="Paste your Fal.ai key"
-                value={keyValue}
-                onChange={(event) => setKeyValue(event.target.value)}
-                aria-invalid={keyTooShort}
-              />
-              <button type="button" className="sx-ps-btn" onClick={() => setShowKey((value) => !value)} aria-pressed={showKey}>{showKey ? 'HIDE' : 'SHOW'}</button>
-            </div>
-            {keyTooShort ? <div className="sx-ps-hint">Keys are at least {FAL_KEY_MIN} characters.</div> : null}
-          </div>
+          <FormField
+            label={falKey?.configured ? 'REPLACE KEY' : 'PERSONAL FAL API KEY'}
+            meta={'MIN ' + FAL_KEY_MIN + ' CHARACTERS'}
+            id="wallet-fal-key"
+            hint={keyTooShort ? 'Keys are at least ' + FAL_KEY_MIN + ' characters.' : null}
+          >
+            {(field) => (
+              <div className="sx-ps-inline">
+                <input
+                  {...field}
+                  className="sx-ps-input"
+                  type={showKey ? 'text' : 'password'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={FAL_KEY_MAX}
+                  placeholder="Paste your Fal.ai key"
+                  value={keyValue}
+                  onChange={(event) => setKeyValue(event.target.value)}
+                  aria-invalid={keyTooShort}
+                />
+                <button type="button" className="sx-ps-btn" onClick={() => setShowKey((value) => !value)} aria-pressed={showKey}>{showKey ? 'HIDE' : 'SHOW'}</button>
+              </div>
+            )}
+          </FormField>
           <div className="sx-ps-actions">
             <button type="submit" className="sx-ps-btn sx-ps-btn--primary" disabled={!keyValid || Boolean(busy)}>
               {busy === 'key' ? 'SAVING…' : 'SAVE ENCRYPTED KEY'}

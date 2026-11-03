@@ -229,7 +229,7 @@ export default function PackEditorPage() {
             {pack?.status === 'published' ? (
               <Button loading={busy === 'unpublish'} disabled={!!busy} onClick={unpublish}>UNPUBLISH</Button>
             ) : null}
-            <Button primary loading={busy === 'publish'} disabled={!!busy || selected.length < PACK_MIN_PUBLISHED_ITEMS} onClick={publish}>PUBLISH PACK</Button>
+            <Button variant="primary" loading={busy === 'publish'} disabled={!!busy || selected.length < PACK_MIN_PUBLISHED_ITEMS} onClick={publish}>PUBLISH PACK</Button>
           </div>
         </section>
 

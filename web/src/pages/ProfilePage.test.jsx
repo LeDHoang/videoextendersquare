@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../components/ui/Toast.jsx';
 import ProfilePage from './ProfilePage.jsx';
 
 const mocks = vi.hoisted(() => ({
@@ -22,10 +23,12 @@ const profile = {
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/profile/maker']}>
-      <Routes>
-        <Route path="/profile/:username" element={<ProfilePage />} />
-        <Route path="/login" element={<div>LOGIN SCREEN</div>} />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route path="/profile/:username" element={<ProfilePage />} />
+          <Route path="/login" element={<div>LOGIN SCREEN</div>} />
+        </Routes>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
@@ -77,5 +80,32 @@ describe('ProfilePage report', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'REPORT' }));
     expect(await screen.findByText('LOGIN SCREEN')).toBeInTheDocument();
     expect(promptSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProfilePage followers dialog', () => {
+  beforeEach(() => {
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.auth.user = { id: 'viewer', username: 'viewer' };
+    mocks.api.get.mockImplementation(async (url) => {
+      if (url === '/api/users/maker') return { user: profile };
+      if (url === '/api/users/maker/followers') return { users: [], next_cursor: null };
+      return { items: [], next_cursor: null };
+    });
+  });
+  afterEach(cleanup);
+
+  it('is a modal that takes focus, closes on Escape and gives focus back', async () => {
+    renderPage();
+    const stat = await screen.findByRole('button', { name: /FOLLOWERS/ });
+    stat.focus();
+    fireEvent.click(stat);
+    const dialog = screen.getByRole('dialog', { name: 'FOLLOWERS' });
+    expect(dialog.tagName).toBe('DIALOG');
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus();
+    expect(await within(dialog).findByText('NO USERS YET')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(stat).toHaveFocus();
   });
 });

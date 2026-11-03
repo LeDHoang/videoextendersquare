@@ -759,9 +759,6 @@ window.WebXRVR = window.WebXRVR || (function () {
   // screenDistance and all sizes track the live screenScale, so scale +
   // distance changes keep the control panel on the reel player.
   const DOCK_GAP = 0.08;
-  const DOCK_MAX_DROP_DEG = 25;
-  const DOCK_MIN_FLOOR_Y = 0.6;
-  const SIDE_PANEL_MAX_YAW_DEG = 25; // fix25
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -818,14 +815,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   const MIN_EYE_Y = 0.3;
   function getLockedAnchor() {
     let y = layoutTuning.screenHeight;
-    if (y === DEFAULT_POS.y) {
-      if (sessionEyeY === null && xrSession) {
-        const eye = getHeadPosition().y;
-        if (Number.isFinite(eye) && eye >= MIN_EYE_Y) sessionEyeY = eye;
-      }
-      if (sessionEyeY !== null) y = sessionEyeY;
-    }
+    if (y === DEFAULT_POS.y && sessionEyeY !== null) y = sessionEyeY;
     return { x: DEFAULT_POS.x, y, z: -layoutTuning.screenDistance };
+  }
+
+  // Read from the frame's viewer pose: the camera still holds its default
+  // 1.6 m on the first XR frames, before three.js copies the headset pose in.
+  function captureSessionEye(frame) {
+    if (sessionEyeY !== null || !frame || !xrRefSpace || !frame.getViewerPose) return;
+    try {
+      const pose = frame.getViewerPose(xrRefSpace);
+      const eye = pose && pose.transform && pose.transform.position.y;
+      if (Number.isFinite(eye) && eye >= MIN_EYE_Y) sessionEyeY = eye;
+    } catch (e) {}
   }
 
   function ensureScreenQuat() {
@@ -937,15 +939,20 @@ window.WebXRVR = window.WebXRVR || (function () {
       const pin = earthPanelPins.dock || EARTH_DOCK_POS;
       pos = { x: pin.x, y: pin.y, z: pin.z };
     } else if (lockToViewer) {
-      // Legacy-exact: the transport panel stays fixed and level in the room
-      // at the default screen spot while the locked screen follows the gaze.
+      // The transport panel stays fixed in the room straight ahead while the
+      // locked screen follows the gaze. It sits at the open shell's radius,
+      // low enough that the nav strip under it lands where it sits under the
+      // shell panel (Explore), so the strip does not move between pages and
+      // the dock stays clear of the middle of the reel. pos is the full-height
+      // dock's centre and a fitted dock keeps its top edge, so the bottom edge
+      // is placed from the fitted height. It stays level, like the shell
+      // panel, so the strip hanging under it matches Explore's.
       const a = getLockedAnchor();
-      // The full screenScale/2 drop would put the dock ~33 deg below the eye
-      // line (near the floor); cap it at DOCK_MAX_DROP_DEG and keep it
-      // at least DOCK_MIN_FLOOR_Y above the floor (never above the eye line).
-      const drop = Math.min(layoutTuning.screenScale / 2 + layoutTuning.dockGap,
-        Math.abs(a.z) * Math.tan(DOCK_MAX_DROP_DEG * Math.PI / 180));
-      pos = { x: a.x, y: Math.max(a.y - drop, Math.min(DOCK_MIN_FLOOR_Y, a.y - 0.3)), z: a.z };
+      const full = dockTargetSize(layoutTuning.screenScale);
+      const fit = dockTargetSize(layoutTuning.screenScale, controlsLogicalW, controlsLogicalH);
+      const navH = SHELL_NAV_SIZE.h * fit.w / SHELL_NAV_SIZE.w;
+      const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - SHELL_NAV_DROP - navH / 2;
+      pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
       const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
@@ -959,20 +966,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     return {
       pos,
       yaw: Math.atan2(dx, dz),
-      pitch: -Math.atan2(dy, Math.hypot(dx, dz)),
+      pitch: (lockToViewer && m !== 'earth') ? 0 : -Math.atan2(dy, Math.hypot(dx, dz)),
     };
-  }
-
-  // fix25: swing a side offset (x, z) from the locked anchor in toward
-  // straight ahead so it sits no more than SIDE_PANEL_MAX_YAW_DEG off it
-  // (the comments panel opened at about 52 deg, out of view). The panel keeps
-  // its distance from the viewer; d is the viewer's distance to the anchor.
-  function clampSideOffset(x, z, d) {
-    const back = d - z;
-    const r = Math.hypot(x, back);
-    const lim = SIDE_PANEL_MAX_YAW_DEG * Math.PI / 180;
-    const yaw = Math.max(-lim, Math.min(lim, Math.atan2(x, back)));
-    return { x: r * Math.sin(yaw), z: d - r * Math.cos(yaw) };
   }
 
   // Side-panel world layout (upstream getCommentsPanelCenter/Size +
@@ -986,12 +981,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
-      const c = clampSideOffset(-base / 2 - size.w / 2 - layoutTuning.panelSideGap,
-        layoutTuning.panelFwdOffset, layoutTuning.screenDistance);
       center = {
-        x: a.x + c.x,
+        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
-        z: a.z + c.z,
+        z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
@@ -1146,9 +1139,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Applies headset yaw/pitch or orbit spherical position to the camera.
   // Headset mode keeps the old custom drag-look (OrbitControls disabled);
   // orbit mode is fully delegated to THREE.OrbitControls.
+  const PREVIEW_ORBIT_TARGET = { x: 0, y: 1.4, z: -2.0 };
   function applyPreviewCamera() {    if (!camera) return;
     if (previewCameraMode === 'orbit') {
-      const tx = 0, ty = 1.4, tz = -2.0;
+      const tx = PREVIEW_ORBIT_TARGET.x, ty = PREVIEW_ORBIT_TARGET.y, tz = PREVIEW_ORBIT_TARGET.z;
       const d = previewOrbitDistance;
       const cp = Math.cos(previewOrbitPitch), sp = Math.sin(previewOrbitPitch);
       const cy = Math.cos(previewOrbitYaw), sy = Math.sin(previewOrbitYaw);
@@ -5527,6 +5521,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ready yet, or stalls mid-play, shows 'loading' after LOAD_SPINNER_DELAY_MS.
   const LOAD_SPINNER_DELAY_MS = 500;
   let loadWaitSince = -1;
+  let loadWaitEl = null;
+  let loadWaitReel = '';
   function reelLoadState(source) {
     if (!source || source.kind !== 'video' || !source.element) {
       loadWaitSince = -1;
@@ -5534,6 +5530,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     const el = source.element;
     trackStalls(el);
+    // Each reel waits from its own start: another reel (or another source on
+    // the same element) must not inherit a failed reel's wait.
+    const reel = String(source.version || '');
+    if (el !== loadWaitEl || reel !== loadWaitReel) loadWaitSince = -1;
+    loadWaitEl = el;
+    loadWaitReel = reel;
     const failed = !!el.error || el.networkState === 3; // NETWORK_NO_SOURCE
     if (!failed && source.ready !== false && stallStart < 0) {
       loadWaitSince = -1;
@@ -5550,6 +5552,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // pop-up comment id and opens the comments panel at it.
   function handleOverlayHit(id) {
     if (id === 'load:skip') {
+      loadWaitSince = -1;
       if (callbacks.onNext) callbacks.onNext();
     } else if (id === 'load:retry') {
       const el = getVisualSource().element;
@@ -6110,7 +6113,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       activeIds = ui.filterOverlayComments(comments, source.currentTime)
         .map((c) => String(c.id)).join(',');
     } catch (e) { activeIds = ''; }
-    const key = activeIds + '|' + (overlayHoverId || '') + '|' + loadState;
+    // The reel's auto caption (the 2D CC switch applies), on the same overlay;
+    // a cue change is a new key, so the texture re-uploads once per cue.
+    let caption = '';
+    if (!commentsPanelVisible && source.kind === 'video' && callbacks.getCaption) {
+      try { caption = String(callbacks.getCaption() || ''); } catch (e) { caption = ''; }
+    }
+    const key = activeIds + '|' + (overlayHoverId || '') + '|' + loadState + '|' + caption;
     const hasActive = activeIds.length > 0;
     const due = (time === undefined) || (lastOverlayUploadT < 0) ||
       ((time - lastOverlayUploadT) >= VR_UI_MIN_INTERVAL);
@@ -6129,12 +6138,13 @@ window.WebXRVR = window.WebXRVR || (function () {
         overlayHoverId,
         loadState,
         nowMs: nowMs(),
+        caption,
       }) || [];
     } catch (e) { regions = []; }
     overlayRegions = regions;
     if (overlayHoverId && !regions.some((r) => r.id === overlayHoverId)) overlayHoverId = null;
     const had = overlayHasPopups;
-    overlayHasPopups = regions.length > 0 || !!loadState;
+    overlayHasPopups = regions.length > 0 || !!loadState || !!caption;
     if (overlayTexture) {
       overlayTexture.needsUpdate = true;
       renderStats.overlayUploads = (renderStats.overlayUploads || 0) + 1;
@@ -6266,11 +6276,19 @@ window.WebXRVR = window.WebXRVR || (function () {
   // vr_shell.js (window.VRShell), drawing in vr_shell_canvas.js
   // (window.VRShellCanvas); this block only owns meshes, rays and visibility.
   const SHELL_MAIN_RADIUS = 2.2;
+  const SHELL_MAIN_DROP = 0.15;
   const SHELL_MAIN_SIZE = { w: 2.0, h: 1.125 };
+  // The nav sits this far lower than flush under a 1.125 m panel (about 10% of
+  // the Quest's view height at the bend radius); the main panel keeps its top
+  // edge and scales up to fill the gap.
+  const SHELL_NAV_DROP = 0.35;
+  const SHELL_MAIN_SCALE = (SHELL_MAIN_SIZE.h + SHELL_NAV_DROP) / SHELL_MAIN_SIZE.h;
   const SHELL_NAV_SIZE = { w: 1.5, h: 0.16 };
   const SHELL_KB_SIZE = { w: 1.2, h: 0.54 };
   const SHELL_IMAGE_CAP = 96;
   const SHELL_TYPING_IDLE_MS = 400;
+  // While grid tiles play their preview loops, the main panel repaints at about 12 fps.
+  const SHELL_VIDEO_FRAME_MS = 80;
   let shell = null;
   let shellWasOpen = false;
   let shellDirtyContent = -1;
@@ -6282,6 +6300,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
   const shellImages = new Map();
+  // Tile preview loops: url → { vid, ok, used }. A paint that no longer draws one releases it.
+  const shellVideos = new Map();
+  let shellVideoPaintAt = 0;
   let shellStick = { dir: 0, t: 0 };
   let shellWheelT = 0;
   let shellHover = { panel: '', key: '' };
@@ -6341,7 +6362,8 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // LRU thumbnail cache; a finished load redraws the grid. Cross-origin
   // images without CORS fail to load and fall back to initials.
-  function getShellImage(url) {
+  function getShellImage(url, kind) {
+    if (kind === 'video') return getShellVideo(url);
     let entry = shellImages.get(url);
     if (entry) {
       shellImages.delete(url);
@@ -6358,6 +6380,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellImages.set(url, entry);
     while (shellImages.size > SHELL_IMAGE_CAP) shellImages.delete(shellImages.keys().next().value);
     return null;
+  }
+
+  // Muted looping preview for a tile on screen, as the 2D ExploreTile plays it. null until it
+  // has a frame (the tile shows its poster meanwhile) and always null under reduced motion.
+  function getShellVideo(url) {
+    if (reducedMotion || typeof document === 'undefined') return null;
+    let entry = shellVideos.get(url);
+    if (!entry) {
+      const vid = document.createElement('video');
+      entry = { vid, ok: false, used: false };
+      vid.crossOrigin = 'anonymous';
+      vid.muted = true;
+      vid.loop = true;
+      vid.playsInline = true;
+      vid.preload = 'auto';
+      vid.onloadeddata = () => { entry.ok = true; if (shell && shellVideos.get(url) === entry) shell.touch(); };
+      vid.src = url;
+      shellVideos.set(url, entry);
+    }
+    entry.used = true;
+    if (entry.vid.paused) entry.vid.play().catch(() => {});
+    return entry.ok ? entry.vid : null;
+  }
+
+  // After a main-panel paint: stop and drop the previews it did not draw.
+  function sweepShellVideos(all) {
+    shellVideos.forEach((entry, url) => {
+      if (!all && entry.used) { entry.used = false; return; }
+      try { entry.vid.pause(); entry.vid.removeAttribute('src'); entry.vid.load(); } catch (e) {}
+      shellVideos.delete(url);
+    });
   }
 
   // Thumbstick Y scrolls the grid one row per flick, repeating while held.
@@ -6529,9 +6582,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     const yaw = headYaw();
     shellMainMesh.position.set(
       headPos.x - Math.sin(yaw) * SHELL_MAIN_RADIUS,
-      headPos.y - 0.15,
+      headPos.y - SHELL_MAIN_DROP - SHELL_NAV_DROP / 2,
       headPos.z - Math.cos(yaw) * SHELL_MAIN_RADIUS
     );
+    shellMainMesh.scale.set(SHELL_MAIN_SCALE, SHELL_MAIN_SCALE, SHELL_MAIN_SCALE);
     faceViewerLevel(shellMainMesh, headPos, 0);
   }
 
@@ -6539,28 +6593,34 @@ window.WebXRVR = window.WebXRVR || (function () {
   // (same width and tilt, shared edge); open, the dock is hidden and the bar
   // keeps that same size under the main panel.
   let shellNavK = 1;
-  let shellNavDockDist = 0;
+  let shellNavDist = 0;
   function layoutShellNav() {
     if (!shellNavMesh || !THREE) return;
     const anchor = isShellOpen() ? shellMainMesh : controlsMesh;
     if (!anchor) return;
     const open = anchor === shellMainMesh;
-    const dist = anchor.position.distanceTo(getHeadPosition());
+    const head = getHeadPosition();
     // controlsMesh is a 1.6x0.6 plane scaled to the dock's world size.
+    if (!open) shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
+    const anchorH = open ? SHELL_MAIN_SIZE.h * anchor.scale.y : 0.6 * anchor.scale.y;
+    const place = (k) => {
+      const navH = SHELL_NAV_SIZE.h * k;
+      const gap = open ? navH * 0.5 : 0;
+      shellNavMesh.scale.set(k, k, 1);
+      shellNavMesh.quaternion.copy(anchor.quaternion);
+      shellNavMesh.position.copy(anchor.position)
+        .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+    };
+    place(shellNavK);
+    const dist = shellNavMesh.position.distanceTo(head);
     if (!open) {
-      shellNavK = (1.6 * anchor.scale.x) / SHELL_NAV_SIZE.w;
-      shellNavDockDist = dist;
+      shellNavDist = dist;
+    } else if (shellNavDist > 0) {
+      // Open, the bar keeps the angular size it has under the dock, so it reads
+      // the same on every page even though the main panel may sit further away.
+      // On a locked reel the closed bar already sits where this places it.
+      place(shellNavK * dist / shellNavDist);
     }
-    // Open, the bar keeps the angular size it has under the dock, so it reads
-    // the same on every page even though the main panel sits further away.
-    const k = open && shellNavDockDist > 0 ? shellNavK * dist / shellNavDockDist : shellNavK;
-    const anchorH = open ? SHELL_MAIN_SIZE.h : 0.6 * anchor.scale.y;
-    const navH = SHELL_NAV_SIZE.h * k;
-    const gap = open ? navH * 0.5 : 0;
-    shellNavMesh.scale.set(k, k, 1);
-    shellNavMesh.quaternion.copy(anchor.quaternion);
-    shellNavMesh.position.copy(anchor.position)
-      .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
   }
 
   // Keyboard: below the main panel, closer, tilted up toward the viewer.
@@ -6672,10 +6732,16 @@ window.WebXRVR = window.WebXRVR || (function () {
       shellPainted.navHover = navHover;
       shellPainted.navVersion = state.contentVersion;
     }
-    if (shellMainCtx && shellMainMesh && shellMainMesh.visible &&
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const mainShown = !!(shellMainCtx && shellMainMesh && shellMainMesh.visible);
+    if (!mainShown && shellVideos.size) sweepShellVideos(true);
+    if (mainShown &&
         (shellPainted.mainContent !== state.contentVersion || shellPainted.mainHover !== mainHover ||
-          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS))) {
+          (shellPainted.mainVersion !== state.version && vrLastUiUploadT - shellPainted.seenAt >= SHELL_TYPING_IDLE_MS) ||
+          (shellVideos.size && now - shellVideoPaintAt >= SHELL_VIDEO_FRAME_MS))) {
       sc.renderMainPanel(shellMainCtx, state, mainHover, getShellImage);
+      sweepShellVideos(false);
+      shellVideoPaintAt = now;
       shellMainTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.mainHover = mainHover;
@@ -6703,6 +6769,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
     shellKbWasShown = false;
     shellImages.clear();
+    sweepShellVideos(true);
   }
 
   const shellFacade = {
@@ -7479,6 +7546,73 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
+  // OrbitControls moves the orbit camera itself, so read its angles back before adding a key step.
+  function syncOrbitFromCamera() {
+    if (!orbitControls || !orbitControls.enabled || !camera) return;
+    const ox = camera.position.x - PREVIEW_ORBIT_TARGET.x;
+    const oy = camera.position.y - PREVIEW_ORBIT_TARGET.y;
+    const oz = camera.position.z - PREVIEW_ORBIT_TARGET.z;
+    const d = Math.sqrt(ox * ox + oy * oy + oz * oz);
+    if (!d) return;
+    previewOrbitDistance = d;
+    previewOrbitPitch = Math.asin(oy / d);
+    previewOrbitYaw = Math.atan2(ox, oz);
+  }
+
+  // A drag of (dx, dy) CSS pixels: look around (headset POV) or orbit (orbit inspect).
+  function lookPreviewBy(dx, dy) {
+    const sensitivity = 0.006;
+    if (previewCameraMode === 'orbit') {
+      syncOrbitFromCamera();
+      previewOrbitYaw -= dx * sensitivity;
+      previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
+    } else {
+      previewYaw -= dx * sensitivity;
+      previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
+    }
+    applyPreviewCamera();
+  }
+
+  // Keys on the focused preview canvas. An arrow acts like a short drag that way: it looks
+  // around or orbits, and in the Earth scene it turns the globe (Shift+arrow looks, as
+  // Shift-drag does). + and − zoom like the wheel. Other keys fall through to the player's
+  // own shortcuts (Space, N/P, A/D, M).
+  const PREVIEW_KEY_DRAG_PX = 30;
+  function previewKeyDown(event) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return false;
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    const zoom = { '+': 1, '=': 1, '-': -1, '_': -1 }[event.key] || 0;
+    if (arrow) {
+      const dx = arrow[0] * PREVIEW_KEY_DRAG_PX;
+      const dy = arrow[1] * PREVIEW_KEY_DRAG_PX;
+      if (sceneMode === 'earth' && !event.shiftKey) {
+        // The globe's surface moves the way the arrow points, as it follows a drag.
+        earthTouchInput();
+        earthFling = { yaw: 0, pitch: 0 };
+        if (earthFocus && earthZoom > 1.0001 && earthTopdownActive()) {
+          // Zoomed in: pan the map by what the thumbstick covers in 0.1 s (0.09 m of surface).
+          earthTopdownNudge(arrow[0], -arrow[1], 0.09 / (Math.max(1, earthEffectiveK(earthZoom)) * earthVisibleRadius(earthZoom)));
+        } else {
+          const step = 0.12 / Math.max(1, Math.sqrt(earthZoom));
+          rotateEarth(arrow[0] * step, arrow[1] * step);
+        }
+      } else {
+        lookPreviewBy(dx, dy);
+      }
+    } else if (zoom && sceneMode === 'earth') {
+      adjustEarthZoom(zoom > 0 ? EARTH_ZOOM_STEP : 1 / EARTH_ZOOM_STEP);
+    } else if (zoom && previewCameraMode === 'orbit') {
+      syncOrbitFromCamera();
+      previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance * (zoom > 0 ? 0.85 : 1 / 0.85)));
+      applyPreviewCamera();
+    } else {
+      return false;
+    }
+    // Handled here, so the page does not scroll and the player's arrow shortcuts stay out of it.
+    if (event.preventDefault) { try { event.preventDefault(); } catch (e) {} }
+    return true;
+  }
+
   function installPreviewListeners() {
     if (!previewCanvas || previewListeners) return;
     if (typeof previewCanvas.addEventListener !== 'function') return;
@@ -7563,15 +7697,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       // In orbit mode OrbitControls owns the drag; otherwise custom yaw/pitch.
       if (previewCameraMode === 'orbit' && orbitControls && orbitControls.enabled) return;
-      const sensitivity = 0.006;
-      if (previewCameraMode === 'orbit') {
-        previewOrbitYaw -= dx * sensitivity;
-        previewOrbitPitch = Math.max(-1.35, Math.min(1.35, previewOrbitPitch + dy * sensitivity));
-      } else {
-        previewYaw -= dx * sensitivity;
-        previewPitch = Math.max(-1.35, Math.min(1.35, previewPitch - dy * sensitivity));
-      }
-      applyPreviewCamera();
+      lookPreviewBy(dx, dy);
       } catch (e) { capturePointerError('pointermove', e); }
     };
     const finishPointer = function (event) {
@@ -7680,7 +7806,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     };
     const onContextMenu = function (event) { if (event.preventDefault) event.preventDefault(); };
     const onKeyDown = function (event) {
-      try { shellKeyDown(event); } catch (e) { capturePointerError('keydown', e); }
+      try {
+        if (!shellKeyDown(event)) previewKeyDown(event);
+      } catch (e) { capturePointerError('keydown', e); }
     };
     previewListeners = { onPointerDown, onPointerMove, finishPointer, onWheel, onPointerLeave, onContextMenu, onKeyDown };
     try { previewCanvas.style.touchAction = 'none'; } catch (e) {}
@@ -9850,6 +9978,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (renderer.setAnimationLoop) renderer.setAnimationLoop(null);
       } catch (e) {}
       renderer.setAnimationLoop((time, frame) => {
+        captureSessionEye(frame);
         applySceneVisibility();
         if (sceneMode === 'reels') {
           updateVisualTexture(getVisualSource());
@@ -10563,6 +10692,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHeatStyle,
       earthHeatRamp,
       computeDockPose,
+      getHeadPosition,
+      captureSessionEye,
       controlIndexFromUV,
       // v8.3 lock/scale/distance/panel seams.
       computeLockedPose,

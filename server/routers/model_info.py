@@ -14,7 +14,8 @@ Both sources are public and keyless:
 - ``https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<id>`` — structured
   input/output properties + ``info.x-fal-metadata`` (category, playground URL)
 
-Results are cached in-process for an hour per model id. Any fetch/parse
+Signed-in callers only; cache misses are rate-limited per user. Results are
+cached in-process for an hour per model id. Any fetch/parse
 failure returns ``found: False`` with generic pipeline expectations so the UI
 can still render a useful (clearly estimated) panel.
 """
@@ -29,13 +30,18 @@ import urllib.parse
 import urllib.request
 from html import unescape
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
 from core import models as _models
+from server.social.auth import AuthContext, rate_limiter, require_auth
+from server.social.database import get_db
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 _CACHE_TTL_S = 3600.0
+# Cache misses per user per minute; each miss makes up to two fal.ai fetches.
+MODEL_INFO_FETCHES_PER_MINUTE = 10
 _cache: dict[str, tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
 _FETCH_TIMEOUT_S = 15
@@ -267,6 +273,8 @@ def _fetch_model_info(model_id: str, kind: str) -> dict:
 def get_model_info(
     model: str = Query(..., description="fal.ai model id, e.g. fal-ai/foo/bar"),
     kind: str = Query("upscale", description="Pipeline slot: outpaint|upscale|image_upscale|image_outpaint"),
+    context: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
 ):
     """Pull live requirements, pricing and input/output schema for a model id."""
     norm = _models.normalize_model_id(model)
@@ -278,6 +286,7 @@ def get_model_info(
             cached = dict(hit[1])
             cached["from_cache"] = True
             return cached
+    rate_limiter.check(db, f"model-info:{context.user.id}", MODEL_INFO_FETCHES_PER_MINUTE, 60)
     payload = _fetch_model_info(norm, kind)
     payload["fetched_at"] = time.time()
     payload["from_cache"] = False

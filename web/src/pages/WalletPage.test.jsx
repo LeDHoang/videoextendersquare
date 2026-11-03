@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WalletPage from './WalletPage.jsx';
+import { ToastProvider } from '../components/ui/Toast.jsx';
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -62,13 +63,15 @@ function ledgerRow(i, extra = {}) {
 
 function renderPage(path = '/wallet') {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/wallet" element={<WalletPage />} />
-        <Route path="/login" element={<div>LOGIN SCREEN</div>} />
-        <Route path="/profile/:username" element={<div>PROFILE SCREEN</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/wallet" element={<WalletPage />} />
+          <Route path="/login" element={<div>LOGIN SCREEN</div>} />
+          <Route path="/profile/:username" element={<div>PROFILE SCREEN</div>} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   );
 }
 
@@ -228,6 +231,8 @@ describe('WalletPage', () => {
       fireEvent.change(keyInput(), { target: { value: 'short' } });
       expect(save).toBeDisabled();
       expect(screen.getByText(/at least 8 characters/)).toBeInTheDocument();
+      expect(keyInput()).toHaveAccessibleDescription('Keys are at least 8 characters.');
+      expect(keyInput()).toHaveAttribute('aria-invalid', 'true');
       fireEvent.change(keyInput(), { target: { value: '  fal-12345678  ' } });
       expect(save).toBeEnabled();
     });
@@ -243,7 +248,7 @@ describe('WalletPage', () => {
       renderPage();
       fireEvent.change(keyInput(), { target: { value: '  fal-12345678  ' } });
       fireEvent.click(screen.getByRole('button', { name: 'SAVE ENCRYPTED KEY' }));
-      expect(await screen.findByText(/PERSONAL FAL KEY SAVED ENCRYPTED/)).toBeInTheDocument();
+      expect(await screen.findByText('Personal fal key saved, encrypted.')).toBeInTheDocument();
       expect(mocks.saveFalKey).toHaveBeenCalledWith('fal-12345678');
       expect(keyInput()).toHaveValue('');
     });
@@ -276,7 +281,7 @@ describe('WalletPage', () => {
       renderPage();
       expect(screen.getByText('••••9883')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'REMOVE KEY' }));
-      expect(await screen.findByText(/PERSONAL FAL KEY REMOVED/)).toBeInTheDocument();
+      expect(await screen.findByText('Personal fal key removed.')).toBeInTheDocument();
       expect(mocks.deleteFalKey).toHaveBeenCalledTimes(1);
     });
   });

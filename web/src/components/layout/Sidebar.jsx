@@ -2,30 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
-import { Field } from '../ui/controls.jsx';
+import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
-import {
-  IndustrialImageIcon,
-  IndustrialVideoIcon,
-  IndustrialCompareIcon,
-  IndustrialReelsIcon,
-  IndustrialExploreIcon,
-  IndustrialMessageIcon,
-  IndustrialUploadIcon,
-  IndustrialCreditsIcon,
-} from '../icons/index.jsx';
-
-const NAV_ITEMS = [
-  { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
-  { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
-  { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },
-  { to: '/wallet', label: 'Credits', Icon: IndustrialCreditsIcon }, // TEMP glyph — final art to follow
-  { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
-  { to: '/image', label: 'Image', Icon: IndustrialImageIcon },
-  { to: '/video', label: 'Video', Icon: IndustrialVideoIcon },
-  { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon },
-];
+import { IndustrialCreditsIcon } from '../icons/index.jsx';
+import { SIDEBAR_NAV } from './nav.js';
 
 const MODEL_FIELDS = [
   { key: 'outpaint_vid', label: 'VIDEO OUTPAINT' },
@@ -196,7 +177,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
       <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
+        {SIDEBAR_NAV.filter((item) => !item.adminOnly || user?.role === 'admin').map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}
@@ -372,9 +353,9 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             <summary>▸ {degraded.length} DEGRADED ISSUE(S)</summary>
             <div className="sx-expander-body">
               {degraded.map((p) => (
-                <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
+                <div key={p.id} className="sx-body" style={{ marginBottom: 8, fontSize: 'var(--sx-t-eyebrow)' }}>
                   <b style={{ color: 'var(--sx-ink)' }}>{p.label}</b> — {p.detail}
-                  <div style={{ color: 'var(--sx-warn)', fontSize: '0.8rem', marginTop: 2 }}>
+                  <div style={{ color: 'var(--sx-warn)', fontSize: 'var(--sx-t-eyebrow)', marginTop: 2 }}>
                     {p.fix}
                   </div>
                 </div>
@@ -402,7 +383,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
               <Field key={key} label={`${label}${customLabel ? ` · ${customLabel}` : ''}`}>
                 <input
                   className="sx-input"
-                  style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                  style={{ fontSize: 'var(--sx-t-eyebrow)', padding: '6px 10px' }}
                   placeholder={modelDefaults[key] || ''}
                   value={current}
                   onChange={(e) => {
@@ -427,22 +408,12 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             </div>
           ) : null}
           <div className="sx-sidebar-btn-grid" style={{ marginTop: 12 }}>
-            <button
-              type="button"
-              className="sx-sidebar-btn-secondary"
-              onClick={resetModels}
-              disabled={saving}
-            >
+            <Button size="md" onClick={resetModels} disabled={saving}>
               RESET
-            </button>
-            <button
-              type="button"
-              className="sx-sidebar-btn-primary"
-              onClick={saveModels}
-              disabled={saving}
-            >
+            </Button>
+            <Button variant="primary" size="md" onClick={saveModels} disabled={saving}>
               {saving ? 'SAVING…' : 'SAVE'}
-            </button>
+            </Button>
           </div>
         </div>
       </details>

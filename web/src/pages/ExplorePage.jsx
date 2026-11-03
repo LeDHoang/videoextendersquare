@@ -53,6 +53,8 @@ export default function ExplorePage() {
   const navigate = useNavigate();
   const messaging = useMessaging();
   const { user } = useAuth();
+  // Beta: the folder/codec filters and rescan stay with admins.
+  const isAdmin = user?.role === 'admin';
   const { config } = useConfigContext();
   const packFeatures = config?.features?.reel_packs;
   const packDiscoveryEnabled = packFeatures?.discovery !== false;
@@ -281,7 +283,7 @@ export default function ExplorePage() {
         stats={[
           { label: 'TOTAL REELS', value: data ? order.length : '—' },
           ...(packDiscoveryEnabled ? [{ label: 'CURATED PACKS', value: packData ? packData.total : '—' }] : []),
-          { label: 'FOLDERS', value: data ? (data.folders || []).length : '—' },
+          ...(isAdmin ? [{ label: 'FOLDERS', value: data ? (data.folders || []).length : '—' }] : []),
         ]}
       />
 
@@ -298,7 +300,7 @@ export default function ExplorePage() {
       <Toolbar
         filters={(
           <>
-            {contentType !== 'packs' ? (
+            {contentType !== 'packs' && isAdmin ? (
               <>
                 <div style={{ flex: '1 1 150px', minWidth: 0, maxWidth: 260 }}>
                   <Dropdown value={folder} options={folderOptions} onChange={setFolder} placeholder="Target folder…" />
@@ -319,7 +321,7 @@ export default function ExplorePage() {
                 <button type="button" className="sx-search-clear" onClick={() => setSearch('')} aria-label="Clear search filter">✕</button>
               ) : null}
             </div>
-            <Button onClick={() => setRefreshKey((key) => key + 1)} title="Refresh discovery">↻</Button>
+            {isAdmin ? <Button onClick={() => setRefreshKey((key) => key + 1)} title="Refresh discovery">↻</Button> : null}
           </>
         )}
       >
@@ -356,7 +358,7 @@ export default function ExplorePage() {
         <EmptyState
           title="NO CONTENT MATCHES CURRENT FILTERS"
           text="Try another title, creator, place, or tag, or publish new reels and packs."
-          hint={'search="' + debouncedSearch + '"'}
+          hint={debouncedSearch ? 'Searched for “' + debouncedSearch + '”' : ''}
         />
       ) : (
         <>

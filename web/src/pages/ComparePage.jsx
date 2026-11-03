@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { EmptyState, Mono, GatedReason, Hero } from '../components/ui/primitives.jsx';
-import { Spinner } from '../components/ui/controls.jsx';
+import { Button, Spinner } from '../components/ui/controls.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import Emoji from '../components/ui/Emoji.jsx';
 
@@ -128,7 +128,7 @@ export default function ComparePage() {
               <span className="sx-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>RENDER PAIR</span>
               <select
                 className="sx-select"
-                style={{ flex: '1 1 160px', minWidth: 0, maxWidth: '100%', height: 34, fontSize: '0.8rem', padding: '0 8px', whiteSpace: 'nowrap' }}
+                style={{ flex: '1 1 160px', minWidth: 0, maxWidth: '100%', height: 34, fontSize: 'var(--sx-t-eyebrow)', padding: '0 8px', whiteSpace: 'nowrap' }}
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
                 aria-label="Select render pair to inspect"
@@ -181,23 +181,23 @@ export default function ComparePage() {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className={`sx-btn ${showDownload ? 'sx-primary' : ''}`}
-                style={{ height: 34, padding: '0 12px', fontSize: '0.8rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
+              <Button
+                size="sm"
+                variant={showDownload ? 'primary' : 'secondary'}
+                aria-pressed={showDownload}
                 onClick={() => setShowDownload((prev) => !prev)}
               >
                 ↓ DOWNLOAD
-              </button>
-              <button
-                type="button"
-                className="sx-btn"
-                style={{ height: 34, padding: '0 10px', fontSize: '0.8rem', flexShrink: 0 }}
+              </Button>
+              <Button
+                size="sm"
+                style={{ padding: '0 10px', flexShrink: 0 }}
                 onClick={() => setRefreshKey((k) => k + 1)}
                 title="Rescan output folder"
+                aria-label="Rescan output folder"
               >
                 ↻
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -318,7 +318,7 @@ export default function ComparePage() {
                         border: '1px solid var(--sx-rule-strong)',
                         padding: '4px 12px',
                         fontFamily: 'JetBrains Mono',
-                        fontSize: '0.8rem',
+                        fontSize: 'var(--sx-t-eyebrow)',
                         color: 'var(--sx-accent)',
                       }}
                     >
@@ -366,7 +366,7 @@ export default function ComparePage() {
                 </div>
                 <div className="sx-telemetry-row">
                   <span className="sx-telemetry-label">HARDWARE</span>
-                  <span className="sx-telemetry-val" style={{ fontSize: '0.8rem', color: 'var(--sx-ink-2)' }}>
+                  <span className="sx-telemetry-val" style={{ fontSize: 'var(--sx-t-eyebrow)', color: 'var(--sx-ink-2)' }}>
                     GPU VideoToolbox
                   </span>
                 </div>
@@ -398,7 +398,7 @@ export default function ComparePage() {
                 </div>
                 <div className="sx-telemetry-row">
                   <span className="sx-telemetry-label">NEURAL ENGINE</span>
-                  <span className="sx-telemetry-val" style={{ fontSize: '0.8rem', color: 'var(--sx-ink-2)' }}>
+                  <span className="sx-telemetry-val" style={{ fontSize: 'var(--sx-t-eyebrow)', color: 'var(--sx-ink-2)' }}>
                     VapourSynth Plugin
                   </span>
                 </div>

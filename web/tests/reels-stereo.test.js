@@ -328,5 +328,5 @@ test('reels page 3D testing filter sends media=stereo to the list and the player
   assert.match(page, /media: only3d \? 'stereo' : undefined/);
   assert.match(page, /\.\.\.\(only3d \? \{ media: 'stereo' \} : \{\}\)/);
   assert.match(page, /nextParams\.set\('media', 'stereo'\)/);
-  assert.match(page, /primary=\{only3d\}[\s\S]{0,120}aria-pressed=\{only3d\}/);
+  assert.match(page, /variant=\{only3d \? 'primary' : 'secondary'\}[\s\S]{0,120}aria-pressed=\{only3d\}/);
 });

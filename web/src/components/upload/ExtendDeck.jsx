@@ -1,6 +1,7 @@
 import { AccentBlock, GatedReason } from '../ui/primitives.jsx';
 import { Segmented, Button, ToggleRow } from '../ui/controls.jsx';
 import CustomModelPanel from '../ui/CustomModelPanel.jsx';
+import { onRovingKeyDown, tabStop } from '../ui/roving.js';
 import JobRunner from '../ui/JobRunner.jsx';
 import CloudFundingPanel from '../billing/CloudFundingPanel.jsx';
 import { MODES, MAX_LORAS } from './useExtendConfig.js';
@@ -36,9 +37,10 @@ const modelShort = (model) => (model || '').split('/').filter(Boolean).slice(-2)
 // Selectable model tiles (a radiogroup, so they read like the Segmented
 // control to assistive tech and tests).
 export function ModelCards({ entries, value, onChange, ariaLabel }) {
+  const stop = tabStop(entries.map((entry) => entry.label === value));
   return (
-    <div className="sx-studio-models" role="radiogroup" aria-label={ariaLabel}>
-      {entries.map((entry) => {
+    <div className="sx-studio-models" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
+      {entries.map((entry, index) => {
         const selected = entry.label === value;
         const byok = entry.credit_enabled === false || entry.is_custom;
         return (
@@ -47,6 +49,7 @@ export function ModelCards({ entries, value, onChange, ariaLabel }) {
             key={entry.label}
             role="radio"
             aria-checked={selected}
+            tabIndex={index === stop ? 0 : -1}
             className={`sx-studio-model ${selected ? 'sx-selected' : ''}`}
             onClick={() => onChange(entry.label)}
           >
@@ -384,11 +387,17 @@ export function ExecuteSection({
         quoteState={funding.quoteState}
         byokOnly={funding.byokOnly}
       />
-      {blocked.length ? <GatedReason>{blocked[0].label} UNAVAILABLE — CHECK SYSTEM PROBES</GatedReason> : null}
-      {!blocked.length && cfg.kind === 'video' && cfg.studioPicked && !studioOk ? (
-        <GatedReason>STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI</GatedReason>
-      ) : null}
-      <Button primary className="sx-studio-render" disabled={disabled} loading={busy} onClick={onRender}>
+      <Button
+        variant="primary"
+        className="sx-studio-render"
+        disabled={disabled}
+        disabledReasons={[
+          blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES',
+          !blocked.length && cfg.kind === 'video' && cfg.studioPicked && !studioOk && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
+        ]}
+        loading={busy}
+        onClick={onRender}
+      >
         {funding.quoteStale ? '↻ RETRY QUOTE & RENDER' : label}
       </Button>
       {error ? (

@@ -2,20 +2,7 @@ import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
-import {
-  IndustrialReelsIcon,
-  IndustrialExploreIcon,
-  IndustrialUploadIcon,
-  IndustrialMessageIcon,
-} from '../icons/index.jsx';
-
-// Same destinations and glyphs as the sidebar's nav grid; the account slot shows the user's avatar.
-const ITEMS = [
-  { to: '/reels', label: 'Reels', Icon: IndustrialReelsIcon },
-  { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
-  { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
-  { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon, badge: true },
-];
+import { BOTTOM_NAV, NAV } from './nav.js';
 
 function Avatar({ user }) {
   const label = (user?.display_name || user?.username || '?').trim();
@@ -49,9 +36,10 @@ export default function MobileBottomNav() {
 
   return (
     <nav className="sx-bottom-nav" aria-label="Main navigation">
-      {ITEMS.map(({ to, label, Icon, badge }) => {
+      {BOTTOM_NAV.map(({ to, label, Icon }) => {
         // A playing Reel Pack belongs to Explore, so that tab stays lit while it plays.
-        const inPack = to === '/explore' && location.pathname.startsWith('/packs/');
+        const inPack = to === NAV.explore.to && location.pathname.startsWith('/packs/');
+        const badge = to === NAV.messages.to;
         return (
         <NavLink
           key={to}

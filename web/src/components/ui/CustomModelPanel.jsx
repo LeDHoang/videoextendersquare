@@ -32,6 +32,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
   useEffect(() => {
     if (!model) return undefined;
     let alive = true;
+    setInfo(null);
     setLoading(true);
     setError('');
     api
@@ -163,7 +164,7 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
         <span className="sx-cost-title">
           {entry?.label || 'CUSTOM MODEL'} — MODEL INFO (LIVE FROM FAL.AI)
         </span>
-        <span className="sx-cost-total" style={{ fontSize: '0.8rem', wordBreak: 'break-all' }}>
+        <span className="sx-cost-total" style={{ fontSize: 'var(--sx-t-eyebrow)', wordBreak: 'break-all' }}>
           {model}
         </span>
       </div>

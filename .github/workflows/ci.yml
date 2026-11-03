@@ -124,6 +124,22 @@ jobs:
           run 'test "$(ls /app/ui)" = assets'
           run 'test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg'
           echo "image contents OK"
+      - name: Trivy image scan (fixable HIGH and CRITICAL)
+        # Release binary pinned by sha256, not trivy-action or `latest`: Trivy
+        # 0.69.4-0.69.6 and the trivy-action/setup-trivy tags were malicious in
+        # March 2026 (GHSA-69fq-xp46-6x23). Unfixed Debian CVEs are skipped;
+        # to accept a fixable one, list its ID in a .trivyignore with a comment
+        # saying why and when to revisit.
+        env:
+          TRIVY_VERSION: "0.76.1"
+          TRIVY_SHA256: "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
+        run: |
+          set -euo pipefail
+          f="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSLO "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$f"
+          echo "${TRIVY_SHA256}  $f" | sha256sum -c -
+          tar xzf "$f" trivy
+          ./trivy image --no-progress --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed echo-app:ci
 
   scans:
     name: dependency + secret scans

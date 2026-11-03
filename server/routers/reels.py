@@ -1500,6 +1500,9 @@ def _build_payload(
             else SM.legacy_stereo_layout(item["rel_path"], meta.get("width"), meta.get("height"), root=str(OUTPUT_DIR))
         ) or "mono"
         stereo = stereo_fields(item["rel_path"], layout, files)
+        # Auto captions (<stem>.vtt) of a video's original; the 2D rendition and stereo file share its audio.
+        base["captions_url"] = None if _is_image_item(item) else _sibling_media_url(
+            src_path, SM.captions_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
@@ -3035,13 +3038,16 @@ def reels_player_inline(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    play: str | None = None,
     pack_id: str | None = None,
     restart: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
     """Return the Reels/VR player as CSS + HTML + scripts for direct in-SPA
-    embedding (no iframe, so the player sizes itself to the page)."""
+    embedding (no iframe, so the player sizes itself to the page).
+
+    `play` is a deep-linked media path; the player starts on it."""
     feed_data = _pack_feed_data(
         db=db,
         viewer=viewer,
@@ -3069,6 +3075,21 @@ def reels_player_inline(
         post=post,
     )
     payload = feed_data["items"]
+    # The feed holds posts only, so a deep-linked file without a post is
+    # hydrated on its own and put first.
+    play_idx = None
+    if play and not pack_id and not post:
+        play_idx = next((index for index, item in enumerate(payload) if item.get("path") == play), None)
+        if play_idx is None:
+            viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+            hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+            video = next(
+                (item for item in _scan_cached(db) if item["rel_path"] == play and play not in hidden_paths),
+                None,
+            )
+            if video:
+                payload[:0] = _build_payload([video], codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
+                play_idx = 0
     try:
         if pack_id and not restart and (feed_data.get("resume") or {}).get("current_item_id"):
             resume_item_id = feed_data["resume"]["current_item_id"]
@@ -3076,6 +3097,8 @@ def reels_player_inline(
                 (index for index, item in enumerate(payload) if item.get("pack_item_id") == resume_item_id),
                 0,
             )
+        elif play_idx is not None:
+            start_idx = play_idx
         else:
             start_idx = 0 if post else max(0, min(int(start), max(0, len(payload) - 1)))
     except (TypeError, ValueError):

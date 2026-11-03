@@ -307,7 +307,10 @@ describe('UploadPage studio — video extender parity', () => {
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(screen.getByText('STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI')).toBeInTheDocument();
     expect(screen.queryByLabelText('CAS Sharpening level')).toBeNull();
-    expect(renderButton()).toBeDisabled();
+    // Blocked with a reason: still focusable, and the reason is its description.
+    expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(renderButton()).not.toBeDisabled();
+    expect(renderButton()).toHaveAccessibleDescription('STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI');
   });
 
   it('gates STUDIO when the ffms2 source plugin does not load', async () => {
@@ -317,7 +320,7 @@ describe('UploadPage studio — video extender parity', () => {
     await screen.findByText('ORIGINAL CLIP (1080×1920)');
     fireEvent.click(radio('Upscale Engine', 'STUDIO'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
-    expect(renderButton()).toBeDisabled();
+    expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('disables CAS with a reason when the filter probe fails', async () => {
@@ -704,13 +707,16 @@ describe('UploadPage studio — MAKE 3D', () => {
     expect(screen.getByText('MAKE 3D FIRST')).toBeInTheDocument();
     expect(screen.getByText('3D SIDE-BY-SIDE · MAKE 3D')).toBeInTheDocument();
     expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
-    expect(share()).toBeDisabled();
+    expect(share()).toHaveAttribute('aria-disabled', 'true');
+    expect(share()).toHaveAccessibleDescription('MAKE 3D FIRST');
+    fireEvent.click(share());
+    expect(mocks.post).not.toHaveBeenCalled();
 
     fireEvent.click(make3d());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', stage_id: 'st-square.png' }));
     // Running: the path is locked and nothing can be shared yet.
     expect(radio('Publish path', 'SHARE DIRECTLY')).toBeDisabled();
-    expect(share()).toBeDisabled();
+    expect(share()).toHaveAttribute('aria-disabled', 'true');
     expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-img' }));
@@ -759,6 +765,7 @@ describe('UploadPage studio — MAKE 3D', () => {
 
     fireEvent.click(make3d());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', job_id: 'job-ext' }));
+    // The 3D job is running and lists no reason, so the button is plainly disabled.
     expect(share()).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-ext' }));
     expect(await screen.findByAltText('3D result for square.png (left eye)')).toHaveAttribute('src', '/api/jobs/job-3d-ext/download');
@@ -779,7 +786,7 @@ describe('UploadPage studio — MAKE 3D', () => {
     fireEvent.click(make3d());
     expect(await screen.findByText('MAKE 3D is not available on this server right now.')).toBeInTheDocument();
     expect(make3d()).toBeEnabled();
-    expect(share()).toBeDisabled();
+    expect(share()).toHaveAttribute('aria-disabled', 'true');
 
     fireEvent.click(make3d());
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-3d-img' }));

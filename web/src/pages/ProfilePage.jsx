@@ -5,11 +5,14 @@ import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTi
 import { DensityToggle, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
 import PackTile, { packCoverMembers } from '../components/packs/PackTile.jsx';
 import ReportDialog from '../components/ReportDialog.jsx';
-import { Button, Field } from '../components/ui/controls.jsx';
+import { Button, Field, Tabs } from '../components/ui/controls.jsx';
+import Dialog from '../components/ui/Dialog.jsx';
+import IconButton from '../components/ui/IconButton.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
@@ -83,11 +86,11 @@ function PeopleDialog({ title, username, kind, onClose }) {
   }, [load]);
 
   return (
-    <div className="sx-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sx-people-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
+    <Dialog className="sx-modal-backdrop" aria-label={title} onClose={onClose}>
+      <section className="sx-people-dialog">
         <div className="sx-people-dialog-head">
           <strong>{title}</strong>
-          <button type="button" onClick={onClose} aria-label="Close">×</button>
+          <IconButton variant="plain" label="Close" data-dialog-close onClick={onClose}>×</IconButton>
         </div>
         <div className="sx-people-list">
           {rows === null ? <span>LOADING…</span> : rows.map((person) => (
@@ -104,7 +107,7 @@ function PeopleDialog({ title, username, kind, onClose }) {
           ) : null}
         </div>
       </section>
-    </div>
+    </Dialog>
   );
 }
 
@@ -115,6 +118,7 @@ export default function ProfilePage() {
   const requestedTab = searchParams.get('tab') || 'all';
   const { user: viewer } = useAuth();
   const messaging = useMessaging();
+  const toast = useToast();
   const { config } = useConfigContext();
   const packCreationEnabled = config?.features?.reel_packs?.creation !== false;
   const packDiscoveryEnabled = config?.features?.reel_packs?.discovery !== false;
@@ -129,11 +133,9 @@ export default function ProfilePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportNotice, setReportNotice] = useState('');
   const [dialog, setDialog] = useState('');
   const [followBusy, setFollowBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
-  const [shareLabel, setShareLabel] = useState('');
   const [editing, setEditing] = useState(null);
   const [editForm, setEditForm] = useState({ title: '', caption: '', tags: '' });
 
@@ -245,11 +247,10 @@ export default function ProfilePage() {
         return;
       }
       await navigator.clipboard.writeText(url);
-      setShareLabel('LINK COPIED');
+      toast('Link copied.');
     } catch {
-      setShareLabel(window.prompt('Copy profile link', url) === null ? '' : 'LINK COPIED');
+      if (window.prompt('Copy profile link', url) !== null) toast('Link copied.');
     }
-    setTimeout(() => setShareLabel(''), 2000);
   };
 
   const toggleFollow = async () => {
@@ -347,13 +348,12 @@ export default function ProfilePage() {
       navigate('/login?next=' + encodeURIComponent('/profile/' + username));
       return;
     }
-    setReportNotice('');
     setReportOpen(true);
   };
 
   const submitProfileReport = async ({ reason, details }) => {
     await api.post('/api/reports', { target_type: 'user', target_id: profile.id, reason, details });
-    setReportNotice('Report submitted. Thank you — our moderators will review it.');
+    toast('Report submitted. Thank you — our moderators will review it.');
   };
 
   const blockProfile = async () => {
@@ -373,7 +373,7 @@ export default function ProfilePage() {
   if (error && !profile) {
     return (
       <EmptyState title="PROFILE UNAVAILABLE" text={error} hint={'@' + username}>
-        <Link className="sx-btn" to="/explore">BACK TO EXPLORE</Link>
+        <Button as={Link} to="/explore">BACK TO EXPLORE</Button>
       </EmptyState>
     );
   }
@@ -417,7 +417,7 @@ export default function ProfilePage() {
                   <button type="button" className="sx-xh-btn sx-xh-btn--primary" onClick={() => navigate('/settings/profile')}>EDIT PROFILE</button>
                   {/* Credits are private to the account owner: this button only renders on your own profile. */}
                   <button type="button" className="sx-xh-btn" onClick={() => navigate('/wallet')}>CREDITS</button>
-                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>{shareLabel || 'SHARE'}</button>
+                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>SHARE</button>
                 </>
               ) : (
                 <>
@@ -431,16 +431,14 @@ export default function ProfilePage() {
                     {followBusy ? '…' : profile.is_following ? 'FOLLOWING' : 'FOLLOW +'}
                   </button>
                   <button type="button" className="sx-xh-btn" onClick={() => navigate('/messages?user=' + encodeURIComponent(profile.username))}>MESSAGE</button>
-                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>{shareLabel || 'SHARE'}</button>
+                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>SHARE</button>
                   <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={reportProfile}>REPORT</button>
                   <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={blockProfile}>BLOCK</button>
                 </>
               )}
-              {/* The SHARE label swap is visual only; this announces it. */}
-              <span className="sx-sr-only" aria-live="polite">{shareLabel}</span>
             </div>
             <div className="sx-pf-stats" role="group" aria-label="Profile statistics">
-              <button type="button" className="sx-pf-stat sx-pf-stat--link sx-pf-stat--lead" onClick={() => setDialog('followers')}>
+              <button type="button" className="sx-pf-stat sx-pf-stat--link" onClick={() => setDialog('followers')}>
                 <span className="sx-pf-stat-value">{formatCompactCount(profile.follower_count)}</span>
                 <span className="sx-pf-stat-label">FOLLOWERS</span>
               </button>
@@ -491,13 +489,13 @@ export default function ProfilePage() {
           ) : null}
 
           <div className="sx-pf-controls">
-            <div className="sx-pf-tabs" role="tablist" aria-label="Profile content">
-              {TABS.filter(([value]) => value !== 'packs' || packDiscoveryEnabled || profile.is_me).concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => (
-                <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'sx-active' : ''} onClick={() => selectTab(value)}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Tabs
+              className="sx-pf-tabs"
+              ariaLabel="Profile content"
+              tabs={TABS.filter(([value]) => value !== 'packs' || packDiscoveryEnabled || profile.is_me).concat(profile.is_me ? [['saved', 'SAVED']] : []).map(([value, label]) => ({ value, label }))}
+              value={tab}
+              onChange={selectTab}
+            />
             {!packGrid && tab !== 'saved' ? (
               <div className="sx-pf-tools">
                 <label className="sx-xh-ctl">
@@ -518,21 +516,23 @@ export default function ProfilePage() {
           ) : null}
 
           {tab === 'saved' ? (
-            <div className="sx-profile-saved-tabs" role="tablist" aria-label="Saved content type">
-              <button type="button" role="tab" aria-selected={savedKind === 'reels'} className={savedKind === 'reels' ? 'sx-active' : ''} onClick={() => selectSavedKind('reels')}>REELS</button>
-              <button type="button" role="tab" aria-selected={savedKind === 'packs'} className={savedKind === 'packs' ? 'sx-active' : ''} onClick={() => selectSavedKind('packs')}>PACKS</button>
-            </div>
+            <Tabs
+              className="sx-profile-saved-tabs"
+              ariaLabel="Saved content type"
+              tabs={[{ value: 'reels', label: 'REELS' }, { value: 'packs', label: 'PACKS' }]}
+              value={savedKind}
+              onChange={selectSavedKind}
+            />
           ) : null}
 
           {profile.is_me && tab === 'packs' && packCreationEnabled ? (
             <div className="sx-profile-pack-create">
-              <Button primary onClick={() => navigate('/packs/new')}>+ CREATE REEL PACK</Button>
+              <Button variant="primary" onClick={() => navigate('/packs/new')}>+ CREATE REEL PACK</Button>
             </div>
           ) : null}
 
           {previewMessage && !packGrid ? <Mono>{previewMessage}</Mono> : null}
           {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
-          {reportNotice ? <div className="sx-pk-notice" role="status">{reportNotice}</div> : null}
           {loading ? (
             <ExploreGridSkeleton label={packGrid ? 'Loading Reel Packs' : 'Loading profile posts'} />
           ) : items.length ? (
@@ -581,11 +581,11 @@ export default function ProfilePage() {
           )}
 
           {editing ? (
-            <div className="sx-modal-backdrop" role="presentation" onMouseDown={() => setEditing(null)}>
-              <section className="sx-people-dialog sx-post-editor" role="dialog" aria-modal="true" aria-label="Edit post" onMouseDown={(event) => event.stopPropagation()}>
+            <Dialog className="sx-modal-backdrop" aria-label="Edit post" onClose={() => setEditing(null)}>
+              <section className="sx-people-dialog sx-post-editor">
                 <div className="sx-people-dialog-head">
                   <strong>EDIT POST</strong>
-                  <button type="button" onClick={() => setEditing(null)} aria-label="Close">×</button>
+                  <IconButton variant="plain" label="Close" data-dialog-close onClick={() => setEditing(null)}>×</IconButton>
                 </div>
                 <div className="sx-post-editor-fields">
                   <Field label="TITLE">
@@ -599,11 +599,11 @@ export default function ProfilePage() {
                   </Field>
                   <div className="sx-profile-actions">
                     <Button onClick={() => setEditing(null)}>CANCEL</Button>
-                    <Button primary loading={actionBusy === editing.id} disabled={actionBusy === editing.id} onClick={saveEditedPost}>SAVE POST</Button>
+                    <Button variant="primary" loading={actionBusy === editing.id} disabled={actionBusy === editing.id} onClick={saveEditedPost}>SAVE POST</Button>
                   </div>
                 </div>
               </section>
-            </div>
+            </Dialog>
           ) : null}
 
           {reportOpen ? (

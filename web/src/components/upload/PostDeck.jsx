@@ -99,7 +99,7 @@ export function ShareSection({ num, user, title, path, jobDone, shareDisabled, p
             </div>
           </div>
           <div className="sx-studio-actions">
-            <Button primary onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(published.rel_path)}`)}>
+            <Button variant="primary" onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(published.rel_path)}`)}>
               ▶ PLAY IN REELS
             </Button>
             <Button onClick={() => navigate('/explore')}>EXPLORE GRID</Button>
@@ -110,10 +110,18 @@ export function ShareSection({ num, user, title, path, jobDone, shareDisabled, p
         </>
       ) : (
         <>
-          {!title.trim() ? <GatedReason>TITLE IS REQUIRED BEFORE SHARING</GatedReason> : null}
-          {path === 'extend' && !jobDone ? <GatedReason>RENDER THE 1:1 EXTEND FIRST</GatedReason> : null}
-          {path === 'convert' && !jobDone ? <GatedReason>MAKE 3D FIRST</GatedReason> : null}
-          <Button primary className="sx-studio-render" disabled={shareDisabled} loading={publishing} onClick={onShare}>
+          <Button
+            variant="primary"
+            className="sx-studio-render"
+            disabled={shareDisabled}
+            disabledReasons={[
+              !title.trim() && 'TITLE IS REQUIRED BEFORE SHARING',
+              path === 'extend' && !jobDone && 'RENDER THE 1:1 EXTEND FIRST',
+              path === 'convert' && !jobDone && 'MAKE 3D FIRST',
+            ]}
+            loading={publishing}
+            onClick={onShare}
+          >
             SHARE REEL TO UPLOADS
           </Button>
           {error ? (

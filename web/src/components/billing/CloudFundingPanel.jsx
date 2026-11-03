@@ -49,7 +49,7 @@ export default function CloudFundingPanel({ required, paymentSource, onChange, q
           ariaLabel="Cloud payment source"
         />
       ) : (
-        <Button primary onClick={() => navigate('/login?next=' + encodeURIComponent(window.location.pathname))}>SIGN IN FOR CLOUD PROCESSING</Button>
+        <Button variant="primary" onClick={() => navigate('/login?next=' + encodeURIComponent(window.location.pathname))}>SIGN IN FOR CLOUD PROCESSING</Button>
       )}
       {paymentSource === 'credits' && user ? (
         <div className="sx-cost-body" style={{ marginTop: 10 }}>

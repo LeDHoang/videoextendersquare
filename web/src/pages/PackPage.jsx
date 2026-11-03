@@ -10,6 +10,7 @@ import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
 import { Button, Dropdown } from '../components/ui/controls.jsx';
 import { EmptyState } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
 import { formatDuration, formatPostResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
@@ -111,11 +112,11 @@ export default function PackPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const messaging = useMessaging();
+  const toast = useToast();
   const [view, setView] = usePackView();
   const [density, setDensity] = useGridDensity();
   const [pack, setPack] = useState(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
   const [dialog, setDialog] = useState('');
   const [dialogError, setDialogError] = useState('');
@@ -150,7 +151,6 @@ export default function PackPage() {
 
   useEffect(() => {
     setPack(null);
-    setNotice('');
     setDialog('');
     load();
     return () => { loadSeq.current += 1; };
@@ -238,13 +238,12 @@ export default function PackPage() {
       details,
     });
     setError('');
-    setNotice('Report submitted. Thank you — our moderators will review it.');
+    toast('Report submitted. Thank you — our moderators will review it.');
   };
 
   const patchPack = async (action, body, failure) => {
     setBusy(action);
     setError('');
-    setNotice('');
     try {
       const result = await api.patch(`/api/packs/${encodeURIComponent(pack.id)}`, {
         ...body,
@@ -267,13 +266,12 @@ export default function PackPage() {
   const postStatusChange = async (action, path, failure, success) => {
     setBusy(action);
     setError('');
-    setNotice('');
     try {
       const result = await api.post(`/api/packs/${encodeURIComponent(pack.id)}/${path}`, {
         expected_revision: pack.revision,
       });
       setPack(result.pack);
-      setNotice(success);
+      toast(success);
     } catch (requestError) {
       setError(requestError.message || failure);
       await load({ recordOpen: false });
@@ -310,7 +308,7 @@ export default function PackPage() {
   if (error && !pack) {
     return (
       <EmptyState title="REEL PACK UNAVAILABLE" text={error} hint={packId}>
-        <Link className="sx-btn" to="/explore">BACK TO EXPLORE</Link>
+        <Button as={Link} to="/explore">BACK TO EXPLORE</Button>
       </EmptyState>
     );
   }
@@ -366,7 +364,6 @@ export default function PackPage() {
           <Button onClick={() => setError('')}>DISMISS</Button>
         </div>
       ) : null}
-      {notice ? <div className="sx-pk-notice" role="status">{notice}</div> : null}
 
       <div className="sx-pk-grid">
         <section className="sx-pk-side" aria-label="Pack details">
@@ -455,7 +452,7 @@ export default function PackPage() {
                       {playable < MIN_PUBLISH ? `${playable}/${MIN_PUBLISH} AVAILABLE` : `${playable}/${pack.reel_count ?? 0} READY`}
                     </span>
                     <Button
-                      primary
+                      variant="primary"
                       loading={busy === 'publish'}
                       disabled={busy !== '' || playable < MIN_PUBLISH}
                       onClick={publishPack}
@@ -478,7 +475,7 @@ export default function PackPage() {
               <div className="sx-pk-owner-row">
                 <Button disabled={busy !== ''} onClick={() => navigate('/packs/' + encodeURIComponent(pack.id) + '/edit')}>EDIT PACK</Button>
                 <Button
-                  className="sx-pk-danger"
+                  variant="danger"
                   disabled={busy !== ''}
                   onClick={() => { setDialogError(''); setDialog('delete'); }}
                 >
@@ -502,9 +499,10 @@ export default function PackPage() {
           </div>
 
           {!items.length ? (
-            <p className="sx-pk-empty" role="status">
-              This pack has no reels yet.{isOwner ? ' Use EDIT PACK to add some.' : ''}
-            </p>
+            <EmptyState
+              title="THIS PACK IS EMPTY"
+              text={'This pack has no reels yet.' + (isOwner ? ' Use EDIT PACK to add some.' : '')}
+            />
           ) : view === 'gallery' ? (
             <div className={gridClassName(density) + ' sx-pk-gallery'} aria-label="Reels in this pack">
               {items.map((item, index) => (
@@ -552,7 +550,7 @@ export default function PackPage() {
           {dialogError ? <div className="sx-pk-dialog-error" role="alert">{dialogError}</div> : null}
           <div className="sx-pk-dialog-actions">
             <Button onClick={() => setDialog('')} disabled={busy === 'delete'}>CANCEL</Button>
-            <Button className="sx-pk-danger" loading={busy === 'delete'} onClick={deletePack}>DELETE PACK</Button>
+            <Button variant="danger" loading={busy === 'delete'} onClick={deletePack}>DELETE PACK</Button>
           </div>
         </Dialog>
       ) : null}

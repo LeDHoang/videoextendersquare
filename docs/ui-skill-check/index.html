@@ -358,7 +358,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p>Changed: <code>webxr_vr.js</code> has a new <code>reelLoadState</code>, which runs every frame from the overlay refresh. A video reel whose element has a media error (or <code>NETWORK_NO_SOURCE</code>) turns <em>failed</em> once it has waited <code>FRESH_VISUAL_MAX_HOLD_MS</code> (2.5 s). A reel that is not ready, or that stalls mid-play, shows <em>loading</em> after 0.5 s. Stall tracking (<code>trackStalls</code>) is now bound by this check on every frame; only the diagnostics POST still needs <code>?xrdiag=1</code>.</p>
     <p><code>vr_ui_canvas.js</code> <code>renderOverlayCanvas</code> takes a <code>loadState</code>. When the reel has failed, it dims the whole frame (62% black) and draws "This reel couldn't load" with RETRY and SKIP buttons (220×72 px on the 1024 px overlay, roughly 18°×6° on the default screen). While loading, it draws a spinner and "Loading…" over the held frame. SKIP calls <code>onNext</code>. RETRY calls <code>load()</code> and then <code>play()</code> on the element. Both go through the existing pop-up-comment hit path, now <code>handleOverlayHit</code>.</p>
     <p>Checked: in a preview harness running the real engine, pointing the video at a missing file left the old frame for about 2.5 s, then showed the dimmed card below. The hit regions resolve to <code>load:skip</code> and <code>load:retry</code>. A new unit test, "fix26: a reel with a media error shows SKIP / RETRY after the hold", covers the timing.</p>
-    <p><strong>Not done:</strong> Not verified on a Quest. RETRY was checked by reading the code only. The overlay follows the existing overlay rules: it is hidden while the comments panel is open and when <code>?overlay=0</code> is set. The title row still shows the raw filename when a reel has no title.</p>
+    <p><strong>Not done:</strong> Not verified on a Quest. RETRY was checked by reading the code only. The overlay follows the existing overlay rules: it is hidden while the comments panel is open and when <code>?overlay=0</code> is set. The title row still shows the raw filename when a reel has no title. <strong>Update:</strong> kept on purpose: a post with no title is named by its file, and one with a title shows the title (fix <a href="#fix-55">55</a>).</p>
     <figure>
       <img src="img/fix26-load-error-after.jpg" alt="Desktop preview: the reel frame is dimmed, with the white text This reel couldn't load above a dark RETRY button and an orange SKIP button" loading="lazy">
       <figcaption>After: a reel whose file is missing, about 3.5 s after the switch (desktop preview harness, same engine).</figcaption>
@@ -709,7 +709,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-10">
   <h4>Fix 10 · Attempted fix · verified locally (Playwright keyboard checks on /reels at 1024×768 and 375×812, and /reels/immersive-preview at 1280×800)</h4>
   <p><code>ui/assets/reels.html</code>: closing the comments sheet now returns focus to whatever opened it, or to the Comments button if nothing did. This works with the close button and with Esc. Before the change, focus stayed on the hidden <code>#closeDrawerBtn</code> or <code>#commentInput</code>; now it lands on <code>#commentBtn</code>. Rail buttons went from 32px (34px in phone fullscreen) to 44px in every breakpoint, measured 44×44 at 1024px and 53×53 at 375px, where the rail is scaled 1.2×. In the More group on a phone, all 8 visible buttons still fit inside the frame. <code>web/src/components/ui/ReelsPlayer.jsx</code>: the hidden player mount behind the immersive preview uses <code>inert</code> instead of <code>aria-hidden</code>. Tabbing through the preview page went from 73 stops (20 inside the hidden mount) to 55 stops (0 inside). <code>web/src/styles/global.css</code>: the share dialog's × went from 19×13 to 44×44.</p>
-  <p>The share dialog already gave focus back to the Share button on close and on Esc before this change (from an earlier fix), so that part needed no edit. <strong>Not done:</strong> a keyboard path into the 3D preview canvas. The page-edge prev/next chevrons are still 32px. <strong>Since done:</strong> 44px in fix <a href="#fix-39">39</a>.</p>
+  <p>The share dialog already gave focus back to the Share button on close and on Esc before this change (from an earlier fix), so that part needed no edit. <strong>Not done:</strong> a keyboard path into the 3D preview canvas. The page-edge prev/next chevrons are still 32px. <strong>Since done:</strong> 44px in fix <a href="#fix-39">39</a>, keyboard path in fix <a href="#fix-54">54</a>.</p>
   <figure>
     <img src="img/fix10-focus-rail-after.jpg" alt="Reels player at 1024px after closing comments with Escape: the focus ring is on the Comments button in a rail of 44px buttons" loading="lazy">
     <figcaption>After: comments closed with Esc. Focus is back on the Comments button, and the rail buttons are 44px.</figcaption>
@@ -729,7 +729,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>768:</strong> they sit at the left edge, from x 10 to 54. The frame starts at x 65.</li>
     </ul>
     <p>On phones they stay hidden, as before, because phones navigate by swiping.</p>
-    <p><strong>Not done:</strong> a keyboard path into the 3D preview canvas.</p>
+    <p><strong>Not done:</strong> a keyboard path into the 3D preview canvas. <strong>Since done:</strong> fix <a href="#fix-54">54</a>.</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix39-edge-arrows-before-1280.jpg" alt="Docked gutter with the up and down arrows at 32px." loading="lazy" style="max-width:200px">
@@ -781,7 +781,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <h3><span class="chip">Low</span>Smaller player issues</h3>
     <dl>
       <dt>What</dt><dd><ul>
-        <li>No captions or caption track.</li>
+        <li>No captions or caption track. <strong>Since done:</strong> fix <a href="#fix-56">56</a>.</li>
         <li>Folder chips and raw filenames show as reel titles.</li>
         <li>More-menu items are labelled only by <code>title</code>.</li>
         <li>"SEND TO 0" is styled as a primary action while disabled in meaning.</li>
@@ -793,7 +793,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-12">
   <h4>Fix 12 · Attempted fix · verified locally (Playwright on /reels at 1024×768 with reducedMotion "reduce" vs "no-preference", and the share dialog)</h4>
   <p><code>web/src/styles/global.css</code>: "SEND TO 0" is now a plain outlined button (grey text, not-allowed cursor) while it is disabled. It gets the accent fill only once at least one person is selected. Measured background: <code>rgb(255,59,31)</code> before, transparent after. <code>ui/assets/reels.html</code>: with <code>prefers-reduced-motion: reduce</code>, <code>loadVideo</code> treats every load as <code>autoplay:false</code>, so reels and image dwell timers start paused and tap or Space plays them. This does not apply inside a WebXR session. Measured: with no preference the video was playing at 2.5s; with reduce it was paused at 0.00s, and Space started it.</p>
-  <p><strong>Not done:</strong> captions / a caption track; titles derived from folder chips and filenames; visible labels for the More-menu items, which are still icon-only with title and aria-label. Under reduced motion there is also no on-screen play hint (the player has no visible play button). Because the immersive preview reuses this player, its reel also starts paused when the OS asks for reduced motion. <strong>Since done:</strong> a PLAY button in fix <a href="#fix-46">46</a>.</p>
+  <p><strong>Not done:</strong> captions / a caption track; titles derived from folder chips and filenames; visible labels for the More-menu items, which are still icon-only with title and aria-label. Under reduced motion there is also no on-screen play hint (the player has no visible play button). Because the immersive preview reuses this player, its reel also starts paused when the OS asks for reduced motion. <strong>Since done:</strong> a PLAY button in fix <a href="#fix-46">46</a>, and auto captions in fix <a href="#fix-56">56</a>.</p>
   <figure>
     <img src="img/fix10-share-close-after.jpg" alt="Share dialog with nobody selected: SEND TO 0 is an outlined grey button, not the orange primary" loading="lazy">
     <figcaption>After: with nobody selected, "SEND TO 0" is an outlined grey button, not the primary.</figcaption>
@@ -809,7 +809,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
       <li><strong>Reduced motion off:</strong> the reel autoplays and no button shows.</li>
       <li><strong>Next reel:</strong> not seen live, because this local feed has one published reel. Every reel goes through the same <code>loadVideo</code> path, which sets the button for images and videos alike.</li>
     </ul>
-    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision. <strong>Since decided (yours):</strong> the rail and the More menu stay icon-only, and Enter VR joins the rail as an icon too (fix <a href="#fix-48">48</a>).</p>
+    <p><strong>Not done:</strong> captions; titles derived from filenames; and visible labels in the More menu. The CSS deliberately hides the rail labels ("Icon-only buttons"), and the 9-item More panel has no room for labels on a phone, so that needs a design decision. <strong>Since decided (yours):</strong> the rail and the More menu stay icon-only, and Enter VR joins the rail as an icon too (fix <a href="#fix-48">48</a>). Captions are done in fix <a href="#fix-56">56</a>.</p>
     <div class="shot-row">
       <figure>
         <img src="img/fix46-reduced-motion-play-before.jpg" alt="Player with reduced motion on, before: a still white frame and the rail, with no way to tell it is paused or how to play." loading="lazy">
@@ -1029,7 +1029,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 <section class="attempt" id="fix-18">
   <h4>Fix 18 · Attempted fix · verified locally (account menu and tab titles at 1280px; dev flag by unit test)</h4>
   <p><strong>Dev telemetry:</strong> <code>utils/devTools.js</code> already had a flag (<code>VITE_SX_HIDE_DEV_TOOLS</code>), but it was off unless set, and no deploy config set it. Production builds (<code>import.meta.env.PROD</code>) now hide the probe card and telemetry bar by default. <code>true</code> or <code>false</code> still forces either way, and dev and tests are unchanged. The "TELEMETRY / V2.0" subtitle in <code>Sidebar.jsx</code> is now behind the same flag. <code>devTools.test.js</code> gained a production-default case, and the flag's row in <code>RUNNING.md</code> was updated. <strong>Location title:</strong> <code>LocationExplorePage.jsx</code> sets the tab title from the place name, and the route fallback in <code>useDocumentTitle.js</code> no longer uses the slug. /explore/location/tokyo--japan now reads "Tokyo, Japan · ECHO" (it was "tokyo--japan"). <strong>Account menu:</strong> PROFILE, SAVED, SETTINGS, CREDITS / FAL KEY and STAFF are now <code>&lt;Link&gt;</code>s with real <code>href</code>s, so they can be opened in a new tab. LOG OUT stays a button (<code>HeaderBar.jsx</code>, popover CSS widened to <code>:is(a, button)</code>).</p>
-  <p><strong>Not done:</strong> one nav source shared by the header, drawer and sidebar. The header's CREDITS, UPLOAD and MESSAGES buttons still navigate with <code>navigate()</code>. Hiding the telemetry in production was checked by unit test, not in a production build. <strong>Since done:</strong> header links in fix <a href="#fix-35">35</a>, production build checked in fix <a href="#fix-42">42</a>.</p>
+  <p><strong>Not done:</strong> one nav source shared by the header, drawer and sidebar. The header's CREDITS, UPLOAD and MESSAGES buttons still navigate with <code>navigate()</code>. Hiding the telemetry in production was checked by unit test, not in a production build. <strong>Since done:</strong> header links in fix <a href="#fix-35">35</a>, production build checked in fix <a href="#fix-42">42</a>, one nav source in fix <a href="#fix-53">53</a>.</p>
   <figure>
     <img src="img/fix18-account-menu-after.jpg" alt="Account menu open under the avatar: PROFILE, SAVED, SETTINGS and CREDITS / FAL KEY rows, now links, above a LOG OUT button." loading="lazy" style="max-width:380px">
     <figcaption>After: account menu items that navigate are links.</figcaption>
@@ -1373,7 +1373,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     </ul>
     <p><strong>Also fixed:</strong> on tablet and phone, a <code>fill: currentColor</code> rule flooded the closed shapes of the outline icons, so the credit coin and the envelope showed as solid blobs (see the 768px "before"). The icons now keep their own outline colours. Only the red UPLOAD icon is recoloured, to the on-accent ink.</p>
     <p>Measured at 1280px: UPLOAD 88×36, credits 51×36, messages 36×36 with an 18×18 badge, then the avatar, in that order. A new test in <code>HeaderBar.test.jsx</code> checks the order (/upload, /wallet, /messages), that UPLOAD is not in the nav, and the two accessible names. The CSS for the old ghost text buttons is removed.</p>
-    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton). <strong>Since done:</strong> fix <a href="#fix-50">50</a> makes the hamburger plain, keeps the avatar accent (your choice), and takes COMPARE out of the nav.</p>
+    <p><strong>Not changed:</strong> at 390px and below the credits button is hidden, as before, to fit the search, upload and messages icons. The balance is still in the sidebar there. The hamburger and avatar are still accent-filled. The icon buttons are 36px, under the 44px target, like the other header icons (Phase 2 IconButton). <strong>Since done:</strong> fix <a href="#fix-50">50</a> makes the hamburger plain, keeps the avatar accent (your choice), and takes COMPARE out of the nav. Fix <a href="#fix-52">52</a> makes the header icon buttons 44px.</p>
     <figure>
       <img src="img/fix47-header-1280-before.jpg" alt="Header at 1280px before: nav REELS/VR, EXPLORE, UPLOAD, COMPARE; then 0 CREDITS outlined, UPLOAD filled, MESSAGES outlined with a 1 badge." loading="lazy">
       <figcaption>Before, 1280px: UPLOAD in the nav and as the button.</figcaption>
@@ -1404,7 +1404,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
     <p><strong>Fix:</strong> <code>AccountAvatar</code> in <code>HeaderBar.jsx</code> measures the initials' ink once the web font has loaded (canvas <code>measureText</code> at 100× size, so the bounds are precise to about 0.01px). It then shifts them by the difference, for example 0.32px right for "WE". The same avatar is used in the header search results, so those initials are centred too. In a browser without <code>document.fonts</code> nothing moves.</p>
     <p><strong>Measured</strong> on the rendered pixels, against the exact centre of the disc: "WE" and three other pairs that skew either way (LA, KW, JO) are all 0.00px off, horizontally and vertically, at 1x and 2x, at 1280 and 375px. Before, "WE" was 0.25–0.5px left in the same check. At 1280px the order is UPLOAD 88×36, credits 54×36, messages 36×36, then the avatar. The search box shifts left into the space COMPARE left. At 375px the credits button is still hidden, as before.</p>
     <p><strong>Tests:</strong> <code>HeaderBar.test.jsx</code> checks that the nav is exactly REELS/VR and EXPLORE. A new test fakes the font and the canvas measurement and checks that the initials shift by the measured amount (0.32px for "WE").</p>
-    <p><strong>Not changed:</strong> button sizes. The hamburger and the icon buttons are still under the 44px target (Phase 2 IconButton).</p>
+    <p><strong>Not changed:</strong> button sizes. The hamburger and the icon buttons are still under the 44px target (Phase 2 IconButton). <strong>Since done:</strong> 44px in fix <a href="#fix-52">52</a>.</p>
     <figure>
       <img src="img/fix50-header-1280-before.jpg" alt="Header at 1280px before: a red-filled hamburger, nav REELS/VR, EXPLORE, COMPARE, then UPLOAD, credits, messages and a red avatar circle with WE." loading="lazy">
       <figcaption>Before, 1280px: red hamburger, COMPARE in the nav.</figcaption>
@@ -1513,7 +1513,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 
   <section class="attempt" id="fix-33">
     <h4>Fix 33 · Not attempted · Phase 2 primitives</h4>
-    <p>The Button / IconButton / FormField primitives in the table below are a new component layer that every page would migrate to. This pass only made local fixes on the screens with findings (inline errors with <code>aria-describedby</code> and disabled-reason text on the forms; see the forms finding), without adding the shared primitives.</p>
+    <p>The Button / IconButton / FormField primitives in the table below are a new component layer that every page would migrate to. This pass only made local fixes on the screens with findings (inline errors with <code>aria-describedby</code> and disabled-reason text on the forms; see the forms finding), without adding the shared primitives. <strong>Since done:</strong> Dialog, IconButton, FormField and the Button's disabled reasons in fix <a href="#fix-52">52</a>.</p>
   </section>
 
 
@@ -1548,7 +1548,705 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 
   <section class="attempt" id="fix-34">
     <h4>Fix 34 · Not attempted · Phase 0 guardrails and Phase 1 codemod</h4>
-    <p>Still true at this commit: 163 <code>!important</code> in <code>global.css</code>. Replacing literals, unifying z-index and generating <code>tokens.py</code> are mechanical but large; they need the stylelint rules in place first so the count can only go down. The only token added in this pass is <code>--sx-focus-halo</code>, next to the existing <code>--sx-focus-ring</code> (see the focus-styles fix).</p>
+    <p>Still true at this commit: 163 <code>!important</code> in <code>global.css</code>. Replacing literals, unifying z-index and generating <code>tokens.py</code> are mechanical but large; they need the stylelint rules in place first so the count can only go down. The only token added in this pass is <code>--sx-focus-halo</code>, next to the existing <code>--sx-focus-ring</code> (see the focus-styles fix). <strong>Since done:</strong> the guardrails, the literal codemod and <code>tokens.py</code> in fix <a href="#fix-51">51</a>.</p>
+  </section>
+
+  <section class="attempt" id="fix-51">
+    <h4>Fix 51 · Follow-up fix · stylelint guardrails, token codemod, <code>tokens.py</code> read from CSS, verified locally (30 page captures at 1280 and 375px, compared pixel by pixel)</h4>
+    <p><strong>Guardrails.</strong> <code>web/stylelint.config.mjs</code> sets five rules for the CSS in <code>web/src</code>:</p>
+    <ul>
+      <li>no hex colours;</li>
+      <li>no <code>rgb()</code>, <code>rgba()</code>, <code>hsl()</code> or <code>hsla()</code> (colours come from <code>tokens.css</code>, which is exempt);</li>
+      <li>no <code>!important</code>;</li>
+      <li>no <code>outline: none</code> or <code>outline: 0</code>;</li>
+      <li>a z-index is either a <code>--sx-z-*</code> token, <code>auto</code>, or a single digit for stacking inside one component.</li>
+    </ul>
+    <p><code>global.css</code> broke these rules before they existed, so <code>web/tests/css-guardrails.test.js</code> runs stylelint on every <code>npm test</code> (and so in CI's <code>make test</code>) and compares each rule's count with a baseline:</p>
+    <ul>
+      <li>One more than the baseline fails, with the rule's name and the command that lists the findings (<code>npx stylelint "src/styles/global.css"</code>).</li>
+      <li>One fewer also fails, asking you to lower the baseline. So the numbers only go down.</li>
+      <li>A new CSS file starts at zero for every rule.</li>
+    </ul>
+    <p>The check takes about 0.2s. I proved it by adding <code>color: #fff !important; z-index: 1234</code> to <code>global.css</code>: the test failed on the first extra hex colour.</p>
+    <p><strong>Codemod.</strong> 69 colour literals in <code>global.css</code> were exactly equal to a token, and now use it:</p>
+    <ul>
+      <li>19 hex values became <code>var(--token)</code>, for example <code>#101214</code> → <code>var(--sx-surface)</code>.</li>
+      <li>10 <code>rgba()</code> values that match an alpha token became that token, for example <code>--sx-accent-dim</code>.</li>
+      <li>40 <code>rgba()</code> values are a solid token at another opacity. They became <code>color-mix(in srgb, var(--sx-accent) 22%, transparent)</code>, which the browser resolves to the same colour.</li>
+    </ul>
+    <p>Most were the accent (27). The codemod only swaps exact matches. Near misses stay as they are, because changing them would change pixels. It never edits <code>url()</code> data URIs.</p>
+    <p><strong>One catch, found by the pixel check.</strong> A gradient that contains a <code>color-mix()</code> stop blends in the oklab colour space instead of sRGB. Three gradients came out up to 2/255 different. They keep their <code>rgba()</code> stops, so nothing moves.</p>
+    <p><strong>z-index.</strong> The <code>var(--sx-z-drawer, 2000)</code> the audit flagged is now <code>var(--sx-z-drawer)</code>. The token is always defined (45), so the 2000 never applied; it only misled readers.</p>
+    <p><strong><code>ui/tokens.py</code></strong> (used by the Streamlit compare view) no longer keeps its own copy. It parses the <code>:root</code> block of <code>tokens.css</code> when it is imported and points each existing name at a token, for example <code>COLOR_ACCENT = TOKENS["--sx-accent"]</code>. The values it had drifted to now match the web app: the eyebrow size is 12px, not 11px, and the accent rule is 5px, not 6px.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Rule</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Why the rest stay</th></tr></thead>
+        <tbody>
+          <tr><td style="white-space:nowrap">Hex colours</td><td>72</td><td>53</td><td rowspan="2">37 are pure white or black. Black sits behind video and iframes. White is used for text over photos and video on Explore cards, the sidebar buttons' hover, the QR code's backing and some studio labels. Neither colour is a token (ink is <code>#f2f3f5</code>), so each one needs a choice: move to ink, which is a visible change, or add a media token. The rest are one-off shades with no token.</td></tr>
+          <tr><td style="white-space:nowrap"><code>rgb()</code>/<code>rgba()</code></td><td>98</td><td>48</td></tr>
+          <tr><td style="white-space:nowrap"><code>!important</code></td><td>163</td><td>163</td><td>Each one has to be checked against the specificity it fights, so none is mechanical.</td></tr>
+          <tr><td style="white-space:nowrap">z-index<br>off the scale</td><td>29</td><td>28</td><td>The share and pack dialogs sit under the 1000 top bar, while the phone tab bar is at 100000. That layering moves to one modal layer with the Dialog primitive, where it can be checked on screen. <strong>Since done:</strong> fix <a href="#fix-52">52</a>.</td></tr>
+          <tr><td style="white-space:nowrap"><code>outline: none</code></td><td>15</td><td>15</td><td>Audited in <a href="#fix-38">fix 38</a>: each one sits beside its own focus style.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>Verified:</strong></p>
+    <ul>
+      <li>13 pages (signed in, apart from /login), plus the open account menu and the open drawer, at 1280 and 375px. That is 30 PNGs: full pages, and the viewport for the two open states. Each was compared pixel by pixel with the same capture taken before the change.</li>
+      <li>Every capture is identical. Explore shuffles the order of its two reels between loads, so I repeated those captures until the order matched; then they were identical too.</li>
+      <li>Two "before" runs differ by 46 pixels on the 1280 drawer, which shows the noise floor.</li>
+      <li>The colour swaps that only show on hover (the logo glow, sidebar buttons) are exact by construction, so no screenshot can catch a difference there.</li>
+    </ul>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>css-guardrails.test.js</code> is the ratchet.</li>
+      <li><code>tests/test_ui_tokens.py</code> has three tests:
+        <ul>
+          <li>The values come from <code>tokens.css</code>: a comment after a value is ignored, and the 640px override of <code>--sx-header-h</code> does not win.</li>
+          <li>Every constant equals a token.</li>
+          <li>The module assigns nothing but <code>TOKENS[...]</code>. Pasting <code>"#f2c744"</code> back in fails, even though it is the right value.</li>
+        </ul>
+      </li>
+      <li>One older test matched <code>color: #f2f3f5</code> on the tab bar and now matches <code>var(--sx-ink)</code>, the same colour.</li>
+    </ul>
+    <p><strong>Not covered:</strong></p>
+    <ul>
+      <li>Inline <code>style</code> props in JSX.</li>
+      <li>The CSS inside <code>ui/assets/reels.html</code>. Its token block is already held to <code>tokens.css</code> by <code>echo-token-parity.test.js</code>; its rules are not linted.</li>
+      <li>The Streamlit app's <code>.streamlit/config.toml</code> and <code>ui/assets/app.css</code>, which cannot read CSS variables from another file and still repeat a few values by hand.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix51-sidebar-before.jpg" alt="The open sidebar at 1280px before the codemod: ECHO logo, the nav grid, the credits card with an orange MANAGE CREDITS button, and the live status card." loading="lazy">
+        <figcaption>Before, 1280px: the open sidebar, which uses many of the replaced colours.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix51-sidebar-after.jpg" alt="The same sidebar after the codemod, identical to the before image." loading="lazy">
+        <figcaption>After: the same pixels. 0 of the capture's 1,152,000 pixels differ.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="attempt" id="fix-52">
+    <h4>Fix 52 · Follow-up fix · Phase 2 primitives: Dialog, IconButton, FormField and the Button's disabled reasons, verified locally (five dialogs at 1280 and 375px, the header at nine widths, the blocked share button)</h4>
+    <p>Four shared components in <code>web/src/components/ui/</code>, with the screens that had their own copies moved onto them.</p>
+
+    <p><strong>Dialog</strong> (<code>Dialog.jsx</code>) is a native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>:</p>
+    <ul>
+      <li>It opens in the browser's top layer, so it sits above the 1000 top bar and the phone tab bar with no z-index. The page behind it is inert: Tab cannot reach it and screen readers do not read it.</li>
+      <li>On open, focus goes to the control marked <code>data-autofocus</code>. Without one, it goes to the first control that is not the close button, or to the close button if there is nothing else.</li>
+      <li>Escape, the browser's own close request and a press on the dimmed backdrop all call <code>onClose</code>. While the dialog is busy (a report being sent), none of them close it.</li>
+      <li>Tab wraps from the last control to the first and back. On close, focus returns to the button that opened it.</li>
+    </ul>
+    <p>The report dialog (so also the staff action and pack dialogs, which use it), share, followers/following, edit post and the delete-account confirmation now use it. The hand-written focus traps in the report and share dialogs are gone, and so are the z-index 1300 and 200 that kept the share and pack dialogs under the top bar.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Dialog</th><th scope="col">Before</th><th scope="col">After (1280 and 375px)</th></tr></thead>
+        <tbody>
+          <tr><td>Share</td><td>At 375px the top bar covered the title and the close button.</td><td rowspan="5">A native modal; focus starts inside; Tab escapes 0; Escape closes it and focus returns to the opener.</td></tr>
+          <tr><td>Edit post</td><td>Focus stayed on the EDIT button behind it. On 6 of 12 Tab presses, focus was outside the dialog. Escape did nothing.</td></tr>
+          <tr><td>Followers</td><td>Focus stayed on the FOLLOWERS stat. Outside on 11 of 12 Tab presses. Escape did nothing.</td></tr>
+          <tr><td>Delete account</td><td>Outside on 11 of 12 Tab presses. Escape did nothing.</td></tr>
+          <tr><td>Report</td><td>Already correct (it was the model for the primitive).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Each panel keeps its exact box: the same position and size at both widths, read from the page before and after.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix52-share-375-before.jpg" alt="Share dialog at 375px before: the ECHO top bar with its search, upload, messages and avatar buttons sits over the top of the dialog, hiding the SHARE REEL title and the close button." loading="lazy" style="max-width:340px">
+        <figcaption>Before, 375px: the top bar covers the dialog's title and close button.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix52-share-375-after.jpg" alt="The same share dialog after: SHARE REEL, the reel title and the close button are visible at the top; the top bar is behind the dim backdrop." loading="lazy" style="max-width:340px">
+        <figcaption>After: the dialog is above everything, close button included.</figcaption>
+      </figure>
+    </div>
+
+    <p><strong>IconButton</strong> (<code>IconButton.jsx</code>) needs a <code>label</code>, which is also its tooltip unless a <code>title</code> is given. It has three looks (outline, primary, plain) and can render a link (<code>as={NavLink}</code>). The box is 44px. Where a screen draws it smaller, an invisible <code>::after</code> still gives it a 44px hit area.</p>
+    <ul>
+      <li>All six header icon controls use it: hamburger, search, the phone search's back button, upload, messages and the account avatar. The UPLOAD and credits buttons and the search box are now 44px tall too.</li>
+      <li>From 641px up, every one is 44×44 (was 36–38px).</li>
+      <li>At 640px and below the boxes stay 38px, in the same places, so the bar still fits at 320px. Each has a 44px hit area there, checked at 640, 414, 390, 375, 360 and 320px. No width scrolls sideways.</li>
+      <li>The avatar picture is 40px inside the 44px button (was 32px).</li>
+      <li>The close buttons in the five dialogs above use it too. They keep their size on screen and gain the hit area.</li>
+    </ul>
+    <p>The 11 <code>!important</code> rules that used to size the phone header are replaced by two plain rules.</p>
+    <figure>
+      <img src="img/fix52-header-compare.jpg" alt="Header strips in pairs, before then after, at 1280, 768 and 375px. At 1280 and 768 the hamburger, upload, credits, messages and avatar buttons are visibly larger after. At 375 the two strips are the same." loading="lazy">
+      <figcaption>Each pair is before, then after, at 1280, 768 and 375px. At 375px nothing moves; only the tap areas grow.</figcaption>
+    </figure>
+
+    <p><strong>FormField</strong> (<code>FormField.jsx</code>) renders the label (with an optional note on the right), the control, an optional hint and an optional error. It links them for you:</p>
+    <ul>
+      <li>The label points at the control.</li>
+      <li>The control is described by the hint and the error.</li>
+      <li>The control is <code>aria-invalid</code> while there is an error.</li>
+    </ul>
+    <p>A control wrapped in other markup, such as an input with a SHOW button beside it, takes these props through a function. The support form, every field in profile settings and the wallet's Fal key now use it. Three hand-rolled copies are gone: the support form's <code>Field</code>, and settings' <code>FieldRow</code>, <code>FieldError</code> and <code>fieldErrorProps</code>. Two changes you can hear or see:</p>
+    <ul>
+      <li>The wallet's "Keys are at least 8 characters" hint was visible but not linked; the key field is now described by it.</li>
+      <li>In settings, the bio's error now shows under the preview or tip instead of between the box and the preview.</li>
+    </ul>
+
+    <p><strong>Button</strong> takes <code>disabledReasons</code>, a list of reasons it is blocked:</p>
+    <ul>
+      <li>The reasons show above the button, as the warning lines did before, and describe it.</li>
+      <li>A blocked button with reasons uses <code>aria-disabled</code> instead of <code>disabled</code>. So keyboard and screen-reader users can Tab to it and hear why, and a click does nothing.</li>
+      <li>With no reason listed, for example while a 3D job is running, it stays plainly disabled.</li>
+      <li>While <code>loading</code>, it is <code>aria-busy</code>.</li>
+    </ul>
+    <p>The Upload share and render buttons and the Image and Video render buttons use it. On /upload with the title cleared, Tab from the title used to go past SHARE REEL TO UPLOADS to the footer links. Now it stops on the button, which reads "TITLE IS REQUIRED BEFORE SHARING".</p>
+    <p>The button's 40% opacity also dims its focus ring: the accent ring drops to 1.7:1 against the page. A blocked button therefore gets an ink ring, which keeps 3.5:1 at that opacity.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix52-button-before.jpg" alt="Upload's SHARE section before: the warning TITLE IS REQUIRED BEFORE SHARING above a dimmed SHARE REEL TO UPLOADS button with no focus ring; keyboard focus has moved on to the footer." loading="lazy">
+        <figcaption>Before: after Tab from the title, focus skips the dimmed button.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix52-button-after.jpg" alt="The same section after: the same warning and dimmed button, now with a light grey focus ring around the button." loading="lazy">
+        <figcaption>After: the same look, with focus on the button and a ring that stays visible.</figcaption>
+      </figure>
+    </div>
+
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>Dialog.test.jsx</code> (8 tests): native modal, where focus starts, Escape, backdrop and cancel, busy, Tab wrapping, and focus return on close.</li>
+      <li><code>IconButton.test.jsx</code> (3): label and tooltip, variants, link mode.</li>
+      <li><code>FormField.test.jsx</code> (3): label, hint and error descriptions, <code>aria-invalid</code>, function children.</li>
+      <li><code>Button.test.jsx</code> (3): reasons describe a focusable blocked button that ignores clicks; with no reason it is plainly disabled; a reason appearing does not remount the button, so focus is kept.</li>
+      <li>New page tests:
+        <ul>
+          <li>The followers dialog closes on Escape and returns focus.</li>
+          <li>The delete-account confirmation opens on Cancel, Escape deletes nothing, and focus returns.</li>
+          <li>The wallet key is described by its hint.</li>
+          <li>The Upload share and render buttons are described by their reasons, and a click on a blocked share sends nothing.</li>
+        </ul>
+      </li>
+      <li>Results: 511 vitest, 466 node and 762 pytest tests pass, and the production build passes.</li>
+      <li>The stylelint ratchet goes down: <code>!important</code> 163 → 152, off-scale z-index 28 → 25, <code>outline: none</code> 15 → 14.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>Button <code>variant</code> and <code>size</code>.</strong> Merging <code>.sx-btn</code>, <code>.sx-pill</code> and the sidebar's primary button changes how every page looks, so it needs its own visual pass.</li>
+      <li><strong>The rest of Phase 2:</strong> Tabs, Chip, Toast and EmptyState. <strong>Since done:</strong> fixes <a href="#fix-72">72</a>–<a href="#fix-74">74</a>.</li>
+      <li><strong>The sidebar drawer as a Dialog.</strong> It is a navigation panel, and it moves with the single navigation source. <strong>Update:</strong> fix <a href="#fix-53">53</a> kept the drawer's own handling; see there for why.</li>
+      <li><strong>The sign-in forms' <code>AuthField</code> and the studio <code>Field</code>.</strong> Both already link their labels; their hints and errors are not on FormField yet.</li>
+      <li><strong>The credits pill on phones</strong> is still 38px tall.</li>
+      <li><strong>Hints outside a field are not linked to it:</strong> the Fal key's "Stored encrypted…" line and the password notes in settings.</li>
+      <li><strong>A global <code>.sx-primary</code> rule with <code>!important</code></strong> (from the messaging styles) fixes every primary button's colours, so the primary hover colour never shows. It was like this before; changing it changes every primary button.</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-53">
+    <h4>Fix 53 · Follow-up fix · One navigation source for the header, account menu, sidebar/drawer and phone tab bar, verified locally (all five places at 1280 and 375px, pixel-compared before and after)</h4>
+    <p>Before this, four places each had their own copy of the app's destinations:</p>
+    <ul>
+      <li>the header's REELS/VR and EXPLORE links and its upload, credits and messages buttons;</li>
+      <li>the account menu;</li>
+      <li>the sidebar, which is also the drawer below 900px;</li>
+      <li>the phone tab bar.</li>
+    </ul>
+    <p>The copies had drifted. The wallet was "CREDITS" in the sidebar, "CREDITS / FAL KEY" in the account menu and "Wallet" in the browser tab. Reels was "Reels/VR" everywhere except the tab bar, which screen readers read as "Reels".</p>
+    <p>Now <code>web/src/components/layout/nav.js</code> lists each destination once, with its path, its one label and its icon. Each place picks the ones it shows, in its own order:</p>
+    <ul>
+      <li><code>HEADER_NAV</code>: Reels/VR and Explore. The header's upload, credits and messages buttons read <code>NAV.upload</code>, <code>NAV.credits</code> and <code>NAV.messages</code>.</li>
+      <li><code>SIDEBAR_NAV</code>: the sidebar's eight tiles. Its own copy is gone.</li>
+      <li><code>BOTTOM_NAV</code>: the tab bar's four tabs. The avatar tab is still built in place, because it depends on who is signed in.</li>
+      <li><code>accountNav(user)</code>: Profile, Saved, Settings, Credits, and Staff for moderators.</li>
+    </ul>
+    <p>Labels are written once in sentence case. CSS draws them in capitals as before; the account menu gains <code>text-transform: uppercase</code> to keep its look. Screen readers hear "Reels/VR" and "Log out", not letters in capitals.</p>
+    <p><strong>What changes:</strong></p>
+    <ul>
+      <li>The account menu's "CREDITS / FAL KEY" is now "CREDITS". The wallet page holds both, and every other place calls it Credits.</li>
+      <li>The phone tab bar's Reels tab is named "Reels/VR". The tab is icon-only, so this changes what is read, not what is seen.</li>
+      <li>The browser tab on /wallet reads "Credits · ECHO" (was "Wallet"), matching the links and the page's ECHO CREDITS heading.</li>
+    </ul>
+    <p><strong>What stays the same:</strong> header, sidebar, drawer and tab bar are pixel-identical to before at 1280 and 375px (0 pixels differ). The account menu differs only in that one item.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix53-account-before.jpg" alt="Account menu before: @webfix908775, Web Fix, 0 CREDITS, then PROFILE, SAVED, SETTINGS, CREDITS / FAL KEY and LOG OUT." loading="lazy" style="max-width:340px">
+        <figcaption>Before: the wallet is "CREDITS / FAL KEY" here, and "CREDITS" everywhere else.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix53-account-after.jpg" alt="The same account menu after: PROFILE, SAVED, SETTINGS, CREDITS and LOG OUT, in the same capitals and spacing." loading="lazy" style="max-width:340px">
+        <figcaption>After: "CREDITS", like the sidebar and the header's credits button.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>nav.test.jsx</code> renders the header (account menu open, as a moderator), the sidebar and the tab bar together. It checks that every link to a destination has that destination's one label, that every destination can be reached from one of them, and that the account menu reads Profile, Saved, Settings, Credits, Staff.</li>
+      <li><code>HeaderBar.test.jsx</code> and <code>MobileBottomNav.test.jsx</code> are updated for the new names.</li>
+      <li>Results: 512 vitest and 466 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>The drawer as a Dialog.</strong> It keeps its own Escape, Tab and inert handling from fix <a href="#fix-18">18</a>, which leaves the header live so its menu button can close the drawer. A modal Dialog would make the header inert too, so the move needs its own design.</li>
+      <li><strong>The footer's legal links and the sidebar's billing card buttons</strong> are not destinations in the main navigation, so they are not in the list.</li>
+      <li><strong>Other browser-tab titles</strong> keep their own wording, for example /reels is still "Reels".</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-54">
+    <h4>Fix 54 · Follow-up fix · A keyboard path into the 3D preview canvas, verified locally (every key measured in the browser in headset, orbit and Earth views, before and after)</h4>
+    <p>On /reels/immersive-preview the 3D scene could already take focus (it is the 21st Tab stop), but once it had focus the keyboard could not move it:</p>
+    <ul>
+      <li>The arrow keys, <kbd>+</kbd> and <kbd>−</kbd> did nothing. The camera stayed at 0, 0.</li>
+      <li><kbd>Space</kbd> played and paused, and <kbd>M</kbd> turned the sound on and off. These keys belong to the hidden 2D player behind the scene, and nothing on the page mentioned them.</li>
+      <li>Screen readers announced the scene as an image, which tells the user there is nothing to operate.</li>
+    </ul>
+    <p>Looking around, orbiting, turning the Earth and zooming were mouse-only.</p>
+    <p><strong>What the keys do now</strong>, when the scene has focus (<code>previewKeyDown</code> in <code>ui/assets/webxr_vr.js</code>):</p>
+    <ul>
+      <li><strong>Arrows act like a short drag.</strong> The mouse drag and the arrows now share one function, so they cannot drift apart.
+        <ul>
+          <li>In HEADSET POV they look around, 0.18 rad per press.</li>
+          <li>In ORBIT INSPECT they orbit the same point the mouse orbits. The mouse drag moves the camera itself, so the arrows first read back where it left the camera. Without that, the first key press would jump the camera back to where it was before the drag.</li>
+          <li>On the Earth they turn the globe the way the arrow points, the same way a drag in that direction does. Zoomed in, they pan the map by the distance the headset thumbstick covers in a tenth of a second, because the globe does not turn when zoomed. <kbd>Shift</kbd>+arrow looks around instead, like Shift-drag.</li>
+        </ul>
+      </li>
+      <li><strong><kbd>+</kbd> and <kbd>−</kbd> zoom</strong> where the mouse wheel zooms: closer or further in ORBIT INSPECT, and one wheel step on the Earth. In HEADSET POV they do nothing, as the wheel does nothing there.</li>
+      <li><strong>Every other key goes on to the player's own shortcuts</strong>, so <kbd>Space</kbd>, <kbd>N</kbd>/<kbd>P</kbd>, <kbd>A</kbd>/<kbd>D</kbd> and <kbd>M</kbd> work as before. Keys held with Ctrl, Alt or Cmd are left alone, so browser shortcuts still work.</li>
+      <li><strong>Keys the scene handles go no further.</strong> The page does not scroll, and the player's own arrow shortcuts (previous/next and seek) do not fire as well.</li>
+      <li><strong>Tab still leaves the scene</strong>, so focus is never trapped.</li>
+    </ul>
+    <p>The scene is now announced as an application, so screen readers pass the keys through to it. A visible line under the scene lists the keys, and it is also the scene's accessible description: "KEYS ON THE SCENE: ARROWS LOOK, ORBIT OR TURN THE EARTH (SHIFT TO LOOK) · + / − ZOOM · SPACE PLAY · N / P NEXT, PREVIOUS · A / D SEEK · M SOUND".</p>
+    <p><strong>Measured in the browser at 1280px</strong>, with focus moved to the scene by Tab:</p>
+    <ul>
+      <li><strong>Headset:</strong> two presses of Left turned the view 0.18 and then 0.36 rad, Up tilted it 0.18, and Right and Down each took one step back. <kbd>Space</kbd> played and paused and <kbd>M</kbd> unmuted, as before. PageDown still scrolls the page; the scene does not use it.</li>
+      <li><strong>Orbit, after a mouse drag:</strong> each arrow continued from where the drag left the camera, for example from (−3.68, −0.52, 0.41) to (−3.33, −0.60, 0.81), with no jump. <kbd>+</kbd> moved closer and <kbd>−</kbd> further.</li>
+      <li><strong>Earth:</strong> Right turned the globe +0.12 per press, the same direction as a drag to the right. Down tilted it the way a downward drag does. <kbd>Shift</kbd>+Left looked around without turning the globe. <kbd>+</kbd> set the zoom target to 2.6 and <kbd>−</kbd> back to 1. Zoomed in over Tokyo, each arrow moved the map toward its own direction on screen.</li>
+      <li>Tab moved on to "▸ MORE CONTROLS". No page errors.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix54-keys-before.jpg" alt="The immersive preview with the scene focused after three presses of the Left arrow: the player panel still faces straight ahead, and under the scene there is only the mouse hint." loading="lazy">
+        <figcaption>Before: after three presses of Left, the view has not moved. Only the mouse is described.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix54-keys-after.jpg" alt="The same view after three presses of Left: the scene has turned left, so the player panel sits angled at the lower right, and a second line under the scene lists the keyboard keys." loading="lazy">
+        <figcaption>After: the same three presses turn the view. A second line lists the keys.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li><code>webxr-earth.test.js</code> gets four tests that drive the real scene code with key events:
+        <ul>
+          <li>Headset: the arrows look around; Space, K, N, M, + and − are passed on to the player; Ctrl+arrow is ignored.</li>
+          <li>Orbit: an arrow continues from a camera the mouse moved, by one step; + and − zoom and come back.</li>
+          <li>Earth: Right and Down turn the globe; Shift+Left looks without turning it; + then − returns the zoom to 1.</li>
+          <li>Zoomed Earth: each arrow moves the map toward its direction on screen.</li>
+        </ul>
+        Making the orbit read-back return early fails the orbit test, which shows the test covers it.
+      </li>
+      <li>New <code>ReelsPlayer.test.jsx</code>: the scene is a focusable application and is described by the page's key line.</li>
+      <li>Results: 513 vitest and 470 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>The buttons inside the scene</strong>: the player dock, the comments panel and the shell pages. Focus cannot move between them. Their main actions are reachable through the keys above, but buttons such as LIKE, SAVE and FOLLOW are not.</li>
+      <li><strong>Picking an Earth heat marker</strong>, to load its reels, still needs a click.</li>
+      <li><strong><kbd>C</kbd></strong> still opens the hidden 2D player's comments drawer, which cannot be seen in the preview. This was already the case.</li>
+      <li><strong>Two mouse quirks, already present, left as they were:</strong> a sideways wheel does nothing on a zoomed Earth, and in ORBIT INSPECT the wheel jumps the camera back after a drag.</li>
+      <li><strong>No test with a real screen reader.</strong> The role and description were checked in the browser and by test only.</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-55">
+    <h4>Fix 55 · Follow-up fix · A post's title replaces the file name wherever a reel is named, verified locally (/reels opened from Explore, the player's title, and the Explore tile)</h4>
+    <p>The rule you set: a reel is named by its file name by default, and when the post has a title, the title is shown instead.</p>
+    <p>An audit of every place a reel is named found the rule already holds in most of them: the player's title row and side panel, VR's title row and overlay, share cards, packs, and the Explore tile's label. Three places broke it:</p>
+    <ul>
+      <li><strong>/reels opened from Explore</strong> said "PLAYING white_frame_reel.mp4" while the player beside it showed the title OVEREXPOSED TEST FRAME.</li>
+      <li><strong>The player's title tooltip</strong>, shown on hover in fullscreen, gave the post's description. When the post had no description it gave the file name, even for a titled post. It now repeats the title, which is the full text when the row is cut off. The description is still shown in the side panel.</li>
+      <li><strong>An Explore tile whose video cannot play</strong> showed the file name under ▶. It now uses the tile's own label: the title, else the file name.</li>
+    </ul>
+    <p>A reel in a pack that has been removed now drops the previous reel's tooltip. Before, it kept it.</p>
+    <p>Measured in the browser, on the titled reel:</p>
+    <ul>
+      <li>/reels: "PLAYING white_frame_reel.mp4" became "PLAYING Overexposed test frame".</li>
+      <li>Tooltip: "Bright-frame legibility check for the overlay text" became "Overexposed test frame".</li>
+      <li>The untitled reel still reads "PLAYING bright_test_reel.mp4".</li>
+    </ul>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix55-title-before.jpg" alt="Top of /reels opened from Explore: the line reads OPENED FROM EXPLORE — PLAYING white_frame_reel.mp4 (1/2), while the side panel titles the reel OVEREXPOSED TEST FRAME." loading="lazy">
+        <figcaption>Before: the line names the file; the side panel names the post.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix55-title-after.jpg" alt="The same view after: the line reads OPENED FROM EXPLORE — PLAYING Overexposed test frame (1/2), matching the side panel." loading="lazy">
+        <figcaption>After: both name the post.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>reel-titles.test.js</code> reads the player, VR, Explore, pack and /reels code. It checks that every file name shown is the fallback after the post title, and that the tooltip repeats the title. It fails on the old code.</li>
+      <li><code>ExploreTile.test.jsx</code>: when neither the preview nor the original plays, the tile shows "Reel A", not "a.mp4". It fails on the old code.</li>
+      <li>Results: 514 vitest and 472 node tests pass, and the production build passes. No Python changed.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li><strong>Found while testing, not fixed:</strong> /reels?play= for a local file with no post can play a different reel than it names. The player builds its own For You feed, and when that feed is shorter than the page's list, the start position falls back to the first reel. Locally the line said "PLAYING bright_test_reel.mp4 (2/2)" while the overexposed reel played. Published posts open by post id, so they are not affected. This was already the case.</li>
+      <li>Upload drafts are still named by the file being uploaded, which is the right name before a post exists.</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-56">
+    <h4>Fix 56 · Follow-up fix · Auto captions: made when a video is published if the free speech model is installed, shown in the 2D player and in VR, verified locally with a hand-written caption file (the model could not be downloaded here)</h4>
+    <p>The rule you set: if a free speech-to-text model is available, use it to make captions when a video is published. If not, skip captions.</p>
+    <p><strong>At publish:</strong></p>
+    <ul>
+      <li>After the previews and the other files are built, the background worker checks whether the video has an audio track. If it does, faster-whisper transcribes it. This is the free, MIT-licensed Whisper "base" model, running on the server's CPU, and nothing is sent to an outside service. The captions are saved as <code>&lt;name&gt;.vtt</code> next to the video and uploaded with the other files.</li>
+      <li>Long speech is split at word timings into captions of at most 84 characters, which is two lines of 42.</li>
+      <li>If faster-whisper is not installed, or its model cannot load, the worker logs it once and the video publishes with no captions, as before. Like the MAKE 3D model, it is an opt-in install: <code>requirements-captions.txt</code>, described in RUNNING.md. It adds CTranslate2 and onnxruntime, and the first publish downloads about 150 MB of model weights.</li>
+      <li>Captions are made last, so a slow transcription never holds back the previews. If a transcription fails, the error is logged and counted with the other failed files, and the post stays up.</li>
+    </ul>
+    <p><strong>What viewers see:</strong></p>
+    <ul>
+      <li>The feed gives each video a <code>captions_url</code> when its captions exist and are newer than the video.</li>
+      <li><strong>2D player:</strong> the captions load as a hidden text track, and the player draws the current caption itself, centred low on the reel. The text is 16px semibold white on a near-black backing, so it reads on any frame, including the overexposed test reel below. It sits above the creator block and the pop-up comments and clear of the rail, at 1280 and 390 wide, in fullscreen, and full screen on a phone. It hides while the comments drawer covers the player.</li>
+      <li><strong>CC button:</strong> in the More menu after AUTO/LOOP, icon only like the other More items. It shows only on reels that have captions. Captions start on, and the browser remembers the choice.</li>
+      <li><strong>VR:</strong> the same caption is drawn on the reel's in-screen overlay, just above the dock in the default locked layout, and the pop-up comments move up above it. It follows the 2D CC switch and hides while the comments panel is open. The overlay texture is re-uploaded once per caption, not every frame.</li>
+    </ul>
+    <p>Why the player draws the captions itself: the browser's own captions sit at the bottom of the video, under the progress bar, the creator block and the comment pills, and their backing cannot be set to stay readable on a white frame. Burned-in captions would need a re-encode and could not be turned off.</p>
+    <p>No real transcription ran here: the model weights come from Hugging Face, which this environment cannot reach. The screenshots use a hand-written caption file for the overexposed test reel, with two captions, one containing "&amp;". It goes through the same feed field and player code.</p>
+    <p>Measured in Chromium on the overexposed test reel at 0:04, with two pop-up comments showing:</p>
+    <ul>
+      <li>390×844: the caption spans x 28–276 and y 563–633. The comments start at y 658 and the rail at x 306.</li>
+      <li>1280×800: the caption spans x 126–630 and y 611–632. The comments start at y 687 and the rail at x 695.</li>
+      <li>VR overlay, a 1024px square: the caption ends at y 584 (57%). With a two-line caption, the third comment ends 24px above it. With no caption, the comments stay centred.</li>
+    </ul>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-1280-before.jpg" alt="The reel frame at 1280 wide on a white frame at 0:04: no captions." loading="lazy">
+        <figcaption>Before, 1280: no captions.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-1280-after.jpg" alt="The same frame after: one caption line, white text on a near-black backing, centred low on the reel and clear of the rail." loading="lazy">
+        <figcaption>After, 1280: the caption reads on a white frame.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-390-before.jpg" alt="The reel at 390 wide at 0:04: the creator block and folder chip, no captions." loading="lazy">
+        <figcaption>Before, 390.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-390-after.jpg" alt="The same view after: a three-line caption above the creator block, clear of the rail." loading="lazy">
+        <figcaption>After, 390: above the creator block.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix56-390-pills.jpg" alt="At 390 wide with two pop-up comments showing: the caption sits above both comments and clear of the rail." loading="lazy">
+        <figcaption>With two pop-up comments: the caption sits above them.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-390-more.jpg" alt="The More menu open at 390 wide: the CC button is the third item, after AUTO, outlined in red because captions are on." loading="lazy">
+        <figcaption>The CC button in More, after AUTO, outlined red while on.</figcaption>
+      </figure>
+    </div>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix56-vr-before.jpg" alt="The immersive preview before: the white reel screen with the dock below and the controller guide to the right, no caption." loading="lazy">
+        <figcaption>Before, VR (immersive preview): no caption.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix56-vr-after.jpg" alt="The immersive preview after: a two-line caption on its dark backing sits on the reel just above the dock." loading="lazy">
+        <figcaption>After, VR: the caption sits on the reel just above the dock.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong></p>
+    <ul>
+      <li>New <code>tests/test_captions.py</code> (13 tests) covers:
+        <ul>
+          <li>WebVTT timing and escaping, and splitting at word timings;</li>
+          <li>audio detection with ffmpeg;</li>
+          <li>no file written when there is no model, no audio or no speech;</li>
+          <li>reusing fresh captions and redoing stale ones;</li>
+          <li>the model being off when it is not installed or its weights cannot load, and loading once on the CPU;</li>
+          <li>the feed linking fresh captions for videos only.</li>
+        </ul>
+      </li>
+      <li><code>tests/test_publish_background.py</code> adds three publish tests with a fake model:
+        <ul>
+          <li>captions are built last, uploaded as <code>text/vtt</code>, recorded, and in the feed;</li>
+          <li>with no model, the post publishes with no warning and no captions;</li>
+          <li>a failed transcription is logged and the post stays up.</li>
+        </ul>
+      </li>
+      <li>New <code>web/tests/reels-captions.test.js</code> (6 tests) runs the player's caption code against a fake video. It covers:
+        <ul>
+          <li>the track and the caption text;</li>
+          <li>a new track for each reel;</li>
+          <li>CC off applying to 2D and VR, and being remembered;</li>
+          <li>blocked storage;</li>
+          <li>the comments drawer;</li>
+          <li>the wiring.</li>
+        </ul>
+      </li>
+      <li><code>webxr-earth.test.js</code> adds two VR tests:
+        <ul>
+          <li>one upload per caption, and the caption hidden while the comments panel is open;</li>
+          <li>the caption's position, wrapping to at most three lines, and the comments moving up above it.</li>
+        </ul>
+        Both fail on the old VR code.</li>
+      <li>Results: 778 pytest tests pass (12 skipped). The 480 node and 514 vitest tests pass, and the production build passes.</li>
+    </ul>
+    <p><strong>Not done:</strong></p>
+    <ul>
+      <li>No real transcription ran, so accuracy, speed on the server's CPU and memory use are untested. The code follows faster-whisper 1.2's API and is tested with a fake model.</li>
+      <li>Videos published before this change have no captions, and there is no backfill job.</li>
+      <li>If the model fails to load, captions stay off until the server restarts. <strong>Since done:</strong> it is tried again after 10 minutes (fix <a href="#fix-64">64</a>).</li>
+      <li>The track has no language label. Whisper detects the language, but it is not stored.</li>
+      <li>Creators cannot edit their captions.</li>
+      <li>VR has no CC button of its own; it follows the 2D switch. The VR caption's position is set for the default locked layout, so in other layouts it may not sit just above the dock.</li>
+      <li>Packs built from the database fallback do not carry captions.</li>
+      <li>At 375×667 the More menu of a captioned reel is 12px too tall for the space, so it scrolls.</li>
+      <li>Moving from one reel to the next was not tried in the browser, because the local feed has one reel. The node test covers the track swap.</li>
+    </ul>
+  </section>
+
+  <section class="attempt" id="fix-57">
+    <h4>Fix 57 · Follow-up fix · A <code>?play=</code> deep link to a file with no post plays that file, verified locally (tests)</h4>
+    <p><code>/reels?play=&lt;path&gt;</code> sent the file's index in the page's <code>/api/reels</code> list as the player's start. The player builds its own feed from posts only, so a file with no post was never in it. The index was clamped and another reel started, while the page said "PLAYING &lt;file&gt;".</p>
+    <p>The page now sends the path as <code>play=</code>. <code>/player-inline</code> starts on that item when it is in the feed. When it is not, it loads the file from the media scan (hidden paths excluded), puts it first and starts there. <code>post=</code> and pack links are unchanged.</p>
+    <p><strong>Tests:</strong> <code>tests/test_recommendations.py</code> checks that <code>/player-inline</code> starts on a file that has no post. <code>ReelsPage.test.jsx</code> checks that the page sends the path, not an index.</p>
+    <p><strong>Not done:</strong> nothing left here. The page label this fix kept was removed in <a href="#fix-68">fix 68</a>.</p>
+  </section>
+
+  <section class="attempt" id="fix-58">
+    <h4>Fix 58 · Follow-up fix · Captions keep Whisper's own word spacing for Chinese, Japanese and Thai, verified locally (tests)</h4>
+    <p>Captions were made by joining Whisper's words with a space. Whisper already puts a leading space on each word in languages written with spaces (" Hello"), and none in Chinese, Japanese or Thai. So "曼谷很热" came out as "曼谷 很 热", and Thai words were split the same way.</p>
+    <p>Words are now joined as Whisper gives them. Only the start of each caption is trimmed. The 84-character limit counts the real text, with no extra space per word.</p>
+    <p><strong>Tests:</strong> <code>test_words_keep_whispers_own_spacing</code> covers Thai, Chinese and English.</p>
+    <p><strong>Not done:</strong> no real transcription in these languages was run.</p>
+  </section>
+
+  <section class="attempt" id="fix-59">
+    <h4>Fix 59 · Follow-up fix · Captions run on their own worker, so the next post's poster is not held up, verified locally (tests)</h4>
+    <p>Captions ran last on the one background worker that also builds posters and previews. A long reel, or the first download of the model weights, could take minutes, and every post published after it waited for its poster.</p>
+    <p>Captions now have a worker of their own. Server shutdown drains both workers, and a new server start reopens both.</p>
+    <p><strong>Tests:</strong> <code>tests/test_graceful_shutdown.py</code> holds a caption job open and checks that the next post's poster still runs. It also checks that shutdown lets the running job finish and drops the queued one, and that the next start reopens the worker. <code>tests/test_publish_background.py</code> waits for the captions worker.</p>
+    <p><strong>Not done:</strong> captions still run one at a time, so a queue of long videos gets its captions in turn.</p>
+  </section>
+
+  <section class="attempt" id="fix-60">
+    <h4>Fix 60 · Follow-up fix · The locked VR comments panel sits in front of the screen it covers, at the same size in view, verified locally (tests)</h4>
+    <p>Fix 25 swung the locked comments panel in to no more than 25° off straight ahead. Swung in, it overlaps the reel screen, but it stayed 3.8 m away, behind the screen at 2.24 m. So the screen hid the part of the panel it covered.</p>
+    <p>The panel now also moves toward the viewer until its inner edge is 0.1 m in front of the screen. It shrinks by the same factor, so it looks the same size as before.</p>
+    <p><strong>Tests:</strong> <code>web/tests/webxr-earth.test.js</code> checks that the panel's inner edge is 0.1 m in front of the screen plane, and that its width shrinks with its distance.</p>
+    <p><strong>Not done:</strong> not checked on the Quest. The panel still covers part of the reel; whether it should sit beside the dock instead needs a design call.</p>
+  </section>
+
+  <section class="attempt" id="fix-61">
+    <h4>Fix 61 · Follow-up fix · VR loading screen: no caption over "Loading…", and each reel waits from its own start, verified locally (tests)</h4>
+    <ul>
+      <li><strong>The caption covered the loading label.</strong> While a reel loaded, the overlay drew the "Loading…" label and the last caption. The caption's last line sat on top of the label. The caption is now hidden while the reel is loading or has failed.</li>
+      <li><strong>A failed reel passed its wait on to the next reel.</strong> The wait only reset when a reel became ready. After a reel that never loaded, the next reel began with the old wait already counted. It could show "Couldn't load" at once, without its own chance to load. The wait now resets when the video element or the reel changes, and on SKIP.</li>
+    </ul>
+    <p><strong>Tests:</strong> <code>web/tests/webxr-earth.test.js</code> adds a check that no caption is drawn while loading. It also adds "fix26: the next reel waits from its own start, not the failed reel's": after SKIP onto a reel that fails too, that reel gets its own 2.5-second wait before SKIP shows. Both fail on the old code.</p>
+    <p><strong>Not done:</strong> not checked on the Quest or in the immersive preview; the change is in the overlay drawing and the load-state timer, which the tests run directly.</p>
+  </section>
+
+  <section class="attempt" id="fix-62">
+    <h4>Fix 62 · Follow-up fix · The reduced-motion ▶ PLAY button keeps keyboard focus on the player, verified locally (tests)</h4>
+    <p>Under reduced motion the reel starts paused with a ▶ PLAY button (fix 46). Pressing it with Enter or Space hid the button while it had focus, so focus fell to the page body. A keyboard user lost their place. Focus now moves to the player before the button hides.</p>
+    <p><strong>Tests:</strong> <code>web/tests/reels-keyboard.test.js</code> presses PLAY with focus on it and checks that focus ends on the player. It fails on the old code.</p>
+    <p><strong>Not done:</strong> not tried in a browser with reduced motion on, or with a screen reader.</p>
+  </section>
+
+  <section class="attempt" id="fix-63">
+    <h4>Fix 63 · Follow-up fix · The <code>?play=</code> label reads "PLAYING &lt;title&gt;", with no Explore prefix and no counter, verified locally (390–420 wide)</h4>
+    <p>The label above the player read "OPENED FROM EXPLORE — PLAYING &lt;title&gt; (n/total)". The link is not always from Explore, and after fix 57 the count was the page's list, not the player's feed. It now reads "PLAYING &lt;title&gt;".</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix63-play-label-after.jpg" alt="Above the reel player, the label reads PLAYING Codec test H264 9.7MB, with no Explore prefix and no counter." loading="lazy">
+        <figcaption>After: "PLAYING Codec test H264 9.7MB".</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>ReelsPage.test.jsx</code> checks that neither the prefix nor the counter is shown. It fails on the old code.</p>
+    <p><strong>Not done:</strong> replaced by <a href="#fix-68">fix 68</a>, which removes the label.</p>
+  </section>
+
+  <section class="attempt" id="fix-64">
+    <h4>Fix 64 · Follow-up fix · A caption model that failed to load is tried again after 10 minutes, verified locally (tests)</h4>
+    <p>The caption model was loaded once and the result kept, including a failure. If the weights could not download the first time, for example while offline, captions stayed off until the server restarted.</p>
+    <p>A failed load is now kept for 10 minutes only. Publishes during that time skip captions without trying again. The first publish after it tries again, and a model that loads is kept.</p>
+    <p><strong>Tests:</strong> <code>test_a_failed_load_is_retried_after_a_cool_down</code> moves the clock forward and checks that there is no second try inside the 10 minutes, a second try after it, and that the model is then kept. All 25 caption tests pass.</p>
+    <p><strong>Not done:</strong> a real download that fails and then works was not tried.</p>
+  </section>
+
+  <section class="attempt" id="fix-65">
+    <h4>Fix 65 · Follow-up fix · The credits pill's tap area stays 44px tall on phones; wallet dead conditions removed, verified locally (420 wide)</h4>
+    <p>On phones the header's credits pill shrinks to 38px. Its neighbours, the icon buttons, keep a 44px tap area with an invisible layer, but the pill did not. It now has the same layer, so its tap area is 44px tall like theirs. It looks the same.</p>
+    <p>Checked in the browser at 420 wide: the layer reaches 3px above and below the pill. A press 2px outside the pill's edge hits it, and a press 4px outside does not.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix65-pill-hit-before.jpg" alt="The phone header with dashed outlines on each tap area: the credits pill's outline is shorter than the icon buttons' on either side." loading="lazy">
+        <figcaption>Before: the pill's tap area (dashed) is 38px, shorter than its neighbours.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix65-pill-hit-after.jpg" alt="The same header: the credits pill's dashed tap area is now as tall as the icon buttons' on either side." loading="lazy">
+        <figcaption>After: 44px, the same as the icon buttons.</figcaption>
+      </figure>
+    </div>
+    <p>The wallet's pack buttons also checked <code>creditsReady</code>, which is always true where the packs are shown. The check is removed. The behaviour is the same.</p>
+    <p><strong>Tests:</strong> the 28 WalletPage tests pass. The tap area was checked in the browser only.</p>
+    <p><strong>Not done:</strong> not tried on a real touch phone.</p>
+  </section>
+
+  <section class="attempt" id="fix-66">
+    <h4>Fix 66 · Follow-up fix · Dialog: Escape inside a dropdown, a press on the scrollbar, and page titles for deeper paths, verified locally (tests and 1280 wide)</h4>
+    <ul>
+      <li><strong>Escape in an open dropdown closed the whole dialog.</strong> The Dropdown now marks Escape as handled, and the Dialog ignores an Escape that a control inside has handled. The first Escape closes the dropdown, and the second closes the dialog.</li>
+      <li><strong>A press on the backdrop's scrollbar closed the dialog.</strong> On a short screen a tall dialog scrolls its backdrop. Dragging that scrollbar counted as a press outside the dialog. The Dialog now ignores a press on the scrollbar.</li>
+      <li><strong>A caller's props could replace the Dialog's own handlers.</strong> The Dialog's <code>onCancel</code> and <code>onMouseDown</code> now come after the caller's props, so they cannot be overridden.</li>
+      <li><strong>Page titles for deeper paths.</strong> <code>/profile/pixelnomad/extra</code> showed "@pixelnomad" over the 404 page. Each route now matches its exact depth, and anything deeper is titled "Page not found".</li>
+    </ul>
+    <p>Checked in the browser on <code>/profile/pixelnomad</code>: the report dialog opens with focus on the reason. Escape closes it and focus returns to REPORT. A press on the backdrop closes it. <code>/profile/pixelnomad/extra</code> is titled "Page not found · ECHO".</p>
+    <p><strong>Tests:</strong> <code>Dialog.test.jsx</code> adds "Escape handled inside" and "a press on the scrollbar". <code>useDocumentTitle.test.js</code> adds the deeper paths. All three fail on the old code.</p>
+    <p><strong>Not done:</strong> the scrollbar case was not tried in the browser, because macOS shows overlay scrollbars. It is covered by the test.</p>
+  </section>
+
+  <section class="attempt" id="fix-67">
+    <h4>Fix 67 · Follow-up fix · Font sizes on the type tokens, and the stylelint gaps closed, verified locally (tests)</h4>
+    <ul>
+      <li><strong>Font sizes:</strong> every <code>font-size</code> of 0.8rem, 0.8667rem or 0.8125rem in <code>global.css</code> now uses <code>--sx-t-eyebrow</code>, <code>--sx-t-small</code> or <code>--sx-t-mono</code>. The values are the same, so nothing moves. The same goes for the inline 0.8rem in the sidebar, the custom model panel and the compare page. Shorthand <code>font:</code> values are left as they are.</li>
+      <li><strong>Stylelint:</strong> the guardrail let through named colours (<code>red</code>), the newer colour functions (<code>oklch()</code> and others), and <code>outline: 0px</code>. All three are now caught outside <code>tokens.css</code>. The baseline counts are unchanged, so no existing code is flagged.</li>
+    </ul>
+    <p><strong>Tests:</strong> <code>web/tests/css-guardrails.test.js</code> lints a sample with each of the three and expects each to be caught. It fails on the old config.</p>
+    <p><strong>Results for fixes 61–67:</strong> 784 pytest tests pass (12 skipped). The 483 node and 517 vitest tests pass. One UploadPage test ("sends every video setting…") takes about 5 seconds and once timed out under load; it passes on its own and in the full run.</p>
+    <p><strong>Not done:</strong> font sizes set with the <code>font:</code> shorthand still use literals.</p>
+  </section>
+
+  <section class="attempt" id="fix-68">
+    <h4>Fix 68 · Follow-up fix · No "PLAYING &lt;title&gt;" label above the player on a <code>?play=</code> link, verified locally (375 wide and desktop)</h4>
+    <p>The label from <a href="#fix-63">fix 63</a> repeated the title the player already shows, and it took space above the player. It is removed. A <code>?play=</code> link still starts the player on that file (<a href="#fix-57">fix 57</a>).</p>
+    <p><strong>Tests:</strong> <code>ReelsPage.test.jsx</code> checks that the player is sent the path and that no "PLAYING" text is shown.</p>
+    <p><strong>Not done:</strong> nothing.</p>
+  </section>
+
+  <section class="attempt" id="fix-69">
+    <h4>Fix 69 · Follow-up fix · In fullscreen and on phones, the time readout sits under the action rail with a gap, verified locally (375 wide)</h4>
+    <p>In fullscreen the action rail ends 36px above the bottom, and the time readout ("0:01 / 0:02") filled the 14–36px band under it. The two touched with no gap, and the readout looked big next to the rail.</p>
+    <p>In fullscreen the readout is now 11px instead of 12px, with less padding and no letter spacing. It sits 10px from the bottom, lined up with the rail's right edge. Measured at 375 wide: an 8px gap under the rail, and the readout is 83px wide instead of 97px. It still clears the progress bar. Outside fullscreen nothing changes.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix69-time-before.jpg" alt="Bottom right of the phone player: the time readout touches the bottom of the action rail." loading="lazy">
+        <figcaption>Before: the readout touches the rail.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix69-time-after.jpg" alt="The same corner: a smaller time readout with a gap under the action rail." loading="lazy">
+        <figcaption>After: smaller, with an 8px gap.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>web/tests/reels-docked-column.test.js</code> reads the two fullscreen rules and checks that the readout's top ends at least 6px below the rail. It fails on the old values.</p>
+    <p><strong>Not done:</strong> not tried on a real phone with a home-indicator inset; the rule uses the same inset as the rail.</p>
+  </section>
+
+  <section class="attempt" id="fix-70">
+    <h4>Fix 70 · Follow-up fix · Feed reels no longer show their folder chip; packs keep "PACK n OF m", verified locally (375 wide)</h4>
+    <p>Every reel showed a "📁 OUTPUT/UPLOADS" chip above the creator line. The folder is a storage detail, not something a viewer needs, and the chip took a row of space. It is now hidden for feed reels. In a reel pack the same chip shows the place in the pack ("▦ PACK 1 OF 3"), so it stays there.</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix68-phone-after.jpg" alt="The phone player after fixes 68 to 70: no label above the player, no folder chip above the creator line, and a small time readout under the action rail." loading="lazy" style="max-width:375px">
+        <figcaption>After fixes 68–70 at 375 wide: no PLAYING label, no folder chip, and the time readout clear of the rail.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser: on a <code>?play=</code> link the chip is hidden. On a pack (CYBERPUNK SPATIAL MASTERS, ▶ PLAY COLLECTION) it shows "▦ PACK 1 OF 3".</p>
+    <p><strong>Tests:</strong> <code>web/tests/reels-docked-column.test.js</code> checks that the chip starts hidden, that only pack mode shows it, and that no folder text is set. <strong>Results for fixes 68–70:</strong> 784 pytest tests pass (12 skipped). The 485 node and 517 vitest tests pass.</p>
+    <p><strong>Not done:</strong> nothing. The /reels page's folder filter is unchanged.</p>
+  </section>
+
+  <section class="attempt" id="fix-71">
+    <h4>Fix 71 · Follow-up fix · Auto captions checked on real speech: the model loads, a real clip is captioned, and older videos can be backfilled (verified locally)</h4>
+    <p>The speech model could not be downloaded when <a href="#fix-56">fix 56</a> shipped. With it installed, a real clip ("reef square" in the dev library) was transcribed and the captions showed in the player. Three things came out of that check:</p>
+    <ul>
+      <li><strong>Every transcription failed.</strong> The newest PyAV dropped an argument that faster-whisper passes when it decodes audio, so each call raised <code>TypeError</code>. <code>requirements-captions.txt</code> now pins <code>av&lt;19</code>.</li>
+      <li><strong>A last word could flash alone.</strong> Whisper heard one 89-character segment; the 84-character limit left "they" as its own cue. Long segments now split into cues of about even length (89 characters become 51 and 35).</li>
+      <li><strong>Older videos had no captions.</strong> <code>scripts/batch_backfill_captions.py</code> captions every published video that has none, one after another, and skips those already done.</li>
+    </ul>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix71-speech-captions.jpg" alt="The reef square clip playing with a two-line caption of the speech at the bottom of the player." loading="lazy" style="max-width:375px">
+        <figcaption>A caption made from real speech.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>tests/test_captions.py</code> adds the split case and updates the long-segment case; <code>tests/test_graceful_shutdown.py</code> adds the backfill test (older videos captioned once, finished ones skipped).</p>
+    <p><strong>Not done:</strong> the backfill has not been run on the whole library, and a video with no speech is transcribed again on each run, since nothing marks it as checked.</p>
+  </section>
+
+  <section class="attempt" id="fix-72">
+    <h4>Fix 72 · Follow-up fix · Phase 2: Button has <code>variant</code>, <code>size</code> and <code>as</code>, and replaces the sidebar's own buttons, verified locally (1280 wide)</h4>
+    <p>The Button now takes <code>variant</code> (<code>secondary</code>, <code>primary</code>, <code>danger</code>), <code>size</code> (<code>sm</code> 34px, <code>md</code> 38px, <code>lg</code> 44px) and <code>as</code>, so a link can look like a button (the 404 page's two actions). The old boolean <code>primary</code> is gone; the dozen places that used it moved to <code>variant</code>. It had also been reaching the DOM as an unknown attribute, which React warned about.</p>
+    <p>The sidebar's model settings had their own two button styles (<code>.sx-sidebar-btn-primary</code>, <code>.sx-sidebar-btn-secondary</code>, about 60 lines). RESET and SAVE are now a Button each, and those rules are deleted. They are square with the same hover as every other button. Compare's two hand-sized buttons use <code>size="sm"</code> instead of inline heights.</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix72-sidebar-before.png" alt="The sidebar model settings before: rounded RESET and SAVE buttons in a style used nowhere else." loading="lazy">
+        <figcaption>Before: a third button style.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix72-sidebar-after.png" alt="The sidebar model settings after: square RESET and SAVE buttons that match the rest of the app." loading="lazy">
+        <figcaption>After: the shared Button, 38px tall.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser: primary SAVE is 38px tall with square corners and its hover is the lighter accent. The global <code>.sx-primary</code> rule is now scoped to raw buttons so it no longer fights the Button's own.</p>
+    <p><strong>Tests:</strong> <code>Button.test.jsx</code> checks the variant and size classes and that <code>as={Link}</code> renders a link with its href, the Button class and no <code>type</code>.</p>
+    <p><strong>Not done:</strong> the <code>.sx-pill</code> filter chips stay their own component (see fix 73), and a few raw <code>.sx-btn</code> buttons in pages not touched here were not moved.</p>
+  </section>
+
+  <section class="attempt" id="fix-73">
+    <h4>Fix 73 · Follow-up fix · Phase 2: Tabs and Chip with roving focus, and a Toast for "it worked" notes, verified locally (1280 and 375 wide)</h4>
+    <p><strong>Roving focus.</strong> The segmented controls, pills and the Explore tabs were a Tab stop each. They now follow the WAI-ARIA pattern: Tab enters the group once, on the selected option (or the first enabled one); the arrows, Home and End move to the next enabled option and select it. This is one small helper, <code>roving.js</code>, used by Tabs, the segmented control, the pills and the Explore tab rows. A new <code>Tabs</code> component replaces the hand-built tab list in messaging. On a profile, ArrowRight moved focus and selection to REELS, the URL became <code>?tab=video</code>, and only one tab had <code>tabIndex 0</code>.</p>
+    <p><strong>Toast.</strong> "Link copied." and "Report submitted." used a notice banner that pushed the page down (profile, pack) and a share button that changed its own label. Both now call <code>toast(message)</code>: one note at the bottom of the screen for 4 seconds, in an <code>aria-live="polite"</code> region that is always on the page. A new message replaces the old one. Errors are not toasts; they stay inline with <code>role="alert"</code> next to what failed. On phones the toast sits above the tab bar and above the MESSAGE button (the first version covered it).</p>
+    <div class="shot-row">
+      <figure>
+        <img src="img/fix73-toast-desktop.png" alt="Profile page at 1280 wide with a Link copied note at the bottom centre." loading="lazy">
+        <figcaption>1280 wide.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/fix73-toast-phone.jpg" alt="Profile page at 375 wide with a Link copied note above the MESSAGE button." loading="lazy" style="max-width:375px">
+        <figcaption>375 wide: clear of the MESSAGE button.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Tests:</strong> <code>roving.test.jsx</code> (4: Tabs arrows, Home, End and a single tab stop; pills ignore Enter; a disabled option is skipped; the stop falls on the first enabled option with nothing selected) and <code>Toast.test.jsx</code> (3: the live region is always there and the note leaves after 4 seconds; a new note replaces the old one and restarts the timer; no provider means no effect). The profile and pack tests now render inside a <code>ToastProvider</code>.</p>
+    <p><strong>Not done:</strong> the toast has no close button or undo; it is for short confirmations only. Other success banners (for example in the studio) were not moved.</p>
+  </section>
+
+  <section class="attempt" id="fix-74">
+    <h4>Fix 74 · Follow-up fix · Phase 2: EmptyState used for the empty pack, and its hints now say something a viewer can use, verified locally (375 wide)</h4>
+    <p>EmptyState already existed; two things were off around it. An empty pack still used its own paragraph style, and some hints were debug text. The empty pack is now an EmptyState ("THIS PACK IS EMPTY", with "Use EDIT PACK to add some." for the owner), and the hint has its own style. The /reels empty state no longer prints <code>folder="…" codec=…</code>. Explore, tag and place searches say what the match rule is ("Tags match exactly, ignoring case and punctuation.").</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix74-empty-notfound.jpg" alt="The 404 page at 375 wide: a title, one line of explanation, the address, and two actions." loading="lazy" style="max-width:375px">
+        <figcaption>The 404 page: title, text, address as the hint, two Button links.</figcaption>
+      </figure>
+    </div>
+    <p><strong>Kept on purpose:</strong> the small "nothing here" rows inside narrow lists (messages, a picker list, the command palette). They are one line in a panel, and a title plus action would not fit.</p>
+    <p><strong>Tests:</strong> the pack test now looks for "This pack has no reels yet." <strong>Results for fixes 71–74:</strong> 786 pytest tests pass (12 skipped), 485 node and 526 vitest. The CSS guardrail baselines were lowered (hex colours 53 to 49, <code>!important</code> 152 to 150, disallowed functions 48 to 47) because the deleted sidebar rules removed those findings, and the 3D-filter source test now looks for the Button's <code>variant</code>.</p>
+    <p><strong>Not done:</strong> the empty pack's EmptyState was checked in the test, not in the browser.</p>
+  </section>
+
+  <section class="attempt" id="fix-75">
+    <h4>Fix 75 · Follow-up fix · The profile's four stats are one line of "number label", not boxes, verified locally (375 wide)</h4>
+    <p>FOLLOWERS, FOLLOWING, LIKES and POSTS were four boxes: two rows on a phone, about 136px tall. They are now one borderless line under a thin rule, each stat read as "0 FOLLOWERS": the number in the display font, then its label in small mono type. LIKES keeps the accent colour. FOLLOWERS and FOLLOWING are still buttons; the number and label both turn bright on hover. The line is about 43px tall on a phone and the same line on wider screens, so the hero card is shorter everywhere.</p>
+    <div class="shot-row" style="grid-template-columns:minmax(0,1fr)">
+      <figure>
+        <img src="img/fix75-profile-stats-phone.png" alt="The profile stats on a phone as one line: 0 followers, 0 following, 0 likes, 1 posts." loading="lazy" style="max-width:375px">
+        <figcaption>375 wide: all four stats on one line, no boxes.</figcaption>
+      </figure>
+    </div>
+    <p>Checked in the browser at 375: all four sit on one row inside the card with no horizontal scroll. On phones the gap and label spacing are tighter, because the first version wrapped POSTS alone onto a second row. I also removed a leftover duplicate <code>.sx-pf-stat-value</code> rule and the unused <code>--lead</code> class.</p>
+    <p><strong>Not done:</strong> hover and keyboard focus on the two buttons were not re-tested after the restyle. With 4-digit counts (tested by swapping in "12.4K", "3,210", "98.7K", "1,204") the line wraps to two rows of two, with no overflow; it was not tuned further.</p>
+  </section>
+
+  <section class="attempt" id="fix-76">
+    <h4>Fix 76 · Follow-up fix · One SIGN UP / SIGN IN action before login, and a smaller time readout, verified locally</h4>
+    <p><strong>Header before login:</strong> UPLOAD and SIGN IN sat side by side at different heights (44px and 38px), and uploading needs an account anyway. Signed out, the header now has one filled action in the old UPLOAD style, labelled <code>SIGN UP / SIGN IN</code>. It opens the sign-up page (with the tabs to switch to sign in) and returns to the current page afterwards. Signed in, nothing changes. On a phone the label wraps to two lines in a 38px button so the bar still fits 375 wide (no horizontal scroll). The old <code>.sx-account-signin</code> styles are deleted.</p>
+    <p><strong>Time readout in the docked reel player:</strong> the <code>0:12 / 0:30</code> chip went from 12px to 11px with less padding and no letter spacing, the same as in fullscreen.</p>
+    <p><strong>Checked:</strong> at 1280 the button is 162 by 44px; at 375 it is 82 by 38px. I could not get a real signed-out session in the browser, so I measured a copy of the button placed in the header. The header test now expects the single action and no Upload. Results: 485 node and 526 vitest pass.</p>
+    <p><strong>Not done:</strong> the sign-up page after clicking was not walked through in the browser, and the time readout was not seen on a video reel (the page showed an image post).</p>
   </section>
 
 </section>
@@ -1594,23 +2292,22 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 </section>
 
 <section id="open" aria-labelledby="open-h">
-  <h2 id="open-h">Still open<small>After fix 50. Each item says why it is not done.</small></h2>
+  <h2 id="open-h">Still open<small>After fix 75. Each item says why it is not done.</small></h2>
   <div class="cols">
     <div class="box">
       <h3>Needs the headset</h3>
       <ul>
         <li><strong>UI depth and the head-locked 89° screen</strong> (<a href="#fix-29">fix 29</a>, <a href="#fix-30">30</a>). Proposed changes are written up but not made.</li>
         <li><strong>A check on device of fixes 24–28</strong>, including flashes after hand tracking was requested (<a href="#fix-27">fix 27</a>).</li>
+        <li><strong>A check on device of fixes 60 and 61</strong>: the comments panel in front of the screen, and the VR loading screen.</li>
+        <li><strong>Where the locked comments panel should sit</strong> (<a href="#fix-60">fix 60</a>): it now sits in front of the screen, but it still covers part of the reel. Moving it beside the dock instead is a design call.</li>
       </ul>
     </div>
     <div class="box">
       <h3>Larger pieces of work</h3>
       <ul>
-        <li>The shared Dialog, Button, IconButton and FormField primitives (Phase 2). These would also bring the header icon buttons from 36–38px to 44px.</li>
-        <li>Captions or a caption track for reels, and titles that do not come from file names.</li>
-        <li>One navigation source for the header, drawer and sidebar.</li>
-        <li>A keyboard path into the 3D preview canvas.</li>
-        <li>Stylelint guardrails and the token codemod (<a href="#fix-34">fix 34</a>).</li>
+        <li><strong>Phase 2 follow-ups:</strong> a few raw <code>.sx-btn</code> buttons in pages not touched yet, and success banners outside profile and pack (for example in the studio), still need moving onto Button and Toast (<a href="#fix-72">fix 72</a>, <a href="#fix-73">73</a>).</li>
+        <li><strong>Backfill of older videos' captions</strong> (<a href="#fix-71">fix 71</a>): the script is written and tested but not yet run on the whole library. Run <code>.venv/bin/python scripts/batch_backfill_captions.py</code>.</li>
       </ul>
     </div>
     <div class="box">
@@ -1621,6 +2318,7 @@ td.old { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
         <li><strong>The "Stripe checkout is disabled" banner:</strong> it only shows when credits are on and Stripe is off, which is not the beta setup.</li>
         <li><strong>"Layout gaps at 375px":</strong> the audit did not record which gaps, so it needs a fresh look.</li>
         <li><strong>The /reels status strip</strong> still shows "CODEC: HEVC" and "H.264 PROXIES" (<a href="#fix-37">fix 37</a>).</li>
+        <li><strong>The colour literals and <code>!important</code> left after the codemod</strong> (<a href="#fix-51">fix 51</a>): each needs a design or specificity decision. The guardrail stops new ones.</li>
       </ul>
     </div>
   </div>

@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Emoji from '../ui/Emoji.jsx';
+import { onRovingKeyDown, tabStop } from '../ui/roving.js';
 
 /*
  * Shared "Explore chrome" — the header, telemetry strip, chip row and toolbar
@@ -132,14 +133,16 @@ export function Toolbar({ children, filters }) {
 
 /* tabs: [{ label, value, count }] */
 export function TabGroup({ tabs, value, onChange, ariaLabel }) {
+  const stop = tabStop(tabs.map((tab) => tab.value === value));
   return (
-    <div className="sx-xh-tabs" role="radiogroup" aria-label={ariaLabel}>
-      {tabs.map((tab) => (
+    <div className="sx-xh-tabs" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
+      {tabs.map((tab, index) => (
         <button
           type="button"
           key={tab.value}
           role="radio"
           aria-checked={tab.value === value}
+          tabIndex={index === stop ? 0 : -1}
           className={'sx-xh-tab' + (tab.value === value ? ' sx-xh-tab--on' : '')}
           onClick={() => onChange(tab.value)}
         >
@@ -151,16 +154,18 @@ export function TabGroup({ tabs, value, onChange, ariaLabel }) {
 }
 
 export function Segmented({ label, options, value, onChange, ariaLabel }) {
+  const stop = tabStop(options.map((opt) => opt.value === value));
   return (
     <div className="sx-xh-ctl">
       {label ? <span className="sx-xh-ctl-label">{label}</span> : null}
-      <div className="sx-xh-seg" role="radiogroup" aria-label={ariaLabel || label}>
-        {options.map((opt) => (
+      <div className="sx-xh-seg" role="radiogroup" aria-label={ariaLabel || label} onKeyDown={onRovingKeyDown}>
+        {options.map((opt, index) => (
           <button
             type="button"
             key={opt.value}
             role="radio"
             aria-checked={opt.value === value}
+            tabIndex={index === stop ? 0 : -1}
             className={'sx-xh-seg-btn' + (opt.value === value ? ' sx-xh-seg-btn--on' : '')}
             onClick={() => onChange(opt.value)}
           >

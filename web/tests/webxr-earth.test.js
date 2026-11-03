@@ -1124,20 +1124,20 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   api.setScreenState({ locked: true, pos: { x: 1, y: 1.5, z: -3 }, distance: 3.0 });
   const dock = api.computeDockPose({ x: 0, y: 1.6, z: 0 });
   closeTo(dock.pos.x, 0);
-  // fix7: the 25 deg drop cap lands below the floor clamp here, so the dock
-  // sits at DOCK_MIN_FLOOR_Y (0.6 m).
-  closeTo(dock.pos.y, 0.6);
-  closeTo(dock.pos.z, -2.24);
+  // The dock sits at the open shell's 2.2 m radius, its bottom edge on the
+  // top of the nav strip under the Explore panel: eye 1.52 - 0.15 drop -
+  // 1.125 / 2 panel - 0.35 nav drop - half of the 0.16 * 3.28 / 1.5 m strip.
+  const navH = 0.16 * 3.28 / 1.5;
+  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - 0.35 - navH / 2 + 1.23 / 2);
+  closeTo(dock.pos.z, -2.2);
+  closeTo(dock.pitch, 0);
   const comments = api.getCommentsPanelLayout();
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
   closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
-  // fix25: the comments panel keeps its distance from the viewer but swings
-  // in to 25 deg left of straight ahead (it sat at about 52 deg).
-  const sideX = 2 + comments.w / 2 + 0.445;
-  closeTo(Math.hypot(comments.center.x, comments.center.z), Math.hypot(sideX, 2.58));
-  closeTo(Math.atan2(-comments.center.x, -comments.center.z) * 180 / Math.PI, 25);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
+  closeTo(comments.center.z, -2.58);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -1986,6 +1986,21 @@ test('fix27: the first VR entry shows the dock and guide once (localStorage flag
   assert.equal(second.renderer.__test.getScreenState().controlsVisible, false, 'later entries start hidden');
 });
 
+test('locked UI takes the eye height from the first XR viewer pose, not the default camera', async () => {
+  const { renderer } = await enterLiveSession();
+  const api = renderer.__test;
+  // Before a pose arrives the camera still sits at its default 1.6 m; the
+  // dock must not latch onto that.
+  const before = api.computeDockPose({ x: 0, y: 1.6, z: 0 }).pos.y;
+  api.captureSessionEye({ getViewerPose: () => null });
+  closeTo(api.computeDockPose({ x: 0, y: 1.6, z: 0 }).pos.y, before);
+  api.captureSessionEye({ getViewerPose: () => ({ transform: { position: { x: 0, y: 0.9, z: 0 } } }) });
+  closeTo(api.computeDockPose({ x: 0, y: 0.9, z: 0 }).pos.y, before - (1.52 - 0.9));
+  // Captured once per session.
+  api.captureSessionEye({ getViewerPose: () => ({ transform: { position: { x: 0, y: 1.7, z: 0 } } }) });
+  closeTo(api.computeDockPose({ x: 0, y: 1.7, z: 0 }).pos.y, before - (1.52 - 0.9));
+});
+
 test('exitVR resolves immediately when no session is active', async () => {
   const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
   renderer.init(null, {});
@@ -2310,6 +2325,31 @@ test('fix26: a reel with a media error shows SKIP / RETRY after the hold', () =>
   renderer.stopPreview();
 });
 
+test('fix26: the next reel waits from its own start, not the failed reel\'s', () => {
+  const clock = { t: 0 };
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, now: () => clock.t });
+  const video = {
+    paused: false, readyState: 0, currentTime: 0, duration: 0, muted: true, error: { code: 4 },
+    currentSrc: 'broken.mp4', addEventListener() {}, removeEventListener() {},
+  };
+  renderer.init(video, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.refreshOverlayTexture(1000, true);
+  clock.t = 2600;
+  api.refreshOverlayTexture(2000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), 'load:skip');
+  // SKIP lands on a reel that fails too: it gets its own 2.5 s hold first.
+  video.currentSrc = 'next.mp4';
+  api.refreshOverlayTexture(3000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), null, 'held again for the next reel');
+  clock.t = 5200;
+  api.refreshOverlayTexture(4000, true);
+  assert.equal(api.overlayCommentFromUV({ x: 0.62, y: 0.45 }), 'load:skip');
+  renderer.stopPreview();
+});
+
 test('A and B buttons toggle playback and the control panels', () => {
   const toggles = [];
   const renderer = loadRenderer();
@@ -2376,9 +2416,7 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  // fix25: the locked comments panel swings in to 25 deg at the same
-  // viewer distance, so it moves back from the -2.58 m station.
-  closeTo(Math.atan2(-lockedComments.center.x, -lockedComments.center.z) * 180 / Math.PI, 25);
+  closeTo(lockedComments.center.z, -2.58);
   closeTo(lockedGuide.center.z, -2.58);
 });
 
@@ -2579,6 +2617,77 @@ test('overlay fade repaints while visible, bounded at the UI interval', () => {
   assert.equal(api.refreshOverlayTexture(1200), true);
   assert.equal(api.getScreenState().overlayUploads, 2);
   renderer.stopPreview();
+});
+
+test('the auto caption shows on the overlay, uploads once per cue, and steps aside for the comments panel', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = {
+    paused: false, readyState: 4, currentTime: 2, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+  };
+  let caption = 'Hello there';
+  renderer.init(video, { getComments: () => [], getCaption: () => caption });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  const uploads = () => api.getScreenState().overlayUploads;
+  // A cue alone keeps the overlay up, with no comments.
+  assert.equal(api.refreshOverlayTexture(1000), true);
+  assert.equal(uploads(), 1);
+  // The same cue as time moves on: no repaint.
+  assert.equal(api.refreshOverlayTexture(2000), true);
+  assert.equal(api.refreshOverlayTexture(9000), true);
+  assert.equal(uploads(), 1);
+  caption = 'Next cue';
+  assert.equal(api.refreshOverlayTexture(9050), true);
+  assert.equal(uploads(), 2);
+  caption = '';
+  assert.equal(api.refreshOverlayTexture(9100), false);
+  assert.equal(uploads(), 3);
+  // The comments panel hides the pop-ups, and the caption with them.
+  caption = 'Behind the panel';
+  api.toggleCommentsPanel();
+  assert.equal(api.refreshOverlayTexture(9200), false);
+  api.toggleCommentsPanel();
+  assert.equal(api.refreshOverlayTexture(9300), true);
+  renderer.stopPreview();
+});
+
+test('the overlay caption sits above the dock, wraps to three lines, and lifts the comments above it', () => {
+  const ui = loadUICanvasStandalone();
+  const render = (caption) => {
+    const { ctx, texts } = makeRecordingCtx();
+    const boxes = [];
+    // Caption backings are centred on the screen; the comments' accent bars sit on the left.
+    ctx.fillRect = (x, y, w, h) => { if (x + w / 2 === 512) boxes.push({ x, y, w, h }); };
+    const comments = ['a', 'b', 'c'].map((id) => ({ id, author_name: id, text: 'hi', timestamp: 1 }));
+    const regions = ui.renderOverlayCanvas(ctx, { comments, currentTime: 2, caption });
+    return { texts, boxes, regions };
+  };
+  // The test ctx measures 8px per character: 77 characters fit in 76% of 1024.
+  const short = render('Fish & chips');
+  assert.ok(short.texts.includes(`Fish & chips 512 ${0.57 * 1024 - 22}`), 'centred on one 44px line ending at 57%');
+  assert.deepEqual(short.boxes, [{ x: 512 - (12 * 8 + 28) / 2, y: 0.57 * 1024 - 44, w: 12 * 8 + 28, h: 44 }]);
+
+  const long = render(`${'word '.repeat(40)}\nsecond cue\nthird cue`);
+  const lines = long.boxes.map((box) => box.y);
+  assert.equal(lines.length, 3, 'never more than three lines');
+  assert.deepEqual(lines, [0.57 * 1024 - 132, 0.57 * 1024 - 88, 0.57 * 1024 - 44]);
+  assert.ok(long.boxes.every((box) => box.w <= 1024 * 0.76 + 28));
+
+  // The three pop-up comments end 24px above the caption; without one they stay centred.
+  const bottom = (regions) => regions[2].y + regions[2].h - 6;
+  assert.equal(bottom(short.regions), 0.57 * 1024 - 44 - 24);
+  assert.equal(bottom(long.regions), 0.57 * 1024 - 132 - 24);
+  const none = render('');
+  assert.equal(none.boxes.length, 0);
+  assert.equal(none.regions[0].y + 6, 512 - (3 * 60 + 2 * 11) / 2);
+
+  // While the reel loads, the caption waits: it would cover the "Loading…" label.
+  const { ctx, texts } = makeRecordingCtx();
+  ui.renderOverlayCanvas(ctx, { caption: 'Fish & chips', loadState: 'loading' });
+  assert.ok(texts.some((t) => t.startsWith('Loading…')));
+  assert.ok(!texts.some((t) => t.startsWith('Fish & chips')));
 });
 
 test('video and overlay textures use legacy linear sampling without mipmaps', () => {
@@ -6022,6 +6131,10 @@ test('VR shell: nav bar sits under the dock, or under the main panel when open',
   renderer.shell.open('/explore');
   let p = local(main);
   assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -1.125 / 2, `under the main panel (${p.y})`);
+  // The main panel grows 0.35 m downward from its old top edge, so the nav drops with it.
+  const s = (1.125 + 0.35) / 1.125;
+  closeTo(main.scale.y, s);
+  closeTo(main.position.y + 1.125 * s / 2, renderer.__test.getHeadPosition().y - 0.15 + 1.125 / 2);
   renderer.shell.close();
   p = local(dock);
   assert.ok(Math.abs(p.x) < 1e-6 && p.y + p.half < -0.3 + 1e-9, `under the dock (${p.y})`);
@@ -6231,5 +6344,101 @@ test('grip on an Earth panel drags it along the laser and it stays put', () => {
   renderer.setSceneMode('earth');
   const reset = api.computeDockPose(head, 'earth').pos;
   assert.deepEqual([reset.x, reset.y, reset.z], [0, 0.20, -0.85]);
+  renderer.stopPreview();
+});
+
+// The preview canvas's own keys (fix 54): a keyboard path through the 3D scene.
+function keyedPreview(options = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  const canvas = makePreviewCanvas(gl);
+  const handlers = {};
+  canvas.addEventListener = (type, fn) => { handlers[type] = fn; };
+  canvas.getRootNode = () => canvas.ownerDocument; // lets the real OrbitControls attach
+  renderer.startPreview(canvas, options);
+  const press = (key, extra = {}) => {
+    const event = { key, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, prevented: false, ...extra };
+    event.preventDefault = () => { event.prevented = true; };
+    handlers.keydown(event);
+    return event.prevented;
+  };
+  return { renderer, api: renderer.__test, camera: renderer.__test.getCamera(), press };
+}
+
+test('preview keys: arrows look around in headset POV; other keys fall through to the player', () => {
+  const { renderer, camera, press } = keyedPreview();
+  assert.equal(press('ArrowLeft'), true);
+  assert.ok(camera.rotation.y > 0.1, `looked left: ${camera.rotation.y}`);
+  assert.equal(press('ArrowUp'), true);
+  assert.ok(camera.rotation.x > 0.1, `looked up: ${camera.rotation.x}`);
+  press('ArrowRight');
+  press('ArrowDown');
+  closeTo(camera.rotation.y, 0, 1e-9);
+  closeTo(camera.rotation.x, 0, 1e-9);
+  // Space, letters, + / − (nothing to zoom here) and modified arrows are not taken:
+  // the player's own shortcuts and the browser keep them.
+  for (const key of [' ', 'k', 'n', 'm', '+', '-']) assert.equal(press(key), false, key);
+  assert.equal(press('ArrowLeft', { ctrlKey: true }), false);
+  closeTo(camera.rotation.y, 0, 1e-9);
+  renderer.stopPreview();
+});
+
+test('preview keys: orbit inspect continues from where a drag left the camera, and + / − zoom', () => {
+  const { renderer, camera, press } = keyedPreview({ cameraMode: 'orbit' });
+  renderer.setPreviewCameraMode('orbit');
+  const target = { x: 0, y: 1.4, z: -2.0 };
+  const dist = () => Math.hypot(camera.position.x - target.x, camera.position.y - target.y, camera.position.z - target.z);
+  // As if OrbitControls had moved the camera round to the side.
+  camera.position.set(target.x + 4, target.y + 1, target.z);
+  const before = camera.position.clone();
+  press('ArrowLeft');
+  const step = camera.position.distanceTo(before);
+  assert.ok(step > 0.1 && step < 1.5, `one short orbit step from the dragged spot, not a jump back: ${step}`);
+  closeTo(dist(), Math.hypot(4, 1), 1e-6);
+  const d0 = dist();
+  assert.equal(press('+'), true);
+  closeTo(dist(), d0 * 0.85, 1e-6);
+  assert.equal(press('-'), true);
+  closeTo(dist(), d0, 1e-6);
+  renderer.stopPreview();
+});
+
+test('preview keys: in the Earth scene arrows turn the globe, Shift+arrows look, + / − zoom', () => {
+  const { renderer, api, camera, press } = keyedPreview();
+  renderer.setSceneMode('earth');
+  press('ArrowRight');
+  assert.ok(api.getEarthState().yaw > 0.1, 'the surface moves right, as a drag right moves it');
+  press('ArrowDown');
+  assert.ok(api.getEarthState().pitch > 0.1, 'and down with ArrowDown');
+  const yaw = api.getEarthState().yaw;
+  press('ArrowLeft', { shiftKey: true });
+  closeTo(api.getEarthState().yaw, yaw, 1e-9);
+  assert.ok(camera.rotation.y > 0.1, 'Shift+arrow looks around instead');
+  assert.equal(press('+'), true);
+  assert.ok(api.getEarthState().zoomTarget > 1, 'zoomed in');
+  assert.equal(press('-'), true);
+  closeTo(api.getEarthState().zoomTarget, 1, 1e-9);
+  renderer.stopPreview();
+});
+
+test('preview keys: zoomed in on Earth, an arrow pans the map that way on screen', () => {
+  const { renderer, api, press } = keyedPreview();
+  renderer.setSceneMode('earth');
+  const T = renderer.getThree();
+  for (const [key, cx, cy] of [['ArrowRight', 1, 0], ['ArrowLeft', -1, 0], ['ArrowUp', 0, 1], ['ArrowDown', 0, -1]]) {
+    api.setEarthZoom(64, { lat: 35, lon: 139 });
+    api.advanceEarthZoom(100000);
+    const A = api.getEarthState().anchor;
+    const f = new T.Vector3(A.x, A.y - 1.6, A.z).normalize();
+    const right = new T.Vector3().crossVectors(f, new T.Vector3(0, 1, 0)).normalize();
+    const up = new T.Vector3().crossVectors(right, f).normalize();
+    const screenOf = () => { const p = earthWorldSample(renderer, api, 35, 139).point.clone().sub(new T.Vector3(A.x, A.y, A.z)); return { x: p.dot(right), y: p.dot(up) }; };
+    const before = screenOf();
+    assert.equal(press(key), true);
+    const after = screenOf();
+    const dx = after.x - before.x, dy = after.y - before.y;
+    assert.ok(dx * cx + dy * cy > 0, `${key} moved the map toward (${cx},${cy}): ${dx.toFixed(5)}, ${dy.toFixed(5)}`);
+  }
   renderer.stopPreview();
 });

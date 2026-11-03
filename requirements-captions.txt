@@ -1,0 +1,10 @@
+# Auto captions at publish (server/media.py make_captions). Kept out of
+# requirements.txt like the MAKE 3D model (requirements-3d.txt): without it
+# the server publishes as before, with no captions. With it, the free Whisper
+# "base" model (about 150 MB) downloads from Hugging Face on the first
+# publish and runs on the CPU in the background worker.
+-r requirements.txt
+faster-whisper>=1.1,<2
+# PyAV 19 dropped the open(metadata_errors=...) argument faster-whisper 1.2
+# passes when it decodes the audio, so every transcription raised TypeError.
+av<19

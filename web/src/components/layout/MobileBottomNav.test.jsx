@@ -28,11 +28,11 @@ describe('MobileBottomNav', () => {
     renderNav();
     const hrefs = screen.getAllByRole('link').map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/reels', '/explore', '/upload', '/messages', '/profile/maker']);
-    expect(screen.getByRole('link', { name: 'Reels' })).toHaveClass('sx-active');
+    expect(screen.getByRole('link', { name: 'Reels/VR' })).toHaveClass('sx-active');
     expect(screen.getByRole('link', { name: 'Explore' })).not.toHaveClass('sx-active');
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveTextContent('MA');
     // icon-only: no text labels under the glyphs
-    expect(screen.getByRole('link', { name: 'Reels' })).toHaveTextContent('');
+    expect(screen.getByRole('link', { name: 'Reels/VR' })).toHaveTextContent('');
     expect(document.querySelector('.sx-bottom-nav-label')).toBeNull();
   });
 
@@ -41,7 +41,7 @@ describe('MobileBottomNav', () => {
     mockUseMessaging.mockReturnValue({ unread: { total: 0 } });
     renderNav('/packs/abc?play=1');
     expect(screen.getByRole('link', { name: 'Explore' })).toHaveClass('sx-active');
-    expect(screen.getByRole('link', { name: 'Reels' })).not.toHaveClass('sx-active');
+    expect(screen.getByRole('link', { name: 'Reels/VR' })).not.toHaveClass('sx-active');
   });
 
   it('shows the unread count on Messages', () => {

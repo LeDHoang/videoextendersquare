@@ -1,66 +1,24 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from './ui/controls.jsx';
+import ModalDialog from './ui/Dialog.jsx';
+import IconButton from './ui/IconButton.jsx';
 import { REPORT_REASONS } from '../utils/messageFormat.js';
 
 export const REPORT_DETAILS_LIMIT = 500;
 
-const FOCUSABLE = 'a[href], button:not(:disabled), select:not(:disabled), textarea:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])';
-
-/** Small modal: Escape and backdrop close it, Tab stays inside, focus returns to the opener. */
+/** Small titled modal on ui/Dialog: Escape and the backdrop close it, focus returns to the opener. */
 export function Dialog({ title, onClose, busy = false, children }) {
-  const panelRef = useRef(null);
   const titleId = useId();
-
-  useEffect(() => {
-    const opener = document.activeElement;
-    const panel = panelRef.current;
-    const first = panel?.querySelector('select, textarea, input, button:not([data-dialog-close])');
-    (first || panel)?.focus();
-    return () => {
-      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape' && !busy) {
-        onClose();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const stops = Array.from(panel.querySelectorAll(FOCUSABLE));
-      if (!stops.length) {
-        event.preventDefault();
-        panel.focus();
-        return;
-      }
-      const firstStop = stops[0];
-      const lastStop = stops[stops.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && (active === firstStop || !panel.contains(active))) {
-        event.preventDefault();
-        lastStop.focus();
-      } else if (!event.shiftKey && (active === lastStop || !panel.contains(active))) {
-        event.preventDefault();
-        firstStop.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
-
   return (
-    <div className="sx-pk-modal" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <div className="sx-pk-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={panelRef} tabIndex={-1}>
+    <ModalDialog className="sx-pk-modal" aria-labelledby={titleId} onClose={onClose} busy={busy}>
+      <div className="sx-pk-dialog">
         <header>
           <h2 id={titleId}>{title}</h2>
-          <button type="button" data-dialog-close onClick={onClose} disabled={busy} aria-label="Close dialog">×</button>
+          <IconButton variant="plain" label="Close dialog" data-dialog-close onClick={onClose} disabled={busy}>×</IconButton>
         </header>
         {children}
       </div>
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -121,7 +79,7 @@ export default function ReportDialog({ title = 'REPORT', onSubmit, onClose }) {
         {error ? <div className="sx-pk-dialog-error" role="alert">{error}</div> : null}
         <div className="sx-pk-dialog-actions">
           <Button onClick={onClose} disabled={busy}>CANCEL</Button>
-          <Button primary type="submit" loading={busy}>SUBMIT REPORT</Button>
+          <Button variant="primary" type="submit" loading={busy}>SUBMIT REPORT</Button>
         </div>
       </form>
     </Dialog>

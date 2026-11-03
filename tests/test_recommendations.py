@@ -850,6 +850,40 @@ def test_inline_player_attaches_the_keyboard_handler_instead_of_orphaning_it(app
     assert "window.removeEventListener('keydown', window.__sxReelsKeydown);" in init_script
 
 
+def test_inline_player_starts_on_a_deep_linked_file_that_has_no_post(app, monkeypatch):
+    seed_catalog(app, creators=1, posts_per_creator=1)
+    postless = {
+        "rel_path": "tests/postless.jpg",
+        "path": "output/tests/postless.jpg",
+        "filename": "postless.jpg",
+        "folder": "tests",
+        "mtime": 2000,
+        "media_type": "image",
+        "size_human": "1 KB",
+    }
+    app.state.scan_rows = [postless, *app.state.scan_rows]
+    stub = reels._build_payload
+
+    def payload(items, codec, tunnel="", viewer_id=None, db=None):
+        posted = [item for item in items if item is not postless]
+        result = stub(posted, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
+        if any(item is postless for item in items):
+            result.insert(0, {"post_id": None, "path": postless["rel_path"], "filename": postless["filename"]})
+        return result
+
+    monkeypatch.setattr(reels, "_build_payload", payload)
+    with TestClient(app) as client:
+        # The page found the file at index 1 of /api/reels and used to send that as `start`.
+        body = client.get(
+            "/api/reels/player-inline",
+            params={"folder": "ALL FOLDERS", "play": postless["rel_path"], "start": 1},
+        ).json()
+    init_script = body["scripts"][-1]
+    items = json.loads(re.search(r"let videoData = (.*?);\n\s*const initialFeedState =", init_script, re.S).group(1))
+    start = int(re.search(r"loadVideo\((\d+)\);", init_script).group(1))
+    assert items[start]["path"] == postless["rel_path"]
+
+
 def test_inline_player_items_carry_probed_duration_and_resolution(app, monkeypatch):
     posts = seed_catalog(app, creators=2, posts_per_creator=2)
     with app.state.testing_session() as db:
