@@ -1076,6 +1076,14 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink);
 }
 
+.sx-sidebar-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sx-3);
+  flex-shrink: 0;
+}
+
 .sx-sidebar-status-pill {
   display: flex;
   align-items: center;

@@ -122,3 +122,34 @@ describe('Sidebar beta navigation', () => {
     expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Credits', 'Upload', 'Image', 'Video', 'Compare']);
   });
 });
+
+describe('Sidebar colour theme switch', () => {
+  afterEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  const renderGuest = () => {
+    mockUseAuth.mockReturnValue({ user: null });
+    mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
+    render(
+      <MemoryRouter>
+        <Sidebar isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+  };
+
+  it('shows LIGHT checked by default', () => {
+    renderGuest();
+    expect(screen.getByRole('radiogroup', { name: 'Colour theme' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'LIGHT' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('DARK applies and remembers the theme', () => {
+    renderGuest();
+    fireEvent.click(screen.getByRole('radio', { name: 'DARK' }));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(localStorage.getItem('sx.theme')).toBe('dark');
+    expect(screen.getByRole('radio', { name: 'DARK' })).toHaveAttribute('aria-checked', 'true');
+  });
+});
