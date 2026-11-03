@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar.jsx';
@@ -123,9 +123,24 @@ describe('Sidebar beta navigation', () => {
   });
 });
 
+// Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    clear: () => { data.clear(); },
+  };
+}
+
 describe('Sidebar colour theme switch', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', memoryStorage());
+  });
+
   afterEach(() => {
-    localStorage.clear();
+    vi.unstubAllGlobals();
     delete document.documentElement.dataset.theme;
   });
 

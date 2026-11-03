@@ -6,7 +6,19 @@ import { THEME_COLOR, THEME_KEY, applyTheme, useTheme } from './theme.js';
 const html = document.documentElement;
 let meta;
 
+// Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    clear: () => { data.clear(); },
+  };
+}
+
 beforeEach(() => {
+  vi.stubGlobal('localStorage', memoryStorage());
   meta = document.createElement('meta');
   meta.name = 'theme-color';
   document.head.appendChild(meta);
@@ -46,7 +58,7 @@ describe('useTheme', () => {
   });
 
   it('still switches when storage throws', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('blocked');
     });
     const { result } = renderHook(() => useTheme());
