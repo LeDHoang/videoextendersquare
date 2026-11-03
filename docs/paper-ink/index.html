@@ -1,0 +1,446 @@
+<meta charset="utf-8">
+<title>ECHO Paper &amp; Ink</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,700;112,800&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: same shell as docs/palette-test (sticky index, one reading column). Design cards up top,
+   then the screenshot grid with a route switcher, the slider, contrast and what each left undone. */
+:root {
+  --bg: #f6f5f9;
+  --surface: #ffffff;
+  --ink: #17151d;
+  --muted: #5d5a6b;
+  --line: #dedbe6;
+  --accent: #5b2bb5;
+  --good: #2f6d4f;
+  --good-bg: #e3f3ea;
+  --warn: #a85d00;
+  --warn-bg: #fff1dc;
+  --bad: #c62f2f;
+  --bad-bg: #fde8e8;
+  --code-bg: #efedf4;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121118; --surface: #1a1922; --ink: #ebe9f2; --muted: #a09cb0; --line: #2d2b38;
+    --accent: #b896ff; --good: #7fd1a6; --good-bg: #15301f; --warn: #f2b35b; --warn-bg: #35270f;
+    --bad: #ff8a80; --bad-bg: #3a1c1c; --code-bg: #24222e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121118; --surface: #1a1922; --ink: #ebe9f2; --muted: #a09cb0; --line: #2d2b38;
+  --accent: #b896ff; --good: #7fd1a6; --good-bg: #15301f; --warn: #f2b35b; --warn-bg: #35270f;
+  --bad: #ff8a80; --bad-bg: #3a1c1c; --code-bg: #24222e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 var(--font-body); }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 40px 16px 80px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px; }
+nav.toc { position: sticky; top: 24px; align-self: start; font-size: 14px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+nav.toc a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
+.label { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+nav.toc .label { display: block; margin-bottom: 10px; }
+main { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 64px; }
+header h1 { font: 800 clamp(34px, 5vw, 56px)/1.02 var(--font-display); font-stretch: 112%; margin: 0 0 14px; letter-spacing: -.01em; }
+.meta { font: 13px var(--font-mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.lede { max-width: 68ch; font-size: 19px; margin: 18px 0 0; }
+h2 { font: 700 28px/1.15 var(--font-display); font-stretch: 112%; margin: 0 0 6px; }
+h2 small { display: block; font: 400 15px var(--font-body); color: var(--muted); margin-top: 6px; font-stretch: normal; }
+.intro { max-width: 70ch; color: var(--muted); margin: 0 0 24px; }
+a { color: var(--accent); }
+code { font-family: var(--font-mono); font-size: .82em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 20px; }
+.box h3 { margin: 0 0 8px; font-size: 17px; }
+.box ul, .box ol { margin: 0; padding-left: 20px; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+.stat { background: var(--surface); border: 1px solid var(--line); padding: 14px 16px; border-radius: 6px; }
+.stat b { display: block; font: 800 34px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 14px; color: var(--muted); }
+
+/* Palette cards: the app's own colours preview the theme, so they are literal values, not report tokens. */
+.palettes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pal { border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); display: grid; }
+.pal-hero { background: var(--p-bg); color: var(--p-ink); padding: 18px 20px 16px; display: grid; gap: 12px; }
+.pal-hero h3 { margin: 0; font: 800 22px/1.1 var(--font-display); font-stretch: 112%; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.pal-hero h3 span { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-ink3); }
+.mock { background: var(--p-s2); border: 1px solid var(--p-rule); border-radius: 4px; padding: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mock .btn { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; background: var(--p-accent); color: var(--p-on); padding: 7px 12px; border-radius: 3px; }
+.mock .ghost { font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-ink); border: 1px solid var(--p-rule); padding: 6px 11px; border-radius: 3px; }
+.mock .txt { font-size: 14px; color: var(--p-ink2); }
+.mock .lnk { font-size: 14px; color: var(--p-accent); text-decoration: underline; }
+.swatches { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; height: 30px; }
+.swatches i { display: block; }
+.pal-body { padding: 14px 20px 18px; display: grid; gap: 10px; font-size: 15px; }
+.pal-body p { margin: 0; }
+.roles { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 12px var(--font-mono); color: var(--muted); }
+.roles b { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; border: 1px solid var(--line); }
+.tag { font: 600 11px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; padding: 4px 7px; border-radius: 3px; white-space: nowrap; }
+.tag.good { color: var(--good); background: var(--good-bg); }
+.tag.warn { color: var(--warn); background: var(--warn-bg); }
+.tag.bad { color: var(--bad); background: var(--bad-bg); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Screenshot compare */
+.switch { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.switch button { font: 600 12px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 9px 14px; min-height: 40px; cursor: pointer; }
+.switch button[aria-pressed="true"] { color: var(--surface); background: var(--ink); border-color: var(--ink); }
+.shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.shots.narrow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+figure { margin: 0; min-width: 0; }
+figure img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); background: #000; }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+figcaption b { color: var(--ink); font: 700 15px var(--font-display); font-stretch: 112%; }
+
+/* Before/after slider: copies the app's compare player (ui/assets/compare.html), so the bar, knob
+   and labels use the app's literal colours. Before = current, after = the chosen redesign. */
+.cmp { position: relative; overflow: hidden; background: #000; border: 1px solid var(--line); border-radius: 4px; touch-action: pan-y; user-select: none; cursor: ew-resize; }
+.cmp.narrow { max-width: 375px; margin: 0 auto; }
+.cmp img { display: block; width: 100%; height: auto; pointer-events: none; }
+.cmp .after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--pos, 50%)); }
+.cmp-handle { position: absolute; top: 0; bottom: 0; left: var(--pos, 50%); width: 3px; background: #ff3b1f; transform: translateX(-50%); z-index: 2; }
+.cmp-handle::after { content: "↔"; position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: #ff3b1f; color: #0a0a0a; font: 700 17px var(--font-mono); transform: translate(-50%, -50%); }
+.cmp-handle:focus-visible { outline: 0; }
+.cmp-handle:focus-visible::after { outline: 2px solid #fff; outline-offset: 2px; }
+.cmp-labels { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; z-index: 1; }
+.cmp-labels span { font: 700 11px var(--font-mono); letter-spacing: .16em; text-transform: uppercase; padding: 4px 10px; color: #0a0a0a; }
+.cmp-labels span:first-child { background: #ff3b1f; }
+.cmp-labels span:last-child { background: #ba0001; color: #f6f6f6; }
+.cmp.narrow .cmp-labels { top: 8px; left: 8px; right: 8px; }
+.cmp.narrow .cmp-labels span { letter-spacing: .08em; padding: 3px 7px; }
+
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+th { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+td.n { font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+td.n.fail { color: var(--bad); font-weight: 600; }
+td.n.edge { color: var(--warn); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.note { font-size: 15px; color: var(--muted); max-width: 72ch; }
+
+.picks { counter-reset: p; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.picks li { counter-increment: p; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; }
+.picks li::before { content: counter(p); font: 800 22px/1.2 var(--font-display); color: var(--accent); }
+.picks li p { margin: 2px 0 0; color: var(--muted); font-size: 15px; }
+
+@media (max-width: 1000px) {
+  .palettes { grid-template-columns: minmax(0, 1fr); }
+  .shots.narrow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  nav.toc { position: static; }
+  nav.toc ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cols, .shots { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&display=swap">
+<style>
+/* Additions: four-up phone grid and a type sample in each card's own display font. */
+.shots.narrow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pal-hero h3 { font-family: var(--p-font); font-stretch: normal; }
+.fonts { font: 12px var(--font-mono); color: var(--muted); }
+.switch + .switch { margin-top: -6px; }
+td.wrap-cell { white-space: normal; min-width: 260px; }
+@media (max-width: 900px) {
+  .shots.narrow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Sections">
+  <span class="label">Contents</span>
+  <ol>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#designs">The four looks</a></li>
+    <li><a href="#compare">Side by side</a></li>
+    <li><a href="#slider">Before and after</a></li>
+    <li><a href="#contrast">Contrast</a></li>
+    <li><a href="#size">Change size</a></li>
+    <li><a href="#undone">What is left undone</a></li>
+    <li><a href="#how">How to run them</a></li>
+  </ol>
+</nav>
+
+<main>
+<header id="summary">
+  <h1>ECHO Paper &amp; Ink</h1>
+  <div class="meta">
+    <span>3 Nov 2026</span>
+    <span>alts from <code>redesign/editorial-ink</code> @ 1e11447</span>
+    <span>Vite :5181 :5184 :5186 :5187 · headless Chrome · 1280 and 375 px</span>
+  </div>
+  <p class="lede">A closer look at the Paper &amp; Ink redesign and two variants of it: one that swaps the cobalt accent for the app's own vermilion, and one that prints the same magazine in reverse, on a dark page with the vermilion accent. Both variants change colour tokens only; type, shape and spacing are Paper &amp; Ink's. Every screenshot was taken in one run with the same viewport, wait and API data.</p>
+  <div class="cols" style="margin-top:22px">
+    <div class="box">
+      <h3>Scope</h3>
+      <ul>
+        <li>Web UI only. The reels player and the WebXR scene in <code>ui/</code> keep the current look inside every variant.</li>
+        <li>Public pages only. The signed-in pages use the same tokens but nobody has looked at them.</li>
+        <li>The two variants are uncommitted changes in their own worktrees. Nothing is merged or pushed.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Checks</h3>
+      <ul>
+        <li>Both variants pass <code>npm test</code> (544 vitest tests plus node tests) and <code>vite build</code>. One HeaderBar test timed out once under load in the red variant and passed on a rerun.</li>
+        <li>Neither variant changes the CSS guardrail counts: the new colours live in <code>tokens.css</code>, which is exempt.</li>
+        <li>The reels shot picks a random reel on each load, so its video differs between looks.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="stats" aria-label="Test size">
+    <div class="stat"><b>3</b><span>Paper &amp; Ink looks, plus the current one</span></div>
+    <div class="stat"><b>11</b><span>Screens per look</span></div>
+    <div class="stat"><b>44</b><span>Screenshots</span></div>
+    <div class="stat"><b>0</b><span>Layout changes in the variants</span></div>
+  </div>
+</header>
+
+<section id="designs" aria-labelledby="designs-h">
+  <h2 id="designs-h">The four looks<small>Each card shows the look's own colours and display font. Contrast is the main text pairs on the page background.</small></h2>
+  <div class="palettes">
+    <article class="pal" style="--p-bg:#08090a;--p-s2:#16191c;--p-rule:#24282d;--p-ink:#f2f3f5;--p-ink2:#a4abb3;--p-ink3:#8e959e;--p-accent:#ff3b1f;--p-on:#0a0a0a;--p-font:var(--font-display)">
+      <div class="pal-hero">
+        <h3>Current <span>palette-test · reference</span></h3>
+        <div class="mock"><span class="btn">Sign up</span><span class="ghost">Shuffle</span><span class="txt">Muted text</span><span class="lnk">Link</span></div>
+      </div>
+      <div class="swatches" aria-hidden="true"><i style="background:#08090a"></i><i style="background:#16191c"></i><i style="background:#f2f3f5"></i><i style="background:#8e959e"></i><i style="background:#ff3b1f"></i></div>
+      <div class="pal-body">
+        <p>Near-black brutalist: condensed caps, hairline rules, square corners, one vermilion accent.</p>
+        <div class="fonts">Archivo · Source Sans 3 · JetBrains Mono</div>
+        <div class="tags"><span class="tag good">Text 17.9:1</span><span class="tag bad">Faint text 3.7:1</span></div>
+      </div>
+    </article>
+    <article class="pal" style="--p-bg:#f2ede3;--p-s2:#ebe5d8;--p-rule:#d3cab8;--p-ink:#17140f;--p-ink2:#45403a;--p-ink3:#5c554c;--p-accent:#2a35c9;--p-on:#faf7f0;--p-font:'Fraunces', Georgia, serif">
+      <div class="pal-hero">
+        <h3>Paper &amp; Ink <span>redesign/editorial-ink</span></h3>
+        <div class="mock"><span class="btn">Sign up</span><span class="ghost">Shuffle</span><span class="txt">Muted text</span><span class="lnk">Link</span></div>
+      </div>
+      <div class="swatches" aria-hidden="true"><i style="background:#f2ede3"></i><i style="background:#ebe5d8"></i><i style="background:#17140f"></i><i style="background:#2a35c9"></i><i style="background:#f3d34a"></i><i style="background:#0c0b09"></i></div>
+      <div class="pal-body">
+        <p>Editorial print: warm paper, a serif display face, cobalt actions and proof-yellow marks. The reels area flips to dark ink with a yellow accent.</p>
+        <div class="fonts">Fraunces · Instrument Sans · IBM Plex Mono</div>
+        <div class="tags"><span class="tag good">Text 15.7:1</span><span class="tag good">Accent 7.3:1</span><span class="tag good">Faint 5.7:1</span></div>
+      </div>
+    </article>
+    <article class="pal" style="--p-bg:#f2ede3;--p-s2:#ebe5d8;--p-rule:#d3cab8;--p-ink:#17140f;--p-ink2:#45403a;--p-ink3:#5c554c;--p-accent:#c8270f;--p-on:#faf7f0;--p-font:'Fraunces', Georgia, serif">
+      <div class="pal-hero">
+        <h3>Paper &amp; Ink · Red <span>redesign/editorial-ink-red</span></h3>
+        <div class="mock"><span class="btn">Sign up</span><span class="ghost">Shuffle</span><span class="txt">Muted text</span><span class="lnk">Link</span></div>
+      </div>
+      <div class="swatches" aria-hidden="true"><i style="background:#f2ede3"></i><i style="background:#ebe5d8"></i><i style="background:#17140f"></i><i style="background:#c8270f"></i><i style="background:#f3d34a"></i><i style="background:#be123c"></i><i style="background:#0c0b09"></i></div>
+      <div class="pal-body">
+        <p>Same paper and type, with vermilion carrying every action and the logo. The app's <code>#ff3b1f</code> is 3.05:1 on paper, so the page uses a deeper <code>#c8270f</code>; the dark reels area keeps the original. Danger moves to a deep rose to stay apart from the accent.</p>
+        <div class="fonts">Fraunces · Instrument Sans · IBM Plex Mono</div>
+        <div class="tags"><span class="tag good">Text 15.7:1</span><span class="tag good">Accent 4.8:1</span><span class="tag good">Faint 5.7:1</span></div>
+      </div>
+    </article>
+    <article class="pal" style="--p-bg:#0c0b09;--p-s2:#1c1a16;--p-rule:#2e2a24;--p-ink:#f5f1e8;--p-ink2:#c4bdb0;--p-ink3:#a39b8e;--p-accent:#ff3b1f;--p-on:#17140f;--p-font:'Fraunces', Georgia, serif">
+      <div class="pal-hero">
+        <h3>Paper &amp; Ink · Dark red <span>redesign/editorial-ink-dark</span></h3>
+        <div class="mock"><span class="btn">Sign up</span><span class="ghost">Shuffle</span><span class="txt">Muted text</span><span class="lnk">Link</span></div>
+      </div>
+      <div class="swatches" aria-hidden="true"><i style="background:#0c0b09"></i><i style="background:#1c1a16"></i><i style="background:#f5f1e8"></i><i style="background:#ff3b1f"></i><i style="background:#f3d34a"></i><i style="background:#f43f5e"></i></div>
+      <div class="pal-body">
+        <p>The magazine printed in reverse: warm carbon page, cream ink, the app's own <code>#ff3b1f</code> as the accent and the original status colours. Closest in mood to the current app and the reels player.</p>
+        <div class="fonts">Fraunces · Instrument Sans · IBM Plex Mono</div>
+        <div class="tags"><span class="tag good">Text 17.5:1</span><span class="tag good">Accent 5.5:1</span><span class="tag good">Faint 5.9:1</span></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="compare" aria-labelledby="compare-h">
+  <h2 id="compare-h">Side by side<small>Pick a screen. Click any shot to open it full size.</small></h2>
+  <div class="switch" role="group" aria-label="Screen">
+    <button type="button" data-screen="explore" aria-pressed="true">Explore</button>
+    <button type="button" data-screen="reels" aria-pressed="false">Reels</button>
+    <button type="button" data-screen="profile" aria-pressed="false">Profile</button>
+    <button type="button" data-screen="pack" aria-pressed="false">Pack</button>
+    <button type="button" data-screen="tag" aria-pressed="false">Tag</button>
+    <button type="button" data-screen="login" aria-pressed="false">Sign in</button>
+    <button type="button" data-screen="signup" aria-pressed="false">Sign up</button>
+    <button type="button" data-screen="terms" aria-pressed="false">Terms</button>
+    <button type="button" data-screen="404" aria-pressed="false">404</button>
+    <button type="button" data-screen="explore-375" aria-pressed="false">Explore 375</button>
+    <button type="button" data-screen="profile-375" aria-pressed="false">Profile 375</button>
+  </div>
+  <div class="shots" id="shots">
+    <figure data-p="current"><a href="img/current-explore.jpg"><img src="img/current-explore.jpg" alt="Current design, Explore" loading="lazy"></a><figcaption><b>Current</b> reference</figcaption></figure>
+    <figure data-p="ink"><a href="img/ink-explore.jpg"><img src="img/ink-explore.jpg" alt="Paper &amp; Ink, Explore" loading="lazy"></a><figcaption><b>Paper &amp; Ink</b></figcaption></figure>
+    <figure data-p="ink-red"><a href="img/ink-red-explore.jpg"><img src="img/ink-red-explore.jpg" alt="Paper &amp; Ink · Red, Explore" loading="lazy"></a><figcaption><b>Paper &amp; Ink · Red</b></figcaption></figure>
+    <figure data-p="ink-dark"><a href="img/ink-dark-explore.jpg"><img src="img/ink-dark-explore.jpg" alt="Paper &amp; Ink · Dark red, Explore" loading="lazy"></a><figcaption><b>Paper &amp; Ink · Dark red</b></figcaption></figure>
+  </div>
+</section>
+
+<section id="slider" aria-labelledby="slider-h">
+  <h2 id="slider-h">Before and after<small>Drag the bar, or focus it and use the arrow keys. Left is the current look.</small></h2>
+  <div class="switch" role="group" aria-label="Look" id="cmp-design">
+    <button type="button" data-p="ink" data-name="Paper &amp; Ink" aria-pressed="false">Paper &amp; Ink</button>
+    <button type="button" data-p="ink-red" data-name="Paper &amp; Ink · Red" aria-pressed="true">Red</button>
+    <button type="button" data-p="ink-dark" data-name="Paper &amp; Ink · Dark red" aria-pressed="false">Dark red</button>
+  </div>
+  <div class="switch" role="group" aria-label="Screen" id="cmp-screen">
+    <button type="button" data-screen="explore" aria-pressed="true">Explore</button>
+    <button type="button" data-screen="profile" aria-pressed="false">Profile</button>
+    <button type="button" data-screen="pack" aria-pressed="false">Pack</button>
+    <button type="button" data-screen="tag" aria-pressed="false">Tag</button>
+    <button type="button" data-screen="login" aria-pressed="false">Sign in</button>
+    <button type="button" data-screen="terms" aria-pressed="false">Terms</button>
+    <button type="button" data-screen="404" aria-pressed="false">404</button>
+    <button type="button" data-screen="explore-375" aria-pressed="false">Explore 375</button>
+  </div>
+  <div class="cmp" id="cmp" style="--pos:50%">
+    <img class="before" src="img/current-explore.jpg" alt="Current design, Explore">
+    <img class="after" src="img/ink-red-explore.jpg" alt="Paper &amp; Ink · Red, Explore">
+    <div class="cmp-labels" aria-hidden="true"><span>Current</span><span id="cmp-after-label">Paper &amp; Ink · Red</span></div>
+    <div class="cmp-handle" role="slider" tabindex="0" aria-label="Before and after split" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
+  </div>
+</section>
+
+<section id="contrast" aria-labelledby="contrast-h">
+  <h2 id="contrast-h">Contrast<small>WCAG ratios from each look's tokens, on its page background. 4.5:1 is the bar for body text.</small></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Look</th><th>Text</th><th>Secondary</th><th>Faint</th><th>Accent</th><th>Label on accent</th><th>Danger</th></tr></thead>
+      <tbody>
+        <tr><td>Current</td><td class="n">17.9</td><td class="n">6.6</td><td class="n fail">3.7</td><td class="n">5.6</td><td class="n">5.6</td><td class="n">5.4</td></tr>
+        <tr><td>Paper &amp; Ink</td><td class="n">15.7</td><td class="n">6.3</td><td class="n">5.7</td><td class="n">7.3</td><td class="n">8.0</td><td class="n">—</td></tr>
+        <tr><td>Paper &amp; Ink · Red</td><td class="n">15.7</td><td class="n">6.3</td><td class="n">5.7</td><td class="n">4.8</td><td class="n">5.2</td><td class="n">5.4</td></tr>
+        <tr><td>Red · reels area (dark)</td><td class="n">17.5</td><td class="n">7.2</td><td class="n">5.9</td><td class="n">5.5</td><td class="n">5.2</td><td class="n">—</td></tr>
+        <tr><td>Paper &amp; Ink · Dark red</td><td class="n">17.5</td><td class="n">7.2</td><td class="n">5.9</td><td class="n">5.5</td><td class="n">5.2</td><td class="n">5.4</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Tokens: <code>--sx-ink</code>, <code>--sx-ink-3</code>, <code>--sx-ink-muted</code>, <code>--sx-accent</code> and <code>--sx-danger</code> against <code>--sx-bg</code>, and <code>--sx-on-accent</code> against <code>--sx-accent</code>. The red accent passes 4.5:1 in both variants but with less room than cobalt: in the light variant it is 4.8:1 on the page and 5.2:1 on cards; in the dark variant it drops to 4.9:1 on the raised <code>--sx-surface-2</code>. Gradients, photos behind text and the hard-coded colours left in <code>global.css</code> are not in these figures.</p>
+</section>
+
+<section id="size" aria-labelledby="size-h">
+  <h2 id="size-h">Change size<small>Paper &amp; Ink against palette-test 3861f7b; each variant against Paper &amp; Ink 1e11447.</small></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Look</th><th>Files</th><th>Lines</th><th>Hex colours in CSS</th><th>Colour functions</th><th>What changed</th></tr></thead>
+      <tbody>
+        <tr><td>Paper &amp; Ink</td><td class="n">6</td><td class="n">+895 −296</td><td class="n">49 → 26</td><td class="n">47 → 34</td><td class="wrap-cell">New <code>editorial.css</code>, tokens, fonts in <code>index.html</code>; logo re-inked by CSS</td></tr>
+        <tr><td>Paper &amp; Ink · Red</td><td class="n">2</td><td class="n">+21 −20</td><td class="n">26 → 26</td><td class="n">34 → 34</td><td class="wrap-cell">Accent and danger tokens in <code>tokens.css</code>; logo fill points at the accent in <code>editorial.css</code></td></tr>
+        <tr><td>Paper &amp; Ink · Dark red</td><td class="n">3</td><td class="n">+61 −60</td><td class="n">26 → 26</td><td class="n">34 → 34</td><td class="wrap-cell">Red's changes plus a dark colour block in <code>tokens.css</code>; <code>color-scheme</code> and <code>theme-color</code> meta in <code>index.html</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="undone" aria-labelledby="undone-h">
+  <h2 id="undone-h">What is left undone</h2>
+  <div class="cols">
+    <div class="box">
+      <h3>All three looks</h3>
+      <ul>
+        <li><b>Reels player and VR.</b> <code>ui/</code> was off-limits, so the player chrome and the WebXR panels keep the current look.</li>
+        <li><b>Signed-in pages.</b> Upload, Wallet, Messages, Settings and Moderation were never viewed.</li>
+        <li><b>Fragile logo.</b> The logo is recoloured through CSS attribute selectors on the SVG, which breaks if the SVG markup changes.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>The red variants</h3>
+      <ul>
+        <li><b>Accent and danger look alike.</b> Vermilion and rose have nearly the same lightness (about 1.1:1), so they differ by hue only. The current app has the same trade-off; a colour-blind user may not tell a delete button from a primary one without its label or icon.</li>
+        <li><b>Two reds in the light variant.</b> The page uses <code>#c8270f</code> and the dark reels area uses <code>#ff3b1f</code>, so the accent shifts slightly when a reel opens.</li>
+        <li><b>Dark variant on cards.</b> Accent text on <code>--sx-surface-2</code> is 4.9:1, close to the bar; small accent text on raised cards should be checked on the signed-in pages.</li>
+        <li><b>Not committed.</b> Both variants are working-tree changes in <code>.claude/worktrees/ink-red</code> and <code>ink-dark</code>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="how" aria-labelledby="how-h">
+  <h2 id="how-h">How to run them<small>Each look is a branch in its own worktree under <code>.claude/worktrees</code>.</small></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Look</th><th>Branch</th><th>Commit</th><th>Worktree</th><th>Port used here</th></tr></thead>
+      <tbody>
+        <tr><td>Current</td><td><code>palette-test</code></td><td class="n">3861f7b</td><td><code>.</code></td><td class="n">5181</td></tr>
+        <tr><td>Paper &amp; Ink</td><td><code>redesign/editorial-ink</code></td><td class="n">1e11447</td><td><code>agent-ac54579df16357dcd</code></td><td class="n">5184</td></tr>
+        <tr><td>Paper &amp; Ink · Red</td><td><code>redesign/editorial-ink-red</code></td><td class="n">uncommitted</td><td><code>ink-red</code></td><td class="n">5186</td></tr>
+        <tr><td>Paper &amp; Ink · Dark red</td><td><code>redesign/editorial-ink-dark</code></td><td class="n">uncommitted</td><td><code>ink-dark</code></td><td class="n">5187</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">In a worktree's <code>web</code> folder, run <code>npx vite --port 5186 --strictPort</code> with the API on :8000. On Node 18, add <code>NODE_OPTIONS=--dns-result-order=ipv4first</code> so the proxy reaches the API on 127.0.0.1.</p>
+</section>
+</main>
+</div>
+<script>
+const shots = document.getElementById("shots");
+const buttons = document.querySelectorAll("#compare .switch button");
+for (const btn of buttons) {
+  btn.addEventListener("click", () => {
+    const screen = btn.dataset.screen;
+    for (const b of buttons) b.setAttribute("aria-pressed", String(b === btn));
+    shots.classList.toggle("narrow", screen.endsWith("-375"));
+    for (const fig of shots.querySelectorAll("figure")) {
+      const src = `img/${fig.dataset.p}-${screen}.jpg`;
+      const img = fig.querySelector("img");
+      img.src = src;
+      img.alt = `${fig.querySelector("b").textContent}, ${btn.textContent}`;
+      fig.querySelector("a").href = src;
+    }
+  });
+}
+
+const cmp = document.getElementById("cmp");
+const handle = cmp.querySelector(".cmp-handle");
+const setPos = (pct) => {
+  pct = Math.max(0, Math.min(100, pct));
+  cmp.style.setProperty("--pos", pct + "%");
+  handle.setAttribute("aria-valuenow", String(Math.round(pct)));
+};
+const fromPointer = (e) => {
+  const rect = cmp.getBoundingClientRect();
+  setPos(((e.clientX - rect.left) / rect.width) * 100);
+};
+cmp.addEventListener("pointerdown", (e) => {
+  cmp.setPointerCapture(e.pointerId);
+  fromPointer(e);
+  handle.focus({ preventScroll: true });
+});
+cmp.addEventListener("pointermove", (e) => { if (cmp.hasPointerCapture(e.pointerId)) fromPointer(e); });
+handle.addEventListener("keydown", (e) => {
+  const now = Number(handle.getAttribute("aria-valuenow"));
+  const step = { ArrowLeft: -5, ArrowRight: 5, Home: -100, End: 100 }[e.key];
+  if (step === undefined) return;
+  e.preventDefault();
+  setPos(now + step);
+});
+let cmpDesign = document.querySelector("#cmp-design [aria-pressed=true]");
+let cmpScreen = document.querySelector("#cmp-screen [aria-pressed=true]");
+const renderCmp = () => {
+  const screen = cmpScreen.dataset.screen;
+  cmp.classList.toggle("narrow", screen.endsWith("-375"));
+  const before = cmp.querySelector(".before");
+  const after = cmp.querySelector(".after");
+  before.src = `img/current-${screen}.jpg`;
+  before.alt = `Current design, ${cmpScreen.textContent}`;
+  after.src = `img/${cmpDesign.dataset.p}-${screen}.jpg`;
+  after.alt = `${cmpDesign.dataset.name}, ${cmpScreen.textContent}`;
+  document.getElementById("cmp-after-label").textContent = cmpDesign.dataset.name;
+};
+for (const [group, set] of [["#cmp-design", (b) => { cmpDesign = b; }], ["#cmp-screen", (b) => { cmpScreen = b; }]]) {
+  const btns = document.querySelectorAll(group + " button");
+  for (const btn of btns) {
+    btn.addEventListener("click", () => {
+      for (const b of btns) b.setAttribute("aria-pressed", String(b === btn));
+      set(btn);
+      renderCmp();
+    });
+  }
+}
+</script>
