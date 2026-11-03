@@ -115,3 +115,15 @@ test('icon re-ink reaches the reels details column and comments drawer', () => {
     );
   }
 });
+
+// Avatar discs are painted in the user's own colour, which does not flip with the theme,
+// so their initials need an ink that does not flip either.
+test('initials on user-coloured avatar discs keep one ink in both modes', () => {
+  const globalCss = read('../src/styles/global.css');
+  for (const selector of ['.sx-account-avatar,\n.sx-profile-avatar', '.sx-message-avatar', '.sx-ps-avatar-disc', '.sx-bottom-nav-avatar']) {
+    const start = globalCss.indexOf(`\n${selector} {`);
+    assert.ok(start >= 0, `${selector} rule not found`);
+    const body = globalCss.slice(start, globalCss.indexOf('}', start));
+    assert.match(body, /\n\s*color: var\(--sx-on-spot\);/, `${selector} initials flip with the theme`);
+  }
+});

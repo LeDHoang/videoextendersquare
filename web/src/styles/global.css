@@ -5589,7 +5589,7 @@ button.sx-explore-loc-link:hover {
   height: 30px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 50%;
-  color: var(--sx-bg);
+  color: var(--sx-on-spot);
   font: 900 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
 }
 
@@ -6717,7 +6717,7 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   place-items: center;
   border-radius: 50%;
   overflow: hidden;
-  color: var(--sx-on-accent);
+  color: var(--sx-on-spot);
   font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
 }
 
@@ -8836,7 +8836,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
-  color: var(--sx-bg);
+  color: var(--sx-on-spot);
   font: 900 1.9rem/1 var(--sx-font-mono);
 }
 
@@ -10893,7 +10893,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   border-radius: 50%;
   border: 1.5px solid rgba(255, 255, 255, 0.35);
   /* Dark initials like the other avatars: white on the default #ff3b1f is 3.56:1, this is 5.6:1. */
-  color: var(--sx-bg);
+  color: var(--sx-on-spot);
   font: 800 12px/1 var(--sx-font-mono);
 }
 
