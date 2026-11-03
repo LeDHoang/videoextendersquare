@@ -37,8 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY deploy/ffmpeg-nice.sh /usr/local/bin/ffmpeg
 RUN chmod 0755 /usr/local/bin/ffmpeg
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt && rm requirements.txt
+# requirements-captions.txt includes requirements.txt and adds faster-whisper
+# for auto captions at publish (server/media.py make_captions).
+COPY requirements.txt requirements-captions.txt ./
+RUN pip install -r requirements-captions.txt && rm requirements.txt requirements-captions.txt
 
 # Non-root runtime user. /app/data and /app/output are pre-created and owned
 # by it so fresh named volumes mounted there inherit the ownership.
@@ -46,6 +48,14 @@ RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /home/app --create-home app \
     && mkdir -p /app/data /app/output \
     && chown app:app /app/data /app/output
+
+# The Whisper "base" speech model (about 150 MB) is baked into the image, so
+# captions work on the first publish and a deploy never downloads it. Offline
+# at runtime: the server only reads this cache.
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')" \
+    && chown -R app:app /opt/hf-cache
+ENV HF_HUB_OFFLINE=1
 
 # Allowlist: only the runtime trees. Tests, docs, scripts, video/, local
 # state and secrets never enter the image.
