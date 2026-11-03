@@ -7,6 +7,7 @@ import { AuthProvider } from './hooks/AuthContext.jsx';
 import { WalletProvider } from './hooks/WalletContext.jsx';
 import './styles/tokens.css';
 import './styles/global.css';
+import './styles/editorial.css';
 
 if (import.meta.env.DEV) import('./dev/palettePreview.js');
 

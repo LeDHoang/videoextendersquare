@@ -1,0 +1,579 @@
+/* ═══ ECHO Editorial: "Paper & Ink" layer ════════════════════════════════
+   Loaded after global.css. Turns the app into a culture magazine: a masthead
+   with a double ink rule, Fraunces headlines in mixed case, Plex Mono captions,
+   vermilion for every action and a proof-yellow highlighter for labels.
+   Tokens only; no colour literals here. */
+
+/* ─── Type ─────────────────────────────────────────────────────────────── */
+body {
+  font-feature-settings: 'ss01', 'kern';
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 0;
+  letter-spacing: -0.015em;
+  text-transform: none;
+}
+
+::selection {
+  background-color: var(--sx-spot);
+  color: var(--sx-on-spot);
+}
+
+/* Kickers: small mono caps led by a short vermilion rule. */
+.sx-eyebrow,
+.sx-xh-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--sx-ink-2);
+}
+.sx-eyebrow::before,
+.sx-xh-kicker::before {
+  content: '';
+  flex: 0 0 28px;
+  height: 2px;
+  background: var(--sx-accent);
+}
+
+/* Page heroes read like section openers: big serif, heavy rule under. */
+.sx-hero {
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.035em;
+  line-height: 0.92;
+  text-transform: none;
+}
+.sx-hero::after {
+  height: 0;
+  margin-top: var(--sx-4);
+  border-top: 2px solid var(--sx-ink);
+  border-bottom: 1px solid var(--sx-ink);
+  padding-top: 3px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ─── Masthead ─────────────────────────────────────────────────────────── */
+.sx-top-bar {
+  border-bottom: 1px solid var(--sx-ink);
+  box-shadow: 0 3px 0 var(--sx-surface), 0 4px 0 var(--sx-ink);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--sx-surface);
+}
+.sx-top-brand {
+  color: var(--sx-accent);
+  font-weight: 900;
+  font-style: italic;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.03em;
+  text-transform: none;
+  /* The base clips at the box. Italic overhangs it, and the mark's hover grows past it. */
+  overflow: visible;
+}
+.sx-top-brand:hover {
+  color: var(--sx-accent-hi);
+}
+.sx-sidebar-hero-title {
+  color: var(--sx-accent);
+}
+.sx-top-link {
+  font-family: var(--sx-font-sans);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--sx-ink-2);
+  border-bottom-width: 3px;
+}
+.sx-top-link:hover {
+  color: var(--sx-ink);
+}
+.sx-top-link.sx-active {
+  color: var(--sx-ink);
+  border-bottom-color: var(--sx-accent);
+  font-weight: 700;
+}
+.sx-command-box {
+  background: var(--sx-bg);
+  border-color: var(--sx-rule);
+  border-radius: var(--sx-radius);
+  padding-left: 6px;
+}
+
+.sx-command-input {
+  font-family: var(--sx-font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.sx-top-action-btn {
+  border-radius: var(--sx-radius);
+  font-family: var(--sx-font-sans);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* The Echo Glass mark is drawn with the VR scene's literal colours; re-ink it for paper. */
+.sx-echo-mark [stroke='#f2f3f5'] {
+  stroke: var(--sx-ink);
+}
+.sx-echo-mark [fill='#f2f3f5'] {
+  fill: var(--sx-ink);
+}
+.sx-echo-mark [stroke='#ff3b1f'] {
+  stroke: var(--sx-accent);
+}
+.sx-echo-mark [fill='#ff3b1f'] {
+  fill: var(--sx-accent);
+}
+.sx-echo-mark [fill='#08090a'] {
+  fill: var(--sx-ink);
+}
+
+/* The other icons are drawn for dark surfaces too: light lines, dark cut-outs. Off
+   the tiles (which sit on photos) and the reels player, the lines take the text
+   colour, the cut-outs take the paper and the vermilion takes the accent. */
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#f2f3f5'] {
+  stroke: currentColor;
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#f2f3f5'] {
+  fill: currentColor;
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#121315'] {
+  fill: var(--sx-bg);
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#ff3b1f'] {
+  stroke: var(--sx-accent);
+}
+svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#ff3b1f'] {
+  fill: var(--sx-accent);
+}
+
+/* ─── Buttons ──────────────────────────────────────────────────────────── */
+.sx-btn {
+  border-color: var(--sx-ink);
+  border-radius: var(--sx-radius);
+  font-family: var(--sx-font-sans);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 0.95rem;
+}
+.sx-btn:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--sx-ink);
+  border-color: var(--sx-ink);
+  color: var(--sx-surface);
+  transform: none;
+}
+.sx-btn.sx-primary {
+  font-family: var(--sx-font-sans);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  box-shadow: none;
+}
+.sx-btn.sx-primary:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--sx-accent-hi);
+  border-color: var(--sx-accent-hi);
+  color: var(--sx-on-accent);
+  box-shadow: none;
+}
+
+.sx-xh-btn {
+  border-color: var(--sx-ink);
+  border-radius: var(--sx-radius);
+  font-family: var(--sx-font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  min-height: 44px;
+}
+.sx-xh-btn:hover:not(:disabled) {
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+}
+.sx-xh-btn--primary {
+  box-shadow: none;
+}
+
+/* ─── Explore chrome ───────────────────────────────────────────────────── */
+.sx-xh {
+  padding-top: var(--sx-4);
+}
+.sx-xh-row {
+  padding-bottom: var(--sx-4);
+  border-bottom: 2px solid var(--sx-ink);
+  box-shadow: 0 3px 0 var(--sx-bg), 0 4px 0 var(--sx-ink);
+}
+.sx-xh-title {
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.04em;
+  line-height: 0.88;
+  text-transform: none;
+}
+.sx-xh-prefix {
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Telemetry reads as a contents strip: hairline columns, big serif numerals. */
+.sx-xh-stats {
+  gap: 0;
+  margin-top: var(--sx-3);
+  padding-top: 0;
+  border-top: 0;
+  border-bottom: 1px solid var(--sx-rule);
+}
+.sx-xh-stat {
+  padding: var(--sx-3) var(--sx-4) var(--sx-3) 0;
+  border: 0;
+  border-right: 1px solid var(--sx-rule);
+  background: transparent;
+}
+.sx-xh-stat + .sx-xh-stat {
+  padding-left: var(--sx-4);
+}
+.sx-xh-stat:last-child {
+  border-right: 0;
+}
+.sx-xh-stat-value {
+  margin-top: 4px;
+  font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+  font-weight: 700;
+  font-variation-settings: 'opsz' 144;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+/* Tags as pills, like stickers on a proof sheet. */
+.sx-xh-chip {
+  min-height: 34px;
+  padding: 4px 14px;
+  border: 1px solid var(--sx-ink);
+  border-radius: var(--sx-radius);
+  background: transparent;
+  backdrop-filter: none;
+  color: var(--sx-ink);
+  font-family: var(--sx-font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: none;
+}
+.sx-xh-chip:hover {
+  border-color: var(--sx-ink);
+  background: var(--sx-spot);
+  color: var(--sx-on-spot);
+}
+.sx-xh-chip:hover .sx-xh-chip-prefix {
+  color: var(--sx-on-spot);
+}
+.sx-xh-chip-count {
+  padding: 1px 7px;
+  border-radius: var(--sx-radius);
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+  font-family: var(--sx-font-mono);
+  font-size: 0.75rem;
+}
+
+.sx-xh-toolbar {
+  padding: var(--sx-3) 0;
+  border: 0;
+  border-top: 1px solid var(--sx-ink);
+  border-bottom: 1px solid var(--sx-rule);
+  background: transparent;
+}
+.sx-xh-tab {
+  min-height: 38px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--sx-radius);
+  background: transparent;
+  color: var(--sx-ink-2);
+  font-family: var(--sx-font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.sx-xh-tab:hover:not(.sx-xh-tab--on) {
+  border-color: var(--sx-ink);
+  background: transparent;
+  color: var(--sx-ink);
+}
+.sx-xh-tab--on {
+  border-color: var(--sx-ink);
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+}
+.sx-xh-seg {
+  border-radius: var(--sx-radius);
+}
+.sx-xh-seg-btn {
+  border-radius: var(--sx-radius);
+}
+.sx-xh-seg-btn--on {
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+  box-shadow: none;
+}
+.sx-xh-icon-btn {
+  border-radius: var(--sx-radius);
+}
+.sx-xh-icon-btn--on {
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+}
+
+/* ─── Explore tiles: a contact sheet with paper gutters ────────────────── */
+.sx-explore-grid {
+  gap: 6px;
+}
+.sx-explore-kind,
+.sx-explore-order {
+  background: var(--sx-accent);
+  color: var(--sx-on-accent);
+}
+.sx-explore-kind {
+  font-family: var(--sx-font-mono);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.sx-explore-loc,
+.sx-explore-creator {
+  font-family: var(--sx-font-sans);
+  font-weight: 600;
+  border-radius: var(--sx-radius);
+}
+.sx-explore-loc {
+  padding: 4px 10px 4px 8px;
+}
+.sx-explore-creator:hover,
+button.sx-explore-loc-link:hover {
+  color: var(--sx-spot);
+}
+
+/* ─── Profile: a feature opener ────────────────────────────────────────── */
+.sx-pf-hero {
+  padding: var(--sx-6) 0 var(--sx-5);
+  border: 0;
+  border-top: 2px solid var(--sx-ink);
+  border-bottom: 1px solid var(--sx-ink);
+  box-shadow: inset 0 3px 0 var(--sx-bg), inset 0 4px 0 var(--sx-ink);
+  background: transparent;
+}
+.sx-pf-hero::before,
+.sx-pf-hero::after {
+  content: none;
+}
+.sx-pf-name {
+  font-size: clamp(2.2rem, 5.5vw, 4rem);
+  font-weight: 800;
+  font-variation-settings: 'opsz' 144, 'WONK' 1;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-transform: none;
+}
+.sx-pf-tag {
+  min-height: 32px;
+  padding: 4px 12px;
+  border-color: var(--sx-ink);
+  border-radius: var(--sx-radius);
+  background: transparent;
+  font: 600 0.875rem/1.2 var(--sx-font-sans);
+}
+.sx-pf-tag:hover {
+  background: var(--sx-spot);
+  color: var(--sx-on-spot);
+}
+.sx-pf-stat-value {
+  font-family: var(--sx-font-display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variation-settings: 'opsz' 144;
+}
+.sx-pf-tabs button {
+  min-height: 44px;
+  font: 600 0.95rem/1 var(--sx-font-sans);
+  letter-spacing: 0;
+}
+.sx-pf-tabs button.sx-active {
+  border-bottom-width: 3px;
+  background: transparent;
+}
+
+/* Touch: 44px hit areas for the profile tag pills and stat links, same trick as the tile chips. */
+@media (pointer: coarse) {
+  .sx-pf-tag,
+  .sx-pf-stat--link {
+    position: relative;
+  }
+  .sx-pf-tag::before,
+  .sx-pf-stat--link::before {
+    content: '';
+    position: absolute;
+    inset: -6px -2px;
+  }
+}
+
+/* ─── Empty states: a blank page with a headline, not a dashed box ─────── */
+.sx-empty-state {
+  border: 0;
+  border-top: 2px solid var(--sx-ink);
+  border-bottom: 1px solid var(--sx-ink);
+  background: transparent;
+}
+.sx-empty-state-title {
+  font-size: var(--sx-t-display);
+  font-weight: 700;
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'WONK' 1;
+  text-transform: none;
+  color: var(--sx-ink);
+}
+
+/* ─── Sign in / sign up: a subscription card ───────────────────────────── */
+.sx-au-tabs {
+  border: 0;
+  border-bottom: 1px solid var(--sx-ink);
+  background: transparent;
+}
+.sx-au-tab {
+  font: 600 0.95rem/1 var(--sx-font-sans);
+  letter-spacing: 0.01em;
+  border-bottom-width: 3px;
+}
+.sx-au-tab + .sx-au-tab {
+  border-left: 0;
+}
+.sx-au-tab:hover {
+  background: transparent;
+}
+.sx-au-tab.is-active {
+  background: transparent;
+}
+.sx-au-input {
+  font: 500 1rem/1.4 var(--sx-font-sans);
+}
+.sx-au-submit {
+  font: 700 1rem/1 var(--sx-font-sans);
+  letter-spacing: 0.04em;
+  box-shadow: none;
+}
+.sx-au-submit:hover:not(:disabled) {
+  box-shadow: none;
+}
+
+/* ─── Reels player: its stylesheet names JetBrains Mono and Archivo, which this
+   theme does not load; captions fall to Plex Mono instead of system Courier. ─── */
+#sxReelsRoot :where(*):not(.material-symbols-outlined) {
+  font-family: var(--sx-font-mono);
+}
+#sxReelsRoot :where(h1, h2, h3, h4, strong, b) {
+  font-family: var(--sx-font-sans);
+}
+
+/* ─── Corners: every box and button takes the same slight radius. global.css
+   squares most of them off; avatars and dots stay round, and the player frame,
+   which wears corner brackets, stays square. ─── */
+.sx-icon-button,
+.sx-sidebar-close-btn,
+.sx-sidebar-nav-card,
+.sx-pill,
+.sx-input,
+.sx-select,
+.sx-textarea,
+.sx-toast,
+.sx-dropdown-head,
+.sx-dropdown-panel,
+.sx-upload-zone,
+.sx-command-kbd span,
+.sx-command-results,
+.sx-account-popover,
+.sx-people-dialog,
+.sx-gif-picker,
+.sx-emote-picker > div,
+.sx-message-dock,
+.sx-message-bubble,
+.sx-share-dialog textarea,
+.sx-message-report textarea,
+.sx-message-composer textarea,
+.sx-explore-tile,
+.sx-explore-kind,
+.sx-explore-order,
+.sx-explore-title,
+.sx-explore-stats,
+.sx-explore-share button,
+.sx-pack-label,
+.sx-pack-cover-label,
+.sx-pack-cover-stack,
+.sx-tag-chip,
+.sx-profile-demo,
+.sx-pf-select,
+.sx-ps-input,
+.sx-ps-btn,
+.sx-pk-cover,
+.sx-pk-play,
+.sx-pk-kind,
+.sx-pk-status,
+.sx-pk-act,
+.sx-pk-foot,
+.sx-pk-dialog,
+.sx-pk-dialog textarea,
+.sx-au-control,
+.sx-au-rules,
+.sx-au-submit {
+  border-radius: var(--sx-radius);
+}
+/* These paint their own corners with children, so they clip to the radius. */
+.sx-pk-stats,
+.sx-au {
+  overflow: hidden;
+  border-radius: var(--sx-radius);
+}
+/* The player's stylesheet is scoped to #sxReelsRoot when it mounts and lands after
+   this file, so the doubled id outranks it. */
+#sxReelsRoot#sxReelsRoot :is(
+  .reels-cluster,
+  .action-btn,
+  .edge-chevron,
+  .reels-side,
+  .side-avatar,
+  .side-chip,
+  .follow-pill,
+  .side-stats,
+  .account-btn,
+  .sync-time-toggle,
+  .drawer-sync-filter,
+  .comment-empty,
+  .comment-item,
+  .comment-avatar,
+  .comment-time-btn,
+  .comment-input-wrap,
+  .comment-submit-btn,
+  .center-flash,
+  .reward-toast,
+  .reels-time-display,
+  .twitch-comment-pill
+) {
+  border-radius: var(--sx-radius);
+}
+
+/* ─── Footer: a colophon ───────────────────────────────────────────────── */
+.sx-footer {
+  border-top: 2px solid var(--sx-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-btn.sx-primary:hover:not(:disabled, [aria-disabled='true']) {
+    transform: none;
+  }
+}
