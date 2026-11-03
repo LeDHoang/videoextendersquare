@@ -6579,3 +6579,113 @@ test('preview keys: zoomed in on Earth, an arrow pans the map that way on screen
   }
   renderer.stopPreview();
 });
+
+// ─── Task 5: the world (starfield, light sky, playback dim) ─────────────
+function startWorld(theme, extra = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, theme, withShell: true, search: '?vrtex=canvas', ...extra });
+  const video = {
+    paused: false,
+    ended: false,
+    readyState: 4,
+    currentTime: 1,
+    duration: 10,
+    muted: true,
+    addEventListener() {},
+    removeEventListener() {},
+    requestVideoFrameCallback() { return 1; },
+    cancelVideoFrameCallback() {},
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); },
+  };
+  renderer.init(video, { getPlaylist: () => [], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  let t = 0;
+  const run = (ms) => { for (let spent = 0; spent < ms; spent += 100) { t += 100; renderer.__runScheduledFrame(t); } };
+  return { renderer, video, run };
+}
+
+test('dim targets only light playback in the reels scene', () => {
+  const { renderer } = startWorld('light');
+  const { worldDimTarget, DIM_AMOUNT } = renderer.__test;
+  const base = { mode: 'light', scene: 'reels', paused: false, shellOpen: false };
+  assert.equal(worldDimTarget(base), DIM_AMOUNT);
+  assert.ok(DIM_AMOUNT > 0);
+  assert.equal(worldDimTarget({ ...base, mode: 'dark' }), 0);
+  assert.equal(worldDimTarget({ ...base, scene: 'earth' }), 0);
+  assert.equal(worldDimTarget({ ...base, paused: true }), 0);
+  assert.equal(worldDimTarget({ ...base, shellOpen: true }), 0);
+  renderer.stopPreview();
+});
+
+test('dim fades without overshoot', () => {
+  const { renderer } = startWorld('light');
+  const { stepDim, DIM_FADE_MS } = renderer.__test;
+  // Rate is 1 / DIM_FADE_MS per ms; the target caps the step.
+  assert.ok(Math.abs(stepDim(0, 0.45, 100) - 100 / DIM_FADE_MS) < 1e-9);
+  assert.equal(stepDim(0, 0.45, 300), 0.45);
+  assert.ok(Math.abs(stepDim(0.45, 0.2, 100) - (0.45 - 100 / DIM_FADE_MS)) < 1e-9);
+  assert.equal(stepDim(0.4, 0.45, DIM_FADE_MS), 0.45);
+  assert.equal(stepDim(0.45, 0, 300), 0);
+  assert.equal(stepDim(0.45, 0, DIM_FADE_MS), 0);
+  renderer.stopPreview();
+});
+
+test('the light world dims during playback and clears when it stops', () => {
+  const { renderer, video, run } = startWorld('light');
+  const { DIM_AMOUNT } = renderer.__test;
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  video.pause();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+
+  video.play();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  assert.equal(renderer.shell.open('/explore'), true);
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.shell.close();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  renderer.setSceneMode('earth');
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.stopPreview();
+});
+
+test('dark mode never dims', () => {
+  const { renderer, run } = startWorld('dark');
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.stopPreview();
+});
+
+test('each mode shows its own world', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  let w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, clouds: true, stars: false, glow: false });
+  renderer.__test.setVRTheme('dark');
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, clouds: false, stars: true, glow: true });
+  renderer.setSceneMode('earth');
+  run(100);
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, clouds: false, stars: true, glow: false });
+  renderer.__test.setVRTheme('light');
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, clouds: true, stars: false, glow: false });
+  renderer.stopPreview();
+});
+
+test('the source has no carbon world literals', () => {
+  const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e', '#0a0a0a',
+    'JetBrains Mono', 'Archivo', 'Orbitron', '#39D7FF', '#4FE3C1', '#FFC857', '#FF8A5B', '#121315', '#1c1d1f', '#ff6a52', '#061D37',
+    'rgba(13, 14, 15', 'rgba(2,6,14', '0x020612', '0x0d2a3f', '0x39d7ff'];
+  const lower = rendererSource.toLowerCase();
+  const leftover = banned.filter((s) => lower.includes(s.toLowerCase()));
+  // The globe colours (Task 6) are not the world's.
+  assert.deepEqual(leftover.filter((s) => !['0x0d2a3f', '0x39d7ff', '#061D37'].includes(s)), []);
+});

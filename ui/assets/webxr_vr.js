@@ -586,6 +586,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let controlsMesh = null;
   let commentsMesh = null;
   let starfieldPoints = null;
+  let worldSky = null;
+  let worldMountains = null;
+  let worldClouds = null;
+  let worldDim = 0;
+  let worldLastT = -1;
   let earthGroup = null;
   let earthMesh = null;
   let earthLegacyGeometry = null;
@@ -673,6 +678,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
   }
 
+  // Font stack from VRUICanvas.TOKENS.font; the fallback applies if the canvas module is absent.
+  function uiFont(name, fallback) {
+    const ui = getUICanvas();
+    const v = ui && ui.TOKENS && ui.TOKENS.font && ui.TOKENS.font[name];
+    return typeof v === 'string' && v ? v : fallback;
+  }
+
   // <html data-theme> is the one switch: 'dark' is dark, anything else light.
   function readPageTheme() {
     try {
@@ -698,8 +710,178 @@ window.WebXRVR = window.WebXRVR || (function () {
     vrLastUiUploadT = -1;
   }
 
+  // The one place for world colours. Task 6 adds `earth` to each mode.
+  const WORLD_PALETTE = {
+    light: {
+      skyTop: '#cfe0ec', horizon: '#f2ede3', mist: '#e9e3d6',
+      mountains: ['#dad8cf', '#cac8be', '#b9b8ae'], // far to near
+      cloud: '#f2ede3',
+    },
+    dark: { sky: '#0c0b09', star: '#f5f1e8' },
+  };
+  const DIM_AMOUNT = 0.45;
+  const DIM_FADE_MS = 600;
+
+  // Light playback in the reels scene dims the sky; every other state clears it.
+  function worldDimTarget(s) {
+    return s && s.mode === 'light' && s.scene === 'reels' && !s.paused && !s.shellOpen ? DIM_AMOUNT : 0;
+  }
+
+  // Moves linearly at 1 / DIM_FADE_MS per ms and stops on the target.
+  function stepDim(current, target, dtMs) {
+    const step = Math.max(0, dtMs) / DIM_FADE_MS;
+    if (current < target) return Math.min(target, current + step);
+    return Math.max(target, current - step);
+  }
+
+  function worldClearHex() {
+    return readVRTheme() === 'dark' ? WORLD_PALETTE.dark.sky : WORLD_PALETTE.light.horizon;
+  }
+
+  // Sky, mountains and clouds: three meshes built once, shown in light mode only.
+  function buildLightWorld() {
+    if (worldSky || !THREE || !scene) return;
+    const L = WORLD_PALETTE.light;
+    const rgb = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+    const mat = (side, depthWrite) => new THREE.MeshBasicMaterial({
+      vertexColors: true, side, depthWrite, fog: false,
+    });
+    const make = (positions, colors, indices, material, order) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+      g.setIndex(indices);
+      const m = new THREE.Mesh(g, material);
+      m.renderOrder = order;
+      m.frustumCulled = false;
+      m.visible = false;
+      m.userData.baseColor = new THREE.Color(1, 1, 1);
+      scene.add(m);
+      return m;
+    };
+
+    // Sky: vertex-coloured sphere, skyTop overhead, horizon at the eye line, mist below.
+    {
+      const R = 60, W = 32, H = 16;
+      const pos = [], col = [], idx = [];
+      const top = rgb(L.skyTop), hor = rgb(L.horizon), mist = rgb(L.mist);
+      for (let j = 0; j <= H; j++) {
+        const ph = Math.PI * j / H; // 0 = zenith
+        const y = Math.cos(ph);
+        const c = y >= 0
+          ? hor.map((v, k) => v + (top[k] - v) * Math.pow(y, 0.6))
+          : hor.map((v, k) => v + (mist[k] - v) * Math.min(1, -y * 3));
+        for (let i = 0; i <= W; i++) {
+          const th = 2 * Math.PI * i / W;
+          pos.push(R * Math.sin(ph) * Math.cos(th), R * y, R * Math.sin(ph) * Math.sin(th));
+          col.push(c[0], c[1], c[2]);
+        }
+      }
+      for (let j = 0; j < H; j++) {
+        for (let i = 0; i < W; i++) {
+          const a = j * (W + 1) + i, b = a + W + 1;
+          idx.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+      worldSky = make(pos, col, idx, mat(THREE.BackSide, false), -10);
+    }
+
+    // Mountains: three rings, far and palest first, a fixed sum of sines for the ridge.
+    {
+      const N = 96, EYE = 1.6;
+      const bands = [
+        { r: 52, base: 3.2, amp: 1.6, ph: 0.7, f: [3, 7, 13] },
+        { r: 48, base: 2.4, amp: 1.4, ph: 2.1, f: [4, 9, 17] },
+        { r: 44, base: 1.7, amp: 1.1, ph: 4.0, f: [5, 11, 19] },
+      ];
+      const pos = [], col = [], idx = [];
+      bands.forEach((b, bi) => {
+        const c = rgb(L.mountains[bi]);
+        const start = pos.length / 3;
+        for (let i = 0; i <= N; i++) {
+          const th = 2 * Math.PI * i / N;
+          const ridge = (Math.sin(b.f[0] * th + b.ph) + 0.5 * Math.sin(b.f[1] * th + 2 * b.ph) +
+            0.25 * Math.sin(b.f[2] * th + 3 * b.ph)) / 1.75;
+          const h = EYE + b.base + b.amp * ridge; // peak stays under ~8 degrees
+          pos.push(b.r * Math.cos(th), -3, b.r * Math.sin(th), b.r * Math.cos(th), h, b.r * Math.sin(th));
+          col.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (let i = 0; i < N; i++) {
+          const a = start + i * 2;
+          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        }
+      });
+      worldMountains = make(pos, col, idx, mat(THREE.DoubleSide, true), -9);
+    }
+
+    // Clouds: flat still ellipses merged into one mesh, above the mountains.
+    {
+      const R = 40, SEG = 10;
+      const c = rgb(L.cloud);
+      const pos = [], col = [], idx = [];
+      const groups = [[0.3, 22], [1.6, 30], [2.7, 18], [3.9, 27], [5.1, 20], [0.9, 38]];
+      groups.forEach(([az, elDeg], gi) => {
+        for (let p = 0; p < 4; p++) {
+          const a = az + (p - 1.5) * 0.09;
+          const e = (elDeg + (p % 2 ? 1.2 : -0.8)) * Math.PI / 180;
+          const cx = R * Math.cos(e) * Math.cos(a), cy = R * Math.sin(e), cz = R * Math.cos(e) * Math.sin(a);
+          // Tangent basis on the sphere: east and up.
+          const ex = -Math.sin(a), ez = Math.cos(a);
+          const ux = -Math.sin(e) * Math.cos(a), uy = Math.cos(e), uz = -Math.sin(e) * Math.sin(a);
+          const rw = 3.6 - 0.5 * Math.abs(p - 1.5) + gi * 0.1, rh = 0.9;
+          const start = pos.length / 3;
+          pos.push(cx, cy, cz);
+          col.push(c[0], c[1], c[2]);
+          for (let i = 0; i < SEG; i++) {
+            const t = 2 * Math.PI * i / SEG;
+            const x = Math.cos(t) * rw, y = Math.sin(t) * rh;
+            pos.push(cx + ex * x + ux * y, cy + uy * y, cz + ez * x + uz * y);
+            col.push(c[0], c[1], c[2]);
+          }
+          for (let i = 0; i < SEG; i++) idx.push(start, start + 1 + i, start + 1 + (i + 1) % SEG);
+        }
+      });
+      worldClouds = make(pos, col, idx, mat(THREE.DoubleSide, false), -8);
+    }
+  }
+
+  function worldObjectMeshes() { return [worldSky, worldMountains, worldClouds]; }
+
+  // Shows the world of the current mode and sets the clear colour from the palette.
+  function applyWorldMode() {
+    const light = readVRTheme() !== 'dark';
+    for (const m of worldObjectMeshes()) if (m) m.visible = light;
+    if (starfieldPoints) starfieldPoints.visible = !light;
+  }
+
+  // Scales the light world by 1 - dim (colour multiplies the vertex colours).
+  function applyWorldDim() {
+    const k = 1 - worldDim;
+    for (const m of worldObjectMeshes()) {
+      if (m && m.material && m.material.color) m.material.color.setRGB(k, k, k);
+    }
+  }
+
+  // Once a frame: eases the dim toward its target for the current state.
+  function updateWorld(time) {
+    const src = videoElement;
+    const dt = worldLastT < 0 || !Number.isFinite(time) ? 0 : time - worldLastT;
+    if (Number.isFinite(time)) worldLastT = time;
+    const target = worldDimTarget({
+      mode: readVRTheme(),
+      scene: sceneMode,
+      paused: !src || !!src.paused || !!src.ended,
+      shellOpen: isShellOpen(),
+    });
+    const next = stepDim(worldDim, target, dt);
+    if (next !== worldDim) {
+      worldDim = next;
+      applyWorldDim();
+    }
+  }
+
   function recolourScene() {
-    const bg = parseInt(echoHex('bg', '#f2ede3').slice(1), 16);
+    const bg = parseInt(worldClearHex().slice(1), 16);
     try { if (renderer && renderer.setClearColor) renderer.setClearColor(bg, 1); } catch (e) {}
     try { if (scene && scene.background && scene.background.setHex) scene.background.setHex(bg); } catch (e) {}
     try {
@@ -724,6 +906,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!ui || typeof ui.setTheme !== 'function' || !ui.setTheme(mode)) return;
     markCanvasesDirty();
     recolourScene();
+    if (scene) applySceneVisibility();
   }
 
   // The nav bar's LIGHT / DARK switch: saves the choice and sets the page attribute
@@ -4063,7 +4246,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
     ctx.fillStyle = echoHex('ink', '#17140f');
-    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.font = `700 15px ${uiFont('mono', 'monospace')}`;
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
   }
@@ -5093,14 +5276,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       updatePreviewSize(canvas);
       if (renderer.xr) renderer.xr.enabled = true;
       try {
-        if (renderer.setClearColor) renderer.setClearColor(parseInt(echoHex('bg', '#f2ede3').slice(1), 16), 1);
+        if (renderer.setClearColor) renderer.setClearColor(parseInt(worldClearHex().slice(1), 16), 1);
       } catch (e) {}
     }
 
     if (!scene) {
       scene = new THREE.Scene();
       try {
-        scene.background = new THREE.Color(parseInt(echoHex('bg', '#f2ede3').slice(1), 16));
+        scene.background = new THREE.Color(parseInt(worldClearHex().slice(1), 16));
       } catch (e) {}
     }
 
@@ -5383,9 +5566,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       for (let i = 0; i < starCount; i++) {
         const t = Math.random();
         const warm = t > 0.88, bright = 0.55 + Math.random() * 0.45;
-        starColors[i * 3] = (warm ? 1.0 : 0.62 + t * 0.2) * bright;
-        starColors[i * 3 + 1] = (warm ? 0.86 : 0.80 + t * 0.15) * bright;
-        starColors[i * 3 + 2] = 1.0 * bright;
+        // Brightness only; the warm hue comes from the material colour (WORLD_PALETTE.dark.star).
+        const b = warm ? bright : bright * (0.7 + t * 0.3);
+        starColors[i * 3] = b;
+        starColors[i * 3 + 1] = b;
+        starColors[i * 3 + 2] = b;
       }
       starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
       let starSprite = null;
@@ -5404,13 +5589,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       } catch (e) { starSprite = null; }
       const starMat = new THREE.PointsMaterial({
-        color: 0xffffff, size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
+        color: parseInt(WORLD_PALETTE.dark.star.slice(1), 16), size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
         vertexColors: true, depthWrite: false,
       });
       if (starSprite) starMat.map = starSprite;
       starfieldPoints = new THREE.Points(starGeo, starMat);
       scene.add(starfieldPoints);
     }
+    buildLightWorld();
+    applyWorldMode();
+    applyWorldDim();
 
     // Earth Subsystem — textured holographic globe (upstream visual parity):
     // dark equirect base map + painted heat zones, 3D pulsing pins at exact
@@ -6935,7 +7123,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       pressedButton,
       renderStats: { ...renderStats },
       earthState: getEarthState(),
-      world: { theme: readVRTheme() },
+      world: { theme: readVRTheme(), dim: worldDim },
     };
   }
 
@@ -6991,6 +7179,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     updatePreviewSize(previewCanvas);
     applySceneVisibility();
+    updateWorld(time);
 
     if (sceneMode === 'reels') {
       updateVisualTexture(getVisualSource());
@@ -8286,7 +8475,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (screenMesh) screenMesh.visible = !isEarth;
     applyStereoVisibility();
-    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
+    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow && readVRTheme() === 'dark';
     if (overlayMesh) {
       const source = getVisualSource();
       overlayMesh.visible = !isEarth && !commentsPanelVisible && overlayHasPopups &&
@@ -8295,7 +8484,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (controlsMesh) controlsMesh.visible = controlsVisible;
     if (commentsMesh) commentsMesh.visible = (!isEarth && commentsPanelVisible);
     if (guideMesh) guideMesh.visible = (!isEarth && controlsVisible && debugFlags.guide);
-    if (starfieldPoints) starfieldPoints.visible = true;
+    applyWorldMode();
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
     if (reticleMesh) reticleMesh.visible = pointerActive;
@@ -10086,6 +10275,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       renderer.setAnimationLoop((time, frame) => {
         captureSessionEye(frame);
         applySceneVisibility();
+        updateWorld(time);
         if (sceneMode === 'reels') {
           updateVisualTexture(getVisualSource());
           updateGlowColor(time, 800);
@@ -10272,6 +10462,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     controlsMesh = null;
     commentsMesh = null;
     starfieldPoints = null;
+    worldSky = null;
+    worldMountains = null;
+    worldClouds = null;
+    worldLastT = -1;
     earthGroup = null;
     if (earthLegacyGeometry) earthLegacyGeometry.dispose();
     if (earthAdaptiveGeometry) earthAdaptiveGeometry.dispose();
@@ -10658,7 +10852,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.autocomplete = 'off';
       domOverlayInput.setAttribute('enterkeyhint', 'send');
       domOverlayInput.placeholder = 'Type a VR comment…';
-      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:' + uiFont('sans', 'system-ui,sans-serif') + ';font-size:16px;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
       styleDomInput();
       domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
       domOverlayInput.addEventListener('blur', onCommentInputBlur);
@@ -10804,6 +10998,19 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     __test: {
       setVRTheme,
+      worldDimTarget,
+      stepDim,
+      DIM_AMOUNT,
+      DIM_FADE_MS,
+      worldObjects() {
+        return {
+          sky: !!(worldSky && worldSky.visible),
+          mountains: !!(worldMountains && worldMountains.visible),
+          clouds: !!(worldClouds && worldClouds.visible),
+          stars: !!(starfieldPoints && starfieldPoints.visible),
+          glow: !!(ambilightMesh && ambilightMesh.visible),
+        };
+      },
       postXRDiag,
       locationToUnit,
       earthZoneAngularRadius,
