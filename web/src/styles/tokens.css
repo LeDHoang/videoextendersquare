@@ -245,6 +245,65 @@
   }
 }
 
+/* Dark mode is the magazine printed in reverse: paper ink on carbon. Only colours
+   change; type, sizes and the corner stay shared. This block has the same
+   specificity as :root:root above, so it has to stay after it. Nothing sets
+   data-theme yet; the sidebar switch in docs/paper-ink-theme-switch-plan.md will. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --sx-bg: #0c0b09;
+  --sx-surface: #14130f;
+  --sx-surface-2: #1c1a16;
+  --sx-surface-3: #25221d;
+  --sx-surface-hover: #221f1a;
+  --sx-surface-glass: rgba(20, 19, 15, 0.86);
+  --sx-surface-glass-border: rgba(250, 247, 240, 0.1);
+  --sx-surface-overlay: rgba(6, 5, 4, 0.72);
+
+  --sx-rule: #2e2a24;
+  --sx-rule-strong: #f5f1e8;
+  --sx-rule-subtle: rgba(250, 247, 240, 0.06);
+
+  --sx-ink: #f5f1e8;
+  --sx-ink-2: #c4bdb0;
+  --sx-ink-3: #a39b8e;
+  --sx-ink-muted: #938c80;
+
+  /* Vermilion: the app's own accent, 5.5:1 on the carbon page. */
+  --sx-accent: #ff3b1f;
+  --sx-accent-hi: #ff5c42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-accent-glow: rgba(255, 59, 31, 0.3);
+  --sx-accent-border: rgba(255, 59, 31, 0.45);
+  --sx-on-accent: #17140f;
+  /* The app's original status colours, made for a dark page. */
+  --sx-success: #22c55e;
+  --sx-success-hi: #4ade80;
+  --sx-success-dim: rgba(34, 197, 94, 0.12);
+  --sx-success-border: rgba(34, 197, 94, 0.35);
+
+  --sx-warn: #f2c744;
+  --sx-warn-hi: #fde047;
+  --sx-warn-dim: rgba(242, 199, 68, 0.12);
+  --sx-warn-border: rgba(242, 199, 68, 0.35);
+
+  --sx-danger: #f43f5e; /* rose, hue-separated from the vermilion accent */
+  --sx-danger-hi: #fb7185;
+  --sx-danger-dim: rgba(244, 63, 94, 0.12);
+  --sx-danger-border: rgba(244, 63, 94, 0.35);
+
+  --sx-info: #3b82f6;
+  --sx-info-hi: #60a5fa;
+  --sx-info-dim: rgba(59, 130, 246, 0.12);
+  --sx-info-border: rgba(59, 130, 246, 0.35);
+
+  /* Print has no glow: shadows are short, deeper on carbon so cards still lift. */
+  --sx-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sx-shadow-card: 0 1px 0 rgba(250, 247, 240, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --sx-shadow-popover: 0 18px 40px -8px rgba(0, 0, 0, 0.7);
+}
+
 /* The reels player is a screening room inside the magazine: its injected stylesheet
    paints dark panels with literal colours, so its tokens go back to carbon and the
    app's own vermilion is the accent there. */
