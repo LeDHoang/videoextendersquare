@@ -1191,7 +1191,7 @@
     border: 1px solid var(--sx-rule-strong);
     transition: border-color 0.15s ease, background 0.15s ease;
   }
-  .comment-item:hover { border-color: #5d3f3a; background: var(--sx-surface); }
+  .comment-item:hover { border-color: color-mix(in srgb, var(--sx-accent) 40%, var(--sx-rule-strong)); background: var(--sx-surface); }
   .comment-item.comment-highlight {
     border-color: var(--sx-accent);
     background: var(--sx-surface-3);
@@ -1253,7 +1253,7 @@
   .comment-msg {
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
     font-size: 13px; line-height: 18px;
-    color: #e3e2e3;
+    color: var(--sx-ink);
     word-break: break-word;
     margin: 0;
   }
@@ -1316,7 +1316,7 @@
   .account-btn {
     background: var(--sx-surface-3);
     border: 1px solid var(--sx-rule-strong);
-    color: #e3e2e3;
+    color: var(--sx-ink);
     padding: 5px 10px;
     border-radius: 0;
     cursor: pointer;
@@ -1409,7 +1409,7 @@
     background: transparent;
     border: none;
     padding: 0 16px;
-    color: #e3e2e3;
+    color: var(--sx-ink);
     font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
     font-size: 15px;
     outline: none;
@@ -1876,7 +1876,7 @@
     border: 1px solid var(--sx-rule);
     border-radius: 0;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    box-shadow: var(--sx-shadow-popover, 0 20px 60px rgba(0, 0, 0, 0.6));
   }
   .reels-side-inner {
     position: absolute;
@@ -1893,7 +1893,7 @@
     display: grid;
     gap: 10px;
     padding: 14px;
-    background: rgba(8, 9, 10, 0.8);
+    background: var(--sx-surface);
     border-bottom: 1px solid var(--sx-rule);
     user-select: auto;
   }
@@ -1908,7 +1908,7 @@
     width: 36px;
     height: 36px;
     border-radius: 0;
-    background: #121417;
+    background: var(--sx-surface);
     border: 1px solid var(--sx-accent);
     box-shadow: 0 0 8px color-mix(in srgb, var(--sx-accent) 35%, transparent);
     display: flex;
@@ -2034,7 +2034,7 @@
     max-width: 100%;
     padding: 3px 8px;
     border-radius: 0;
-    background: #121417;
+    background: var(--sx-surface);
     border: 1px solid var(--sx-rule);
     color: var(--sx-ink-2);
     font: 600 12px/1.3 'JetBrains Mono', monospace;
@@ -2068,7 +2068,7 @@
     grid-template-columns: repeat(3, 1fr);
     border: 1px solid var(--sx-rule);
     border-radius: 0;
-    background: #121417;
+    background: var(--sx-surface);
   }
   .side-stats > div {
     padding: 7px 4px;

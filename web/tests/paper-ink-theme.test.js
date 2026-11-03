@@ -88,3 +88,30 @@ test('no rule pairs fixed scrims or white text with theme colours', () => {
 test('pack tiles in the explore grid are a carbon island, like reel tiles', () => {
   assert.match(tokensCss, /\.sx-explore-grid \.sx-pack-tile,\n#sxReelsRoot,/);
 });
+
+// The reels details column and comments drawer are reading panels, not the screen:
+// in light mode they leave the carbon island and take the paper tokens.
+test('reels details column and comments drawer take paper tokens in light mode', () => {
+  assert.match(
+    tokensCss,
+    /\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-side,\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-comments-drawer,\n:root:root \{/,
+  );
+});
+
+test('reels details column and comments drawer paint no fixed carbon colours', () => {
+  const reelsHtml = read('../../ui/assets/reels.html');
+  for (const literal of ['#121417', '#e3e2e3', '#5d3f3a', 'rgba(8, 9, 10, 0.8)']) {
+    assert.ok(!reelsHtml.includes(literal), `reels.html still paints ${literal}`);
+  }
+});
+
+test('icon re-ink reaches the reels details column and comments drawer', () => {
+  const editorialCss = read('../src/styles/editorial.css');
+  const rules = editorialCss.split('\n').filter((line) => line.includes('svg:not(.sx-echo-mark'));
+  for (const rule of rules) {
+    assert.ok(
+      rule.includes('#sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)'),
+      `${rule} still skips the reels panels`,
+    );
+  }
+});

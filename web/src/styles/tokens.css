@@ -145,7 +145,11 @@
    The block above is the shared contract with ui/assets/reels.html and the
    in-headset canvas (tests pin it), so the VR scene keeps its own look. The web
    app re-points the same tokens here: newsprint paper, carbon ink, one
-   vermilion spot colour and a proof-yellow highlighter. */
+   vermilion spot colour and a proof-yellow highlighter. The reels details column
+   and comments drawer are reading panels beside the screen, so in light mode they
+   step out of the carbon island below and print on paper too. */
+:root:not([data-theme='dark']) #sxReelsRoot .reels-side,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-comments-drawer,
 :root:root {
   color-scheme: light;
 
