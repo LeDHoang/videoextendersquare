@@ -6681,6 +6681,29 @@ test('each mode shows its own world', () => {
   renderer.stopPreview();
 });
 
+// The eye sits at the centre of the sky dome, so every face must show its visible side there.
+test('the light sky faces the eye at its centre', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const [sky] = renderer.__test.worldMeshes();
+  const THREE = renderer.getThree();
+  const pos = sky.geometry.getAttribute('position');
+  const idx = sky.geometry.getIndex();
+  const v = (i) => new THREE.Vector3().fromBufferAttribute(pos, i);
+  let hidden = 0;
+  for (let t = 0; t < idx.count; t += 3) {
+    const [a, b, c] = [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)].map(v);
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    if (normal.lengthSq() < 1e-9) continue; // pole slivers
+    const towardEye = normal.dot(a) < 0;
+    const shown = sky.material.side === THREE.DoubleSide ||
+      (sky.material.side === THREE.FrontSide) === towardEye;
+    if (!shown) hidden++;
+  }
+  assert.equal(hidden, 0);
+  renderer.stopPreview();
+});
+
 test('webxr_vr.js paints no carbon literal', () => {
   const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e', '#646b74', '#0a0a0a',
     'JetBrains Mono', 'Archivo', 'Orbitron', '#39D7FF', '#4FE3C1', '#FFC857', '#FF8A5B', '#121315', '#1c1d1f', '#ff6a52', '#061D37',

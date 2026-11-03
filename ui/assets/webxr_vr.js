@@ -717,9 +717,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // keyed dark-raster chain; light mode maps those rasters to paper instead.
   const WORLD_PALETTE = {
     light: {
-      skyTop: '#cfe0ec', horizon: '#f2ede3', mist: '#e9e3d6',
+      skyTop: '#9cc0dc', horizon: '#f2ede3', mist: '#e9e3d6',
       mountains: ['#dad8cf', '#cac8be', '#b9b8ae'], // far to near
-      cloud: '#f2ede3',
+      cloud: '#fbf9f4',
       earth: {
         land: '#f2ede3', sea: '#d8e2e4', park: '#dfe3cf', lineSoft: '#d3cab8', line: '#45403a',
         rim: '#17140f', rimOpacity: 0.10, rimBlending: 'NormalBlending',
@@ -785,7 +785,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const ph = Math.PI * j / H; // 0 = zenith
         const y = Math.cos(ph);
         const c = y >= 0
-          ? hor.map((v, k) => v + (top[k] - v) * Math.pow(y, 0.6))
+          ? hor.map((v, k) => v + (top[k] - v) * Math.pow(y, 0.45))
           : hor.map((v, k) => v + (mist[k] - v) * Math.min(1, -y * 3));
         for (let i = 0; i <= W; i++) {
           const th = 2 * Math.PI * i / W;
@@ -799,7 +799,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           idx.push(a, b, a + 1, b, b + 1, a + 1);
         }
       }
-      worldSky = make(pos, col, idx, mat(THREE.BackSide, false), -10);
+      worldSky = make(pos, col, idx, mat(THREE.FrontSide, false), -10); // faces wind toward the centre
     }
 
     // Mountains: three rings, far and palest first, a fixed sum of sines for the ridge.
@@ -11109,6 +11109,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       stepDim,
       DIM_AMOUNT,
       DIM_FADE_MS,
+      worldMeshes: worldObjectMeshes,
       worldObjects() {
         return {
           sky: !!(worldSky && worldSky.visible),
