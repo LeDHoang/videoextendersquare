@@ -42,8 +42,8 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Page heroes read like section openers: big serif, heavy rule under. */
 .sx-hero {
-  font-weight: 800;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.035em;
   line-height: 0.92;
   text-transform: none;
@@ -68,9 +68,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 .sx-top-brand {
   color: var(--sx-accent);
-  font-weight: 800;
+  font-weight: 900;
   font-style: italic;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.03em;
   text-transform: none;
 }
@@ -192,8 +192,8 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 3px 0 var(--sx-bg), 0 4px 0 var(--sx-ink);
 }
 .sx-xh-title {
-  font-weight: 800;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-weight: 900;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.04em;
   line-height: 0.88;
   text-transform: none;
