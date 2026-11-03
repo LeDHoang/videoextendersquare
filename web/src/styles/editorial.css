@@ -1,7 +1,7 @@
 /* ═══ ECHO Editorial: "Paper & Ink" layer ════════════════════════════════
    Loaded after global.css. Turns the app into a culture magazine: a masthead
    with a double ink rule, Fraunces headlines in mixed case, Plex Mono captions,
-   ultramarine for every action and a proof-yellow highlighter for labels.
+   vermilion for every action and a proof-yellow highlighter for labels.
    Tokens only; no colour literals here. */
 
 /* ─── Type ─────────────────────────────────────────────────────────────── */
@@ -22,7 +22,7 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--sx-on-spot);
 }
 
-/* Kickers: small mono caps led by a short ultramarine rule. */
+/* Kickers: small mono caps led by a short vermilion rule. */
 .sx-eyebrow,
 .sx-xh-kicker {
   display: flex;
@@ -125,7 +125,7 @@ h1, h2, h3, h4, h5, h6 {
   stroke: var(--sx-accent);
 }
 .sx-echo-mark [fill='#ff3b1f'] {
-  fill: var(--sx-spot);
+  fill: var(--sx-accent);
 }
 .sx-echo-mark [fill='#08090a'] {
   fill: var(--sx-ink);

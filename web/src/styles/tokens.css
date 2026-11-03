@@ -144,36 +144,36 @@
 /* ═══ ECHO Editorial: "Paper & Ink" theme ═══════════════════════════════
    The block above is the shared contract with ui/assets/reels.html and the
    in-headset canvas (tests pin it), so the VR scene keeps its own look. The web
-   app re-points the same tokens here: newsprint paper, carbon ink, one
-   ultramarine spot colour and a proof-yellow highlighter. */
+   app re-points the same tokens here: the magazine printed in reverse, paper ink
+   on carbon, one vermilion spot colour and a proof-yellow highlighter. */
 :root:root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --sx-bg: #f2ede3;
-  --sx-surface: #faf7f0;
-  --sx-surface-2: #ebe5d8;
-  --sx-surface-3: #e0d8c7;
-  --sx-surface-hover: #e6dfd0;
-  --sx-surface-glass: rgba(250, 247, 240, 0.92);
-  --sx-surface-glass-border: rgba(23, 20, 15, 0.16);
-  --sx-surface-overlay: rgba(23, 20, 15, 0.55);
+  --sx-bg: #0c0b09;
+  --sx-surface: #14130f;
+  --sx-surface-2: #1c1a16;
+  --sx-surface-3: #25221d;
+  --sx-surface-hover: #221f1a;
+  --sx-surface-glass: rgba(20, 19, 15, 0.86);
+  --sx-surface-glass-border: rgba(250, 247, 240, 0.1);
+  --sx-surface-overlay: rgba(6, 5, 4, 0.72);
 
-  --sx-rule: #d3cab8;
-  --sx-rule-strong: #17140f;
-  --sx-rule-subtle: rgba(23, 20, 15, 0.08);
+  --sx-rule: #2e2a24;
+  --sx-rule-strong: #f5f1e8;
+  --sx-rule-subtle: rgba(250, 247, 240, 0.06);
 
-  --sx-ink: #17140f;
-  --sx-ink-2: #45403a;
-  --sx-ink-3: #5c554c;
-  --sx-ink-muted: #635b50;
+  --sx-ink: #f5f1e8;
+  --sx-ink-2: #c4bdb0;
+  --sx-ink-3: #a39b8e;
+  --sx-ink-muted: #938c80;
 
-  /* Ultramarine: the one spot colour that carries every action. */
-  --sx-accent: #2a35c9;
-  --sx-accent-hi: #1f2aa8;
-  --sx-accent-dim: rgba(42, 53, 201, 0.09);
-  --sx-accent-glow: rgba(42, 53, 201, 0.22);
-  --sx-accent-border: rgba(42, 53, 201, 0.4);
-  --sx-on-accent: #faf7f0;
+  /* Vermilion: the app's own accent, 5.5:1 on the carbon page. */
+  --sx-accent: #ff3b1f;
+  --sx-accent-hi: #ff5c42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-accent-glow: rgba(255, 59, 31, 0.3);
+  --sx-accent-border: rgba(255, 59, 31, 0.45);
+  --sx-on-accent: #17140f;
 
   /* Proof-yellow highlighter: marks, badges and "new" moments, always with ink on top. */
   --sx-spot: #f3d34a;
@@ -183,25 +183,26 @@
   --sx-on-media: #ffffff;
   --sx-media-scrim: rgba(12, 10, 8, 0.72);
 
-  --sx-success: #146638;
-  --sx-success-hi: #11592f;
-  --sx-success-dim: rgba(23, 112, 63, 0.1);
-  --sx-success-border: rgba(23, 112, 63, 0.4);
+  /* The app's original status colours, made for a dark page. */
+  --sx-success: #22c55e;
+  --sx-success-hi: #4ade80;
+  --sx-success-dim: rgba(34, 197, 94, 0.12);
+  --sx-success-border: rgba(34, 197, 94, 0.35);
 
-  --sx-warn: #7a5200;
-  --sx-warn-hi: #5e3f00;
-  --sx-warn-dim: rgba(243, 211, 74, 0.32);
-  --sx-warn-border: rgba(122, 82, 0, 0.4);
+  --sx-warn: #f2c744;
+  --sx-warn-hi: #fde047;
+  --sx-warn-dim: rgba(242, 199, 68, 0.12);
+  --sx-warn-border: rgba(242, 199, 68, 0.35);
 
-  --sx-danger: #b42318;
-  --sx-danger-hi: #8f1b12;
-  --sx-danger-dim: rgba(180, 35, 24, 0.08);
-  --sx-danger-border: rgba(180, 35, 24, 0.4);
+  --sx-danger: #f43f5e; /* rose, hue-separated from the vermilion accent */
+  --sx-danger-hi: #fb7185;
+  --sx-danger-dim: rgba(244, 63, 94, 0.12);
+  --sx-danger-border: rgba(244, 63, 94, 0.35);
 
-  --sx-info: #1d6680;
-  --sx-info-hi: #154c60;
-  --sx-info-dim: rgba(29, 102, 128, 0.1);
-  --sx-info-border: rgba(29, 102, 128, 0.4);
+  --sx-info: #3b82f6;
+  --sx-info-hi: #60a5fa;
+  --sx-info-dim: rgba(59, 130, 246, 0.12);
+  --sx-info-border: rgba(59, 130, 246, 0.35);
 
   /* Fraunces for headlines, Instrument Sans for reading and controls, Plex Mono for captions. */
   --sx-font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
@@ -226,10 +227,10 @@
   --sx-radius: 2px;
   --sx-radius-pill: 999px;
 
-  /* Print has no glow: shadows are short and warm, like paper lifting off a desk. */
-  --sx-shadow-sm: 0 1px 2px rgba(23, 20, 15, 0.1);
-  --sx-shadow-card: 0 1px 0 rgba(23, 20, 15, 0.06), 0 8px 24px -12px rgba(23, 20, 15, 0.22);
-  --sx-shadow-popover: 0 18px 40px -8px rgba(23, 20, 15, 0.28);
+  /* Print has no glow: shadows are short, deeper on carbon so cards still lift. */
+  --sx-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sx-shadow-card: 0 1px 0 rgba(250, 247, 240, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --sx-shadow-popover: 0 18px 40px -8px rgba(0, 0, 0, 0.7);
   --sx-glow-accent: 0 0 0 transparent;
   --sx-glow-accent-strong: 0 0 0 transparent;
 
@@ -247,7 +248,7 @@
 
 /* The reels player is a screening room inside the magazine: its injected stylesheet
    paints dark panels with literal colours, so its tokens go back to carbon and the
-   proof-yellow becomes the accent there. */
+   app's own vermilion is the accent there. */
 #sxReelsRoot {
   color-scheme: dark;
   --sx-bg: #0c0b09;
@@ -264,11 +265,11 @@
   --sx-ink-2: #c4bdb0;
   --sx-ink-3: #a39b8e;
   --sx-ink-muted: #938c80;
-  --sx-accent: #f3d34a;
-  --sx-accent-hi: #f8e07a;
-  --sx-accent-dim: rgba(243, 211, 74, 0.12);
-  --sx-accent-glow: rgba(243, 211, 74, 0.25);
-  --sx-accent-border: rgba(243, 211, 74, 0.45);
+  --sx-accent: #ff3b1f;
+  --sx-accent-hi: #ff5c42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-accent-glow: rgba(255, 59, 31, 0.3);
+  --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #17140f;
   --sx-focus-halo: inset 0 0 0 3px var(--sx-bg);
 }
