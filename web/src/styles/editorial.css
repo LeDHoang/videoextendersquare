@@ -140,19 +140,19 @@ h1, h2, h3, h4, h5, h6 {
    the tiles (which sit on photos) and the reels player, the lines take the text
    colour, the cut-outs take the paper and the vermilion takes the accent. On carbon
    the art's own colours already fit, so dark mode leaves them alone. */
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot *) [stroke='#f2f3f5'] {
   stroke: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot *) [fill='#f2f3f5'] {
   fill: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#121315'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot *) [fill='#121315'] {
   fill: var(--sx-bg);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [stroke='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot *) [stroke='#ff3b1f'] {
   stroke: var(--sx-accent);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, #sxReelsRoot *) [fill='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot *) [fill='#ff3b1f'] {
   fill: var(--sx-accent);
 }
 

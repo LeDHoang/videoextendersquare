@@ -307,7 +307,9 @@
 /* The reels player is a screening room inside the magazine: its injected stylesheet
    paints dark panels with literal colours, so its tokens go back to carbon and the
    app's own vermilion is the accent there. The studio stage is a screening room too:
-   its flags sit over black video in both modes. */
+   its flags sit over black video in both modes. Explore pack tiles lay their copy
+   over a cover photo, like reel tiles, so they read on carbon too. */
+.sx-explore-grid .sx-pack-tile,
 #sxReelsRoot,
 .sx-studio-stage {
   color-scheme: dark;

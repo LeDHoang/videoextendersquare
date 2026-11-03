@@ -284,7 +284,7 @@
 .sx-pack-tile-actions button:hover,
 .sx-pack-tile-actions button:focus-visible,
 .sx-profile-saved-tabs button.sx-active {
-  color: #fff;
+  color: var(--sx-on-accent);
   background: var(--sx-accent);
   outline: none;
 }
@@ -5876,7 +5876,7 @@ button.sx-explore-loc-link:hover {
   padding: 0 9px;
   border: none;
   background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
-  color: #fff;
+  color: var(--sx-ink);
   cursor: pointer;
   font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
 }
@@ -8440,8 +8440,8 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   right: 3px;
   bottom: 3px;
   padding: 1px 4px;
-  background: rgba(0, 0, 0, 0.8);
-  color: var(--sx-ink-2);
+  background: var(--sx-media-scrim);
+  color: var(--sx-on-media);
   font: 500 var(--sx-t-eyebrow)/1.2 var(--sx-font-mono);
 }
 
@@ -11073,7 +11073,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--sx-surface-2);
   border: 1px solid var(--sx-rule);
   color: var(--sx-ink-2);
   font: 500 var(--sx-t-eyebrow)/1 var(--sx-font-mono);

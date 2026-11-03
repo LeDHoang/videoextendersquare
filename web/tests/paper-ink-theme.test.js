@@ -64,3 +64,27 @@ test('icon re-ink rules apply in light mode only', () => {
     assert.ok(rule.startsWith(":root:not([data-theme='dark']) svg:not("), `${rule} is not scoped to light mode`);
   }
 });
+
+// Outside the carbon islands, text tokens flip with the theme, so a fixed dark scrim
+// or fixed white text beside them is unreadable in one of the two modes.
+test('no rule pairs fixed scrims or white text with theme colours', () => {
+  const globalCss = read('../src/styles/global.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const island = /#sxReelsRoot|\.sx-studio-stage/;
+  // These render inside .sx-studio-stage (StudioStage.jsx), so they read carbon tokens.
+  const inStage = ['.sx-studio-zone-tag', '.sx-studio-flag', '.sx-studio-replace'];
+  const offenders = [];
+  for (const [, selector, body] of globalCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (island.test(selector) || inStage.includes(selector.trim())) continue;
+    const background = body.match(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/)?.[1] ?? '';
+    const color = body.match(/(?:^|;)\s*color\s*:\s*([^;]+)/)?.[1]?.trim() ?? '';
+    const darkScrim = /rgba\(\s*(0,\s*0,\s*0|5,\s*8,\s*12)\s*,/.test(background);
+    const themeText = /^var\(--sx-(ink|accent)/.test(color);
+    const themeSurface = /var\(--sx-(bg|surface|accent)/.test(background);
+    if ((darkScrim && themeText) || (color === '#fff' && themeSurface)) offenders.push(selector.trim());
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('pack tiles in the explore grid are a carbon island, like reel tiles', () => {
+  assert.match(tokensCss, /\.sx-explore-grid \.sx-pack-tile,\n#sxReelsRoot,/);
+});
