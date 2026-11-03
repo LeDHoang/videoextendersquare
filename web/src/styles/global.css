@@ -4697,7 +4697,7 @@ body.sx-vr-active .sx-reels-mount,
     height: var(--sx-control-h);
   }
 
-  .sx-top-bar .sx-account-avatar {
+  .sx-top-bar .sx-account-trigger .sx-account-avatar {
     width: 34px !important;
     height: 34px !important;
   }
@@ -4709,9 +4709,9 @@ body.sx-vr-active .sx-reels-mount,
   }
 
   .sx-command-box--mobile-active {
-    height: 38px !important;
-    min-height: 38px !important;
-    max-height: 38px !important;
+    height: var(--sx-control-h) !important;
+    min-height: var(--sx-control-h) !important;
+    max-height: var(--sx-control-h) !important;
   }
 
   .sx-command-results {
@@ -5358,9 +5358,9 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-command-result-mark {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
   display: grid;
   place-items: center;
   color: var(--sx-on-accent);
