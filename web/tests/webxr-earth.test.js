@@ -6681,12 +6681,67 @@ test('each mode shows its own world', () => {
   renderer.stopPreview();
 });
 
-test('the source has no carbon world literals', () => {
-  const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e', '#0a0a0a',
+test('webxr_vr.js paints no carbon literal', () => {
+  const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e', '#646b74', '#0a0a0a',
     'JetBrains Mono', 'Archivo', 'Orbitron', '#39D7FF', '#4FE3C1', '#FFC857', '#FF8A5B', '#121315', '#1c1d1f', '#ff6a52', '#061D37',
     'rgba(13, 14, 15', 'rgba(2,6,14', '0x020612', '0x0d2a3f', '0x39d7ff'];
   const lower = rendererSource.toLowerCase();
   const leftover = banned.filter((s) => lower.includes(s.toLowerCase()));
-  // The globe colours (Task 6) are not the world's.
-  assert.deepEqual(leftover.filter((s) => !['0x0d2a3f', '0x39d7ff', '#061D37'].includes(s)), []);
+  assert.deepEqual(leftover, []);
 });
+
+// ─── Task 6: the globe in paper and ink ───
+
+const EARTH_LIGHT = { land: '#f2ede3', sea: '#d8e2e4', park: '#dfe3cf', lineSoft: '#d3cab8', line: '#45403a' };
+const EARTH_DARK = { land: '#1c1a16', sea: '#0c0b09', park: '#25221d', lineSoft: '#2e2a24', line: '#f5f1e8' };
+const linear = (hex) => Math.pow(parseInt(hex.slice(1, 3), 16) / 255, 2.2);
+
+test('earth grade follows the mode', () => {
+  const api = loadRenderer({ theme: 'light' }).__test;
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_LIGHT);
+  api.setVRTheme('dark');
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_DARK);
+  api.setVRTheme('light');
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_LIGHT);
+});
+
+test('tiles already on the globe take a switch', () => {
+  const api = loadRenderer({ theme: 'light' }).__test;
+  const a = api.makeEarthTileUniforms(null, true);
+  const b = api.makeEarthTileUniforms(null, true);
+  assert.equal(a.uEarthLand, b.uEarthLand);
+  assert.equal(a.uTileTintLift, b.uTileTintLift);
+  assert.equal(a.uEarthPaper.value, 1);
+  api.setVRTheme('dark');
+  closeTo(a.uEarthLand.value.x, linear(EARTH_DARK.land), 1e-9);
+  assert.equal(a.uEarthPaper.value, 0);
+  assert.equal(b.uEarthPaper.value, 0);
+  api.setVRTheme('light');
+  closeTo(a.uEarthLand.value.x, linear(EARTH_LIGHT.land), 1e-9);
+  assert.equal(a.uEarthPaper.value, 1);
+});
+
+test('the tile shader reads the palette uniforms', () => {
+  assert.match(rendererSource, /uniform vec3 uEarthLand/);
+  assert.match(rendererSource, /uniform float uEarthPaper/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.070, 0\.150, 0\.235\)/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.016, 0\.052, 0\.110\)/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.050, 0\.190, 0\.205\)/);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`raw tiles stay untouched in ${theme} mode`, () => {
+    const api = loadRenderer({ theme }).__test;
+    api.setDebugFlags({ earthstyle: 'raw' });
+    const rec = recordingCanvasDocument();
+    api.setEarthTileCanvasFactory(() => rec.canvas);
+    api.composeEarthTileCanvas({ base: { tag: 'base', width: 512, height: 512 }, labels: { tag: 'labels', width: 512, height: 512 } });
+    assert.deepEqual(rec.ops.map((o) => o[0]), ['draw']);
+    api.setEarthTileCanvasFactory(null);
+    const raw = api.makeEarthTileUniforms(null, false);
+    assert.equal(raw.uTileTintStrength.value, 0);
+    assert.equal(raw.uTileLabelsAlpha.value, 1);
+    assert.equal(raw.uTileNight.value, 0);
+    api.setDebugFlags({ earthstyle: 'holo' });
+  });
+}
