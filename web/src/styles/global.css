@@ -6472,8 +6472,8 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-message-thread-actions a,
 .sx-message-request-actions button,
 .sx-message-confirm button,
-.sx-message-compose-actions button,
-.sx-message-report button,
+.sx-message-compose-actions button:not(.sx-btn),
+.sx-message-report button:not(.sx-btn),
 .sx-gif-picker button,
 .sx-share-dialog button,
 .sx-share-dialog a {
@@ -7058,11 +7058,8 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 
 .sx-message-report-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-.sx-message-report-actions button {
-  padding: 8px 14px;
-  border: 1px solid var(--sx-rule-strong);
-  text-transform: uppercase;
-}
+.sx-message-report-actions .sx-btn.sx-primary,
+.sx-message-compose-send .sx-btn.sx-primary { width: auto; }
 
 .sx-message-composer {
   display: grid;
@@ -7117,15 +7114,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 
 .sx-message-compose-actions button:not(.sx-primary):hover,
 .sx-emote-picker summary:hover { background: var(--sx-surface-3); color: var(--sx-ink); }
-
-.sx-message-compose-actions .sx-primary {
-  min-height: 34px;
-  padding: 8px 18px;
-  border: 1px solid var(--sx-accent);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  box-shadow: 0 0 14px -4px var(--sx-accent-glow);
-}
 
 .sx-message-hint-keys,
 .sx-message-counter {
@@ -7189,7 +7177,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-gif-picker small { color: var(--sx-ink-3); }
 
 .sx-message-pending-note,
-.sx-message-notice,
 .sx-message-error {
   display: flex;
   align-items: center;
@@ -7201,7 +7188,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 }
 
 .sx-message-pending-note { color: var(--sx-warn-hi); background: var(--sx-warn-dim); }
-.sx-message-notice { color: var(--sx-success-hi); background: var(--sx-success-dim); }
 .sx-message-error { color: var(--sx-danger-hi); background: var(--sx-danger-dim); border-top-color: var(--sx-danger-border); }
 
 .sx-message-error button { padding: 0 4px; border: 0; background: transparent; color: inherit; font-size: 1rem; cursor: pointer; }

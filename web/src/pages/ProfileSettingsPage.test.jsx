@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProfileSettingsPage from './ProfileSettingsPage.jsx';
+import { ToastProvider } from '../components/ui/Toast.jsx';
 
 const mocks = vi.hoisted(() => ({
   hardRedirect: vi.fn(),
@@ -28,13 +29,15 @@ const OWNER = {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/settings/profile']}>
-      <Routes>
-        <Route path="/settings/profile" element={<ProfileSettingsPage />} />
-        <Route path="/login" element={<div>LOGIN SCREEN</div>} />
-        <Route path="/reels" element={<div>REELS SCREEN</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/settings/profile']}>
+        <Routes>
+          <Route path="/settings/profile" element={<ProfileSettingsPage />} />
+          <Route path="/login" element={<div>LOGIN SCREEN</div>} />
+          <Route path="/reels" element={<div>REELS SCREEN</div>} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   );
 }
 
@@ -79,7 +82,7 @@ describe('ProfileSettingsPage', () => {
     await waitFor(() => expect(mocks.api.patch).toHaveBeenCalledWith('/api/users/me', {
       display_name: 'EchoDev', bio: 'hi #test', website: 'test.com',
     }));
-    expect(await screen.findByText(/PROFILE UPDATED/)).toBeInTheDocument();
+    expect(await screen.findByText('Profile updated.')).toBeInTheDocument();
     expect(mocks.auth.setUser).toHaveBeenCalled();
   });
 
@@ -147,7 +150,7 @@ describe('ProfileSettingsPage', () => {
     fireEvent.change(screen.getByLabelText('RESTRICT A HANDLE'), { target: { value: '@troll' } });
     fireEvent.click(screen.getByRole('button', { name: 'RESTRICT' }));
     await waitFor(() => expect(mocks.api.put).toHaveBeenCalledWith('/api/users/troll/block'));
-    expect(await screen.findByText(/@troll RESTRICTED/)).toBeInTheDocument();
+    expect(await screen.findByText('@troll restricted.')).toBeInTheDocument();
   });
 
   it('keeps password change and account deletion locked until their rules pass', () => {
@@ -229,7 +232,7 @@ describe('ProfileSettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'UNBLOCK' }));
     await waitFor(() => expect(mocks.api.delete).toHaveBeenCalledWith('/api/users/spambot/block'));
     expect(await screen.findByText('NO BLOCKED PROFILES')).toBeInTheDocument();
-    expect(screen.getByText(/@spambot UNBLOCKED/)).toBeInTheDocument();
+    expect(screen.getByText('@spambot unblocked.')).toBeInTheDocument();
   });
 
   it('is titled DELETE ACCOUNT and has no avatar SIGNED IN badge', () => {

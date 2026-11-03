@@ -13,7 +13,8 @@ import {
   matchesConversation,
 } from '../../utils/messageFormat.js';
 import PackCover from '../packs/PackCover.jsx';
-import { Tabs } from '../ui/controls.jsx';
+import { Button, Tabs } from '../ui/controls.jsx';
+import { useToast } from '../ui/Toast.jsx';
 
 const TEXT_LIMIT = 2000;
 const COUNTER_FROM = 1600;
@@ -152,6 +153,7 @@ function notice(selected, pendingOutgoingRequest) {
 export default function MessagingPanel({ compact = false, onConversationRoute }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const toast = useToast();
   const messaging = useMessaging();
   const [box, setBox] = useState('inbox');
   const [filter, setFilter] = useState('');
@@ -164,7 +166,6 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
   const [gifs, setGifs] = useState([]);
   const [gifBusy, setGifBusy] = useState(false);
   const [localError, setLocalError] = useState('');
-  const [localNotice, setLocalNotice] = useState('');
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState('');
   const [reportTarget, setReportTarget] = useState(null);
@@ -242,7 +243,6 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
     setReportTarget(null);
     setGifOpen(false);
     setLocalError('');
-    setLocalNotice('');
   }, [messageKey]);
 
   useEffect(() => {
@@ -383,7 +383,7 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
       });
       setReportTarget(null);
       setReportForm({ reason: 'spam', details: '' });
-      setLocalNotice('Report submitted. Thank you — our moderators will review it.');
+      toast('Report submitted. Thank you — our moderators will review it.');
     } catch (requestError) {
       setLocalError(requestError.message || 'Could not report message.');
     } finally {
@@ -611,7 +611,7 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
                             </>
                           ) : <button type="button" onClick={() => setConfirmDeleteId(message.id)}>DELETE</button>
                         ) : null}
-                        {message.can_report ? <button type="button" onClick={() => { setReportTarget(message); setLocalNotice(''); }}>REPORT</button> : null}
+                        {message.can_report ? <button type="button" onClick={() => setReportTarget(message)}>REPORT</button> : null}
                       </footer>
                     </article>
                   </div>
@@ -641,8 +641,8 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
                   />
                 </label>
                 <div className="sx-message-report-actions">
-                  <button type="button" onClick={() => setReportTarget(null)}>CANCEL</button>
-                  <button type="submit" className="sx-primary" disabled={actionBusy === 'report'}>{actionBusy === 'report' ? 'SENDING…' : 'SUBMIT REPORT'}</button>
+                  <Button size="sm" onClick={() => setReportTarget(null)}>CANCEL</Button>
+                  <Button type="submit" variant="primary" size="sm" disabled={actionBusy === 'report'}>{actionBusy === 'report' ? 'SENDING…' : 'SUBMIT REPORT'}</Button>
                 </div>
               </form>
             ) : null}
@@ -688,7 +688,7 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
                         {draftLength.toLocaleString()} / {TEXT_LIMIT.toLocaleString()}
                       </span>
                     ) : <span className="sx-message-hint-keys">↵ SEND · ⇧↵ NEW LINE</span>}
-                    <button type="submit" className="sx-primary" disabled={messaging.busy || !messaging.draft.trim()}>{messaging.busy ? 'SENDING…' : 'SEND ↵'}</button>
+                    <Button type="submit" variant="primary" size="sm" disabled={messaging.busy || !messaging.draft.trim()}>{messaging.busy ? 'SENDING…' : 'SEND ↵'}</Button>
                   </div>
                 </div>
               </form>
@@ -711,7 +711,6 @@ export default function MessagingPanel({ compact = false, onConversationRoute })
             <span>Pick a conversation from the list or start a new message.</span>
           </div>
         )}
-        {localNotice ? <div className="sx-message-notice" role="status">{localNotice}</div> : null}
         {error ? (
           <div className="sx-message-error" role="alert">
             <span>{error}</span>

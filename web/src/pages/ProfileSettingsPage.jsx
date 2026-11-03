@@ -7,6 +7,7 @@ import FormField from '../components/ui/FormField.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import RichText from '../components/ui/RichText.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { PASSWORD_MAX, PASSWORD_MIN } from '../utils/authForm.js';
@@ -59,11 +60,10 @@ function PasswordInput({ name, ...inputProps }) {
   );
 }
 
+// Errors stay next to what failed; success is a toast.
 function Feedback({ state }) {
   if (!state) return null;
-  return state.ok
-    ? <div className="sx-ps-feedback sx-ps-feedback--ok" role="status">✓ {state.text}</div>
-    : <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{state.text}</div>;
+  return <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{state.text}</div>;
 }
 
 function Check({ pass, children, advisory = false }) {
@@ -84,6 +84,7 @@ function Check({ pass, children, advisory = false }) {
  */
 export default function ProfileSettingsPage() {
   const { user, loading, setUser } = useAuth();
+  const toast = useToast();
   const { falKey, saveFalKey, deleteFalKey } = useWallet();
   const navigate = useNavigate();
   const avatarInputRef = useRef(null);
@@ -141,7 +142,7 @@ export default function ProfileSettingsPage() {
       try {
         const result = await api.patch('/api/users/me', form);
         setUser(result.user);
-        setProfileStatus({ ok: true, text: 'PROFILE UPDATED' });
+        toast('Profile updated.');
       } catch (requestError) {
         // A rejected save changes nothing. A reason tied to one field (e.g. an
         // invalid website) goes under that field; anything else beside the button.
@@ -177,7 +178,7 @@ export default function ProfileSettingsPage() {
       try {
         const result = await api.upload('/api/users/me/avatar', file);
         setUser(result.user);
-        setAvatarStatus({ ok: true, text: 'AVATAR UPDATED' });
+        toast('Avatar updated.');
       } catch (requestError) {
         setAvatarStatus({ ok: false, text: AVATAR_ERRORS[requestError.code] || requestError.message || 'Could not update avatar.' });
       }
@@ -190,7 +191,7 @@ export default function ProfileSettingsPage() {
     try {
       const result = await api.delete('/api/users/me/avatar');
       setUser(result.user);
-      setAvatarStatus({ ok: true, text: 'AVATAR REMOVED' });
+      toast('Avatar removed.');
     } catch (requestError) {
       setAvatarStatus({ ok: false, text: requestError.message || 'Could not remove avatar.' });
     }
@@ -204,7 +205,7 @@ export default function ProfileSettingsPage() {
       try {
         await saveFalKey(keyValue.trim());
         setKeyValue('');
-        setKeyStatus({ ok: true, text: 'KEY SAVED' });
+        toast('Key saved.');
       } catch (requestError) {
         setKeyStatus({ ok: false, text: requestError.message || 'Could not save the key.' });
       }
@@ -215,7 +216,7 @@ export default function ProfileSettingsPage() {
     setKeyStatus(null);
     try {
       await deleteFalKey();
-      setKeyStatus({ ok: true, text: 'KEY REMOVED' });
+      toast('Key removed.');
     } catch (requestError) {
       setKeyStatus({ ok: false, text: requestError.message || 'Could not remove the key.' });
     }
@@ -245,7 +246,7 @@ export default function ProfileSettingsPage() {
       try {
         await api.patch('/api/auth/password', passwords);
         setPasswords({ current_password: '', new_password: '' });
-        setPasswordStatus({ ok: true, text: 'PASSWORD UPDATED · OTHER DEVICES SIGNED OUT' });
+        toast('Password updated. Other devices are signed out.');
       } catch (requestError) {
         setPasswordStatus({ ok: false, text: requestError.message || 'Could not update password.' });
       }
@@ -265,7 +266,7 @@ export default function ProfileSettingsPage() {
         // Keep anything the user already started typing for the next handle.
         setBlockHandle((current) => (current.trim().replace(/^@+/, '') === handle ? '' : current));
         setBlockedOpen(true);
-        setBlockStatus({ ok: true, text: '@' + handle + ' RESTRICTED' });
+        toast('@' + handle + ' restricted.');
       } catch (requestError) {
         setBlockStatus({ ok: false, text: BLOCK_ERRORS[requestError.code] || requestError.message || 'Could not restrict this account.' });
       }
@@ -277,7 +278,7 @@ export default function ProfileSettingsPage() {
     try {
       await api.delete('/api/users/' + encodeURIComponent(username) + '/block');
       setBlocked((current) => (current || []).filter((person) => person.username !== username));
-      setBlockStatus({ ok: true, text: '@' + username + ' UNBLOCKED' });
+      toast('@' + username + ' unblocked.');
     } catch (requestError) {
       setBlockStatus({ ok: false, text: requestError.message || 'Could not unblock this user.' });
     }

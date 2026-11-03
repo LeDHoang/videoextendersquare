@@ -3,6 +3,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import FormField from '../components/ui/FormField.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { billingErrorMessage } from '../utils/billingErrors.js';
@@ -107,6 +108,7 @@ function TransactionRow({ row }) {
  */
 export default function WalletPage() {
   const { user, loading: authLoading } = useAuth();
+  const toast = useToast();
   const { wallet, catalog, catalogStatus, falKey, refresh, saveFalKey, deleteFalKey } = useWallet();
   const [ledger, setLedger] = useState({ rows: [], status: 'loading', hasMore: false, loadingMore: false, loadError: false });
   const [keyValue, setKeyValue] = useState('');
@@ -243,7 +245,7 @@ export default function WalletPage() {
       await saveFalKey(trimmedKey);
       setKeyValue('');
       setShowKey(false);
-      setKeyStatus({ ok: true, text: 'PERSONAL FAL KEY SAVED ENCRYPTED' });
+      toast('Personal fal key saved, encrypted.');
     } catch (error) {
       setKeyStatus({ ok: false, text: billingErrorMessage(error) });
     } finally {
@@ -258,7 +260,7 @@ export default function WalletPage() {
     try {
       await deleteFalKey();
       setKeyValue('');
-      setKeyStatus({ ok: true, text: 'PERSONAL FAL KEY REMOVED' });
+      toast('Personal fal key removed.');
     } catch (error) {
       setKeyStatus({ ok: false, text: billingErrorMessage(error) });
     } finally {

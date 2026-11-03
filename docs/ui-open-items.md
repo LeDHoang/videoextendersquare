@@ -25,15 +25,13 @@ was removed. The full report with screenshots is in git at `9264b73:docs/ui-skil
 - Where the locked comments panel should sit (fix 60): it now sits in front of the screen but
   covers part of the reel. Moving it beside the dock is a design call.
 
-## Larger work
-
-- Move the remaining raw `.sx-btn` buttons, and success banners outside profile and pack (for
-  example the studio), onto `Button` and `Toast` (fixes 72, 73).
-- Caption backfill (fix 71): `.venv/bin/python scripts/batch_backfill_captions.py`. As of
-  2026-11-02, 38 of 43 published videos still have no captions.
-
 ## Left as is, on purpose
 
+- Success notes that stay inline (fix 73): the studio "SHARED — LIVE" block (it carries actions),
+  the models-saved note in the sidebar (it carries instructions), the wallet payment note, the
+  auth "email resent" notes, and the share dialog statuses (the dialog is modal).
+- Caption backfill (fix 71): ran on 2026-11-03 and captioned nothing new; the videos still
+  without captions are ones it skips or has no speech in.
 - Legal page placeholders: deferred by scope (fix 23).
 - The immersive preview toolbar wraps to two rows at 1280px.
 - The "Stripe checkout is disabled" banner shows only when credits are on and Stripe is off.

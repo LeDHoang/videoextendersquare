@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MessagingPanel from './MessagingPanel.jsx';
 import MessageDock from './MessageDock.jsx';
+import { ToastProvider } from '../ui/Toast.jsx';
 
 const mocks = vi.hoisted(() => ({
   user: { id: 'viewer-id', username: 'viewer' },
@@ -83,7 +84,7 @@ function activeConversation(overrides = {}) {
 }
 
 function renderPanel(props = {}) {
-  return render(<MemoryRouter><MessagingPanel {...props} /></MemoryRouter>);
+  return render(<MemoryRouter><ToastProvider><MessagingPanel {...props} /></ToastProvider></MemoryRouter>);
 }
 
 describe('MessagingPanel', () => {
@@ -591,7 +592,7 @@ describe('MessagingPanel', () => {
         mocks.messaging.messages = {
           'conversation-1': [message({ id: 'older-1', text: 'older 1', content: { text: 'older 1' } }), message({ id: 'older-2', text: 'older 2', content: { text: 'older 2' } }), message()],
         };
-        view.rerender(<MemoryRouter><MessagingPanel /></MemoryRouter>);
+        view.rerender(<MemoryRouter><ToastProvider><MessagingPanel /></ToastProvider></MemoryRouter>);
         return null;
       });
       fireEvent.click(screen.getByRole('button', { name: 'LOAD EARLIER' }));
