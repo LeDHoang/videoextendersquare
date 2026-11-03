@@ -145,7 +145,7 @@
    The block above is the shared contract with ui/assets/reels.html and the
    in-headset canvas (tests pin it), so the VR scene keeps its own look. The web
    app re-points the same tokens here: newsprint paper, carbon ink, one
-   ultramarine spot colour and a proof-yellow highlighter. */
+   vermilion spot colour and a proof-yellow highlighter. */
 :root:root {
   color-scheme: light;
 
@@ -167,12 +167,13 @@
   --sx-ink-3: #5c554c;
   --sx-ink-muted: #635b50;
 
-  /* Ultramarine: the one spot colour that carries every action. */
-  --sx-accent: #2a35c9;
-  --sx-accent-hi: #1f2aa8;
-  --sx-accent-dim: rgba(42, 53, 201, 0.09);
-  --sx-accent-glow: rgba(42, 53, 201, 0.22);
-  --sx-accent-border: rgba(42, 53, 201, 0.4);
+  /* Vermilion: the one spot colour that carries every action. The app's #ff3b1f is
+     3.05:1 on paper, so it is deepened to read as text (4.8:1). */
+  --sx-accent: #c8270f;
+  --sx-accent-hi: #a81f0b;
+  --sx-accent-dim: rgba(200, 39, 15, 0.09);
+  --sx-accent-glow: rgba(200, 39, 15, 0.22);
+  --sx-accent-border: rgba(200, 39, 15, 0.4);
   --sx-on-accent: #faf7f0;
 
   /* Proof-yellow highlighter: marks, badges and "new" moments, always with ink on top. */
@@ -193,10 +194,10 @@
   --sx-warn-dim: rgba(243, 211, 74, 0.32);
   --sx-warn-border: rgba(122, 82, 0, 0.4);
 
-  --sx-danger: #b42318;
-  --sx-danger-hi: #8f1b12;
-  --sx-danger-dim: rgba(180, 35, 24, 0.08);
-  --sx-danger-border: rgba(180, 35, 24, 0.4);
+  --sx-danger: #be123c; /* rose, hue-separated from the vermilion accent */
+  --sx-danger-hi: #9f1239;
+  --sx-danger-dim: rgba(190, 18, 60, 0.08);
+  --sx-danger-border: rgba(190, 18, 60, 0.4);
 
   --sx-info: #1d6680;
   --sx-info-hi: #154c60;
@@ -247,7 +248,7 @@
 
 /* The reels player is a screening room inside the magazine: its injected stylesheet
    paints dark panels with literal colours, so its tokens go back to carbon and the
-   proof-yellow becomes the accent there. */
+   app's own vermilion is the accent there. */
 #sxReelsRoot {
   color-scheme: dark;
   --sx-bg: #0c0b09;
@@ -264,11 +265,11 @@
   --sx-ink-2: #c4bdb0;
   --sx-ink-3: #a39b8e;
   --sx-ink-muted: #938c80;
-  --sx-accent: #f3d34a;
-  --sx-accent-hi: #f8e07a;
-  --sx-accent-dim: rgba(243, 211, 74, 0.12);
-  --sx-accent-glow: rgba(243, 211, 74, 0.25);
-  --sx-accent-border: rgba(243, 211, 74, 0.45);
+  --sx-accent: #ff3b1f;
+  --sx-accent-hi: #ff5c42;
+  --sx-accent-dim: rgba(255, 59, 31, 0.12);
+  --sx-accent-glow: rgba(255, 59, 31, 0.3);
+  --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #17140f;
   --sx-focus-halo: inset 0 0 0 3px var(--sx-bg);
 }
