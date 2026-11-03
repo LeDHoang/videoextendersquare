@@ -2115,13 +2115,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Holo Atlas label HUD ───────────────────────────────────────────
-  // Zoom realms (v3 plan §2): tier name + accent colour follow the heat ramp
-  // (cyan → teal → amber → coral) so the breadcrumb reads as depth at a glance.
+  // Zoom realms (v3 plan §2): tier name + tone follow the heat ramp
+  // (info → success → warn → accent) so the breadcrumb reads as depth at a glance.
+  // The colour is TOKENS.hex[tone] from the canvas module (see tierColor below).
   const EARTH_TIERS = [
-    { name: 'ORBIT', max: 3, color: '#39D7FF' },
-    { name: 'REGION', max: 24, color: '#4FE3C1' },
-    { name: 'CITY', max: 200, color: '#FFC857' },
-    { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+    { name: 'ORBIT', max: 3, tone: 'info' },
+    { name: 'REGION', max: 24, tone: 'success' },
+    { name: 'CITY', max: 200, tone: 'warn' },
+    { name: 'STREET', max: Infinity, tone: 'accent' },
   ];
   function earthTierIndex(scale) {
     const s = Math.max(1, Number(scale) || 1);
@@ -6172,7 +6173,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       return {
         tier: tier.name,
-        tierColor: tier.color,
+        tierColor: echoHex(tier.tone, '#ff3b1f'),
         zoomPct: earthZoomPercent(),
         scaleCaption,
         mapStatus,

@@ -6270,7 +6270,7 @@ test('Enter posts once; Escape and an empty field post nothing', async () => {
 test('shared earth HUD renderers: tiers stay in sync with the engine and every renderer paints', () => {
   const { renderer, api } = topdownHarness();
   const ui = loadUICanvasStandalone();
-  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.color}`);
+  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.tone}`);
   assert.equal(tiers(ui.EARTH_TIERS).join(","), tiers(api.EARTH_TIERS).join(","));
   for (const s of [1, 3, 24, 200, 16384]) assert.equal(ui.earthTierIndex(s), api.earthTierIndex(s));
   const label = makeRecordingCtx();
