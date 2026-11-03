@@ -3,8 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f2ede3" />
+    <script>
+      (function () {
+        var theme;
+        try { theme = localStorage.getItem('sx.theme'); } catch (e) {}
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'dark' ? '#0c0b09' : '#f2ede3');
+      })();
+    </script>
     <meta
       name="description"
       content="ECHO: watch, extend and create spatial video. Turn clips into immersive 3D reels you can view on screen or in VR."
