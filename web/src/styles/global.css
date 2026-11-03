@@ -1108,8 +1108,8 @@ button:hover .sx-sidebar-hero-logo,
 }
 
 .sx-dot-warning {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+  background: var(--sx-warn);
+  box-shadow: 0 0 8px var(--sx-warn-border);
 }
 
 @keyframes sx-pulse {
@@ -7615,7 +7615,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   padding: var(--sx-3);
   overflow-x: auto;
   border: 1px solid var(--sx-rule);
-  background: #050608;
+  background: var(--sx-surface-2);
   font: 12px/1.6 var(--sx-font-mono);
 }
 
@@ -10813,10 +10813,10 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   height: calc(56px + env(safe-area-inset-bottom, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
   box-sizing: border-box;
-  background: rgba(13, 14, 16, 0.96);
+  background: var(--sx-surface-glass);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  border-top: 1px solid #24282e;
+  border-top: 1px solid var(--sx-rule);
 }
 
 .sx-bottom-nav-item {
@@ -10832,7 +10832,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 .sx-bottom-nav-item:focus-visible {
-  outline: 2px solid #fff;
+  outline: var(--sx-focus-ring);
   outline-offset: -4px;
 }
 
@@ -10946,7 +10946,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   justify-content: space-between;
   gap: var(--sx-3) var(--sx-5);
   padding: 10px var(--sx-4);
-  background: #0d0e10;
+  background: var(--sx-surface-2);
   border: 1px solid var(--sx-rule);
 }
 
@@ -11644,7 +11644,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 
 .sx-studio-badge.sx-ok {
   border-color: var(--sx-success-border);
-  background: rgba(5, 46, 22, 0.4);
+  background: var(--sx-success-dim);
   color: var(--sx-success-hi);
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { currentTheme } from '../../theme.js';
 
 const SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 let scriptPromise = null;
@@ -41,7 +42,7 @@ export default function Turnstile({ siteKey, onToken, onUnavailable, resetKey = 
         if (cancelled || !box.current) return;
         widget.current = turnstile.render(box.current, {
           sitekey: siteKey,
-          theme: 'dark',
+          theme: currentTheme(),
           callback: (token) => callbacks.current.onToken?.(token),
           'expired-callback': () => callbacks.current.onToken?.(''),
           'error-callback': () => callbacks.current.onToken?.(''),
