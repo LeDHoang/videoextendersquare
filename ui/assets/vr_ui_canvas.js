@@ -2381,43 +2381,106 @@
     return '';
   }
 
-  // ─── ECHO design tokens ─────────────────────────────────────────────
-  // Mirror of web/src/styles/tokens.css (colour, font, spacing). The parity test
-  // web/tests/echo-token-parity.test.js fails when the two drift apart. Frozen and
-  // side-effect free so the module still loads in a bare VM.
-  const TOKENS = Object.freeze({
-    hex: Object.freeze({
-      bg: '#08090a',
-      surface: '#101214',
-      surface2: '#16191c',
-      surface3: '#1d2126',
-      rule: '#24282d',
-      ruleStrong: '#3a4047',
-      ink: '#f2f3f5',
-      ink2: '#a4abb3',
-      ink3: '#8e959e',
-      inkMuted: '#646b74',
-      accent: '#ff3b1f',
-      accentHi: '#ff5c42',
-      onAccent: '#0a0a0a',
-      success: '#22c55e',
-      successHi: '#4ade80',
-      warn: '#f2c744',
-      warnHi: '#fde047',
-      danger: '#f43f5e',
-      dangerHi: '#fb7185',
-      info: '#3b82f6',
-      infoHi: '#60a5fa',
-    }),
-    font: Object.freeze({
-      display: "'Archivo Black', Archivo, sans-serif",
-      sans: 'Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif',
-      mono: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-      brand: "Orbitron, 'Archivo Black', sans-serif",
-    }),
-    space: Object.freeze({ s1: 4, s2: 8, s3: 12, s4: 16, s5: 24 }),
-    radius: 0,
+  // ─── Paper & Ink design tokens ──────────────────────────────────────
+  // Mirror of web/src/styles/tokens.css: TOKEN_SETS.light is the :root:root block,
+  // TOKEN_SETS.dark is that block overlaid with :root[data-theme='dark'] (colours
+  // only). The parity test web/tests/echo-token-parity.test.js fails when they drift
+  // apart. Frozen and side-effect free so the module still loads in a bare VM.
+  // radius mirrors --sx-radius (CSS px); radiusPx is the canvas-pixel corner, tune in QA.
+  const TOKEN_FONT = Object.freeze({
+    display: "'Fraunces', Georgia, 'Times New Roman', serif",
+    sans: "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif",
+    mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+    brand: "'Fraunces', Georgia, serif",
   });
+  const TOKEN_SPACE = Object.freeze({ s1: 4, s2: 8, s3: 12, s4: 16, s5: 24 });
+  const TOKEN_SETS = Object.freeze({
+    light: Object.freeze({
+      hex: Object.freeze({
+        bg: '#f2ede3',
+        surface: '#faf7f0',
+        surface2: '#ebe5d8',
+        surface3: '#e0d8c7',
+        surfaceHover: '#e6dfd0',
+        rule: '#d3cab8',
+        ruleStrong: '#17140f',
+        ink: '#17140f',
+        ink2: '#45403a',
+        ink3: '#5c554c',
+        inkMuted: '#635b50',
+        accent: '#c2250e',
+        accentHi: '#a81f0b',
+        onAccent: '#faf7f0',
+        spot: '#f3d34a',
+        spotSoft: '#f8e7a0',
+        onSpot: '#17140f',
+        onMedia: '#ffffff',
+        success: '#146638',
+        successHi: '#11592f',
+        warn: '#7a5200',
+        warnHi: '#5e3f00',
+        danger: '#be123c',
+        dangerHi: '#9f1239',
+        info: '#1d6680',
+        infoHi: '#154c60',
+      }),
+      rgba: Object.freeze({ mediaScrim: 'rgba(12, 10, 8, 0.72)' }),
+      font: TOKEN_FONT,
+      space: TOKEN_SPACE,
+      radius: 4,
+      radiusPx: 8,
+    }),
+    dark: Object.freeze({
+      hex: Object.freeze({
+        bg: '#0c0b09',
+        surface: '#14130f',
+        surface2: '#1c1a16',
+        surface3: '#25221d',
+        surfaceHover: '#221f1a',
+        rule: '#2e2a24',
+        ruleStrong: '#f5f1e8',
+        ink: '#f5f1e8',
+        ink2: '#c4bdb0',
+        ink3: '#a39b8e',
+        inkMuted: '#938c80',
+        accent: '#ff3b1f',
+        accentHi: '#ff5c42',
+        onAccent: '#17140f',
+        spot: '#f3d34a',
+        spotSoft: '#f8e7a0',
+        onSpot: '#17140f',
+        onMedia: '#ffffff',
+        success: '#22c55e',
+        successHi: '#4ade80',
+        warn: '#f2c744',
+        warnHi: '#fde047',
+        danger: '#f43f5e',
+        dangerHi: '#fb7185',
+        info: '#3b82f6',
+        infoHi: '#60a5fa',
+      }),
+      rgba: Object.freeze({ mediaScrim: 'rgba(12, 10, 8, 0.72)' }),
+      font: TOKEN_FONT,
+      space: TOKEN_SPACE,
+      radius: 4,
+      radiusPx: 8,
+    }),
+  });
+
+  // The active set. Painters read TOKENS.hex.* etc.; setTheme reassigns it.
+  let TOKENS = TOKEN_SETS.light;
+
+  // 'dark' selects dark, anything else light. Returns true when the active set changed.
+  function setTheme(mode) {
+    const next = mode === 'dark' ? TOKEN_SETS.dark : TOKEN_SETS.light;
+    if (next === TOKENS) return false;
+    TOKENS = next;
+    return true;
+  }
+
+  function getTheme() {
+    return TOKENS === TOKEN_SETS.dark ? 'dark' : 'light';
+  }
 
   // ─── Public Module API ──────────────────────────────────────────────
   return {
@@ -2465,6 +2528,11 @@
     resolveEarthLabelHit,
     drawIcon,
     chamferPath,
-    TOKENS,
+    TOKEN_SETS,
+    get TOKENS() {
+      return TOKENS;
+    },
+    setTheme,
+    getTheme,
   };
 });
