@@ -33,3 +33,12 @@ test('dark block redeclares every light colour except the shared ones', () => {
   assert.equal(dark['color-scheme'], 'dark');
   assert.deepEqual(Object.keys(dark).sort(), [...colours, 'color-scheme'].sort());
 });
+
+test('icon re-ink rules apply in light mode only', () => {
+  const editorialCss = read('../src/styles/editorial.css');
+  const rules = editorialCss.split('\n').filter((line) => line.includes('svg:not(.sx-echo-mark'));
+  assert.equal(rules.length, 5);
+  for (const rule of rules) {
+    assert.ok(rule.startsWith(":root:not([data-theme='dark']) svg:not("), `${rule} is not scoped to light mode`);
+  }
+});
