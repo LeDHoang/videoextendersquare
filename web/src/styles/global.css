@@ -7522,7 +7522,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border: 1px solid var(--sx-rule-strong);
-  background: #020612;
+  background: var(--sx-bg);
   box-shadow: 0 18px 70px rgb(0 0 0 / 45%);
   isolation: isolate;
 }
@@ -7640,7 +7640,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   padding: var(--sx-4);
   overflow-x: auto;
   border: 1px solid var(--sx-rule-strong);
-  background: #020612;
+  background: var(--sx-bg);
 }
 
 .sx-vr-workbench-panel {

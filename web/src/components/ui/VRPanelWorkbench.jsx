@@ -6,6 +6,7 @@ import '../../../../ui/assets/vr_shell_canvas.js';
 import '../../../../ui/assets/vr_shell.js';
 import controllerPng from '../../../../ui/assets/quest_controller.png';
 import { Segmented, ToggleRow } from './controls.jsx';
+import { useTheme } from '../../theme.js';
 
 // Captured now: ReelsPlayer later re-injects its own copy onto window.
 const UI = typeof window !== 'undefined' ? window.VRUICanvas : null;
@@ -390,6 +391,7 @@ function drawPanel(key, ctx, mock, comments, s, now) {
 // state. Draws with the same vr_ui_canvas.js renderers and hit tests the
 // engine uploads as textures, so what you tune here is what the Quest shows.
 export default function VRPanelWorkbench() {
+  const [theme] = useTheme();
   const [mock, setMock] = useState({
     panel: 'ALL',
     dock: 'REELS',
@@ -479,6 +481,11 @@ export default function VRPanelWorkbench() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  // The draw loop repaints every frame, so switching the palette is enough.
+  useEffect(() => {
+    UI?.setTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     const shell = interact.current.shell;

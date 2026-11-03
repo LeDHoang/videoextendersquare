@@ -127,3 +127,13 @@ test('initials on user-coloured avatar discs keep one ink in both modes', () => 
     assert.match(body, /\n\s*color: var\(--sx-on-spot\);/, `${selector} initials flip with the theme`);
   }
 });
+
+test('VR preview stages take the page tone', () => {
+  const globalCss = read('../src/styles/global.css');
+  for (const selector of ['.sx-immersive-preview-stage', '.sx-vr-workbench-stage']) {
+    const start = globalCss.indexOf(`\n${selector} {`);
+    assert.ok(start >= 0, `${selector} rule not found`);
+    const body = globalCss.slice(start, globalCss.indexOf('}', start));
+    assert.match(body, /\n\s*background: var\(--sx-bg\);/, `${selector} keeps a fixed background`);
+  }
+});
