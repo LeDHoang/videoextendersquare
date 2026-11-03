@@ -931,7 +931,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (earthMesh && earthMesh.material && !earthMesh.material.map && earthMesh.material.color) {
       earthMesh.material.color.set(pal.sea);
     }
-    if (earthBaseSource === 'photo' && earthBasePhoto) buildHolographicEarthBase(earthBasePhoto);
+    // Rebuild whenever a photo is held, finished or not: the build token cancels
+    // a build still running on the old palette.
+    if (earthBasePhoto) buildHolographicEarthBase(earthBasePhoto);
     else earthBaseStale = true;
   }
 
@@ -5756,8 +5758,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       // the map cap. Opacity breathes with table tilt (0.12→0.20).
       try {
         const atmosphereGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.03, 32, 20);
-          const rimPal = earthPalette();
-          earthRimOpacity = rimPal.rimOpacity;
+        const rimPal = earthPalette();
+        earthRimOpacity = rimPal.rimOpacity;
           const atmosphereMat = new THREE.MeshBasicMaterial({
           color: rimPal.rim, transparent: true, opacity: rimPal.rimOpacity,
           blending: THREE[rimPal.rimBlending], side: THREE.BackSide, depthWrite: false,
@@ -11098,6 +11100,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       setVRTheme,
       earthGradeColors,
       makeEarthTileUniforms,
+      buildEarthBase: (image) => buildHolographicEarthBase(image),
+      earthAtmosphere() {
+        const m = earthAtmosphereMesh && earthAtmosphereMesh.material;
+        return m ? { color: m.color.getHexString(), blending: m.blending } : null;
+      },
       worldDimTarget,
       stepDim,
       DIM_AMOUNT,

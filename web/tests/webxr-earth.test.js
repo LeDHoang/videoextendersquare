@@ -6745,3 +6745,54 @@ for (const theme of ['light', 'dark']) {
     api.setDebugFlags({ earthstyle: 'holo' });
   });
 }
+
+test('raw tiles skip the paper label mapping', () => {
+  assert.match(rendererSource, /if \(tilePaper && uTileTintStrength > 0\.5\) \{\s*tileLabels\.rgb = mix\(uEarthLand, uEarthLine/);
+});
+
+test('a switch during the first photo build re-inks the whole base', () => {
+  const timers = [];
+  const puts = new Map(); // band y0 -> red channel of its first pixel, last write wins
+  const ctx = new Proxy({}, {
+    get(target, prop) {
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
+      if (prop === 'getImageData') return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      if (prop === 'createImageData') return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      if (prop === 'putImageData') return (img, x, y) => puts.set(y, img.data[0]);
+      if (!(prop in target)) target[prop] = () => {};
+      return target[prop];
+    },
+    set(target, prop, value) { target[prop] = value; return true; },
+  });
+  const api = loadRenderer({
+    theme: 'light',
+    createElement: (kind) => (kind === 'canvas' ? { width: 0, height: 0, getContext: () => ctx } : null),
+    globals: { setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {} },
+  }).__test;
+  assert.equal(api.buildEarthBase({ naturalWidth: 2, naturalHeight: 2 }), true);
+  assert.ok(puts.get(0) > 200, 'the first band is paper');
+  api.setVRTheme('dark');
+  while (timers.length) timers.shift()();
+  assert.equal(puts.size, 2048 / 64);
+  for (const [y, red] of puts) assert.ok(red < 60, `band ${y} is night land, got ${red}`);
+});
+
+test('the atmosphere follows the mode in the earth scene', () => {
+  const { renderer, run } = startWorld('light');
+  renderer.setSceneMode('earth');
+  run(100);
+  const THREE = { NormalBlending: 1, AdditiveBlending: 2 }; // three.js blending constants
+  let rim = renderer.__test.earthAtmosphere();
+  assert.ok(rim, 'atmosphere built');
+  assert.equal(rim.color, '17140f');
+  assert.equal(rim.blending, THREE.NormalBlending);
+  renderer.__test.setVRTheme('dark');
+  rim = renderer.__test.earthAtmosphere();
+  assert.equal(rim.color, 'f5f1e8');
+  assert.equal(rim.blending, THREE.AdditiveBlending);
+  renderer.__test.setVRTheme('light');
+  rim = renderer.__test.earthAtmosphere();
+  assert.equal(rim.color, '17140f');
+  assert.equal(rim.blending, THREE.NormalBlending);
+  renderer.stopPreview();
+});
