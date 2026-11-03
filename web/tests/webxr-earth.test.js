@@ -6620,14 +6620,15 @@ test('dim targets only light playback in the reels scene', () => {
 
 test('dim fades without overshoot', () => {
   const { renderer } = startWorld('light');
-  const { stepDim, DIM_FADE_MS } = renderer.__test;
-  // Rate is 1 / DIM_FADE_MS per ms; the target caps the step.
-  assert.ok(Math.abs(stepDim(0, 0.45, 100) - 100 / DIM_FADE_MS) < 1e-9);
-  assert.equal(stepDim(0, 0.45, 300), 0.45);
-  assert.ok(Math.abs(stepDim(0.45, 0.2, 100) - (0.45 - 100 / DIM_FADE_MS)) < 1e-9);
-  assert.equal(stepDim(0.4, 0.45, DIM_FADE_MS), 0.45);
-  assert.equal(stepDim(0.45, 0, 300), 0);
-  assert.equal(stepDim(0.45, 0, DIM_FADE_MS), 0);
+  const { stepDim, DIM_FADE_MS, DIM_AMOUNT } = renderer.__test;
+  // A full 0 to DIM_AMOUNT fade takes DIM_FADE_MS; the target caps the step.
+  const rate = DIM_AMOUNT / DIM_FADE_MS;
+  assert.ok(Math.abs(stepDim(0, DIM_AMOUNT, 300) - 300 * rate) < 1e-9);
+  assert.ok(Math.abs(stepDim(DIM_AMOUNT, 0.2, 100) - (DIM_AMOUNT - 100 * rate)) < 1e-9);
+  assert.equal(stepDim(0, DIM_AMOUNT, DIM_FADE_MS), DIM_AMOUNT);
+  assert.equal(stepDim(0.4, DIM_AMOUNT, DIM_FADE_MS), DIM_AMOUNT);
+  assert.equal(stepDim(DIM_AMOUNT, 0, 300), DIM_AMOUNT - 300 * rate);
+  assert.equal(stepDim(DIM_AMOUNT, 0, DIM_FADE_MS), 0);
   renderer.stopPreview();
 });
 

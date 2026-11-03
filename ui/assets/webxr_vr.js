@@ -727,9 +727,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     return s && s.mode === 'light' && s.scene === 'reels' && !s.paused && !s.shellOpen ? DIM_AMOUNT : 0;
   }
 
-  // Moves linearly at 1 / DIM_FADE_MS per ms and stops on the target.
+  // Moves linearly, a full 0 to DIM_AMOUNT fade in DIM_FADE_MS, and stops on the target.
   function stepDim(current, target, dtMs) {
-    const step = Math.max(0, dtMs) / DIM_FADE_MS;
+    const step = Math.max(0, dtMs) * DIM_AMOUNT / DIM_FADE_MS;
     if (current < target) return Math.min(target, current + step);
     return Math.max(target, current - step);
   }
