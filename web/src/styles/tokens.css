@@ -168,8 +168,8 @@
   --sx-ink-muted: #635b50;
 
   /* Vermilion: the one spot colour that carries every action. The app's #ff3b1f is
-     3.05:1 on paper, so it is deepened to read as text (4.8:1). */
-  --sx-accent: #c8270f;
+     3.05:1 on paper, so it is deepened to read as text (4.7:1 even on surface-2). */
+  --sx-accent: #c2250e;
   --sx-accent-hi: #a81f0b;
   --sx-accent-dim: rgba(200, 39, 15, 0.09);
   --sx-accent-glow: rgba(200, 39, 15, 0.22);

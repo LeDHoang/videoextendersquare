@@ -34,6 +34,28 @@ test('dark block redeclares every light colour except the shared ones', () => {
   assert.deepEqual(Object.keys(dark).sort(), [...colours, 'color-scheme'].sort());
 });
 
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+test('text tokens reach 4.5:1 on every surface in both modes', () => {
+  const inks = ['ink', 'ink-2', 'ink-3', 'ink-muted', 'accent', 'success', 'warn', 'danger', 'info'];
+  for (const selector of [':root:root', ":root[data-theme='dark']"]) {
+    const tokens = block(selector);
+    for (const surface of ['bg', 'surface', 'surface-2']) {
+      for (const ink of inks) {
+        const [hi, lo] = [luminance(tokens[`--sx-${ink}`]), luminance(tokens[`--sx-${surface}`])].sort((a, b) => b - a);
+        const ratio = (hi + 0.05) / (lo + 0.05);
+        assert.ok(ratio >= 4.5, `${selector} ${ink} on ${surface} is ${ratio.toFixed(2)}:1`);
+      }
+    }
+  }
+});
+
 test('icon re-ink rules apply in light mode only', () => {
   const editorialCss = read('../src/styles/editorial.css');
   const rules = editorialCss.split('\n').filter((line) => line.includes('svg:not(.sx-echo-mark'));
