@@ -16,8 +16,8 @@
 
 | Piece | State |
 |---|---|
-| P&I conversion in light colours | Done on `redesign/editorial-ink-red` (`c93e508`), 6 files, +1008 / −296 against `3861f7b` (details below the table). |
-| Dark colours | Exist only as a separate variant, `redesign/editorial-ink-dark` (`5ab914c`). It differs from Red in 3 files only (details below the table). |
+| P&I conversion in light colours | Merged into `palette-test` (`bdd0eea`) from `redesign/editorial-ink-red` (`c93e508`), 6 files, +1008 / −296 against `3861f7b` (details below the table). |
+| Dark colours | Merged into `palette-test` (`03c8e34`) as the dormant `:root[data-theme='dark']` block in `tokens.css`. It came from `redesign/editorial-ink-dark` (`5ab914c`), which differed from Red in 3 files only (details below the table). |
 | Switch, saved choice, first-paint script | Nothing yet. |
 
 The conversion on `c93e508` touched:
@@ -60,8 +60,8 @@ So the work is mostly additive. Red becomes light mode, and Dark red's colour bl
 ### Task 1: Dark token block
 
 **Files:**
-- Branch: `redesign/paper-ink-theme`, from `redesign/editorial-ink-red` (`c93e508`)
-- Modify: `web/src/styles/tokens.css`. Insert after line 246, the end of the second 640px media block, and before the reels comment at line 248.
+- Branch: `redesign/paper-ink-theme`, from `palette-test` (`03c8e34` or later)
+- Already done: the merge `03c8e34` inserted the block in `web/src/styles/tokens.css`, so this task only adds its test.
 - Create: `web/tests/paper-ink-theme.test.js`
 
 **Interfaces:**
@@ -70,7 +70,7 @@ So the work is mostly additive. Red becomes light mode, and Dark red's colour bl
 - [ ] **Step 1: Branch**
 
 ```bash
-git switch -c redesign/paper-ink-theme c93e508
+git switch -c redesign/paper-ink-theme palette-test
 ```
 
 - [ ] **Step 2: Write the failing test.** Use `node --test`, in the style of `tests/echo-token-parity.test.js`.
@@ -83,25 +83,9 @@ git switch -c redesign/paper-ink-theme c93e508
   - Assert that the dark map has `color-scheme` set to `dark`.
   - Assert that the dark map declares nothing else. Fonts, sizes and the radius stay shared.
 
-- [ ] **Step 3: Run the test and expect it to fail**
+- [ ] **Step 3: Check the test can fail.** Delete one line, such as `--sx-bg`, from the dark block. Run `cd web && node --test tests/paper-ink-theme.test.js`. Expected: FAIL naming `--sx-bg`. Restore the line.
 
-Run: `cd web && node --test tests/paper-ink-theme.test.js`
-Expected: FAIL, because the dark block is not found.
-
-- [ ] **Step 4: Insert the block.** Add a comment, then the selector. Copy the body verbatim from Dark red:
-
-```bash
-git show 5ab914c:web/src/styles/tokens.css | sed -n '150,176p;186,205p;229,232p'
-```
-
-The ranges cover three groups:
-- Lines 150–176: `color-scheme`, surfaces, rules, ink and accent.
-- Lines 186–205: status colours.
-- Lines 229–232: shadows.
-
-The comment should say two things:
-- Dark mode is the magazine printed in reverse, and only colours change.
-- The block has the same specificity as `:root:root`, so it has to stay after it.
+- [ ] **Step 4: Nothing to insert.** The merge `03c8e34` already added the block, copied from `git show 5ab914c:web/src/styles/tokens.css | sed -n '150,176p;186,205p;229,232p'`.
 
 - [ ] **Step 5: Run the test and the token contracts, and expect them to pass**
 
@@ -118,8 +102,8 @@ Expected: everything passes. Run the second command from the worktree root.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/styles/tokens.css web/tests/paper-ink-theme.test.js
-git commit -m "Paper & Ink: dark mode token block"
+git add web/tests/paper-ink-theme.test.js
+git commit -m "Paper & Ink: test that dark mode redeclares every colour"
 ```
 
 ### Task 2: Theme module and first-paint script
@@ -500,4 +484,4 @@ Expected: all pass. The first command runs 544 existing tests plus the new ones.
 
 ## Size
 
-About 11 files and roughly +300 / −20 lines on top of `c93e508`. Most of the additions are the 47 copied token lines and the tests. Stylesheet changes outside the token block are under 30 lines.
+About 11 files and roughly +250 / −20 lines on top of `03c8e34`. The token block is already in; most of the rest is tests. Stylesheet changes outside the token block are under 30 lines.
