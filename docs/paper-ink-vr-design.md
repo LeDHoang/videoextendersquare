@@ -23,14 +23,15 @@ These are the owner's decisions, in their words where quoted:
 3. **Earth mode is redesigned for light mode as well.** "earth mode should be redesign for light mode as well".
 4. **The whole world goes cream in light mode.** This covers the backdrop behind the video and behind the globe, not just the panels ("Yes, whole world cream").
 5. **Dark is a starry sky; light is a clear-sky landscape.** "if dark mode is starry skies light mode should be clear sky landscape".
-6. **In light mode, the world dims while a video plays.** The owner chose this over darker world tones, so the world stays full cream the rest of the time ("Dim during playback").
+6. **The light world is a creamy blue sky with no ground, distant mountains and clouds.** "lets make this creamy/blue sky, no ground, mountains in the distant with clouds".
+7. **In light mode, the world dims while a video plays.** The owner chose this over darker world tones, so the world stays full cream the rest of the time ("Dim during playback").
 
 ## Goals
 
 1. Every canvas-drawn VR panel paints in Paper & Ink, with a light and a dark version.
 2. The world around the viewer changes with the mode:
    - dark: a starry sky
-   - light: a clear-sky landscape
+   - light: a creamy blue sky with distant mountains and clouds
    This applies in both scenes, reels and earth.
 3. The globe and everything drawn on it are re-inked for both modes.
 4. VR starts in whichever mode the 2D site is in, and has its own LIGHT / DARK switch that keeps both sides in step.
@@ -60,7 +61,7 @@ The work fails, even if it technically runs, if any of these happen:
 - **Token values come from the 2D site, unchanged.**
   - Light: the `:root:root` block of `web/src/styles/tokens.css`.
   - Dark: the `:root[data-theme='dark']` block.
-  - No new colour values for panels or text. The world (sky, ground, hills, globe ocean) may use extra colours, derived from these tokens, and kept in one place in the VR code.
+  - No new colour values for panels or text. The world (sky, mountains, clouds, globe ocean) may use extra colours, derived from these tokens, and kept in one place in the VR code.
 - **Fonts are the 2D site's:** Fraunces (display and brand), Instrument Sans (body), IBM Plex Mono (numbers and labels).
   - VR waits for them before the first paint, for about three seconds at most. If they have not arrived by then, VR paints with fallback faces and repaints once when they arrive. A blocked font host must never leave a panel blank.
   - The React host loads IBM Plex Mono at weights 400–600 only, so VR mono labels use 600 at most, in place of today's 700 and 800.
@@ -134,13 +135,14 @@ Panels are paper in light mode, including the controls dock and earth dock under
 - Stars are warm paper white rather than blue-white.
 - There is no ground.
 
-**Light: a clear-sky landscape.**
+**Light: a creamy blue sky with distant mountains and clouds.**
 - A sky dome fades from a pale, clear blue at the top to paper cream (#f2ede3) at the horizon.
-- The ground is a cream paper plane.
-- Low rolling hills ring the horizon in two or three flat tones, paler with distance, like a print.
-- There are no stars, no clouds and no sun disc.
+- There is no ground. Below the horizon the dome fades on into cream mist, so looking down never shows a void.
+- Distant mountains ring the horizon in two or three flat tones, paler with distance, like a print. They sit low, so the view ahead stays mostly sky.
+- Flat, print-like clouds float above the mountains. They stay still and do not drift.
+- There are no stars and no sun disc.
 - No world colour is brighter than paper cream. The panels (#faf7f0) and the video stay the brightest things in view.
-- **Dimming during playback.** While a video plays in the reels scene, the sky, ground and hills fade down to a dimmer, still warm tone. They fade back to full cream when the video pauses, ends or the viewer opens the shell.
+- **Dimming during playback.** While a video plays in the reels scene, the sky, mountains and clouds fade down to a dimmer, still warm tone. They fade back to full cream when the video pauses, ends or the viewer opens the shell.
   - The fade is short and smooth, never a jump, so it does not startle the viewer.
   - Panels and the video are not dimmed, so text keeps its contrast.
   - Dark mode does not dim, and neither does the earth scene, where no video plays.
@@ -167,7 +169,7 @@ The owner did not decide these; I chose them, and the owner should check them wh
 
 1. VR follows the 2D site's mode at entry and has its own switch in the nav bar, at the right end.
 2. Dark mode keeps an open starfield with no ground, rather than a night landscape.
-3. The light landscape is sky, cream ground and low hills only: no clouds, no sun, no trees or buildings.
+3. In the light world, the sky below the horizon fades into cream mist, the clouds stay still, and there is no sun, trees or buildings.
 4. The light globe is a paper atlas, with a pale sea wash on cream land, rather than an all-cream globe.
 5. Tier colours map to the `info`, `success`, `warn` and `accent` tokens.
 6. One small change to `web/src/theme.js`, so the 2D switch follows a change made in VR.
@@ -182,9 +184,9 @@ The owner did not decide these; I chose them, and the owner should check them wh
 
 - **How VR holds two token sets.** Today `VRUICanvas.TOKENS` is one frozen object, read about 130 times in `vr_ui_canvas.js`. `vr_shell_canvas.js` reads it through `tokens()`, and `webxr_vr.js` through `echoHex()`.
 - **How the parity test changes.** `web/tests/echo-token-parity.test.js` checks today that the VR tokens equal the first `:root` block. It must instead check the light set against `:root:root` and the dark set against `:root[data-theme='dark']`, while `reels.html` stays checked against the first block.
-- **How the world is built:** sky dome, ground and hill geometry, and how they swap with the starfield.
+- **How the world is built:** sky dome, mountain and cloud geometry, and how they swap with the starfield.
 - **How the tile grade gets its per-mode colours**, and how live tiles pick up a switch. Today the night-chart palette is fixed inside the shader. Light mode must read as a paper atlas whichever tile source the server reports (the `theme` hint from `/api/reels/map-tiles/attribution` can be `light` or `dark`).
-- **Exact hill shapes, the sky blue, and the sea wash**, within the constraints above.
+- **Exact mountain and cloud shapes, the sky blue, and the sea wash**, within the constraints above.
 - **The radius in canvas pixels**, and the switch's exact size in the nav bar.
 - **How dim the light world goes during playback, and how long the fade lasts.** The builder tunes both in the headset, or in the preview when no headset is connected.
 
