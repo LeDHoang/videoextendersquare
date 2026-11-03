@@ -73,6 +73,8 @@ h1, h2, h3, h4, h5, h6 {
   font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
   letter-spacing: -0.03em;
   text-transform: none;
+  /* The base clips at the box. Italic overhangs it, and the mark's hover grows past it. */
+  overflow: visible;
 }
 .sx-top-brand:hover {
   color: var(--sx-accent-hi);
