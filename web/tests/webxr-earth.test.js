@@ -6819,3 +6819,30 @@ test('the atmosphere follows the mode in the earth scene', () => {
   assert.equal(rim.blending, THREE.NormalBlending);
   renderer.stopPreview();
 });
+
+// Pins and heat sprites take the accent, with the spot colour for the hottest band.
+// Additive light washes out on paper, so the sprites blend normally in light mode.
+test('globe pins and heat sprites re-ink with the mode', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    theme: 'light',
+    fetch: async () => ({ ok: true, json: async () => ({ locations: [] }) }),
+  });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3ClusterRow(), z3CityRow()]);
+  const ink = () => JSON.parse(JSON.stringify(api.earthHeatInk()));
+  assert.deepEqual(ink(), {
+    pins: ['#f3d34a', '#c2250e'],
+    sprites: [{ hex: '#f3d34a', additive: false }, { hex: '#c2250e', additive: false }],
+  });
+  api.setVRTheme('dark');
+  assert.deepEqual(ink(), {
+    pins: ['#f3d34a', '#ff3b1f'],
+    sprites: [{ hex: '#f3d34a', additive: true }, { hex: '#ff3b1f', additive: true }],
+  });
+  renderer.stopPreview();
+});

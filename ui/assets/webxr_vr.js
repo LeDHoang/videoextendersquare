@@ -935,6 +935,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     // a build still running on the old palette.
     if (earthBasePhoto) buildHolographicEarthBase(earthBasePhoto);
     else earthBaseStale = true;
+    rebuildEarthPins();
+    rebuildEarthHeatSprites();
   }
 
   // Switches the VR tokens; on a change every canvas repaints once and the scene recolours.
@@ -2197,6 +2199,9 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // Heat blooms in the accent; the hottest band takes the spot colour.
   const EARTH_HEAT_SPOT_FROM = 0.8;
+  function earthHeatInkHex(heat) {
+    return heat >= EARTH_HEAT_SPOT_FROM ? echoHex('spot', '#f3d34a') : echoHex('accent', '#c2250e');
+  }
   function paintHeatZones(ctx) {
     try {
       const accent = hexRgb255(echoHex('accent', '#c2250e'));
@@ -2304,7 +2309,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       ranked.forEach((loc, i) => {
         const u = earthRenderedDirection(loc.lat, loc.lon);
         const heat = earthHeatOf(loc);
-        const color = earthHeatRamp(heat).hex;
+        const color = earthHeatInkHex(heat);
         const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(
           pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color }));
         mesh.frustumCulled = false;
@@ -2384,14 +2389,15 @@ window.WebXRVR = window.WebXRVR || (function () {
         const angular = earthZoneAngularRadius(loc);
         const halfExtent = EARTH_RADIUS * Math.sin(angular);
         const dir = earthRenderedDirection(loc.lat, loc.lon);
-        const color = earthHeatRamp(heat).hex;
+        const color = earthHeatInkHex(heat);
         const material = new THREE.MeshBasicMaterial({
           map: texture,
           color,
           transparent: true,
           opacity: 0,
           depthWrite: false,
-          blending: THREE.AdditiveBlending,
+          // Additive light washes out on paper; the dark globe keeps the glow.
+          blending: readVRTheme() === 'dark' ? THREE.AdditiveBlending : THREE.NormalBlending,
           side: THREE.FrontSide,
         });
         const mesh = new THREE.Mesh(heatSpriteGeo, material);
@@ -11646,6 +11652,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       rebuildEarthHeatSprites,
       updateEarthHeatSprites,
+      earthHeatInk() {
+        const hex = (m) => '#' + m.color.getHexString();
+        return {
+          pins: earthPinsGroup ? earthPinsGroup.children.map((mesh) => hex(mesh.material)) : [],
+          sprites: earthHeatSprites.map((s) => ({ hex: hex(s.material), additive: s.material.blending === THREE.AdditiveBlending })),
+        };
+      },
       earthHeatStats() {
         return {
           count: earthHeatSprites.length,
