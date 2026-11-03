@@ -100,7 +100,7 @@ h1, h2, h3, h4, h5, h6 {
 .sx-command-box {
   background: var(--sx-bg);
   border-color: var(--sx-rule);
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
   padding-left: 6px;
 }
 
@@ -237,7 +237,7 @@ h1, h2, h3, h4, h5, h6 {
   min-height: 34px;
   padding: 4px 14px;
   border: 1px solid var(--sx-ink);
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
   background: transparent;
   backdrop-filter: none;
   color: var(--sx-ink);
@@ -256,7 +256,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 .sx-xh-chip-count {
   padding: 1px 7px;
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
   background: var(--sx-ink);
   color: var(--sx-surface);
   font-family: var(--sx-font-mono);
@@ -274,7 +274,7 @@ h1, h2, h3, h4, h5, h6 {
   min-height: 38px;
   padding: 7px 16px;
   border: 1px solid transparent;
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
   background: transparent;
   color: var(--sx-ink-2);
   font-family: var(--sx-font-sans);
@@ -294,10 +294,10 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--sx-surface);
 }
 .sx-xh-seg {
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
 }
 .sx-xh-seg-btn {
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
 }
 .sx-xh-seg-btn--on {
   background: var(--sx-ink);
@@ -330,7 +330,7 @@ h1, h2, h3, h4, h5, h6 {
 .sx-explore-creator {
   font-family: var(--sx-font-sans);
   font-weight: 600;
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
 }
 .sx-explore-loc {
   padding: 4px 10px 4px 8px;
@@ -365,7 +365,7 @@ button.sx-explore-loc-link:hover {
   min-height: 32px;
   padding: 4px 12px;
   border-color: var(--sx-ink);
-  border-radius: var(--sx-radius-pill);
+  border-radius: var(--sx-radius);
   background: transparent;
   font: 600 0.875rem/1.2 var(--sx-font-sans);
 }
@@ -458,6 +458,92 @@ button.sx-explore-loc-link:hover {
 }
 #sxReelsRoot :where(h1, h2, h3, h4, strong, b) {
   font-family: var(--sx-font-sans);
+}
+
+/* ─── Corners: every box and button takes the same slight radius. global.css
+   squares most of them off; avatars and dots stay round, and the player frame,
+   which wears corner brackets, stays square. ─── */
+.sx-icon-button,
+.sx-sidebar-close-btn,
+.sx-sidebar-nav-card,
+.sx-pill,
+.sx-input,
+.sx-select,
+.sx-textarea,
+.sx-toast,
+.sx-dropdown-head,
+.sx-dropdown-panel,
+.sx-upload-zone,
+.sx-command-kbd span,
+.sx-command-results,
+.sx-account-popover,
+.sx-people-dialog,
+.sx-gif-picker,
+.sx-emote-picker > div,
+.sx-message-dock,
+.sx-message-bubble,
+.sx-share-dialog textarea,
+.sx-message-report textarea,
+.sx-message-composer textarea,
+.sx-explore-tile,
+.sx-explore-kind,
+.sx-explore-order,
+.sx-explore-title,
+.sx-explore-stats,
+.sx-explore-share button,
+.sx-pack-label,
+.sx-pack-cover-label,
+.sx-pack-cover-stack,
+.sx-tag-chip,
+.sx-profile-demo,
+.sx-pf-select,
+.sx-ps-input,
+.sx-ps-btn,
+.sx-pk-cover,
+.sx-pk-play,
+.sx-pk-kind,
+.sx-pk-status,
+.sx-pk-act,
+.sx-pk-foot,
+.sx-pk-dialog,
+.sx-pk-dialog textarea,
+.sx-au-control,
+.sx-au-rules,
+.sx-au-submit {
+  border-radius: var(--sx-radius);
+}
+/* These paint their own corners with children, so they clip to the radius. */
+.sx-pk-stats,
+.sx-au {
+  overflow: hidden;
+  border-radius: var(--sx-radius);
+}
+/* The player's stylesheet is scoped to #sxReelsRoot when it mounts and lands after
+   this file, so the doubled id outranks it. */
+#sxReelsRoot#sxReelsRoot :is(
+  .reels-cluster,
+  .action-btn,
+  .edge-chevron,
+  .reels-side,
+  .side-avatar,
+  .side-chip,
+  .follow-pill,
+  .side-stats,
+  .account-btn,
+  .sync-time-toggle,
+  .drawer-sync-filter,
+  .comment-empty,
+  .comment-item,
+  .comment-avatar,
+  .comment-time-btn,
+  .comment-input-wrap,
+  .comment-submit-btn,
+  .center-flash,
+  .reward-toast,
+  .reels-time-display,
+  .twitch-comment-pill
+) {
+  border-radius: var(--sx-radius);
 }
 
 /* ─── Footer: a colophon ───────────────────────────────────────────────── */
