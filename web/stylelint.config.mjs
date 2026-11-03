@@ -20,5 +20,15 @@ export default {
       files: ['src/styles/tokens.css'],
       rules: { 'color-no-hex': null, 'color-named': null, 'function-disallowed-list': null },
     },
+    {
+      // Dev-only palette preview: re-points the same tokens, and its picker sits above everything.
+      files: ['src/dev/palettes.css'],
+      rules: {
+        'color-no-hex': null,
+        'color-named': null,
+        'function-disallowed-list': null,
+        'declaration-property-value-allowed-list': null,
+      },
+    },
   ],
 };
