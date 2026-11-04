@@ -4400,17 +4400,16 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 /* The ECHO wordmark ripples with the logo's hover ghost: each time the mark
-   plays (.is-play, once per hover with its own cooldown), two outline copies
-   of the word grow out of it and fade, one after the other. Reduced motion
-   never sets .is-play. The copies come from data-echo with empty alt text, so
-   screen readers still hear the word once. */
+   plays (.is-play, once per hover with its own cooldown), one outline copy
+   of the word grows out of it and fades. Reduced motion never sets .is-play.
+   The copy comes from data-echo with empty alt text, so screen readers still
+   hear the word once. */
 .sx-wordmark {
   position: relative;
   isolation: isolate;
 }
 
-.sx-wordmark::before,
-.sx-wordmark::after {
+.sx-wordmark::before {
   content: attr(data-echo) / "";
   position: absolute;
   inset: 0;
@@ -4421,16 +4420,8 @@ body.sx-vr-active .sx-reels-mount,
   opacity: 0;
 }
 
-.sx-wordmark::after {
-  -webkit-text-stroke-width: 0.03em;
-}
-
 .sx-echo-mark.is-play ~ .sx-wordmark::before {
   animation: sx-wordmark-pulse 950ms cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-
-.sx-echo-mark.is-play ~ .sx-wordmark::after {
-  animation: sx-wordmark-pulse 950ms cubic-bezier(0.2, 0.7, 0.3, 1) 240ms;
 }
 
 @keyframes sx-wordmark-pulse {
