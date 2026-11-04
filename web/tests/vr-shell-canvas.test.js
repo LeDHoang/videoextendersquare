@@ -369,40 +369,63 @@ const monoWeight = (font) => {
   return w ? (w[1] === 'bold' ? 700 : Number(w[1])) : 400;
 };
 
-test('nav bar ends in a LIGHT / DARK switch', () => {
-  const { sc } = loadThemed();
-  const { light, dark } = sc.themeSwitchRects();
-  const centre = (r) => [r.x + r.w / 2, r.y + r.h / 2];
-  assert.deepEqual({ ...sc.resolveNavHit(...centre(light)) }, { action: 'theme', arg: 'light' });
-  assert.deepEqual({ ...sc.resolveNavHit(...centre(dark)) }, { action: 'theme', arg: 'dark' });
+test('nav bar ends in a day / night switch that flips the mode', () => {
+  const { sc, ui } = loadThemed();
+  const sw = sc.themeSwitchRect();
+  const centre = [sw.x + sw.w / 2, sw.y + sw.h / 2];
+  ui.setTheme('light');
+  assert.deepEqual({ ...sc.resolveNavHit(...centre) }, { action: 'theme', arg: 'dark' });
+  ui.setTheme('dark');
+  assert.deepEqual({ ...sc.resolveNavHit(...centre) }, { action: 'theme', arg: 'light' });
   const tabs = sc.navRects();
   for (const r of tabs) {
     assert.deepEqual({ ...sc.resolveNavHit(r.x + r.w / 2, r.y + r.h / 2) }, { action: 'nav', arg: r.id });
-    for (const seg of [light, dark]) assert.ok(r.x + r.w <= seg.x || seg.x + seg.w <= r.x, `tab ${r.id} overlaps switch`);
+    assert.ok(r.x + r.w <= sw.x, `tab ${r.id} overlaps switch`);
+    assert.equal(sw.w, r.w, 'switch is as wide as a dock tile');
+    assert.equal(sw.h, r.h, 'switch is as tall as a dock tile');
+    assert.equal(sw.y, r.y);
   }
-  assert.ok(tabs[tabs.length - 1].x + tabs[tabs.length - 1].w <= light.x);
-  assert.ok(dark.x + dark.w <= sc.NAV_W);
-  assert.ok(light.x + light.w <= dark.x);
+  assert.ok(sw.x + sw.w <= sc.NAV_W);
 });
 
-test('the switch shows the active mode', () => {
-  for (const mode of ['light', 'dark']) {
+test('the switch shows a paper-white sky by day and a night sky by night', () => {
+  const cases = { light: { label: 'DAY', other: 'NIGHT', sky: 'surface' }, dark: { label: 'NIGHT', other: 'DAY', sky: 'surface' } };
+  for (const [mode, c] of Object.entries(cases)) {
     const { sc, ui } = loadThemed();
     ui.setTheme(mode);
     const { hex } = ui.TOKENS;
     const rec = paintCtx();
     sc.renderNavBar(rec.ctx, { open: false }, '');
-    const on = rec.texts.find((t) => t.text === mode.toUpperCase());
-    const off = rec.texts.find((t) => t.text === (mode === 'light' ? 'DARK' : 'LIGHT'));
-    assert.ok(on && off, `${mode} labels drawn`);
-    assert.equal(on.style, hex.bg, `${mode} selected label colour`);
-    assert.equal(on.before, hex.ink, `${mode} selected segment fill`);
-    assert.equal(off.style, hex.ink2, `${mode} resting label colour`);
-    for (const t of [on, off]) {
-      assert.ok(/IBM Plex Mono/.test(t.font), t.font);
-      assert.ok(monoWeight(t.font) <= 600, t.font);
-    }
+    const label = rec.texts.find((t) => t.text === c.label);
+    assert.ok(label, `${mode} label drawn`);
+    assert.ok(!rec.texts.some((t) => t.text === c.other), `${mode} hides ${c.other}`);
+    assert.equal(label.style, hex.ink, `${mode} label colour`);
+    assert.equal(label.before, hex[c.sky], `${mode} sky colour`);
+    assert.ok(/IBM Plex Mono/.test(label.font), label.font);
+    assert.ok(monoWeight(label.font) <= 600, label.font);
   }
+});
+
+test('the switch eases between day and night', () => {
+  const { sc, ui } = loadThemed();
+  ui.setTheme('dark');
+  const { hex } = ui.TOKENS;
+  const at = (p) => {
+    const rec = paintCtx();
+    sc.renderNavBar(rec.ctx, { open: false }, '', p);
+    return { labels: rec.texts.map((t) => t.text).filter((t) => t === 'DAY' || t === 'NIGHT'), accents: rec.fills.filter((f) => f === hex.accent).length };
+  };
+  const day = at(0);
+  const setting = at(0.25);
+  const rising = at(0.75);
+  const night = at(1);
+  assert.deepEqual(day.labels, ['DAY']);
+  assert.deepEqual(setting.labels, ['DAY'], 'one label at a time');
+  assert.deepEqual(rising.labels, ['NIGHT'], 'one label at a time');
+  assert.deepEqual(night.labels, ['NIGHT']);
+  assert.equal(day.accents, night.accents + 1, 'the sun is up by day only');
+  assert.equal(setting.accents, night.accents + 1, 'the sun is still setting');
+  assert.equal(rising.accents, night.accents, 'the sun has set before the moon rises');
 });
 
 test('the ECHO mark takes the mode\'s ink and accent', () => {

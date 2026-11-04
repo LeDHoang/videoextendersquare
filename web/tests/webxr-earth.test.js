@@ -528,6 +528,41 @@ test('the VR switch writes the attribute and sx.theme', () => {
   assert.equal(renderer.getPreviewState().world.theme, 'dark');
 });
 
+test('a press on the VR switch eases the nav switch to the new mode', () => {
+  let clock = 0;
+  const seen = [];
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    theme: 'light',
+    withShell: true,
+    now: () => clock,
+    beforeRenderer: (win) => {
+      const paint = win.VRShellCanvas.renderNavBar;
+      win.VRShellCanvas.renderNavBar = function (...args) {
+        seen.push(args[3]);
+        return paint.apply(this, args);
+      };
+    },
+  });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  const frame = () => { clock += 100; renderer.__runScheduledFrame(clock); };
+  for (let i = 0; i < 3; i += 1) frame();
+  assert.ok(seen.length > 0, 'the nav painted');
+  seen.length = 0;
+  renderer.__test.setVRTheme('dark');
+  for (let i = 0; i < 10; i += 1) frame();
+  assert.equal(seen[0], 0, 'starts from day');
+  assert.equal(seen[seen.length - 1], 1, 'ends at night');
+  assert.ok(seen.filter((p) => p > 0 && p < 1).length >= 3, `in-between frames: ${seen}`);
+  for (let i = 1; i < seen.length; i += 1) assert.ok(seen[i] > seen[i - 1], `rises: ${seen}`);
+  const painted = seen.length;
+  for (let i = 0; i < 3; i += 1) frame();
+  assert.equal(seen.length, painted, 'the nav rests once the switch arrives');
+  renderer.stopPreview();
+});
+
 test('the VR switch works when storage throws', () => {
   const localStorage = memoryStorage({ setItem() { throw new Error('blocked'); } });
   const renderer = loadRenderer({ theme: 'light', globals: { localStorage } });

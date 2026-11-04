@@ -1327,10 +1327,19 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (scene) applySceneVisibility();
   }
 
+  // A press on the nav switch eases it to the new mode over THEME_SWITCH_MS. The clock
+  // starts on the next shell frame, after the theme change has repainted every panel.
+  const THEME_SWITCH_MS = 500;
+  let themeSwitchAnim = null;
+
   // The nav bar's LIGHT / DARK switch: saves the choice and sets the page attribute
   // (the 2D page follows it), then applies it here at once.
   function setVRTheme(mode) {
     const next = mode === 'dark' ? 'dark' : 'light';
+    const ui = getUICanvas();
+    if (ui && typeof ui.getTheme === 'function' && ui.getTheme() !== next) {
+      themeSwitchAnim = { to: next === 'dark' ? 1 : 0, start: null };
+    }
     try {
       if (typeof localStorage !== 'undefined') localStorage.setItem('sx.theme', next);
     } catch (e) { /* storage unavailable: the choice lasts for this visit */ }
@@ -7497,15 +7506,22 @@ window.WebXRVR = window.WebXRVR || (function () {
     } else if (shellKbMesh && !shellKbMesh.visible) {
       shellPainted.kbHover = null;
     }
-    if (shellNavCtx && shellNavMesh && shellNavMesh.visible &&
-        (shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
-      sc.renderNavBar(shellNavCtx, state, navHover);
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    let themeT;
+    if (themeSwitchAnim) {
+      if (themeSwitchAnim.start === null) themeSwitchAnim.start = now;
+      const k = Math.min(1, (now - themeSwitchAnim.start) / THEME_SWITCH_MS);
+      themeT = themeSwitchAnim.to ? k : 1 - k;
+      if (k >= 1) themeSwitchAnim = null;
+    }
+    if (shellNavCtx && shellNavMesh && shellNavMesh.visible && (themeT !== undefined ||
+        shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
+      sc.renderNavBar(shellNavCtx, state, navHover, themeT);
       shellNavTexture.needsUpdate = true;
       renderStats.panelUploads += 1;
       shellPainted.navHover = navHover;
       shellPainted.navVersion = state.contentVersion;
     }
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const mainShown = !!(shellMainCtx && shellMainMesh && shellMainMesh.visible);
     if (!mainShown && shellVideos.size) sweepShellVideos(true);
     if (mainShown &&

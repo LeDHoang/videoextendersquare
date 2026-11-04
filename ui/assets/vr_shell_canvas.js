@@ -47,22 +47,16 @@
   const NAV_PAD = 16;
   const NAV_GAP = 12;
   const NAV_BRAND_W = 216;
-  // LIGHT / DARK segmented switch at the right end of the bar.
-  const SWITCH_SEG_W = 112;
-  const SWITCH_H = 64;
-  const SWITCH_X = NAV_W - NAV_PAD - SWITCH_SEG_W * 2;
-  function themeSwitchRects() {
-    const y = (NAV_H - SWITCH_H) / 2;
-    return {
-      light: { x: SWITCH_X, y, w: SWITCH_SEG_W, h: SWITCH_H },
-      dark: { x: SWITCH_X + SWITCH_SEG_W, y, w: SWITCH_SEG_W, h: SWITCH_H },
-    };
+  // The dock is the nav tiles plus a day / night switch of the same size at the right end.
+  const DOCK_W = (NAV_W - NAV_PAD - NAV_BRAND_W - NAV_GAP * NAV_ITEMS.length) / (NAV_ITEMS.length + 1);
+  function themeSwitchRect() {
+    const n = NAV_ITEMS.length;
+    return { x: NAV_BRAND_W + n * (DOCK_W + NAV_GAP), y: NAV_PAD, w: DOCK_W, h: NAV_H - NAV_PAD * 2 };
   }
   function navRects() {
-    const w = (SWITCH_X - NAV_GAP - NAV_BRAND_W - NAV_GAP * (NAV_ITEMS.length - 1)) / NAV_ITEMS.length;
     return NAV_ITEMS.map((item, i) => ({
       id: item.id, label: item.label, icon: item.icon,
-      x: NAV_BRAND_W + i * (w + NAV_GAP), y: NAV_PAD, w, h: NAV_H - NAV_PAD * 2,
+      x: NAV_BRAND_W + i * (DOCK_W + NAV_GAP), y: NAV_PAD, w: DOCK_W, h: NAV_H - NAV_PAD * 2,
     }));
   }
 
@@ -468,7 +462,7 @@
   // chamfered icon tiles with mono captions (VRUICanvas renderControlsCanvas).
   // Closed, the bar hangs flush under the dock, so it drops its top rule and
   // the dock's bottom edge is the seam.
-  function renderNavBar(ctx, state, hover) {
+  function renderNavBar(ctx, state, hover, themeT) {
     const t = tokens();
     const T = t.hex;
     const ui = typeof window !== 'undefined' && window.VRUICanvas;
@@ -520,32 +514,85 @@
       }
       if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 30, r.y + 30, s.unread);
     });
-    drawThemeSwitch(ctx, hover);
+    drawThemeSwitch(ctx, hover, themeT);
   }
 
-  // Segmented LIGHT / DARK pair: the active mode is filled ink with bg text.
-  function drawThemeSwitch(ctx, hover) {
+  // Horizon switch, laid out like a dock tile: a red sun over a paper-white
+  // sky by day, an upright crescent moon and stars over the dark sky by night,
+  // with the label in the ground below an ink horizon line.
+  // themeT runs 0 (day) to 1 (night) while the switch changes; left out, it follows the mode.
+  // The sun sets below the horizon, then the moon rises; the stars come out across both.
+  function drawThemeSwitch(ctx, hover, themeT) {
     const t = tokens();
     const T = t.hex;
     const ui = uiKit();
-    const mode = ui && ui.getTheme ? ui.getTheme() : 'light';
-    const rects = themeSwitchRects();
-    ['light', 'dark'].forEach((id) => {
-      const r = rects[id];
-      const on = id === mode;
-      const hot = !on && hover === 'theme:' + id;
-      shape(ctx, r);
-      ctx.fillStyle = on ? T.ink : (hot ? T.surfaceHover : T.surface2);
+    const night = (ui && ui.getTheme ? ui.getTheme() : 'light') === 'dark';
+    const p = typeof themeT === 'number' ? Math.max(0, Math.min(1, themeT)) : (night ? 1 : 0);
+    const ease = (k) => { const c = Math.max(0, Math.min(1, k)); return c * c * (3 - 2 * c); };
+    const set = ease(p * 2);
+    const rise = ease(p * 2 - 1);
+    const r = themeSwitchRect();
+    const sky = T.surface;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + 44;
+    const horizon = r.y + r.h - 44;
+    const drop = horizon - cy + 24;
+    ctx.save();
+    shape(ctx, r);
+    ctx.fillStyle = sky;
+    ctx.fill();
+    ctx.clip();
+    if (p > 0) {
+      ctx.globalAlpha = ease(p);
+      ctx.fillStyle = T.ink;
+      [[cx - 52, cy - 22], [cx - 34, cy + 8], [cx + 40, cy - 14]].forEach(([sx, sy]) => {
+        ctx.fillRect(sx, sy, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+    }
+    if (rise > 0) {
+      const my = cy + (1 - rise) * drop;
+      ctx.fillStyle = T.ink;
+      ctx.beginPath();
+      ctx.arc(cx, my, 20, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = on ? T.ink : T.rule;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = on ? T.bg : (hot ? T.ink : T.ink2);
-      ctx.font = '600 22px ' + t.font.mono;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(id.toUpperCase(), r.x + r.w / 2, r.y + r.h / 2 + 1);
-    });
+      ctx.fillStyle = sky;
+      ctx.beginPath();
+      ctx.arc(cx - 9, my, 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (set < 1) {
+      ctx.fillStyle = T.accent;
+      ctx.beginPath();
+      ctx.arc(cx, cy + set * drop, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Ground below the horizon, the same colour as the sky.
+    ctx.fillStyle = sky;
+    ctx.fillRect(r.x, horizon, r.w, r.y + r.h - horizon);
+    ctx.restore();
+    ctx.strokeStyle = T.ink;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(r.x, horizon);
+    ctx.lineTo(r.x + r.w, horizon);
+    ctx.stroke();
+    shape(ctx, r);
+    ctx.lineWidth = hover && hover.indexOf('theme:') === 0 ? 4 : 2;
+    ctx.stroke();
+    ctx.fillStyle = T.ink;
+    ctx.font = '600 26px ' + t.font.mono;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // One label at a time: DAY fades out over the first half, NIGHT fades in over the second.
+    if (p < 0.5) {
+      ctx.globalAlpha = 1 - p * 2;
+      ctx.fillText('DAY', cx, r.y + r.h - 22);
+    } else if (p > 0.5) {
+      ctx.globalAlpha = p * 2 - 1;
+      ctx.fillText('NIGHT', cx, r.y + r.h - 22);
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawBadge(ctx, cx, cy, n) {
@@ -562,9 +609,11 @@
   }
 
   function resolveNavHit(x, y) {
-    const sw = themeSwitchRects();
-    if (inRect(sw.light, x, y)) return { action: 'theme', arg: 'light' };
-    if (inRect(sw.dark, x, y)) return { action: 'theme', arg: 'dark' };
+    if (inRect(themeSwitchRect(), x, y)) {
+      const ui = uiKit();
+      const mode = ui && ui.getTheme ? ui.getTheme() : 'light';
+      return { action: 'theme', arg: mode === 'dark' ? 'light' : 'dark' };
+    }
     const r = navRects().find((rect) => inRect(rect, x, y));
     return r ? { action: 'nav', arg: r.id } : null;
   }
@@ -1548,7 +1597,7 @@
     NAV_H,
     NAV_ITEMS,
     navRects,
-    themeSwitchRects,
+    themeSwitchRect,
     renderNavBar,
     resolveNavHit,
     GRID_COLS,

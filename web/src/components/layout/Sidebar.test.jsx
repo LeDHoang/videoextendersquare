@@ -154,17 +154,21 @@ describe('Sidebar colour theme switch', () => {
     );
   };
 
-  it('shows LIGHT checked by default', () => {
+  it('shows the dark switch off by default', () => {
     renderGuest();
-    expect(screen.getByRole('radiogroup', { name: 'Colour theme' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'LIGHT' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: 'Dark theme' })).toHaveAttribute('aria-checked', 'false');
   });
 
-  it('DARK applies and remembers the theme', () => {
+  it('the switch applies and remembers the theme both ways', () => {
     renderGuest();
-    fireEvent.click(screen.getByRole('radio', { name: 'DARK' }));
+    const toggle = screen.getByRole('switch', { name: 'Dark theme' });
+    fireEvent.click(toggle);
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(localStorage.getItem('sx.theme')).toBe('dark');
-    expect(screen.getByRole('radio', { name: 'DARK' })).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(toggle);
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(localStorage.getItem('sx.theme')).toBe('light');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 });

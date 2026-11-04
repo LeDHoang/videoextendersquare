@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
-import { Button, Field, Segmented } from '../ui/controls.jsx';
+import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import { IndustrialCreditsIcon } from '../icons/index.jsx';
@@ -199,12 +199,20 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       {/* ─── Colour Theme ─────────────────────────────────── */}
       <div className="sx-sidebar-theme">
         <span className="sx-sidebar-card-title">APPEARANCE</span>
-        <Segmented
-          options={['LIGHT', 'DARK']}
-          value={theme.toUpperCase()}
-          onChange={(opt) => setTheme(opt.toLowerCase())}
-          ariaLabel="Colour theme"
-        />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={theme === 'dark'}
+          aria-label="Dark theme"
+          className="sx-horizon"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        >
+          <span className="sx-horizon-stars" aria-hidden="true" />
+          <span className="sx-horizon-sun" aria-hidden="true" />
+          <span className="sx-horizon-moon" aria-hidden="true" />
+          <span className="sx-horizon-label sx-horizon-day" aria-hidden="true">DAY</span>
+          <span className="sx-horizon-label sx-horizon-night" aria-hidden="true">NIGHT</span>
+        </button>
       </div>
 
       {/* ─── Account Billing Module ───────────────────────── */}
