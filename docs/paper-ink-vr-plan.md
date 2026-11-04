@@ -341,6 +341,13 @@ git commit -m "Paper & Ink VR: follow data-theme, wait for fonts, and keep the 2
 - These are 3 draw calls. Build them once and toggle `visible`.
 - **Dim:** each frame, `dim = stepDim(dim, worldDimTarget(…), dt)`. Scale the three materials' colours by `1 - dim`. Panels and the video are untouched.
 
+**As shipped (QA redesign):** the flat sky, bands and clouds above read as a dated cartoon, so the light world became a golden hour over a sea of cloud. It is 2 draw calls, built once and toggled:
+- **Sky:** a shader on the `BackSide` sphere. A low sun (azimuth 55°, elevation 4.5°) with a warm glow, a rose belt and a blue shadow band opposite, and a drifting deck of lit cloud overhead from a baked noise texture.
+- **Sea of cloud:** drawn by the sky shader below the horizon, a lumpy deck whose billows catch the sun on one face and shade the hollows behind them.
+- **Mountains:** one polar-grid mesh of ridged and eroded noise, warped off the lattice, low hills near and tall massifs far, parting where the sun sets. Sun, soft shadow, snow and valley occlusion are baked into vertex colours at build time; the shader adds gullies, strata, backlit rims, haze and the cloud lapping at their feet.
+- `WORLD_PALETTE.light` holds the sky, cloud, sea, rock and snow colours. `__test.worldObjects()` reports `{ sky, mountains, stars, glow }`, and `__test.worldMeshes()` returns the two meshes.
+- **Dim:** a shared `uTint` uniform scales both meshes by `1 - dim`.
+
 **The dark world:** today's starfield in `star`, with `sky` as the clear colour and background, and no ground.
 
 Each world shows in both the reels scene and the earth scene. `applySceneVisibility` (8192) shows the starfield in every scene today. It becomes `visible = mode === 'dark'`, and the three light objects take `mode === 'light'`.

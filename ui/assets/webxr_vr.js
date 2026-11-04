@@ -588,7 +588,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let starfieldPoints = null;
   let worldSky = null;
   let worldMountains = null;
-  let worldClouds = null;
+  let worldUniforms = null; // shared by the sky and mountain shaders
   let worldDim = 0;
   let worldLastT = -1;
   let earthGroup = null;
@@ -715,11 +715,17 @@ window.WebXRVR = window.WebXRVR || (function () {
   // The one place for world and globe colours. `earth` is the globe: a paper
   // atlas in light mode, a warm night chart in dark. The tint values drive the
   // keyed dark-raster chain; light mode maps those rasters to paper instead.
+  // The light world is golden hour: a sky graded from the sun side to the far
+  // side, a cloud deck lit from below, peaks in alpenglow over a sea of cloud.
   const WORLD_PALETTE = {
     light: {
-      skyTop: '#9cc0dc', horizon: '#f2ede3', mist: '#e9e3d6',
-      mountains: ['#dad8cf', '#cac8be', '#b9b8ae'], // far to near
-      cloud: '#fbf9f4',
+      horizon: '#f2ede3', // clear colour, behind the sky dome
+      zenith: '#3b5c9e', midSun: '#f9d9a6', midAway: '#aebbd9',
+      horizonSun: '#ffa45c', horizonAway: '#e6a9a6',
+      belt: '#e8a2b0', shadowBand: '#7c84aa', sunHaze: '#ffc57a', sun: '#fff0c8',
+      cloudLit: '#ffd0a6', cloudShade: '#77708f',
+      seaLit: '#ffe1bd', seaAway: '#e7c9d6', seaShade: '#9d8fb3',
+      rockLit: '#d68f63', rockShade: '#3d4466', snowLit: '#ffdcc2', snowShade: '#8c97c2',
       earth: {
         land: '#f2ede3', sea: '#d8e2e4', park: '#dfe3cf', lineSoft: '#d3cab8', line: '#45403a',
         rim: '#17140f', rimOpacity: 0.10, rimBlending: 'NormalBlending',
@@ -754,114 +760,488 @@ window.WebXRVR = window.WebXRVR || (function () {
     return readVRTheme() === 'dark' ? WORLD_PALETTE.dark.sky : WORLD_PALETTE.light.horizon;
   }
 
-  // Sky, mountains and clouds: three meshes built once, shown in light mode only.
+  // The light world's sun sits low, right of the screen, so it never shows behind the video.
+  const SUN_AZIMUTH_DEG = 55; // clockwise from straight ahead (-Z)
+  const SUN_ELEVATION_DEG = 4.5;
+  const WORLD_SEA_Y = -6; // top of the sea of cloud; the eye is at 1.6
+
+  function smoothstep(e0, e1, x) {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Seeded 2D gradient noise in about [-1, 1]. With a period the lattice wraps, so the noise tiles.
+  function makeGradientNoise(seed) {
+    const { floor, imul } = Math; // read once: the builders call this a million times, and node:vm makes each global lookup slow
+    const grad = new Float32Array(512);
+    let s = seed >>> 0;
+    for (let i = 0; i < 256; i++) {
+      s = (imul(s, 1664525) + 1013904223) >>> 0;
+      const a = s / 4294967296 * Math.PI * 2;
+      grad[2 * i] = Math.cos(a);
+      grad[2 * i + 1] = Math.sin(a);
+    }
+    const corner = (i, j) => {
+      let h = imul(i, 374761393) ^ imul(j, 668265263) ^ seed;
+      h = imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) & 255) << 1;
+    };
+    return (x, y, period) => {
+      let i0 = floor(x), j0 = floor(y);
+      const fx = x - i0, fy = y - j0;
+      let i1 = i0 + 1, j1 = j0 + 1;
+      if (period) {
+        i0 = ((i0 % period) + period) % period;
+        j0 = ((j0 % period) + period) % period;
+        i1 = (i0 + 1) % period;
+        j1 = (j0 + 1) % period;
+      }
+      const a = corner(i0, j0), b = corner(i1, j0), c = corner(i0, j1), d = corner(i1, j1);
+      const n00 = grad[a] * fx + grad[a + 1] * fy;
+      const n10 = grad[b] * (fx - 1) + grad[b + 1] * fy;
+      const n01 = grad[c] * fx + grad[c + 1] * (fy - 1);
+      const n11 = grad[d] * (fx - 1) + grad[d + 1] * (fy - 1);
+      const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+      const v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+      const top = n00 + u * (n10 - n00), bottom = n01 + u * (n11 - n01);
+      return (top + v * (bottom - top)) * 1.4142;
+    };
+  }
+
+  // Tiling cloud noise: R is fBm (soft masses, haze), G is billow noise (puffs,
+  // rock grain). The shaders sample it at several scales.
+  function bakeCloudTexture() {
+    const { abs, round } = Math;
+    const S = 256, OCTAVES = 5;
+    const noise = makeGradientNoise(7919);
+    const fbm = new Float32Array(S * S), billow = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        let f = 0, b = 0, amp = 1;
+        for (let o = 0; o < OCTAVES; o++) {
+          const p = 4 << o;
+          const n = noise(x / S * p + o * 0.37, y / S * p + o * 0.71, p);
+          f += n * amp;
+          b += abs(n) * amp;
+          amp *= 0.5;
+        }
+        fbm[y * S + x] = f;
+        billow[y * S + x] = b;
+      }
+    }
+    const span = (list) => {
+      let lo = Infinity, hi = -Infinity;
+      for (const v of list) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      return [lo, 255 / (hi - lo)];
+    };
+    const [fLo, fScale] = span(fbm), [bLo, bScale] = span(billow);
+    const data = new Uint8Array(S * S * 4);
+    for (let i = 0; i < S * S; i++) {
+      data[4 * i] = round((fbm[i] - fLo) * fScale);
+      data[4 * i + 1] = round((billow[i] - bLo) * bScale);
+      data[4 * i + 3] = 255;
+    }
+    const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const WORLD_GLSL_PARS = `
+    uniform vec3 uSunDir;
+    uniform float uTime;
+    uniform vec3 uTint;
+    uniform sampler2D uCloudTex;
+    uniform float uSeaY;
+    uniform vec3 uZenith, uMidSun, uMidAway, uHorizonSun, uHorizonAway;
+    uniform vec3 uBelt, uShadowBand, uSunHaze, uSunColor;
+    uniform vec3 uCloudLit, uCloudShade, uSeaLit, uSeaAway, uSeaShade;
+    varying vec3 vWorld;
+
+    // 1 looking toward the sun round the horizon, 0 looking away.
+    float sunSide(vec3 d) {
+      return clamp(0.5 + 0.5 * dot(d.xz, uSunDir.xz) / max(length(d.xz) * length(uSunDir.xz), 1e-4), 0.0, 1.0);
+    }
+
+    vec3 skyBase(vec3 d) {
+      float h = max(d.y, 0.0);
+      float side = sunSide(d);
+      float toward = pow(side, 1.6);
+      vec3 col = mix(mix(uHorizonAway, uHorizonSun, toward), mix(uMidAway, uMidSun, toward), smoothstep(0.0, 0.22, h));
+      col = mix(col, uZenith, smoothstep(0.12, 0.85, h));
+      // Opposite the sun: the Earth's shadow on the horizon, the pink belt above it.
+      float away = pow(1.0 - side, 1.5);
+      col = mix(col, uBelt, 0.6 * away * exp(-pow((h - 0.11) / 0.07, 2.0)));
+      col = mix(col, uShadowBand, 0.65 * away * (1.0 - smoothstep(0.0, 0.07, h)));
+      // Glow round the sun, and along the horizon under it.
+      float mu = max(dot(d, uSunDir), 0.0);
+      col += uSunHaze * (0.3 * pow(mu, 5.0) + 0.7 * pow(mu, 60.0));
+      col += uSunHaze * 0.3 * exp(-h * 10.0) * pow(side, 5.0);
+      return col;
+    }
+
+    // Broad swells carrying puffs, with fine billows on top.
+    float seaHeight(vec2 uv) {
+      float macro = texture2D(uCloudTex, uv * 0.27 + vec2(0.21, 0.67)).r;
+      float puffs = texture2D(uCloudTex, uv).g;
+      float fine = texture2D(uCloudTex, uv * 3.1 + vec2(0.5, 0.13)).g;
+      return smoothstep(0.25, 0.8, macro) * 0.55 + puffs * 0.33 + fine * 0.12;
+    }
+
+    // The sea of cloud below the eye line: billows lit across their tops by the low sun.
+    vec3 cloudSea(vec3 d) {
+      float down = max(-d.y, 1e-4);
+      float dist = (cameraPosition.y - uSeaY) / down;
+      vec2 hit = cameraPosition.xz + d.xz * dist;
+      vec2 uv = hit * 0.0065 + vec2(0.005, 0.0018) * uTime;
+      vec2 s = normalize(uSunDir.xz);
+      float h = seaHeight(uv);
+      // Faces turned to the sun catch it; taller billows sunward shade the hollows behind them.
+      float e = 0.006;
+      float slope = (seaHeight(uv + s * e) - seaHeight(uv - s * e)) / (2.0 * e);
+      float lit = smoothstep(-4.0, 6.0, -slope);
+      float occl = smoothstep(0.02, 0.16, seaHeight(uv + s * 0.03) - h);
+      float sunAmt = lit * (1.0 - 0.6 * occl);
+      float side = sunSide(d);
+      vec3 litCol = mix(uSeaAway, uSeaLit, pow(side, 1.4));
+      vec3 shade = uSeaShade * (0.8 + 0.3 * h);
+      vec3 col = mix(shade, litCol, 0.25 + 0.75 * sunAmt) * (0.86 + 0.24 * h);
+      // Far off the billows merge into one soft sheet.
+      float far = 1.0 - exp(-dist * 0.016);
+      col = mix(col, mix(uSeaShade, litCol, 0.62), far * 0.75);
+      // Forward scatter: the cloud glows along the line under the sun.
+      float mu = max(dot(normalize(d.xz), s), 0.0);
+      col += uSunHaze * (0.25 * pow(mu, 4.0) + 0.5 * pow(mu, 24.0)) * exp(-down * 4.0);
+      return mix(col, skyBase(normalize(vec3(d.x, 0.0, d.z))), exp(-down * 8.0));
+    }
+
+    // Soft shoulder above 0.8, so the sun and its glow roll off instead of clipping.
+    vec3 knee(vec3 c) {
+      vec3 over = max(c - 0.8, 0.0);
+      return min(c, 0.8) + over / (1.0 + over * 5.0);
+    }
+
+    float worldDither() {
+      return (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+    }
+  `;
+
+  const WORLD_SKY_FRAGMENT = `
+    // The cloud deck overhead, lit from below by the low sun; rgb and coverage.
+    vec4 cloudDeck(vec3 d, float side, float mu) {
+      float h = d.y;
+      vec2 drift = vec2(0.006, 0.002) * uTime;
+      vec2 uv = d.xz / (h + 0.07) * 0.16 + drift;
+      float cover = smoothstep(0.32, 0.68, texture2D(uCloudTex, uv * 0.21 + vec2(0.37, 0.11)).r);
+      float floorLevel = mix(0.66, 0.4, cover);
+      float dens = texture2D(uCloudTex, uv).g * 0.7 + texture2D(uCloudTex, uv * 3.3 + drift).r * 0.3 - floorLevel;
+      float alpha = smoothstep(0.0, 0.2, dens) * smoothstep(0.02, 0.22, h);
+      // Cloud between this point and the sun shades it.
+      vec2 toSun = uv + normalize(uSunDir.xz) * 0.03;
+      float occl = texture2D(uCloudTex, toSun).g * 0.7 + texture2D(uCloudTex, toSun * 3.3 + drift).r * 0.3 - floorLevel;
+      float thick = smoothstep(0.1, 0.4, dens);
+      float light = exp(-max(occl, 0.0) * 3.5);
+      // Toward the sun the cores go dark and the thin edges burn.
+      float back = pow(max(mu, 0.0), 3.0);
+      light *= mix(1.0, 1.0 - 0.7 * thick, back);
+      vec3 lit = mix(uBelt * 1.1, uCloudLit, pow(side, 1.2));
+      lit += uSunHaze * 0.6 * pow(max(mu, 0.0), 6.0) * (1.0 - thick);
+      vec3 col = mix(uCloudShade, lit, light * (1.0 - 0.55 * thick));
+      col = mix(col, skyBase(d), 0.5 * (1.0 - smoothstep(0.02, 0.3, h)));
+      return vec4(col, alpha);
+    }
+
+    void main() {
+      vec3 d = normalize(vWorld - cameraPosition);
+      vec3 col;
+      if (d.y < 0.0) {
+        col = cloudSea(d);
+      } else {
+        col = skyBase(d);
+        float side = sunSide(d);
+        float mu = dot(d, uSunDir);
+        // High cirrus: long thin streaks catching the gold.
+        vec2 q = d.xz / (d.y + 0.18);
+        vec2 cq = vec2(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8) * vec2(0.04, 0.32) + vec2(0.002 * uTime, 0.0);
+        float cirrus = smoothstep(0.55, 0.85, texture2D(uCloudTex, cq).r) * smoothstep(0.03, 0.25, d.y) * 0.45;
+        col = mix(col, mix(uBelt, uSunHaze * 1.2, pow(side, 2.0)), cirrus);
+        col = mix(col, uSunColor * 1.6, smoothstep(0.99984, 0.99993, mu));
+        vec4 deck = cloudDeck(d, side, mu);
+        col = mix(col, deck.rgb, deck.a);
+      }
+      gl_FragColor = vec4(knee(col) * uTint, 1.0);
+      #include <colorspace_fragment>
+      gl_FragColor.rgb += worldDither();
+    }
+  `;
+
+  const WORLD_TERRAIN_FRAGMENT = `
+    varying vec3 vRock;
+    varying vec3 vNormal;
+
+    // Quintic texel blend: plain bilinear lookups have creased slopes that the bump picks up as lines.
+    vec4 smoothTex(vec2 uv) {
+      uv = uv * 256.0 + 0.5;
+      vec2 i = floor(uv), f = uv - i;
+      f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+      return texture2D(uCloudTex, (i + f - 0.5) / 256.0);
+    }
+
+    float gullyAt(float u, float y) {
+      return smoothTex(vec2(u * 0.11, y * 0.018)).g * 0.65 + smoothTex(vec2(u * 0.37, y * 0.06 + 0.3)).g * 0.35;
+    }
+
+    void main() {
+      vec3 toFrag = vWorld - cameraPosition;
+      float dist = length(toFrag);
+      vec3 d = toFrag / dist;
+      vec3 n = normalize(vNormal);
+      // Gullies run down the fall line, sampled on the two vertical planes and blended by facing.
+      vec2 face = abs(n.xz) / (abs(n.x) + abs(n.z) + 1e-4);
+      float gully = gullyAt(vWorld.z, vWorld.y) * face.x + gullyAt(vWorld.x + 17.0, vWorld.y) * face.y;
+      float strata = smoothTex(vec2(0.37, vWorld.y * 0.22 + gully * 0.6)).r;
+      float bump = gully * 0.9 + strata * 0.1;
+      // Bump the normal from the screen-space slope of the relief.
+      vec3 dpx = dFdx(vWorld), dpy = dFdy(vWorld);
+      float bx = dFdx(bump), by = dFdy(bump);
+      vec3 r1 = cross(dpy, n), r2 = cross(n, dpx);
+      float det = dot(dpx, r1);
+      // Steep faces carry the most relief; gentle foothills stay smooth.
+      float relief = 1.3 * smoothstep(0.97, 0.7, n.y);
+      vec3 nb = normalize(abs(det) * n - sign(det) * (bx * r1 + by * r2) * relief);
+      vec3 col = vRock;
+      float litness = clamp(dot(n, uSunDir) * 3.0, 0.0, 1.0);
+      col *= clamp(1.0 + 2.2 * (dot(nb, uSunDir) - dot(n, uSunDir)) * litness + 0.6 * (nb.y - n.y), 0.55, 1.5);
+      // Patches of paler and darker rock.
+      float blotch = texture2D(uCloudTex, vWorld.xz * 0.013 + 0.4).r;
+      col *= 0.82 + 0.36 * blotch;
+      // Ridges seen against the sun light up at the edge.
+      float mu = max(dot(d, uSunDir), 0.0);
+      vec3 nr = normalize(mix(n, nb, 0.3));
+      col += uSunHaze * 1.1 * pow(1.0 - abs(dot(nr, d)), 3.0) * pow(mu, 5.0);
+      // Distance and the low mist wash the peaks toward the sky behind them.
+      float air = max(1.0 - exp(-dist * 0.0055), 0.5 * smoothstep(uSeaY + 4.0, uSeaY, vWorld.y));
+      col = mix(col, skyBase(normalize(vec3(d.x, max(d.y, 0.0) + 0.02, d.z))), air);
+      // The sea of cloud laps round the foot of the range.
+      float top = uSeaY + (texture2D(uCloudTex, vWorld.xz * 0.0065 + vec2(0.005, 0.0018) * uTime).r - 0.45) * 2.2;
+      col = mix(col, cloudSea(d), smoothstep(top + 3.0, top - 0.4, vWorld.y));
+      gl_FragColor = vec4(knee(col) * uTint, 1.0);
+      #include <colorspace_fragment>
+      gl_FragColor.rgb += worldDither();
+    }
+  `;
+
+  // The range: a polar grid round the eye, sharp crests blended with worn slopes, lit
+  // and shadowed by the low sun once at build time. Low hills stand near, tall massifs
+  // far off. Its rims sink under the cloud, and it parts where the sun sets.
+  function buildWorldTerrain(L, sun) {
+    const { abs, atan2, floor, max, min, pow, sqrt } = Math; // the shadow march calls these millions of times
+    const N = 720, M = 80, R0 = 26, R1 = 92, EYE = 1.6, SEA = WORLD_SEA_Y;
+    const ROW_BUNCH = 1.35; // rows crowd toward the eye, where detail shows most
+    const AMP_NEAR = 7, AMP_FAR = 24, RIDGED_SHARE = 0.6, WARP = 7;
+    const CAP = 9.5 * Math.PI / 180, NOTCH = 11 * Math.PI / 180;
+    const sunAz = SUN_AZIMUTH_DEG * Math.PI / 180;
+    const noise = makeGradientNoise(1013);
+    // Crests: ridged noise, each octave weighted by the one before so detail gathers on the ridges.
+    const ridged = (x, z) => {
+      let sum = 0, norm = 0, amp = 0.5, w = 1, px = x / 13, pz = z / 13;
+      for (let o = 0; o < 4; o++) {
+        let n = 1 - abs(noise(px, pz));
+        n = n * n * w;
+        sum += n * amp;
+        norm += amp;
+        w = min(1, n * 2);
+        const rx = (px * 0.8 - pz * 0.6) * 2.03 + 5.3;
+        pz = (px * 0.6 + pz * 0.8) * 2.03 - 3.1;
+        px = rx;
+        amp *= 0.5;
+      }
+      return sum / norm;
+    };
+    // Worn slopes: finer octaves fade where the slope beneath them is steep, as erosion would leave them.
+    const eroded = (x, z) => {
+      let a = 0, b = 0.5, dx = 0, dz = 0, norm = 0, px = x / 26, pz = z / 26;
+      const e = 0.02;
+      for (let o = 0; o < 4; o++) {
+        const n = noise(px, pz);
+        dx += (noise(px + e, pz) - n) / e;
+        dz += (noise(px, pz + e) - n) / e;
+        a += b * n / (1 + dx * dx + dz * dz);
+        norm += b;
+        b *= 0.5;
+        const rx = (px * 0.8 - pz * 0.6) * 2 + 1.7;
+        pz = (px * 0.6 + pz * 0.8) * 2 - 2.9;
+        px = rx;
+      }
+      return a / norm;
+    };
+
+    const H = new Float32Array(N * M);
+    const pos = new Float32Array(N * M * 3);
+    for (let j = 0; j < M; j++) {
+      const r = R0 + (R1 - R0) * pow(j / (M - 1), ROW_BUNCH);
+      const env = smoothstep(R0, R0 + 5, r) * (1 - smoothstep(R1 - 8, R1, r));
+      const amp = AMP_NEAR + (AMP_FAR - AMP_NEAR) * smoothstep(R0 + 4, R1 - 10, r);
+      for (let i = 0; i < N; i++) {
+        const th = 2 * Math.PI * i / N;
+        const x = r * Math.sin(th), z = -r * Math.cos(th);
+        let dAz = th - sunAz;
+        dAz -= 2 * Math.PI * Math.round(dAz / (2 * Math.PI));
+        const notch = 1 - 0.9 * Math.exp(-(dAz / NOTCH) * (dAz / NOTCH));
+        // Warped coordinates bend the ranges off the noise lattice.
+        const wx = x + WARP * noise(x / 22 + 3.1, z / 22 - 1.7);
+        const wz = z + WARP * noise(x / 22 - 7.3, z / 22 + 5.2);
+        const massif = pow(smoothstep(-0.35, 0.6, noise(wx / 34 + 11.7, wz / 34 - 4.2)), 1.4);
+        const shape = RIDGED_SHARE * ridged(wx, wz) + (1 - RIDGED_SHARE) * (0.5 + 0.5 * eroded(wx, wz));
+        let y = SEA - 2.5 + env * notch * (1.5 + amp * massif * shape);
+        const e = atan2(y - EYE, r);
+        if (e > 0) y = EYE + r * Math.tan(CAP * Math.tanh(e / CAP)); // peaks ease under CAP
+        const k = j * N + i;
+        H[k] = y;
+        pos[3 * k] = x;
+        pos[3 * k + 1] = y;
+        pos[3 * k + 2] = z;
+      }
+    }
+    const idx = new Uint32Array((M - 1) * N * 6);
+    let t = 0;
+    for (let j = 0; j < M - 1; j++) {
+      for (let i = 0; i < N; i++) {
+        const a = j * N + i, b = j * N + (i + 1) % N;
+        idx[t++] = a; idx[t++] = b; idx[t++] = a + N;
+        idx[t++] = b; idx[t++] = b + N; idx[t++] = a + N;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeVertexNormals();
+    const nrm = g.getAttribute('normal').array;
+
+    const heightAt = (x, z) => {
+      const r = sqrt(x * x + z * z);
+      if (r <= R0 || r >= R1) return -1e9;
+      let fi = atan2(x, -z) / (2 * Math.PI) * N;
+      if (fi < 0) fi += N;
+      const fj = pow((r - R0) / (R1 - R0), 1 / ROW_BUNCH) * (M - 1);
+      const i0 = floor(fi) % N, i1 = (i0 + 1) % N, j0 = min(M - 2, floor(fj));
+      const u = fi - floor(fi), v = fj - j0;
+      const h0 = H[j0 * N + i0] + (H[j0 * N + i1] - H[j0 * N + i0]) * u;
+      const h1 = H[(j0 + 1) * N + i0] + (H[(j0 + 1) * N + i1] - H[(j0 + 1) * N + i0]) * u;
+      return h0 + (h1 - h0) * v;
+    };
+    let top = -Infinity;
+    for (const y of H) if (y > top) top = y;
+    const flat = Math.hypot(sun.x, sun.z), rise = sun.y / flat;
+    const sx = sun.x / flat, sz = sun.z / flat;
+    const c = (hex) => new THREE.Color(hex);
+    const rockLit = c(L.rockLit), rockShade = c(L.rockShade), snowLit = c(L.snowLit), snowShade = c(L.snowShade);
+    const col = new Float32Array(N * M * 3);
+    for (let j = 0; j < M; j++) {
+      for (let i = 0; i < N; i++) {
+        const k = j * N + i;
+        const x = pos[3 * k], y = H[k], z = pos[3 * k + 2];
+        const nx = nrm[3 * k], ny = nrm[3 * k + 1], nz = nrm[3 * k + 2];
+        const ndl = nx * sun.x + ny * sun.y + nz * sun.z;
+        // Soft shadow: march toward the sun and keep the closest miss over the ridges.
+        let shadow = 0;
+        if (ndl > 0 && y > SEA - 1) {
+          shadow = 1;
+          for (let s = 1; s <= 24 && shadow > 0; s++) {
+            const d = 0.3 + 0.12 * s * s;
+            const ray = y + 0.05 + d * rise;
+            if (ray > top) break;
+            shadow = min(shadow, 6 * (ray - heightAt(x + sx * d, z + sz * d)) / d);
+          }
+          shadow = max(0, shadow);
+        }
+        const sunAmt = smoothstep(0, 0.45, ndl) * shadow;
+        const sky = 0.5 + 0.5 * ny;
+        const snowLine = 2.5 + 1.6 * noise(x / 6 + 40, z / 6);
+        const snow = smoothstep(snowLine - 0.8, snowLine + 1, y) * smoothstep(0.4, 0.8, ny);
+        // Valleys sit lower than their neighbours and catch less sky.
+        const around = (H[j * N + (i + 1) % N] + H[j * N + (i + N - 1) % N] +
+          H[min(M - 1, j + 1) * N + i] + H[max(0, j - 1) * N + i]) / 4;
+        const ao = min(1, max(0.5, 1 - (around - y) * 0.3));
+        for (let ch = 0; ch < 3; ch++) {
+          const key = ch === 0 ? 'r' : ch === 1 ? 'g' : 'b';
+          const lit = rockLit[key] + (snowLit[key] - rockLit[key]) * snow;
+          const shade = (rockShade[key] + (snowShade[key] - rockShade[key]) * snow) * sky;
+          col[3 * k + ch] = (shade + (lit - shade) * sunAmt) * ao;
+        }
+      }
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  }
+
+  // Sky and mountains: two meshes built once, shown in light mode only. They share
+  // one uniforms object, so the sun, the drift and the dim reach both.
   function buildLightWorld() {
     if (worldSky || !THREE || !scene) return;
     const L = WORLD_PALETTE.light;
-    const rgb = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
-    const mat = (side, depthWrite) => new THREE.MeshBasicMaterial({
-      vertexColors: true, side, depthWrite, fog: false,
-    });
-    const make = (positions, colors, indices, material, order) => {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-      g.setIndex(indices);
-      const m = new THREE.Mesh(g, material);
+    const az = SUN_AZIMUTH_DEG * Math.PI / 180, el = SUN_ELEVATION_DEG * Math.PI / 180;
+    const sun = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
+    worldUniforms = {
+      uSunDir: { value: sun },
+      uTime: { value: 0 },
+      uTint: { value: new THREE.Color(1, 1, 1) },
+      uCloudTex: { value: bakeCloudTexture() },
+      uSeaY: { value: WORLD_SEA_Y },
+    };
+    const colours = {
+      uZenith: 'zenith', uMidSun: 'midSun', uMidAway: 'midAway', uHorizonSun: 'horizonSun',
+      uHorizonAway: 'horizonAway', uBelt: 'belt', uShadowBand: 'shadowBand', uSunHaze: 'sunHaze',
+      uSunColor: 'sun', uCloudLit: 'cloudLit', uCloudShade: 'cloudShade', uSeaLit: 'seaLit',
+      uSeaAway: 'seaAway', uSeaShade: 'seaShade',
+    };
+    for (const name in colours) worldUniforms[name] = { value: new THREE.Color(L[colours[name]]) };
+    const make = (geometry, material, order) => {
+      const m = new THREE.Mesh(geometry, material);
       m.renderOrder = order;
       m.frustumCulled = false;
       m.visible = false;
-      m.userData.baseColor = new THREE.Color(1, 1, 1);
       scene.add(m);
       return m;
     };
-
-    // Sky: vertex-coloured sphere, skyTop overhead, horizon at the eye line, mist below.
-    {
-      const R = 60, W = 32, H = 16;
-      const pos = [], col = [], idx = [];
-      const top = rgb(L.skyTop), hor = rgb(L.horizon), mist = rgb(L.mist);
-      for (let j = 0; j <= H; j++) {
-        const ph = Math.PI * j / H; // 0 = zenith
-        const y = Math.cos(ph);
-        const c = y >= 0
-          ? hor.map((v, k) => v + (top[k] - v) * Math.pow(y, 0.45))
-          : hor.map((v, k) => v + (mist[k] - v) * Math.min(1, -y * 3));
-        for (let i = 0; i <= W; i++) {
-          const th = 2 * Math.PI * i / W;
-          pos.push(R * Math.sin(ph) * Math.cos(th), R * y, R * Math.sin(ph) * Math.sin(th));
-          col.push(c[0], c[1], c[2]);
+    worldSky = make(new THREE.SphereGeometry(60, 32, 16), new THREE.ShaderMaterial({
+      uniforms: worldUniforms,
+      vertexShader: `
+        varying vec3 vWorld;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vWorld = w.xyz;
+          gl_Position = projectionMatrix * viewMatrix * w;
         }
-      }
-      for (let j = 0; j < H; j++) {
-        for (let i = 0; i < W; i++) {
-          const a = j * (W + 1) + i, b = a + W + 1;
-          idx.push(a, b, a + 1, b, b + 1, a + 1);
+      `,
+      fragmentShader: WORLD_GLSL_PARS + WORLD_SKY_FRAGMENT,
+      side: THREE.BackSide, // seen from the centre
+      depthWrite: false,
+    }), -10);
+    worldMountains = make(buildWorldTerrain(L, sun), new THREE.ShaderMaterial({
+      uniforms: worldUniforms,
+      vertexShader: `
+        varying vec3 vWorld;
+        varying vec3 vRock;
+        varying vec3 vNormal;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vWorld = w.xyz;
+          vRock = color;
+          vNormal = normal;
+          gl_Position = projectionMatrix * viewMatrix * w;
         }
-      }
-      worldSky = make(pos, col, idx, mat(THREE.FrontSide, false), -10); // faces wind toward the centre
-    }
-
-    // Mountains: three rings, far and palest first, a fixed sum of sines for the ridge.
-    {
-      const N = 96, EYE = 1.6;
-      const bands = [
-        { r: 52, base: 3.2, amp: 1.6, ph: 0.7, f: [3, 7, 13] },
-        { r: 48, base: 2.4, amp: 1.4, ph: 2.1, f: [4, 9, 17] },
-        { r: 44, base: 1.7, amp: 1.1, ph: 4.0, f: [5, 11, 19] },
-      ];
-      const pos = [], col = [], idx = [];
-      bands.forEach((b, bi) => {
-        const c = rgb(L.mountains[bi]);
-        const start = pos.length / 3;
-        for (let i = 0; i <= N; i++) {
-          const th = 2 * Math.PI * i / N;
-          const ridge = (Math.sin(b.f[0] * th + b.ph) + 0.5 * Math.sin(b.f[1] * th + 2 * b.ph) +
-            0.25 * Math.sin(b.f[2] * th + 3 * b.ph)) / 1.75;
-          const h = EYE + b.base + b.amp * ridge; // peak stays under ~8 degrees
-          pos.push(b.r * Math.cos(th), -3, b.r * Math.sin(th), b.r * Math.cos(th), h, b.r * Math.sin(th));
-          col.push(c[0], c[1], c[2], c[0], c[1], c[2]);
-        }
-        for (let i = 0; i < N; i++) {
-          const a = start + i * 2;
-          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-        }
-      });
-      worldMountains = make(pos, col, idx, mat(THREE.DoubleSide, true), -9);
-    }
-
-    // Clouds: flat still ellipses merged into one mesh, above the mountains.
-    {
-      const R = 40, SEG = 10;
-      const c = rgb(L.cloud);
-      const pos = [], col = [], idx = [];
-      const groups = [[0.3, 22], [1.6, 30], [2.7, 18], [3.9, 27], [5.1, 20], [0.9, 38]];
-      groups.forEach(([az, elDeg], gi) => {
-        for (let p = 0; p < 4; p++) {
-          const a = az + (p - 1.5) * 0.09;
-          const e = (elDeg + (p % 2 ? 1.2 : -0.8)) * Math.PI / 180;
-          const cx = R * Math.cos(e) * Math.cos(a), cy = R * Math.sin(e), cz = R * Math.cos(e) * Math.sin(a);
-          // Tangent basis on the sphere: east and up.
-          const ex = -Math.sin(a), ez = Math.cos(a);
-          const ux = -Math.sin(e) * Math.cos(a), uy = Math.cos(e), uz = -Math.sin(e) * Math.sin(a);
-          const rw = 3.6 - 0.5 * Math.abs(p - 1.5) + gi * 0.1, rh = 0.9;
-          const start = pos.length / 3;
-          pos.push(cx, cy, cz);
-          col.push(c[0], c[1], c[2]);
-          for (let i = 0; i < SEG; i++) {
-            const t = 2 * Math.PI * i / SEG;
-            const x = Math.cos(t) * rw, y = Math.sin(t) * rh;
-            pos.push(cx + ex * x + ux * y, cy + uy * y, cz + ez * x + uz * y);
-            col.push(c[0], c[1], c[2]);
-          }
-          for (let i = 0; i < SEG; i++) idx.push(start, start + 1 + i, start + 1 + (i + 1) % SEG);
-        }
-      });
-      worldClouds = make(pos, col, idx, mat(THREE.DoubleSide, false), -8);
-    }
+      `,
+      fragmentShader: WORLD_GLSL_PARS + WORLD_TERRAIN_FRAGMENT,
+      vertexColors: true,
+    }), -9);
   }
 
-  function worldObjectMeshes() { return [worldSky, worldMountains, worldClouds]; }
+  function worldObjectMeshes() { return [worldSky, worldMountains]; }
 
   // Shows the world of the current mode and sets the clear colour from the palette.
   function applyWorldMode() {
@@ -870,15 +1250,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (starfieldPoints) starfieldPoints.visible = !light;
   }
 
-  // Scales the light world by 1 - dim (colour multiplies the vertex colours).
+  // Scales the light world by 1 - dim; both meshes share the tint.
   function applyWorldDim() {
     const k = 1 - worldDim;
-    for (const m of worldObjectMeshes()) {
-      if (m && m.material && m.material.color) m.material.color.setRGB(k, k, k);
-    }
+    if (worldUniforms) worldUniforms.uTint.value.setRGB(k, k, k);
   }
 
-  // Once a frame: eases the dim toward its target for the current state.
+  // Once a frame: drifts the clouds and eases the dim toward its target for the current state.
   function updateWorld(time) {
     const src = videoElement;
     const dt = worldLastT < 0 || !Number.isFinite(time) ? 0 : time - worldLastT;
@@ -889,6 +1267,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       paused: !src || !!src.paused || !!src.ended,
       shellOpen: isShellOpen(),
     });
+    if (worldUniforms && Number.isFinite(time)) worldUniforms.uTime.value = time * 0.001;
     const next = stepDim(worldDim, target, dt);
     if (next !== worldDim) {
       worldDim = next;
@@ -10509,6 +10888,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Dispose Three-managed GPU resources. Textures are nulled (not just
     // disposed) so the next startPreview() rebuilds them — reusing a
     // disposed CanvasTexture rendered black after restart.
+    if (worldUniforms) {
+      try { worldUniforms.uCloudTex.value.dispose(); } catch (e) {}
+    }
     if (scene) {
       try {
         scene.traverse((obj) => {
@@ -10570,7 +10952,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     starfieldPoints = null;
     worldSky = null;
     worldMountains = null;
-    worldClouds = null;
+    worldUniforms = null;
     worldLastT = -1;
     earthGroup = null;
     if (earthLegacyGeometry) earthLegacyGeometry.dispose();
@@ -11120,7 +11502,6 @@ window.WebXRVR = window.WebXRVR || (function () {
         return {
           sky: !!(worldSky && worldSky.visible),
           mountains: !!(worldMountains && worldMountains.visible),
-          clouds: !!(worldClouds && worldClouds.visible),
           stars: !!(starfieldPoints && starfieldPoints.visible),
           glow: !!(ambilightMesh && ambilightMesh.visible),
         };

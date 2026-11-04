@@ -6667,17 +6667,17 @@ test('each mode shows its own world', () => {
   const { renderer, run } = startWorld('light');
   run(100);
   let w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: true, mountains: true, clouds: true, stars: false, glow: false });
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
   renderer.__test.setVRTheme('dark');
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: false, mountains: false, clouds: false, stars: true, glow: true });
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: true });
   renderer.setSceneMode('earth');
   run(100);
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: false, mountains: false, clouds: false, stars: true, glow: false });
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: false });
   renderer.__test.setVRTheme('light');
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: true, mountains: true, clouds: true, stars: false, glow: false });
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
   renderer.stopPreview();
 });
 
@@ -6701,6 +6701,112 @@ test('the light sky faces the eye at its centre', () => {
     if (!shown) hidden++;
   }
   assert.equal(hidden, 0);
+  renderer.stopPreview();
+});
+
+// Golden hour: a low sun off to the side lights the sky and its drifting clouds,
+// so it never sits behind the video.
+test('the light sky is lit by a low sun beside the screen', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const THREE = renderer.getThree();
+  const [sky] = renderer.__test.worldMeshes();
+  assert.ok(sky.material instanceof THREE.ShaderMaterial);
+  const u = sky.material.uniforms;
+  const sun = u.uSunDir.value;
+  assert.ok(Math.abs(sun.length() - 1) < 1e-6);
+  const elevation = Math.asin(sun.y) * 180 / Math.PI;
+  assert.ok(elevation > 1 && elevation < 12, `sun at ${elevation.toFixed(1)} degrees`);
+  const offScreen = Math.acos(-sun.z / Math.hypot(sun.x, sun.z)) * 180 / Math.PI;
+  assert.ok(offScreen >= 30, `sun ${offScreen.toFixed(0)} degrees off the screen`);
+  assert.ok(u.uCloudTex.value instanceof THREE.Texture);
+  const t0 = u.uTime.value;
+  run(1000);
+  assert.ok(u.uTime.value > t0, 'the clouds drift');
+  renderer.stopPreview();
+});
+
+test('playback dims the sky and the mountains alike', () => {
+  const { renderer, run } = startWorld('light');
+  const k = 1 - renderer.__test.DIM_AMOUNT;
+  run(1000);
+  const [sky, mountains] = renderer.__test.worldMeshes();
+  assert.ok(Math.abs(sky.material.uniforms.uTint.value.r - k) < 1e-9);
+  assert.ok(Math.abs(mountains.material.uniforms.uTint.value.r - k) < 1e-9);
+  renderer.stopPreview();
+});
+
+function terrainView(renderer) {
+  const [sky, mountains] = renderer.__test.worldMeshes();
+  const pos = mountains.geometry.getAttribute('position');
+  const u = sky.material.uniforms;
+  const sun = u.uSunDir.value;
+  const deg = 180 / Math.PI;
+  const points = [];
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const r = Math.hypot(x, z);
+    points.push({ i, r, y, azimuth: Math.atan2(x, -z) * deg, elevation: Math.atan2(y - 1.6, r) * deg });
+  }
+  return {
+    mountains, points, seaY: u.uSeaY.value,
+    sunAzimuth: Math.atan2(sun.x, -sun.z) * deg,
+    sunElevation: Math.asin(sun.y) * deg,
+  };
+}
+
+// The range stands in a sea of cloud: its outer and inner rims sink below the cloud
+// top, so no cut edge shows, and no peak climbs high enough to crowd the screen.
+test('the mountains rise from a sea of cloud and stay low', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { points, seaY } = terrainView(renderer);
+  const rMin = Math.min(...points.map((p) => p.r));
+  const rMax = Math.max(...points.map((p) => p.r));
+  const rims = points.filter((p) => p.r - rMin < 1e-3 || rMax - p.r < 1e-3);
+  assert.ok(rims.length > 100, `${rims.length} rim vertices`);
+  for (const p of rims) assert.ok(p.y < seaY, `rim vertex at ${p.y.toFixed(2)} stands above the cloud at ${seaY}`);
+  const highest = Math.max(...points.map((p) => p.elevation));
+  assert.ok(highest < 10, `a peak reaches ${highest.toFixed(1)} degrees`);
+  assert.ok(highest > 3, `the tallest peak is only ${highest.toFixed(1)} degrees`);
+  renderer.stopPreview();
+});
+
+// The low sun sits in a notch of the range, so the ridges never cover it.
+test('the sun clears the ridge in front of it', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { points, sunAzimuth, sunElevation } = terrainView(renderer);
+  const near = points.filter((p) => Math.abs(p.azimuth - sunAzimuth) <= 2);
+  assert.ok(near.length > 0);
+  const top = Math.max(...near.map((p) => p.elevation));
+  assert.ok(top < sunElevation - 0.5, `the ridge reaches ${top.toFixed(2)} degrees under a sun at ${sunElevation.toFixed(2)}`);
+  renderer.stopPreview();
+});
+
+// Slopes that face the low sun catch its light; slopes turned away fall into shade.
+test('the mountains are lit from the sun side', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { mountains } = terrainView(renderer);
+  const THREE = renderer.getThree();
+  const sun = renderer.__test.worldMeshes()[0].material.uniforms.uSunDir.value;
+  const normal = mountains.geometry.getAttribute('normal');
+  const col = mountains.geometry.getAttribute('color');
+  const pos = mountains.geometry.getAttribute('position');
+  const lit = [], shade = [];
+  const n = new THREE.Vector3();
+  for (let i = 0; i < normal.count; i++) {
+    if (pos.getY(i) < 0) continue; // under the cloud
+    n.fromBufferAttribute(normal, i);
+    const lum = 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i);
+    const facing = n.dot(sun);
+    if (facing > 0.35) lit.push(lum);
+    else if (facing < -0.2) shade.push(lum);
+  }
+  const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
+  assert.ok(lit.length > 50 && shade.length > 50, `${lit.length} lit, ${shade.length} shaded`);
+  assert.ok(mean(lit) > 2 * mean(shade), `lit ${mean(lit).toFixed(3)} against shade ${mean(shade).toFixed(3)}`);
   renderer.stopPreview();
 });
 
