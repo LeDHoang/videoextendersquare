@@ -148,8 +148,15 @@ function loadRenderer(options = {}) {
   window.top = window;
   window.parent = window;
   window.self = window;
+  const documentElement = { classList: { add() {}, remove() {} } };
+  if (options.theme !== undefined) {
+    let theme = options.theme;
+    documentElement.getAttribute = (name) => (name === 'data-theme' ? theme : null);
+    documentElement.setAttribute = (name, value) => { if (name === 'data-theme') theme = String(value); };
+  }
   const mockDocument = {
-    documentElement: { classList: { add() {}, remove() {} } },
+    documentElement,
+    ...(options.fonts !== undefined ? { fonts: options.fonts } : {}),
     body: { classList: { add() {}, remove() {} }, appendChild() {} },
     getElementById() { return null; },
     addEventListener() {},
@@ -196,12 +203,14 @@ function loadRenderer(options = {}) {
     vm.runInContext(shellCanvasSource, context, { filename: 'vr_shell_canvas.js' });
     vm.runInContext(shellSource, context, { filename: 'vr_shell.js' });
   }
+  if (options.beforeRenderer) options.beforeRenderer(window);
   vm.runInContext(rendererSource, context, { filename: 'webxr_vr.js' });
   window.WebXRVR.__runScheduledFrame = (time) => {
     const callback = scheduledFrame;
     scheduledFrame = null;
     if (callback) callback(time);
   };
+  window.WebXRVR.__document = mockDocument;
   return window.WebXRVR;
 }
 
@@ -415,6 +424,134 @@ test('Reels frames skip Earth draws and Earth frames pause video texture uploads
   assert.ok(state.renderStats.earthDrawCalls > 0);
   assert.ok(state.renderStats.starDrawCalls > 0);
   assert.equal(state.renderStats.videoUploads, uploadsBeforeEarthFrame);
+  renderer.stopPreview();
+});
+
+// Wraps every render* painter on the two canvas modules. Each wrapper counts
+// its calls and records the VR mode in force when it ran.
+function countRenders() {
+  const counts = {};
+  const seen = {};
+  const beforeRenderer = (win) => {
+    for (const [prefix, lib] of [['ui', win.VRUICanvas], ['shell', win.VRShellCanvas]]) {
+      if (!lib) continue;
+      for (const name of Object.keys(lib)) {
+        if (!/^render/.test(name) || typeof lib[name] !== 'function') continue;
+        const key = prefix + '.' + name;
+        const fn = lib[name];
+        counts[key] = 0;
+        seen[key] = [];
+        lib[name] = function (...args) {
+          counts[key] += 1;
+          seen[key].push(win.VRUICanvas.getTheme());
+          return fn.apply(this, args);
+        };
+      }
+    }
+  };
+  const painted = () => Object.keys(counts).filter((k) => counts[k] > 0).sort();
+  return { counts, seen, beforeRenderer, painted };
+}
+
+function startCounted(options = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const rec = countRenders();
+  const renderer = loadRenderer({ gl, withShell: true, beforeRenderer: rec.beforeRenderer, ...options });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  // A fixed clock: nothing repaints on a timer, so every extra paint is the theme's.
+  const frames = (n) => { for (let i = 0; i < n; i += 1) renderer.__runScheduledFrame(16); };
+  return { renderer, rec, frames };
+}
+
+function memoryStorage(overrides = {}) {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    ...overrides,
+  };
+}
+
+test("VR starts in the page's mode", () => {
+  const { renderer, rec, frames } = startCounted({ theme: 'dark' });
+  frames(1);
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+  const modes = Object.values(rec.seen).flat();
+  assert.ok(modes.length > 0, 'something painted');
+  assert.ok(modes.every((m) => m === 'dark'), `every paint saw dark: ${modes}`);
+  renderer.stopPreview();
+});
+
+test('a data-theme change repaints each canvas once', () => {
+  const observers = [];
+  class FakeMutationObserver {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(target, options) { this.target = target; this.options = options; }
+    disconnect() { this.disconnected = true; }
+  }
+  const { renderer, rec, frames } = startCounted({ theme: 'light', globals: { MutationObserver: FakeMutationObserver } });
+  frames(5);
+  const visible = rec.painted();
+  assert.ok(visible.length > 0);
+  frames(5);
+  const base = { ...rec.counts };
+  assert.equal(observers.length, 1);
+  assert.equal(observers[0].target, renderer.__document.documentElement);
+  assert.deepEqual([...observers[0].options.attributeFilter], ['data-theme']);
+
+  observers[0].target.setAttribute('data-theme', 'dark');
+  observers[0].callback([]);
+  frames(5);
+  for (const key of Object.keys(rec.counts)) {
+    assert.equal(rec.counts[key] - base[key], visible.includes(key) ? 1 : 0, key);
+  }
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+
+  renderer.setSceneMode('earth');
+  frames(5);
+  assert.ok(rec.seen['ui.renderEarthLabelCanvas'].length > 0, 'the earth label painted');
+  for (const key of ['ui.renderEarthLabelCanvas', 'ui.renderEarthPreviewCanvas']) {
+    assert.ok(rec.seen[key].slice(base[key]).every((m) => m === 'dark'), key);
+  }
+  renderer.stopPreview();
+  assert.equal(observers[0].disconnected, true);
+});
+
+test('the VR switch writes the attribute and sx.theme', () => {
+  const localStorage = memoryStorage();
+  const renderer = loadRenderer({ theme: 'light', globals: { localStorage } });
+  renderer.__test.setVRTheme('dark');
+  assert.equal(renderer.__document.documentElement.getAttribute('data-theme'), 'dark');
+  assert.equal(localStorage.getItem('sx.theme'), 'dark');
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+});
+
+test('the VR switch works when storage throws', () => {
+  const localStorage = memoryStorage({ setItem() { throw new Error('blocked'); } });
+  const renderer = loadRenderer({ theme: 'light', globals: { localStorage } });
+  assert.doesNotThrow(() => renderer.__test.setVRTheme('dark'));
+  assert.equal(renderer.getPreviewState().world.theme, 'dark');
+});
+
+test('canvases wait for the fonts', async () => {
+  const reference = startCounted();
+  reference.frames(1);
+  const visible = reference.rec.painted();
+  reference.renderer.stopPreview();
+  assert.ok(visible.length > 0);
+
+  let resolveFonts;
+  const arrived = new Promise((resolve) => { resolveFonts = resolve; });
+  const fonts = { load: () => arrived };
+  const { renderer, rec, frames } = startCounted({ fonts });
+  frames(5);
+  assert.deepEqual(rec.painted(), [], 'nothing paints before the fonts');
+  resolveFonts([]);
+  await new Promise((resolve) => setImmediate(resolve));
+  frames(1);
+  assert.deepEqual(rec.painted(), visible);
   renderer.stopPreview();
 });
 
@@ -6270,7 +6407,7 @@ test('Enter posts once; Escape and an empty field post nothing', async () => {
 test('shared earth HUD renderers: tiers stay in sync with the engine and every renderer paints', () => {
   const { renderer, api } = topdownHarness();
   const ui = loadUICanvasStandalone();
-  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.color}`);
+  const tiers = (list) => list.map((t) => `${t.name}|${t.max}|${t.tone}`);
   assert.equal(tiers(ui.EARTH_TIERS).join(","), tiers(api.EARTH_TIERS).join(","));
   for (const s of [1, 3, 24, 200, 16384]) assert.equal(ui.earthTierIndex(s), api.earthTierIndex(s));
   const label = makeRecordingCtx();
@@ -6440,5 +6577,378 @@ test('preview keys: zoomed in on Earth, an arrow pans the map that way on screen
     const dx = after.x - before.x, dy = after.y - before.y;
     assert.ok(dx * cx + dy * cy > 0, `${key} moved the map toward (${cx},${cy}): ${dx.toFixed(5)}, ${dy.toFixed(5)}`);
   }
+  renderer.stopPreview();
+});
+
+// ─── Task 5: the world (starfield, light sky, playback dim) ─────────────
+function startWorld(theme, extra = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, theme, withShell: true, search: '?vrtex=canvas', ...extra });
+  const video = {
+    paused: false,
+    ended: false,
+    readyState: 4,
+    currentTime: 1,
+    duration: 10,
+    muted: true,
+    addEventListener() {},
+    removeEventListener() {},
+    requestVideoFrameCallback() { return 1; },
+    cancelVideoFrameCallback() {},
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); },
+  };
+  renderer.init(video, { getPlaylist: () => [], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  let t = 0;
+  const run = (ms) => { for (let spent = 0; spent < ms; spent += 100) { t += 100; renderer.__runScheduledFrame(t); } };
+  return { renderer, video, run };
+}
+
+test('dim targets only light playback in the reels scene', () => {
+  const { renderer } = startWorld('light');
+  const { worldDimTarget, DIM_AMOUNT } = renderer.__test;
+  const base = { mode: 'light', scene: 'reels', paused: false, shellOpen: false };
+  assert.equal(worldDimTarget(base), DIM_AMOUNT);
+  assert.ok(DIM_AMOUNT > 0);
+  assert.equal(worldDimTarget({ ...base, mode: 'dark' }), 0);
+  assert.equal(worldDimTarget({ ...base, scene: 'earth' }), 0);
+  assert.equal(worldDimTarget({ ...base, paused: true }), 0);
+  assert.equal(worldDimTarget({ ...base, shellOpen: true }), 0);
+  renderer.stopPreview();
+});
+
+test('dim fades without overshoot', () => {
+  const { renderer } = startWorld('light');
+  const { stepDim, DIM_FADE_MS, DIM_AMOUNT } = renderer.__test;
+  // A full 0 to DIM_AMOUNT fade takes DIM_FADE_MS; the target caps the step.
+  const rate = DIM_AMOUNT / DIM_FADE_MS;
+  assert.ok(Math.abs(stepDim(0, DIM_AMOUNT, 300) - 300 * rate) < 1e-9);
+  assert.ok(Math.abs(stepDim(DIM_AMOUNT, 0.2, 100) - (DIM_AMOUNT - 100 * rate)) < 1e-9);
+  assert.equal(stepDim(0, DIM_AMOUNT, DIM_FADE_MS), DIM_AMOUNT);
+  assert.equal(stepDim(0.4, DIM_AMOUNT, DIM_FADE_MS), DIM_AMOUNT);
+  assert.equal(stepDim(DIM_AMOUNT, 0, 300), DIM_AMOUNT - 300 * rate);
+  assert.equal(stepDim(DIM_AMOUNT, 0, DIM_FADE_MS), 0);
+  renderer.stopPreview();
+});
+
+test('the light world dims during playback and clears when it stops', () => {
+  const { renderer, video, run } = startWorld('light');
+  const { DIM_AMOUNT } = renderer.__test;
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  video.pause();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+
+  video.play();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  assert.equal(renderer.shell.open('/explore'), true);
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.shell.close();
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, DIM_AMOUNT);
+  renderer.setSceneMode('earth');
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.stopPreview();
+});
+
+test('dark mode never dims', () => {
+  const { renderer, run } = startWorld('dark');
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, 0);
+  renderer.stopPreview();
+});
+
+test('each mode shows its own world', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  let w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
+  renderer.__test.setVRTheme('dark');
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: true });
+  renderer.setSceneMode('earth');
+  run(100);
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: false });
+  renderer.__test.setVRTheme('light');
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
+  renderer.stopPreview();
+});
+
+// The eye sits at the centre of the sky dome, so every face must show its visible side there.
+test('the light sky faces the eye at its centre', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const [sky] = renderer.__test.worldMeshes();
+  const THREE = renderer.getThree();
+  const pos = sky.geometry.getAttribute('position');
+  const idx = sky.geometry.getIndex();
+  const v = (i) => new THREE.Vector3().fromBufferAttribute(pos, i);
+  let hidden = 0;
+  for (let t = 0; t < idx.count; t += 3) {
+    const [a, b, c] = [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)].map(v);
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    if (normal.lengthSq() < 1e-9) continue; // pole slivers
+    const towardEye = normal.dot(a) < 0;
+    const shown = sky.material.side === THREE.DoubleSide ||
+      (sky.material.side === THREE.FrontSide) === towardEye;
+    if (!shown) hidden++;
+  }
+  assert.equal(hidden, 0);
+  renderer.stopPreview();
+});
+
+// Golden hour: a low sun off to the side lights the sky and its drifting clouds,
+// so it never sits behind the video.
+test('the light sky is lit by a low sun beside the screen', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const THREE = renderer.getThree();
+  const [sky] = renderer.__test.worldMeshes();
+  assert.ok(sky.material instanceof THREE.ShaderMaterial);
+  const u = sky.material.uniforms;
+  const sun = u.uSunDir.value;
+  assert.ok(Math.abs(sun.length() - 1) < 1e-6);
+  const elevation = Math.asin(sun.y) * 180 / Math.PI;
+  assert.ok(elevation > 1 && elevation < 12, `sun at ${elevation.toFixed(1)} degrees`);
+  const offScreen = Math.acos(-sun.z / Math.hypot(sun.x, sun.z)) * 180 / Math.PI;
+  assert.ok(offScreen >= 30, `sun ${offScreen.toFixed(0)} degrees off the screen`);
+  assert.ok(u.uCloudTex.value instanceof THREE.Texture);
+  const t0 = u.uTime.value;
+  run(1000);
+  assert.ok(u.uTime.value > t0, 'the clouds drift');
+  renderer.stopPreview();
+});
+
+test('playback dims the sky and the mountains alike', () => {
+  const { renderer, run } = startWorld('light');
+  const k = 1 - renderer.__test.DIM_AMOUNT;
+  run(1000);
+  const [sky, mountains] = renderer.__test.worldMeshes();
+  assert.ok(Math.abs(sky.material.uniforms.uTint.value.r - k) < 1e-9);
+  assert.ok(Math.abs(mountains.material.uniforms.uTint.value.r - k) < 1e-9);
+  renderer.stopPreview();
+});
+
+function terrainView(renderer) {
+  const [sky, mountains] = renderer.__test.worldMeshes();
+  const pos = mountains.geometry.getAttribute('position');
+  const u = sky.material.uniforms;
+  const sun = u.uSunDir.value;
+  const deg = 180 / Math.PI;
+  const points = [];
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const r = Math.hypot(x, z);
+    points.push({ i, r, y, azimuth: Math.atan2(x, -z) * deg, elevation: Math.atan2(y - 1.6, r) * deg });
+  }
+  return {
+    mountains, points, seaY: u.uSeaY.value,
+    sunAzimuth: Math.atan2(sun.x, -sun.z) * deg,
+    sunElevation: Math.asin(sun.y) * deg,
+  };
+}
+
+// The range stands in a sea of cloud: its outer and inner rims sink below the cloud
+// top, so no cut edge shows, and no peak climbs high enough to crowd the screen.
+test('the mountains rise from a sea of cloud and stay low', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { points, seaY } = terrainView(renderer);
+  const rMin = Math.min(...points.map((p) => p.r));
+  const rMax = Math.max(...points.map((p) => p.r));
+  const rims = points.filter((p) => p.r - rMin < 1e-3 || rMax - p.r < 1e-3);
+  assert.ok(rims.length > 100, `${rims.length} rim vertices`);
+  for (const p of rims) assert.ok(p.y < seaY, `rim vertex at ${p.y.toFixed(2)} stands above the cloud at ${seaY}`);
+  const highest = Math.max(...points.map((p) => p.elevation));
+  assert.ok(highest < 10, `a peak reaches ${highest.toFixed(1)} degrees`);
+  assert.ok(highest > 3, `the tallest peak is only ${highest.toFixed(1)} degrees`);
+  renderer.stopPreview();
+});
+
+// The low sun sits in a notch of the range, so the ridges never cover it.
+test('the sun clears the ridge in front of it', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { points, sunAzimuth, sunElevation } = terrainView(renderer);
+  const near = points.filter((p) => Math.abs(p.azimuth - sunAzimuth) <= 2);
+  assert.ok(near.length > 0);
+  const top = Math.max(...near.map((p) => p.elevation));
+  assert.ok(top < sunElevation - 0.5, `the ridge reaches ${top.toFixed(2)} degrees under a sun at ${sunElevation.toFixed(2)}`);
+  renderer.stopPreview();
+});
+
+// Slopes that face the low sun catch its light; slopes turned away fall into shade.
+test('the mountains are lit from the sun side', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  const { mountains } = terrainView(renderer);
+  const THREE = renderer.getThree();
+  const sun = renderer.__test.worldMeshes()[0].material.uniforms.uSunDir.value;
+  const normal = mountains.geometry.getAttribute('normal');
+  const col = mountains.geometry.getAttribute('color');
+  const pos = mountains.geometry.getAttribute('position');
+  const lit = [], shade = [];
+  const n = new THREE.Vector3();
+  for (let i = 0; i < normal.count; i++) {
+    if (pos.getY(i) < 0) continue; // under the cloud
+    n.fromBufferAttribute(normal, i);
+    const lum = 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i);
+    const facing = n.dot(sun);
+    if (facing > 0.35) lit.push(lum);
+    else if (facing < -0.2) shade.push(lum);
+  }
+  const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
+  assert.ok(lit.length > 50 && shade.length > 50, `${lit.length} lit, ${shade.length} shaded`);
+  assert.ok(mean(lit) > 2 * mean(shade), `lit ${mean(lit).toFixed(3)} against shade ${mean(shade).toFixed(3)}`);
+  renderer.stopPreview();
+});
+
+test('webxr_vr.js paints no carbon literal', () => {
+  const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e', '#646b74', '#0a0a0a',
+    'JetBrains Mono', 'Archivo', 'Orbitron', '#39D7FF', '#4FE3C1', '#FFC857', '#FF8A5B', '#121315', '#1c1d1f', '#ff6a52', '#061D37',
+    'rgba(13, 14, 15', 'rgba(2,6,14', '0x020612', '0x0d2a3f', '0x39d7ff'];
+  const lower = rendererSource.toLowerCase();
+  const leftover = banned.filter((s) => lower.includes(s.toLowerCase()));
+  assert.deepEqual(leftover, []);
+});
+
+// ─── Task 6: the globe in paper and ink ───
+
+const EARTH_LIGHT = { land: '#f2ede3', sea: '#d8e2e4', park: '#dfe3cf', lineSoft: '#d3cab8', line: '#45403a' };
+const EARTH_DARK = { land: '#1c1a16', sea: '#0c0b09', park: '#25221d', lineSoft: '#2e2a24', line: '#f5f1e8' };
+const linear = (hex) => Math.pow(parseInt(hex.slice(1, 3), 16) / 255, 2.2);
+
+test('earth grade follows the mode', () => {
+  const api = loadRenderer({ theme: 'light' }).__test;
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_LIGHT);
+  api.setVRTheme('dark');
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_DARK);
+  api.setVRTheme('light');
+  assert.deepEqual({ ...api.earthGradeColors() }, EARTH_LIGHT);
+});
+
+test('tiles already on the globe take a switch', () => {
+  const api = loadRenderer({ theme: 'light' }).__test;
+  const a = api.makeEarthTileUniforms(null, true);
+  const b = api.makeEarthTileUniforms(null, true);
+  assert.equal(a.uEarthLand, b.uEarthLand);
+  assert.equal(a.uTileTintLift, b.uTileTintLift);
+  assert.equal(a.uEarthPaper.value, 1);
+  api.setVRTheme('dark');
+  closeTo(a.uEarthLand.value.x, linear(EARTH_DARK.land), 1e-9);
+  assert.equal(a.uEarthPaper.value, 0);
+  assert.equal(b.uEarthPaper.value, 0);
+  api.setVRTheme('light');
+  closeTo(a.uEarthLand.value.x, linear(EARTH_LIGHT.land), 1e-9);
+  assert.equal(a.uEarthPaper.value, 1);
+});
+
+test('the tile shader reads the palette uniforms', () => {
+  assert.match(rendererSource, /uniform vec3 uEarthLand/);
+  assert.match(rendererSource, /uniform float uEarthPaper/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.070, 0\.150, 0\.235\)/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.016, 0\.052, 0\.110\)/);
+  assert.doesNotMatch(rendererSource, /vec3\(0\.050, 0\.190, 0\.205\)/);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`raw tiles stay untouched in ${theme} mode`, () => {
+    const api = loadRenderer({ theme }).__test;
+    api.setDebugFlags({ earthstyle: 'raw' });
+    const rec = recordingCanvasDocument();
+    api.setEarthTileCanvasFactory(() => rec.canvas);
+    api.composeEarthTileCanvas({ base: { tag: 'base', width: 512, height: 512 }, labels: { tag: 'labels', width: 512, height: 512 } });
+    assert.deepEqual(rec.ops.map((o) => o[0]), ['draw']);
+    api.setEarthTileCanvasFactory(null);
+    const raw = api.makeEarthTileUniforms(null, false);
+    assert.equal(raw.uTileTintStrength.value, 0);
+    assert.equal(raw.uTileLabelsAlpha.value, 1);
+    assert.equal(raw.uTileNight.value, 0);
+    api.setDebugFlags({ earthstyle: 'holo' });
+  });
+}
+
+test('raw tiles skip the paper label mapping', () => {
+  assert.match(rendererSource, /if \(tilePaper && uTileTintStrength > 0\.5\) \{\s*tileLabels\.rgb = mix\(uEarthLand, uEarthLine/);
+});
+
+test('a switch during the first photo build re-inks the whole base', () => {
+  const timers = [];
+  const puts = new Map(); // band y0 -> red channel of its first pixel, last write wins
+  const ctx = new Proxy({}, {
+    get(target, prop) {
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
+      if (prop === 'getImageData') return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      if (prop === 'createImageData') return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      if (prop === 'putImageData') return (img, x, y) => puts.set(y, img.data[0]);
+      if (!(prop in target)) target[prop] = () => {};
+      return target[prop];
+    },
+    set(target, prop, value) { target[prop] = value; return true; },
+  });
+  const api = loadRenderer({
+    theme: 'light',
+    createElement: (kind) => (kind === 'canvas' ? { width: 0, height: 0, getContext: () => ctx } : null),
+    globals: { setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {} },
+  }).__test;
+  assert.equal(api.buildEarthBase({ naturalWidth: 2, naturalHeight: 2 }), true);
+  assert.ok(puts.get(0) > 200, 'the first band is paper');
+  api.setVRTheme('dark');
+  while (timers.length) timers.shift()();
+  assert.equal(puts.size, 2048 / 64);
+  for (const [y, red] of puts) assert.ok(red < 60, `band ${y} is night land, got ${red}`);
+});
+
+test('the atmosphere follows the mode in the earth scene', () => {
+  const { renderer, run } = startWorld('light');
+  renderer.setSceneMode('earth');
+  run(100);
+  const THREE = { NormalBlending: 1, AdditiveBlending: 2 }; // three.js blending constants
+  let rim = renderer.__test.earthAtmosphere();
+  assert.ok(rim, 'atmosphere built');
+  assert.equal(rim.color, '17140f');
+  assert.equal(rim.blending, THREE.NormalBlending);
+  renderer.__test.setVRTheme('dark');
+  rim = renderer.__test.earthAtmosphere();
+  assert.equal(rim.color, 'f5f1e8');
+  assert.equal(rim.blending, THREE.AdditiveBlending);
+  renderer.__test.setVRTheme('light');
+  rim = renderer.__test.earthAtmosphere();
+  assert.equal(rim.color, '17140f');
+  assert.equal(rim.blending, THREE.NormalBlending);
+  renderer.stopPreview();
+});
+
+// Pins and heat sprites take the accent, with the spot colour for the hottest band.
+// Additive light washes out on paper, so the sprites blend normally in light mode.
+test('globe pins and heat sprites re-ink with the mode', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({
+    gl,
+    theme: 'light',
+    fetch: async () => ({ ok: true, json: async () => ({ locations: [] }) }),
+  });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  renderer.setSceneMode('earth');
+  api.setLocationActivity([z3ClusterRow(), z3CityRow()]);
+  const ink = () => JSON.parse(JSON.stringify(api.earthHeatInk()));
+  assert.deepEqual(ink(), {
+    pins: ['#f3d34a', '#c2250e'],
+    sprites: [{ hex: '#f3d34a', additive: false }, { hex: '#c2250e', additive: false }],
+  });
+  api.setVRTheme('dark');
+  assert.deepEqual(ink(), {
+    pins: ['#f3d34a', '#ff3b1f'],
+    sprites: [{ hex: '#f3d34a', additive: true }, { hex: '#ff3b1f', additive: true }],
+  });
   renderer.stopPreview();
 });

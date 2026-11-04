@@ -327,3 +327,135 @@ test('grid tiles draw the playing preview video, else the poster', () => {
   assert.deepEqual(drawn.slice(0, 3), ['video', 'poster', 'poster'], 'no frame yet falls back to the poster');
   assert.equal(asked.filter((a) => a[1] === 'video').length, 2, 'image reels never ask for a video');
 });
+
+// ---- Paper & Ink theme ----
+const uiSource = readFileSync(new URL('../../ui/assets/vr_ui_canvas.js', import.meta.url), 'utf8');
+
+function loadThemed() {
+  const window = {};
+  vm.runInNewContext(uiSource, { window }, { filename: 'vr_ui_canvas.js' });
+  vm.runInNewContext(source, { window }, { filename: 'vr_shell_canvas.js' });
+  return { sc: window.VRShellCanvas, ui: window.VRUICanvas };
+}
+
+function paintCtx() {
+  const fills = [];
+  const strokes = [];
+  const texts = [];
+  const fonts = new Set();
+  const ctx = new Proxy({}, {
+    get(target, prop) {
+      if (prop === 'fill' || prop === 'fillRect') return () => fills.push(target.fillStyle);
+      if (prop === 'stroke' || prop === 'strokeRect') return () => strokes.push(target.strokeStyle);
+      if (prop === 'fillText') {
+        return (text) => texts.push({ text: String(text), style: target.fillStyle, font: target.font, before: fills.length ? fills[fills.length - 1] : null });
+      }
+      if (prop === 'measureText') return (value) => ({ width: String(value).length * 8 });
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
+      if (!(prop in target)) target[prop] = () => {};
+      return target[prop];
+    },
+    set(target, prop, value) {
+      if (prop === 'font') fonts.add(value);
+      target[prop] = value;
+      return true;
+    },
+  });
+  return { ctx, fills, strokes, texts, fonts };
+}
+
+const monoWeight = (font) => {
+  const w = /^\s*(?:italic\s+)?(bold|\d{3})\b/.exec(font);
+  return w ? (w[1] === 'bold' ? 700 : Number(w[1])) : 400;
+};
+
+test('nav bar ends in a LIGHT / DARK switch', () => {
+  const { sc } = loadThemed();
+  const { light, dark } = sc.themeSwitchRects();
+  const centre = (r) => [r.x + r.w / 2, r.y + r.h / 2];
+  assert.deepEqual({ ...sc.resolveNavHit(...centre(light)) }, { action: 'theme', arg: 'light' });
+  assert.deepEqual({ ...sc.resolveNavHit(...centre(dark)) }, { action: 'theme', arg: 'dark' });
+  const tabs = sc.navRects();
+  for (const r of tabs) {
+    assert.deepEqual({ ...sc.resolveNavHit(r.x + r.w / 2, r.y + r.h / 2) }, { action: 'nav', arg: r.id });
+    for (const seg of [light, dark]) assert.ok(r.x + r.w <= seg.x || seg.x + seg.w <= r.x, `tab ${r.id} overlaps switch`);
+  }
+  assert.ok(tabs[tabs.length - 1].x + tabs[tabs.length - 1].w <= light.x);
+  assert.ok(dark.x + dark.w <= sc.NAV_W);
+  assert.ok(light.x + light.w <= dark.x);
+});
+
+test('the switch shows the active mode', () => {
+  for (const mode of ['light', 'dark']) {
+    const { sc, ui } = loadThemed();
+    ui.setTheme(mode);
+    const { hex } = ui.TOKENS;
+    const rec = paintCtx();
+    sc.renderNavBar(rec.ctx, { open: false }, '');
+    const on = rec.texts.find((t) => t.text === mode.toUpperCase());
+    const off = rec.texts.find((t) => t.text === (mode === 'light' ? 'DARK' : 'LIGHT'));
+    assert.ok(on && off, `${mode} labels drawn`);
+    assert.equal(on.style, hex.bg, `${mode} selected label colour`);
+    assert.equal(on.before, hex.ink, `${mode} selected segment fill`);
+    assert.equal(off.style, hex.ink2, `${mode} resting label colour`);
+    for (const t of [on, off]) {
+      assert.ok(/IBM Plex Mono/.test(t.font), t.font);
+      assert.ok(monoWeight(t.font) <= 600, t.font);
+    }
+  }
+});
+
+test('the ECHO mark takes the mode\'s ink and accent', () => {
+  const { sc, ui } = loadThemed();
+  ui.setTheme('light');
+  const rec = paintCtx();
+  sc.renderNavBar(rec.ctx, { open: false }, '');
+  for (const s of [...rec.fills, ...rec.strokes]) {
+    assert.ok(!/^#(ff3b1f|08090a)$/i.test(String(s)), `nav paints ${s}`);
+  }
+  const mark = rec.texts.find((t) => t.text === 'ECHO');
+  assert.ok(mark && /Fraunces/.test(mark.font), mark && mark.font);
+  assert.equal(mark.style, ui.TOKEN_SETS.light.hex.ink);
+});
+
+test('shell panels use paper tokens and fonts', () => {
+  const items = [{ title: 'Neon rain', creator: { username: 'a', display_name: 'a' } }];
+  const panels = {
+    nav: (sc, ctx) => sc.renderNavBar(ctx, { open: true, tab: 'explore', unread: 3 }, 'wallet'),
+    handoff: (sc, ctx) => sc.renderMainPanel(ctx, { handoff: { title: 'FINISH ON 2D', message: 'm', path: '/upload' } }, 'handoff-confirm'),
+    explore: (sc, ctx) => sc.renderMainPanel(ctx, { route: { section: 'explore', items, status: 'ready', scroll: 0 } }, 'close'),
+    rewards: (sc, ctx) => sc.renderMainPanel(ctx, { route: { section: 'rewards', path: '/rewards', arg: '' } }, ''),
+  };
+  for (const mode of ['light', 'dark']) {
+    const other = mode === 'light' ? 'dark' : 'light';
+    for (const [name, render] of Object.entries(panels)) {
+      const { sc, ui } = loadThemed();
+      ui.setTheme(mode);
+      const rec = paintCtx();
+      render(sc, rec.ctx);
+      assert.ok(rec.fills.includes(ui.TOKEN_SETS[mode].hex.surface), `${mode} ${name}: no surface fill`);
+      assert.ok(!rec.fills.includes(ui.TOKEN_SETS[other].hex.surface), `${mode} ${name}: paints ${other} surface`);
+      for (const font of rec.fonts) {
+        assert.ok(!/JetBrains Mono|Archivo|Orbitron/.test(font), `${mode} ${name}: ${font}`);
+        if (/IBM Plex Mono/.test(font)) assert.ok(monoWeight(font) <= 600, `${mode} ${name}: ${font}`);
+      }
+      const forbidden = [ui.TOKEN_SETS[mode].hex.accent, ui.TOKEN_SETS[mode].hex.danger, ui.TOKEN_SETS[mode].hex.info];
+      for (const t of rec.texts) {
+        if (t.before === ui.TOKEN_SETS[mode].hex.surface3 || t.before === ui.TOKEN_SETS[mode].hex.surfaceHover) {
+          assert.ok(!forbidden.includes(t.style), `${mode} ${name}: "${t.text}" ${t.style} on hover fill`);
+        }
+      }
+    }
+  }
+});
+
+test('vr_shell_canvas.js paints no carbon literal or chamfer', () => {
+  const banned = ['#08090a', '#101214', '#16191c', '#1d2126', '#24282d', '#3a4047', '#f2f3f5', '#a4abb3', '#8e959e',
+    '#646b74', '#0a0a0a', 'JetBrains Mono', 'Archivo', 'Orbitron', '#39D7FF', '#4FE3C1', '#FFC857', '#FF8A5B',
+    '#121315', '#1c1d1f', '#ff6a52', '#061D37', 'rgba(13, 14, 15', 'rgba(2,6,14', '0x020612', '0x0d2a3f', '0x39d7ff',
+    'rgba(13,14,15', 'rgba(8,9,10', 'rgba(18,19,21', '#0d0e0f'];
+  const low = source.toLowerCase();
+  for (const b of banned) assert.ok(!low.includes(b.toLowerCase()), `contains ${b}`);
+  assert.ok(!/chamferPath/.test(source), 'shell mentions chamferPath');
+  assert.ok(!/chamferPath/.test(uiSource), 'ui mentions chamferPath');
+});

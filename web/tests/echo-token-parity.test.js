@@ -36,19 +36,46 @@ test('reels.html keeps its token block inside the first bare <style>', () => {
   assert.ok(first.includes('--sx-accent: #ff3b1f'));
 });
 
-test('VRUICanvas.TOKENS matches tokens.css', () => {
+function block(selector) {
+  const start = tokensCss.indexOf(`\n${selector} {`);
+  assert.ok(start >= 0, `${selector} block not found`);
+  return declarations(tokensCss.slice(start, tokensCss.indexOf('\n}', start)));
+}
+
+const lightCss = block(':root:root');
+const darkCss = { ...lightCss, ...block(":root[data-theme='dark']") };
+const camelToCss = (k) => '--sx-' + k.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/([a-z])(\d)/g, '$1-$2').toLowerCase();
+const HEX_KEYS = [
+  'bg', 'surface', 'surface2', 'surface3', 'surfaceHover', 'rule', 'ruleStrong',
+  'ink', 'ink2', 'ink3', 'inkMuted', 'accent', 'accentHi', 'onAccent',
+  'spot', 'spotSoft', 'onSpot', 'onMedia',
+  'success', 'successHi', 'warn', 'warnHi', 'danger', 'dangerHi', 'info', 'infoHi',
+];
+
+function checkSet(set, css) {
+  const { hex, rgba, font, radius } = set;
+  assert.deepEqual(Object.keys(hex), HEX_KEYS);
+  for (const key of HEX_KEYS) assert.equal(norm(hex[key]), norm(css[camelToCss(key)]), key);
+  assert.equal(norm(rgba.mediaScrim), norm(css['--sx-media-scrim']), 'mediaScrim');
+  for (const [key, value] of Object.entries(font)) {
+    assert.equal(norm(value), norm(css[`--sx-font-${key}`]), `font.${key}`);
+  }
+  assert.deepEqual(Object.keys(font), ['display', 'sans', 'mono', 'brand']);
+  assert.equal(`${radius}px`, css['--sx-radius']);
+  assert.ok(Object.isFrozen(set));
+  assert.ok(Object.isFrozen(hex));
+}
+
+function loadCanvas() {
   const window = {};
   vm.runInNewContext(canvasSource, { window }, { filename: 'vr_ui_canvas.js' });
-  const { hex, font, radius } = window.VRUICanvas.TOKENS;
-  assert.equal(radius, 0);
-  assert.ok(Object.isFrozen(window.VRUICanvas.TOKENS));
-  const camelToCss = (k) => '--sx-' + k.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/([a-z])(\d)/g, '$1-$2').toLowerCase();
-  for (const [key, value] of Object.entries(hex)) {
-    const css = camelToCss(key);
-    assert.ok(css in canonical, `${key} -> ${css} missing in tokens.css`);
-    assert.equal(norm(value), norm(canonical[css]), key);
-  }
-  for (const [key, value] of Object.entries(font)) {
-    assert.equal(norm(value), norm(canonical[`--sx-font-${key}`]), `font.${key}`);
-  }
+  return window.VRUICanvas;
+}
+
+test('VRUICanvas light tokens match the :root:root block', () => {
+  checkSet(loadCanvas().TOKEN_SETS.light, lightCss);
+});
+
+test('VRUICanvas dark tokens match the dark block over the light one', () => {
+  checkSet(loadCanvas().TOKEN_SETS.dark, darkCss);
 });

@@ -466,6 +466,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastOverlayKey = '';
   // Guide panel upload-once state
   let vrGuideUploaded = false;
+  // Canvases wait (at most 3 s) for the paper fonts; see initThreeScene.
+  let fontsSettled = false;
+  let fontGateStarted = false;
+  // Follows <html data-theme> while the renderer runs.
+  let themeObserver = null;
   // ?dockfreeze=1 painted flag (reset per session in cleanup).
   let dockFreezePainted = false;
   // VR comment keyboard (DOM overlay) state
@@ -581,6 +586,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let controlsMesh = null;
   let commentsMesh = null;
   let starfieldPoints = null;
+  let worldSky = null;
+  let worldMountains = null;
+  let worldUniforms = null; // shared by the sky and mountain shaders
+  let worldDim = 0;
+  let worldLastT = -1;
   let earthGroup = null;
   let earthMesh = null;
   let earthLegacyGeometry = null;
@@ -598,6 +608,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthBaseBuildToken = 0;
   let earthHeatPaintedAt = -1e9;
   let earthBaseSource = 'fallback';
+  let earthBasePhoto = null; // kept so a mode switch can re-ink the photo base
+  let earthRimOpacity = 0.10; // the mode's atmosphere opacity at a level table
   let earthBaseTried = false;
   let earthBaseStale = true;
   let earthLabelCanvas = null;
@@ -666,6 +678,667 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     const v = ui && ui.TOKENS && ui.TOKENS.hex && ui.TOKENS.hex[name];
     return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+  }
+
+  // Font stack from VRUICanvas.TOKENS.font; the fallback applies if the canvas module is absent.
+  function uiFont(name, fallback) {
+    const ui = getUICanvas();
+    const v = ui && ui.TOKENS && ui.TOKENS.font && ui.TOKENS.font[name];
+    return typeof v === 'string' && v ? v : fallback;
+  }
+
+  // <html data-theme> is the one switch: 'dark' is dark, anything else light.
+  function readPageTheme() {
+    try {
+      const el = typeof document !== 'undefined' ? document.documentElement : null;
+      return el && typeof el.getAttribute === 'function' && el.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+      return 'light';
+    }
+  }
+
+  // Every canvas paints once more on its next update (no per-frame cost).
+  function markCanvasesDirty() {
+    shellPainted.mainContent = -1;
+    shellPainted.navVersion = -1;
+    shellPainted.kbVersion = -1;
+    shellPainted.kbHover = null;
+    vrGuideUploaded = false;
+    lastOverlayKey = '';
+    lastEarthLabelKey = '';
+    lastEarthPreviewUpdate = -1e9;
+    earthMapDirty = true;
+    // The dock and comments panel repaint on the next UI tick.
+    vrLastUiUploadT = -1;
+  }
+
+  // The one place for world and globe colours. `earth` is the globe: a paper
+  // atlas in light mode, a warm night chart in dark. The tint values drive the
+  // keyed dark-raster chain; light mode maps those rasters to paper instead.
+  // The light world is golden hour: a sky graded from the sun side to the far
+  // side, a cloud deck lit from below, peaks in alpenglow over a sea of cloud.
+  const WORLD_PALETTE = {
+    light: {
+      horizon: '#f2ede3', // clear colour, behind the sky dome
+      zenith: '#3b5c9e', midSun: '#f9d9a6', midAway: '#aebbd9',
+      horizonSun: '#ffa45c', horizonAway: '#e6a9a6',
+      belt: '#e8a2b0', shadowBand: '#7c84aa', sunHaze: '#ffc57a', sun: '#fff0c8',
+      cloudLit: '#ffd0a6', cloudShade: '#77708f',
+      seaLit: '#ffe1bd', seaAway: '#e7c9d6', seaShade: '#9d8fb3',
+      rockLit: '#d68f63', rockShade: '#3d4466', snowLit: '#ffdcc2', snowShade: '#8c97c2',
+      earth: {
+        land: '#f2ede3', sea: '#d8e2e4', park: '#dfe3cf', lineSoft: '#d3cab8', line: '#45403a',
+        rim: '#17140f', rimOpacity: 0.10, rimBlending: 'NormalBlending',
+        tintLift: '#f2ede3', tintHue: '#45403a', tintDepth: 1,
+      },
+    },
+    dark: {
+      sky: '#0c0b09', star: '#f5f1e8',
+      earth: {
+        land: '#1c1a16', sea: '#0c0b09', park: '#25221d', lineSoft: '#2e2a24', line: '#f5f1e8',
+        rim: '#f5f1e8', rimOpacity: 0.16, rimBlending: 'AdditiveBlending',
+        tintLift: '#1c1a16', tintHue: '#f5f1e8', tintDepth: 0.9,
+      },
+    },
+  };
+  const DIM_AMOUNT = 0.45;
+  const DIM_FADE_MS = 600;
+
+  // Light playback in the reels scene dims the sky; every other state clears it.
+  function worldDimTarget(s) {
+    return s && s.mode === 'light' && s.scene === 'reels' && !s.paused && !s.shellOpen ? DIM_AMOUNT : 0;
+  }
+
+  // Moves linearly, a full 0 to DIM_AMOUNT fade in DIM_FADE_MS, and stops on the target.
+  function stepDim(current, target, dtMs) {
+    const step = Math.max(0, dtMs) * DIM_AMOUNT / DIM_FADE_MS;
+    if (current < target) return Math.min(target, current + step);
+    return Math.max(target, current - step);
+  }
+
+  function worldClearHex() {
+    return readVRTheme() === 'dark' ? WORLD_PALETTE.dark.sky : WORLD_PALETTE.light.horizon;
+  }
+
+  // The light world's sun sits low, right of the screen, so it never shows behind the video.
+  const SUN_AZIMUTH_DEG = 55; // clockwise from straight ahead (-Z)
+  const SUN_ELEVATION_DEG = 4.5;
+  const WORLD_SEA_Y = -6; // top of the sea of cloud; the eye is at 1.6
+
+  function smoothstep(e0, e1, x) {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Seeded 2D gradient noise in about [-1, 1]. With a period the lattice wraps, so the noise tiles.
+  function makeGradientNoise(seed) {
+    const { floor, imul } = Math; // read once: the builders call this a million times, and node:vm makes each global lookup slow
+    const grad = new Float32Array(512);
+    let s = seed >>> 0;
+    for (let i = 0; i < 256; i++) {
+      s = (imul(s, 1664525) + 1013904223) >>> 0;
+      const a = s / 4294967296 * Math.PI * 2;
+      grad[2 * i] = Math.cos(a);
+      grad[2 * i + 1] = Math.sin(a);
+    }
+    const corner = (i, j) => {
+      let h = imul(i, 374761393) ^ imul(j, 668265263) ^ seed;
+      h = imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) & 255) << 1;
+    };
+    return (x, y, period) => {
+      let i0 = floor(x), j0 = floor(y);
+      const fx = x - i0, fy = y - j0;
+      let i1 = i0 + 1, j1 = j0 + 1;
+      if (period) {
+        i0 = ((i0 % period) + period) % period;
+        j0 = ((j0 % period) + period) % period;
+        i1 = (i0 + 1) % period;
+        j1 = (j0 + 1) % period;
+      }
+      const a = corner(i0, j0), b = corner(i1, j0), c = corner(i0, j1), d = corner(i1, j1);
+      const n00 = grad[a] * fx + grad[a + 1] * fy;
+      const n10 = grad[b] * (fx - 1) + grad[b + 1] * fy;
+      const n01 = grad[c] * fx + grad[c + 1] * (fy - 1);
+      const n11 = grad[d] * (fx - 1) + grad[d + 1] * (fy - 1);
+      const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+      const v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+      const top = n00 + u * (n10 - n00), bottom = n01 + u * (n11 - n01);
+      return (top + v * (bottom - top)) * 1.4142;
+    };
+  }
+
+  // Tiling cloud noise: R is fBm (soft masses, haze), G is billow noise (puffs,
+  // rock grain). The shaders sample it at several scales.
+  function bakeCloudTexture() {
+    const { abs, round } = Math;
+    const S = 256, OCTAVES = 5;
+    const noise = makeGradientNoise(7919);
+    const fbm = new Float32Array(S * S), billow = new Float32Array(S * S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        let f = 0, b = 0, amp = 1;
+        for (let o = 0; o < OCTAVES; o++) {
+          const p = 4 << o;
+          const n = noise(x / S * p + o * 0.37, y / S * p + o * 0.71, p);
+          f += n * amp;
+          b += abs(n) * amp;
+          amp *= 0.5;
+        }
+        fbm[y * S + x] = f;
+        billow[y * S + x] = b;
+      }
+    }
+    const span = (list) => {
+      let lo = Infinity, hi = -Infinity;
+      for (const v of list) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      return [lo, 255 / (hi - lo)];
+    };
+    const [fLo, fScale] = span(fbm), [bLo, bScale] = span(billow);
+    const data = new Uint8Array(S * S * 4);
+    for (let i = 0; i < S * S; i++) {
+      data[4 * i] = round((fbm[i] - fLo) * fScale);
+      data[4 * i + 1] = round((billow[i] - bLo) * bScale);
+      data[4 * i + 3] = 255;
+    }
+    const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const WORLD_GLSL_PARS = `
+    uniform vec3 uSunDir;
+    uniform float uTime;
+    uniform vec3 uTint;
+    uniform sampler2D uCloudTex;
+    uniform float uSeaY;
+    uniform vec3 uZenith, uMidSun, uMidAway, uHorizonSun, uHorizonAway;
+    uniform vec3 uBelt, uShadowBand, uSunHaze, uSunColor;
+    uniform vec3 uCloudLit, uCloudShade, uSeaLit, uSeaAway, uSeaShade;
+    varying vec3 vWorld;
+
+    // 1 looking toward the sun round the horizon, 0 looking away.
+    float sunSide(vec3 d) {
+      return clamp(0.5 + 0.5 * dot(d.xz, uSunDir.xz) / max(length(d.xz) * length(uSunDir.xz), 1e-4), 0.0, 1.0);
+    }
+
+    vec3 skyBase(vec3 d) {
+      float h = max(d.y, 0.0);
+      float side = sunSide(d);
+      float toward = pow(side, 1.6);
+      vec3 col = mix(mix(uHorizonAway, uHorizonSun, toward), mix(uMidAway, uMidSun, toward), smoothstep(0.0, 0.22, h));
+      col = mix(col, uZenith, smoothstep(0.12, 0.85, h));
+      // Opposite the sun: the Earth's shadow on the horizon, the pink belt above it.
+      float away = pow(1.0 - side, 1.5);
+      col = mix(col, uBelt, 0.6 * away * exp(-pow((h - 0.11) / 0.07, 2.0)));
+      col = mix(col, uShadowBand, 0.65 * away * (1.0 - smoothstep(0.0, 0.07, h)));
+      // Glow round the sun, and along the horizon under it.
+      float mu = max(dot(d, uSunDir), 0.0);
+      col += uSunHaze * (0.3 * pow(mu, 5.0) + 0.7 * pow(mu, 60.0));
+      col += uSunHaze * 0.3 * exp(-h * 10.0) * pow(side, 5.0);
+      return col;
+    }
+
+    // Broad swells carrying puffs, with fine billows on top.
+    float seaHeight(vec2 uv) {
+      float macro = texture2D(uCloudTex, uv * 0.27 + vec2(0.21, 0.67)).r;
+      float puffs = texture2D(uCloudTex, uv).g;
+      float fine = texture2D(uCloudTex, uv * 3.1 + vec2(0.5, 0.13)).g;
+      return smoothstep(0.25, 0.8, macro) * 0.55 + puffs * 0.33 + fine * 0.12;
+    }
+
+    // The sea of cloud below the eye line: billows lit across their tops by the low sun.
+    vec3 cloudSea(vec3 d) {
+      float down = max(-d.y, 1e-4);
+      float dist = (cameraPosition.y - uSeaY) / down;
+      vec2 hit = cameraPosition.xz + d.xz * dist;
+      vec2 uv = hit * 0.0065 + vec2(0.005, 0.0018) * uTime;
+      vec2 s = normalize(uSunDir.xz);
+      float h = seaHeight(uv);
+      // Faces turned to the sun catch it; taller billows sunward shade the hollows behind them.
+      float e = 0.006;
+      float slope = (seaHeight(uv + s * e) - seaHeight(uv - s * e)) / (2.0 * e);
+      float lit = smoothstep(-4.0, 6.0, -slope);
+      float occl = smoothstep(0.02, 0.16, seaHeight(uv + s * 0.03) - h);
+      float sunAmt = lit * (1.0 - 0.6 * occl);
+      float side = sunSide(d);
+      vec3 litCol = mix(uSeaAway, uSeaLit, pow(side, 1.4));
+      vec3 shade = uSeaShade * (0.8 + 0.3 * h);
+      vec3 col = mix(shade, litCol, 0.25 + 0.75 * sunAmt) * (0.86 + 0.24 * h);
+      // Far off the billows merge into one soft sheet.
+      float far = 1.0 - exp(-dist * 0.016);
+      col = mix(col, mix(uSeaShade, litCol, 0.62), far * 0.75);
+      // Forward scatter: the cloud glows along the line under the sun.
+      float mu = max(dot(normalize(d.xz), s), 0.0);
+      col += uSunHaze * (0.25 * pow(mu, 4.0) + 0.5 * pow(mu, 24.0)) * exp(-down * 4.0);
+      return mix(col, skyBase(normalize(vec3(d.x, 0.0, d.z))), exp(-down * 8.0));
+    }
+
+    // Soft shoulder above 0.8, so the sun and its glow roll off instead of clipping.
+    vec3 knee(vec3 c) {
+      vec3 over = max(c - 0.8, 0.0);
+      return min(c, 0.8) + over / (1.0 + over * 5.0);
+    }
+
+    float worldDither() {
+      return (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+    }
+  `;
+
+  const WORLD_SKY_FRAGMENT = `
+    // The cloud deck overhead, lit from below by the low sun; rgb and coverage.
+    vec4 cloudDeck(vec3 d, float side, float mu) {
+      float h = d.y;
+      vec2 drift = vec2(0.006, 0.002) * uTime;
+      vec2 uv = d.xz / (h + 0.07) * 0.16 + drift;
+      float cover = smoothstep(0.32, 0.68, texture2D(uCloudTex, uv * 0.21 + vec2(0.37, 0.11)).r);
+      float floorLevel = mix(0.66, 0.4, cover);
+      float dens = texture2D(uCloudTex, uv).g * 0.7 + texture2D(uCloudTex, uv * 3.3 + drift).r * 0.3 - floorLevel;
+      float alpha = smoothstep(0.0, 0.2, dens) * smoothstep(0.02, 0.22, h);
+      // Cloud between this point and the sun shades it.
+      vec2 toSun = uv + normalize(uSunDir.xz) * 0.03;
+      float occl = texture2D(uCloudTex, toSun).g * 0.7 + texture2D(uCloudTex, toSun * 3.3 + drift).r * 0.3 - floorLevel;
+      float thick = smoothstep(0.1, 0.4, dens);
+      float light = exp(-max(occl, 0.0) * 3.5);
+      // Toward the sun the cores go dark and the thin edges burn.
+      float back = pow(max(mu, 0.0), 3.0);
+      light *= mix(1.0, 1.0 - 0.7 * thick, back);
+      vec3 lit = mix(uBelt * 1.1, uCloudLit, pow(side, 1.2));
+      lit += uSunHaze * 0.6 * pow(max(mu, 0.0), 6.0) * (1.0 - thick);
+      vec3 col = mix(uCloudShade, lit, light * (1.0 - 0.55 * thick));
+      col = mix(col, skyBase(d), 0.5 * (1.0 - smoothstep(0.02, 0.3, h)));
+      return vec4(col, alpha);
+    }
+
+    void main() {
+      vec3 d = normalize(vWorld - cameraPosition);
+      vec3 col;
+      if (d.y < 0.0) {
+        col = cloudSea(d);
+      } else {
+        col = skyBase(d);
+        float side = sunSide(d);
+        float mu = dot(d, uSunDir);
+        // High cirrus: long thin streaks catching the gold.
+        vec2 q = d.xz / (d.y + 0.18);
+        vec2 cq = vec2(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8) * vec2(0.04, 0.32) + vec2(0.002 * uTime, 0.0);
+        float cirrus = smoothstep(0.55, 0.85, texture2D(uCloudTex, cq).r) * smoothstep(0.03, 0.25, d.y) * 0.45;
+        col = mix(col, mix(uBelt, uSunHaze * 1.2, pow(side, 2.0)), cirrus);
+        col = mix(col, uSunColor * 1.6, smoothstep(0.99984, 0.99993, mu));
+        vec4 deck = cloudDeck(d, side, mu);
+        col = mix(col, deck.rgb, deck.a);
+      }
+      gl_FragColor = vec4(knee(col) * uTint, 1.0);
+      #include <colorspace_fragment>
+      gl_FragColor.rgb += worldDither();
+    }
+  `;
+
+  const WORLD_TERRAIN_FRAGMENT = `
+    varying vec3 vRock;
+    varying vec3 vNormal;
+
+    // Quintic texel blend: plain bilinear lookups have creased slopes that the bump picks up as lines.
+    vec4 smoothTex(vec2 uv) {
+      uv = uv * 256.0 + 0.5;
+      vec2 i = floor(uv), f = uv - i;
+      f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+      return texture2D(uCloudTex, (i + f - 0.5) / 256.0);
+    }
+
+    float gullyAt(float u, float y) {
+      return smoothTex(vec2(u * 0.11, y * 0.018)).g * 0.65 + smoothTex(vec2(u * 0.37, y * 0.06 + 0.3)).g * 0.35;
+    }
+
+    void main() {
+      vec3 toFrag = vWorld - cameraPosition;
+      float dist = length(toFrag);
+      vec3 d = toFrag / dist;
+      vec3 n = normalize(vNormal);
+      // Gullies run down the fall line, sampled on the two vertical planes and blended by facing.
+      vec2 face = abs(n.xz) / (abs(n.x) + abs(n.z) + 1e-4);
+      float gully = gullyAt(vWorld.z, vWorld.y) * face.x + gullyAt(vWorld.x + 17.0, vWorld.y) * face.y;
+      float strata = smoothTex(vec2(0.37, vWorld.y * 0.22 + gully * 0.6)).r;
+      float bump = gully * 0.9 + strata * 0.1;
+      // Bump the normal from the screen-space slope of the relief.
+      vec3 dpx = dFdx(vWorld), dpy = dFdy(vWorld);
+      float bx = dFdx(bump), by = dFdy(bump);
+      vec3 r1 = cross(dpy, n), r2 = cross(n, dpx);
+      float det = dot(dpx, r1);
+      // Steep faces carry the most relief; gentle foothills stay smooth.
+      float relief = 1.3 * smoothstep(0.97, 0.7, n.y);
+      vec3 nb = normalize(abs(det) * n - sign(det) * (bx * r1 + by * r2) * relief);
+      vec3 col = vRock;
+      float litness = clamp(dot(n, uSunDir) * 3.0, 0.0, 1.0);
+      col *= clamp(1.0 + 2.2 * (dot(nb, uSunDir) - dot(n, uSunDir)) * litness + 0.6 * (nb.y - n.y), 0.55, 1.5);
+      // Patches of paler and darker rock.
+      float blotch = texture2D(uCloudTex, vWorld.xz * 0.013 + 0.4).r;
+      col *= 0.82 + 0.36 * blotch;
+      // Ridges seen against the sun light up at the edge.
+      float mu = max(dot(d, uSunDir), 0.0);
+      vec3 nr = normalize(mix(n, nb, 0.3));
+      col += uSunHaze * 1.1 * pow(1.0 - abs(dot(nr, d)), 3.0) * pow(mu, 5.0);
+      // Distance and the low mist wash the peaks toward the sky behind them.
+      float air = max(1.0 - exp(-dist * 0.0055), 0.5 * smoothstep(uSeaY + 4.0, uSeaY, vWorld.y));
+      col = mix(col, skyBase(normalize(vec3(d.x, max(d.y, 0.0) + 0.02, d.z))), air);
+      // The sea of cloud laps round the foot of the range.
+      float top = uSeaY + (texture2D(uCloudTex, vWorld.xz * 0.0065 + vec2(0.005, 0.0018) * uTime).r - 0.45) * 2.2;
+      col = mix(col, cloudSea(d), smoothstep(top + 3.0, top - 0.4, vWorld.y));
+      gl_FragColor = vec4(knee(col) * uTint, 1.0);
+      #include <colorspace_fragment>
+      gl_FragColor.rgb += worldDither();
+    }
+  `;
+
+  // The range: a polar grid round the eye, sharp crests blended with worn slopes, lit
+  // and shadowed by the low sun once at build time. Low hills stand near, tall massifs
+  // far off. Its rims sink under the cloud, and it parts where the sun sets.
+  function buildWorldTerrain(L, sun) {
+    const { abs, atan2, floor, max, min, pow, sqrt } = Math; // the shadow march calls these millions of times
+    const N = 720, M = 80, R0 = 26, R1 = 92, EYE = 1.6, SEA = WORLD_SEA_Y;
+    const ROW_BUNCH = 1.35; // rows crowd toward the eye, where detail shows most
+    const AMP_NEAR = 7, AMP_FAR = 24, RIDGED_SHARE = 0.6, WARP = 7;
+    const CAP = 9.5 * Math.PI / 180, NOTCH = 11 * Math.PI / 180;
+    const sunAz = SUN_AZIMUTH_DEG * Math.PI / 180;
+    const noise = makeGradientNoise(1013);
+    // Crests: ridged noise, each octave weighted by the one before so detail gathers on the ridges.
+    const ridged = (x, z) => {
+      let sum = 0, norm = 0, amp = 0.5, w = 1, px = x / 13, pz = z / 13;
+      for (let o = 0; o < 4; o++) {
+        let n = 1 - abs(noise(px, pz));
+        n = n * n * w;
+        sum += n * amp;
+        norm += amp;
+        w = min(1, n * 2);
+        const rx = (px * 0.8 - pz * 0.6) * 2.03 + 5.3;
+        pz = (px * 0.6 + pz * 0.8) * 2.03 - 3.1;
+        px = rx;
+        amp *= 0.5;
+      }
+      return sum / norm;
+    };
+    // Worn slopes: finer octaves fade where the slope beneath them is steep, as erosion would leave them.
+    const eroded = (x, z) => {
+      let a = 0, b = 0.5, dx = 0, dz = 0, norm = 0, px = x / 26, pz = z / 26;
+      const e = 0.02;
+      for (let o = 0; o < 4; o++) {
+        const n = noise(px, pz);
+        dx += (noise(px + e, pz) - n) / e;
+        dz += (noise(px, pz + e) - n) / e;
+        a += b * n / (1 + dx * dx + dz * dz);
+        norm += b;
+        b *= 0.5;
+        const rx = (px * 0.8 - pz * 0.6) * 2 + 1.7;
+        pz = (px * 0.6 + pz * 0.8) * 2 - 2.9;
+        px = rx;
+      }
+      return a / norm;
+    };
+
+    const H = new Float32Array(N * M);
+    const pos = new Float32Array(N * M * 3);
+    for (let j = 0; j < M; j++) {
+      const r = R0 + (R1 - R0) * pow(j / (M - 1), ROW_BUNCH);
+      const env = smoothstep(R0, R0 + 5, r) * (1 - smoothstep(R1 - 8, R1, r));
+      const amp = AMP_NEAR + (AMP_FAR - AMP_NEAR) * smoothstep(R0 + 4, R1 - 10, r);
+      for (let i = 0; i < N; i++) {
+        const th = 2 * Math.PI * i / N;
+        const x = r * Math.sin(th), z = -r * Math.cos(th);
+        let dAz = th - sunAz;
+        dAz -= 2 * Math.PI * Math.round(dAz / (2 * Math.PI));
+        const notch = 1 - 0.9 * Math.exp(-(dAz / NOTCH) * (dAz / NOTCH));
+        // Warped coordinates bend the ranges off the noise lattice.
+        const wx = x + WARP * noise(x / 22 + 3.1, z / 22 - 1.7);
+        const wz = z + WARP * noise(x / 22 - 7.3, z / 22 + 5.2);
+        const massif = pow(smoothstep(-0.35, 0.6, noise(wx / 34 + 11.7, wz / 34 - 4.2)), 1.4);
+        const shape = RIDGED_SHARE * ridged(wx, wz) + (1 - RIDGED_SHARE) * (0.5 + 0.5 * eroded(wx, wz));
+        let y = SEA - 2.5 + env * notch * (1.5 + amp * massif * shape);
+        const e = atan2(y - EYE, r);
+        if (e > 0) y = EYE + r * Math.tan(CAP * Math.tanh(e / CAP)); // peaks ease under CAP
+        const k = j * N + i;
+        H[k] = y;
+        pos[3 * k] = x;
+        pos[3 * k + 1] = y;
+        pos[3 * k + 2] = z;
+      }
+    }
+    const idx = new Uint32Array((M - 1) * N * 6);
+    let t = 0;
+    for (let j = 0; j < M - 1; j++) {
+      for (let i = 0; i < N; i++) {
+        const a = j * N + i, b = j * N + (i + 1) % N;
+        idx[t++] = a; idx[t++] = b; idx[t++] = a + N;
+        idx[t++] = b; idx[t++] = b + N; idx[t++] = a + N;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeVertexNormals();
+    const nrm = g.getAttribute('normal').array;
+
+    const heightAt = (x, z) => {
+      const r = sqrt(x * x + z * z);
+      if (r <= R0 || r >= R1) return -1e9;
+      let fi = atan2(x, -z) / (2 * Math.PI) * N;
+      if (fi < 0) fi += N;
+      const fj = pow((r - R0) / (R1 - R0), 1 / ROW_BUNCH) * (M - 1);
+      const i0 = floor(fi) % N, i1 = (i0 + 1) % N, j0 = min(M - 2, floor(fj));
+      const u = fi - floor(fi), v = fj - j0;
+      const h0 = H[j0 * N + i0] + (H[j0 * N + i1] - H[j0 * N + i0]) * u;
+      const h1 = H[(j0 + 1) * N + i0] + (H[(j0 + 1) * N + i1] - H[(j0 + 1) * N + i0]) * u;
+      return h0 + (h1 - h0) * v;
+    };
+    let top = -Infinity;
+    for (const y of H) if (y > top) top = y;
+    const flat = Math.hypot(sun.x, sun.z), rise = sun.y / flat;
+    const sx = sun.x / flat, sz = sun.z / flat;
+    const c = (hex) => new THREE.Color(hex);
+    const rockLit = c(L.rockLit), rockShade = c(L.rockShade), snowLit = c(L.snowLit), snowShade = c(L.snowShade);
+    const col = new Float32Array(N * M * 3);
+    for (let j = 0; j < M; j++) {
+      for (let i = 0; i < N; i++) {
+        const k = j * N + i;
+        const x = pos[3 * k], y = H[k], z = pos[3 * k + 2];
+        const nx = nrm[3 * k], ny = nrm[3 * k + 1], nz = nrm[3 * k + 2];
+        const ndl = nx * sun.x + ny * sun.y + nz * sun.z;
+        // Soft shadow: march toward the sun and keep the closest miss over the ridges.
+        let shadow = 0;
+        if (ndl > 0 && y > SEA - 1) {
+          shadow = 1;
+          for (let s = 1; s <= 24 && shadow > 0; s++) {
+            const d = 0.3 + 0.12 * s * s;
+            const ray = y + 0.05 + d * rise;
+            if (ray > top) break;
+            shadow = min(shadow, 6 * (ray - heightAt(x + sx * d, z + sz * d)) / d);
+          }
+          shadow = max(0, shadow);
+        }
+        const sunAmt = smoothstep(0, 0.45, ndl) * shadow;
+        const sky = 0.5 + 0.5 * ny;
+        const snowLine = 2.5 + 1.6 * noise(x / 6 + 40, z / 6);
+        const snow = smoothstep(snowLine - 0.8, snowLine + 1, y) * smoothstep(0.4, 0.8, ny);
+        // Valleys sit lower than their neighbours and catch less sky.
+        const around = (H[j * N + (i + 1) % N] + H[j * N + (i + N - 1) % N] +
+          H[min(M - 1, j + 1) * N + i] + H[max(0, j - 1) * N + i]) / 4;
+        const ao = min(1, max(0.5, 1 - (around - y) * 0.3));
+        for (let ch = 0; ch < 3; ch++) {
+          const key = ch === 0 ? 'r' : ch === 1 ? 'g' : 'b';
+          const lit = rockLit[key] + (snowLit[key] - rockLit[key]) * snow;
+          const shade = (rockShade[key] + (snowShade[key] - rockShade[key]) * snow) * sky;
+          col[3 * k + ch] = (shade + (lit - shade) * sunAmt) * ao;
+        }
+      }
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  }
+
+  // Sky and mountains: two meshes built once, shown in light mode only. They share
+  // one uniforms object, so the sun, the drift and the dim reach both.
+  function buildLightWorld() {
+    if (worldSky || !THREE || !scene) return;
+    const L = WORLD_PALETTE.light;
+    const az = SUN_AZIMUTH_DEG * Math.PI / 180, el = SUN_ELEVATION_DEG * Math.PI / 180;
+    const sun = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
+    worldUniforms = {
+      uSunDir: { value: sun },
+      uTime: { value: 0 },
+      uTint: { value: new THREE.Color(1, 1, 1) },
+      uCloudTex: { value: bakeCloudTexture() },
+      uSeaY: { value: WORLD_SEA_Y },
+    };
+    const colours = {
+      uZenith: 'zenith', uMidSun: 'midSun', uMidAway: 'midAway', uHorizonSun: 'horizonSun',
+      uHorizonAway: 'horizonAway', uBelt: 'belt', uShadowBand: 'shadowBand', uSunHaze: 'sunHaze',
+      uSunColor: 'sun', uCloudLit: 'cloudLit', uCloudShade: 'cloudShade', uSeaLit: 'seaLit',
+      uSeaAway: 'seaAway', uSeaShade: 'seaShade',
+    };
+    for (const name in colours) worldUniforms[name] = { value: new THREE.Color(L[colours[name]]) };
+    const make = (geometry, material, order) => {
+      const m = new THREE.Mesh(geometry, material);
+      m.renderOrder = order;
+      m.frustumCulled = false;
+      m.visible = false;
+      scene.add(m);
+      return m;
+    };
+    worldSky = make(new THREE.SphereGeometry(60, 32, 16), new THREE.ShaderMaterial({
+      uniforms: worldUniforms,
+      vertexShader: `
+        varying vec3 vWorld;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vWorld = w.xyz;
+          gl_Position = projectionMatrix * viewMatrix * w;
+        }
+      `,
+      fragmentShader: WORLD_GLSL_PARS + WORLD_SKY_FRAGMENT,
+      side: THREE.BackSide, // seen from the centre
+      depthWrite: false,
+    }), -10);
+    worldMountains = make(buildWorldTerrain(L, sun), new THREE.ShaderMaterial({
+      uniforms: worldUniforms,
+      vertexShader: `
+        varying vec3 vWorld;
+        varying vec3 vRock;
+        varying vec3 vNormal;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vWorld = w.xyz;
+          vRock = color;
+          vNormal = normal;
+          gl_Position = projectionMatrix * viewMatrix * w;
+        }
+      `,
+      fragmentShader: WORLD_GLSL_PARS + WORLD_TERRAIN_FRAGMENT,
+      vertexColors: true,
+    }), -9);
+  }
+
+  function worldObjectMeshes() { return [worldSky, worldMountains]; }
+
+  // Shows the world of the current mode and sets the clear colour from the palette.
+  function applyWorldMode() {
+    const light = readVRTheme() !== 'dark';
+    for (const m of worldObjectMeshes()) if (m) m.visible = light;
+    if (starfieldPoints) starfieldPoints.visible = !light;
+  }
+
+  // Scales the light world by 1 - dim; both meshes share the tint.
+  function applyWorldDim() {
+    const k = 1 - worldDim;
+    if (worldUniforms) worldUniforms.uTint.value.setRGB(k, k, k);
+  }
+
+  // Once a frame: drifts the clouds and eases the dim toward its target for the current state.
+  function updateWorld(time) {
+    const src = videoElement;
+    const dt = worldLastT < 0 || !Number.isFinite(time) ? 0 : time - worldLastT;
+    if (Number.isFinite(time)) worldLastT = time;
+    const target = worldDimTarget({
+      mode: readVRTheme(),
+      scene: sceneMode,
+      paused: !src || !!src.paused || !!src.ended,
+      shellOpen: isShellOpen(),
+    });
+    if (worldUniforms && Number.isFinite(time)) worldUniforms.uTime.value = time * 0.001;
+    const next = stepDim(worldDim, target, dt);
+    if (next !== worldDim) {
+      worldDim = next;
+      applyWorldDim();
+    }
+  }
+
+  function recolourScene() {
+    const bg = parseInt(worldClearHex().slice(1), 16);
+    try { if (renderer && renderer.setClearColor) renderer.setClearColor(bg, 1); } catch (e) {}
+    try { if (scene && scene.background && scene.background.setHex) scene.background.setHex(bg); } catch (e) {}
+    try {
+      if (laserLine && laserLine.material && laserLine.material.color) {
+        laserLine.material.color.setHex(parseInt(echoHex('accent', '#c2250e').slice(1), 16));
+      }
+    } catch (e) {}
+    try {
+      const rx = reticleTexture && reticleTexture.image && reticleTexture.image.getContext
+        ? reticleTexture.image.getContext('2d') : null;
+      if (rx) {
+        paintReticle(rx);
+        reticleTexture.needsUpdate = true;
+      }
+    } catch (e) {}
+    try { recolourEarth(); } catch (e) {}
+    styleDomInput();
+  }
+
+  // The globe's share of a switch: the shared tile uniforms update in place,
+  // the atmosphere and fallback globe recolour, and the base canvas re-inks once.
+  function recolourEarth() {
+    syncEarthGrade();
+    const pal = earthPalette();
+    earthRimOpacity = pal.rimOpacity;
+    if (earthAtmosphereMesh && earthAtmosphereMesh.material) {
+      const m = earthAtmosphereMesh.material;
+      if (m.color && m.color.set) m.color.set(pal.rim);
+      if (THREE && THREE[pal.rimBlending] !== undefined) m.blending = THREE[pal.rimBlending];
+    }
+    if (earthMesh && earthMesh.material && !earthMesh.material.map && earthMesh.material.color) {
+      earthMesh.material.color.set(pal.sea);
+    }
+    // Rebuild whenever a photo is held, finished or not: the build token cancels
+    // a build still running on the old palette.
+    if (earthBasePhoto) buildHolographicEarthBase(earthBasePhoto);
+    else earthBaseStale = true;
+    rebuildEarthPins();
+    rebuildEarthHeatSprites();
+  }
+
+  // Switches the VR tokens; on a change every canvas repaints once and the scene recolours.
+  function applyVRTheme(mode) {
+    const ui = getUICanvas();
+    if (!ui || typeof ui.setTheme !== 'function' || !ui.setTheme(mode)) return;
+    markCanvasesDirty();
+    recolourScene();
+    if (scene) applySceneVisibility();
+  }
+
+  // The nav bar's LIGHT / DARK switch: saves the choice and sets the page attribute
+  // (the 2D page follows it), then applies it here at once.
+  function setVRTheme(mode) {
+    const next = mode === 'dark' ? 'dark' : 'light';
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem('sx.theme', next);
+    } catch (e) { /* storage unavailable: the choice lasts for this visit */ }
+    try {
+      const el = typeof document !== 'undefined' ? document.documentElement : null;
+      if (el && typeof el.setAttribute === 'function') el.setAttribute('data-theme', next);
+    } catch (e) {}
+    applyVRTheme(next);
   }
 
   function ensureThree() {
@@ -1348,9 +2021,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       hex: ((Math.round(base[0]) << 16) | (Math.round(base[1]) << 8) | Math.round(base[2])),
     };
   }
-  function earthHeatStyle(heat, state) {
+  // `hue` ([r, g, b]) replaces the ramp colours of the bloom when given.
+  function earthHeatStyle(heat, state, hue) {
     const h = Math.max(0, Math.min(1, Number(heat) || 0));
-    const r = earthHeatRamp(h);
+    const r = hue ? { core: hue, base: hue, edge: hue } : earthHeatRamp(h);
     const rgba = (c, a) => 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + a.toFixed(3) + ')';
     const k = 0.85 + 0.15 * h; // strong at every heat: the bloom IS the data
     return {
@@ -1375,24 +2049,59 @@ window.WebXRVR = window.WebXRVR || (function () {
   // ("labels"). Geography is tinted into the globe palette with canvas
   // composite ops (GPU-accelerated, no per-pixel loop): 'screen' lifts the
   // R5 decision (owner): base-only GPU tint. The base layer is tinted toward
-  // holo cyan in the tile shader; the labels layer stays a separate texture
+  // the mode palette in the tile shader; the labels layer stays a separate texture
   // composited untinted on top. Canvas 2D ops never touch color — the canvas
   // only normalizes the base image to ≤512 px (upload size cap). The v1
   // per-pixel OSM re-grade is gone: thresholding dark-glyph-in-white-halo
   // rasters always ringed and fattened text.
-  const EARTH_TILE_TINT_LIFT = 'rgb(4,22,44)';     // screen: blacks → deep navy
-  const EARTH_TILE_TINT_HUE = 'rgb(120,214,255)';  // multiply: grays → holo cyan
   const EARTH_TILE_LABEL_ALPHA = 0.96;
-  // Shader-space twins of the tint consts above (0–1). The fragment replicates
-  // the old canvas screen+multiply chain so holo styling is pixel-comparable.
-  const EARTH_TILE_TINT_LIFT_VEC = { x: 4 / 255, y: 22 / 255, z: 44 / 255 };
-  const EARTH_TILE_TINT_HUE_VEC = { x: 120 / 255, y: 214 / 255, z: 255 / 255 };
-  // Depth gain for light-raster defaults (keyless OSM standard): near-white
-  // land would otherwise screen/multiply into a near-white cyan wash that
-  // blinds a dark VR room and breaks the dark-globe identity. 0.55 lands
-  // OSM land at steel-cyan while dark CARTO tiles (keyed opt-in) stay deep
-  // navy. Labels composite AFTER this gain, so glyphs keep full contrast.
-  const EARTH_TILE_TINT_DEPTH = 0.55;
+
+  // The globe grade: one set of uniform objects that every tile block shares,
+  // so a mode switch updates them in place and reaches tiles already on the
+  // globe (no recompile, no reload). Grade colours are linear (sRGB^2.2); the
+  // tint values stay sRGB 0–1, as the screen+multiply chain always took them.
+  const EARTH_GRADE_KEYS = ['land', 'sea', 'park', 'lineSoft', 'line'];
+  const earthGradeName = (key) => 'uEarth' + key[0].toUpperCase() + key.slice(1);
+  const earthGradeUniforms = {
+    uEarthPaper: { value: 1 },
+    uTileTintLift: { value: { x: 0, y: 0, z: 0 } },
+    uTileTintHue: { value: { x: 0, y: 0, z: 0 } },
+    uTileTintDepth: { value: 1 },
+  };
+  for (const key of EARTH_GRADE_KEYS) earthGradeUniforms[earthGradeName(key)] = { value: { x: 0, y: 0, z: 0 } };
+
+  function earthPalette() {
+    return WORLD_PALETTE[readVRTheme() === 'dark' ? 'dark' : 'light'].earth;
+  }
+  function hexRgb255(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function setVecFromHex(vec, hex, gamma) {
+    const c = hexRgb255(hex);
+    vec.x = Math.pow(c[0] / 255, gamma);
+    vec.y = Math.pow(c[1] / 255, gamma);
+    vec.z = Math.pow(c[2] / 255, gamma);
+  }
+  function syncEarthGrade() {
+    const pal = earthPalette();
+    for (const key of EARTH_GRADE_KEYS) setVecFromHex(earthGradeUniforms[earthGradeName(key)].value, pal[key], 2.2);
+    setVecFromHex(earthGradeUniforms.uTileTintLift.value, pal.tintLift, 1);
+    setVecFromHex(earthGradeUniforms.uTileTintHue.value, pal.tintHue, 1);
+    earthGradeUniforms.uTileTintDepth.value = pal.tintDepth;
+    earthGradeUniforms.uEarthPaper.value = readVRTheme() === 'dark' ? 0 : 1;
+  }
+  syncEarthGrade();
+  // sRGB hex read back from the shared uniforms (tests).
+  function earthGradeColors() {
+    const out = {};
+    const c = (v) => Math.round(Math.pow(v, 1 / 2.2) * 255).toString(16).padStart(2, '0');
+    for (const key of EARTH_GRADE_KEYS) {
+      const v = earthGradeUniforms[earthGradeName(key)].value;
+      out[key] = '#' + c(v.x) + c(v.y) + c(v.z);
+    }
+    return out;
+  }
 
   function earthTileStyleMode() {
     return debugFlags.earthstyle === 'raw' ? 'raw' : 'holo';
@@ -1430,7 +2139,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // R5 base-only GPU tint: every tile material gets this injection. The base
-  // map is tinted toward holo cyan (screen-lift + multiply-hue, same chain as
+  // map is tinted toward the mode palette (screen-lift + multiply-hue, same chain as
   // the retired canvas fills); the labels layer is sampled from a SECOND
   // texture and mixed on top by its own alpha, never tinted. ?earthstyle=raw
   // sets uTileTintStrength=0 and full label alpha (exact passthrough).
@@ -1449,18 +2158,27 @@ window.WebXRVR = window.WebXRVR || (function () {
       shader.uniforms.uTileHasLabels = uniforms.uTileHasLabels;
       shader.uniforms.uTileLabelsAlpha = uniforms.uTileLabelsAlpha;
       shader.uniforms.uTileNight = uniforms.uTileNight || { value: 0 };
+      for (const key of EARTH_GRADE_KEYS) shader.uniforms[earthGradeName(key)] = uniforms[earthGradeName(key)];
+      shader.uniforms.uEarthPaper = uniforms.uEarthPaper;
       shader.fragmentShader = ('uniform sampler2D labelsMap; uniform vec3 uTileTintLift; uniform vec3 uTileTintHue; uniform float uTileTintDepth; uniform float uTileTintStrength; uniform float uTileHasLabels; uniform float uTileLabelsAlpha; uniform float uTileNight;\n' +
+        'uniform vec3 uEarthLand; uniform vec3 uEarthSea; uniform vec3 uEarthPark; uniform vec3 uEarthLineSoft; uniform vec3 uEarthLine; uniform float uEarthPaper;\n' +
         shader.fragmentShader.replace('#include <map_fragment>', `
           #include <map_fragment>
           {
             vec3 tileLifted = 1.0 - (1.0 - diffuseColor.rgb) * (1.0 - uTileTintLift);
             vec3 tileTinted = tileLifted * uTileTintHue * uTileTintDepth;
+            // Dark rasters in light mode: brightness maps from land to line,
+            // so dark land becomes paper and bright lines become ink.
+            bool tilePaper = uTileNight < 0.5 && uEarthPaper > 0.5;
+            if (tilePaper) {
+              float pLum = pow(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.4545);
+              tileTinted = mix(uEarthLand, uEarthLine, pLum);
+            }
             if (uTileNight > 0.5) {
-              // Night chart grade for LIGHT rasters (keyless OSM): classify the
-              // paper-white source into land / sea / park, then re-light only the
-              // ink (labels, casings, coast) and warm road fills as holo-cyan
-              // line work. Result: deep navy chart with glowing, legible detail
-              // instead of a muddy multiplied wash. Palette is sRGB -> linear.
+              // Chart grade for LIGHT rasters (keyless OSM): classify the
+              // paper-white source into land / sea / park, then redraw only the
+              // ink (labels, casings, coast) and warm road fills as line work in
+              // the mode's palette: a paper atlas in light, a night chart in dark.
               vec3 nSrc = diffuseColor.rgb;
               float nLum = dot(nSrc, vec3(0.2126, 0.7152, 0.0722));
               float nWater = smoothstep(0.015, 0.09, nSrc.b - nSrc.r);
@@ -1468,16 +2186,16 @@ window.WebXRVR = window.WebXRVR || (function () {
               float nWarm = smoothstep(0.05, 0.26, nSrc.r - nSrc.b) * (1.0 - nGreen);
               float nSat = max(nSrc.r, max(nSrc.g, nSrc.b)) - min(nSrc.r, min(nSrc.g, nSrc.b));
               float nInk = clamp((0.80 - nLum) * 2.6, 0.0, 1.0) * (1.0 - nWater * 0.85) * (1.0 - nGreen) * (1.0 - smoothstep(0.07, 0.24, nSat));
-              vec3 nLand = pow(vec3(0.070, 0.150, 0.235), vec3(2.2));
-              vec3 nSea = pow(vec3(0.016, 0.052, 0.110), vec3(2.2));
-              vec3 nPark = pow(vec3(0.050, 0.190, 0.205), vec3(2.2));
-              vec3 nBase = mix(mix(nLand, nSea, nWater), nPark, nGreen);
-              vec3 nGlow = mix(pow(vec3(0.20, 0.56, 0.78), vec3(2.2)), pow(vec3(0.84, 0.97, 1.0), vec3(2.2)), smoothstep(0.5, 1.0, nInk));
+              vec3 nBase = mix(mix(uEarthLand, uEarthSea, nWater), uEarthPark, nGreen);
+              vec3 nGlow = mix(uEarthLineSoft, uEarthLine, smoothstep(0.5, 1.0, nInk));
               tileTinted = mix(nBase, nGlow, clamp(max(nInk, nWarm * 0.75), 0.0, 1.0) * 0.92);
             }
             vec3 tileRgb = mix(diffuseColor.rgb, tileTinted, uTileTintStrength);
             if (uTileHasLabels > 0.5) {
               vec4 tileLabels = texture2D(labelsMap, vMapUv);
+              if (tilePaper && uTileTintStrength > 0.5) {
+                tileLabels.rgb = mix(uEarthLand, uEarthLine, pow(dot(tileLabels.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.4545));
+              }
               tileRgb = mix(tileRgb, tileLabels.rgb, tileLabels.a * uTileLabelsAlpha);
             }
             diffuseColor.rgb = tileRgb;
@@ -1507,12 +2225,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     return tex;
   }
 
-  // Instant fallback base (upstream drawHolographicEarthFallback verbatim).
+  // Instant fallback base: a sea wash that warms toward land at the equator.
   function paintEarthBase(ctx) {
+    const pal = earthPalette();
     const gradient = ctx.createLinearGradient(0, 0, 0, EARTH_MAP_H);
-    gradient.addColorStop(0, '#061D37');
-    gradient.addColorStop(0.5, '#020B1A');
-    gradient.addColorStop(1, '#06172D');
+    gradient.addColorStop(0, pal.sea);
+    gradient.addColorStop(0.5, pal.land);
+    gradient.addColorStop(1, pal.sea);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, EARTH_MAP_W, EARTH_MAP_H);
   }
@@ -1526,10 +2245,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Minor meridians stop at ±80° (like a printed graticule) so the pole
     // isn't a 36-spoke starburst; the 30° majors still meet there.
     const capY = ((90 - 80) / 180) * EARTH_MAP_H;
+    ctx.strokeStyle = echoHex('rule', '#d3cab8');
     for (let lon = -180; lon <= 180; lon += 10) {
       const x = ((lon + 180) / 360) * EARTH_MAP_W;
       const major = lon % 30 === 0;
-      ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
+      ctx.globalAlpha = major ? 0.9 : 0.45;
       ctx.lineWidth = (major ? 2 : 1) * sc;
       ctx.beginPath();
       ctx.moveTo(x, major ? 0 : capY);
@@ -1539,15 +2259,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     for (let lat = -80; lat <= 80; lat += 10) {
       const y = ((90 - lat) / 180) * EARTH_MAP_H;
       const major = lat % 30 === 0;
-      ctx.strokeStyle = major ? 'rgba(62, 202, 242, 0.18)' : 'rgba(42, 148, 188, 0.07)';
+      ctx.globalAlpha = major ? 0.9 : 0.45;
       ctx.lineWidth = (major ? 2 : 1) * sc;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(EARTH_MAP_W, y);
       ctx.stroke();
     }
-    ctx.fillStyle = 'rgba(91, 221, 255, 0.028)';
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = echoHex('rule', '#d3cab8');
     for (let y = sc; y < EARTH_MAP_H; y += 6 * sc) ctx.fillRect(0, y, EARTH_MAP_W, sc);
+    ctx.globalAlpha = 1;
     try { ctx.restore(); } catch (e) {}
   }
 
@@ -1629,6 +2351,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const dst = ensureEarthBaseCanvas() ? earthBaseCtx : earthMapCtx;
     if (!dst) return false;
     const token = ++earthBaseBuildToken;
+    if (image) earthBasePhoto = image;
     paintEarthBase(dst);
     const finish = (source) => {
       if (token !== earthBaseBuildToken) return;
@@ -1665,6 +2388,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     const lut = earthCoastGlowLut();
     const lutN = lut.length;
+    // The mode's sea, land, shelf and coast colours (0–255).
+    const pal = earthPalette();
+    const cSea = hexRgb255(pal.sea);
+    const cLand = hexRgb255(pal.land);
+    const cShelf = hexRgb255(pal.lineSoft);
+    const cCoast = hexRgb255(pal.line);
     const field = new Float32Array(W * (bandRows + 2));
     const rowSums = new Float64Array((W * 2 + 2) * 3);
     let y0 = 0;
@@ -1725,21 +2454,23 @@ window.WebXRVR = window.WebXRVR || (function () {
             const o = (row + x) * 4;
             const lum = (src[o] * 0.25 + src[o + 1] * 0.55 + src[o + 2] * 0.20) / 255;
             const cover = earthSmoothstep(-1.1, 1.1, d);
-            // Ocean → land body colour (upstream palette), anti-aliased.
-            let rr = (1 + lum * 4) + ((5 + lum * 16) - (1 + lum * 4)) * cover;
-            let gg = (8 + lum * 13) + ((50 + lum * 72) - (8 + lum * 13)) * cover;
-            let bb = (23 + lum * 25) + ((82 + lum * 105) - (23 + lum * 25)) * cover;
-            // Shelf glow hugging the coast on both sides.
+            // Sea → land in the mode's palette, anti-aliased; the photo's
+            // brightness keeps a little relief.
+            const shade = 0.92 + 0.16 * lum;
+            let rr = (cSea[0] + (cLand[0] - cSea[0]) * cover) * shade;
+            let gg = (cSea[1] + (cLand[1] - cSea[1]) * cover) * shade;
+            let bb = (cSea[2] + (cLand[2] - cSea[2]) * cover) * shade;
+            // Shelf wash hugging the coast on both sides.
             const glow = lut[Math.round((d + EARTH_COAST_RANGE) / EARTH_COAST_LUT_STEP)];
-            rr += (24 - rr) * glow;
-            gg += (150 - gg) * glow;
-            bb += (214 - bb) * glow;
-            // Crisp cyan coastline, ~3 px wide, anti-aliased.
+            rr += (cShelf[0] - rr) * glow;
+            gg += (cShelf[1] - gg) * glow;
+            bb += (cShelf[2] - bb) * glow;
+            // Crisp coastline in line ink, ~3 px wide, anti-aliased.
             const ad = d < 0 ? -d : d;
             const line = 1 - earthSmoothstep(0.9, 2.1, ad);
-            rr += (42 - rr) * line;
-            gg += (222 - gg) * line;
-            bb += (255 - bb) * line;
+            rr += (cCoast[0] - rr) * line;
+            gg += (cCoast[1] - gg) * line;
+            bb += (cCoast[2] - bb) * line;
             px[(j * W + x) * 4] = rr;
             px[(j * W + x) * 4 + 1] = gg;
             px[(j * W + x) * 4 + 2] = bb;
@@ -1845,8 +2576,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
   }
 
+  // Heat blooms in the accent; the hottest band takes the spot colour.
+  const EARTH_HEAT_SPOT_FROM = 0.8;
+  function earthHeatInkHex(heat) {
+    return heat >= EARTH_HEAT_SPOT_FROM ? echoHex('spot', '#f3d34a') : echoHex('accent', '#c2250e');
+  }
   function paintHeatZones(ctx) {
     try {
+      const accent = hexRgb255(echoHex('accent', '#c2250e'));
+      const spot = hexRgb255(echoHex('spot', '#f3d34a'));
       const zoneState = (loc) => {
         if (earthSelectedIndex >= 0 && earthLocations[earthSelectedIndex] === loc) return 2;
         if (earthHoveredIndex >= 0 && earthLocations[earthHoveredIndex] === loc) return 1;
@@ -1866,7 +2604,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const r = earthZonePixelRadius(loc);
         const heat = earthHeatOf(loc);
         const state = zoneState(loc);
-        const style = earthHeatStyle(heat, state);
+        const style = earthHeatStyle(heat, state, heat >= EARTH_HEAT_SPOT_FROM ? spot : accent);
         for (let k = -1; k <= 1; k++) {
           const px = u.x + k * EARTH_MAP_W;
           if (px < -r.x || px > EARTH_MAP_W + r.x) continue;
@@ -1950,7 +2688,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       ranked.forEach((loc, i) => {
         const u = earthRenderedDirection(loc.lat, loc.lon);
         const heat = earthHeatOf(loc);
-        const color = earthHeatRamp(heat).hex;
+        const color = earthHeatInkHex(heat);
         const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(
           pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color }));
         mesh.frustumCulled = false;
@@ -2030,14 +2768,15 @@ window.WebXRVR = window.WebXRVR || (function () {
         const angular = earthZoneAngularRadius(loc);
         const halfExtent = EARTH_RADIUS * Math.sin(angular);
         const dir = earthRenderedDirection(loc.lat, loc.lon);
-        const color = earthHeatRamp(heat).hex;
+        const color = earthHeatInkHex(heat);
         const material = new THREE.MeshBasicMaterial({
           map: texture,
           color,
           transparent: true,
           opacity: 0,
           depthWrite: false,
-          blending: THREE.AdditiveBlending,
+          // Additive light washes out on paper; the dark globe keeps the glow.
+          blending: readVRTheme() === 'dark' ? THREE.AdditiveBlending : THREE.NormalBlending,
           side: THREE.FrontSide,
         });
         const mesh = new THREE.Mesh(heatSpriteGeo, material);
@@ -2115,13 +2854,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Holo Atlas label HUD ───────────────────────────────────────────
-  // Zoom realms (v3 plan §2): tier name + accent colour follow the heat ramp
-  // (cyan → teal → amber → coral) so the breadcrumb reads as depth at a glance.
+  // Zoom realms (v3 plan §2): tier name + tone follow the heat ramp
+  // (info → success → warn → accent) so the breadcrumb reads as depth at a glance.
+  // The colour is TOKENS.hex[tone] from the canvas module (see tierColor below).
   const EARTH_TIERS = [
-    { name: 'ORBIT', max: 3, color: '#39D7FF' },
-    { name: 'REGION', max: 24, color: '#4FE3C1' },
-    { name: 'CITY', max: 200, color: '#FFC857' },
-    { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+    { name: 'ORBIT', max: 3, tone: 'info' },
+    { name: 'REGION', max: 24, tone: 'success' },
+    { name: 'CITY', max: 200, tone: 'warn' },
+    { name: 'STREET', max: Infinity, tone: 'accent' },
   ];
   function earthTierIndex(scale) {
     const s = Math.max(1, Number(scale) || 1);
@@ -2145,7 +2885,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   function refreshEarthLabel() {
-    if (!earthLabelCtx || !earthLabelTexture) return;
+    if (!fontsSettled || !earthLabelCtx || !earthLabelTexture) return;
     const hovered = (earthHoveredIndex >= 0 && earthHoveredIndex < earthLocations.length)
       ? earthLocations[earthHoveredIndex]
       : null;
@@ -2348,6 +3088,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (earthPreviewVideo) disposeEarthPreviewVideo();
       return;
     }
+    if (!fontsSettled) return;
     // Cycle the hero through the (≤3) previewed reels. With a live video the
     // clip's own end advances it (capped so one long reel can't hog the card);
     // otherwise a short poster rotation. Frozen under reduced motion.
@@ -2799,7 +3540,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Limb glow breathes with table tilt (stronger once the map lies "flat").
     if (earthAtmosphereMesh && earthAtmosphereMesh.material) {
       try {
-        earthAtmosphereMesh.material.opacity = sceneMode === 'earth' ? 0.30 + tableTilt(earthZoom) * 0.10 : 0;
+        earthAtmosphereMesh.material.opacity = sceneMode === 'earth' ? earthRimOpacity * (1 + tableTilt(earthZoom) / 3) : 0;
       } catch (e) {}
     }
     refreshEarthTexture();
@@ -3981,15 +4722,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     // callers, tests, and future miss branches.
     if (!bar || !ctx || bar.caption === 'UNAVAILABLE' || !(bar.pixels > 0)) return;
     const left = 220 - bar.pixels / 2, right = 220 + bar.pixels / 2;
-    ctx.strokeStyle = echoHex('ink', '#f2f3f5');
+    ctx.strokeStyle = echoHex('ink', '#17140f');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(left, 94); ctx.lineTo(right, 94);
     ctx.moveTo(left, 89); ctx.lineTo(left, 99);
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
-    ctx.fillStyle = echoHex('ink', '#f2f3f5');
-    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.fillStyle = echoHex('ink', '#17140f');
+    ctx.font = `700 15px ${uiFont('mono', 'monospace')}`;
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
   }
@@ -4328,12 +5069,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   function earthTileSourceIsLight() {
     return earthTileTheme !== 'dark';
   }
+  // The grade and tint uniforms are the shared module objects (see
+  // earthGradeUniforms); only the per-tile switches below are fresh.
   function makeEarthTileUniforms(labelsTexture, holo) {
     return {
+      ...earthGradeUniforms,
       labelsMap: { value: labelsTexture || null },
-      uTileTintLift: { value: EARTH_TILE_TINT_LIFT_VEC },
-      uTileTintHue: { value: EARTH_TILE_TINT_HUE_VEC },
-      uTileTintDepth: { value: EARTH_TILE_TINT_DEPTH },
       uTileTintStrength: { value: holo ? 1 : 0 },
       uTileHasLabels: { value: labelsTexture ? 1 : 0 },
       uTileLabelsAlpha: { value: holo ? EARTH_TILE_LABEL_ALPHA : 1 },
@@ -4944,10 +5685,51 @@ window.WebXRVR = window.WebXRVR || (function () {
     return delta;
   }
 
+  // The 64×64 reticle dot in the accent colour (repainted on a mode switch).
+  function paintReticle(rx) {
+    rx.clearRect(0, 0, 64, 64);
+    const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    rg.addColorStop(0, '#ffffff');
+    const reticleHex = echoHex('accent', '#c2250e');
+    const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
+    rg.addColorStop(0.25, reticleHex);
+    rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
+    rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
+    rx.fillStyle = rg;
+    rx.fillRect(0, 0, 64, 64);
+    rx.strokeStyle = reticleHex;
+    rx.lineWidth = 3;
+    rx.beginPath();
+    rx.arc(32, 32, 20, 0, Math.PI * 2);
+    rx.stroke();
+    rx.fillStyle = '#ffffff';
+    rx.beginPath();
+    rx.arc(32, 32, 5, 0, Math.PI * 2);
+    rx.fill();
+  }
+
   // ─── Three.js Scene Setup ───────────────────────────────────────────
   function initThreeScene(canvas, context) {
     ensureThree();
     if (!THREE) return null;
+
+    // The page's mode first, so nothing below paints or clears in the wrong one.
+    applyVRTheme(readPageTheme());
+    if (!themeObserver && typeof MutationObserver === 'function' &&
+        typeof document !== 'undefined' && document.documentElement) {
+      try {
+        themeObserver = new MutationObserver(() => applyVRTheme(readPageTheme()));
+        themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      } catch (e) { themeObserver = null; }
+    }
+    if (!fontGateStarted) {
+      fontGateStarted = true;
+      const ui = getUICanvas();
+      const onFonts = () => { fontsSettled = true; markCanvasesDirty(); };
+      const fontSet = typeof document !== 'undefined' ? document.fonts : undefined;
+      if (ui && typeof ui.waitForFonts === 'function') ui.waitForFonts(fontSet, 3000, onFonts);
+      else onFonts();
+    }
 
     if (context) {
       glContext = context;
@@ -4978,14 +5760,14 @@ window.WebXRVR = window.WebXRVR || (function () {
       updatePreviewSize(canvas);
       if (renderer.xr) renderer.xr.enabled = true;
       try {
-        if (renderer.setClearColor) renderer.setClearColor(0x020612, 1);
+        if (renderer.setClearColor) renderer.setClearColor(parseInt(worldClearHex().slice(1), 16), 1);
       } catch (e) {}
     }
 
     if (!scene) {
       scene = new THREE.Scene();
       try {
-        scene.background = new THREE.Color(0x020612);
+        scene.background = new THREE.Color(parseInt(worldClearHex().slice(1), 16));
       } catch (e) {}
     }
 
@@ -5178,7 +5960,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       guideMesh.renderOrder = 4;
       guideMesh.visible = false;
       scene.add(guideMesh);
-      if (guideCtx && ui && typeof ui.renderGuideCanvas === 'function') {
+      if (fontsSettled && guideCtx && ui && typeof ui.renderGuideCanvas === 'function') {
         try {
           ui.renderGuideCanvas(guideCtx);
           guideTexture.needsUpdate = true;
@@ -5201,7 +5983,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const laserGeo = new THREE.BufferGeometry();
       laserGeo.setAttribute('position', new THREE.BufferAttribute(laserPositions, 3));
       const laserMat = new THREE.LineBasicMaterial({
-        color: parseInt(echoHex('accent', '#ff3b1f').slice(1), 16),
+        color: parseInt(echoHex('accent', '#c2250e').slice(1), 16),
         transparent: true,
         opacity: 0.8,
         // Legacy parity: the beam always paints over the scene (v5.2 drew
@@ -5222,24 +6004,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         rc.height = 64;
         const rx = rc.getContext('2d');
         if (rx) {
-          const rg = rx.createRadialGradient(32, 32, 2, 32, 32, 30);
-          rg.addColorStop(0, '#ffffff');
-          const reticleHex = echoHex('accent', '#ff3b1f');
-          const reticleRgb = [1, 3, 5].map((i) => parseInt(reticleHex.slice(i, i + 2), 16)).join(',');
-          rg.addColorStop(0.25, reticleHex);
-          rg.addColorStop(0.6, 'rgba(' + reticleRgb + ',0.55)');
-          rg.addColorStop(1, 'rgba(' + reticleRgb + ',0)');
-          rx.fillStyle = rg;
-          rx.fillRect(0, 0, 64, 64);
-          rx.strokeStyle = reticleHex;
-          rx.lineWidth = 3;
-          rx.beginPath();
-          rx.arc(32, 32, 20, 0, Math.PI * 2);
-          rx.stroke();
-          rx.fillStyle = '#ffffff';
-          rx.beginPath();
-          rx.arc(32, 32, 5, 0, Math.PI * 2);
-          rx.fill();
+          paintReticle(rx);
           reticleTexture = applyLinearSampling(new THREE.CanvasTexture(rc));
         }
       } catch (e) {
@@ -5285,9 +6050,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       for (let i = 0; i < starCount; i++) {
         const t = Math.random();
         const warm = t > 0.88, bright = 0.55 + Math.random() * 0.45;
-        starColors[i * 3] = (warm ? 1.0 : 0.62 + t * 0.2) * bright;
-        starColors[i * 3 + 1] = (warm ? 0.86 : 0.80 + t * 0.15) * bright;
-        starColors[i * 3 + 2] = 1.0 * bright;
+        // Brightness only; the warm hue comes from the material colour (WORLD_PALETTE.dark.star).
+        const b = warm ? bright : bright * (0.7 + t * 0.3);
+        starColors[i * 3] = b;
+        starColors[i * 3 + 1] = b;
+        starColors[i * 3 + 2] = b;
       }
       starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
       let starSprite = null;
@@ -5306,13 +6073,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         }
       } catch (e) { starSprite = null; }
       const starMat = new THREE.PointsMaterial({
-        color: 0xffffff, size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
+        color: parseInt(WORLD_PALETTE.dark.star.slice(1), 16), size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
         vertexColors: true, depthWrite: false,
       });
       if (starSprite) starMat.map = starSprite;
       starfieldPoints = new THREE.Points(starGeo, starMat);
       scene.add(starfieldPoints);
     }
+    buildLightWorld();
+    applyWorldMode();
+    applyWorldDim();
 
     // Earth Subsystem — textured holographic globe (upstream visual parity):
     // dark equirect base map + painted heat zones, 3D pulsing pins at exact
@@ -5352,7 +6122,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 48, 32);
       const earthMat = new THREE.MeshBasicMaterial({
         map: earthMapTexture || null,
-        color: earthMapTexture ? 0xffffff : 0x0d2a3f,
+        color: earthMapTexture ? 0xffffff : earthPalette().sea,
       });
       installEarthWarpShader(earthMat);
       earthLegacyGeometry = earthGeo;
@@ -5373,9 +6143,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       // the map cap. Opacity breathes with table tilt (0.12→0.20).
       try {
         const atmosphereGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.03, 32, 20);
+        const rimPal = earthPalette();
+        earthRimOpacity = rimPal.rimOpacity;
           const atmosphereMat = new THREE.MeshBasicMaterial({
-          color: 0x39d7ff, transparent: true, opacity: 0.24,
-          blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
+          color: rimPal.rim, transparent: true, opacity: rimPal.rimOpacity,
+          blending: THREE[rimPal.rimBlending], side: THREE.BackSide, depthWrite: false,
           depthTest: true,
         });
         atmosphereMat.onBeforeCompile = (shader) => {
@@ -5386,7 +6158,6 @@ window.WebXRVR = window.WebXRVR || (function () {
           shader.fragmentShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
             shader.fragmentShader.replace('#include <opaque_fragment>', `
               float earthRim = pow(1.0 - abs(dot(normalize(vEarthRimNormal), normalize(vEarthRimViewPosition))), 3.0);
-              diffuseColor.rgb = mix(vec3(0.04, 0.30, 0.85), vec3(0.50, 0.96, 1.0), earthRim);
               diffuseColor.a *= earthRim;
               #include <opaque_fragment>
             `);
@@ -6092,6 +6863,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       return false;
     }
+    if (!fontsSettled) return overlayHasPopups;
     if (!ui || !overlayCtx || typeof ui.renderOverlayCanvas !== 'function' ||
         typeof ui.filterOverlayComments !== 'function') {
       if (overlayHasPopups) {
@@ -6172,7 +6944,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
       return {
         tier: tier.name,
-        tierColor: tier.color,
+        tierColor: echoHex(tier.tone, '#c2250e'),
         zoomPct: earthZoomPercent(),
         scaleCaption,
         mapStatus,
@@ -6186,7 +6958,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   function updateUiTextures() {
     const ui = getUICanvas();
-    if (!ui) return;
+    if (!ui || !fontsSettled) return;
     const source = getVisualSource();
     let itemState = {};
     if (callbacks.getCurrentItemState) {
@@ -6327,6 +7099,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
       getScene: () => sceneMode,
       earthAvailable: () => !isPackExperience(),
+      setTheme: setVRTheme,
       // REELS from the open shell just returns to the feed; from the dock it
       // is the main feed, so it also leaves a location feed.
       setScene(mode, wasOpen) {
@@ -6835,7 +7608,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       pressedButton,
       renderStats: { ...renderStats },
       earthState: getEarthState(),
+      world: { theme: readVRTheme(), dim: worldDim },
     };
+  }
+
+  function readVRTheme() {
+    const ui = getUICanvas();
+    return ui && typeof ui.getTheme === 'function' ? ui.getTheme() : readPageTheme();
   }
 
   // ─── Frame Rendering Loop ───────────────────────────────────────────
@@ -6885,6 +7664,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     updatePreviewSize(previewCanvas);
     applySceneVisibility();
+    updateWorld(time);
 
     if (sceneMode === 'reels') {
       updateVisualTexture(getVisualSource());
@@ -8180,7 +8960,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (screenMesh) screenMesh.visible = !isEarth;
     applyStereoVisibility();
-    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow;
+    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow && readVRTheme() === 'dark';
     if (overlayMesh) {
       const source = getVisualSource();
       overlayMesh.visible = !isEarth && !commentsPanelVisible && overlayHasPopups &&
@@ -8189,7 +8969,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (controlsMesh) controlsMesh.visible = controlsVisible;
     if (commentsMesh) commentsMesh.visible = (!isEarth && commentsPanelVisible);
     if (guideMesh) guideMesh.visible = (!isEarth && controlsVisible && debugFlags.guide);
-    if (starfieldPoints) starfieldPoints.visible = true;
+    applyWorldMode();
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
     if (reticleMesh) reticleMesh.visible = pointerActive;
@@ -9980,6 +10760,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       renderer.setAnimationLoop((time, frame) => {
         captureSessionEye(frame);
         applySceneVisibility();
+        updateWorld(time);
         if (sceneMode === 'reels') {
           updateVisualTexture(getVisualSource());
           updateGlowColor(time, 800);
@@ -10100,9 +10881,16 @@ window.WebXRVR = window.WebXRVR || (function () {
       try { window.removeEventListener('resize', previewResizeHandler); } catch (e) {}
       previewResizeHandler = null;
     }
+    if (themeObserver) {
+      try { themeObserver.disconnect(); } catch (e) {}
+      themeObserver = null;
+    }
     // Dispose Three-managed GPU resources. Textures are nulled (not just
     // disposed) so the next startPreview() rebuilds them — reusing a
     // disposed CanvasTexture rendered black after restart.
+    if (worldUniforms) {
+      try { worldUniforms.uCloudTex.value.dispose(); } catch (e) {}
+    }
     if (scene) {
       try {
         scene.traverse((obj) => {
@@ -10162,6 +10950,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     controlsMesh = null;
     commentsMesh = null;
     starfieldPoints = null;
+    worldSky = null;
+    worldMountains = null;
+    worldUniforms = null;
+    worldLastT = -1;
     earthGroup = null;
     if (earthLegacyGeometry) earthLegacyGeometry.dispose();
     if (earthAdaptiveGeometry) earthAdaptiveGeometry.dispose();
@@ -10529,6 +11321,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ── Quest virtual keyboard (DOM Overlay) for posting comments ──
+  // Colours only, so a mode switch never touches the input's display or layout.
+  function styleDomInput() {
+    if (!domOverlayInput || !domOverlayInput.style) return;
+    domOverlayInput.style.color = echoHex('ink', '#17140f');
+    domOverlayInput.style.background = echoHex('surface', '#faf7f0');
+    domOverlayInput.style.border = '2px solid ' + echoHex('accent', '#c2250e');
+  }
+
   function initDomOverlay() {
     if (domOverlayRoot || typeof document === 'undefined') return;
     try {
@@ -10540,7 +11340,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.autocomplete = 'off';
       domOverlayInput.setAttribute('enterkeyhint', 'send');
       domOverlayInput.placeholder = 'Type a VR comment…';
-      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:Archivo,system-ui,sans-serif;font-size:16px;color:#f2f3f5;background:#101214;border:2px solid #ff5c42;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      domOverlayInput.style.cssText = 'position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:460px;max-width:80vw;padding:14px 16px;font-family:' + uiFont('sans', 'system-ui,sans-serif') + ';font-size:16px;border-radius:0;outline:none;pointer-events:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.9);';
+      styleDomInput();
       domOverlayInput.addEventListener('keydown', onCommentInputKeydown);
       domOverlayInput.addEventListener('blur', onCommentInputBlur);
       domOverlayRoot.appendChild(domOverlayInput);
@@ -10684,6 +11485,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     getSourceStereo() { return sourceStereo; },
 
     __test: {
+      setVRTheme,
+      earthGradeColors,
+      makeEarthTileUniforms,
+      buildEarthBase: (image) => buildHolographicEarthBase(image),
+      earthAtmosphere() {
+        const m = earthAtmosphereMesh && earthAtmosphereMesh.material;
+        return m ? { color: m.color.getHexString(), blending: m.blending } : null;
+      },
+      worldDimTarget,
+      stepDim,
+      DIM_AMOUNT,
+      DIM_FADE_MS,
+      worldMeshes: worldObjectMeshes,
+      worldObjects() {
+        return {
+          sky: !!(worldSky && worldSky.visible),
+          mountains: !!(worldMountains && worldMountains.visible),
+          stars: !!(starfieldPoints && starfieldPoints.visible),
+          glow: !!(ambilightMesh && ambilightMesh.visible),
+        };
+      },
       postXRDiag,
       locationToUnit,
       earthZoneAngularRadius,
@@ -11211,6 +12033,13 @@ window.WebXRVR = window.WebXRVR || (function () {
       },
       rebuildEarthHeatSprites,
       updateEarthHeatSprites,
+      earthHeatInk() {
+        const hex = (m) => '#' + m.color.getHexString();
+        return {
+          pins: earthPinsGroup ? earthPinsGroup.children.map((mesh) => hex(mesh.material)) : [],
+          sprites: earthHeatSprites.map((s) => ({ hex: hex(s.material), additive: s.material.blending === THREE.AdditiveBlending })),
+        };
+      },
       earthHeatStats() {
         return {
           count: earthHeatSprites.length,

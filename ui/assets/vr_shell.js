@@ -620,6 +620,9 @@
           if (hit.arg === 'profile') { open(profilePath()); return true; }
           if (NAV_PATHS[hit.arg]) { open(NAV_PATHS[hit.arg]); return true; }
           return false;
+        case 'theme':
+          if (d.setTheme) d.setTheme(hit.arg);
+          return true;
         case 'close':
           close();
           return true;

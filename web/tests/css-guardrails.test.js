@@ -8,8 +8,8 @@ import stylelint from 'stylelint';
 // holds those counts so they can only go down. When you remove some, lower the number here.
 const BASELINE = {
   'src/styles/global.css': {
-    'color-no-hex': 26,
-    'function-disallowed-list': 34,
+    'color-no-hex': 17,
+    'function-disallowed-list': 29,
     'declaration-no-important': 150,
     'declaration-property-value-allowed-list': 25,
     'declaration-property-value-disallowed-list': 14,

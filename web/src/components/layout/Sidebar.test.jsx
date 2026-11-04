@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar.jsx';
@@ -120,5 +120,51 @@ describe('Sidebar beta navigation', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'boss', role: 'admin' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
     expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Credits', 'Upload', 'Image', 'Video', 'Compare']);
+  });
+});
+
+// Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    clear: () => { data.clear(); },
+  };
+}
+
+describe('Sidebar colour theme switch', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', memoryStorage());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete document.documentElement.dataset.theme;
+  });
+
+  const renderGuest = () => {
+    mockUseAuth.mockReturnValue({ user: null });
+    mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
+    render(
+      <MemoryRouter>
+        <Sidebar isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+  };
+
+  it('shows LIGHT checked by default', () => {
+    renderGuest();
+    expect(screen.getByRole('radiogroup', { name: 'Colour theme' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'LIGHT' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('DARK applies and remembers the theme', () => {
+    renderGuest();
+    fireEvent.click(screen.getByRole('radio', { name: 'DARK' }));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(localStorage.getItem('sx.theme')).toBe('dark');
+    expect(screen.getByRole('radio', { name: 'DARK' })).toHaveAttribute('aria-checked', 'true');
   });
 });

@@ -48,7 +48,7 @@
   const CP_STATS_Y = 198;
   // One time-sync toggle replaces the ALL / SYNC / GENERAL tabs.
   const CP_SYNC_BTN = { x: 504, y: CP_INFO_H + 12, w: 36, h: 32 };
-  // Comment name advance (700 11px JetBrains Mono, 0.6em per glyph).
+  // Comment name advance (600 11px IBM Plex Mono, 0.6em per glyph).
   const CP_NAME_CHAR_W = 6.6;
 
   // FOLLOW hugs its label (same 700 11px mono), right-aligned 8px left of close.
@@ -401,18 +401,30 @@
     ctx.restore();
   }
 
-  // Chamfered button outline: the bevelled corner of the ECHO icon set.
-  function chamferPath(ctx, x, y, w, h, c) {
+  // Rounded-rectangle path (no fill, no stroke). Falls back to a square rect
+  // where the context has no roundRect.
+  function roundRectPath(ctx, x, y, w, h, r) {
     ctx.beginPath();
-    ctx.moveTo(x + c, y);
-    ctx.lineTo(x + w - c, y);
-    ctx.lineTo(x + w, y + c);
-    ctx.lineTo(x + w, y + h - c);
-    ctx.lineTo(x + w - c, y + h);
-    ctx.lineTo(x + c, y + h);
-    ctx.lineTo(x, y + h - c);
-    ctx.lineTo(x, y + c);
-    ctx.closePath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+
+  // '#rrggbb' or 'rgba(r, g, b, a)' with a new alpha, for gradients and veils.
+  function withAlpha(color, alpha) {
+    let m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+    if (m) return 'rgba(' + parseInt(m[1], 16) + ', ' + parseInt(m[2], 16) + ', ' + parseInt(m[3], 16) + ', ' + alpha + ')';
+    m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(color);
+    return m ? 'rgba(' + m[1] + ', ' + m[2] + ', ' + m[3] + ', ' + alpha + ')' : color;
+  }
+
+  // Accent rule across the top of a panel, clipped to the panel's rounded corners.
+  function panelTopBar(ctx, w, h) {
+    ctx.save();
+    roundRectPath(ctx, 0, 0, w, h, TOKENS.radiusPx);
+    ctx.clip();
+    ctx.fillStyle = TOKENS.hex.accent;
+    ctx.fillRect(0, 0, w, 3);
+    ctx.restore();
   }
 
   function wrapTextLines(ctx, text, maxW, maxLines) {
@@ -570,17 +582,17 @@
     const size = controlsCanvasSize(options);
 
     // Container + border (reels dock parity)
-    previewRoundRect(ctx, 0, 0, size.w, size.h, TOKENS.radius);
+    roundRectPath(ctx, 0, 0, size.w, size.h, TOKENS.radiusPx);
     ctx.fillStyle = T.surface;
     ctx.fill();
-    ctx.strokeStyle = T.accent;
+    ctx.strokeStyle = T.ruleStrong;
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     // Header
     ctx.fillStyle = T.accent;
     ctx.fillRect(24, 14, 4, 20);
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
+    ctx.font = `600 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('EARTH ATLAS', 36, 24);
@@ -591,12 +603,12 @@
     // Exit (the way back to reels is the nav bar's REELS tab)
     ctx.lineWidth = 1;
     const xb = CTRL_BUTTONS.find((b) => b.action === 'exit');
-    previewRoundRect(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radius);
+    roundRectPath(ctx, xb.x, xb.y, xb.w, xb.h, TOKENS.radiusPx);
     ctx.fillStyle = T.surface;
     ctx.fill();
-    ctx.strokeStyle = T.accent;
+    ctx.strokeStyle = T.ruleStrong;
     ctx.stroke();
-    drawIcon(ctx, 'exit', xb.x + xb.w / 2, xb.y + xb.h / 2, 14, T.accent);
+    drawIcon(ctx, 'exit', xb.x + xb.w / 2, xb.y + xb.h / 2, 14, T.ink);
 
     // Readout strip: one compact row of realm / scale / map / zoom cells.
     const zp = Math.max(0, Math.min(100, Number(earth.zoomPct) || 0)) / 100;
@@ -607,7 +619,7 @@
       { k: 'ZOOM', zoom: true, w: 192 },
     ];
     const sy = 52, sh = 32, my = sy + sh / 2;
-    previewRoundRect(ctx, 24, sy, 752, sh, TOKENS.radius);
+    roundRectPath(ctx, 24, sy, 752, sh, TOKENS.radiusPx);
     ctx.fillStyle = T.surface2;
     ctx.fill();
     ctx.strokeStyle = T.rule;
@@ -627,7 +639,7 @@
         kx += 14;
       }
       ctx.fillStyle = T.ink3;
-      ctx.font = `bold 10px ${TOKENS.font.mono}`;
+      ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(cell.k, kx, my);
       const vx = kx + ctx.measureText(cell.k).width + 8;
@@ -638,11 +650,11 @@
         ctx.textAlign = 'right';
         ctx.fillText(Math.round(zp * 100) + '%', cx + cell.w - 12, my);
         const tw = room - 40;
-        previewRoundRect(ctx, vx, my - 3, tw, 6, TOKENS.radius);
+        roundRectPath(ctx, vx, my - 3, tw, 6, TOKENS.radiusPx);
         ctx.fillStyle = T.surface;
         ctx.fill();
         if (zp > 0.005) {
-          previewRoundRect(ctx, vx, my - 3, Math.max(6, tw * zp), 6, TOKENS.radius);
+          roundRectPath(ctx, vx, my - 3, Math.max(6, tw * zp), 6, TOKENS.radiusPx);
           ctx.fillStyle = T.accent;
           ctx.fill();
         }
@@ -650,7 +662,7 @@
         // Shrink long values (STREAMING 42%) to the cell instead of overflowing.
         const v = String(cell.v).slice(0, 14);
         ctx.fillStyle = cell.c;
-        ctx.font = `800 16px ${TOKENS.font.sans}`;
+        ctx.font = `700 16px ${TOKENS.font.sans}`;
         const vw = ctx.measureText(v).width;
         if (vw > room) ctx.font = `800 ${Math.max(10, Math.floor(16 * room / vw))}px ${TOKENS.font.sans}`;
         ctx.fillText(v, vx, my + 1);
@@ -668,20 +680,20 @@
       const live = feed ? !!earth.canOpenFeed : true;
       const lit = btn.action === 'earth_north_up' && earth.northUp;
       const primary = feed && live;
-      previewRoundRect(ctx, btn.x, btn.y, btn.w, btn.h, TOKENS.radius);
+      roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, TOKENS.radiusPx);
       if (primary) ctx.fillStyle = (pressed || hover) ? T.accentHi : T.accent;
-      else ctx.fillStyle = pressed ? T.bg : ((hover && live) || lit ? T.surface3 : T.surface);
+      else ctx.fillStyle = pressed ? T.surface3 : (hover && live ? T.surfaceHover : (lit ? T.surface2 : T.surface));
       ctx.fill();
       if (!primary) {
-        ctx.strokeStyle = live && (hover || lit) ? T.accent : (live ? T.ruleStrong : T.rule);
+        ctx.strokeStyle = live && lit ? T.accent : (live ? T.ruleStrong : T.rule);
         ctx.lineWidth = 1;
         ctx.stroke();
       }
       const ink = primary ? T.onAccent : (!live ? T.inkMuted : T.ink);
-      const iconInk = primary ? T.onAccent : (!live ? T.inkMuted : ((hover || lit) ? T.accent : T.ink2));
+      const iconInk = primary ? T.onAccent : (!live ? T.inkMuted : ((hover || pressed || lit) ? T.ink : T.ink2));
       EARTH_ICON[btn.action](ctx, btn.x + 26, btn.y + btn.h / 2, iconInk);
       ctx.fillStyle = ink;
-      ctx.font = `bold 13px ${TOKENS.font.mono}`;
+      ctx.font = `600 13px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2);
@@ -734,49 +746,44 @@
 
     const size = controlsCanvasSize(options);
 
-    // 1. Dark Glass Container Background
+    // 1. Paper container
     ctx.fillStyle = TOKENS.hex.surface;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, size.w, size.h, TOKENS.radius);
-    else ctx.rect(0, 0, size.w, size.h);
+    roundRectPath(ctx, 0, 0, size.w, size.h, TOKENS.radiusPx);
     ctx.fill();
 
-    // 2. Vermilion Glow Outer Border
-    ctx.strokeStyle = TOKENS.hex.accent;
+    // 2. Ink hairline border
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, size.w, size.h, TOKENS.radius);
-    else ctx.rect(0, 0, size.w, size.h);
+    roundRectPath(ctx, 0, 0, size.w, size.h, TOKENS.radiusPx);
     ctx.stroke();
 
     const T = TOKENS.hex;
 
     // Square header pill (all header controls share one 32 px height).
     const headerPill = (b, active) => {
-      ctx.fillStyle = active ? T.surface3 : T.surface2;
-      ctx.strokeStyle = active ? T.accent : T.rule;
+      ctx.fillStyle = active ? T.surfaceHover : T.surface2;
+      ctx.strokeStyle = active ? T.ruleStrong : T.rule;
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(b.x, b.y, b.w, b.h, TOKENS.radius);
-      else ctx.rect(b.x, b.y, b.w, b.h);
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
       ctx.fill();
       ctx.stroke();
     };
-    // Chamfered body button; returns the ink for its icon and caption.
+    // Rounded body button; returns the ink for its icon and caption. Lit
+    // (engaged) buttons keep the resting fill and say so with an accent edge.
     const bodyButton = (b, isHover, isPressed, lit) => {
-      chamferPath(ctx, b.x, b.y, b.w, b.h, 6);
-      ctx.fillStyle = isPressed ? T.bg : ((isHover || lit) ? T.surface3 : T.surface2);
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
+      ctx.fillStyle = isPressed ? T.surface3 : (isHover ? T.surfaceHover : T.surface2);
       ctx.fill();
-      ctx.strokeStyle = (isHover || lit) ? T.accent : T.rule;
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = lit ? T.accent : (isHover || isPressed ? T.ruleStrong : T.rule);
+      ctx.lineWidth = lit ? 2 : 1;
       ctx.stroke();
-      return (isHover || lit) ? T.ink : T.ink2;
+      return (isHover || isPressed || lit) ? T.ink : T.ink2;
     };
 
     // 3. Header: ECHO mark + wordmark, then the current title.
     drawIcon(ctx, 'logo', 38, 24, 26, T.ink, T.accent, T.surface);
     ctx.fillStyle = T.ink;
-    ctx.font = `900 16.5px ${TOKENS.font.brand}`;
+    ctx.font = `700 16.5px ${TOKENS.font.display}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('ECHO', 58, 24);
@@ -794,12 +801,10 @@
       // Sits flush against the comment pill; packs step left of the index pill.
       const chipX = packMode ? STEREO_CHIP.x - 152 : STEREO_CHIP.x;
       ctx.fillStyle = T.accent;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radius);
-      else ctx.rect(chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h);
+      roundRectPath(ctx, chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radiusPx);
       ctx.fill();
       ctx.fillStyle = T.onAccent;
-      ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
+      ctx.font = `600 12.1px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', chipX + STEREO_CHIP.w / 2, 24);
       ctx.textAlign = 'left';
@@ -812,7 +817,7 @@
     headerPill(commentBtn, isCommentHover);
     drawIcon(ctx, 'comment', commentBtn.x + 20, 24, 16, isCommentHover ? T.ink : T.ink2);
     ctx.fillStyle = isCommentHover ? T.ink : T.ink2;
-    ctx.font = `bold 13.2px ${TOKENS.font.mono}`;
+    ctx.font = `600 13.2px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
 
@@ -830,7 +835,7 @@
       headerPill(earthButton, queueActive);
       drawIcon(ctx, 'more', earthButton.x + 16, 24, 16, queueActive ? T.ink : T.ink2);
       ctx.fillStyle = queueActive ? T.ink : T.ink2;
-      ctx.font = `bold 12.1px ${TOKENS.font.mono}`;
+      ctx.font = `600 12.1px ${TOKENS.font.mono}`;
       ctx.fillText('QUEUE', earthButton.x + 16 + (earthButton.w - 16) / 2, 24);
     }
 
@@ -838,7 +843,7 @@
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
     const exitBtn = CTRL_BUTTONS[exitBtnIdx];
     headerPill(exitBtn, hoveredButton === exitBtnIdx);
-    drawIcon(ctx, 'exit', exitBtn.x + exitBtn.w / 2, 24, 14, T.accent);
+    drawIcon(ctx, 'exit', exitBtn.x + exitBtn.w / 2, 24, 14, hoveredButton === exitBtnIdx ? T.ink : T.ink2);
 
     // Body controls: mode/curve pills left, transport centre, lock/audio pills
     // right, then a row of icon tiles for reel and pack actions.
@@ -874,9 +879,9 @@
           icon = isMuted ? 'sound-mute' : 'sound-audio';
         }
         if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
-        else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, (isHover || lit) ? T.accent : T.ink2);
+        else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, ink);
         ctx.fillStyle = ink;
-        ctx.font = `bold 13px ${TOKENS.font.mono}`;
+        ctx.font = `600 13px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, btn.x + 46, cy);
@@ -885,7 +890,7 @@
 
       // Primary play/pause: solid vermilion, chamfered like play.svg.
       if (btn.action === 'play') {
-        chamferPath(ctx, btn.x, btn.y, btn.w, btn.h, 10);
+        roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, TOKENS.radiusPx);
         ctx.fillStyle = (isPressed || isHover) ? T.accentHi : T.accent;
         ctx.fill();
         const cx = btn.x + btn.w / 2;
@@ -915,18 +920,18 @@
         ((btn.action === 'save_reel' || btn.action === 'collect') && itemState.saved) ||
         (btn.action === 'follow' && itemState.following);
       const ink = bodyButton(btn, isHover, isPressed, lit);
-      ctx.font = `bold 13px ${TOKENS.font.mono}`;
+      ctx.font = `600 13px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
       if (btn.action === 'collect') {
         drawIcon(ctx, 'collect', btn.x + btn.w / 2 - 34, cy, 22, ink);
-        ctx.font = `bold 12px ${TOKENS.font.mono}`;
-        ctx.fillStyle = lit ? T.accentHi : ink;
+        ctx.font = `600 12px ${TOKENS.font.mono}`;
+        ctx.fillStyle = ink;
         ctx.textAlign = 'left';
         ctx.fillText(btn.label, btn.x + btn.w / 2 - 16, cy);
         continue;
       }
       drawIcon(ctx, ACTION_ICON[btn.action], btn.x + btn.w / 2, btn.y + 18, 22, ink);
-      ctx.fillStyle = lit ? T.accentHi : ink;
+      ctx.fillStyle = ink;
       ctx.textAlign = 'center';
       ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + 38);
     }
@@ -934,7 +939,7 @@
     // Reel | pack divider on the action row
     if (isControlVisible('save_pack', source, itemState, packMode, sceneMode) &&
         isControlVisible('like', source, itemState, packMode, sceneMode)) {
-      ctx.fillStyle = T.ruleStrong;
+      ctx.fillStyle = T.rule;
       ctx.fillRect(589, 196, 1, 32);
     }
 
@@ -971,7 +976,7 @@
       ctx.fillStyle = TOKENS.hex.accent;
       ctx.fillRect(stripX, stripY, stripW, 2);
       ctx.fillStyle = TOKENS.hex.ink;
-      ctx.font = `bold 14px ${TOKENS.font.mono}`;
+      ctx.font = `600 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       let label = String(notificationText);
@@ -1080,15 +1085,14 @@
     ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(0, 3, CPANEL_W, CP_INFO_H - 3);
 
-    // Avatar
-    ctx.fillStyle = '#121417';
-    ctx.fillRect(20, 20, 48, 48);
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(20, 20, 48, 48);
+    // Avatar disc: spot yellow, onSpot initial
+    ctx.fillStyle = TOKENS.hex.spot;
+    ctx.beginPath();
+    ctx.arc(44, 44, 24, 0, Math.PI * 2);
+    ctx.fill();
     if (creator) {
-      ctx.fillStyle = accent;
-      ctx.font = `800 20px ${TOKENS.font.mono}`;
+      ctx.fillStyle = TOKENS.hex.onSpot;
+      ctx.font = `600 20px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(String(creator.display_name || creator.username || '?').slice(0, 1).toUpperCase(), 44, 45);
@@ -1100,7 +1104,7 @@
     ctx.textBaseline = 'middle';
     if (creator && creator.username) {
       ctx.fillStyle = cPanelHover === 'creator' ? TOKENS.hex.ink : accent;
-      ctx.font = `700 16px ${TOKENS.font.mono}`;
+      ctx.font = `600 16px ${TOKENS.font.mono}`;
       ctx.fillText(wrapTextLines(ctx, creator.display_name || creator.username, textW, 1)[0] || '', 80, 34);
     }
     const age = unavailable ? '' : relativeAge(item.created_at);
@@ -1113,16 +1117,16 @@
     if (showFollow) {
       const b = cpFollowBtn(following);
       const hover = cPanelHover === 'follow';
-      const tone = following ? TOKENS.hex.infoHi : accent;
-      ctx.fillStyle = hover ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.strokeStyle = following ? TOKENS.hex.infoHi : (hover ? accent : TOKENS.hex.ruleStrong);
+      ctx.fillStyle = hover ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
+      ctx.fill();
+      ctx.strokeStyle = following ? TOKENS.hex.info : (hover ? accent : TOKENS.hex.ruleStrong);
       ctx.lineWidth = following ? 2 : 1;
-      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.stroke();
       // 12px pad, 18px icon, 8px gap, label, 12px pad.
-      drawIcon(ctx, 'follow', b.x + 21, b.y + b.h / 2, 18, following ? TOKENS.hex.infoHi : TOKENS.hex.ink, accent, TOKENS.hex.surface2);
-      ctx.fillStyle = tone;
-      ctx.font = `700 11px ${TOKENS.font.mono}`;
+      drawIcon(ctx, 'follow', b.x + 21, b.y + b.h / 2, 18, TOKENS.hex.ink, accent, TOKENS.hex.surface2);
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `600 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(following ? 'FOLLOWING' : 'FOLLOW', b.x + 38, b.y + b.h / 2 + 1);
     }
@@ -1131,7 +1135,7 @@
     let y = 84;
     ctx.textBaseline = 'top';
     ctx.fillStyle = TOKENS.hex.ink;
-    ctx.font = `800 15px ${TOKENS.font.sans}`;
+    ctx.font = `700 15px ${TOKENS.font.display}`;
     const title = unavailable ? 'Reel unavailable' : (item.title || item.filename || '');
     wrapTextLines(ctx, String(title).toUpperCase(), CPANEL_W - 40, 2).forEach((line) => {
       ctx.fillText(line, 20, y);
@@ -1174,14 +1178,15 @@
         const keyW = chip.key ? ctx.measureText(chip.key + ' ').width : 0;
         const w = Math.ceil(keyW + ctx.measureText(chip.text).width) + 16;
         if (x + w > CPANEL_W - 20) break;
-        ctx.fillStyle = '#121417';
-        ctx.fillRect(x, chipY, w, 22);
-        ctx.strokeStyle = chip.kind === 'tag' ? 'rgba(255, 59, 31, 0.3)' : TOKENS.hex.rule;
+        ctx.fillStyle = TOKENS.hex.surface2;
+        roundRectPath(ctx, x, chipY, w, 22, TOKENS.radiusPx);
+        ctx.fill();
+        ctx.strokeStyle = chip.kind === 'tag' ? withAlpha(accent, 0.5) : TOKENS.hex.rule;
         ctx.lineWidth = 1;
-        ctx.strokeRect(x, chipY, w, 22);
+        ctx.stroke();
         if (chip.key) {
           ctx.fillStyle = TOKENS.hex.ink3;
-          ctx.font = `700 10px ${TOKENS.font.mono}`;
+          ctx.font = `600 10px ${TOKENS.font.mono}`;
           ctx.fillText(chip.key, x + 8, chipY + 11);
           ctx.font = `600 10px ${TOKENS.font.mono}`;
         }
@@ -1199,11 +1204,12 @@
     ];
     const statsW = CPANEL_W - 40;
     const cellW = statsW / stats.length;
-    ctx.fillStyle = '#121417';
-    ctx.fillRect(20, CP_STATS_Y, statsW, 46);
+    ctx.fillStyle = TOKENS.hex.surface2;
+    roundRectPath(ctx, 20, CP_STATS_Y, statsW, 46, TOKENS.radiusPx);
+    ctx.fill();
     ctx.strokeStyle = TOKENS.hex.rule;
     ctx.lineWidth = 1;
-    ctx.strokeRect(20, CP_STATS_Y, statsW, 46);
+    ctx.stroke();
     ctx.fillStyle = TOKENS.hex.rule;
     for (let i = 1; i < stats.length; i++) ctx.fillRect(20 + cellW * i, CP_STATS_Y, 1, 46);
     ctx.textAlign = 'center';
@@ -1213,7 +1219,7 @@
       ctx.font = `600 9px ${TOKENS.font.mono}`;
       ctx.fillText(label, cx, CP_STATS_Y + 15);
       ctx.fillStyle = TOKENS.hex.ink;
-      ctx.font = `800 15px ${TOKENS.font.sans}`;
+      ctx.font = `700 15px ${TOKENS.font.sans}`;
       ctx.fillText(value, cx, CP_STATS_Y + 32);
     });
 
@@ -1243,15 +1249,12 @@
 
     ctx.clearRect(0, 0, CPANEL_W, CPANEL_H);
 
-    // Container
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, CPANEL_W, CPANEL_H, TOKENS.radius);
-    else ctx.rect(0, 0, CPANEL_W, CPANEL_H);
+    // Container: paper, everything below clipped to its rounded corners
+    ctx.fillStyle = TOKENS.hex.surface;
+    roundRectPath(ctx, 0, 0, CPANEL_W, CPANEL_H, TOKENS.radiusPx);
     ctx.fill();
-    ctx.strokeStyle = TOKENS.hex.ruleStrong;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    ctx.save();
+    ctx.clip();
 
     ctx.fillStyle = accent;
     ctx.fillRect(0, 0, CPANEL_W, 3);
@@ -1260,14 +1263,13 @@
 
     // Header
     const headY = CP_INFO_H + CP_HEADER_H / 2;
-    ctx.fillStyle = '#0d0e0f';
+    ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(0, CP_INFO_H, CPANEL_W, CP_HEADER_H);
-    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
     drawGlyph(ctx, 'chat', 24, headY, 12, accent);
-    ctx.font = `700 11px ${TOKENS.font.mono}`;
+    ctx.font = `600 11px ${TOKENS.font.mono}`;
     ctx.fillText('COMMENTS', 40, headY);
     ctx.fillStyle = TOKENS.hex.accentHi;
     const titleW = ctx.measureText('COMMENTS').width;
@@ -1277,26 +1279,25 @@
     const syncOn = cPanelTab !== 'general';
     const syncHover = hover.indexOf('tab:') === 0;
     const sb = CP_SYNC_BTN;
-    ctx.fillStyle = syncHover ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
-    ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+    ctx.fillStyle = syncHover ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
+    roundRectPath(ctx, sb.x, sb.y, sb.w, sb.h, TOKENS.radiusPx);
+    ctx.fill();
     ctx.strokeStyle = syncOn || syncHover ? accent : TOKENS.hex.ruleStrong;
     ctx.lineWidth = syncOn ? 1.5 : 1;
-    ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
+    ctx.stroke();
     drawIcon(ctx, 'timesync', sb.x + sb.w / 2, sb.y + sb.h / 2, 20,
       syncOn ? TOKENS.hex.ink : TOKENS.hex.inkMuted, syncOn ? accent : TOKENS.hex.inkMuted, TOKENS.hex.surface2);
 
     // Close button
     const cb = CP_CLOSE_BTN;
-    ctx.fillStyle = hover === 'close' ? TOKENS.hex.surface3 : TOKENS.hex.surface2;
+    ctx.fillStyle = hover === 'close' ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
     ctx.strokeStyle = hover === 'close' ? accent : TOKENS.hex.ruleStrong;
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(cb.x, cb.y, cb.w, cb.h, TOKENS.radius);
-    else ctx.rect(cb.x, cb.y, cb.w, cb.h);
+    roundRectPath(ctx, cb.x, cb.y, cb.w, cb.h, TOKENS.radiusPx);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = hover === 'close' ? TOKENS.hex.ink : accent;
-    ctx.font = 'bold 14px sans-serif';
+    ctx.font = `700 14px ${TOKENS.font.sans}`;
     ctx.textAlign = 'center';
     ctx.fillText('✕', cb.x + cb.w / 2, cb.y + cb.h / 2);
 
@@ -1308,7 +1309,7 @@
 
     if (filtered.length === 0) {
       ctx.fillStyle = accent;
-      ctx.font = `700 10px ${TOKENS.font.mono}`;
+      ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, CP_LIST_TOP + 40);
@@ -1322,52 +1323,46 @@
         const border = c.avatar_color || accent;
         const highlighted = (c.id === cPanelHighlightId);
 
-        ctx.fillStyle = highlighted ? '#1c1d1f' : '#121315';
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(itemX, y, itemW, CP_ITEM_H, TOKENS.radius);
-        else ctx.rect(itemX, y, itemW, CP_ITEM_H);
+        ctx.fillStyle = highlighted ? TOKENS.hex.surface2 : TOKENS.hex.surface;
+        roundRectPath(ctx, itemX, y, itemW, CP_ITEM_H, TOKENS.radiusPx);
         ctx.fill();
-        ctx.strokeStyle = highlighted ? accent : TOKENS.hex.ruleStrong;
+        ctx.strokeStyle = highlighted ? accent : TOKENS.hex.rule;
         ctx.lineWidth = highlighted ? 2.5 : 1;
         ctx.stroke();
 
         ctx.fillStyle = border;
-        ctx.fillRect(itemX, y, 3, CP_ITEM_H);
+        ctx.fillRect(itemX, y + 8, 3, CP_ITEM_H - 16);
 
-        // Avatar
-        ctx.fillStyle = TOKENS.hex.surface2;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(itemX + 8, y + 12, 40, 40, TOKENS.radius);
-        else ctx.rect(itemX + 8, y + 12, 40, 40);
-        ctx.fill();
-        ctx.strokeStyle = border;
-        ctx.stroke();
+        // Avatar disc: the user's colour, onSpot initials
         ctx.fillStyle = border;
-        ctx.font = `700 11px ${TOKENS.font.mono}`;
+        ctx.beginPath();
+        ctx.arc(itemX + 28, y + 32, 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = TOKENS.hex.onSpot;
+        ctx.font = `600 11px ${TOKENS.font.mono}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(getInitials(c.author_name), itemX + 28, y + 33);
 
         // Author name, then the time pill right after it (none for general)
         const head = cpCommentHead(c, itemX, y);
-        ctx.fillStyle = border;
-        ctx.font = `700 11px ${TOKENS.font.mono}`;
+        ctx.fillStyle = TOKENS.hex.ink;
+        ctx.font = `600 11px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(head.name, itemX + 56, y + 20);
 
         if (head.pill) {
           const p = head.pill;
-          ctx.fillStyle = hover === 'seek:' + c.id ? accent : TOKENS.hex.surface3;
+          const seekHot = hover === 'seek:' + c.id;
+          ctx.fillStyle = seekHot ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
           ctx.strokeStyle = accent;
-          ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(p.x, p.y, p.w, p.h, TOKENS.radius);
-          else ctx.rect(p.x, p.y, p.w, p.h);
+          roundRectPath(ctx, p.x, p.y, p.w, p.h, TOKENS.radiusPx);
           ctx.fill();
           ctx.stroke();
-          drawIcon(ctx, 'timesync', p.x + 15, p.y + p.h / 2, 14, TOKENS.hex.ink, accent, TOKENS.hex.surface3);
-          ctx.fillStyle = hover === 'seek:' + c.id ? TOKENS.hex.ink : TOKENS.hex.accentHi;
-          ctx.font = `700 10px ${TOKENS.font.mono}`;
+          drawIcon(ctx, 'timesync', p.x + 15, p.y + p.h / 2, 14, TOKENS.hex.ink, accent, seekHot ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2);
+          ctx.fillStyle = TOKENS.hex.ink;
+          ctx.font = `600 10px ${TOKENS.font.mono}`;
           ctx.fillText(head.time, p.x + 28, p.y + p.h / 2 + 1);
         }
 
@@ -1375,15 +1370,15 @@
         const liked = !!c.liked_by_me;
         const likeHover = hover === 'like:' + c.id;
         const likeTone = liked ? accent : TOKENS.hex.ink;
-        drawIcon(ctx, 'like', itemX + itemW - 56, y + 20, 24, likeHover && !liked ? accent : likeTone, accent, '#121315');
+        drawIcon(ctx, 'like', itemX + itemW - 56, y + 20, 24, likeHover && !liked ? accent : likeTone, accent, TOKENS.hex.surface);
         ctx.fillStyle = likeTone;
-        ctx.font = `700 12px ${TOKENS.font.mono}`;
+        ctx.font = `600 12px ${TOKENS.font.mono}`;
         ctx.textAlign = 'left';
         ctx.fillText(fmtCount(c.likes), itemX + itemW - 40, y + 21);
 
         // Text
         ctx.fillStyle = TOKENS.hex.ink;
-        ctx.font = '500 13px sans-serif';
+        ctx.font = `500 13px ${TOKENS.font.sans}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         const lines = wrapTextLines(ctx, c.text || '', itemW - 70, 2);
@@ -1396,23 +1391,27 @@
 
     // Footer
     const footerY = CP_LIST_BOTTOM + 4;
-    ctx.fillStyle = '#0d0e0f';
+    ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(0, footerY, CPANEL_W, CPANEL_H - footerY);
 
     const addHover = cPanelHover === 'add';
-    ctx.fillStyle = addHover ? '#ff6a52' : accent;
-    ctx.strokeStyle = accent;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(16, footerY + 54, CPANEL_W - 32, 44, TOKENS.radius);
-    else ctx.rect(16, footerY + 54, CPANEL_W - 32, 44);
+    ctx.fillStyle = addHover ? TOKENS.hex.accentHi : accent;
+    ctx.strokeStyle = addHover ? TOKENS.hex.accentHi : accent;
+    roundRectPath(ctx, 16, footerY + 54, CPANEL_W - 32, 44, TOKENS.radiusPx);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = TOKENS.hex.onAccent;
-    ctx.font = `bold 11px ${TOKENS.font.mono}`;
+    ctx.font = `600 11px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     // fix28: signed out, the button leads to sign-in instead.
     ctx.fillText(user ? '+ ADD COMMENT' : 'SIGN IN TO COMMENT', CPANEL_W / 2, footerY + 77);
+    ctx.restore();
+    // Hairline border over the clipped fills
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, 0, 0, CPANEL_W, CPANEL_H, TOKENS.radiusPx);
+    ctx.stroke();
   }
 
   // ─── Render In-Screen Popup Comment Overlay ─────────────────────────
@@ -1445,47 +1444,49 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (loadState === 'failed') {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+      ctx.fillStyle = TOKENS.rgba.mediaScrim;
       ctx.fillRect(0, 0, OVERLAY_W, OVERLAY_H);
-      ctx.fillStyle = T.ink;
+      ctx.fillStyle = T.onMedia;
       ctx.font = `700 34px ${TOKENS.font.sans}`;
       ctx.fillText('This reel couldn\'t load', cx, cy - 56);
       for (const b of LOAD_BTNS) {
         const hover = hoverId === b.id;
         const primary = b.id === 'load:skip';
-        ctx.fillStyle = primary ? (hover ? T.accentHi : T.accent) : (hover ? T.surface3 : T.surface2);
-        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.fillStyle = primary ? (hover ? T.accentHi : T.accent) : (hover ? T.surfaceHover : T.surface2);
+        roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
+        ctx.fill();
         ctx.strokeStyle = primary || hover ? T.accent : T.ruleStrong;
         ctx.lineWidth = 2;
-        ctx.strokeRect(b.x, b.y, b.w, b.h);
+        ctx.stroke();
         ctx.fillStyle = primary ? T.onAccent : T.ink;
-        ctx.font = `bold 28px ${TOKENS.font.mono}`;
+        ctx.font = `600 28px ${TOKENS.font.mono}`;
         ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
       }
       ctx.restore();
       return LOAD_BTNS.map((b) => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h }));
     }
     // 'loading': a backing plate keeps the spinner readable on any frame.
-    ctx.fillStyle = 'rgba(8, 9, 10, 0.72)';
-    ctx.fillRect(cx - 130, cy - 90, 260, 180);
+    ctx.fillStyle = TOKENS.rgba.mediaScrim;
+    roundRectPath(ctx, cx - 130, cy - 90, 260, 180, TOKENS.radiusPx);
+    ctx.fill();
     const a = ((Number(nowMs) || 0) / 1000) * Math.PI * 2;
-    ctx.strokeStyle = T.ruleStrong;
+    ctx.strokeStyle = withAlpha(T.onMedia, 0.3);
     ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.arc(cx, cy - 22, 34, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = T.accent;
+    ctx.strokeStyle = T.onMedia;
     ctx.beginPath();
     ctx.arc(cx, cy - 22, 34, a, a + Math.PI * 0.6);
     ctx.stroke();
-    ctx.fillStyle = T.ink;
+    ctx.fillStyle = T.onMedia;
     ctx.font = `600 28px ${TOKENS.font.sans}`;
     ctx.fillText('Loading…', cx, cy + 50);
     ctx.restore();
     return [];
   }
 
-  // The playing reel's auto caption, centred, each line on its own near-black backing like the 2D
+  // The playing reel's auto caption, centred, each line on its own scrim backing like the 2D
   // player's (.reels-captions). Its bottom sits just above the dock, which covers the screen from about
   // 60% down in the default (locked) layout; a cue is at most two lines, three when two cues overlap.
   // Returns the caption's top, so the pop-up comments can stack above it.
@@ -1517,9 +1518,9 @@
     shown.forEach((line, i) => {
       const w = ctx.measureText(line).width + 28;
       const y = top + i * lineH;
-      ctx.fillStyle = 'rgba(8, 9, 10, 0.86)';
+      ctx.fillStyle = TOKENS.rgba.mediaScrim;
       ctx.fillRect(OVERLAY_W / 2 - w / 2, y, w, lineH);
-      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.fillStyle = TOKENS.hex.onMedia;
       ctx.fillText(line, OVERLAY_W / 2, y + lineH / 2);
     });
     ctx.restore();
@@ -1566,12 +1567,8 @@
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      // Shadow for high-contrast legibility over video — no background box,
-      // but with the 2D twitch-comment-pill typography AND its left accent line.
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 2;
+      // Each comment sits on the media scrim (onMedia text) with a left bar in
+      // the author's colour, like the 2D twitch-comment-pill.
 
       const authorColor = c.avatar_color || TOKENS.hex.accent;
       const authorName = c.author_name || 'Anonymous';
@@ -1584,7 +1581,7 @@
 
       // Prepare display text early so the hover pill can be sized and drawn
       // FIRST (behind) so it never covers the accent bar, avatar or name.
-      ctx.font = '500 14px "Archivo", sans-serif';
+      ctx.font = `500 14px ${TOKENS.font.sans}`;
       let dispText = c.text;
       if (dispText.length > 46) {
         dispText = dispText.slice(0, 44) + '…';
@@ -1595,15 +1592,13 @@
       const regionY = y - 6;
       const regionH = itemHeight + 12;
 
-      // Hover / click affordance background — drawn behind all pill content
+      // Scrim plate, drawn behind all pill content; hover adds an accent edge.
+      ctx.fillStyle = TOKENS.rgba.mediaScrim;
+      roundRectPath(ctx, regionX, regionY, regionW, regionH, TOKENS.radiusPx);
+      ctx.fill();
       if (isHovered) {
-        ctx.fillStyle = 'rgba(18, 19, 21, 0.78)';
         ctx.strokeStyle = TOKENS.hex.accent;
         ctx.lineWidth = 2;
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(regionX, regionY, regionW, regionH, TOKENS.radius);
-        else ctx.rect(regionX, regionY, regionW, regionH);
-        ctx.fill();
         ctx.stroke();
       }
 
@@ -1618,14 +1613,26 @@
       const textY = y + 32;
 
       // Avatar Icon / Emoji (Middle-Left, like .twitch-avatar)
-      ctx.font = '22px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(c.author_avatar || getInitials(c.author_name || 'Anonymous'), avatarX, y + itemHeight / 2);
+      if (c.author_avatar) {
+        ctx.fillStyle = TOKENS.hex.onMedia;
+        ctx.font = `22px ${TOKENS.font.sans}`;
+        ctx.fillText(c.author_avatar, avatarX, y + itemHeight / 2);
+      } else {
+        // Disc in the author's colour, onSpot initials
+        ctx.fillStyle = authorColor;
+        ctx.beginPath();
+        ctx.arc(avatarX, y + itemHeight / 2, 19, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = TOKENS.hex.onSpot;
+        ctx.font = `600 13px ${TOKENS.font.mono}`;
+        ctx.fillText(getInitials(c.author_name || 'Anonymous'), avatarX, y + itemHeight / 2 + 1);
+      }
 
       // Author Name — bold colored like .twitch-author
-      ctx.font = '800 13px "Archivo", sans-serif';
-      ctx.fillStyle = authorColor;
+      ctx.font = `700 13px ${TOKENS.font.sans}`;
+      ctx.fillStyle = TOKENS.hex.onMedia;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(authorName, nameX, nameY);
@@ -1633,14 +1640,14 @@
 
       // Timestamp tag — muted monospace like .twitch-tag
       if (hasTime) {
-        ctx.font = `700 11px ${TOKENS.font.mono}`;
-        ctx.fillStyle = TOKENS.hex.ink2;
+        ctx.font = `600 11px ${TOKENS.font.mono}`;
+        ctx.fillStyle = TOKENS.hex.onMedia;
         ctx.fillText(timeStr, nameX + nameW + 8, timeY);
       }
 
-      // Comment Text — light Archivo like .twitch-text
-      ctx.font = '500 14px "Archivo", sans-serif';
-      ctx.fillStyle = TOKENS.hex.ink;
+      // Comment Text — light sans like .twitch-text
+      ctx.font = `500 14px ${TOKENS.font.sans}`;
+      ctx.fillStyle = TOKENS.hex.onMedia;
       ctx.textBaseline = 'top';
       ctx.fillText(dispText, textX, textY);
 
@@ -1815,7 +1822,7 @@
     ctx.strokeStyle = 'rgba(255, 59, 31, 0.4)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(-24, 55, 8, 30, TOKENS.radius);
+    if (ctx.roundRect) ctx.roundRect(-24, 55, 8, 30, TOKENS.radiusPx);
     else ctx.rect(-24, 55, 8, 30);
     ctx.fill();
     ctx.stroke();
@@ -1835,20 +1842,17 @@
     ctx.clearRect(0, 0, GUIDE_W, GUIDE_H);
 
     // Container (ECHO, matching the comments panel)
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0, 0, GUIDE_W, GUIDE_H, TOKENS.radius);
-    else ctx.rect(0, 0, GUIDE_W, GUIDE_H);
+    ctx.fillStyle = TOKENS.hex.surface;
+    roundRectPath(ctx, 0, 0, GUIDE_W, GUIDE_H, TOKENS.radiusPx);
     ctx.fill();
-    ctx.strokeStyle = TOKENS.hex.ruleStrong;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    ctx.save();
+    ctx.clip();
     ctx.fillStyle = accent;
     ctx.fillRect(0, 0, GUIDE_W, 3);
 
     // Header
     const headerH = 52;
-    ctx.fillStyle = '#0d0e0f';
+    ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(0, 3, GUIDE_W, headerH - 3);
     ctx.fillStyle = TOKENS.hex.rule;
     ctx.fillRect(0, headerH - 1, GUIDE_W, 1);
@@ -1857,7 +1861,7 @@
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillStyle = TOKENS.hex.ink;
-    ctx.font = `700 14px ${TOKENS.font.mono}`;
+    ctx.font = `600 14px ${TOKENS.font.mono}`;
     ctx.fillText('CONTROLLER GUIDE', 38, 28);
     ctx.textAlign = 'right';
     ctx.fillStyle = TOKENS.hex.ink3;
@@ -1883,8 +1887,8 @@
         // reading as a box (its top-left has a lighter glow).
         const fade = (x0, y0, x1, y1, rx, ry, rw, rh) => {
           const g = ctx.createLinearGradient(x0, y0, x1, y1);
-          g.addColorStop(0, 'rgba(13, 14, 15, 1)');
-          g.addColorStop(1, 'rgba(13, 14, 15, 0)');
+          g.addColorStop(0, withAlpha(TOKENS.hex.surface, 1));
+          g.addColorStop(1, withAlpha(TOKENS.hex.surface, 0));
           ctx.fillStyle = g;
           ctx.fillRect(rx, ry, rw, rh);
         };
@@ -1934,8 +1938,8 @@
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = TOKENS.hex.accentHi;
-      ctx.font = `700 13px ${TOKENS.font.mono}`;
+      ctx.fillStyle = TOKENS.hex.ink;
+      ctx.font = `600 13px ${TOKENS.font.mono}`;
       ctx.fillText(card.title, tableX + 14, lineY(0));
       if (card.tag) {
         ctx.fillStyle = TOKENS.hex.ink3;
@@ -1960,6 +1964,11 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('Press B or ✕ to dismiss', GUIDE_W / 2, (tableY + tableH + GUIDE_H) / 2);
+    ctx.restore();
+    ctx.strokeStyle = TOKENS.hex.ruleStrong;
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, 0, 0, GUIDE_W, GUIDE_H, TOKENS.radiusPx);
+    ctx.stroke();
   }
 
   // ─── Earth HUD: breadcrumb panel ────────────────────────────────────
@@ -1968,23 +1977,18 @@
   const EARTH_LABEL_W = 640;
   const EARTH_LABEL_H = 148;
   const EARTH_LABEL_RESET_RECT = { x: 444, y: 112, w: 176, h: 28 };
-  // Zoom realms; names + colours follow the globe heat ramp. webxr_vr.js keeps
+  // Zoom realms; names + tones (TOKENS.hex[tone]) follow the globe heat ramp. webxr_vr.js keeps
   // the same list for its zoom logic (a test pins them together).
   const EARTH_TIERS = [
-    { name: 'ORBIT', max: 3, color: '#39D7FF' },
-    { name: 'REGION', max: 24, color: '#4FE3C1' },
-    { name: 'CITY', max: 200, color: '#FFC857' },
-    { name: 'STREET', max: Infinity, color: '#FF8A5B' },
+    { name: 'ORBIT', max: 3, tone: 'info' },
+    { name: 'REGION', max: 24, tone: 'success' },
+    { name: 'CITY', max: 200, tone: 'warn' },
+    { name: 'STREET', max: Infinity, tone: 'accent' },
   ];
   function earthTierIndex(scale) {
     const s = Math.max(1, Number(scale) || 1);
     for (let i = 0; i < EARTH_TIERS.length; i++) if (s < EARTH_TIERS[i].max) return i;
     return EARTH_TIERS.length - 1;
-  }
-  function earthRoundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
-    else ctx.rect(x, y, w, h);
   }
   function drawEarthScaleBar(ctx, bar) {
     // A missing or UNAVAILABLE bar draws nothing (no stale ruler).
@@ -1998,7 +2002,7 @@
     ctx.moveTo(right, 89); ctx.lineTo(right, 99);
     ctx.stroke();
     ctx.fillStyle = TOKENS.hex.ink;
-    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.font = `600 15px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.fillText(bar.caption, 325, 94);
   }
@@ -2020,28 +2024,27 @@
     const inkMuted = TOKENS.hex.inkMuted;
     const rule = TOKENS.hex.rule, ruleStrong = TOKENS.hex.ruleStrong;
     const surface = TOKENS.hex.surface, surface2 = TOKENS.hex.surface2, surface3 = TOKENS.hex.surface3;
-    const tier = o.offline ? { name: 'OFFLINE', color: accent } : EARTH_TIERS[tierIdx];
+    const tier = o.offline ? { name: 'OFFLINE', tone: 'accent' } : EARTH_TIERS[tierIdx];
     // Panel body
-    earthRoundRect(ctx, 1, 1, 638, EARTH_LABEL_H - 2, 0);
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
+    roundRectPath(ctx, 1, 1, 638, EARTH_LABEL_H - 2, TOKENS.radiusPx);
+    ctx.fillStyle = surface;
     ctx.fill();
     ctx.strokeStyle = ruleStrong;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = accent;
-    ctx.fillRect(0, 0, EARTH_LABEL_W, 3);
+    panelTopBar(ctx, EARTH_LABEL_W, EARTH_LABEL_H);
     ctx.textBaseline = 'middle';
     // Tier chip
-    ctx.font = '700 12px "JetBrains Mono", monospace';
+    ctx.font = `600 12px ${TOKENS.font.mono}`;
     const chipText = tier.name;
     const chipW = Math.ceil((ctx.measureText ? ctx.measureText(chipText).width : chipText.length * 7.5)) + 34;
-    earthRoundRect(ctx, 18, 14, chipW, 26, 0);
+    roundRectPath(ctx, 18, 14, chipW, 26, TOKENS.radiusPx);
     ctx.fillStyle = surface2;
     ctx.fill();
     ctx.strokeStyle = ruleStrong;
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.fillStyle = tier.color;
+    ctx.fillStyle = TOKENS.hex[tier.tone];
     ctx.fillRect(28, 23, 8, 8);
     ctx.fillStyle = ink;
     ctx.textAlign = 'left';
@@ -2052,10 +2055,10 @@
     const titleMax = 540 - titleX;
     let fs = 25;
     ctx.fillStyle = ink;
-    ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+    ctx.font = `700 ${fs}px ${TOKENS.font.display}`;
     while (ctx.measureText && fs > 15 && ctx.measureText(titleText).width > titleMax) {
       fs -= 1;
-      ctx.font = '700 ' + fs + 'px Archivo, sans-serif';
+      ctx.font = `700 ${fs}px ${TOKENS.font.display}`;
     }
     ctx.fillText(titleText, titleX, 28);
     // Zoom gauge (right)
@@ -2071,13 +2074,13 @@
     }
     ctx.lineCap = 'butt';
     ctx.fillStyle = ink;
-    ctx.font = '700 13px "JetBrains Mono", monospace';
+    ctx.font = `600 13px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(String(Math.round(o.zoomPct || 0)), gx, gy + 1);
     // Detail line
     ctx.textAlign = 'left';
     ctx.fillStyle = o.offline ? TOKENS.hex.accentHi : ink2;
-    ctx.font = '700 15px "JetBrains Mono", monospace';
+    ctx.font = `600 15px ${TOKENS.font.mono}`;
     ctx.fillText(o.detail, 20, 61);
     // Divider
     ctx.fillStyle = rule;
@@ -2085,13 +2088,13 @@
     // Footer row: scale bar (zoomed) or interaction hint, tier ladder right
     if (o.zoomed) {
       ctx.fillStyle = ink3;
-      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText('SCALE', 20, 94);
       drawEarthScaleBar(ctx, o.scaleBar);
     } else if (o.hint) {
       ctx.fillStyle = ink3;
-      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.font = `600 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(o.hint, 20, 94);
     }
@@ -2100,21 +2103,21 @@
     ctx.fillRect(20, 106, 600, 1);
     if (o.zoomed && o.hint) {
       ctx.fillStyle = o.featured ? accent : ink2;
-      ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.font = `600 11px ${TOKENS.font.mono}`;
       ctx.textAlign = 'left';
       ctx.fillText(o.hint, 20, 127);
     }
     {
       const b = EARTH_LABEL_RESET_RECT;
       const on = !!o.resetEnabled, hot = on && !!o.resetHot;
-      earthRoundRect(ctx, b.x, b.y, b.w, b.h, 0);
-      ctx.fillStyle = on ? (hot ? surface3 : surface) : surface2;
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
+      ctx.fillStyle = on ? (hot ? TOKENS.hex.surfaceHover : surface) : surface2;
       ctx.fill();
       ctx.strokeStyle = on ? (hot ? accent : ruleStrong) : rule;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = on ? ink : inkMuted;
-      ctx.font = '800 12px "JetBrains Mono", monospace';
+      ctx.font = `600 12px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText('⟲  RESET ROTATION', b.x + b.w / 2, b.y + b.h / 2 + 1);
     }
@@ -2123,10 +2126,10 @@
     for (let i = 0; i < EARTH_TIERS.length; i++) {
       const sx = ladderX + i * (segW + segGap);
       ctx.fillStyle = surface3;
-      earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
+      roundRectPath(ctx, sx, 91, segW, 6, TOKENS.radiusPx); ctx.fill();
       if (i <= tierIdx) {
-        ctx.fillStyle = EARTH_TIERS[i].color;
-        earthRoundRect(ctx, sx, 91, segW, 6, 0); ctx.fill();
+        ctx.fillStyle = TOKENS.hex[EARTH_TIERS[i].tone];
+        roundRectPath(ctx, sx, 91, segW, 6, TOKENS.radiusPx); ctx.fill();
       }
     }
     // Tile streaming progress hairline along the bottom edge
@@ -2153,19 +2156,13 @@
     } catch (e) { return false; }
   }
 
-  function previewRoundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
-    else ctx.rect(x, y, w, h);
-  }
-
   function posterReady(img) {
     return !!(img && img.complete !== false && (Number(img.naturalWidth) || Number(img.width)) > 0);
   }
 
   function drawCoverRounded(ctx, source, x, y, w, h, r) {
     ctx.save();
-    previewRoundRect(ctx, x, y, w, h, r);
+    roundRectPath(ctx, x, y, w, h, r);
     ctx.clip();
     try {
       if (source && source.videoWidth !== undefined) {
@@ -2185,7 +2182,7 @@
 
   function drawPreviewPlaceholder(ctx, x, y, w, h, r, phase, label) {
     ctx.save();
-    previewRoundRect(ctx, x, y, w, h, r);
+    roundRectPath(ctx, x, y, w, h, r);
     ctx.clip();
     ctx.fillStyle = TOKENS.hex.bg;
     ctx.fillRect(x, y, w, h);
@@ -2193,9 +2190,9 @@
       // Loading shimmer: a soft diagonal band sweeping across the slot.
       const bx = x - w * 0.4 + ((phase % 1400) / 1400) * w * 1.8;
       const sg = ctx.createLinearGradient(bx, y, bx + w * 0.35, y + h * 0.2);
-      sg.addColorStop(0, 'rgba(242,243,245,0)');
-      sg.addColorStop(0.5, 'rgba(242,243,245,0.07)');
-      sg.addColorStop(1, 'rgba(242,243,245,0)');
+      sg.addColorStop(0, withAlpha(TOKENS.hex.ink, 0));
+      sg.addColorStop(0.5, withAlpha(TOKENS.hex.ink, 0.07));
+      sg.addColorStop(1, withAlpha(TOKENS.hex.ink, 0));
       ctx.fillStyle = sg;
       ctx.fillRect(x, y, w, h);
     } else {
@@ -2208,7 +2205,7 @@
     ctx.restore();
     if (label) {
       ctx.fillStyle = TOKENS.hex.inkMuted;
-      ctx.font = `700 15px ${TOKENS.font.mono}`;
+      ctx.font = `600 15px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, x + w / 2, y + h / 2);
@@ -2238,18 +2235,17 @@
 
     ctx.clearRect(0, 0, W, H);
     // Panel body (comments-panel parity: flat glass, rule border, accent top bar)
-    previewRoundRect(ctx, 0, 0, W, H, TOKENS.radius);
-    ctx.fillStyle = 'rgba(13, 14, 15, 0.97)';
+    roundRectPath(ctx, 0, 0, W, H, TOKENS.radiusPx);
+    ctx.fillStyle = T.surface;
     ctx.fill();
     ctx.strokeStyle = T.ruleStrong;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = T.accent;
-    ctx.fillRect(0, 0, W, 3);
+    panelTopBar(ctx, W, H);
 
     // Header: LIVE chip + window label
     const pulse = reducedMotion ? 1 : 0.55 + 0.45 * Math.sin(time * 0.006);
-    previewRoundRect(ctx, 28, 26, 78, 28, TOKENS.radius);
+    roundRectPath(ctx, 28, 26, 78, 28, TOKENS.radiusPx);
     ctx.fillStyle = T.surface2;
     ctx.fill();
     ctx.strokeStyle = T.accent;
@@ -2260,28 +2256,28 @@
     ctx.fillRect(41, 35, 10, 10);
     ctx.globalAlpha = 1;
     ctx.fillStyle = T.ink;
-    ctx.font = `800 14px ${TOKENS.font.mono}`;
+    ctx.font = `600 14px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('LIVE', 58, 41);
     ctx.fillStyle = T.ink3;
-    ctx.font = `700 13px ${TOKENS.font.mono}`;
+    ctx.font = `600 13px ${TOKENS.font.mono}`;
     ctx.textAlign = 'right';
     ctx.fillText('TRENDING · 7 DAYS', W - 30, 41);
 
     // Location name + heat meter
     ctx.fillStyle = T.ink;
-    ctx.font = `800 34px ${TOKENS.font.sans}`;
+    ctx.font = `700 34px ${TOKENS.font.display}`;
     ctx.textAlign = 'left';
     ctx.fillText(truncatePreviewText(location.name || location.slug, 22), 28, 84);
     ctx.fillStyle = T.ink2;
-    ctx.font = `700 14px ${TOKENS.font.mono}`;
+    ctx.font = `600 14px ${TOKENS.font.mono}`;
     ctx.fillText(Math.round(heat * 100) + '% HEAT  ·  ' + (Number(location.active_reel_count) || 0) + ' ACTIVE', 28, 118);
-    previewRoundRect(ctx, 300, 113, 184, 8, TOKENS.radius);
+    roundRectPath(ctx, 300, 113, 184, 8, TOKENS.radiusPx);
     ctx.fillStyle = T.surface3;
     ctx.fill();
     if (heat > 0.01) {
-      previewRoundRect(ctx, 300, 113, Math.max(8, 184 * heat), 8, TOKENS.radius);
+      roundRectPath(ctx, 300, 113, Math.max(8, 184 * heat), 8, TOKENS.radiusPx);
       ctx.fillStyle = T.accent;
       ctx.fill();
     }
@@ -2290,22 +2286,22 @@
     const hx = 28, hy = 144, hw = W - 56, hh = 508;
     const videoLive = previewVideo && previewVideo.readyState >= 2;
     const poster = posterReady(earthPreviewPosters[active]) ? earthPreviewPosters[active] : null;
-    if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, TOKENS.radius);
-    else if (poster) drawCoverRounded(ctx, poster, hx, hy, hw, hh, TOKENS.radius);
+    if (videoLive) drawCoverRounded(ctx, previewVideo, hx, hy, hw, hh, TOKENS.radiusPx);
+    else if (poster) drawCoverRounded(ctx, poster, hx, hy, hw, hh, TOKENS.radiusPx);
     else {
       const loading = earthPreviewStatus === 'loading' || (items.length > 0 && earthPreviewStatus === 'ready');
-      drawPreviewPlaceholder(ctx, hx, hy, hw, hh, TOKENS.radius, loading && !reducedMotion ? time : -1,
+      drawPreviewPlaceholder(ctx, hx, hy, hw, hh, TOKENS.radiusPx, loading && !reducedMotion ? time : -1,
         earthPreviewStatus === 'error' ? 'PREVIEW UNAVAILABLE'
           : (earthPreviewStatus === 'idle' && !items.length ? 'NO RECENT REELS YET' : ''));
     }
     if (items.length) {
       ctx.save();
-      previewRoundRect(ctx, hx, hy, hw, hh, TOKENS.radius);
+      roundRectPath(ctx, hx, hy, hw, hh, TOKENS.radiusPx);
       ctx.clip();
       if (hasGrad) {
         const vg = ctx.createLinearGradient(0, hy + hh * 0.5, 0, hy + hh);
-        vg.addColorStop(0, 'rgba(2,6,14,0)');
-        vg.addColorStop(1, 'rgba(2,6,14,0.88)');
+        vg.addColorStop(0, withAlpha(TOKENS.rgba.mediaScrim, 0));
+        vg.addColorStop(1, TOKENS.rgba.mediaScrim);
         ctx.fillStyle = vg;
         ctx.fillRect(hx, hy + hh * 0.5, hw, hh * 0.5);
       }
@@ -2315,7 +2311,8 @@
         // is a still (poster/loading); once the clip is decoding it gets out of the way.
         const cx = hx + hw / 2, cy = hy + hh / 2 - 14;
         ctx.fillStyle = T.accent;
-        ctx.fillRect(cx - 36, cy - 36, 72, 72);
+        roundRectPath(ctx, cx - 36, cy - 36, 72, 72, TOKENS.radiusPx);
+        ctx.fill();
         ctx.fillStyle = T.onAccent;
         ctx.beginPath();
         ctx.moveTo(cx - 9, cy - 14); ctx.lineTo(cx + 17, cy); ctx.lineTo(cx - 9, cy + 14);
@@ -2329,27 +2326,27 @@
         ? Math.max(0, Math.min(1, (Number(previewVideo.currentTime) || 0) / Number(previewVideo.duration))) : 0;
       for (let i = 0; i < items.length; i++) {
         const sx = hx + 20 + i * (segW + segGap);
-        ctx.fillStyle = 'rgba(255,255,255,0.28)';
-        previewRoundRect(ctx, sx, segY, segW, segH, TOKENS.radius);
+        ctx.fillStyle = withAlpha(T.onMedia, 0.28);
+        roundRectPath(ctx, sx, segY, segW, segH, TOKENS.radiusPx);
         ctx.fill();
         const frac = i < active ? 1 : (i === active ? liveFrac : 0);
         if (frac > 0) {
           ctx.fillStyle = T.accent;
-          previewRoundRect(ctx, sx, segY, Math.max(segH, segW * frac), segH, TOKENS.radius);
+          roundRectPath(ctx, sx, segY, Math.max(segH, segW * frac), segH, TOKENS.radiusPx);
           ctx.fill();
         }
       }
       // Item caption + counter
       const cur = items[active] || {};
-      ctx.fillStyle = T.ink;
-      ctx.font = `800 22px ${TOKENS.font.sans}`;
+      ctx.fillStyle = T.onMedia;
+      ctx.font = `700 22px ${TOKENS.font.sans}`;
       ctx.textAlign = 'left';
       ctx.fillText(truncatePreviewText(cur.title || cur.filename || 'Untitled reel', 30), hx + 20, hy + hh - 32);
-      previewRoundRect(ctx, hx + hw - 78, hy + 28, 62, 28, TOKENS.radius);
-      ctx.fillStyle = 'rgba(8,9,10,0.78)';
+      roundRectPath(ctx, hx + hw - 78, hy + 28, 62, 28, TOKENS.radiusPx);
+      ctx.fillStyle = TOKENS.rgba.mediaScrim;
       ctx.fill();
-      ctx.fillStyle = T.ink;
-      ctx.font = `800 14px ${TOKENS.font.mono}`;
+      ctx.fillStyle = T.onMedia;
+      ctx.font = `600 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText((active + 1) + ' / ' + items.length, hx + hw - 47, hy + 43);
     }
@@ -2358,7 +2355,7 @@
     for (const b of EARTH_PREVIEW_BUTTONS) {
       const hot = earthPreviewHover === b.action;
       const live = b.action !== 'feed' || items.length > 0;
-      previewRoundRect(ctx, b.x, b.y, b.w, b.h, TOKENS.radius);
+      roundRectPath(ctx, b.x, b.y, b.w, b.h, TOKENS.radiusPx);
       ctx.fillStyle = live ? (hot ? T.accentHi : T.accent) : T.surface2;
       ctx.fill();
       if (!live) {
@@ -2367,7 +2364,7 @@
         ctx.stroke();
       }
       ctx.fillStyle = live ? T.onAccent : T.inkMuted;
-      ctx.font = `800 14px ${TOKENS.font.mono}`;
+      ctx.font = `600 14px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.fillText(b.label, b.x + b.w / 2, b.y + 21);
     }
@@ -2381,43 +2378,136 @@
     return '';
   }
 
-  // ─── ECHO design tokens ─────────────────────────────────────────────
-  // Mirror of web/src/styles/tokens.css (colour, font, spacing). The parity test
-  // web/tests/echo-token-parity.test.js fails when the two drift apart. Frozen and
-  // side-effect free so the module still loads in a bare VM.
-  const TOKENS = Object.freeze({
-    hex: Object.freeze({
-      bg: '#08090a',
-      surface: '#101214',
-      surface2: '#16191c',
-      surface3: '#1d2126',
-      rule: '#24282d',
-      ruleStrong: '#3a4047',
-      ink: '#f2f3f5',
-      ink2: '#a4abb3',
-      ink3: '#8e959e',
-      inkMuted: '#646b74',
-      accent: '#ff3b1f',
-      accentHi: '#ff5c42',
-      onAccent: '#0a0a0a',
-      success: '#22c55e',
-      successHi: '#4ade80',
-      warn: '#f2c744',
-      warnHi: '#fde047',
-      danger: '#f43f5e',
-      dangerHi: '#fb7185',
-      info: '#3b82f6',
-      infoHi: '#60a5fa',
-    }),
-    font: Object.freeze({
-      display: "'Archivo Black', Archivo, sans-serif",
-      sans: 'Archivo, ui-sans-serif, system-ui, -apple-system, sans-serif',
-      mono: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-      brand: "Orbitron, 'Archivo Black', sans-serif",
-    }),
-    space: Object.freeze({ s1: 4, s2: 8, s3: 12, s4: 16, s5: 24 }),
-    radius: 0,
+  // ─── Paper & Ink design tokens ──────────────────────────────────────
+  // Mirror of web/src/styles/tokens.css: TOKEN_SETS.light is the :root:root block,
+  // TOKEN_SETS.dark is that block overlaid with :root[data-theme='dark'] (colours
+  // only). The parity test web/tests/echo-token-parity.test.js fails when they drift
+  // apart. Frozen and side-effect free so the module still loads in a bare VM.
+  // radius mirrors --sx-radius (CSS px); radiusPx is the canvas-pixel corner, tune in QA.
+  const TOKEN_FONT = Object.freeze({
+    display: "'Fraunces', Georgia, 'Times New Roman', serif",
+    sans: "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif",
+    mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+    brand: "'Fraunces', Georgia, serif",
   });
+  const TOKEN_SPACE = Object.freeze({ s1: 4, s2: 8, s3: 12, s4: 16, s5: 24 });
+  const TOKEN_SETS = Object.freeze({
+    light: Object.freeze({
+      hex: Object.freeze({
+        bg: '#f2ede3',
+        surface: '#faf7f0',
+        surface2: '#ebe5d8',
+        surface3: '#e0d8c7',
+        surfaceHover: '#e6dfd0',
+        rule: '#d3cab8',
+        ruleStrong: '#17140f',
+        ink: '#17140f',
+        ink2: '#45403a',
+        ink3: '#5c554c',
+        inkMuted: '#635b50',
+        accent: '#c2250e',
+        accentHi: '#a81f0b',
+        onAccent: '#faf7f0',
+        spot: '#f3d34a',
+        spotSoft: '#f8e7a0',
+        onSpot: '#17140f',
+        onMedia: '#ffffff',
+        success: '#146638',
+        successHi: '#11592f',
+        warn: '#7a5200',
+        warnHi: '#5e3f00',
+        danger: '#be123c',
+        dangerHi: '#9f1239',
+        info: '#1d6680',
+        infoHi: '#154c60',
+      }),
+      rgba: Object.freeze({ mediaScrim: 'rgba(12, 10, 8, 0.72)' }),
+      font: TOKEN_FONT,
+      space: TOKEN_SPACE,
+      radius: 4,
+      radiusPx: 8,
+    }),
+    dark: Object.freeze({
+      hex: Object.freeze({
+        bg: '#0c0b09',
+        surface: '#14130f',
+        surface2: '#1c1a16',
+        surface3: '#25221d',
+        surfaceHover: '#221f1a',
+        rule: '#2e2a24',
+        ruleStrong: '#f5f1e8',
+        ink: '#f5f1e8',
+        ink2: '#c4bdb0',
+        ink3: '#a39b8e',
+        inkMuted: '#938c80',
+        accent: '#ff3b1f',
+        accentHi: '#ff5c42',
+        onAccent: '#17140f',
+        spot: '#f3d34a',
+        spotSoft: '#f8e7a0',
+        onSpot: '#17140f',
+        onMedia: '#ffffff',
+        success: '#22c55e',
+        successHi: '#4ade80',
+        warn: '#f2c744',
+        warnHi: '#fde047',
+        danger: '#f43f5e',
+        dangerHi: '#fb7185',
+        info: '#3b82f6',
+        infoHi: '#60a5fa',
+      }),
+      rgba: Object.freeze({ mediaScrim: 'rgba(12, 10, 8, 0.72)' }),
+      font: TOKEN_FONT,
+      space: TOKEN_SPACE,
+      radius: 4,
+      radiusPx: 8,
+    }),
+  });
+
+  // The active set. Painters read TOKENS.hex.* etc.; setTheme reassigns it.
+  let TOKENS = TOKEN_SETS.light;
+
+  // 'dark' selects dark, anything else light. Returns true when the active set changed.
+  function setTheme(mode) {
+    const next = mode === 'dark' ? TOKEN_SETS.dark : TOKEN_SETS.light;
+    if (next === TOKENS) return false;
+    TOKENS = next;
+    return true;
+  }
+
+  function getTheme() {
+    return TOKENS === TOKEN_SETS.dark ? 'dark' : 'light';
+  }
+
+  // The three paper faces the panels draw with.
+  const PAPER_FONTS = ['16px Fraunces', "16px 'Instrument Sans'", "600 16px 'IBM Plex Mono'"];
+
+  // Calls onPaint once the paper fonts settle or timeoutMs passes, whichever is first,
+  // and once more if the fonts arrive after the timeout. A failed load counts as
+  // settled. Without a font set (a bare VM) it paints at once. Never throws.
+  function waitForFonts(fontSet, timeoutMs, onPaint) {
+    const paint = () => { try { onPaint(); } catch (e) {} };
+    if (!fontSet || typeof fontSet.load !== 'function') {
+      paint();
+      return;
+    }
+    let settled = false;
+    let timer = null;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
+      paint();
+    };
+    if (typeof setTimeout === 'function') {
+      timer = setTimeout(() => { timer = null; if (!settled) paint(); }, timeoutMs);
+    }
+    try {
+      Promise.all(PAPER_FONTS.map((font) => fontSet.load(font))).then(settle, settle);
+    } catch (e) {
+      settle();
+    }
+  }
 
   // ─── Public Module API ──────────────────────────────────────────────
   return {
@@ -2464,7 +2554,13 @@
     renderEarthLabelCanvas,
     resolveEarthLabelHit,
     drawIcon,
-    chamferPath,
-    TOKENS,
+    roundRectPath,
+    TOKEN_SETS,
+    get TOKENS() {
+      return TOKENS;
+    },
+    setTheme,
+    getTheme,
+    waitForFonts,
   };
 });

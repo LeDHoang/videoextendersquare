@@ -17,13 +17,16 @@
   const NAV_W = 1536;
   const NAV_H = 160;
 
-  // Fallbacks mirror VRUICanvas.TOKENS; the live tokens win when that module is loaded.
+  // Fallbacks mirror the light VRUICanvas.TOKENS; the live tokens win when that module is loaded.
   const FALLBACK = {
-    hex: { bg: '#08090a', surface: '#101214', surface2: '#16191c', surface3: '#1d2126', rule: '#24282d',
-      ruleStrong: '#3a4047', ink: '#f2f3f5', ink2: '#a4abb3', ink3: '#8e959e', inkMuted: '#646b74', accent: '#ff3b1f',
-      accentHi: '#ff5c42', onAccent: '#0a0a0a' },
-    font: { display: "'Archivo Black', Archivo, sans-serif", sans: 'Archivo, ui-sans-serif, system-ui, sans-serif',
-      mono: "'JetBrains Mono', ui-monospace, Menlo, monospace" },
+    hex: { bg: '#f2ede3', surface: '#faf7f0', surface2: '#ebe5d8', surface3: '#e0d8c7', surfaceHover: '#e6dfd0',
+      rule: '#d3cab8', ruleStrong: '#17140f', ink: '#17140f', ink2: '#45403a', ink3: '#5c554c', inkMuted: '#635b50',
+      accent: '#c2250e', accentHi: '#a81f0b', onAccent: '#faf7f0', onMedia: '#ffffff' },
+    rgba: { mediaScrim: 'rgba(12, 10, 8, 0.72)' },
+    font: { display: "'Fraunces', Georgia, 'Times New Roman', serif",
+      sans: "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif",
+      mono: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace", brand: "'Fraunces', Georgia, serif" },
+    radiusPx: 8,
   };
   function tokens() {
     const ui = typeof window !== 'undefined' && window.VRUICanvas;
@@ -44,8 +47,19 @@
   const NAV_PAD = 16;
   const NAV_GAP = 12;
   const NAV_BRAND_W = 216;
+  // LIGHT / DARK segmented switch at the right end of the bar.
+  const SWITCH_SEG_W = 112;
+  const SWITCH_H = 64;
+  const SWITCH_X = NAV_W - NAV_PAD - SWITCH_SEG_W * 2;
+  function themeSwitchRects() {
+    const y = (NAV_H - SWITCH_H) / 2;
+    return {
+      light: { x: SWITCH_X, y, w: SWITCH_SEG_W, h: SWITCH_H },
+      dark: { x: SWITCH_X + SWITCH_SEG_W, y, w: SWITCH_SEG_W, h: SWITCH_H },
+    };
+  }
   function navRects() {
-    const w = (NAV_W - NAV_BRAND_W - NAV_PAD - NAV_GAP * (NAV_ITEMS.length - 1)) / NAV_ITEMS.length;
+    const w = (SWITCH_X - NAV_GAP - NAV_BRAND_W - NAV_GAP * (NAV_ITEMS.length - 1)) / NAV_ITEMS.length;
     return NAV_ITEMS.map((item, i) => ({
       id: item.id, label: item.label, icon: item.icon,
       x: NAV_BRAND_W + i * (w + NAV_GAP), y: NAV_PAD, w, h: NAV_H - NAV_PAD * 2,
@@ -326,11 +340,6 @@
     messages: 'message', thread: 'message', share: 'share', newchat: 'message', wallet: 'credits', rewards: 'credits',
   };
 
-  // Comments/guide panel shades: header band, row, hovered row.
-  const BAND = '#0d0e0f';
-  const ROW = '#121315';
-  const ROW_HOVER = '#1c1d1f';
-
   function inRect(r, x, y) {
     return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   }
@@ -339,15 +348,16 @@
     return typeof window !== 'undefined' && window.VRUICanvas;
   }
 
-  // Chamfered outline (the dock tile shape); a plain rect when VRUICanvas is absent.
-  function shape(ctx, r, c) {
+  // Rounded outline at the theme radius (the third tile() argument is a legacy corner size, unused);
+  // a plain rect when VRUICanvas is absent.
+  function shape(ctx, r) {
     const ui = uiKit();
-    if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, c);
+    if (ui && ui.roundRectPath) ui.roundRectPath(ctx, r.x, r.y, r.w, r.h, tokens().radiusPx);
     else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
   }
 
   function tile(ctx, r, c, fill, stroke, lineWidth) {
-    shape(ctx, r, c);
+    shape(ctx, r);
     if (fill) { ctx.fillStyle = fill; ctx.fill(); }
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth || 2; ctx.stroke(); }
   }
@@ -366,7 +376,7 @@
     const T = t.hex;
     const o = opts || {};
     const lit = !o.disabled && (o.hover || o.active);
-    let fill = lit ? T.surface3 : (o.quiet ? ROW : T.surface2);
+    let fill = lit ? T.surfaceHover : (o.quiet ? T.surface : T.surface2);
     let stroke = lit ? T.accent : T.rule;
     if (o.primary) {
       fill = o.hover ? (T.accentHi || T.accent) : T.accent;
@@ -379,7 +389,7 @@
       ctx.fillRect(r.x + r.w / 2 - 28, r.y + r.h - 10, 56, 4);
     }
     ctx.fillStyle = o.primary ? T.onAccent : (o.quiet && !lit ? T.ink2 : T.ink);
-    ctx.font = (o.weight || 700) + ' ' + (o.size || 32) + 'px ' + (o.font || t.font.mono);
+    ctx.font = (o.weight || 600) + ' ' + (o.size || 32) + 'px ' + (o.font || t.font.mono);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 2);
@@ -390,7 +400,7 @@
   function drawPill(ctx, right, cy, label, style) {
     const t = tokens();
     const T = t.hex;
-    ctx.font = '700 28px ' + t.font.mono;
+    ctx.font = '600 28px ' + t.font.mono;
     const w = ctx.measureText(label).width + 48;
     const fill = style === 'fill';
     tile(ctx, { x: right - w, y: cy - 28, w, h: 56 }, 8, fill ? T.accent : T.bg, fill || style === 'accent' ? T.accent : T.ruleStrong, 2);
@@ -417,7 +427,7 @@
   function drawStatus(ctx, text, y) {
     const t = tokens();
     const label = String(text).toUpperCase();
-    ctx.font = '700 40px ' + t.font.mono;
+    ctx.font = '600 40px ' + t.font.mono;
     const x = MAIN_W / 2 - (ctx.measureText(label).width + 40) / 2;
     ctx.fillStyle = t.hex.accent;
     ctx.fillRect(x, y - 10, 20, 20);
@@ -466,7 +476,7 @@
     ctx.clearRect(0, 0, NAV_W, NAV_H);
     ctx.fillStyle = T.surface;
     ctx.fillRect(0, 0, NAV_W, NAV_H);
-    ctx.strokeStyle = T.accent;
+    ctx.strokeStyle = T.rule;
     ctx.lineWidth = 3;
     ctx.beginPath();
     if (s.open) ctx.rect(1.5, 1.5, NAV_W - 3, NAV_H - 3);
@@ -477,9 +487,13 @@
       ctx.lineTo(NAV_W - 1.5, 0);
     }
     ctx.stroke();
+    if (s.open) {
+      ctx.fillStyle = T.accent;
+      ctx.fillRect(0, 0, NAV_W, 3);
+    }
     if (ui && ui.drawIcon) ui.drawIcon(ctx, 'logo', 60, NAV_H / 2, 52, T.ink, T.accent, T.surface);
     ctx.fillStyle = T.ink;
-    ctx.font = '900 30px ' + (t.font.brand || t.font.display);
+    ctx.font = '700 30px ' + (t.font.brand || t.font.display);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText('ECHO', 98, NAV_H / 2 + 1);
@@ -488,17 +502,16 @@
       const active = r.id === 'reels' || r.id === 'earth' ? !s.open && scene === r.id : s.open && s.tab === r.id;
       const off = r.id === 'earth' && s.earthOff;
       const lit = !off && (active || hover === r.id);
-      if (ui && ui.chamferPath) ui.chamferPath(ctx, r.x, r.y, r.w, r.h, 12);
-      else { ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); }
-      ctx.fillStyle = lit ? T.surface3 : T.surface2;
+      shape(ctx, r);
+      ctx.fillStyle = lit ? T.surfaceHover : T.surface2;
       ctx.fill();
-      ctx.strokeStyle = lit ? T.accent : T.rule;
+      ctx.strokeStyle = lit ? T.ink : T.rule;
       ctx.lineWidth = 2;
       ctx.stroke();
       const ink = lit ? T.ink : (off ? T.inkMuted : T.ink2);
-      if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surface3 : T.surface2);
+      if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surfaceHover : T.surface2);
       ctx.fillStyle = ink;
-      ctx.font = 'bold 26px ' + t.font.mono;
+      ctx.font = '600 26px ' + t.font.mono;
       ctx.textAlign = 'center';
       ctx.fillText(r.label, r.x + r.w / 2, r.y + r.h - 22);
       if (active) {
@@ -506,6 +519,32 @@
         ctx.fillRect(r.x + r.w / 2 - 24, r.y + r.h - 6, 48, 4);
       }
       if (r.id === 'messages' && s.unread > 0) drawBadge(ctx, r.x + r.w - 30, r.y + 30, s.unread);
+    });
+    drawThemeSwitch(ctx, hover);
+  }
+
+  // Segmented LIGHT / DARK pair: the active mode is filled ink with bg text.
+  function drawThemeSwitch(ctx, hover) {
+    const t = tokens();
+    const T = t.hex;
+    const ui = uiKit();
+    const mode = ui && ui.getTheme ? ui.getTheme() : 'light';
+    const rects = themeSwitchRects();
+    ['light', 'dark'].forEach((id) => {
+      const r = rects[id];
+      const on = id === mode;
+      const hot = !on && hover === 'theme:' + id;
+      shape(ctx, r);
+      ctx.fillStyle = on ? T.ink : (hot ? T.surfaceHover : T.surface2);
+      ctx.fill();
+      ctx.strokeStyle = on ? T.ink : T.rule;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = on ? T.bg : (hot ? T.ink : T.ink2);
+      ctx.font = '600 22px ' + t.font.mono;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(id.toUpperCase(), r.x + r.w / 2, r.y + r.h / 2 + 1);
     });
   }
 
@@ -523,6 +562,9 @@
   }
 
   function resolveNavHit(x, y) {
+    const sw = themeSwitchRects();
+    if (inRect(sw.light, x, y)) return { action: 'theme', arg: 'light' };
+    if (inRect(sw.dark, x, y)) return { action: 'theme', arg: 'dark' };
     const r = navRects().find((rect) => inRect(rect, x, y));
     return r ? { action: 'nav', arg: r.id } : null;
   }
@@ -532,7 +574,7 @@
     const t = tokens();
     const T = t.hex;
     const cy = HEADER_H / 2 + 3;
-    ctx.fillStyle = BAND;
+    ctx.fillStyle = T.surface;
     ctx.fillRect(0, 0, MAIN_W, HEADER_H);
     ctx.fillStyle = T.accent;
     ctx.fillRect(0, 0, MAIN_W, 6);
@@ -541,7 +583,7 @@
     tile(ctx, { x: 40, y: cy - 38, w: 76, h: 76 }, 10, T.surface2, T.rule, 2);
     icon(ctx, iconName || 'logo', 78, cy, 48, T.ink, T.surface2);
     ctx.fillStyle = T.ink;
-    ctx.font = '700 44px ' + t.font.mono;
+    ctx.font = '600 44px ' + t.font.mono;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(title, 148, cy);
@@ -554,9 +596,9 @@
       ctx.fillText(truncate(ctx, subtitle, CLOSE_BTN.x - x - 96), x + 44, cy);
     }
     const lit = hover === 'close';
-    tile(ctx, CLOSE_BTN, 12, lit ? T.surface3 : T.surface2, lit ? T.accent : T.ruleStrong, 2);
+    tile(ctx, CLOSE_BTN, 12, lit ? T.surfaceHover : T.surface2, lit ? T.accent : T.ruleStrong, 2);
     ctx.fillStyle = lit ? T.ink : T.accent;
-    ctx.font = '700 40px ' + t.font.mono;
+    ctx.font = '600 40px ' + t.font.mono;
     ctx.textAlign = 'center';
     ctx.fillText('✕', CLOSE_BTN.x + CLOSE_BTN.w / 2, CLOSE_BTN.y + CLOSE_BTN.h / 2 + 2);
   }
@@ -568,7 +610,7 @@
     const t = tokens();
     const T = t.hex;
     const c = HANDOFF_CARD;
-    tile(ctx, c, 24, ROW, T.ruleStrong, 2);
+    tile(ctx, c, 24, T.surface, T.ruleStrong, 2);
     ctx.fillStyle = T.accent;
     ctx.fillRect(c.x + 24, c.y, c.w - 48, 6);
     tile(ctx, { x: MAIN_W / 2 - 60, y: 260, w: 120, h: 120 }, 16, T.surface2, T.accent, 2);
@@ -631,7 +673,7 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < stats.length; i++) {
-      ctx.font = '700 38px ' + t.font.mono;
+      ctx.font = '600 38px ' + t.font.mono;
       const vw = ctx.measureText(stats[i][0]).width;
       ctx.font = '600 22px ' + t.font.mono;
       const w = Math.max(vw, ctx.measureText(stats[i][1]).width);
@@ -642,7 +684,7 @@
       }
       ctx.fillStyle = t.hex.ink3;
       ctx.fillText(stats[i][1], x, cy + 24);
-      ctx.font = '700 38px ' + t.font.mono;
+      ctx.font = '600 38px ' + t.font.mono;
       ctx.fillStyle = t.hex.ink;
       ctx.fillText(stats[i][0], x, cy - 12);
       x += w + 56;
@@ -746,10 +788,10 @@
     [[det.follower_count, 'FOLLOWERS'], [det.following_count, 'FOLLOWING'], [det.like_count, 'LIKES', true],
       [det.post_count, 'POSTS']].forEach(([n, label, accent], k) => {
       const r = L.stats[k];
-      tile(ctx, r, 10, ROW, T.rule, 2);
+      tile(ctx, r, 10, T.surface, T.rule, 2);
       ctx.textAlign = 'left';
       ctx.fillStyle = accent ? T.accent : T.ink;
-      ctx.font = '700 40px ' + t.font.mono;
+      ctx.font = '600 40px ' + t.font.mono;
       ctx.fillText(fmtCount(n), r.x + 24, r.y + 34);
       ctx.fillStyle = T.ink3;
       ctx.font = '600 20px ' + t.font.mono;
@@ -760,7 +802,7 @@
     if (!hl.length) return;
     ctx.textAlign = 'left';
     ctx.fillStyle = T.ink3;
-    ctx.font = '700 24px ' + t.font.mono;
+    ctx.font = '600 24px ' + t.font.mono;
     ctx.fillText('HIGHLIGHTED PACKS', PROFILE_X, c.y + 18);
     hl.forEach((r) => {
       const lit = hover === 'chip:' + r.path;
@@ -777,7 +819,7 @@
         const bw = monoW(n, 20) + 20;
         tile(ctx, { x: cover.x + cover.w - 8 - bw, y: cover.y + 8, w: bw, h: 32 }, 6, T.accent);
         ctx.fillStyle = T.onAccent;
-        ctx.font = '800 20px ' + t.font.mono;
+        ctx.font = '600 20px ' + t.font.mono;
         ctx.textAlign = 'center';
         ctx.fillText(n, cover.x + cover.w - 8 - bw / 2, cover.y + 25);
       }
@@ -843,8 +885,8 @@
       const lit = !disabled && hover === 'scroll:' + b.arg;
       const r = { x: b.x, y: b.arg < 0 ? b.y : b.y + b.h - b.w, w: b.w, h: b.w };
       ctx.globalAlpha = disabled ? 0.35 : 1;
-      tile(ctx, r, 12, lit ? T.surface3 : T.surface2, lit ? T.accent : T.rule, 2);
-      chevron(ctx, r.x + r.w / 2, r.y + r.h / 2, b.arg < 0 ? -1 : 1, lit ? T.accent : T.ink);
+      tile(ctx, r, 12, lit ? T.surfaceHover : T.surface2, lit ? T.accent : T.rule, 2);
+      chevron(ctx, r.x + r.w / 2, r.y + r.h / 2, b.arg < 0 ? -1 : 1, T.ink);
       ctx.globalAlpha = 1;
     });
   }
@@ -875,20 +917,20 @@
     const lit = hover === 'play:' + i;
     const url = thumbUrl(item);
     ctx.save();
-    shape(ctx, r, TILE_C);
+    shape(ctx, r);
     ctx.clip();
     // A video reel plays its muted preview loop once the host has a frame, like the 2D tile.
     const vid = item.media_type !== 'image' && item.preview_url && getImage ? getImage(item.preview_url, 'video') : null;
     drawThumb(ctx, r, vid || (url && getImage ? getImage(url) : null), item);
     ctx.restore();
-    const pill = (q, on) => tile(ctx, q, 8, 'rgba(8,9,10,0.86)', on ? T.accent : T.ruleStrong, 2);
+    const pill = (q, on) => tile(ctx, q, 8, t.rgba.mediaScrim, on ? T.accent : T.ruleStrong, 2);
     const p = tilePills(r, item);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     if (p.kind) {
       pill(p.kind, false);
-      ctx.fillStyle = T.ink;
-      ctx.font = '700 22px ' + t.font.mono;
+      ctx.fillStyle = T.onMedia;
+      ctx.font = '600 22px ' + t.font.mono;
       ctx.fillText(p.kind.text, p.kind.x + 14, p.kind.y + p.kind.h / 2 + 1);
     }
     if (p.creator) {
@@ -912,21 +954,21 @@
         ctx.restore();
       } else {
         ctx.fillStyle = T.onAccent;
-        ctx.font = '800 18px ' + t.font.mono;
+        ctx.font = '600 18px ' + t.font.mono;
         ctx.textAlign = 'center';
         ctx.fillText(c.user.charAt(0).toUpperCase(), cx, cy + 1);
         ctx.textAlign = 'left';
       }
-      ctx.fillStyle = on ? T.accent : T.ink;
-      ctx.font = '800 ' + PILL_FONT + 'px ' + t.font.mono;
+      ctx.fillStyle = T.onMedia;
+      ctx.font = '600 ' + PILL_FONT + 'px ' + t.font.mono;
       ctx.fillText(c.text, c.x + 56, cy + 1);
     }
     if (p.loc) {
       const on = hover === 'loc:' + i;
       pill(p.loc, on);
-      icon(ctx, 'location', p.loc.x + 24, p.loc.y + p.loc.h / 2, 28, on ? T.accent : T.ink);
-      ctx.fillStyle = on ? T.accent : T.ink;
-      ctx.font = '700 ' + PILL_FONT + 'px ' + t.font.mono;
+      icon(ctx, 'location', p.loc.x + 24, p.loc.y + p.loc.h / 2, 28, T.onMedia);
+      ctx.fillStyle = T.onMedia;
+      ctx.font = '600 ' + PILL_FONT + 'px ' + t.font.mono;
       ctx.fillText(p.loc.text, p.loc.x + 48, p.loc.y + p.loc.h / 2 + 1);
     }
     // Foot: counts pill, the title box above it.
@@ -936,13 +978,13 @@
     const sw = stats.reduce((w, s) => w + 36 + monoW(s[1], 22) + 16, 12);
     const sr = { x: r.x + 12, y: r.y + r.h - 56, w: sw, h: 44 };
     pill(sr, false);
-    ctx.font = '700 22px ' + t.font.mono;
+    ctx.font = '600 22px ' + t.font.mono;
     let x = sr.x + 12;
     stats.forEach(([name, n, on]) => {
-      const ink = on ? T.accent : T.ink;
+      const ink = T.onMedia;
       if (name === 'eye') drawEye(ctx, x + 14, sr.y + 22, 26, ink);
       else icon(ctx, name, x + 14, sr.y + 22, 28, ink);
-      ctx.fillStyle = ink;
+      ctx.fillStyle = T.onMedia;
       ctx.fillText(n, x + 36, sr.y + 23);
       x += 36 + monoW(n, 22) + 16;
     });
@@ -951,8 +993,8 @@
       const lines = wrapLines(ctx, item.title, r.w - 48, 2);
       const tw = lines.reduce((w, l) => Math.max(w, ctx.measureText(l).width), 0);
       const tb = { x: r.x + 12, y: sr.y - 8 - (lines.length * 32 + 16), w: Math.min(r.w - 24, tw + 24), h: lines.length * 32 + 16 };
-      tile(ctx, tb, 8, 'rgba(18,19,21,0.88)');
-      ctx.fillStyle = T.ink;
+      tile(ctx, tb, 8, t.rgba.mediaScrim);
+      ctx.fillStyle = T.onMedia;
       lines.forEach((line, k) => ctx.fillText(line, tb.x + 12, tb.y + 8 + 16 + k * 32));
     }
     tile(ctx, r, TILE_C, null, lit ? T.accent : T.rule, lit ? 4 : 2);
@@ -983,7 +1025,7 @@
     tile(ctx, { x: cx - half, y: cy - half, w: half * 2, h: half * 2 }, Math.round(half / 4), t.hex.surface2, color, 3);
     const words = String(u.display_name || u.username || '?').trim().split(/\s+/);
     ctx.fillStyle = color;
-    ctx.font = '700 ' + Math.round(half * 0.8) + 'px ' + t.font.mono;
+    ctx.font = '600 ' + Math.round(half * 0.8) + 'px ' + t.font.mono;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(words.slice(0, 2).map((w) => Array.from(w)[0] || '').join('').toUpperCase() || '?', cx, cy + 2);
@@ -1005,7 +1047,7 @@
     const t = tokens();
     const T = t.hex;
     const p = conv.participant || {};
-    tile(ctx, r, 12, hover ? ROW_HOVER : ROW, hover ? T.accent : T.ruleStrong, hover ? 3 : 2);
+    tile(ctx, r, 12, hover ? T.surfaceHover : T.surface, hover ? T.accent : T.ruleStrong, hover ? 3 : 2);
     ctx.fillStyle = p.avatar_color || T.accent;
     ctx.fillRect(r.x, r.y + 14, 6, r.h - 28);
     const cy = r.y + r.h / 2;
@@ -1198,14 +1240,14 @@
   // Caption over value in a dark tile (wallet tool row).
   function statTile(ctx, r, caption, value, valueFont, valueColor) {
     const t = tokens();
-    tile(ctx, r, 12, ROW, t.hex.rule, 2);
+    tile(ctx, r, 12, t.hex.surface, t.hex.rule, 2);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = t.hex.ink3;
     ctx.font = '600 22px ' + t.font.mono;
     ctx.fillText(caption, r.x + 24, r.y + 26);
     ctx.fillStyle = valueColor || t.hex.ink;
-    ctx.font = valueFont || '700 38px ' + t.font.mono;
+    ctx.font = valueFont || '600 38px ' + t.font.mono;
     ctx.fillText(truncate(ctx, value, r.w - 48), r.x + 24, r.y + 68);
   }
 
@@ -1227,7 +1269,7 @@
       ctx.font = '52px ' + t.font.display;
       const bx = bal.x + 24 + Math.min(ctx.measureText(balance).width, bal.w - 48) + 20;
       ctx.fillStyle = T.ink2;
-      ctx.font = '700 26px ' + t.font.mono;
+      ctx.font = '600 26px ' + t.font.mono;
       if (bx + ctx.measureText('CREDITS').width < bal.x + bal.w - 20) ctx.fillText('CREDITS', bx, y + 74);
       statTile(ctx, { x: 544, y, w: 200, h }, 'RESERVED', fmtCount(w.reserved_credits));
       statTile(ctx, { x: 760, y, w: 200, h }, 'EARNED', fmtCount(w.lifetime_earned));
@@ -1235,7 +1277,7 @@
       const r = state.rewards;
       if (r) {
         const p = { x: 1192, y, w: 412, h };
-        tile(ctx, p, 12, ROW, T.rule, 2);
+        tile(ctx, p, 12, T.surface, T.rule, 2);
         ctx.textAlign = 'left';
         ctx.fillStyle = T.ink3;
         ctx.font = '600 22px ' + t.font.mono;
@@ -1257,7 +1299,7 @@
       const r = listRowRect(slot);
       const delta = ledgerDelta(e);
       const cy = r.y + r.h / 2;
-      tile(ctx, r, 12, ROW, T.ruleStrong, 2);
+      tile(ctx, r, 12, T.surface, T.ruleStrong, 2);
       ctx.fillStyle = delta.gain ? T.accent : T.ruleStrong;
       ctx.fillRect(r.x, r.y + 14, 6, r.h - 28);
       tile(ctx, { x: r.x + 36, y: cy - 36, w: 72, h: 72 }, 10, T.surface2, T.rule, 2);
@@ -1272,7 +1314,7 @@
       ctx.fillText(String(e.created_at || '').slice(0, 10), r.x + 136, cy + 24);
       ctx.textAlign = 'right';
       ctx.fillStyle = delta.gain ? T.accent : T.ink;
-      ctx.font = '700 44px ' + t.font.mono;
+      ctx.font = '600 44px ' + t.font.mono;
       ctx.fillText(delta.text, r.x + r.w - 32, cy - 14);
       ctx.fillStyle = T.inkMuted;
       ctx.font = '600 24px ' + t.font.mono;
@@ -1299,8 +1341,10 @@
     const t = tokens();
     const s = state || {};
     ctx.clearRect(0, 0, MAIN_W, MAIN_H);
-    ctx.fillStyle = 'rgba(13,14,15,0.97)';
+    ctx.fillStyle = t.hex.surface;
+    ctx.globalAlpha = 0.97;
     ctx.fillRect(0, 0, MAIN_W, MAIN_H);
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = t.hex.ruleStrong;
     ctx.lineWidth = 3;
     ctx.strokeRect(1.5, 1.5, MAIN_W - 3, MAIN_H - 3);
@@ -1412,7 +1456,6 @@
   const KB_GAP = 12;
   const KB_KEY_W = (KB_W - KB_GAP * 11) / 10;
   const KB_KEY_H = (KB_H - KB_STRIP - KB_GAP * 5) / 4;
-  const KB_BG = 'rgba(13,14,15,0.97)';
   const KB_LABELS = { backspace: '⌫', space: 'SPACE', enter: 'ENTER', close: 'HIDE', shift: '⇧' };
   const KB_LAYOUTS = {
     alpha: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
@@ -1445,14 +1488,20 @@
     return out;
   }
 
+  function kbBase(ctx, x, y, w, h) {
+    ctx.fillStyle = tokens().hex.surface;
+    ctx.globalAlpha = 0.97;
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 1;
+  }
+
   // Dock-style keys: letters in sans, function keys quieter in mono caps, ENTER in accent.
   function renderKeyboard(ctx, hover, field) {
     const t = tokens();
     const shift = !!(field && field.shift);
     const emoji = !!(field && field.layout === 'emoji');
     ctx.clearRect(0, 0, KB_W, KB_H);
-    ctx.fillStyle = KB_BG;
-    ctx.fillRect(0, 0, KB_W, KB_H);
+    kbBase(ctx, 0, 0, KB_W, KB_H);
     ctx.strokeStyle = t.hex.accent;
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, KB_W - 2, KB_H - 2);
@@ -1463,7 +1512,7 @@
       if (fn) size = Array.from(k.label).length > 1 ? 28 : 40;
       drawButton(ctx, k, k.label, {
         primary: k.id === 'enter', active: k.id === 'shift' && shift, quiet: fn,
-        hover: hover === 'key:' + k.id, size, font: fn ? t.font.mono : t.font.sans, weight: fn ? 700 : 600,
+        hover: hover === 'key:' + k.id, size, font: fn ? t.font.mono : t.font.sans, weight: 600,
       });
     });
   }
@@ -1473,8 +1522,7 @@
   function renderKeyboardField(ctx, field) {
     const h = KB_STRIP + KB_GAP / 2 - 2;
     ctx.clearRect(2, 2, KB_W - 4, h);
-    ctx.fillStyle = KB_BG;
-    ctx.fillRect(2, 2, KB_W - 4, h);
+    kbBase(ctx, 2, 2, KB_W - 4, h);
     drawField(ctx, { x: KB_GAP, y: KB_GAP, w: KB_W - KB_GAP * 2, h: KB_STRIP - KB_GAP },
       field && field.text, '', true, false, 28);
   }
@@ -1500,6 +1548,7 @@
     NAV_H,
     NAV_ITEMS,
     navRects,
+    themeSwitchRects,
     renderNavBar,
     resolveNavHit,
     GRID_COLS,

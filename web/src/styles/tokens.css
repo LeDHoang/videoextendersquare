@@ -145,7 +145,11 @@
    The block above is the shared contract with ui/assets/reels.html and the
    in-headset canvas (tests pin it), so the VR scene keeps its own look. The web
    app re-points the same tokens here: newsprint paper, carbon ink, one
-   vermilion spot colour and a proof-yellow highlighter. */
+   vermilion spot colour and a proof-yellow highlighter. The reels details column
+   and comments drawer are reading panels beside the screen, so in light mode they
+   step out of the carbon island below and print on paper too. */
+:root:not([data-theme='dark']) #sxReelsRoot .reels-side,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-comments-drawer,
 :root:root {
   color-scheme: light;
 
@@ -168,8 +172,8 @@
   --sx-ink-muted: #635b50;
 
   /* Vermilion: the one spot colour that carries every action. The app's #ff3b1f is
-     3.05:1 on paper, so it is deepened to read as text (4.8:1). */
-  --sx-accent: #c8270f;
+     3.05:1 on paper, so it is deepened to read as text (4.7:1 even on surface-2). */
+  --sx-accent: #c2250e;
   --sx-accent-hi: #a81f0b;
   --sx-accent-dim: rgba(200, 39, 15, 0.09);
   --sx-accent-glow: rgba(200, 39, 15, 0.22);
@@ -306,8 +310,12 @@
 
 /* The reels player is a screening room inside the magazine: its injected stylesheet
    paints dark panels with literal colours, so its tokens go back to carbon and the
-   app's own vermilion is the accent there. */
-#sxReelsRoot {
+   app's own vermilion is the accent there. The studio stage is a screening room too:
+   its flags sit over black video in both modes. Explore pack tiles lay their copy
+   over a cover photo, like reel tiles, so they read on carbon too. */
+.sx-explore-grid .sx-pack-tile,
+#sxReelsRoot,
+.sx-studio-stage {
   color-scheme: dark;
   --sx-bg: #0c0b09;
   --sx-surface: #14130f;
@@ -329,5 +337,9 @@
   --sx-accent-glow: rgba(255, 59, 31, 0.3);
   --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #17140f;
+  --sx-success-hi: #4ade80;
+  --sx-success-border: rgba(34, 197, 94, 0.35);
+  --sx-warn-hi: #fde047;
+  --sx-warn-border: rgba(242, 199, 68, 0.35);
   --sx-focus-halo: inset 0 0 0 3px var(--sx-bg);
 }

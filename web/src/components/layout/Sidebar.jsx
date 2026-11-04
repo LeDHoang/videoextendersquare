@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
-import { Button, Field } from '../ui/controls.jsx';
+import { Button, Field, Segmented } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import { IndustrialCreditsIcon } from '../icons/index.jsx';
 import { SIDEBAR_NAV } from './nav.js';
+import { useTheme } from '../../theme.js';
 
 const MODEL_FIELDS = [
   { key: 'outpaint_vid', label: 'VIDEO OUTPAINT' },
@@ -21,6 +22,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
   const showDevTools = !hideDevTools();
   const { user } = useAuth();
   const { wallet, falKey } = useWallet();
+  const [theme, setTheme] = useTheme();
   const [modelDraft, setModelDraft] = useState({});
   const [saving, setSaving] = useState(false);
   const [modelMsg, setModelMsg] = useState('');
@@ -193,6 +195,17 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </NavLink>
         ))}
       </nav>
+
+      {/* ─── Colour Theme ─────────────────────────────────── */}
+      <div className="sx-sidebar-theme">
+        <span className="sx-sidebar-card-title">APPEARANCE</span>
+        <Segmented
+          options={['LIGHT', 'DARK']}
+          value={theme.toUpperCase()}
+          onChange={(opt) => setTheme(opt.toLowerCase())}
+          ariaLabel="Colour theme"
+        />
+      </div>
 
       {/* ─── Account Billing Module ───────────────────────── */}
       <div className="sx-sidebar-card sx-sidebar-billing-card">
