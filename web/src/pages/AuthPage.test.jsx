@@ -71,6 +71,13 @@ describe('AuthPage — sign in', () => {
     vi.unstubAllGlobals();
   });
 
+  it('marks the ECHO wordmark to pulse like the logo on hover', () => {
+    renderAt('/login');
+    expect(screen.getByText('ECHO')).toHaveClass('sx-wordmark');
+    expect(screen.getByText('ECHO')).toHaveAttribute('data-echo', 'ECHO');
+    expect(screen.getByText('ECHO').previousElementSibling).toHaveClass('sx-echo-mark');
+  });
+
   it('renders the sign-in form with recovery and sign-up routes that keep the destination', () => {
     renderAt('/login?next=%2Fwallet');
     expect(screen.getByRole('heading', { level: 1, name: 'SIGN IN' })).toBeInTheDocument();

@@ -7,7 +7,7 @@ export default function Footer() {
       <div className="sx-footer-inner">
         <NavLink to="/reels" className="sx-footer-brand" title="ECHO 4K Engine">
           <AnimatedEchoLogo className="sx-footer-logo" />
-          <span>ECHO</span>
+          <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
         </NavLink>
         <p className="sx-footer-legal">
           © {new Date().getFullYear()} ECHO Inc. · <NavLink to="/terms" className="sx-footer-link">TERMS</NavLink> · <NavLink to="/privacy" className="sx-footer-link">PRIVACY</NavLink> · <NavLink to="/rules" className="sx-footer-link">RULES</NavLink> · <NavLink to="/support" className="sx-footer-link">SUPPORT</NavLink>

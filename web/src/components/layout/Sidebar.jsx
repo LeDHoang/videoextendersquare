@@ -171,7 +171,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
         <Link to="/reels" className="sx-sidebar-brand-block" onClick={() => onClose?.()} title="ECHO Home" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <div className="sx-sidebar-hero-row">
             <AnimatedEchoLogo className="sx-sidebar-hero-logo" title="ECHO Logo" />
-            <h2 className="sx-sidebar-hero-title">ECHO</h2>
+            <h2 className="sx-sidebar-hero-title sx-wordmark" data-echo="ECHO">ECHO</h2>
           </div>
           {showDevTools ? <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div> : null}
         </Link>

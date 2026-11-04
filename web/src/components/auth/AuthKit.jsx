@@ -18,7 +18,7 @@ export function AuthLayout({ rail, tabs, title, intro, step, children }) {
         <aside className="sx-au-rail">
           <Link to="/reels" className="sx-au-mark" aria-label="ECHO home">
             <AnimatedEchoLogo className="sx-au-logo" />
-            <span>ECHO</span>
+            <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
           </Link>
           <p className="sx-au-kicker">{rail.kicker}</p>
           <p className="sx-au-headline" aria-hidden="true">

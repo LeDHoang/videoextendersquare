@@ -14,6 +14,13 @@ describe('Footer', () => {
     expect(screen.getByText(`© ${new Date().getFullYear()} ECHO Inc.`, { exact: false })).toBeInTheDocument();
   });
 
+  it('marks the ECHO wordmark to pulse like the logo on hover', () => {
+    renderFooter();
+    expect(screen.getByText('ECHO')).toHaveClass('sx-wordmark');
+    expect(screen.getByText('ECHO')).toHaveAttribute('data-echo', 'ECHO');
+    expect(screen.getByText('ECHO').previousElementSibling).toHaveClass('sx-echo-mark');
+  });
+
   it('links home through the brand and to the Terms, Privacy Policy, Community rules and Support (the top bar already carries the navigation)', () => {
     renderFooter();
     expect(screen.queryByRole('navigation')).toBeNull();

@@ -383,7 +383,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             </IconButton>
             <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
               <AnimatedEchoLogo className="sx-top-logo" title="ECHO Logo" />
-              <span>ECHO</span>
+              <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
             </NavLink>
             <nav className="sx-top-nav" aria-label="Global Routes">
               {HEADER_NAV.map(({ to, label }) => (

@@ -48,6 +48,18 @@ describe('HeaderBar responsive behavior', () => {
     expect(screen.queryByText('Upload')).not.toBeInTheDocument();
   });
 
+  it('marks the ECHO wordmark to pulse like the logo on hover', () => {
+    render(
+      <MemoryRouter>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('ECHO')).toHaveClass('sx-wordmark');
+    expect(screen.getByText('ECHO')).toHaveAttribute('data-echo', 'ECHO');
+    expect(screen.getByText('ECHO').previousElementSibling).toHaveClass('sx-echo-mark');
+  });
+
   it('renders action buttons and unread count badge when authenticated', () => {
     mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
 
