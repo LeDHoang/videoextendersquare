@@ -3,7 +3,7 @@
 
 # Base images are pinned by digest so a rebuild cannot silently pick up a new
 # OS or runtime. Dependabot's docker ecosystem proposes the bumps.
-FROM node:22-slim@sha256:a6385bc33f0f9d6a08482c87f52baee537a9184e2b47dea1ed97caac62f8960c AS web-build
+FROM node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS web-build
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
