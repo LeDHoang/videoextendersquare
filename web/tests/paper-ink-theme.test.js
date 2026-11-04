@@ -137,3 +137,21 @@ test('VR preview stages take the page tone', () => {
     assert.match(body, /\n\s*background: var\(--sx-bg\);/, `${selector} keeps a fixed background`);
   }
 });
+
+// The primary icon button paints its icon in one colour on the accent fill; the re-ink
+// would turn the icon's accent parts into the fill colour and its cut-outs into paper.
+test('icon re-ink skips icons on the primary icon button', () => {
+  const editorialCss = read('../src/styles/editorial.css');
+  const rules = editorialCss.split('\n').filter((line) => line.includes('svg:not(.sx-echo-mark'));
+  for (const rule of rules) {
+    assert.ok(rule.includes('.sx-icon-button--primary *'), `${rule} still re-inks the primary icon button`);
+  }
+});
+
+test('header credits pill takes the shared corner radius', () => {
+  const editorialCss = read('../src/styles/editorial.css');
+  const start = editorialCss.indexOf('\n.sx-icon-button,\n');
+  assert.ok(start >= 0, 'corners rule not found');
+  const selectors = editorialCss.slice(start, editorialCss.indexOf('{', start));
+  assert.match(selectors, /\n\.sx-top-credits-pill,\n/);
+});

@@ -140,19 +140,19 @@ h1, h2, h3, h4, h5, h6 {
    the tiles (which sit on photos) and the reels player, the lines take the text
    colour, the cut-outs take the paper and the vermilion takes the accent. On carbon
    the art's own colours already fit, so dark mode leaves them alone. */
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#f2f3f5'] {
   stroke: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#f2f3f5'] {
   fill: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#121315'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#121315'] {
   fill: var(--sx-bg);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#ff3b1f'] {
   stroke: var(--sx-accent);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#ff3b1f'] {
   fill: var(--sx-accent);
 }
 
@@ -486,6 +486,7 @@ button.sx-explore-loc-link:hover {
    squares most of them off; avatars and dots stay round, and the player frame,
    which wears corner brackets, stays square. ─── */
 .sx-icon-button,
+.sx-top-credits-pill,
 .sx-sidebar-close-btn,
 .sx-sidebar-nav-card,
 .sx-pill,
