@@ -38,24 +38,6 @@ describe('Sidebar Account Billing Module', () => {
     expect(screen.getByText('SHARED POOL')).toBeInTheDocument();
   });
 
-  it('marks the ECHO wordmark to pulse like the logo on hover', () => {
-    mockUseAuth.mockReturnValue({ user: null });
-    mockUseWallet.mockReturnValue({
-      wallet: null,
-      falKey: { configured: false, hint: '' },
-    });
-
-    render(
-      <MemoryRouter>
-        <Sidebar isOpen={true} onClose={vi.fn()} />
-      </MemoryRouter>
-    );
-
-    expect(screen.getByText('ECHO')).toHaveClass('sx-wordmark');
-    expect(screen.getByText('ECHO')).toHaveAttribute('data-echo', 'ECHO');
-    expect(screen.getByText('ECHO').previousElementSibling).toHaveClass('sx-echo-mark');
-  });
-
   it('renders authenticated state with credits balance', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 'u1', username: 'alex', display_name: 'Alex' },

@@ -4,7 +4,6 @@ import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link } from 'react-router-dom';
 import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
-import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
 import { IndustrialCreditsIcon } from '../icons/index.jsx';
 import { SIDEBAR_NAV } from './nav.js';
 import { useTheme } from '../../theme.js';
@@ -168,13 +167,6 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             ✕
           </button>
         ) : null}
-        <Link to="/reels" className="sx-sidebar-brand-block" onClick={() => onClose?.()} title="ECHO Home" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
-          <div className="sx-sidebar-hero-row">
-            <AnimatedEchoLogo className="sx-sidebar-hero-logo" title="ECHO Logo" />
-            <h2 className="sx-sidebar-hero-title sx-wordmark" data-echo="ECHO">ECHO</h2>
-          </div>
-          {showDevTools ? <div className="sx-sidebar-hero-sub">TELEMETRY / V2.0</div> : null}
-        </Link>
       </div>
 
       {/* ─── 2x2 Navigation Grid ────────────────────────────── */}

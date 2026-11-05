@@ -254,7 +254,6 @@ export default function ExplorePage() {
     <div className="sx-wide-page">
       <ExploreHeader
         title="EXPLORE"
-        kicker={packDiscoveryEnabled ? 'ECHO · REELS AND REEL PACKS' : 'ECHO · REELS'}
         actions={(
           <>
             {user && packCreationEnabled ? (
