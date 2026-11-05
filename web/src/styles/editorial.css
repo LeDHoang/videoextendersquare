@@ -679,6 +679,27 @@ button.sx-explore-loc-link:hover {
   box-shadow: none;
 }
 
+/* Avatars everywhere are bordered rounded squares, like the Reels comment avatars. */
+.sx-account-avatar,
+.sx-profile-avatar,
+.sx-bottom-nav-avatar,
+.sx-ps-avatar-disc {
+  border-radius: var(--sx-radius);
+}
+.sx-ps-avatar-dock {
+  border-radius: calc(var(--sx-radius) + 4px);
+}
+.sx-profile-avatar--large {
+  border-radius: calc(var(--sx-radius) * 2);
+}
+
+/* Header avatar matches the height of the other header controls. */
+.sx-top-bar .sx-account-avatar,
+.sx-top-bar .sx-account-trigger .sx-account-avatar {
+  width: var(--sx-top-ctl, var(--sx-control-h-lg)) !important;
+  height: var(--sx-top-ctl, var(--sx-control-h-lg)) !important;
+}
+
 /* ─── Footer: a colophon ───────────────────────────────────────────────── */
 .sx-footer {
   border-top: 2px solid var(--sx-ink);
