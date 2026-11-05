@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PASSWORD_MAX, PASSWORD_MIN, passwordChecks, passwordStrength } from '../../utils/authForm.js';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
+import { SonarMaze } from './SonarMaze.jsx';
 
 /*
  * Building blocks shared by sign-in, sign-up and password recovery.
@@ -16,6 +17,7 @@ export function AuthLayout({ rail, tabs, title, intro, step, children }) {
     <div className="sx-au-shell">
       <div className="sx-au">
         <aside className="sx-au-rail">
+          <SonarMaze />
           <Link to="/reels" className="sx-au-mark" aria-label="ECHO home">
             <AnimatedEchoLogo className="sx-au-logo" />
             <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
