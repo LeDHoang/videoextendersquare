@@ -2485,7 +2485,7 @@ button:hover .sx-sidebar-hero-logo,
   pointer-events: none;
 }
 
-@media (max-width: 767px) {
+@media (min-width: 641px) and (max-width: 767px) {
   body:has(.sx-message-launcher) .sx-toasts { bottom: calc(var(--sx-bottom-nav, 0px) + 64px + var(--sx-3)); }
 }
 
@@ -4202,11 +4202,15 @@ code {
   will-change: transform, opacity;
 }
 
+/* overflow: hidden — the header's right cluster is wider than a phone (~446px), and even hidden it widens the
+   document. Mobile browsers then grow the layout viewport to match, which pushes the position:fixed bottom tab bar
+   below the visible screen. */
 .sx-top-bar.sx-top-bar--hidden {
   transform: translateY(-100%);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  overflow: hidden;
 }
 
 /* Pure-CSS fallback: when immersive class is on <html>/<body> (toggled by WebXR / fullscreen handlers) */
@@ -4216,6 +4220,7 @@ body.sx-vr-active .sx-top-bar {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  overflow: hidden;
 }
 
 html.sx-vr-active .sx-shell,
@@ -4829,8 +4834,8 @@ body.sx-vr-active .sx-reels-mount,
     margin-right: 0;
   }
   .sx-top-logo {
-    height: var(--sx-control-h);
-    width: var(--sx-control-h);
+    height: var(--sx-top-ctl);
+    width: var(--sx-top-ctl);
   }
   .sx-top-center {
     display: none !important;
@@ -4839,15 +4844,19 @@ body.sx-vr-active .sx-reels-mount,
     display: inline-flex !important;
   }
 
-  /* Phones: 38px boxes, so the five controls fit at 360px wide. Each icon button's
-     ::after keeps its hit area at 44px. */
+  /* Phones: 38px boxes so the controls fit. tokens.css raises --sx-control-h to 44px at this width,
+     which is why the header gets its own size. Each icon button's ::after keeps a larger hit area. */
+  .sx-top-bar {
+    --sx-top-ctl: 38px;
+  }
+
   .sx-top-bar .sx-icon-button {
-    width: var(--sx-control-h);
-    height: var(--sx-control-h);
+    width: var(--sx-top-ctl);
+    height: var(--sx-top-ctl);
   }
 
   .sx-top-credits-pill {
-    height: var(--sx-control-h);
+    height: var(--sx-top-ctl);
   }
 
   .sx-top-bar .sx-account-trigger .sx-account-avatar {
@@ -4886,15 +4895,17 @@ body.sx-vr-active .sx-reels-mount,
   }
 }
 
-@media (max-width: 390px) {
-  .sx-top-credits-pill {
-    display: none !important;
+/* The bar needs about 420px with the ECHO wordmark and 330px without it, so the wordmark goes first
+   (the logo mark stays), then the credits pill. */
+@media (max-width: 460px) {
+  .sx-top-brand > span {
+    display: none;
   }
 }
 
 @media (max-width: 340px) {
-  .sx-top-brand > span {
-    display: none;
+  .sx-top-credits-pill {
+    display: none !important;
   }
 }
 
@@ -7436,6 +7447,13 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 
 /* Reserve room so the floating launcher never sits on page content or footer links. */
 body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
+
+/* Phones: the header already has a Messages link, and a floating button covers page actions
+   (like a pack's SAVE) as you scroll, so the launcher goes and its reserved room with it. */
+@media (max-width: 640px) {
+  .sx-message-launcher { display: none; }
+  body:has(.sx-message-launcher) .sx-shell { padding-bottom: 0; }
+}
 
 .sx-message-launcher:hover { background: var(--sx-surface-2); }
 .sx-message-launcher:focus-visible { outline: 2px solid var(--sx-accent); outline-offset: 2px; }
