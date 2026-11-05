@@ -409,11 +409,16 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-spot);
   color: var(--sx-on-spot);
 }
+/* Same sans lining numerals as the Explore stats. */
 .sx-pf-stat-value {
-  font-family: var(--sx-font-display);
+  font-family: var(--sx-font-sans);
   font-size: 1.6rem;
   font-weight: 700;
-  font-variation-settings: 'opsz' 144;
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sx-pf-highlight-cover {
+  border-radius: calc(var(--sx-radius) * 2);
 }
 .sx-pf-tabs button {
   min-height: 44px;
