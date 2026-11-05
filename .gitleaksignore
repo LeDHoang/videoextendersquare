@@ -1,3 +1,5 @@
 # gitleaks fingerprints of triaged false positives (see .gitleaks.toml).
 # bdfda1e docs/to-beta.md: env template placeholder matched across two lines.
 bdfda1e19023cd77b1c671ae478cc9c2319696a9:docs/to-beta.md:generic-api-key:40
+# 78c69ff ui/assets/reels.html: CAPTIONS_PREF_KEY is a localStorage key name, not a secret.
+78c69ffd3bd5fcfb883ff4530499f26e859703e8:ui/assets/reels.html:generic-api-key:2741

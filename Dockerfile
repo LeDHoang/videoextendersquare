@@ -26,7 +26,10 @@ WORKDIR /app
 # unavailable inside the container. The app detects this and disables it with an
 # explanation; the "Fast" and "FAL AI" engines work normally.
 # procps provides `ps` for checking ffmpeg niceness in production.
+# apt is listed so the build takes its trixie-security update (CVE-2026-109518,
+# fixed in 3.0.4); drop it once the pinned base image ships the fixed apt.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt \
     ffmpeg \
     procps \
     && rm -rf /var/lib/apt/lists/*
