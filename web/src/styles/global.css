@@ -10967,9 +10967,14 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
     border-bottom: 1px solid var(--sx-rule);
   }
 
+  /* Tall enough to hold a small sonar maze under the brand row. */
+  .sx-au-rail {
+    align-items: flex-start;
+    min-height: 160px;
+  }
+
   .sx-au-headline,
-  .sx-au-steps,
-  .sx-au-sonar { display: none; }
+  .sx-au-steps { display: none; }
 }
 
 @media (max-width: 700px) {

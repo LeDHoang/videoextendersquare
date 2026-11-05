@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
  * Sonar maze behind the auth rail's copy. A hidden maze fills 75% of the rail; sonar pings
  * (from the cursor, clicks, and at random) run as a small wave simulation, bounce off the
  * maze walls and the rail edges, and briefly light up the walls they hit. A new maze is
- * built on every mount and resize. Hidden on narrow screens, where the rail is a brand strip.
+ * built on every mount and resize. On phones the rail is a short strip, so the maze is small.
  */
 
 const RAMP = ' .·:-=+*#%@';
@@ -49,7 +49,9 @@ export function SonarMaze() {
     function buildMaze() {
       const k = Math.sqrt(MAZE_AREA);
       const mw = s.w * k, mh = s.h * k, ox = (s.w - mw) / 2, oy = (s.h - mh) / 2;
-      const mc = Math.max(3, Math.round(mw / 64)), mr = Math.max(3, Math.round(mh / 64));
+      // 64px cells on the desktop rail, down to 32px in the short phone strip
+      const cell = clamp(s.h / 5, 32, 64);
+      const mc = Math.max(3, Math.round(mw / cell)), mr = Math.max(3, Math.round(mh / cell));
       // wall lines snap to character-cell centres so drawn walls sit exactly where waves reflect
       const snapX = (x) => (Math.round(x / s.cw - 0.5) + 0.5) * s.cw;
       const snapY = (y) => (Math.round(y / s.ch - 0.5) + 0.5) * s.ch;
@@ -141,7 +143,7 @@ export function SonarMaze() {
 
     function layout() {
       const w = rail.clientWidth, h = rail.clientHeight;
-      if (!canvas.offsetParent || !w || !h) { s.u = null; return; } // hidden on narrow screens
+      if (!canvas.offsetParent || !w || !h) { s.u = null; return; } // not laid out
       const dpr = window.devicePixelRatio || 1;
       canvas.width = w * dpr;
       canvas.height = h * dpr;
