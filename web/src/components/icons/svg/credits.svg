@@ -1,8 +1,6 @@
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- TEMP placeholder coin for ECHO Credits nav — to be replaced with final art. -->
-  <circle cx="12" cy="12" r="8.2" stroke="#f2f3f5" stroke-width="1.6"/>
-  <circle cx="12" cy="12" r="5.4" stroke="#ff3b1f" stroke-width="1.4"/>
-  <line x1="12" y1="8.2" x2="12" y2="15.8" stroke="#f2f3f5" stroke-width="1.6" stroke-linecap="square"/>
-  <line x1="9.6" y1="10" x2="14.4" y2="10" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.6"/>
-  <line x1="9.6" y1="14" x2="14.4" y2="14" stroke="#f2f3f5" stroke-width="1.2" stroke-opacity="0.6"/>
+  <!-- ECHO Credits coin: ring plus the 3×3 grid path 3 -> 7 -> 2 -> 8 -> 5 -> 9; the last leg (5 -> 9) is the accent -->
+  <polygon points="8.1,2.5 15.9,2.5 21.5,8.1 21.5,15.9 15.9,21.5 8.1,21.5 2.5,15.9 2.5,8.1" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
+  <path d="M17 7L7 17L12 7V17" stroke="currentColor" stroke-width="1.8" stroke-linejoin="bevel"/>
+  <path d="M12 12L17 17" stroke="var(--sx-accent, #ff3b1f)" stroke-width="1.8"/>
 </svg>
