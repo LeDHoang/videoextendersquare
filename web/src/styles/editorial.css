@@ -259,11 +259,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 .sx-xh-stat-value {
   margin-top: 4px;
+  /* Sans lining numerals: the display serif's swashy digits were hard to read at this size. */
+  font-family: var(--sx-font-sans);
   font-size: clamp(1.15rem, 2vw, 1.4rem);
   font-weight: 700;
-  font-variation-settings: 'opsz' 144;
+  font-variant-numeric: lining-nums tabular-nums;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.01em;
 }
 
 /* Tags as pills, like stickers on a proof sheet. */
