@@ -241,7 +241,7 @@ h1, h2, h3, h4, h5, h6 {
   border-bottom: 1px solid var(--sx-rule);
 }
 .sx-xh-stat {
-  padding: var(--sx-3) var(--sx-4) var(--sx-3) 0;
+  padding: var(--sx-2) var(--sx-4) var(--sx-2) 0;
   border: 0;
   border-right: 1px solid var(--sx-rule);
   background: transparent;
@@ -254,7 +254,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 .sx-xh-stat-value {
   margin-top: 4px;
-  font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+  font-size: clamp(1.15rem, 2vw, 1.4rem);
   font-weight: 700;
   font-variation-settings: 'opsz' 144;
   line-height: 1;

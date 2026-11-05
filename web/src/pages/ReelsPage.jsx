@@ -274,14 +274,14 @@ export default function ReelsPage() {
 
   return (
     <div className="sx-reels-page sx-wide-page">
-      <Hero title="REELS / VR PLAYER" kicker="ECHO · 1:1 SQUARE · VR HEADSET BROWSER · H.264 PROXIES">
-        <div className="sx-stats-pill">
-          <span>ITEMS: <strong>{data?.count ?? '—'}</strong> of {data?.total ?? '—'}</span>
-          {isAdmin ? <span>FOLDERS: <strong>{(folders || []).length}</strong></span> : null}
-          {isAdmin ? <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span> : null}
-          <span>FEED: <strong>{activeAuthor ? '@' + activeAuthor : feedScope.toUpperCase()}</strong></span>
-          {isAdmin ? <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span> : null}
-        </div>
+      <Hero title="REELS / VR PLAYER">
+        {isAdmin ? (
+          <div className="sx-stats-pill">
+            <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
+            <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
+            <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
+          </div>
+        ) : null}
       </Hero>
 
       {activeAuthor ? (
