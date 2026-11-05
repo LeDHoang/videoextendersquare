@@ -4855,7 +4855,8 @@ body.sx-vr-active .sx-reels-mount,
     height: var(--sx-top-ctl);
   }
 
-  .sx-top-credits-pill {
+  .sx-top-credits-pill,
+  .sx-top-bar .sx-top-action-btn {
     height: var(--sx-top-ctl);
   }
 
@@ -6520,9 +6521,8 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   overflow-wrap: anywhere;
 }
 @media (max-width: 700px) {
-  /* Signed out, SIGN UP / SIGN IN is the one top action: two short lines so the bar fits 375. */
+  /* Signed out, SIGN IN is the one top action: a fixed width so the bar fits 375. */
   .sx-top-action-btn {
-    height: var(--sx-control-h);
     width: 5.5rem;
     padding: 0 6px;
     white-space: normal;

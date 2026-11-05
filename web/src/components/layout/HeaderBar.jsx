@@ -443,7 +443,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             {/* Right-side actions, in this order: UPLOAD (the one filled action), credits,
                 messages, then the account avatar. They are links, so they can open in a new
                 tab and report aria-current. Signed out, upload needs an account, so the one
-                filled action is SIGN UP / SIGN IN instead. */}
+                filled action is SIGN IN instead (CREATE ACCOUNT is a tab on that page). */}
             {user ? (
               <>
                 <NavLink
@@ -468,9 +468,9 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
               <button
                 type="button"
                 className="sx-top-action-btn"
-                onClick={() => navigate('/signup?next=' + encodeURIComponent(location.pathname + location.search))}
+                onClick={() => navigate('/login?next=' + encodeURIComponent(location.pathname + location.search))}
               >
-                SIGN UP / SIGN IN
+                SIGN IN
               </button>
             )}
 

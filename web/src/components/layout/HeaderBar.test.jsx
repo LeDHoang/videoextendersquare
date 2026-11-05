@@ -36,7 +36,7 @@ describe('HeaderBar responsive behavior', () => {
     cleanup();
   });
 
-  it('renders brand and one SIGN UP / SIGN IN action, with no Upload, when logged out', () => {
+  it('renders brand and one SIGN IN action, with no Upload, when logged out', () => {
     render(
       <MemoryRouter>
         <HeaderBar onToggleSidebar={vi.fn()} />
@@ -44,8 +44,22 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     expect(screen.getByText('ECHO')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'SIGN UP / SIGN IN' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SIGN IN' })).toBeInTheDocument();
     expect(screen.queryByText('Upload')).not.toBeInTheDocument();
+  });
+
+  it('opens the sign-in page, keeping the current page as next, when SIGN IN is pressed', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/explore?search=cats']}>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+        <Where />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: 'SIGN IN' }));
+
+    expect(screen.getByTestId('where').textContent).toBe('/login?next=%2Fexplore%3Fsearch%3Dcats');
   });
 
   it('marks the ECHO wordmark to pulse like the logo on hover', () => {
