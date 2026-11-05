@@ -2,12 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, 3dreels]
+    branches: [main, dev, 3dreels]
   pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded runs are cancelled, except on main: a run there may be mid-deploy.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -178,3 +179,38 @@ jobs:
           grep " $f\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
           tar xzf "$f" gitleaks
           ./gitleaks git . --no-banner --redact --config .gitleaks.toml
+
+  deploy:
+    name: deploy to the VPS
+    # Pushes to main only, and only once every check above has passed. dev and
+    # pull requests get the checks without a deploy.
+    needs: [test, postgres, docker, scans]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    # Own group, never cancelled: a newer push must queue behind a deploy that
+    # is mid-restart instead of killing it halfway.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy over SSH
+        # Secrets (Settings > Secrets and variables > Actions): VPS_HOST,
+        # VPS_USER, VPS_SSH_KEY (private key of a deploy-only user in the
+        # docker group), VPS_KNOWN_HOSTS (the output of `ssh-keyscan` for the
+        # host, so the server's key is pinned and never trusted on first use).
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" "bash -s -- $GITHUB_SHA" < deploy/deploy.sh

@@ -143,6 +143,18 @@ docker compose ps                                  # app should turn "healthy"
 
 Rollback, the pre-deploy dump and migrations: `docs/incident-response.md`.
 
+### Automatic deploy from CI
+
+A push to `main` runs the CI checks, and when all four pass the `deploy` job in `.github/workflows/ci.yml` SSHes to the VPS and runs `deploy/deploy.sh` for that commit. It does the steps above, takes the pre-deploy dump when `migrations/` changed, and waits for `/api/readyz`. A push to `dev`, or a pull request, runs the same checks and never deploys. The script refuses to run if the VPS checkout is not on `main`.
+
+One-time setup:
+
+1. Use the VPS user that owns `/opt/echo` and is in the `docker` group (the deploy writes to the checkout and reads `.env`). Add the public half of a new SSH key, used only by CI, to its `~/.ssh/authorized_keys`. Password auth is already off. Check that `git fetch origin main` works for that user in `/opt/echo`.
+2. In GitHub, create an environment named `production`. Optionally add a required reviewer there to gate each deploy.
+3. Add these Actions secrets (to the `production` environment): `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` (the private key) and `VPS_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 <host>`, run from a machine you trust).
+
+The job does not know whether the job queue is idle, so an automatic deploy can drop in-flight jobs (see below). Merge to `main` when the queue is quiet.
+
 A restart drops in-flight jobs and staged uploads, because both live in container `/tmp`. Completed jobs are read back from R2. Deploy when the job queue is idle.
 
 ## 4. Operations
