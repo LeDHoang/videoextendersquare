@@ -9412,16 +9412,17 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 }
 
 /* ---------- ECHO Credits wallet (sx-cr, builds on sx-ps) ---------- */
-/* The page title wears the header wordmark's face; everything else stays on the
-   default sans so balances, packs and history read as plain UI. */
+/* The title sits like the other page titles, with ECHO in the header wordmark's
+   italic. Labels are mono eyebrows and big numerals are serif, as on Explore. */
 .sx-cr { font-family: var(--sx-font-sans); }
 
 .sx-cr-title {
   margin: 0;
-  font: 900 clamp(1.9rem, 4.5vw, 2.7rem)/1 var(--sx-font-brand);
-  letter-spacing: -0.04em;
+  font: 900 clamp(3rem, 8vw, 6rem)/0.95 var(--sx-font-display);
+  letter-spacing: -0.02em;
   text-transform: uppercase;
   color: var(--sx-ink);
+  overflow-wrap: anywhere;
 }
 
 .sx-cr-accent { color: var(--sx-accent); }
@@ -9443,8 +9444,10 @@ a.sx-ps-btn { text-decoration: none; }
 
 .sx-cr-label {
   color: var(--sx-ink-3);
-  font-size: var(--sx-t-small);
-  font-weight: 600;
+  font-family: var(--sx-font-mono);
+  font-size: var(--sx-t-eyebrow);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 /* Balance hero */
@@ -9468,7 +9471,7 @@ a.sx-ps-btn { text-decoration: none; }
   gap: var(--sx-3);
   margin-top: var(--sx-2);
   color: var(--sx-ink);
-  font: 700 clamp(2.4rem, 7vw, 3.6rem)/1 var(--sx-font-sans);
+  font: 700 clamp(2.4rem, 7vw, 3.6rem)/1 var(--sx-font-display);
   letter-spacing: -0.03em;
   overflow-wrap: anywhere;
 }
@@ -9506,8 +9509,10 @@ a.sx-ps-btn { text-decoration: none; }
 
 .sx-cr-keystate {
   color: var(--sx-ink-3);
-  font-size: var(--sx-t-small);
-  font-weight: 600;
+  font-family: var(--sx-font-mono);
+  font-size: var(--sx-t-eyebrow);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   text-decoration: none;
 }
 
@@ -9583,8 +9588,10 @@ a.sx-ps-btn { text-decoration: none; }
 
 .sx-cr-pack-tag {
   color: var(--sx-ink-3);
-  font-size: var(--sx-t-small);
-  font-weight: 600;
+  font-family: var(--sx-font-mono);
+  font-size: var(--sx-t-eyebrow);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .sx-cr-pack--featured .sx-cr-pack-tag { color: var(--sx-accent-hi); }
@@ -9596,6 +9603,7 @@ a.sx-ps-btn { text-decoration: none; }
 
 .sx-cr-pack-credits b {
   color: var(--sx-ink);
+  font-family: var(--sx-font-display);
   font-size: 1.75rem;
   font-weight: 700;
   letter-spacing: -0.02em;

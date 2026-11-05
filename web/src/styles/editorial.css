@@ -79,10 +79,15 @@ h1, h2, h3, h4, h5, h6 {
 .sx-top-brand:hover {
   color: var(--sx-accent-hi);
 }
-/* The credits page title borrows the masthead wordmark's cut. */
+/* The credits page title sits like the other page titles; its ECHO borrows the
+   masthead wordmark's italic cut. */
 .sx-cr-title {
-  font-style: italic;
   font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.04em;
+  line-height: 0.88;
+}
+.sx-cr-title .sx-cr-accent {
+  font-style: italic;
   letter-spacing: -0.03em;
   text-transform: none;
 }
@@ -481,11 +486,13 @@ button.sx-explore-loc-link:hover {
 }
 
 /* ─── Reels player: its stylesheet names JetBrains Mono and Archivo, which this
-   theme does not load; captions fall to Plex Mono instead of system Courier. ─── */
-#sxReelsRoot :where(*):not(.material-symbols-outlined) {
+   theme does not load; captions fall to Plex Mono instead of system Courier.
+   That stylesheet is scoped to #sxReelsRoot and lands after this file, so the
+   doubled id is what lets these win. ─── */
+#sxReelsRoot#sxReelsRoot :where(*):not(.material-symbols-outlined) {
   font-family: var(--sx-font-mono);
 }
-#sxReelsRoot :where(h1, h2, h3, h4, strong, b) {
+#sxReelsRoot#sxReelsRoot :where(h1, h2, h3, h4, strong, b):not(.material-symbols-outlined) {
   font-family: var(--sx-font-sans);
 }
 
