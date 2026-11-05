@@ -79,6 +79,13 @@ h1, h2, h3, h4, h5, h6 {
 .sx-top-brand:hover {
   color: var(--sx-accent-hi);
 }
+/* The credits page title borrows the masthead wordmark's cut. */
+.sx-cr-title {
+  font-style: italic;
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.03em;
+  text-transform: none;
+}
 .sx-sidebar-hero-title {
   color: var(--sx-accent);
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api/client.js';
+import { IndustrialCreditsIcon } from '../components/icons/index.jsx';
 import FormField from '../components/ui/FormField.jsx';
 import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
@@ -16,39 +17,43 @@ const FAL_KEY_MIN = 8;
 const FAL_KEY_MAX = 500;
 const PAGE_SIZE = 25;
 
+const PACK_NAMES = { starter: 'Starter', plus: 'Plus', creator: 'Creator' };
+
 const PACK_BLURBS = {
-  starter: 'Try cloud outpainting and upscaling on a handful of images or short clips.',
-  plus: 'Steady production use, with bonus credits on top of the purchase.',
-  creator: 'Batch work and long clips. The best value per dollar, with the largest bonus.',
+  starter: 'Try cloud outpainting and upscaling on a few images or short clips.',
+  plus: 'Steady production use, with bonus credits on top.',
+  creator: 'Batch work and long clips. Best value per dollar.',
 };
+
+// Card purchases (and their chargebacks) are payments; every other entry is
+// credits moving through use: cloud jobs, holds, refunds and reel rewards.
+const PAYMENT_SOURCES = new Set(['purchase', 'dispute']);
 
 const SOURCE_LABELS = {
-  purchase: 'PURCHASE',
-  generation: 'CLOUD JOB',
-  earned: 'REEL REWARD',
-  refund: 'REFUND',
-  dispute: 'DISPUTE',
+  purchase: 'Credit purchase',
+  generation: 'Cloud job',
+  earned: 'Reel reward',
+  refund: 'Refund',
+  dispute: 'Payment dispute',
 };
 
-const TYPE_LABELS = {
-  credit: 'CREDIT',
-  debit: 'DEBIT',
-  reserve: 'RESERVED',
-  capture: 'CHARGED',
-  release: 'RELEASED',
+const TYPE_NOTES = {
+  reserve: 'credits held',
+  release: 'hold released',
 };
 
 const formatCredits = (value) => (value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—');
 const formatUsd = (credits) => (credits !== null && credits !== undefined && Number.isFinite(Number(credits)) ? `$${(Number(credits) / 100).toFixed(2)}` : '—');
 const signed = (value) => `${value > 0 ? '+' : ''}${value.toLocaleString()}`;
+const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
-function Panel({ title, note, children, id }) {
+function Section({ title, note, children, id }) {
   const titleId = useId();
   return (
-    <section className="sx-ps-panel" aria-labelledby={titleId} id={id}>
-      <header className="sx-ps-panel-head">
+    <section className="sx-cr-section" aria-labelledby={titleId} id={id}>
+      <header className="sx-cr-section-head">
         <h2 id={titleId}>{title}</h2>
-        {note ? <span className="sx-ps-panel-note">{note}</span> : null}
+        {note ? <span className="sx-cr-section-note">{note}</span> : null}
       </header>
       {children}
     </section>
@@ -62,22 +67,9 @@ function Feedback({ state }) {
     : <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{state.text}</div>;
 }
 
-function Tile({ label, value, sub, hint, tone }) {
-  return (
-    <div className={'sx-cr-tile' + (tone ? ' sx-cr-tile--' + tone : '')}>
-      <div className="sx-cr-tile-label">{label}</div>
-      <div className="sx-cr-tile-value">{value}<span>CREDITS</span></div>
-      <div className="sx-cr-tile-foot">
-        <span>{sub}</span>
-        {hint ? <b>{hint}</b> : null}
-      </div>
-    </div>
-  );
-}
-
 function TransactionRow({ row }) {
-  const source = SOURCE_LABELS[row.source] || String(row.source ?? 'unknown').toUpperCase();
-  const type = TYPE_LABELS[row.type] || String(row.type ?? 'entry').toUpperCase();
+  const label = SOURCE_LABELS[row.source] || capitalize(String(row.source ?? 'unknown'));
+  const note = TYPE_NOTES[row.type];
   const created = new Date(row.created_at);
   const validDate = !Number.isNaN(created.getTime());
   const deltaAvailable = Number(row.delta_available ?? 0);
@@ -86,15 +78,19 @@ function TransactionRow({ row }) {
   return (
     <li className="sx-cr-row">
       <div className="sx-cr-row-main">
-        <span className="sx-cr-row-source">{source}</span>
-        <span className="sx-cr-chip">{type}</span>
+        <span className="sx-cr-row-label">{label}{note ? <span className="sx-cr-row-note"> · {note}</span> : null}</span>
+        <time className="sx-cr-row-when" dateTime={validDate ? created.toISOString() : undefined}>
+          {validDate ? created.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Date unavailable'}
+        </time>
       </div>
-      <time className="sx-cr-row-when" dateTime={validDate ? created.toISOString() : undefined}>{validDate ? created.toLocaleString() : 'Date unavailable'}</time>
       <div className={'sx-cr-row-delta sx-cr-row-delta--' + tone}>
-        {signed(deltaAvailable)} CR
-        {deltaReserved !== 0 ? <small>{signed(deltaReserved)} reserved</small> : null}
+        {signed(deltaAvailable)}
+        {deltaReserved !== 0 ? <small>{signed(deltaReserved)} held</small> : null}
       </div>
-      <div className="sx-cr-row-balance">BAL {formatCredits(row.balance_available)}</div>
+      <div className="sx-cr-row-balance">
+        <small>Balance</small>
+        {formatCredits(row.balance_available)}
+      </div>
     </li>
   );
 }
@@ -111,6 +107,7 @@ export default function WalletPage() {
   const toast = useToast();
   const { wallet, catalog, catalogStatus, falKey, refresh, saveFalKey, deleteFalKey } = useWallet();
   const [ledger, setLedger] = useState({ rows: [], status: 'loading', hasMore: false, loadingMore: false, loadError: false });
+  const [historyView, setHistoryView] = useState('usage');
   const [keyValue, setKeyValue] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState('');
@@ -174,7 +171,7 @@ export default function WalletPage() {
       setPurchaseStatus({ ok: false, text: 'Checkout cancelled — you were not charged.' });
       return undefined;
     }
-    setPurchaseStatus({ ok: true, text: 'PAYMENT RECEIVED — credits appear after Stripe confirms the webhook.' });
+    setPurchaseStatus({ ok: true, text: 'Payment received. Your credits appear as soon as Stripe confirms it.' });
     let attempts = 0;
     let cancelled = false;
     let timer = null;
@@ -202,6 +199,7 @@ export default function WalletPage() {
   const stripeReady = Boolean(catalog?.stripe_enabled);
   const creditsReady = catalog ? catalog.credits_enabled !== false : true;
   const featuredId = packs.length >= 3 ? packs[1].id : null;
+  const historyRows = ledger.rows.filter((row) => PAYMENT_SOURCES.has(row.source) === (historyView === 'payments'));
 
   const refreshAll = async () => {
     setRefreshing(true);
@@ -272,41 +270,50 @@ export default function WalletPage() {
     <div className="sx-ps sx-cr">
       <header className="sx-ps-head">
         <div>
-          <h1 className="sx-ps-title"><span className="sx-cr-accent">ECHO</span> CREDITS</h1>
-          <div className="sx-ps-kicker">SIGNED IN AS @{user.username} · ONLY YOU CAN SEE AND SPEND THIS WALLET</div>
+          <h1 className="sx-cr-title"><span className="sx-cr-accent">ECHO</span> Credits</h1>
+          <div className="sx-cr-kicker">Signed in as @{user.username} · only you can see and spend this wallet</div>
         </div>
         <div className="sx-cr-head-actions">
-          <button type="button" className="sx-xh-btn" onClick={refreshAll} disabled={refreshing}>
-            <span className="sx-xh-btn-icon" aria-hidden="true">↻</span><span>{refreshing ? 'REFRESHING…' : 'REFRESH'}</span>
+          <button type="button" className="sx-ps-btn sx-ps-btn--small" onClick={refreshAll} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
-          <Link to={'/profile/' + user.username} className="sx-xh-btn">
-            <span className="sx-xh-btn-icon" aria-hidden="true">←</span><span>VIEW PROFILE</span>
-          </Link>
+          <Link to={'/profile/' + user.username} className="sx-ps-btn sx-ps-btn--small sx-ps-btn--quiet">View profile</Link>
         </div>
       </header>
 
-      <section aria-label="Balance">
-        <div className="sx-cr-deck">
-          <Tile label="AVAILABLE" tone="accent" value={formatCredits(available)} sub="READY TO USE" hint={`${formatUsd(available)} USD`} />
-          <Tile label="RESERVED" value={formatCredits(reserved)} sub="ACTIVE CLOUD JOBS" hint={reserved > 0 ? 'HELD' : 'NONE'} />
-          <Tile label="PURCHASED" value={formatCredits(wallet?.lifetime_purchased)} sub="CARD PURCHASES" hint="LIFETIME" />
-          <Tile label="EARNED" value={formatCredits(wallet?.lifetime_earned)} sub="REEL REWARDS" hint="ROYALTIES" />
-          <Tile label="SPENT" value={formatCredits(wallet?.lifetime_spent)} sub="COMPLETED FAL STAGES" hint="LIFETIME" />
+      <section className="sx-cr-hero" aria-label="Balance">
+        <div className="sx-cr-hero-main">
+          <div className="sx-cr-label">Your balance</div>
+          {wallet ? (
+            <>
+              <div className="sx-cr-balance">
+                <IndustrialCreditsIcon className="sx-cr-coin" />
+                <span>{formatCredits(available)}</span>
+                <small>credits</small>
+              </div>
+              <div className="sx-cr-hero-sub">
+                ≈ {formatUsd(available)} of cloud work
+                {reserved > 0 ? <> · <b>{formatCredits(reserved)}</b> held for a running job</> : null}
+              </div>
+            </>
+          ) : <div className="sx-ps-hint" role="status">Loading your balance…</div>}
         </div>
-        <p className="sx-cr-note">
-          <span aria-hidden="true">ⓘ</span> 1 ECHO Credit represents $0.01 of service value. Credits never expire, are non-transferable, and have no cash value.
-        </p>
+        <div className="sx-cr-hero-side">
+          {creditsReady ? <a href="#add-credits" className="sx-ps-btn sx-ps-btn--primary">Buy credits</a> : null}
+          <a href="#fal-key" className={'sx-cr-keystate' + (falKey?.configured ? ' is-on' : '')}>
+            {falKey?.configured ? '● Fal key active' : '○ No Fal key'}
+          </a>
+        </div>
         {wallet && available < 0 ? (
-          <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">NEGATIVE BALANCE — platform-funded jobs are blocked until the balance is restored.</div>
+          <div className="sx-ps-feedback sx-ps-feedback--err sx-cr-hero-alert" role="alert">Negative balance: cloud jobs paid with credits are paused until you top up.</div>
         ) : null}
-        {!wallet ? <div className="sx-ps-hint" role="status">Loading your balance…</div> : null}
       </section>
 
-      <Panel title="ADD CREDITS" note={creditsReady ? 'INSTANT ALLOCATION AFTER PAYMENT' : null} id="add-credits">
-        {catalogStatus === 'failed' ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">CREDIT PACKS UNAVAILABLE — RELOAD TO RETRY</div> : null}
+      <Section title="Buy credits" note={creditsReady ? 'One-time purchase · credits never expire' : null} id="add-credits">
+        {catalogStatus === 'failed' ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">Credit packs couldn't load. Reload the page to try again.</div> : null}
         {catalogStatus === 'loading' ? <div className="sx-ps-hint" role="status">Loading credit packs…</div> : null}
         {catalog && !creditsReady ? <p className="sx-cr-copy">Buying credits isn't available yet. You can still use free tools.</p> : null}
-        {catalog && creditsReady && !stripeReady ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">STRIPE CHECKOUT IS DISABLED IN THIS ENVIRONMENT</div> : null}
+        {catalog && creditsReady && !stripeReady ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">Card checkout is turned off in this environment.</div> : null}
         {creditsReady && packs.length ? (
           <div className="sx-cr-packs">
             {packs.map((pack) => {
@@ -316,14 +323,9 @@ export default function WalletPage() {
               const price = `$${(pack.amount_cents / 100).toFixed(2)}`;
               return (
                 <article className={'sx-cr-pack' + (featured ? ' sx-cr-pack--featured' : '')} key={pack.id}>
-                  <div className="sx-cr-pack-top">
-                    <span className="sx-cr-pack-tag">{featured ? '★ MOST POPULAR' : String(pack.label).toUpperCase()}</span>
-                    <span className="sx-cr-pack-credits">{formatCredits(pack.credits)} CREDITS</span>
-                  </div>
-                  <div className="sx-cr-pack-price">
-                    {price}<span>{String(pack.currency || 'usd').toUpperCase()}</span>
-                    {bonus > 0 ? <em className="sx-cr-bonus">+{formatCredits(bonus)} BONUS</em> : null}
-                  </div>
+                  <div className="sx-cr-pack-tag">{featured ? 'Most popular' : (PACK_NAMES[pack.id] || pack.label)}</div>
+                  <div className="sx-cr-pack-credits"><b>{formatCredits(pack.credits)}</b> credits</div>
+                  {bonus > 0 ? <div className="sx-cr-bonus">+{formatCredits(bonus)} bonus</div> : null}
                   <p className="sx-cr-pack-blurb">{PACK_BLURBS[pack.id] || 'One-time purchase. Credits never expire.'}</p>
                   <button
                     type="button"
@@ -332,35 +334,34 @@ export default function WalletPage() {
                     disabled={unavailable || Boolean(busy)}
                     aria-label={`Buy ${formatCredits(pack.credits)} credits for ${price}`}
                   >
-                    {busy === pack.id ? 'OPENING CHECKOUT…' : `BUY ${formatCredits(pack.credits)}`}
+                    {busy === pack.id ? 'Opening checkout…' : price}
                   </button>
-                  {stripeReady && !pack.configured ? <div className="sx-ps-hint">NOT CONFIGURED</div> : null}
+                  {stripeReady && !pack.configured ? <div className="sx-ps-hint">Not available yet</div> : null}
                 </article>
               );
             })}
           </div>
         ) : null}
         {catalog && !packs.length ? <div className="sx-ps-hint">No credit packs are available right now.</div> : null}
+        <p className="sx-cr-fine">1 credit = $0.01 of cloud work. Credits are non-transferable and have no cash value.</p>
         <div className="sx-cr-feedback"><Feedback state={purchaseStatus} /></div>
-      </Panel>
+      </Section>
 
-      <Panel title="MY FAL KEY" note="DIRECT COMPUTE BYPASS" id="fal-key">
-        <p className="sx-cr-copy">
-          Use your own Fal.ai account to bypass ECHO Credit charges and run custom models. The key is encrypted at rest and is never shown again after saving.
-        </p>
-        <div className="sx-ps-keycard">
-          <div>
-            <div className="sx-ps-meta">FAL.AI API KEY</div>
-            <div className="sx-ps-keyvalue">
-              {falKey?.configured ? <>ACTIVE KEY: <b>{falKey.hint || 'saved'}</b></> : 'NO PERSONAL KEY · USING CREDITS'}
-            </div>
+      <Section title="My Fal key" id="fal-key">
+        <div className="sx-cr-keycard">
+          <div className={'sx-cr-keystatus' + (falKey?.configured ? ' is-on' : '')}>
+            {falKey?.configured
+              ? <>● Active <b>{falKey.hint || 'saved'}</b></>
+              : '○ Not set · jobs use your credits'}
           </div>
-          {falKey?.configured ? <span className="sx-ps-badge">[SAVED]</span> : null}
+          <p className="sx-cr-copy">
+            Run cloud jobs on your own Fal.ai account instead of spending credits. The key is stored encrypted and never shown again.
+          </p>
         </div>
         <form className="sx-ps-form" onSubmit={saveKey}>
           <FormField
-            label={falKey?.configured ? 'REPLACE KEY' : 'PERSONAL FAL API KEY'}
-            meta={'MIN ' + FAL_KEY_MIN + ' CHARACTERS'}
+            label={falKey?.configured ? 'Replace key' : 'Fal.ai API key'}
+            meta={'Min ' + FAL_KEY_MIN + ' characters'}
             id="wallet-fal-key"
             hint={keyTooShort ? 'Keys are at least ' + FAL_KEY_MIN + ' characters.' : null}
           >
@@ -378,50 +379,62 @@ export default function WalletPage() {
                   onChange={(event) => setKeyValue(event.target.value)}
                   aria-invalid={keyTooShort}
                 />
-                <button type="button" className="sx-ps-btn" onClick={() => setShowKey((value) => !value)} aria-pressed={showKey}>{showKey ? 'HIDE' : 'SHOW'}</button>
+                <button type="button" className="sx-ps-btn" onClick={() => setShowKey((value) => !value)} aria-pressed={showKey}>{showKey ? 'Hide' : 'Show'}</button>
               </div>
             )}
           </FormField>
           <div className="sx-ps-actions">
             <button type="submit" className="sx-ps-btn sx-ps-btn--primary" disabled={!keyValid || Boolean(busy)}>
-              {busy === 'key' ? 'SAVING…' : 'SAVE ENCRYPTED KEY'}
+              {busy === 'key' ? 'Saving…' : 'Save key'}
             </button>
-            <button type="button" className="sx-ps-btn sx-ps-btn--quiet" disabled={!falKey?.configured || Boolean(busy)} onClick={removeKey}>REMOVE KEY</button>
+            {falKey?.configured ? (
+              <button type="button" className="sx-ps-btn sx-ps-btn--quiet" disabled={Boolean(busy)} onClick={removeKey}>Remove key</button>
+            ) : null}
           </div>
           <Feedback state={keyStatus} />
         </form>
-      </Panel>
+      </Section>
 
-      <Panel title="TRANSACTION HISTORY" note="RECENT ACTIVITY · NEWEST FIRST" id="transactions">
-        {ledger.status === 'loading' ? <div className="sx-ps-hint" role="status">Loading transactions…</div> : null}
+      <Section title="History" note="Newest first" id="transactions">
+        <div className="sx-cr-switch" role="group" aria-label="History view">
+          <button type="button" aria-pressed={historyView === 'usage'} onClick={() => setHistoryView('usage')}>Usage</button>
+          <button type="button" aria-pressed={historyView === 'payments'} onClick={() => setHistoryView('payments')}>Payments</button>
+        </div>
+        {ledger.status === 'loading' ? <div className="sx-ps-hint" role="status">Loading history…</div> : null}
         {ledger.status === 'error' ? (
           <div className="sx-cr-retry">
-            <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">COULD NOT LOAD TRANSACTIONS</div>
+            <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">Couldn't load your history.</div>
             <button
               type="button"
               className="sx-ps-btn sx-ps-btn--small"
               onClick={() => { setLedger((state) => ({ ...state, status: 'loading' })); loadTransactions(); }}
             >
-              RETRY
+              Retry
             </button>
           </div>
         ) : null}
-        {ledger.status === 'ready' && !ledger.rows.length ? <div className="sx-ps-hint">No credit transactions yet. Purchases, cloud jobs and reel rewards will appear here.</div> : null}
-        {ledger.rows.length ? (
-          <ul className="sx-cr-ledger" aria-label="Credit transactions">
-            {ledger.rows.map((row, index) => <TransactionRow key={row.id ?? index} row={row} />)}
+        {ledger.status === 'ready' && !historyRows.length ? (
+          <div className="sx-ps-hint">
+            {historyView === 'payments'
+              ? 'No payments yet. Credit purchases will appear here.'
+              : 'No usage yet. Cloud jobs and reel rewards will appear here.'}
+            {ledger.hasMore ? ' Load more to see older entries.' : null}
+          </div>
+        ) : null}
+        {historyRows.length ? (
+          <ul className="sx-cr-ledger" aria-label={historyView === 'payments' ? 'Payments' : 'Credit usage'}>
+            {historyRows.map((row, index) => <TransactionRow key={row.id ?? index} row={row} />)}
           </ul>
         ) : null}
-        {ledger.loadError ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">Could not load more transactions.</div> : null}
+        {ledger.loadError ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">Could not load more history.</div> : null}
         {ledger.hasMore ? (
           <div className="sx-cr-more">
             <button type="button" className="sx-ps-btn" disabled={ledger.loadingMore} onClick={() => loadTransactions({ append: true })}>
-              {ledger.loadingMore ? 'LOADING…' : 'LOAD MORE'}
+              {ledger.loadingMore ? 'Loading…' : 'Load more'}
             </button>
           </div>
         ) : null}
-        {ledger.rows.length && !ledger.hasMore ? <div className="sx-ps-hint sx-cr-end">END OF LEDGER · {ledger.rows.length} {ledger.rows.length === 1 ? 'ENTRY' : 'ENTRIES'}</div> : null}
-      </Panel>
+      </Section>
     </div>
   );
 }
