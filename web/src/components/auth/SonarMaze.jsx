@@ -234,7 +234,9 @@ export function SonarMaze() {
           const { x0, y0, x1, y1 } = s.maze;
           const count = Math.max(1, Math.round((s.w * s.h) / PING_AREA));
           for (let n = 0; n < count; n++) ping(x0 + Math.random() * (x1 - x0), y0 + Math.random() * (y1 - y0), 2.2);
-          s.nextRandom = t + 1.5 + Math.random() * 2;
+          // small panels also ping less often: up to 3x slower as the area shrinks below one ping's worth
+          const calm = clamp(PING_AREA / (s.w * s.h), 1, 3);
+          s.nextRandom = t + (1.5 + Math.random() * 2) * calm;
         }
         acc += dt * STEPS_PER_SEC;
         while (acc >= 1) { step(); acc -= 1; }

@@ -705,6 +705,48 @@ button.sx-explore-loc-link:hover {
   height: var(--sx-top-ctl, var(--sx-control-h-lg)) !important;
 }
 
+/* Sidebar billing card wears the sign-in rail: same grid-and-glow paper with the sonar maze behind. */
+.sx-sidebar-billing-card {
+  background:
+    radial-gradient(120% 70% at 0% 0%, var(--sx-accent-dim), transparent 60%),
+    linear-gradient(var(--sx-rule-subtle) 1px, transparent 1px) 0 0 / 100% 32px,
+    linear-gradient(90deg, var(--sx-rule-subtle) 1px, transparent 1px) 0 0 / 32px 100%,
+    var(--sx-surface-2);
+  box-shadow: var(--sx-shadow-card);
+}
+.sx-sidebar-billing-card > :not(.sx-au-sonar) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Sidebar credits hero: label on top, coin and a big balance beneath. */
+.sx-sidebar-credits-hero {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--sx-radius);
+}
+.sx-sidebar-credits-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sx-sidebar-credits-hero .sx-sidebar-credits-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--sx-radius);
+}
+.sx-sidebar-credits-hero .sx-sidebar-credits-icon-wrap .sx-sidebar-icon-svg {
+  width: 22px;
+  height: 22px;
+}
+.sx-sidebar-credits-hero .sx-sidebar-credits-num {
+  font-family: var(--sx-font-sans);
+  font-size: 2.1rem;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
 /* ─── Footer: a colophon ───────────────────────────────────────────────── */
 .sx-footer {
   border-top: 2px solid var(--sx-ink);

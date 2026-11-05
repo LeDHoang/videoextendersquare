@@ -5,6 +5,7 @@ import { NavLink, Link } from 'react-router-dom';
 import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
 import { IndustrialCreditsIcon } from '../icons/index.jsx';
+import { SonarMaze } from '../auth/SonarMaze.jsx';
 import { SIDEBAR_NAV } from './nav.js';
 import { useTheme } from '../../theme.js';
 
@@ -212,6 +213,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── Account Billing Module ───────────────────────── */}
       <div className="sx-sidebar-card sx-sidebar-billing-card">
+        <SonarMaze />
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: 'var(--sx-accent)', verticalAlign: '-2px', marginRight: 6 }}>
@@ -241,20 +243,13 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           </div>
         </div>
 
-        {/* Hero Credits Stat Box */}
+        {/* Hero Credits Stat Box: just the balance, no money equivalent */}
         <div className="sx-sidebar-credits-hero">
-          <div className="sx-sidebar-credits-left">
+          <span className="sx-sidebar-credits-label">CREDITS AVAILABLE</span>
+          <div className="sx-sidebar-credits-row">
             <div className="sx-sidebar-credits-icon-wrap" aria-hidden="true">
               <IndustrialCreditsIcon className="sx-sidebar-icon-svg" />
             </div>
-            <div className="sx-sidebar-credits-meta">
-              <span className="sx-sidebar-credits-label">AVAILABLE</span>
-              <span className="sx-sidebar-credits-sub">
-                {user ? '$0.01 / CREDIT' : 'SIGN IN TO USE'}
-              </span>
-            </div>
-          </div>
-          <div className="sx-sidebar-credits-right">
             <span
               className={`sx-sidebar-credits-num ${
                 user && (wallet?.available_credits ?? 0) > 0 ? 'sx-sidebar-credits-num--accent' : ''
@@ -262,7 +257,6 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
             >
               {user ? (wallet?.available_credits ?? 0).toLocaleString() : '—'}
             </span>
-            <span className="sx-sidebar-credits-unit">CREDITS</span>
           </div>
         </div>
 
