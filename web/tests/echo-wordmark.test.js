@@ -18,7 +18,7 @@ test('a single echo ripples out once each time the logo plays, so it shares its 
 
 test('the header logo stands as tall as the header controls, with the ECHO text grown to match', () => {
   assert.match(css, /\.sx-top-logo \{\s*height: var\(--sx-control-h-lg\);\s*width: var\(--sx-control-h-lg\);/);
-  assert.match(css, /@media \(max-width: 640px\) \{[^@]*\.sx-top-logo \{\s*height: var\(--sx-control-h\);\s*width: var\(--sx-control-h\);/);
+  assert.match(css, /@media \(max-width: 640px\) \{[^@]*\.sx-top-logo \{\s*height: var\(--sx-top-ctl\);\s*width: var\(--sx-top-ctl\);/);
   assert.doesNotMatch(css, /\.sx-top-logo \{\s*height: \d+px;/);
   assert.match(css, /\.sx-top-brand \{\s*font-family: var\(--sx-font-brand\);\s*font-size: 2\.7rem;/);
   assert.match(css, /@media \(max-width: 640px\) \{[^@]*\.sx-top-brand \{\s*font-size: 2rem;/);

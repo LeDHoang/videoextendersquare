@@ -4878,11 +4878,6 @@ body.sx-vr-active .sx-reels-mount,
     height: var(--sx-top-ctl);
   }
 
-  .sx-top-bar .sx-account-trigger .sx-account-avatar {
-    width: 34px !important;
-    height: 34px !important;
-  }
-
   .sx-top-credits-pill {
     padding: 0 8px !important;
     gap: 5px !important;

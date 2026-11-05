@@ -595,7 +595,7 @@ button.sx-explore-loc-link:hover {
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-cluster {
   background: color-mix(in srgb, var(--sx-bg) 94%, transparent);
   border-color: var(--sx-rule-strong);
-  box-shadow: 0 8px 24px rgba(23, 20, 15, 0.22);
+  box-shadow: var(--sx-shadow-reels-cluster-paper);
 }
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .action-btn,
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .edge-chevron {
@@ -613,18 +613,20 @@ button.sx-explore-loc-link:hover {
   background: color-mix(in srgb, var(--sx-bg) 95%, transparent);
   border-color: var(--sx-rule-strong);
   border-left-color: var(--sx-accent);
-  box-shadow: 0 4px 14px rgba(23, 20, 15, 0.28);
+  box-shadow: var(--sx-shadow-reels-float-paper);
 }
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.center-flash, .reels-dot-tooltip) {
-  box-shadow: 0 4px 14px rgba(23, 20, 15, 0.28);
+  box-shadow: var(--sx-shadow-reels-float-paper);
 }
 
 /* Commenter names and avatars arrive in per-user neon inline colours, unreadable on
    paper; use ink in the pop-ups and the comments panel/drawer. */
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.twitch-author, .comment-name, .comment-avatar-initials) {
+  /* stylelint-disable-next-line declaration-no-important -- beats the inline per-user colour */
   color: var(--sx-ink) !important;
 }
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .comment-avatar {
+  /* stylelint-disable-next-line declaration-no-important -- beats the inline per-user colour */
   border-color: var(--sx-rule-strong) !important;
 }
 /* Pop-up pills: same square-cornered card as the panel items; the accent edge is an
@@ -632,10 +634,10 @@ button.sx-explore-loc-link:hover {
 #sxReelsRoot#sxReelsRoot .twitch-comment-pill {
   border-left-width: 1px;
   border-radius: 6px;
-  box-shadow: inset 3px 0 0 var(--sx-accent), 0 4px 14px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 3px 0 0 var(--sx-accent), var(--sx-shadow-reels-float);
 }
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .twitch-comment-pill {
-  box-shadow: inset 3px 0 0 var(--sx-accent), 0 4px 14px rgba(23, 20, 15, 0.28);
+  box-shadow: inset 3px 0 0 var(--sx-accent), var(--sx-shadow-reels-float-paper);
 }
 
 /* Pop-up pill avatar: the same small bordered square as the comments panel avatar. */
@@ -701,8 +703,8 @@ button.sx-explore-loc-link:hover {
 /* Header avatar matches the height of the other header controls. */
 .sx-top-bar .sx-account-avatar,
 .sx-top-bar .sx-account-trigger .sx-account-avatar {
-  width: var(--sx-top-ctl, var(--sx-control-h-lg)) !important;
-  height: var(--sx-top-ctl, var(--sx-control-h-lg)) !important;
+  width: var(--sx-top-ctl, var(--sx-control-h-lg));
+  height: var(--sx-top-ctl, var(--sx-control-h-lg));
 }
 
 /* Sidebar billing card wears the sign-in rail: same grid-and-glow paper with the sonar maze behind. */

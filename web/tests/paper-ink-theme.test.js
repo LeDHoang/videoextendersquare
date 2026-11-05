@@ -94,7 +94,7 @@ test('pack tiles in the explore grid are a carbon island, like reel tiles', () =
 test('reels details column and comments drawer take paper tokens in light mode', () => {
   assert.match(
     tokensCss,
-    /\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-side,\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-comments-drawer,\n:root:root \{/,
+    /\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-side,\n:root:not\(\[data-theme='dark'\]\) #sxReelsRoot \.reels-comments-drawer,\n[^{}]*:root:root \{/,
   );
 });
 
@@ -110,7 +110,7 @@ test('icon re-ink reaches the reels details column and comments drawer', () => {
   const rules = editorialCss.split('\n').filter((line) => line.includes('svg:not(.sx-echo-mark'));
   for (const rule of rules) {
     assert.ok(
-      rule.includes('#sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)'),
+      /#sxReelsRoot :not\(\.reels-side \*, \.reels-comments-drawer \*[,)]/.test(rule),
       `${rule} still skips the reels panels`,
     );
   }

@@ -103,6 +103,10 @@
   --sx-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
   --sx-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.55);
   --sx-shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.75);
+  /* Reels floating controls: fixed, theme-independent, so a re-pointed island can't change them. */
+  --sx-shadow-reels-float: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --sx-shadow-reels-float-paper: 0 4px 14px rgba(23, 20, 15, 0.28);
+  --sx-shadow-reels-cluster-paper: 0 8px 24px rgba(23, 20, 15, 0.22);
   --sx-glow-accent: 0 0 24px var(--sx-accent-glow);
   --sx-glow-accent-strong: 0 0 36px rgba(255, 59, 31, 0.55);
 
