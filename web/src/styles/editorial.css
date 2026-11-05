@@ -603,6 +603,72 @@ button.sx-explore-loc-link:hover {
   color: var(--sx-on-accent);
 }
 
+/* Light theme: pause/play flash and the pop-up comment pills are paper chips. */
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .twitch-comment-pill {
+  background: color-mix(in srgb, var(--sx-bg) 95%, transparent);
+  border-color: var(--sx-rule-strong);
+  border-left-color: var(--sx-accent);
+  box-shadow: 0 4px 14px rgba(23, 20, 15, 0.28);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.center-flash, .reels-dot-tooltip) {
+  box-shadow: 0 4px 14px rgba(23, 20, 15, 0.28);
+}
+
+/* Commenter names and avatars arrive in per-user neon inline colours, unreadable on
+   paper; use ink in the pop-ups and the comments panel/drawer. */
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.twitch-author, .comment-name, .comment-avatar-initials) {
+  color: var(--sx-ink) !important;
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .comment-avatar {
+  border-color: var(--sx-rule-strong) !important;
+}
+/* Pop-up pills: same square-cornered card as the panel items; the accent edge is an
+   inset bar so it follows the corner curve. */
+#sxReelsRoot#sxReelsRoot .twitch-comment-pill {
+  border-left-width: 1px;
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 var(--sx-accent), 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .twitch-comment-pill {
+  box-shadow: inset 3px 0 0 var(--sx-accent), 0 4px 14px rgba(23, 20, 15, 0.28);
+}
+
+/* Pop-up pill avatar: the same small bordered square as the comments panel avatar. */
+#sxReelsRoot#sxReelsRoot .twitch-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 0;
+  border: 1px solid var(--sx-rule-strong);
+  border-radius: var(--sx-radius);
+  background: var(--sx-surface-3);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Comment-box account chip: avatar is the same bordered square as the panel avatars. */
+#sxReelsRoot#sxReelsRoot #accountAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid var(--sx-rule-strong);
+  border-radius: var(--sx-radius);
+  background: var(--sx-surface-3);
+  font-weight: 700;
+  line-height: 1;
+}
+#sxReelsRoot#sxReelsRoot #accountAvatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
 /* The details column's shadow spills left over the gutter; keep PREV/NEXT above it
    and drop the column's shadow in light mode so the gutter stays clean paper. */
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-gutter {

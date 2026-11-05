@@ -152,6 +152,9 @@
 :root:not([data-theme='dark']) #sxReelsRoot .reels-comments-drawer,
 :root:not([data-theme='dark']) #sxReelsRoot .reels-cluster,
 :root:not([data-theme='dark']) #sxReelsRoot .reels-edge-nav,
+:root:not([data-theme='dark']) #sxReelsRoot .center-flash,
+:root:not([data-theme='dark']) #sxReelsRoot .twitch-comment-pill,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-dot-tooltip,
 :root:root {
   color-scheme: light;
 
