@@ -68,7 +68,7 @@ Ranked by priority (2026-11-01). The domain, Tunnel and edge work that blocks mo
   - Pin the checkpoint's SHA-256.
   - Handle or refuse HDR sources.
   - Decide whether image-only MAKE 3D ships on the VPS first.
-- [ ] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, marked TEMP).
+- [x] Replace temporary Credits nav coin glyph with final art (`web/src/components/icons/svg/credits.svg`, canonical 3×3 grid runic coin art).
 
 ## VR Reels recommended execution order
 

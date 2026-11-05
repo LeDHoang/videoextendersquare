@@ -246,8 +246,7 @@ This section answers "is this supposed to exist yet?" for every planned feature.
 | DSAR data export (`GET /api/users/me/export`) | P2 (P1 if EU users allowed) | Absent | Privacy section above |
 | Report dialog UI (replace `window.prompt`) | P2 | **Done (2026-10-21):** shared `ReportDialog` on profile and pack pages, native dialog in `reels.html` | Privacy section above |
 | In-app support/contact surface | **Done (2026-10-21)** | `/support` form (signed out too, so suspended users can appeal), footer SUPPORT link, moderator Support tab; `report_content` requests file real reports | Health/support section above |
-| Cookie-consent banner (ePrivacy) | P2 (EU-scoped) | 1-year anon cookie writes on load | Privacy section above |
-| Credits nav icon final art | P2 cosmetic | `web/src/components/icons/svg/credits.svg` marked TEMP | todolist.md near-term |
+| Credits nav icon final art | **Done** | Canonical 3×3 grid runic coin art landed in `web/src/components/icons/svg/credits.svg` | `web/src/components/icons/IndustrialCreditsIcon.jsx` |
 | Captions/WebVTT | **Out of scope for beta (decided 2026-10-21)** | No `<track>`/VTT capability anywhere | A11y item above |
 | Alt-text field on upload | P3 | No field; avatars render `alt=""` | Deferred |
 | Reels page default folder | **Done** | ~~`ReelsPage.jsx` still defaults `folder` to `testpipeline` (dev HEVC test clips). That folder holds no image posts, so the default For You feed shows videos only; image/slideshow posts (added 2026-10-11) appear only under ALL FOLDERS / `uploads` or via deep links. Owner decision: keep `testpipeline` during dev, switch the default (likely `ALL FOLDERS`) when close to beta launch~~ **Corrected 2026-10-21:** Reels already defaults to `ALL FOLDERS` | `web/src/pages/ReelsPage.jsx` (defaults to `ALL FOLDERS`; the folder picker is admin-only since `ui-beta`) |
