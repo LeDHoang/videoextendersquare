@@ -6640,13 +6640,13 @@ function startWorld(theme, extra = {}) {
   return { renderer, video, run };
 }
 
-test('dim targets only light playback in the reels scene', () => {
+test('dim targets playback in the reels scene, by day or by night', () => {
   const { renderer } = startWorld('light');
   const { worldDimTarget, DIM_AMOUNT } = renderer.__test;
   const base = { mode: 'light', scene: 'reels', paused: false, shellOpen: false };
   assert.equal(worldDimTarget(base), DIM_AMOUNT);
   assert.ok(DIM_AMOUNT > 0);
-  assert.equal(worldDimTarget({ ...base, mode: 'dark' }), 0);
+  assert.equal(worldDimTarget({ ...base, mode: 'dark' }), DIM_AMOUNT);
   assert.equal(worldDimTarget({ ...base, scene: 'earth' }), 0);
   assert.equal(worldDimTarget({ ...base, paused: true }), 0);
   assert.equal(worldDimTarget({ ...base, shellOpen: true }), 0);
@@ -6691,8 +6691,11 @@ test('the light world dims during playback and clears when it stops', () => {
   renderer.stopPreview();
 });
 
-test('dark mode never dims', () => {
-  const { renderer, run } = startWorld('dark');
+test('the night world dims during playback too', () => {
+  const { renderer, video, run } = startWorld('dark');
+  run(1000);
+  assert.equal(renderer.getPreviewState().world.dim, renderer.__test.DIM_AMOUNT);
+  video.pause();
   run(1000);
   assert.equal(renderer.getPreviewState().world.dim, 0);
   renderer.stopPreview();
@@ -6701,18 +6704,155 @@ test('dark mode never dims', () => {
 test('each mode shows its own world', () => {
   const { renderer, run } = startWorld('light');
   run(100);
+  const day = { sky: true, mountains: true, stars: false, lines: false, meteor: false };
   let w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
+  assert.deepEqual({ ...w }, { ...day, glow: false });
   renderer.__test.setVRTheme('dark');
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: true });
+  assert.deepEqual({ ...w }, { ...day, stars: true, lines: true, glow: true });
   renderer.setSceneMode('earth');
+  run(1500);
+  w = renderer.__test.worldObjects();
+  assert.deepEqual({ ...w }, { ...day, stars: true, lines: true, glow: false });
+  renderer.__test.setVRTheme('light');
   run(100);
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: false, mountains: false, stars: true, glow: false });
-  renderer.__test.setVRTheme('light');
+  assert.equal(w.stars, true, 'the stars fade out with the night');
+  run(1500);
   w = renderer.__test.worldObjects();
-  assert.deepEqual({ ...w }, { sky: true, mountains: true, stars: false, glow: false });
+  assert.deepEqual({ ...w }, { ...day, glow: false });
+  renderer.stopPreview();
+});
+
+// The night: a real sky turned to the scene, its stars only above the horizon, its
+// shooting stars clear of the video, and the day fading into it on a theme switch.
+test('a theme switch fades the world between day and night', () => {
+  const { renderer, run } = startWorld('light');
+  run(100);
+  assert.equal(renderer.__test.worldNight().uNight, 0);
+  renderer.__test.setVRTheme('dark');
+  run(600);
+  const mid = renderer.__test.worldNight().uNight;
+  assert.ok(mid > 0 && mid < 1, `half way: ${mid}`);
+  run(1000);
+  assert.equal(renderer.__test.worldNight().uNight, 1);
+  renderer.stopPreview();
+});
+
+test('a dark start opens straight onto the night', () => {
+  const { renderer, run } = startWorld('dark');
+  run(100);
+  assert.equal(renderer.__test.worldNight().uNight, 1);
+  renderer.stopPreview();
+});
+
+test('the stars are seeded and stand above the horizon', () => {
+  const read = () => {
+    const { renderer, run } = startWorld('dark');
+    run(100);
+    const pos = renderer.__test.worldStarGeometry().getAttribute('position');
+    const out = Array.from(pos.array);
+    renderer.stopPreview();
+    return out;
+  };
+  const a = read(), b = read();
+  assert.ok(a.length / 12 > 2000, `${a.length / 12} stars`);
+  assert.deepEqual(a, b);
+  let below = 0;
+  for (let i = 1; i < a.length; i += 3) if (a[i] <= 0) below++;
+  assert.equal(below, 0);
+});
+
+test('the night sky is placed as seen from the scene', () => {
+  const { renderer } = startWorld('dark');
+  const { celestialDir } = renderer.__test;
+  const el = (d) => Math.asin(d.y) * 180 / Math.PI;
+  const az = (d) => Math.atan2(d.x, -d.z) * 180 / Math.PI;
+  const polaris = celestialDir(2.530, 89.26);
+  assert.ok(Math.abs(el(polaris) - 34) < 1.5, `Polaris at ${el(polaris).toFixed(1)}`);
+  assert.ok(Math.abs(Math.abs(az(polaris)) - 100) < 3, `Polaris az ${az(polaris).toFixed(0)}`);
+  const antares = celestialDir(16.490, -26.43);
+  assert.ok(el(antares) > 10 && az(antares) < -30, `Antares el ${el(antares).toFixed(0)} az ${az(antares).toFixed(0)}`);
+  renderer.stopPreview();
+});
+
+test('the constellations show while paused and fade as playback dims the sky', () => {
+  const { renderer, video, run } = startWorld('dark');
+  run(1000);
+  assert.equal(renderer.__test.worldObjects().lines, true);
+  assert.ok(renderer.__test.worldNight().reveal < 1e-9);
+  video.pause();
+  run(1000);
+  assert.equal(renderer.__test.worldNight().reveal, 1);
+  renderer.stopPreview();
+});
+
+test('shooting stars keep clear of the video and above the horizon, some crossing above it', () => {
+  const { renderer } = startWorld('dark');
+  const { planMeteor, meteorPoint, METEOR_CLEAR_DEG, METEOR_OVER_DEG } = renderer.__test;
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  let above = 0;
+  for (let n = 0; n < 500; n++) {
+    const m = planMeteor(rand);
+    for (let k = 0; k <= 10; k++) {
+      const p = meteorPoint(m, m.arc * k / 10);
+      const az = Math.abs(Math.atan2(p.x, -p.z)) * 180 / Math.PI;
+      const el = Math.asin(p.y) * 180 / Math.PI;
+      assert.ok(az >= METEOR_CLEAR_DEG || el >= METEOR_OVER_DEG, `meteor at az ${az.toFixed(1)} el ${el.toFixed(1)}`);
+      assert.ok(p.y > 0.2, `meteor at height ${p.y.toFixed(2)}`);
+      if (k === 0 && az < METEOR_CLEAR_DEG) above++;
+    }
+  }
+  assert.ok(above > 50, `${above} of 500 start above the video`);
+  renderer.stopPreview();
+});
+
+test('shooting stars fall by night, and never with reduced motion', () => {
+  const seen = (reduced) => {
+    const { renderer, run } = startWorld('dark');
+    if (reduced) renderer.setReducedMotion(true);
+    let flights = 0;
+    for (let i = 0; i < 1200; i++) {
+      run(100);
+      if (renderer.__test.worldNight().meteor) flights++;
+    }
+    renderer.stopPreview();
+    return flights;
+  };
+  assert.ok(seen(false) > 0, 'two minutes of night bring a shooting star');
+  assert.equal(seen(true), 0);
+});
+
+// The streak is placed in its vertex shader; this follows the same sums to check its faces.
+test('the shooting star faces the eye at its centre', () => {
+  const { renderer } = startWorld('dark');
+  const THREE = renderer.getThree();
+  const meteor = renderer.__test.worldMeshes()[4];
+  let seed = 11;
+  const m = renderer.__test.planMeteor(() => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; });
+  const S = new THREE.Vector3(m.S.x, m.S.y, m.S.z);
+  const T = new THREE.Vector3(m.T.x, m.T.y, m.T.z);
+  const g = meteor.geometry;
+  const aU = g.getAttribute('aU');
+  const aV = g.getAttribute('aV');
+  const idx = g.getIndex();
+  const v = (i) => {
+    const th = m.arc * (1 - aU.getX(i));
+    const p = S.clone().multiplyScalar(Math.cos(th)).addScaledVector(T, Math.sin(th));
+    const along = S.clone().multiplyScalar(-Math.sin(th)).addScaledVector(T, Math.cos(th));
+    const side = new THREE.Vector3().crossVectors(p, along).normalize();
+    return p.multiplyScalar(54).addScaledVector(side, aV.getX(i) * 0.25);
+  };
+  let hidden = 0;
+  for (let t = 0; t < idx.count; t += 3) {
+    const [a, b, c] = [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)].map(v);
+    const normal = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    const shown = meteor.material.side === THREE.DoubleSide ||
+      (meteor.material.side === THREE.FrontSide) === (normal.dot(a) < 0);
+    if (!shown) hidden++;
+  }
+  assert.equal(hidden, 0);
   renderer.stopPreview();
 });
 

@@ -585,11 +585,17 @@ window.WebXRVR = window.WebXRVR || (function () {
   let lastGlowSample = -1;
   let controlsMesh = null;
   let commentsMesh = null;
-  let starfieldPoints = null;
   let worldSky = null;
   let worldMountains = null;
-  let worldUniforms = null; // shared by the sky and mountain shaders
+  let worldStars = null;
+  let worldLines = null; // constellations
+  let worldMeteor = null;
+  let worldUniforms = null; // shared by every world shader
+  let worldMeteorUniforms = null; // the shared set plus the meteor's path
   let worldDim = 0;
+  let worldNight = -1; // 0 day to 1 night; -1 until the first frame sets it
+  let worldMeteorFlight = null;
+  let worldMeteorNext = -1;
   let worldLastT = -1;
   let earthGroup = null;
   let earthMesh = null;
@@ -732,8 +738,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         tintLift: '#f2ede3', tintHue: '#45403a', tintDepth: 1,
       },
     },
+    // The dark world is the same range by night: a moon off to the right, the Milky Way
+    // arching over from a core low on the left, an aurora behind on the right.
     dark: {
       sky: '#0c0b09', star: '#f5f1e8',
+      zenith: '#03050b', mid: '#0a1226', horizon: '#1b2742', airglow: '#1d4a3c', town: '#4a2e1c',
+      moon: '#f3efe4', moonHaze: '#7e93c0',
+      seaLit: '#7d8bb0', seaAway: '#232b47', seaShade: '#0b0f1e',
+      rockLit: '#3e4866', rockShade: '#080b14', snowLit: '#aab6d6', snowShade: '#1f2742',
+      galaxyWarm: '#ffc98a', galaxyCool: '#6f82e8', galaxyPink: '#e0709f', auroraLow: '#39e29a', auroraHigh: '#8a5cd6',
+      line: '#9fb2d6', meteor: '#eef3ff',
       earth: {
         land: '#1c1a16', sea: '#0c0b09', park: '#25221d', lineSoft: '#2e2a24', line: '#f5f1e8',
         rim: '#f5f1e8', rimOpacity: 0.16, rimBlending: 'AdditiveBlending',
@@ -744,9 +758,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   const DIM_AMOUNT = 0.45;
   const DIM_FADE_MS = 600;
 
-  // Light playback in the reels scene dims the sky; every other state clears it.
+  // Playback in the reels scene dims the sky, by day or by night; every other state clears it.
   function worldDimTarget(s) {
-    return s && s.mode === 'light' && s.scene === 'reels' && !s.paused && !s.shellOpen ? DIM_AMOUNT : 0;
+    return s && s.scene === 'reels' && !s.paused && !s.shellOpen ? DIM_AMOUNT : 0;
   }
 
   // Moves linearly, a full 0 to DIM_AMOUNT fade in DIM_FADE_MS, and stops on the target.
@@ -764,6 +778,22 @@ window.WebXRVR = window.WebXRVR || (function () {
   const SUN_AZIMUTH_DEG = 55; // clockwise from straight ahead (-Z)
   const SUN_ELEVATION_DEG = 4.5;
   const WORLD_SEA_Y = -6; // top of the sea of cloud; the eye is at 1.6
+
+  // By night a moon stands where the sun set, higher, so its light reaches over the range.
+  const MOON_AZIMUTH_DEG = 50;
+  const MOON_ELEVATION_DEG = 32;
+  const NIGHT_FADE_MS = 1200; // a theme switch sets the sun and raises the night over this long
+  // The night sky is a real one: a summer evening at 34°N, turned so the galactic core
+  // rises low on the left of the screen and the pole star stands behind on the right.
+  const NIGHT_LATITUDE_DEG = 34;
+  const NIGHT_LST_HOURS = 18.5;
+  const NIGHT_SOUTH_AZIMUTH_DEG = -80; // where due south lands, clockwise from straight ahead
+  const AURORA_AZIMUTH_DEG = NIGHT_SOUTH_AZIMUTH_DEG + 180; // the aurora hangs in the north
+  const STAR_RADIUS = 55; // just inside the sky dome (60); the peaks still cover them, being drawn after
+  const TOWN_AZIMUTH_DEG = -130; // a far town's glow, low behind on the left
+  // Shooting stars keep clear of the video: this far round from straight ahead, or above it.
+  const METEOR_CLEAR_DEG = 40;
+  const METEOR_OVER_DEG = 46;
 
   function smoothstep(e0, e1, x) {
     const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -860,14 +890,73 @@ window.WebXRVR = window.WebXRVR || (function () {
     uniform vec3 uZenith, uMidSun, uMidAway, uHorizonSun, uHorizonAway;
     uniform vec3 uBelt, uShadowBand, uSunHaze, uSunColor;
     uniform vec3 uCloudLit, uCloudShade, uSeaLit, uSeaAway, uSeaShade;
+    // Night: 0 by day, 1 by night, between while a theme switch sets the sun.
+    uniform float uNight;
+    uniform float uAuroraAz;
+    uniform vec3 uMoonDir, uTownDir, uGalN, uGalE;
+    uniform vec3 uNZenith, uNMid, uNHorizon, uNAirglow, uNTown, uNMoon, uNMoonHaze;
+    uniform vec3 uNSeaLit, uNSeaAway, uNSeaShade, uNRockLit, uNRockShade, uNSnowLit, uNSnowShade;
+    uniform vec3 uGalaxyWarm, uGalaxyCool, uGalaxyPink, uAuroraLow, uAuroraHigh;
     varying vec3 vWorld;
 
-    // 1 looking toward the sun round the horizon, 0 looking away.
-    float sunSide(vec3 d) {
-      return clamp(0.5 + 0.5 * dot(d.xz, uSunDir.xz) / max(length(d.xz) * length(uSunDir.xz), 1e-4), 0.0, 1.0);
+    // 1 looking toward the light round the horizon, 0 looking away.
+    float sideOf(vec3 d, vec3 l) {
+      return clamp(0.5 + 0.5 * dot(d.xz, l.xz) / max(length(d.xz) * length(l.xz), 1e-4), 0.0, 1.0);
     }
 
-    vec3 skyBase(vec3 d) {
+    float sunSide(vec3 d) { return sideOf(d, uSunDir); }
+
+    // Signed angle round the horizon from azimuth az0 (clockwise from straight ahead), in [-pi, pi].
+    float azimuthFrom(vec3 d, float az0) {
+      float a = atan(d.x, -d.z) - az0;
+      return mod(a + 3.14159265, 6.2831853) - 3.14159265;
+    }
+
+    // How far the foot of an aurora curtain lies along the ray at angle a from the aurora's
+    // bearing: a line dist out, square to that bearing, folded by slow drifting waves.
+    float auroraFoot(float a, float dist, float phase, float t) {
+      float x = dist * tan(a);
+      float w = 0.8 * sin(0.9 * x + phase + t) + 0.35 * sin(2.1 * x - 1.7 * phase - 1.6 * t)
+              + 0.08 * sin(4.7 * x + phase + 2.3 * t);
+      return (dist + w) / cos(a);
+    }
+
+    // One curtain: a thin glowing sheet hanging tall above a folded line at height 1, where
+    // the eye's ray (angle a round the horizon, rise = tan elevation) passes through it.
+    // Folds seen edge-on glow brighter; far reaches sink to the horizon.
+    vec3 auroraCurtain(float a, float rise, float dist, float tall, float phase, float t) {
+      float r = auroraFoot(a, dist, phase, t);
+      float z = (r * rise - 1.0) / tall; // 0 at the foot, 1 at the top
+      if (z < -0.05 || z > 1.2) return vec3(0.0);
+      float e = 0.01;
+      float r0 = auroraFoot(a - e, dist, phase, t), r1 = auroraFoot(a + e, dist, phase, t);
+      vec2 tng = vec2(sin(a + e), cos(a + e)) * r1 - vec2(sin(a - e), cos(a - e)) * r0;
+      vec2 h = vec2(sin(a), cos(a));
+      float graze = min(length(tng) / max(abs(h.x * tng.y - h.y * tng.x), 1e-4), 5.0);
+      float x = dist * tan(a);
+      float rays = texture2D(uCloudTex, vec2(x * 0.3 + phase + uTime * 0.004, 0.37)).g;
+      rays = 0.3 + 1.4 * rays * rays;
+      // Brightest along its lower edge, fading up the rays.
+      float body = smoothstep(-0.06, 0.03, z) * (exp(-z * 3.0) + 0.9 * exp(-max(z, 0.0) * 14.0)) * (1.0 - smoothstep(0.75, 1.15, z));
+      // Bright stretches and gaps along the sheet.
+      float stretch = smoothstep(0.3, 0.7, texture2D(uCloudTex, vec2(x * 0.05 + phase * 0.3 + uTime * 0.003, 0.83)).r);
+      float breathe = 0.8 + 0.2 * sin(uTime * 0.25 + x * 0.3 + phase);
+      vec3 c = mix(uAuroraLow, uAuroraHigh, smoothstep(0.2, 0.85, z));
+      return c * body * rays * graze * breathe * (0.25 + 0.75 * stretch) * smoothstep(14.0, 5.0, r);
+    }
+
+    // The aurora: two folded curtains in the north, green at their feet, violet at their tops.
+    vec3 aurora(vec3 d) {
+      float a = azimuthFrom(d, uAuroraAz);
+      if (abs(a) > 1.45 || d.y <= 0.0) return vec3(0.0);
+      float rise = d.y / max(length(d.xz), 1e-4);
+      float t = uTime * 0.05;
+      vec3 c = auroraCurtain(a, rise, 2.2, 1.6, 0.0, t);
+      c += 0.45 * auroraCurtain(a, rise, 4.0, 1.2, 2.1, t * 0.8);
+      return c * 0.24;
+    }
+
+    vec3 skyDay(vec3 d) {
       float h = max(d.y, 0.0);
       float side = sunSide(d);
       float toward = pow(side, 1.6);
@@ -884,6 +973,28 @@ window.WebXRVR = window.WebXRVR || (function () {
       return col;
     }
 
+    // Night: navy at the horizon deepening overhead, a faint band of airglow, a distant
+    // town's warmth low on one side, and the moon's halo.
+    vec3 skyNight(vec3 d) {
+      float h = max(d.y, 0.0);
+      vec3 col = mix(uNHorizon, uNMid, smoothstep(0.0, 0.25, h));
+      col = mix(col, uNZenith, smoothstep(0.2, 0.9, h));
+      col += uNAirglow * 0.5 * exp(-pow((h - 0.1) / 0.07, 2.0));
+      vec2 hdir = normalize(d.xz + vec2(1e-5));
+      col += uNTown * pow(max(dot(hdir, uTownDir.xz), 0.0), 6.0) * exp(-h * 9.0);
+      float mu = max(dot(d, uMoonDir), 0.0);
+      col += uNMoonHaze * (0.06 * pow(mu, 6.0) + 0.22 * pow(mu, 180.0));
+      col += uNMoonHaze * 0.08 * exp(-h * 8.0) * pow(sideOf(d, uMoonDir), 4.0);
+      return col;
+    }
+
+    vec3 skyBase(vec3 d) {
+      vec3 col = vec3(0.0);
+      if (uNight < 1.0) col = skyDay(d);
+      if (uNight > 0.0) col = mix(col, skyNight(d), uNight);
+      return col;
+    }
+
     // Broad swells carrying puffs, with fine billows on top.
     float seaHeight(vec2 uv) {
       float macro = texture2D(uCloudTex, uv * 0.27 + vec2(0.21, 0.67)).r;
@@ -892,30 +1003,43 @@ window.WebXRVR = window.WebXRVR || (function () {
       return smoothstep(0.25, 0.8, macro) * 0.55 + puffs * 0.33 + fine * 0.12;
     }
 
-    // The sea of cloud below the eye line: billows lit across their tops by the low sun.
-    vec3 cloudSea(vec3 d) {
-      float down = max(-d.y, 1e-4);
-      float dist = (cameraPosition.y - uSeaY) / down;
-      vec2 hit = cameraPosition.xz + d.xz * dist;
-      vec2 uv = hit * 0.0065 + vec2(0.005, 0.0018) * uTime;
-      vec2 s = normalize(uSunDir.xz);
+    // Billows lit across their tops by a low light (the sun by day, the moon by night).
+    vec3 seaLitBy(vec3 d, vec2 uv, float dist, float down, vec3 l, vec3 cLit, vec3 cAway, vec3 cShade, vec3 haze) {
+      vec2 s = normalize(l.xz);
       float h = seaHeight(uv);
-      // Faces turned to the sun catch it; taller billows sunward shade the hollows behind them.
+      // Faces turned to the light catch it; taller billows lightward shade the hollows behind them.
       float e = 0.006;
       float slope = (seaHeight(uv + s * e) - seaHeight(uv - s * e)) / (2.0 * e);
       float lit = smoothstep(-4.0, 6.0, -slope);
       float occl = smoothstep(0.02, 0.16, seaHeight(uv + s * 0.03) - h);
       float sunAmt = lit * (1.0 - 0.6 * occl);
-      float side = sunSide(d);
-      vec3 litCol = mix(uSeaAway, uSeaLit, pow(side, 1.4));
-      vec3 shade = uSeaShade * (0.8 + 0.3 * h);
+      float side = sideOf(d, l);
+      vec3 litCol = mix(cAway, cLit, pow(side, 1.4));
+      vec3 shade = cShade * (0.8 + 0.3 * h);
       vec3 col = mix(shade, litCol, 0.25 + 0.75 * sunAmt) * (0.86 + 0.24 * h);
       // Far off the billows merge into one soft sheet.
       float far = 1.0 - exp(-dist * 0.016);
-      col = mix(col, mix(uSeaShade, litCol, 0.62), far * 0.75);
-      // Forward scatter: the cloud glows along the line under the sun.
+      col = mix(col, mix(cShade, litCol, 0.62), far * 0.75);
+      // Forward scatter: the cloud glows along the line under the light.
       float mu = max(dot(normalize(d.xz), s), 0.0);
-      col += uSunHaze * (0.25 * pow(mu, 4.0) + 0.5 * pow(mu, 24.0)) * exp(-down * 4.0);
+      col += haze * (0.25 * pow(mu, 4.0) + 0.5 * pow(mu, 24.0)) * exp(-down * 4.0);
+      return col;
+    }
+
+    // The sea of cloud below the eye line.
+    vec3 cloudSea(vec3 d) {
+      float down = max(-d.y, 1e-4);
+      float dist = (cameraPosition.y - uSeaY) / down;
+      vec2 hit = cameraPosition.xz + d.xz * dist;
+      vec2 uv = hit * 0.0065 + vec2(0.005, 0.0018) * uTime;
+      vec3 col = vec3(0.0);
+      if (uNight < 1.0) col = seaLitBy(d, uv, dist, down, uSunDir, uSeaLit, uSeaAway, uSeaShade, uSunHaze);
+      if (uNight > 0.0) {
+        vec3 night = seaLitBy(d, uv, dist, down, uMoonDir, uNSeaLit, uNSeaAway, uNSeaShade, uNMoonHaze);
+        // The aurora glows faintly on the cloud beneath it.
+        night += aurora(normalize(vec3(d.x, 0.5 * length(d.xz), d.z))) * 0.3 * exp(-down * 3.0);
+        col = mix(col, night, uNight);
+      }
       return mix(col, skyBase(normalize(vec3(d.x, 0.0, d.z))), exp(-down * 8.0));
     }
 
@@ -955,6 +1079,52 @@ window.WebXRVR = window.WebXRVR || (function () {
       return vec4(col, alpha);
     }
 
+    // The Milky Way: a blue-violet band along the galactic plane, golden round the core,
+    // its clouds split by dark lanes of dust and dotted with pink knots of young stars.
+    vec3 galaxy(vec3 d) {
+      float b = dot(d, uGalN);
+      if (abs(b) > 0.6) return vec3(0.0);
+      vec3 f = cross(uGalN, uGalE);
+      float l = atan(dot(d, f), dot(d, uGalE));
+      float core = exp(-l * l / 0.25);
+      float width = 0.11 + 0.1 * core;
+      float band = exp(-b * b / (2.0 * width * width));
+      // Whole repeats round the circle, so the texture meets itself where l wraps.
+      vec2 uv = vec2(l / 6.2831853 * 7.0, b * 2.4);
+      float clouds = texture2D(uCloudTex, uv + vec2(0.31, 0.07)).r * 0.6 + texture2D(uCloudTex, uv * 3.0).g * 0.4;
+      float lane = smoothstep(0.42, 0.72, texture2D(uCloudTex, uv * vec2(2.0, 4.0) + vec2(0.5, 0.2)).r);
+      float rift = lane * exp(-pow((b - 0.02 * sin(l * 3.0)) / (0.035 + 0.03 * core), 2.0));
+      float glow = band * (0.3 + 0.9 * clouds * clouds) * (1.0 - 0.8 * rift);
+      glow += 2.2 * core * exp(-b * b / 0.02) * (0.6 + 0.4 * clouds) * (1.0 - 0.6 * rift);
+      vec3 c = mix(uGalaxyCool, uGalaxyWarm, smoothstep(0.25, 0.9, core));
+      // The brightest clouds burn whiter.
+      c = mix(c, vec3(1.0, 0.95, 0.88), 0.2 * clouds * clouds * band);
+      vec3 col = c * glow;
+      float knots = smoothstep(0.45, 0.8, texture2D(uCloudTex, uv * vec2(1.3, 1.7) + vec2(0.13, 0.71)).g) * clouds;
+      col += uGalaxyPink * knots * band * (1.0 - rift) * (0.5 + 0.5 * core) * 1.3;
+      // A faint blue haze either side of the band.
+      col += uGalaxyCool * 0.2 * exp(-b * b / 0.09);
+      // Thick air near the horizon swallows it.
+      return col * 0.08 * smoothstep(-0.02, 0.3, d.y);
+    }
+
+    // The moon: a waxing gibbous disc lit from the right, with faint grey seas.
+    vec3 moonDisc(vec3 d, vec3 col) {
+      float r = 0.012;
+      float mu = dot(d, uMoonDir);
+      if (mu < cos(r * 1.2)) return col;
+      vec3 t1 = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
+      vec3 t2 = cross(t1, uMoonDir);
+      vec2 p = vec2(dot(d, t1), dot(d, t2)) / r;
+      float q = dot(p, p);
+      if (q > 1.2) return col;
+      vec3 n = vec3(p, sqrt(max(1.0 - q, 0.0)));
+      float lit = smoothstep(-0.08, 0.12, dot(n, normalize(vec3(0.7, -0.15, 0.6))));
+      float seas = texture2D(uCloudTex, p * 0.18 + vec2(0.62, 0.38)).r;
+      vec3 face = uNMoon * ((0.72 + 0.35 * seas) * lit * (0.75 + 0.25 * n.z) + 0.035);
+      return mix(col, face * 1.4, smoothstep(1.0, 0.86, sqrt(q)));
+    }
+
     void main() {
       vec3 d = normalize(vWorld - cameraPosition);
       vec3 col;
@@ -962,16 +1132,25 @@ window.WebXRVR = window.WebXRVR || (function () {
         col = cloudSea(d);
       } else {
         col = skyBase(d);
-        float side = sunSide(d);
-        float mu = dot(d, uSunDir);
-        // High cirrus: long thin streaks catching the gold.
-        vec2 q = d.xz / (d.y + 0.18);
-        vec2 cq = vec2(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8) * vec2(0.04, 0.32) + vec2(0.002 * uTime, 0.0);
-        float cirrus = smoothstep(0.55, 0.85, texture2D(uCloudTex, cq).r) * smoothstep(0.03, 0.25, d.y) * 0.45;
-        col = mix(col, mix(uBelt, uSunHaze * 1.2, pow(side, 2.0)), cirrus);
-        col = mix(col, uSunColor * 1.6, smoothstep(0.99984, 0.99993, mu));
-        vec4 deck = cloudDeck(d, side, mu);
-        col = mix(col, deck.rgb, deck.a);
+        if (uNight < 1.0) {
+          vec3 day = col;
+          float side = sunSide(d);
+          float mu = dot(d, uSunDir);
+          // High cirrus: long thin streaks catching the gold.
+          vec2 q = d.xz / (d.y + 0.18);
+          vec2 cq = vec2(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8) * vec2(0.04, 0.32) + vec2(0.002 * uTime, 0.0);
+          float cirrus = smoothstep(0.55, 0.85, texture2D(uCloudTex, cq).r) * smoothstep(0.03, 0.25, d.y) * 0.45;
+          day = mix(day, mix(uBelt, uSunHaze * 1.2, pow(side, 2.0)), cirrus);
+          day = mix(day, uSunColor * 1.6, smoothstep(0.99984, 0.99993, mu));
+          vec4 deck = cloudDeck(d, side, mu);
+          day = mix(day, deck.rgb, deck.a);
+          col = mix(day, col, uNight);
+        }
+        if (uNight > 0.0) {
+          vec3 night = col + galaxy(d) + aurora(d);
+          night = moonDisc(d, night);
+          col = mix(col, night, uNight);
+        }
       }
       gl_FragColor = vec4(knee(col) * uTint, 1.0);
       #include <colorspace_fragment>
@@ -982,6 +1161,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   const WORLD_TERRAIN_FRAGMENT = `
     varying vec3 vRock;
     varying vec3 vNormal;
+    varying vec2 vNight; // snow cover, sky occlusion
 
     // Quintic texel blend: plain bilinear lookups have creased slopes that the bump picks up as lines.
     vec4 smoothTex(vec2 uv) {
@@ -1013,16 +1193,34 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Steep faces carry the most relief; gentle foothills stay smooth.
       float relief = 1.3 * smoothstep(0.97, 0.7, n.y);
       vec3 nb = normalize(abs(det) * n - sign(det) * (bx * r1 + by * r2) * relief);
-      vec3 col = vRock;
-      float litness = clamp(dot(n, uSunDir) * 3.0, 0.0, 1.0);
-      col *= clamp(1.0 + 2.2 * (dot(nb, uSunDir) - dot(n, uSunDir)) * litness + 0.6 * (nb.y - n.y), 0.55, 1.5);
       // Patches of paler and darker rock.
       float blotch = texture2D(uCloudTex, vWorld.xz * 0.013 + 0.4).r;
-      col *= 0.82 + 0.36 * blotch;
-      // Ridges seen against the sun light up at the edge.
-      float mu = max(dot(d, uSunDir), 0.0);
       vec3 nr = normalize(mix(n, nb, 0.3));
-      col += uSunHaze * 1.1 * pow(1.0 - abs(dot(nr, d)), 3.0) * pow(mu, 5.0);
+      float edge = pow(1.0 - abs(dot(nr, d)), 3.0);
+      vec3 col = vec3(0.0);
+      if (uNight < 1.0) {
+        vec3 day = vRock;
+        float litness = clamp(dot(n, uSunDir) * 3.0, 0.0, 1.0);
+        day *= clamp(1.0 + 2.2 * (dot(nb, uSunDir) - dot(n, uSunDir)) * litness + 0.6 * (nb.y - n.y), 0.55, 1.5);
+        day *= 0.82 + 0.36 * blotch;
+        // Ridges seen against the sun light up at the edge.
+        day += uSunHaze * 1.1 * edge * pow(max(dot(d, uSunDir), 0.0), 5.0);
+        col = day;
+      }
+      if (uNight > 0.0) {
+        // By night the baked sunlight is set aside: the moon lights the faces turned to it,
+        // snow glows pale on the crests, and the rest falls to near-black silhouette.
+        float ndl = dot(n, uMoonDir);
+        vec3 lit = mix(uNRockLit, uNSnowLit, vNight.x);
+        vec3 shade = mix(uNRockShade, uNSnowShade, vNight.x) * (0.5 + 0.5 * n.y);
+        vec3 night = mix(shade, lit, smoothstep(0.0, 0.5, ndl)) * vNight.y;
+        float litness = clamp(ndl * 3.0, 0.0, 1.0);
+        night *= clamp(1.0 + 2.2 * (dot(nb, uMoonDir) - ndl) * litness + 0.6 * (nb.y - n.y), 0.55, 1.5);
+        night *= 0.82 + 0.36 * blotch;
+        // Ridges against the moon catch a silver rim.
+        night += uNMoonHaze * 0.8 * edge * pow(max(dot(d, uMoonDir), 0.0), 5.0);
+        col = mix(col, night, uNight);
+      }
       // Distance and the low mist wash the peaks toward the sky behind them.
       float air = max(1.0 - exp(-dist * 0.0055), 0.5 * smoothstep(uSeaY + 4.0, uSeaY, vWorld.y));
       col = mix(col, skyBase(normalize(vec3(d.x, max(d.y, 0.0) + 0.02, d.z))), air);
@@ -1141,6 +1339,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const c = (hex) => new THREE.Color(hex);
     const rockLit = c(L.rockLit), rockShade = c(L.rockShade), snowLit = c(L.snowLit), snowShade = c(L.snowShade);
     const col = new Float32Array(N * M * 3);
+    const night = new Float32Array(N * M * 2); // snow cover and sky occlusion, for the moonlit shading
     for (let j = 0; j < M; j++) {
       for (let i = 0; i < N; i++) {
         const k = j * N + i;
@@ -1167,6 +1366,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         const around = (H[j * N + (i + 1) % N] + H[j * N + (i + N - 1) % N] +
           H[min(M - 1, j + 1) * N + i] + H[max(0, j - 1) * N + i]) / 4;
         const ao = min(1, max(0.5, 1 - (around - y) * 0.3));
+        night[2 * k] = snow;
+        night[2 * k + 1] = ao;
         for (let ch = 0; ch < 3; ch++) {
           const key = ch === 0 ? 'r' : ch === 1 ? 'g' : 'b';
           const lit = rockLit[key] + (snowLit[key] - rockLit[key]) * snow;
@@ -1176,22 +1377,316 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aNight', new THREE.BufferAttribute(night, 2));
     return g;
   }
 
-  // Sky and mountains: two meshes built once, shown in light mode only. They share
-  // one uniforms object, so the sun, the drift and the dim reach both.
-  function buildLightWorld() {
+  // A direction on the night sky from right ascension and declination, as seen from
+  // NIGHT_LATITUDE_DEG at NIGHT_LST_HOURS, turned into world space (x right, y up, -z ahead).
+  function celestialDir(raHours, decDeg) {
+    const r = Math.PI / 180;
+    const phi = NIGHT_LATITUDE_DEG * r, dec = decDeg * r;
+    const h = (NIGHT_LST_HOURS - raHours) * 15 * r;
+    const alt = Math.asin(Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(phi) * Math.cos(h));
+    // Compass azimuth, from north through east.
+    const az = Math.atan2(-Math.cos(dec) * Math.sin(h),
+      Math.sin(dec) * Math.cos(phi) - Math.cos(dec) * Math.sin(phi) * Math.cos(h));
+    const w = az + (NIGHT_SOUTH_AZIMUTH_DEG - 180) * r;
+    return { x: Math.cos(alt) * Math.sin(w), y: Math.sin(alt), z: -Math.cos(alt) * Math.cos(w) };
+  }
+
+  // The constellations drawn by night: [RA hours, Dec degrees, magnitude, colour class]
+  // per star, and the lines between them as index paths.
+  const NIGHT_CONSTELLATIONS = [
+    { // Ursa Major, the Big Dipper
+      stars: [[11.062, 61.75, 1.8, 3], [11.031, 56.38, 2.4, 1], [11.897, 53.69, 2.4, 1], [12.257, 57.03, 3.3, 1],
+        [12.900, 55.96, 1.8, 1], [13.399, 54.93, 2.2, 1], [13.792, 49.31, 1.9, 0]],
+      paths: [[0, 1, 2, 3, 0], [3, 4, 5, 6]],
+    },
+    { // Ursa Minor
+      stars: [[2.530, 89.26, 2.0, 2], [17.537, 86.59, 4.4, 1], [16.766, 82.04, 4.2, 3], [15.734, 77.79, 4.3, 1],
+        [14.845, 74.16, 2.1, 3], [15.345, 71.83, 3.0, 1], [16.292, 75.76, 5.0, 1]],
+      paths: [[0, 1, 2, 3, 4, 5, 6, 3]],
+    },
+    { // Cassiopeia
+      stars: [[0.153, 59.15, 2.3, 1], [0.675, 56.54, 2.2, 3], [0.945, 60.72, 2.4, 0], [1.430, 60.24, 2.7, 1],
+        [1.907, 63.67, 3.4, 0]],
+      paths: [[0, 1, 2, 3, 4]],
+    },
+    { // Cygnus
+      stars: [[20.690, 45.28, 1.25, 1], [20.370, 40.26, 2.2, 2], [20.770, 33.97, 2.5, 3], [19.750, 45.13, 2.9, 0],
+        [19.512, 27.96, 3.1, 3]],
+      paths: [[0, 1, 4], [3, 1, 2]],
+    },
+    { // Lyra
+      stars: [[18.616, 38.78, 0.03, 0], [18.739, 39.67, 4.7, 1], [18.746, 37.61, 4.4, 1], [18.908, 36.90, 4.3, 3],
+        [18.982, 32.69, 3.2, 0], [18.835, 33.36, 3.5, 0]],
+      paths: [[0, 1], [0, 2], [2, 3, 4, 5, 2]],
+    },
+    { // Aquila
+      stars: [[19.846, 8.87, 0.77, 1], [19.771, 10.61, 2.7, 3], [19.922, 6.41, 3.7, 2], [19.425, 3.11, 3.4, 1],
+        [19.104, -4.88, 3.4, 0]],
+      paths: [[1, 0, 2], [0, 3, 4]],
+    },
+    { // Scorpius
+      stars: [[16.091, -19.81, 2.6, 0], [16.006, -22.62, 2.3, 0], [15.981, -26.11, 2.9, 0], [16.353, -25.59, 2.9, 0],
+        [16.490, -26.43, 1.0, 4], [16.598, -28.22, 2.8, 0], [16.836, -34.29, 2.3, 3], [16.864, -38.05, 3.0, 0],
+        [16.910, -42.36, 3.6, 3], [17.203, -43.24, 3.3, 1], [17.622, -43.00, 1.9, 2], [17.793, -40.13, 3.0, 2],
+        [17.708, -39.03, 2.4, 0], [17.560, -37.10, 1.6, 0]],
+      paths: [[0, 1, 2], [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]],
+    },
+    { // Sagittarius, the Teapot
+      stars: [[18.403, -34.38, 1.8, 0], [18.350, -29.83, 2.7, 3], [18.466, -25.42, 2.8, 3], [18.921, -26.30, 2.0, 0],
+        [19.043, -29.88, 2.6, 1], [18.761, -26.99, 3.2, 0], [19.116, -27.67, 3.3, 3], [18.097, -30.42, 3.0, 3]],
+      paths: [[0, 7, 1, 0], [1, 5, 4, 0], [2, 1], [2, 5], [5, 3, 6, 4]],
+    },
+  ];
+  // Star colour classes, blue-white to red, in display space.
+  const STAR_CLASSES = ['#b9c9ff', '#f4f3ff', '#fff1d8', '#ffcf9a', '#ffb07a'];
+
+  // Seeded stars for the night sky. Each star is a quad: four corners sharing one direction.
+  function buildStarGeometry() {
+    let seed = 0x9e3779b9 >>> 0;
+    const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    const galN = celestialDir(12.8573, 27.128), core = celestialDir(17.7611, -28.936);
+    const along = (core.x * galN.x + core.y * galN.y + core.z * galN.z);
+    let ex = core.x - galN.x * along, ey = core.y - galN.y * along, ez = core.z - galN.z * along;
+    const el = Math.hypot(ex, ey, ez); ex /= el; ey /= el; ez /= el;
+    const wx = galN.y * ez - galN.z * ey, wy = galN.z * ex - galN.x * ez, wz = galN.x * ey - galN.y * ex;
+    const minY = Math.sin(0.5 * Math.PI / 180);
+    const stars = []; // [x, y, z, flux, class]
+    const pickClass = (u) => (u < 0.10 ? 0 : u < 0.55 ? 1 : u < 0.85 ? 2 : u < 0.97 ? 3 : 4);
+    // A point at galactic longitude l (0 at the core) and latitude b.
+    const onBand = (l, b) => {
+      const cb = Math.cos(b), sb = Math.sin(b), cl = Math.cos(l), sl = Math.sin(l);
+      return [cb * (cl * ex + sl * wx) + sb * galN.x, cb * (cl * ey + sl * wy) + sb * galN.y, cb * (cl * ez + sl * wz) + sb * galN.z];
+    };
+    const FIELD = 2600;
+    while (stars.length < FIELD) {
+      let x, y, z;
+      if (rand() < 0.7) {
+        y = rand() * 2 - 1;
+        const a = rand() * 2 * Math.PI, c = Math.sqrt(1 - y * y);
+        x = c * Math.sin(a); z = -c * Math.cos(a);
+      } else {
+        // Crowd toward the galactic plane, and toward the core along it.
+        const l = rand() < 0.4 ? (rand() + rand() + rand() - 1.5) * 0.9 : (rand() * 2 - 1) * Math.PI;
+        [x, y, z] = onBand(l, (rand() + rand() + rand() - 1.5) * 0.22);
+      }
+      if (y < minY) continue;
+      stars.push([x, y, z, 0.05 + 0.7 * Math.pow(rand(), 5), pickClass(rand())]);
+    }
+    // A dust of faint stars packed along the band, thickest round the core.
+    const BAND = FIELD + 2400;
+    while (stars.length < BAND) {
+      const l = rand() < 0.5 ? (rand() + rand() + rand() - 1.5) * 0.8 : (rand() * 2 - 1) * Math.PI;
+      const [x, y, z] = onBand(l, (rand() + rand() + rand() + rand() - 2) * 0.09);
+      if (y < minY) continue;
+      stars.push([x, y, z, 0.03 + 0.2 * Math.pow(rand(), 4), pickClass(rand())]);
+    }
+    const named = [];
+    for (const c of NIGHT_CONSTELLATIONS) {
+      const dirs = c.stars.map(([ra, dec, mag, cls]) => {
+        const d = celestialDir(ra, dec);
+        stars.push([d.x, d.y, d.z, Math.min(3, Math.pow(10, -0.4 * (mag - 1.5))), cls]);
+        return d;
+      });
+      named.push({ dirs, paths: c.paths });
+    }
+    const n = stars.length;
+    const pos = new Float32Array(n * 12), corner = new Float32Array(n * 8);
+    const star = new Float32Array(n * 12), colour = new Float32Array(n * 12);
+    const idx = new Uint32Array(n * 6);
+    const rgb = STAR_CLASSES.map((hex) => {
+      const v = parseInt(hex.slice(1), 16);
+      return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255];
+    });
+    const CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1];
+    for (let i = 0; i < n; i++) {
+      const [x, y, z, f, cls] = stars[i];
+      const size = 0.1 + 0.12 * Math.sqrt(f);
+      const phase = rand();
+      for (let v = 0; v < 4; v++) {
+        const k = i * 4 + v;
+        pos[3 * k] = x * STAR_RADIUS; pos[3 * k + 1] = y * STAR_RADIUS; pos[3 * k + 2] = z * STAR_RADIUS;
+        corner[2 * k] = CORNERS[2 * v]; corner[2 * k + 1] = CORNERS[2 * v + 1];
+        star[3 * k] = size; star[3 * k + 1] = f; star[3 * k + 2] = phase;
+        colour[3 * k] = rgb[cls][0]; colour[3 * k + 1] = rgb[cls][1]; colour[3 * k + 2] = rgb[cls][2];
+      }
+      const a = i * 4;
+      idx.set([a, a + 1, a + 2, a, a + 2, a + 3], i * 6);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2));
+    g.setAttribute('aStar', new THREE.BufferAttribute(star, 3));
+    g.setAttribute('aColor', new THREE.BufferAttribute(colour, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    return { geometry: g, named, count: n };
+  }
+
+  // Thin ribbons along the great circles between constellation stars, stopped short of each star.
+  function buildConstellationGeometry(named) {
+    const R = STAR_RADIUS - 0.5, HALF = 0.05, GAP = 0.7 * Math.PI / 180, STEP = 2 * Math.PI / 180;
+    const pos = [], vs = [], idx = [];
+    const unit = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
+    for (const { dirs, paths } of named) {
+      for (const path of paths) {
+        for (let p = 0; p + 1 < path.length; p++) {
+          const A = dirs[path[p]], B = dirs[path[p + 1]];
+          const cos = Math.max(-1, Math.min(1, A.x * B.x + A.y * B.y + A.z * B.z));
+          const ang = Math.acos(cos);
+          if (ang <= 2 * GAP) continue;
+          // T: unit tangent at A toward B.
+          const T = unit(B.x - A.x * cos, B.y - A.y * cos, B.z - A.z * cos);
+          const steps = Math.max(1, Math.ceil((ang - 2 * GAP) / STEP));
+          const base = pos.length / 3;
+          for (let s = 0; s <= steps; s++) {
+            const th = GAP + (ang - 2 * GAP) * s / steps;
+            const c = Math.cos(th), si = Math.sin(th);
+            const P = [A.x * c + T[0] * si, A.y * c + T[1] * si, A.z * c + T[2] * si];
+            const D = [-A.x * si + T[0] * c, -A.y * si + T[1] * c, -A.z * si + T[2] * c];
+            const side = unit(P[1] * D[2] - P[2] * D[1], P[2] * D[0] - P[0] * D[2], P[0] * D[1] - P[1] * D[0]);
+            for (const v of [-1, 1]) {
+              pos.push(P[0] * R + side[0] * HALF * v, P[1] * R + side[1] * HALF * v, P[2] * R + side[2] * HALF * v);
+              vs.push(v);
+            }
+            if (s < steps) {
+              const k = base + s * 2;
+              idx.push(k, k + 1, k + 3, k, k + 3, k + 2);
+            }
+          }
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('aV', new THREE.BufferAttribute(new Float32Array(vs), 1));
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
+    return g;
+  }
+
+  // One shooting star: a strip along a great circle, placed by uniforms each flight.
+  function buildMeteorGeometry() {
+    const SEG = 8;
+    const u = [], v = [], pos = [], idx = [];
+    for (let s = 0; s <= SEG; s++) {
+      for (const side of [-1, 1]) { u.push(s / SEG); v.push(side); pos.push(0, 0, 0); }
+      // Wound to face the centre, where the viewer stands; the other way round they are culled.
+      if (s < SEG) { const k = s * 2; idx.push(k, k + 3, k + 1, k, k + 2, k + 3); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('aU', new THREE.BufferAttribute(new Float32Array(u), 1));
+    g.setAttribute('aV', new THREE.BufferAttribute(new Float32Array(v), 1));
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
+    return g;
+  }
+
+  const NIGHT_STAR_VERTEX = `
+    attribute vec2 aCorner;
+    attribute vec3 aStar; // size, flux, twinkle phase
+    attribute vec3 aColor;
+    uniform float uNight, uTime;
+    uniform vec3 uTint, uMoonDir;
+    varying vec3 vColor;
+    varying vec2 vCorner;
+    void main() {
+      vec3 dir = normalize(position);
+      // Thicker air near the horizon: dimmer, redder, and twinkling harder.
+      float ext = smoothstep(0.0, 0.25, dir.y);
+      float tw = mix(0.45, 0.12, smoothstep(0.0, 0.5, dir.y));
+      float twinkle = 1.0 + tw * sin(uTime * (2.3 + 2.9 * aStar.z) + aStar.z * 37.0) * sin(uTime * 1.31 + aStar.z * 11.0);
+      float moon = 1.0 - 0.95 * exp(-(1.0 - dot(dir, uMoonDir)) / 0.02);
+      float b = 1.4 * min(aStar.y, 1.2) * (0.25 + 0.75 * ext) * twinkle * moon * uNight;
+      vColor = aColor * mix(vec3(1.0, 0.72, 0.5), vec3(1.0), ext) * b * uTint;
+      vCorner = aCorner;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      mv.xy += aCorner * aStar.x;
+      gl_Position = projectionMatrix * mv;
+    }
+  `;
+  const NIGHT_STAR_FRAGMENT = `
+    varying vec3 vColor;
+    varying vec2 vCorner;
+    void main() {
+      float g = exp(-dot(vCorner, vCorner) * 6.0);
+      gl_FragColor = vec4(vColor * g, 1.0);
+    }
+  `;
+  const NIGHT_LINE_VERTEX = `
+    attribute float aV;
+    varying float vV;
+    void main() {
+      vV = aV;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const NIGHT_LINE_FRAGMENT = `
+    uniform float uNight, uReveal;
+    uniform vec3 uTint, uLine;
+    varying float vV;
+    void main() {
+      float a = exp(-vV * vV * 3.0) * 0.18 * uReveal * uNight;
+      gl_FragColor = vec4(uLine * uTint * a, 1.0);
+    }
+  `;
+  const NIGHT_METEOR_VERTEX = `
+    attribute float aU;
+    attribute float aV;
+    uniform vec3 uMeteorS, uMeteorT;
+    uniform float uMeteorHead, uMeteorTail;
+    varying float vU;
+    varying float vV;
+    void main() {
+      float th = mix(uMeteorHead, uMeteorTail, aU);
+      vec3 p = cos(th) * uMeteorS + sin(th) * uMeteorT;
+      vec3 along = -sin(th) * uMeteorS + cos(th) * uMeteorT;
+      vec3 side = normalize(cross(p, along));
+      vec3 world = p * ${(STAR_RADIUS - 1).toFixed(1)} + side * aV * 0.25 * (1.0 - 0.7 * aU);
+      vU = aU;
+      vV = aV;
+      gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+    }
+  `;
+  const NIGHT_METEOR_FRAGMENT = `
+    uniform float uNight, uMeteorFade;
+    uniform vec3 uTint, uMeteor;
+    varying float vU;
+    varying float vV;
+    void main() {
+      float a = (pow(1.0 - vU, 1.5) + 1.5 * exp(-vU * 25.0)) * exp(-vV * vV * 4.0) * uMeteorFade * uNight;
+      gl_FragColor = vec4(uMeteor * uTint * a, 1.0);
+    }
+  `;
+
+  // The world: sky and mountains built once and shared by both modes, plus the stars,
+  // constellation lines and shooting star that only the night shows. One uniforms object
+  // carries the sun and moon, the drift, the dim and the night blend to every mesh.
+  function buildWorld() {
     if (worldSky || !THREE || !scene) return;
-    const L = WORLD_PALETTE.light;
+    const L = WORLD_PALETTE.light, D = WORLD_PALETTE.dark;
     const az = SUN_AZIMUTH_DEG * Math.PI / 180, el = SUN_ELEVATION_DEG * Math.PI / 180;
     const sun = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
+    const maz = MOON_AZIMUTH_DEG * Math.PI / 180, mel = MOON_ELEVATION_DEG * Math.PI / 180;
+    const moon = new THREE.Vector3(Math.cos(mel) * Math.sin(maz), Math.sin(mel), -Math.cos(mel) * Math.cos(maz));
+    const taz = TOWN_AZIMUTH_DEG * Math.PI / 180;
+    const galN = celestialDir(12.8573, 27.128), core = celestialDir(17.7611, -28.936);
+    const uGalN = new THREE.Vector3(galN.x, galN.y, galN.z).normalize();
+    const uGalE = new THREE.Vector3(core.x, core.y, core.z).addScaledVector(uGalN, -(core.x * galN.x + core.y * galN.y + core.z * galN.z)).normalize();
     worldUniforms = {
       uSunDir: { value: sun },
       uTime: { value: 0 },
       uTint: { value: new THREE.Color(1, 1, 1) },
       uCloudTex: { value: bakeCloudTexture() },
       uSeaY: { value: WORLD_SEA_Y },
+      uNight: { value: 0 },
+      uReveal: { value: 1 },
+      uMoonDir: { value: moon },
+      uTownDir: { value: new THREE.Vector3(Math.sin(taz), 0, -Math.cos(taz)) },
+      uAuroraAz: { value: AURORA_AZIMUTH_DEG * Math.PI / 180 },
+      uGalN: { value: uGalN },
+      uGalE: { value: uGalE },
     };
     const colours = {
       uZenith: 'zenith', uMidSun: 'midSun', uMidAway: 'midAway', uHorizonSun: 'horizonSun',
@@ -1200,6 +1695,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       uSeaAway: 'seaAway', uSeaShade: 'seaShade',
     };
     for (const name in colours) worldUniforms[name] = { value: new THREE.Color(L[colours[name]]) };
+    const nightColours = {
+      uNZenith: 'zenith', uNMid: 'mid', uNHorizon: 'horizon', uNAirglow: 'airglow', uNTown: 'town',
+      uNMoon: 'moon', uNMoonHaze: 'moonHaze', uNSeaLit: 'seaLit', uNSeaAway: 'seaAway', uNSeaShade: 'seaShade',
+      uNRockLit: 'rockLit', uNRockShade: 'rockShade', uNSnowLit: 'snowLit', uNSnowShade: 'snowShade',
+      uGalaxyWarm: 'galaxyWarm', uGalaxyCool: 'galaxyCool', uGalaxyPink: 'galaxyPink', uAuroraLow: 'auroraLow', uAuroraHigh: 'auroraHigh',
+    };
+    for (const name in nightColours) worldUniforms[name] = { value: new THREE.Color(D[nightColours[name]]) };
+    // Lines and meteor add straight onto the framebuffer, so their colours stay in display space.
+    const display = (hex) => new THREE.Color().setRGB(...[16, 8, 0].map((sh) => (parseInt(hex.slice(1), 16) >> sh & 255) / 255));
+    worldUniforms.uLine = { value: display(D.line) };
+    worldUniforms.uMeteor = { value: display(D.meteor) };
     const make = (geometry, material, order) => {
       const m = new THREE.Mesh(geometry, material);
       m.renderOrder = order;
@@ -1228,10 +1734,13 @@ window.WebXRVR = window.WebXRVR || (function () {
         varying vec3 vWorld;
         varying vec3 vRock;
         varying vec3 vNormal;
+        attribute vec2 aNight;
+        varying vec2 vNight;
         void main() {
           vec4 w = modelMatrix * vec4(position, 1.0);
           vWorld = w.xyz;
           vRock = color;
+          vNight = aNight;
           vNormal = normal;
           gl_Position = projectionMatrix * viewMatrix * w;
         }
@@ -1239,15 +1748,110 @@ window.WebXRVR = window.WebXRVR || (function () {
       fragmentShader: WORLD_GLSL_PARS + WORLD_TERRAIN_FRAGMENT,
       vertexColors: true,
     }), -9);
+    // The night layers sit in the opaque queue between the sky and the peaks, adding light
+    // onto the sky without writing depth, so the range drawn after them covers them.
+    const additive = (vertexShader, fragmentShader, uniforms) => new THREE.ShaderMaterial({
+      uniforms, vertexShader, fragmentShader,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: false,
+    });
+    const stars = buildStarGeometry();
+    worldStars = make(stars.geometry, additive(NIGHT_STAR_VERTEX, NIGHT_STAR_FRAGMENT, worldUniforms), -9.8);
+    worldLines = make(buildConstellationGeometry(stars.named), additive(NIGHT_LINE_VERTEX, NIGHT_LINE_FRAGMENT, worldUniforms), -9.7);
+    worldMeteorUniforms = Object.assign({}, worldUniforms, {
+      uMeteorS: { value: new THREE.Vector3(0, 1, 0) },
+      uMeteorT: { value: new THREE.Vector3(1, 0, 0) },
+      uMeteorHead: { value: 0 },
+      uMeteorTail: { value: 0 },
+      uMeteorFade: { value: 0 },
+    });
+    worldMeteor = make(buildMeteorGeometry(), additive(NIGHT_METEOR_VERTEX, NIGHT_METEOR_FRAGMENT, worldMeteorUniforms), -9.6);
   }
 
-  function worldObjectMeshes() { return [worldSky, worldMountains]; }
+  function worldObjectMeshes() { return [worldSky, worldMountains, worldStars, worldLines, worldMeteor]; }
 
-  // Shows the world of the current mode and sets the clear colour from the palette.
+  // The sky and range stand in both modes; the night layers show while any night remains.
   function applyWorldMode() {
-    const light = readVRTheme() !== 'dark';
-    for (const m of worldObjectMeshes()) if (m) m.visible = light;
-    if (starfieldPoints) starfieldPoints.visible = !light;
+    const dark = readVRTheme() === 'dark';
+    if (worldSky) worldSky.visible = true;
+    if (worldMountains) worldMountains.visible = true;
+    const night = dark || worldNight > 0;
+    if (worldStars) worldStars.visible = night;
+    if (worldLines) worldLines.visible = night;
+    if (worldMeteor) worldMeteor.visible = night && !!worldMeteorFlight;
+  }
+
+  // True when a direction lies outside the video: far enough round, or above its top.
+  function meteorClear(p) {
+    const az = Math.abs(Math.atan2(p.x, -p.z)) * 180 / Math.PI;
+    return p.y > 0.2 && (az >= METEOR_CLEAR_DEG || Math.asin(p.y) * 180 / Math.PI >= METEOR_OVER_DEG);
+  }
+
+  // Picks a shooting star's path, where the eye goes when it leaves the video: half streak
+  // across the sky above it, half fall at the sides. Retries until the whole path is clear.
+  function planMeteor(rand) {
+    for (;;) {
+      const m = planMeteorPath(rand);
+      let clear = true;
+      for (let k = 0; k <= 10 && clear; k++) clear = meteorClear(meteorPoint(m, m.arc * k / 10));
+      if (clear) return m;
+    }
+  }
+
+  function planMeteorPath(rand) {
+    const r = Math.PI / 180;
+    const high = rand() < 0.5;
+    const side = rand() < 0.5 ? -1 : 1;
+    const az = high ? (rand() * 2 - 1) * 80 * r : side * (45 + rand() * 105) * r;
+    const el = (high ? 55 + rand() * 17 : 25 + rand() * 35) * r;
+    const S = { x: Math.cos(el) * Math.sin(az), y: Math.sin(el), z: -Math.cos(el) * Math.cos(az) };
+    // Local down and across at S.
+    let dx = -S.x * S.y, dy = -1 + S.y * S.y, dz = -S.z * S.y;
+    const dl = Math.hypot(dx, dy, dz); dx /= dl; dy /= dl; dz /= dl;
+    const ax = S.y * dz - S.z * dy, ay = S.z * dx - S.x * dz, az2 = S.x * dy - S.y * dx;
+    // High ones run mostly across, side ones mostly down.
+    const tilt = (high ? side * (55 + rand() * 30) : (rand() * 2 - 1) * 55) * r;
+    const c = Math.cos(tilt), s = Math.sin(tilt);
+    const T = { x: dx * c + ax * s, y: dy * c + ay * s, z: dz * c + az2 * s };
+    return { S, T, arc: 0.28 + rand() * 0.17, duration: 700 + rand() * 600 };
+  }
+
+  // A point along a planned path, theta radians from its start.
+  function meteorPoint(m, theta) {
+    const c = Math.cos(theta), s = Math.sin(theta);
+    return { x: m.S.x * c + m.T.x * s, y: m.S.y * c + m.T.y * s, z: m.S.z * c + m.T.z * s };
+  }
+
+  // Launches, flies and retires shooting stars. None while motion is reduced or the night is faint.
+  function stepMeteors(time) {
+    if (!worldMeteorUniforms || !Number.isFinite(time)) return;
+    const u = worldMeteorUniforms;
+    if (reducedMotion || worldNight < 0.5) {
+      worldMeteorFlight = null;
+      worldMeteorNext = -1;
+      u.uMeteorFade.value = 0;
+      return;
+    }
+    if (worldMeteorNext < 0) worldMeteorNext = time + (worldNight >= 1 ? 2000 + Math.random() * 3000 : 5000);
+    if (!worldMeteorFlight && time >= worldMeteorNext) {
+      worldMeteorFlight = Object.assign(planMeteor(Math.random), { t0: time });
+      u.uMeteorS.value.set(worldMeteorFlight.S.x, worldMeteorFlight.S.y, worldMeteorFlight.S.z);
+      u.uMeteorT.value.set(worldMeteorFlight.T.x, worldMeteorFlight.T.y, worldMeteorFlight.T.z);
+    }
+    const m = worldMeteorFlight;
+    if (!m) return;
+    const p = (time - m.t0) / m.duration;
+    if (p >= 1) {
+      worldMeteorFlight = null;
+      worldMeteorNext = time + 6000 + Math.random() * 10000;
+      u.uMeteorFade.value = 0;
+      return;
+    }
+    const head = m.arc * Math.min(1, p * 1.15);
+    u.uMeteorHead.value = head;
+    u.uMeteorTail.value = Math.max(0, head - m.arc * 0.7);
+    u.uMeteorFade.value = smoothstep(0, 0.12, p) * (1 - smoothstep(0.65, 1, p));
   }
 
   // Scales the light world by 1 - dim; both meshes share the tint.
@@ -1273,6 +1877,18 @@ window.WebXRVR = window.WebXRVR || (function () {
       worldDim = next;
       applyWorldDim();
     }
+    // A theme switch carries the world from day to night, or back, over NIGHT_FADE_MS.
+    const nightTarget = readVRTheme() === 'dark' ? 1 : 0;
+    if (worldNight < 0) worldNight = nightTarget;
+    else if (worldNight < nightTarget) worldNight = Math.min(nightTarget, worldNight + dt / NIGHT_FADE_MS);
+    else if (worldNight > nightTarget) worldNight = Math.max(nightTarget, worldNight - dt / NIGHT_FADE_MS);
+    if (worldUniforms) {
+      worldUniforms.uNight.value = smoothstep(0, 1, worldNight);
+      // The constellations show while the video rests and fade as playback dims the sky.
+      worldUniforms.uReveal.value = 1 - worldDim / DIM_AMOUNT;
+    }
+    stepMeteors(time);
+    applyWorldMode();
   }
 
   function recolourScene() {
@@ -6037,59 +6653,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       scene.add(reticleMesh);
     }
 
-    // Starfield Points
-    if (!starfieldPoints) {
-      const starGeo = new THREE.BufferGeometry();
-      const starCount = 1500;
-      const starPositions = new Float32Array(starCount * 3);
-      for (let i = 0; i < starCount; i++) {
-        const u = Math.random();
-        const v = Math.random();
-        const th = u * 2 * Math.PI;
-        const ph = Math.acos(2 * v - 1);
-        const r = 25 + Math.random() * 15;
-        starPositions[i * 3] = r * Math.sin(ph) * Math.cos(th);
-        starPositions[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
-        starPositions[i * 3 + 2] = r * Math.cos(ph);
-      }
-      starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-      // Soft round stars (radial sprite) with per-star tint, instead of square
-      // pixels: reads as a night sky rather than dead pixels.
-      const starColors = new Float32Array(starCount * 3);
-      for (let i = 0; i < starCount; i++) {
-        const t = Math.random();
-        const warm = t > 0.88, bright = 0.55 + Math.random() * 0.45;
-        // Brightness only; the warm hue comes from the material colour (WORLD_PALETTE.dark.star).
-        const b = warm ? bright : bright * (0.7 + t * 0.3);
-        starColors[i * 3] = b;
-        starColors[i * 3 + 1] = b;
-        starColors[i * 3 + 2] = b;
-      }
-      starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
-      let starSprite = null;
-      try {
-        if (typeof document !== 'undefined') {
-          const sc = document.createElement('canvas');
-          sc.width = 64; sc.height = 64;
-          const sx = sc.getContext('2d');
-          const sg = sx.createRadialGradient(32, 32, 0, 32, 32, 32);
-          sg.addColorStop(0, 'rgba(255,255,255,1)');
-          sg.addColorStop(0.25, 'rgba(255,255,255,0.55)');
-          sg.addColorStop(1, 'rgba(255,255,255,0)');
-          sx.fillStyle = sg;
-          sx.fillRect(0, 0, 64, 64);
-          starSprite = new THREE.CanvasTexture(sc);
-        }
-      } catch (e) { starSprite = null; }
-      const starMat = new THREE.PointsMaterial({
-        color: parseInt(WORLD_PALETTE.dark.star.slice(1), 16), size: starSprite ? 0.22 : 0.08, transparent: true, opacity: 0.9,
-        vertexColors: true, depthWrite: false,
-      });
-      if (starSprite) starMat.map = starSprite;
-      starfieldPoints = new THREE.Points(starGeo, starMat);
-      scene.add(starfieldPoints);
-    }
-    buildLightWorld();
+    buildWorld();
     applyWorldMode();
     applyWorldDim();
 
@@ -10965,10 +11529,16 @@ window.WebXRVR = window.WebXRVR || (function () {
     guideMesh = null;
     controlsMesh = null;
     commentsMesh = null;
-    starfieldPoints = null;
     worldSky = null;
     worldMountains = null;
+    worldStars = null;
+    worldLines = null;
+    worldMeteor = null;
     worldUniforms = null;
+    worldMeteorUniforms = null;
+    worldNight = -1;
+    worldMeteorFlight = null;
+    worldMeteorNext = -1;
     worldLastT = -1;
     earthGroup = null;
     if (earthLegacyGeometry) earthLegacyGeometry.dispose();
@@ -11514,11 +12084,27 @@ window.WebXRVR = window.WebXRVR || (function () {
       DIM_AMOUNT,
       DIM_FADE_MS,
       worldMeshes: worldObjectMeshes,
+      worldNight() {
+        return {
+          night: worldNight,
+          uNight: worldUniforms ? worldUniforms.uNight.value : null,
+          reveal: worldUniforms ? worldUniforms.uReveal.value : null,
+          meteor: worldMeteorFlight ? { S: worldMeteorFlight.S, T: worldMeteorFlight.T, arc: worldMeteorFlight.arc } : null,
+        };
+      },
+      worldStarGeometry: () => (worldStars ? worldStars.geometry : null),
+      celestialDir,
+      planMeteor,
+      meteorPoint,
+      METEOR_CLEAR_DEG,
+      METEOR_OVER_DEG,
       worldObjects() {
         return {
           sky: !!(worldSky && worldSky.visible),
           mountains: !!(worldMountains && worldMountains.visible),
-          stars: !!(starfieldPoints && starfieldPoints.visible),
+          stars: !!(worldStars && worldStars.visible),
+          lines: !!(worldLines && worldLines.visible),
+          meteor: !!(worldMeteor && worldMeteor.visible),
           glow: !!(ambilightMesh && ambilightMesh.visible),
         };
       },
