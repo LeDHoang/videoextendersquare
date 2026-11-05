@@ -899,36 +899,54 @@ button {
 
 /* ─── Brutalist Command Sidebar (V2.0) ─────────────────────────── */
 .sx-sidebar-header {
-  position: relative;
-  padding: 0 0 var(--sx-2) 0;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sx-3);
+  padding: 0 0 var(--sx-3) 0;
+  border-bottom: 1px solid var(--sx-rule);
+}
+
+.sx-sidebar-header:empty {
+  display: none;
+}
+
+.sx-sidebar-title {
+  font-family: var(--sx-font-mono);
+  font-size: var(--sx-t-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--sx-ink-3);
 }
 
 .sx-sidebar-close-btn {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 32px;
-  height: 32px;
+  flex: none;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-left: auto;
   background: var(--sx-accent);
-  border: none;
+  border: 1px solid var(--sx-accent);
   color: var(--sx-on-accent);
   cursor: pointer;
   border-radius: 0;
-  box-shadow: 0 0 16px var(--sx-accent-glow);
   transition: opacity 150ms ease;
   font-family: var(--sx-font-display);
   font-size: 14px;
   font-weight: 900;
+  line-height: 1;
 }
 
 .sx-sidebar-close-btn:hover {
   opacity: 0.85;
+}
+
+.sx-sidebar-close-btn:focus-visible {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 2px;
 }
 
 .sx-sidebar-brand-block {

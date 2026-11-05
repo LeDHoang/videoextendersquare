@@ -157,15 +157,18 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
       {/* ─── Command Center Header ──────────────────────────── */}
       <div className="sx-sidebar-header">
         {isOpen ? (
-          <button
-            type="button"
-            className="sx-sidebar-close-btn"
-            onClick={onClose}
-            aria-label="Close Settings Drawer"
-            title="Close Settings"
-          >
-            ✕
-          </button>
+          <>
+            <span className="sx-sidebar-title">Menu</span>
+            <button
+              type="button"
+              className="sx-sidebar-close-btn"
+              onClick={onClose}
+              aria-label="Close Settings Drawer"
+              title="Close Settings"
+            >
+              ✕
+            </button>
+          </>
         ) : null}
       </div>
 
