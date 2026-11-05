@@ -19,6 +19,7 @@ const NOISE_FLOOR = 0.03; // hides the faint ripples left behind each front
 const WALL_FADE = 0.965; // per frame; a lit wall fades out over ~1 s
 const TEXT_DIM = 0.22; // waves and walls behind the copy
 const MAZE_AREA = 0.75;
+const PING_AREA = 90000; // px² of rail per simultaneous random ping
 const LEFT = 1, RIGHT = 2, UP = 4, DOWN = 8, OUTER = 16;
 
 const parseColor = (value, fallback) => {
@@ -226,11 +227,13 @@ export function SonarMaze() {
       last = t;
       if (visible && s.u) {
         if (t - lastColors > 0.5) { readColors(); lastColors = t; } // follows theme switches
-        if (s.m && t - s.lastPing > 0.8) { ping(s.m.x, s.m.y, 0.7); s.lastPing = t; }
+        if (s.m && t - s.lastPing > 0.64) { ping(s.m.x, s.m.y, 0.7); s.lastPing = t; }
         if (s.click) { ping(s.click.x, s.click.y, 1.6); s.click = null; }
         if (t > s.nextRandom) {
+          // several pings at once, one per ~90,000px² of rail (3 on desktop, 1 on a phone strip)
           const { x0, y0, x1, y1 } = s.maze;
-          ping(x0 + Math.random() * (x1 - x0), y0 + Math.random() * (y1 - y0), 2.2);
+          const count = Math.max(1, Math.round((s.w * s.h) / PING_AREA));
+          for (let n = 0; n < count; n++) ping(x0 + Math.random() * (x1 - x0), y0 + Math.random() * (y1 - y0), 2.2);
           s.nextRandom = t + 1.5 + Math.random() * 2;
         }
         acc += dt * STEPS_PER_SEC;
