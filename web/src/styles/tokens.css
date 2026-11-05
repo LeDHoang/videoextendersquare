@@ -150,6 +150,8 @@
    step out of the carbon island below and print on paper too. */
 :root:not([data-theme='dark']) #sxReelsRoot .reels-side,
 :root:not([data-theme='dark']) #sxReelsRoot .reels-comments-drawer,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-cluster,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-edge-nav,
 :root:root {
   color-scheme: light;
 

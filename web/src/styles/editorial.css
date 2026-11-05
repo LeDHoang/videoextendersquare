@@ -152,19 +152,19 @@ h1, h2, h3, h4, h5, h6 {
    the tiles (which sit on photos) and the reels player, the lines take the text
    colour, the cut-outs take the paper and the vermilion takes the accent. On carbon
    the art's own colours already fit, so dark mode leaves them alone. */
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [stroke='#f2f3f5'] {
   stroke: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#f2f3f5'] {
   fill: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#121315'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#121315'] {
   fill: var(--sx-bg);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [stroke='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [stroke='#ff3b1f'] {
   stroke: var(--sx-accent);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *)) [fill='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#ff3b1f'] {
   fill: var(--sx-accent);
 }
 
@@ -583,6 +583,34 @@ button.sx-explore-loc-link:hover {
   .twitch-comment-pill
 ) {
   border-radius: var(--sx-radius);
+}
+
+/* Light theme: the rails and PREV/NEXT keys are paper cards with ink icons (their
+   art is drawn light-on-dark, so the recolor rules above now cover them). */
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-cluster {
+  background: color-mix(in srgb, var(--sx-bg) 94%, transparent);
+  border-color: var(--sx-rule-strong);
+  box-shadow: 0 8px 24px rgba(23, 20, 15, 0.22);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .action-btn,
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .edge-chevron {
+  color: var(--sx-ink);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.action-btn, .edge-chevron):hover {
+  color: var(--sx-accent);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.action-btn, .edge-chevron):active {
+  color: var(--sx-on-accent);
+}
+
+/* The details column's shadow spills left over the gutter; keep PREV/NEXT above it
+   and drop the column's shadow in light mode so the gutter stays clean paper. */
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-gutter {
+  position: relative;
+  z-index: 2;
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-side {
+  box-shadow: none;
 }
 
 /* ─── Footer: a colophon ───────────────────────────────────────────────── */
