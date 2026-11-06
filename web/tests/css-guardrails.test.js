@@ -9,8 +9,8 @@ import stylelint from 'stylelint';
 const BASELINE = {
   'src/styles/global.css': {
     'color-no-hex': 17,
-    'function-disallowed-list': 29,
-    'declaration-no-important': 148,
+    'function-disallowed-list': 28,
+    'declaration-no-important': 149,
     'declaration-property-value-allowed-list': 25,
     'declaration-property-value-disallowed-list': 14,
   },

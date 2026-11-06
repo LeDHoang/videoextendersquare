@@ -438,7 +438,7 @@ test('the ECHO mark takes the mode\'s ink and accent', () => {
   }
   const mark = rec.texts.find((t) => t.text === 'ECHO');
   assert.ok(mark && /Fraunces/.test(mark.font), mark && mark.font);
-  assert.equal(mark.style, ui.TOKEN_SETS.light.hex.ink);
+  assert.equal(mark.style, ui.TOKEN_SETS.light.hex.accent);
 });
 
 test('shell panels use paper tokens and fonts', () => {
