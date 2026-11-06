@@ -225,6 +225,14 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
     }
   };
 
+  // On Reels, press the player's own VR button inside this click, so WebXR keeps the user
+  // activation and the headset notice and support checks still run. Elsewhere, go to Reels.
+  const enterVr = () => {
+    const playerVrButton = location.pathname.startsWith('/reels') ? document.getElementById('vrBtn') : null;
+    if (playerVrButton) playerVrButton.click();
+    else navigate('/reels');
+  };
+
   const resultCount = selectable.length;
   const showSearchMenu = Boolean(searchOpen && (searchBusy || resultCount || searchVal.trim()));
 
@@ -390,6 +398,10 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                 <NavLink key={to} to={to} className={({ isActive }) => 'sx-top-link ' + (isActive ? 'sx-active' : '')}>{label}</NavLink>
               ))}
             </nav>
+            <button type="button" className="sx-top-vr-btn" onClick={enterVr} title="Enter VR" aria-label="Enter VR">
+              <NAV.reels.Icon className="sx-top-vr-icon" aria-hidden="true" />
+              <span className="sx-top-vr-label">Enter VR</span>
+            </button>
           </div>
 
           <div className="sx-top-center">

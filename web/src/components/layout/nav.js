@@ -15,7 +15,7 @@ import {
  * picks the ones it shows, in its own order. CSS sets the case (most draw them in capitals).
  */
 export const NAV = {
-  reels: { to: '/reels', label: 'Reels/VR', Icon: IndustrialReelsIcon },
+  reels: { to: '/reels', label: 'Reels', Icon: IndustrialReelsIcon },
   explore: { to: '/explore', label: 'Explore', Icon: IndustrialExploreIcon },
   upload: { to: '/upload', label: 'Upload', Icon: IndustrialUploadIcon },
   messages: { to: '/messages', label: 'Messages', Icon: IndustrialMessageIcon },

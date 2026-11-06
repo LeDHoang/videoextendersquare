@@ -88,7 +88,7 @@ describe('HeaderBar responsive behavior', () => {
     expect(screen.getByLabelText('Open account menu')).toBeInTheDocument();
   });
 
-  it('orders the right-side actions UPLOAD, credits, messages, and keeps the nav to REELS/VR and EXPLORE', () => {
+  it('orders the right-side actions UPLOAD, credits, messages, and keeps the nav to REELS and EXPLORE', () => {
     mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
 
     const { container } = render(
@@ -98,12 +98,45 @@ describe('HeaderBar responsive behavior', () => {
     );
 
     const nav = screen.getByRole('navigation', { name: 'Global Routes' });
-    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Reels/VR', 'Explore']);
+    expect([...nav.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Reels', 'Explore']);
 
     const hrefs = [...container.querySelectorAll('.sx-top-right a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual(['/upload', '/upload', '/wallet', '/messages']);
     expect(screen.getByRole('link', { name: '42 credits' })).toHaveAttribute('href', '/wallet');
     expect(screen.getByRole('link', { name: 'Messages, 3 unread' })).toHaveAttribute('href', '/messages');
+  });
+
+  it('Enter VR presses the player VR button on Reels', async () => {
+    const user = userEvent.setup();
+    const playerVr = document.createElement('button');
+    playerVr.id = 'vrBtn';
+    const pressed = vi.fn();
+    playerVr.addEventListener('click', pressed);
+    document.body.appendChild(playerVr);
+    render(
+      <MemoryRouter initialEntries={['/reels']}>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Enter VR' }));
+
+    expect(pressed).toHaveBeenCalledTimes(1);
+    playerVr.remove();
+  });
+
+  it('Enter VR opens Reels from another page', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/explore']}>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+        <Where />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Enter VR' }));
+
+    expect(screen.getByTestId('where').textContent).toBe('/reels');
   });
 
   it('centres the avatar initials by their ink once the font is ready', async () => {

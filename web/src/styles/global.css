@@ -1499,6 +1499,7 @@ button:hover .sx-sidebar-hero-logo,
 .sx-sidebar-billing-btn .sx-btn-icon {
   width: 18px;
   height: 18px;
+  margin-right: 0;
   flex-shrink: 0;
   transition: transform 180ms ease;
 }
@@ -3523,6 +3524,7 @@ code {
   border: none !important;
   border-radius: 0 !important;
   overflow: hidden !important;
+  overflow: clip !important;
 }
 
 #sxReelsHost:fullscreen .reels-video-wrap,
@@ -4768,6 +4770,49 @@ body.sx-vr-active .sx-reels-mount,
   display: block;
 }
 
+/* Enter VR: purple, icon and label; the label drops below 1024px so the bar keeps its room. */
+.sx-top-vr-btn {
+  height: var(--sx-top-ctl, var(--sx-control-h-lg));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--sx-vr);
+  color: var(--sx-on-vr);
+  border: none;
+  border-radius: var(--sx-radius);
+  font-family: var(--sx-font-sans);
+  font-size: var(--sx-t-mono);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  align-self: center;
+  transition: box-shadow 150ms ease, filter 150ms ease;
+}
+
+.sx-top-vr-btn:hover,
+.sx-top-vr-btn:focus-visible {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px var(--sx-vr-glow);
+}
+
+.sx-top-vr-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* The reels icon's eyes are accent-red; on the purple button they take the button's text colour. */
+.sx-top-vr-icon path[fill] {
+  fill: currentColor;
+}
+
 /* ─── Top Bar Responsive Breakpoints ─────────────────────── */
 
 @media (max-width: 1180px) {
@@ -4788,6 +4833,13 @@ body.sx-vr-active .sx-reels-mount,
 @media (max-width: 1024px) {
   .sx-desktop-only {
     display: none !important;
+  }
+  .sx-top-vr-btn {
+    width: var(--sx-top-ctl, var(--sx-control-h-lg));
+    padding: 0;
+  }
+  .sx-top-vr-label {
+    display: none;
   }
   .sx-mobile-tablet-only {
     display: inline-flex !important;
@@ -4867,15 +4919,15 @@ body.sx-vr-active .sx-reels-mount,
   }
 }
 
-/* The bar needs about 420px with the ECHO wordmark and 330px without it, so the wordmark goes first
-   (the logo mark stays), then the credits pill. */
+/* Signed in, the bar needs about 420px with the ECHO wordmark and 375px without it, so the wordmark
+   goes first (the logo mark stays), then the credits pill. */
 @media (max-width: 460px) {
   .sx-top-brand > span {
     display: none;
   }
 }
 
-@media (max-width: 340px) {
+@media (max-width: 374px) {
   .sx-top-credits-pill {
     display: none !important;
   }

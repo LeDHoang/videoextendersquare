@@ -111,13 +111,13 @@ describe('Sidebar beta navigation', () => {
   it('hides Image, Video and Compare from a regular user', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'alex', role: 'user' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
-    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Upload']);
+    expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload']);
   });
 
   it('shows Image, Video and Compare to an admin', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'boss', role: 'admin' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
-    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Upload', 'Image', 'Video', 'Compare']);
+    expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload', 'Image', 'Video', 'Compare']);
   });
 });
 

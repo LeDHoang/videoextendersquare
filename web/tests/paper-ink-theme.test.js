@@ -28,7 +28,7 @@ test('dark block redeclares every light colour except the shared ones', () => {
   const colours = Object.keys(light).filter(
     (name) => /#|rgba\(/.test(light[name]) && !SHARED.includes(name),
   );
-  assert.equal(colours.length, 40);
+  assert.equal(colours.length, 42);
   for (const name of colours) assert.ok(name in dark, `${name} has no dark value`);
   assert.equal(dark['color-scheme'], 'dark');
   assert.deepEqual(Object.keys(dark).sort(), [...colours, 'color-scheme'].sort());

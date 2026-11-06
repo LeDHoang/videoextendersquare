@@ -110,6 +110,9 @@
     border-radius: 0 !important;
     box-shadow: none !important;
     overflow: hidden !important;
+    /* clip, unlike hidden, cannot be scrolled by focus(): opening the comments drawer used to
+       nudge the frame up a few px and leave a dark strip above the bottom nav. */
+    overflow: clip !important;
   }
   .reels-phone-frame.sx-pseudo-fullscreen {
     height: calc(100dvh - var(--sx-bottom-nav, 0px)) !important;

@@ -30,6 +30,10 @@
   --sx-accent-hi: #ff5c42;
   --sx-accent-dim: rgba(255, 59, 31, 0.12);
   --sx-accent-glow: rgba(255, 59, 31, 0.35);
+  /* Enter VR: the one purple action, kept apart from the vermilion accent. */
+  --sx-vr: #8b5cf6;
+  --sx-on-vr: #faf7f0;
+  --sx-vr-glow: rgba(139, 92, 246, 0.4);
   --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #0a0a0a;
 
@@ -186,6 +190,8 @@
   --sx-accent-hi: #a81f0b;
   --sx-accent-dim: rgba(200, 39, 15, 0.09);
   --sx-accent-glow: rgba(200, 39, 15, 0.22);
+  --sx-vr: #6d28d9;
+  --sx-vr-glow: rgba(109, 40, 217, 0.25);
   --sx-accent-border: rgba(200, 39, 15, 0.4);
   --sx-on-accent: #faf7f0;
 
@@ -288,6 +294,8 @@
   --sx-accent-hi: #ff5c42;
   --sx-accent-dim: rgba(255, 59, 31, 0.12);
   --sx-accent-glow: rgba(255, 59, 31, 0.3);
+  --sx-vr: #8b5cf6;
+  --sx-vr-glow: rgba(139, 92, 246, 0.4);
   --sx-accent-border: rgba(255, 59, 31, 0.45);
   --sx-on-accent: #17140f;
   /* The app's original status colours, made for a dark page. */
