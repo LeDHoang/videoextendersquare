@@ -29,7 +29,7 @@ export const NAV = {
 
 export const HEADER_NAV = [NAV.reels, NAV.explore];
 
-export const SIDEBAR_NAV = [NAV.reels, NAV.explore, NAV.messages, NAV.credits, NAV.upload, NAV.image, NAV.video, NAV.compare];
+export const SIDEBAR_NAV = [NAV.reels, NAV.explore, NAV.messages, NAV.upload, NAV.image, NAV.video, NAV.compare];
 
 export const BOTTOM_NAV = [NAV.reels, NAV.explore, NAV.upload, NAV.messages];
 

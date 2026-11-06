@@ -216,31 +216,11 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
         <SonarMaze />
         <div className="sx-sidebar-card-head">
           <span className="sx-sidebar-card-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: 'var(--sx-accent)', verticalAlign: '-2px', marginRight: 6 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
             </svg>
             ECHO CREDITS & KEY
           </span>
-          <div className="sx-sidebar-status-pill">
-            <span
-              className={`sx-status-dot ${
-                !user
-                  ? 'sx-dot-offline'
-                  : (wallet?.available_credits ?? 0) > 0 || falKey?.configured
-                    ? 'sx-dot-online'
-                    : 'sx-dot-warning'
-              }`}
-            />
-            <span className="sx-sidebar-status-text">
-              {!user
-                ? 'GUEST'
-                : (wallet?.available_credits ?? 0) > 0
-                  ? 'ACTIVE'
-                  : falKey?.configured
-                    ? 'BYOK ACTIVE'
-                    : '0 CREDITS'}
-            </span>
-          </div>
         </div>
 
         {/* Hero Credits Stat Box: just the balance, no money equivalent */}
@@ -289,7 +269,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
           onClick={() => onClose?.()}
         >
           <span>{user ? 'MANAGE CREDITS / KEY' : 'SIGN IN TO TOP UP'}</span>
-          <span className="sx-btn-arrow" aria-hidden="true">↗</span>
+          <IndustrialCreditsIcon className="sx-btn-icon" aria-hidden="true" />
         </Link>
       </div>
 

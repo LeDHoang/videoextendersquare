@@ -1225,47 +1225,6 @@ button:hover .sx-sidebar-hero-logo,
   }
 }
 
-.sx-sidebar-status-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sx-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.sx-dot-online {
-  background: var(--sx-success);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--sx-success) 70%, transparent);
-}
-
-.sx-dot-offline {
-  background: var(--sx-danger);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--sx-danger) 50%, transparent);
-  animation: sx-pulse 2s infinite;
-}
-
-.sx-dot-warning {
-  background: var(--sx-warn);
-  box-shadow: 0 0 8px var(--sx-warn-border);
-}
-
-@keyframes sx-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.sx-sidebar-status-text {
-  font-family: var(--sx-font-mono);
-  font-size: var(--sx-t-eyebrow);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--sx-ink-2);
-}
-
 .sx-sidebar-status-count {
   font-family: var(--sx-font-mono);
   font-size: var(--sx-t-eyebrow);
@@ -1537,12 +1496,11 @@ button:hover .sx-sidebar-hero-logo,
   line-height: 1;
 }
 
-.sx-sidebar-billing-btn .sx-btn-arrow {
-  display: inline-block;
-  font-size: 0.85rem;
-  font-weight: 700;
+.sx-sidebar-billing-btn .sx-btn-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
   transition: transform 180ms ease;
-  line-height: 1;
 }
 
 .sx-sidebar-billing-btn:hover:not(:disabled) {
@@ -1553,8 +1511,8 @@ button:hover .sx-sidebar-hero-logo,
   box-shadow: 0 0 16px var(--sx-accent-glow);
 }
 
-.sx-sidebar-billing-btn:hover:not(:disabled) .sx-btn-arrow {
-  transform: translate(2px, -2px);
+.sx-sidebar-billing-btn:hover:not(:disabled) .sx-btn-icon {
+  transform: rotate(-12deg);
 }
 
 /* System Probes Board */

@@ -33,7 +33,6 @@ describe('Sidebar Account Billing Module', () => {
     );
 
     expect(screen.getByText('ECHO CREDITS & KEY')).toBeInTheDocument();
-    expect(screen.getByText('GUEST')).toBeInTheDocument();
     expect(screen.getByText('SIGN IN TO TOP UP')).toBeInTheDocument();
     expect(screen.getByText('SHARED POOL')).toBeInTheDocument();
   });
@@ -54,7 +53,6 @@ describe('Sidebar Account Billing Module', () => {
     );
 
     expect(screen.getByText('450')).toBeInTheDocument();
-    expect(screen.getByText('ACTIVE')).toBeInTheDocument();
     expect(screen.getByText('MANAGE CREDITS / KEY')).toBeInTheDocument();
   });
 
@@ -73,7 +71,7 @@ describe('Sidebar Account Billing Module', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText('BYOK ACTIVE')).toBeInTheDocument();
+    expect(screen.queryByText('SHARED POOL')).not.toBeInTheDocument();
     expect(screen.getByText(/••••9876/)).toBeInTheDocument();
   });
 
@@ -113,13 +111,13 @@ describe('Sidebar beta navigation', () => {
   it('hides Image, Video and Compare from a regular user', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'alex', role: 'user' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
-    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Credits', 'Upload']);
+    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Upload']);
   });
 
   it('shows Image, Video and Compare to an admin', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'boss', role: 'admin' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
-    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Credits', 'Upload', 'Image', 'Video', 'Compare']);
+    expect(navLabels()).toEqual(['Reels/VR', 'Explore', 'Messages', 'Upload', 'Image', 'Video', 'Compare']);
   });
 });
 
