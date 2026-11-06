@@ -1,8 +1,8 @@
 import Emoji from './Emoji.jsx';
 
-export function Hero({ title, kicker, children, icon }) {
+export function Hero({ title, kicker, children, icon, style }) {
   return (
-    <header style={{ marginBottom: 'var(--sx-6)' }}>
+    <header style={{ marginBottom: 'var(--sx-6)', ...style }}>
       <h1 className="sx-hero">
         {icon ? <span className="sx-hero-icon">{icon}</span> : null}
         <Emoji text={title} />

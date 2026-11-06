@@ -274,15 +274,7 @@ export default function ReelsPage() {
 
   return (
     <div className="sx-reels-page sx-wide-page">
-      <Hero title="REELS / VR PLAYER">
-        {isAdmin ? (
-          <div className="sx-stats-pill">
-            <span>FOLDERS: <strong>{(folders || []).length}</strong></span>
-            <span>CODEC: <strong>{codecParam.toUpperCase()}</strong></span>
-            <span>STATUS: <strong style={{ color: needsProxy ? 'var(--sx-warn)' : 'var(--sx-success)' }}>{needsProxy ? `${needsProxy} NEED PROXY` : 'READY'}</strong></span>
-          </div>
-        ) : null}
-      </Hero>
+      <Hero title="REELS" />
 
       {activeAuthor ? (
         <div className="sx-active-tag-filter" role="status">

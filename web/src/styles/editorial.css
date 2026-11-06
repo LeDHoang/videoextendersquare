@@ -218,7 +218,7 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ─── Explore chrome ───────────────────────────────────────────────────── */
 .sx-xh {
-  padding-top: var(--sx-4);
+  padding-top: 0;
 }
 .sx-xh-row {
   padding-bottom: var(--sx-4);
@@ -228,8 +228,8 @@ h1, h2, h3, h4, h5, h6 {
 .sx-xh-title {
   font-weight: 900;
   font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
-  letter-spacing: -0.04em;
-  line-height: 0.88;
+  letter-spacing: -0.035em;
+  line-height: 0.92;
   text-transform: none;
 }
 .sx-xh-prefix {

@@ -6594,7 +6594,7 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--sx-4);
-  padding: var(--sx-4) var(--sx-4) var(--sx-4);
+  padding: 0 var(--sx-4) var(--sx-4);
   border-bottom: 2px solid var(--sx-accent);
   box-shadow: 0 1px 10px -4px var(--sx-accent-glow);
 }
@@ -6622,8 +6622,9 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-mx-title h1 {
   margin: 0;
   color: var(--sx-ink);
-  font: 400 clamp(1.7rem, 4vw, 2.5rem)/1 var(--sx-font-display);
-  letter-spacing: -0.02em;
+  font: 900 calc(var(--sx-t-hero) * 0.8)/0.92 var(--sx-font-display);
+  font-variation-settings: 'opsz' 72, 'SOFT' 0, 'WONK' 1;
+  letter-spacing: -0.035em;
 }
 
 .sx-mx-kicker {
@@ -7868,7 +7869,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
    explore-style pages. Components live in components/explore/ExploreChrome.jsx. */
 
 .sx-xh {
-  padding: var(--sx-2) 0 0;
+  padding: 0;
 }
 
 .sx-xh-row {
@@ -7890,7 +7891,7 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   gap: 0.08em;
   margin: 0;
   font-family: var(--sx-font-display);
-  font-size: clamp(3rem, 8vw, 6rem);
+  font-size: calc(var(--sx-t-hero) * 0.8);
   font-weight: 900;
   line-height: 0.95;
   letter-spacing: -0.02em;
@@ -11250,38 +11251,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   min-width: 0;
 }
 
-.sx-studio-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sx-3) var(--sx-5);
-  padding: 10px var(--sx-4);
-  background: var(--sx-surface-2);
-  border: 1px solid var(--sx-rule);
-}
-
-.sx-studio-banner-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.sx-studio-banner-title h1 {
-  margin: 0;
-  font-family: var(--sx-font-display);
-  font-size: calc(var(--sx-t-hero) * 0.8);
-  font-weight: 900;
-  line-height: 0.95;
-  letter-spacing: -0.02em;
-  text-transform: uppercase;
-  color: var(--sx-ink);
-}
-
 .sx-studio-banner-meta {
-  flex: 1 1 260px;
   min-width: 0;
-  text-align: right;
   font: 500 var(--sx-t-eyebrow)/1.4 var(--sx-font-mono);
   color: var(--sx-ink-3);
   overflow-wrap: anywhere;
@@ -12039,8 +12010,7 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   flex: 1 1 auto;
 }
 
-.sx-studio-card .sx-seg button.sx-selected,
-.sx-studio-banner .sx-seg button.sx-selected {
+.sx-studio-card .sx-seg button.sx-selected {
   box-shadow: 0 0 10px color-mix(in srgb, var(--sx-accent) 30%, transparent);
 }
 
@@ -12296,23 +12266,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 @media (max-width: 640px) {
-  .sx-studio-banner {
-    padding: 10px 12px;
-  }
-
-  .sx-studio-banner-meta {
-    flex-basis: 100%;
-    text-align: left;
-  }
-
-  .sx-studio-banner .sx-seg {
-    width: 100%;
-  }
-
-  .sx-studio-banner .sx-seg button {
-    flex: 1 1 auto;
-  }
-
   .sx-studio-card {
     padding: var(--sx-3);
   }

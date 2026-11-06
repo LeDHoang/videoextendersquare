@@ -117,7 +117,6 @@ describe('ReelsPage beta controls', () => {
     expect(screen.getByTitle('Rescan video library')).toBeInTheDocument();
     expect(screen.getByText(/Quest & Tools/)).toBeInTheDocument();
     expect(screen.getByText(/IMMERSIVE PREVIEW/)).toBeInTheDocument();
-    expect(screen.getByText(/FOLDERS:/)).toBeInTheDocument();
   });
 
   it('shows a plain empty state without the debug hint to a regular user', async () => {

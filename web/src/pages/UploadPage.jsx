@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { BlockingBanner, Mono } from '../components/ui/primitives.jsx';
+import { BlockingBanner, Hero, Mono } from '../components/ui/primitives.jsx';
 import { Segmented, Button, ToggleRow } from '../components/ui/controls.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
 import { useHealthContext } from '../hooks/HealthContext.jsx';
@@ -832,13 +832,9 @@ export default function UploadPage() {
 
   return (
     <div className="sx-upload-studio">
-      <div className="sx-studio-banner">
-        <div className="sx-studio-banner-title">
-          <span className="sx-studio-dot sx-pulse" aria-hidden="true" />
-          <h1>UPLOAD STUDIO</h1>
-        </div>
-        <div className="sx-studio-banner-meta">{activeKind ? 'PIPELINE: ' : null}<b>{summary}</b></div>
-      </div>
+      <Hero title="UPLOAD STUDIO" style={{ marginBottom: 4 }}>
+        {summary ? <div className="sx-studio-banner-meta">{activeKind ? 'PIPELINE: ' : null}<b>{summary}</b></div> : null}
+      </Hero>
 
       {blocked.length ? (
         <BlockingBanner
