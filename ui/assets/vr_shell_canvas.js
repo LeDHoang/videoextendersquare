@@ -486,7 +486,7 @@
       ctx.fillRect(0, 0, NAV_W, 3);
     }
     if (ui && ui.drawIcon) ui.drawIcon(ctx, 'logo', 60, NAV_H / 2, 52, T.ink, T.accent, T.surface);
-    ctx.fillStyle = T.ink;
+    ctx.fillStyle = T.accent;
     ctx.font = '700 30px ' + (t.font.brand || t.font.display);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';

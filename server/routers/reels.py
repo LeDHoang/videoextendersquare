@@ -553,6 +553,20 @@ def _location_coords(city: str, country: str, lat=None, lon=None) -> tuple[float
     return CITY_COORDS.get(lookup)
 
 
+def _location_with_coords(loc):
+    """A reel location with lat/lon filled from the city table when the reel has none.
+
+    Returns a copy, so the stored meta keeps what the creator gave; unknown
+    cities come back unchanged.
+    """
+    if not isinstance(loc, dict):
+        return loc
+    coords = _location_coords(loc.get("city", ""), loc.get("country", ""), loc.get("lat"), loc.get("lon"))
+    if coords is None:
+        return loc
+    return {**loc, "lat": coords[0], "lon": coords[1]}
+
+
 def _split_location_key(value: str) -> tuple[str, str]:
     """Split a location slug back into (city, country) for key comparison."""
     text = str(value or "")
@@ -1456,7 +1470,7 @@ def _build_payload(
             else _get_comments_for_video(item["rel_path"], item["filename"])
         )
         meta = social_row or _get_meta_for_video(item["rel_path"], item["filename"])
-        loc = meta.get("location", {"city": "", "country": ""})
+        loc = _location_with_coords(meta.get("location", {"city": "", "country": ""}))
         base = {
             "post_id": meta.get("post_id"),
             "tags": meta.get("tags", []),

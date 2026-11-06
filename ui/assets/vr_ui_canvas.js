@@ -779,7 +779,7 @@
 
     // 3. Header: ECHO mark + wordmark, then the current title.
     drawIcon(ctx, 'logo', 38, 24, 26, T.ink, T.accent, T.surface);
-    ctx.fillStyle = T.ink;
+    ctx.fillStyle = T.accent;
     ctx.font = `700 16.5px ${TOKENS.font.display}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -2209,6 +2209,34 @@
     }
   }
 
+  // Place tag on the reels ground globe: the reel's city, ECHO panel style.
+  // Logical space is 512×120; the caller scales the context to its texture.
+  const GROUND_TAG_W = 512;
+  const GROUND_TAG_H = 120;
+  function renderGroundPlaceTagCanvas(ctx, options = {}) {
+    if (!ctx) return;
+    const T = TOKENS.hex;
+    ctx.clearRect(0, 0, GROUND_TAG_W, GROUND_TAG_H);
+    roundRectPath(ctx, 1, 1, GROUND_TAG_W - 2, GROUND_TAG_H - 2, TOKENS.radiusPx);
+    ctx.fillStyle = T.surface;
+    ctx.fill();
+    ctx.strokeStyle = T.ruleStrong;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    panelTopBar(ctx, GROUND_TAG_W, GROUND_TAG_H);
+    const text = String(options.text || '').toUpperCase();
+    let fs = 40;
+    ctx.font = `600 ${fs}px ${TOKENS.font.mono}`;
+    while (ctx.measureText && fs > 18 && ctx.measureText(text).width > GROUND_TAG_W - 48) {
+      fs -= 1;
+      ctx.font = `600 ${fs}px ${TOKENS.font.mono}`;
+    }
+    ctx.fillStyle = T.ink;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, GROUND_TAG_W / 2, GROUND_TAG_H / 2 + 4);
+  }
+
   function renderEarthPreviewCanvas(ctx, options = {}) {
     if (!ctx) return;
     const {
@@ -2541,6 +2569,9 @@
     clearGuideArtworkDirty,
     renderEarthPreviewCanvas,
     resolveEarthPreviewHit,
+    GROUND_TAG_W,
+    GROUND_TAG_H,
+    renderGroundPlaceTagCanvas,
     EARTH_PREVIEW_BUTTONS,
     EARTH_LABEL_W,
     EARTH_LABEL_H,

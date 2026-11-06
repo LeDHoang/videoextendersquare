@@ -618,6 +618,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let earthRimOpacity = 0.10; // the mode's atmosphere opacity at a level table
   let earthBaseTried = false;
   let earthBaseStale = true;
+  let earthBaseVersion = 0; // bumps whenever earthBaseCanvas is repainted
   let earthLabelCanvas = null;
   let earthLabelCtx = null;
   let earthLabelTexture = null;
@@ -1782,6 +1783,332 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (worldMeteor) worldMeteor.visible = night && !!worldMeteorFlight;
   }
 
+  // ─── Ground globe (reels) ───────────────────────────────────────────
+  // A second instance of the shared globe (createEarthGlobe), under the viewer
+  // in reels mode with its top 1.6 m below the eye (on the floor for a standing
+  // viewer), so the viewer stands on a small planet. It spins slowly; a reel with a location turns that place to rest
+  // ahead of and below the eye, north pointing away, and marks it with a pin,
+  // a pulsing ring, a light beam and a name tag.
+  const GROUND_GLOBE_R = 1.5; // small enough that the 4096 px map reads sharp (~2.3 mm per px)
+  const GROUND_EYE_DROP = 1.6; // globe top this far below the live eye, seated or standing
+  const GROUND_EYE_FOLLOW_MS = 1500; // eye-height smoothing: sitting or standing glides, a nod does not
+  const GROUND_REST_DEG = 25; // the place rests this far round from the top: ~70° below the eye
+  const GROUND_CRUISE_LAT = 25; // latitude that drifts past the resting point while spinning
+  const GROUND_SPIN_DEG_PER_S = 1.5;
+  const GROUND_FADE_MS = 400;
+  const GROUND_RING_MS = 1800;
+  const GROUND_PIN_H = 0.12;
+  const GROUND_BEAM_H = 0.28; // short enough that beam and tag stay well below the dome video's lower edge (~43° down)
+  const GROUND_TAG_LIFT = 0.33; // tag centre above the place, m: the tag sits on the beam's top
+  const GROUND_TAG_W_M = 0.4;
+  let groundGlobe = null; // { mesh, rim }
+  let groundGlobeTexture = null;
+  let groundBaseVersion = -1;
+  let groundQuat = { x: 0, y: 0, z: 0, w: 1 };
+  let groundSeek = null; // { from, to, start, ms }
+  let groundSpinning = true;
+  let groundKey = null;
+  let groundLon = 0;
+  let groundPlace = null; // { lat, lon, text } of the current reel
+  let groundHighlight = null;
+  let groundHighlightAlpha = 0;
+  let groundHighlightTarget = 0;
+  let groundTag = null; // { mesh, ctx, texture, key }
+  let groundLastT = -1;
+  let groundEyeY = null; // smoothed live eye height; null until the first frame
+
+  // Pose that brings (lat, lon) to the resting point with north pointing away.
+  function groundTargetQuat(lat, lon) {
+    const a = GROUND_REST_DEG * Math.PI / 180;
+    const src = earthGeographicBasis(lat, lon);
+    const rest = qFromBasis({ x: 1, y: 0, z: 0 }, { x: 0, y: -Math.sin(a), z: -Math.cos(a) }, { x: 0, y: Math.cos(a), z: -Math.sin(a) });
+    return qMultiply(rest, qConjugate(qFromBasis(src.east, src.north, src.normal)));
+  }
+
+  function buildGroundGlobe() {
+    if (groundGlobe || !THREE || !scene) return;
+    ensureEarthBaseCanvas();
+    // Base map only: Earth view's heat zones would compete with the reel's own mark.
+    if (earthBaseCanvas) groundGlobeTexture = configureEarthMapTexture(new THREE.CanvasTexture(earthBaseCanvas));
+    groundGlobe = createEarthGlobe(GROUND_GLOBE_R, 96, 64, groundGlobeTexture || earthMapTexture);
+    const mesh = groundGlobe.mesh;
+    mesh.position.set(0, -GROUND_EYE_DROP - GROUND_GLOBE_R, 0);
+    groundQuat = groundTargetQuat(GROUND_CRUISE_LAT, groundLon);
+    mesh.quaternion.set(groundQuat.x, groundQuat.y, groundQuat.z, groundQuat.w);
+    groundHighlight = buildGroundHighlight();
+    if (groundHighlight) mesh.add(groundHighlight);
+    groundTag = buildGroundTag();
+    mesh.visible = sceneMode !== 'earth';
+    scene.add(mesh);
+  }
+
+  // Pin, ring and beam stand on the surface: local +y is the surface normal.
+  function buildGroundHighlight() {
+    try {
+      const accent = echoHex('accent', '#c2250e');
+      const group = new THREE.Group();
+      group.visible = false;
+      const pinScale = GROUND_PIN_H / 0.0735;
+      const pin = new THREE.Mesh(earthPinGeometry(), new THREE.MeshBasicMaterial(
+        Object.assign(earthPinMaterialOptions(accent), { transparent: true, opacity: 0 })));
+      pin.scale.setScalar(pinScale);
+      pin.position.y = 0.035 * pinScale;
+      const ringGeo = new THREE.RingGeometry(0.07, 0.085, 48);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+        color: accent, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthWrite: false, side: THREE.DoubleSide,
+      }));
+      ring.position.y = 0.004;
+      const beamGeo = new THREE.CylinderGeometry(0.09, 0.04, GROUND_BEAM_H, 32, 1, true);
+      beamGeo.translate(0, GROUND_BEAM_H / 2, 0);
+      const beam = new THREE.Mesh(beamGeo, new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color(accent) }, uOpacity: { value: 0 } },
+        vertexShader: `
+          varying float vH;
+          void main() {
+            vH = position.y / ${GROUND_BEAM_H.toFixed(3)};
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          uniform vec3 uColor;
+          uniform float uOpacity;
+          varying float vH;
+          void main() {
+            gl_FragColor = vec4(uColor, pow(1.0 - clamp(vH, 0.0, 1.0), 1.6) * uOpacity);
+            #include <colorspace_fragment>
+          }`,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      }));
+      for (const part of [pin, ring, beam]) part.frustumCulled = false;
+      group.add(beam, ring, pin);
+      group.userData = { pin, ring, beam };
+      return group;
+    } catch (e) { return null; }
+  }
+
+  function buildGroundTag() {
+    const ui = getUICanvas();
+    if (!ui || !ui.renderGroundPlaceTagCanvas || typeof document === 'undefined') return null;
+    try {
+      const { canvas, ctx } = createPanelCanvas(ui.GROUND_TAG_W, ui.GROUND_TAG_H);
+      const texture = applyEarthTileSampling(new THREE.CanvasTexture(canvas));
+      try { if (THREE.SRGBColorSpace !== undefined) texture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+      const h = GROUND_TAG_W_M * ui.GROUND_TAG_H / ui.GROUND_TAG_W;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_TAG_W_M, h), new THREE.MeshBasicMaterial({
+        map: texture, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+      }));
+      mesh.visible = false;
+      mesh.renderOrder = 5;
+      scene.add(mesh);
+      return { mesh, ctx, texture, key: '' };
+    } catch (e) { return null; }
+  }
+
+  // The globe's share of a theme switch beyond the shared rim: accent parts and the tag.
+  function recolourGroundGlobe() {
+    if (groundTag) groundTag.key = '';
+    const parts = groundHighlight && groundHighlight.userData;
+    if (!parts || !parts.pin) return;
+    const accent = echoHex('accent', '#c2250e');
+    parts.pin.material.color.set(accent);
+    parts.ring.material.color.set(accent);
+    parts.beam.material.uniforms.uColor.value.set(accent);
+  }
+
+  // null, '' and undefined are missing, never 0 (Number(null) === 0).
+  function groundCoord(v, limit) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+  }
+  function currentReelPlace() {
+    let item = null;
+    try {
+      const list = callbacks.getPlaylist ? callbacks.getPlaylist() : null;
+      const i = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : -1;
+      item = list ? list[i] : null;
+    } catch (e) {}
+    const loc = item && item.location;
+    if (!loc) return null;
+    const lat = groundCoord(loc.lat, 90), lon = groundCoord(loc.lon, 180);
+    if (lat === null || lon === null) return null;
+    const text = [loc.city, loc.country].filter(Boolean).join(', ') || String(loc.display_name || '');
+    return { lat, lon, text };
+  }
+
+  function startGroundSeek(to, time) {
+    const from = groundQuat;
+    const d = Math.min(1, Math.abs(from.x * to.x + from.y * to.y + from.z * to.z + from.w * to.w));
+    groundSeek = { from, to, start: time, ms: 1200 + 1400 * (2 * Math.acos(d)) / Math.PI };
+    groundSpinning = false;
+  }
+
+  // Acts only when the current reel's place changes.
+  function trackGroundPlace(time) {
+    const place = currentReelPlace();
+    const key = place ? place.lat.toFixed(4) + ',' + place.lon.toFixed(4) : '';
+    if (key === groundKey) {
+      if (place && groundPlace) groundPlace.text = place.text;
+      return;
+    }
+    const first = groundKey === null;
+    groundKey = key;
+    groundHighlightTarget = 0;
+    if (place) {
+      groundPlace = place;
+      groundLon = place.lon;
+      groundHighlightAlpha = 0;
+      const u = locationToUnit(place.lat, place.lon);
+      if (groundHighlight) {
+        groundHighlight.position.set(u.x * GROUND_GLOBE_R, u.y * GROUND_GLOBE_R, u.z * GROUND_GLOBE_R);
+        groundHighlight.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(u.x, u.y, u.z));
+      }
+      startGroundSeek(groundTargetQuat(place.lat, place.lon), time);
+    } else {
+      // The mark fades where it stands while the globe turns back to the cruise latitude.
+      groundPlace = null;
+      if (!first) startGroundSeek(groundTargetQuat(GROUND_CRUISE_LAT, groundLon), time);
+    }
+  }
+
+  // Follows the live eye height, smoothed, so a seated, standing or crouching
+  // viewer keeps the globe, pin and tag the same distance below the video.
+  function followGroundEye(dt) {
+    const eye = getHeadPosition().y;
+    if (!Number.isFinite(eye)) return;
+    // The first XR frame's pose is the real eye; snap to it rather than glide from the default camera.
+    const seed = sessionEyeY !== null ? sessionEyeY : eye;
+    groundEyeY = groundEyeY === null || reducedMotion
+      ? seed
+      : groundEyeY + (eye - groundEyeY) * (1 - Math.exp(-dt / GROUND_EYE_FOLLOW_MS));
+    groundGlobe.mesh.position.y = groundEyeY - GROUND_EYE_DROP - GROUND_GLOBE_R;
+  }
+
+  // Once a frame, next to updateWorld.
+  function updateGroundGlobe(time) {
+    if (!groundGlobe) return;
+    const now = Number.isFinite(time) ? time : 0;
+    const dt = groundLastT < 0 ? 0 : Math.max(0, Math.min(250, now - groundLastT));
+    groundLastT = now;
+    const mesh = groundGlobe.mesh;
+    mesh.visible = sceneMode !== 'earth';
+    if (!mesh.visible) {
+      if (groundTag) groundTag.mesh.visible = false;
+      return;
+    }
+    // Same base canvas as Earth view: a theme change or a late photo lands here too.
+    if (earthBaseStale) { earthMapDirty = true; refreshEarthTexture(); }
+    if (groundGlobeTexture && groundBaseVersion !== earthBaseVersion) {
+      groundBaseVersion = earthBaseVersion;
+      groundGlobeTexture.needsUpdate = true;
+    }
+    followGroundEye(dt);
+    trackGroundPlace(now);
+    if (groundSeek) {
+      const t = reducedMotion ? 1 : Math.max(0, Math.min(1, (now - groundSeek.start) / groundSeek.ms));
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      groundQuat = qSlerp(groundSeek.from, groundSeek.to, e);
+      if (t >= 1) {
+        groundQuat = groundSeek.to;
+        groundSeek = null;
+        groundSpinning = !groundPlace;
+        groundHighlightTarget = groundPlace ? 1 : 0;
+      }
+    } else if (groundSpinning && !reducedMotion && dt > 0) {
+      groundQuat = qMultiply(groundQuat, qFromAxisAngle({ x: 0, y: 1, z: 0 }, GROUND_SPIN_DEG_PER_S * Math.PI / 180 * dt / 1000));
+    }
+    mesh.quaternion.set(groundQuat.x, groundQuat.y, groundQuat.z, groundQuat.w);
+    // Dims with the sky while a reel plays; the mark itself stays lit.
+    const k = 1 - worldDim;
+    const mat = mesh.material;
+    if (mat.map) mat.color.setRGB(k, k, k);
+    else { mat.color.set(earthPalette().sea); mat.color.multiplyScalar(k); }
+    if (groundGlobe.rim) groundGlobe.rim.material.opacity = earthRimOpacity * k;
+    const step = reducedMotion ? 1 : dt / GROUND_FADE_MS;
+    groundHighlightAlpha = groundHighlightAlpha < groundHighlightTarget
+      ? Math.min(groundHighlightTarget, groundHighlightAlpha + step)
+      : Math.max(groundHighlightTarget, groundHighlightAlpha - step);
+    applyGroundHighlight(now);
+  }
+
+  function applyGroundHighlight(now) {
+    const a = groundHighlightAlpha;
+    const parts = groundHighlight && groundHighlight.userData;
+    if (parts && parts.pin) {
+      groundHighlight.visible = a > 0.001;
+      parts.pin.material.opacity = a;
+      const phase = reducedMotion ? 0.35 : (now % GROUND_RING_MS) / GROUND_RING_MS;
+      parts.ring.scale.setScalar(1 + 1.2 * phase);
+      parts.ring.material.opacity = a * 0.9 * (1 - phase);
+      parts.beam.material.uniforms.uOpacity.value = a * 0.55;
+    }
+    if (!groundTag) return;
+    groundTag.mesh.visible = a > 0.001 && !!groundHighlight;
+    if (!groundTag.mesh.visible) return;
+    if (groundPlace) paintGroundTag();
+    groundTag.mesh.material.opacity = a;
+    const p = groundTagCentre();
+    groundTag.mesh.position.set(p.x, p.y, p.z);
+    const head = getHeadPosition();
+    groundTag.mesh.lookAt(head.x, head.y, head.z);
+  }
+
+  // World point GROUND_TAG_LIFT above the highlighted place.
+  function groundTagCentre() {
+    const local = groundHighlight.position;
+    const n = vNorm(qRotate(groundQuat, { x: local.x, y: local.y, z: local.z }));
+    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    return { x: n.x * r, y: n.y * r + groundGlobe.mesh.position.y, z: n.z * r };
+  }
+
+  // Looking down at the ground globe fades the head-locked video out, so it
+  // never draws over the globe; looking back up brings it back. Runs after
+  // applySceneVisibility, which resets the meshes' visibility every frame.
+  const SCREEN_FADE_FROM_DEG = 30;
+  const SCREEN_FADE_TO_DEG = 40;
+  let screenLookFade = 1;
+  function updateScreenLookFade() {
+    let f = 1;
+    if (lockApplies() && sceneMode !== 'earth' && groundGlobe && groundGlobe.mesh.visible) {
+      const q = getHeadQuaternion();
+      if (q) {
+        const fwd = qRotate(q, { x: 0, y: 0, z: -1 });
+        const down = -Math.asin(Math.max(-1, Math.min(1, fwd.y))) * 180 / Math.PI;
+        const t = Math.max(0, Math.min(1, (down - SCREEN_FADE_FROM_DEG) / (SCREEN_FADE_TO_DEG - SCREEN_FADE_FROM_DEG)));
+        f = 1 - t * t * (3 - 2 * t);
+      }
+    }
+    screenLookFade = f;
+    // The video is opaque at rest; it blends only while fading.
+    const fadeVideo = (mat) => {
+      if (!mat) return;
+      const transparent = f < 1;
+      if (mat.transparent !== transparent) { mat.transparent = transparent; mat.needsUpdate = true; }
+      mat.opacity = f;
+      mat.depthWrite = !transparent;
+    };
+    if (screenMesh) {
+      fadeVideo(screenMesh.material);
+      if (eyeMeshL) fadeVideo(eyeMeshL.material);
+      if (eyeMeshR) fadeVideo(eyeMeshR.material);
+      if (f <= 0.001) screenMesh.visible = false;
+    }
+    if (ambilightMesh) {
+      ambilightMesh.material.opacity = 0.85 * f;
+      if (f <= 0.001) ambilightMesh.visible = false;
+    }
+  }
+
+  function paintGroundTag() {
+    const key = readVRTheme() + '|' + groundPlace.text;
+    if (key === groundTag.key) return;
+    groundTag.key = key;
+    const ui = getUICanvas();
+    try { ui.renderGroundPlaceTagCanvas(groundTag.ctx, { text: groundPlace.text }); } catch (e) {}
+    groundTag.texture.needsUpdate = true;
+  }
+
   // True when a direction lies outside the video: far enough round, or above its top.
   function meteorClear(p) {
     const az = Math.abs(Math.atan2(p.x, -p.z)) * 180 / Math.PI;
@@ -1918,13 +2245,14 @@ window.WebXRVR = window.WebXRVR || (function () {
     syncEarthGrade();
     const pal = earthPalette();
     earthRimOpacity = pal.rimOpacity;
-    if (earthAtmosphereMesh && earthAtmosphereMesh.material) {
-      const m = earthAtmosphereMesh.material;
-      if (m.color && m.color.set) m.color.set(pal.rim);
-      if (THREE && THREE[pal.rimBlending] !== undefined) m.blending = THREE[pal.rimBlending];
-    }
-    if (earthMesh && earthMesh.material && !earthMesh.material.map && earthMesh.material.color) {
-      earthMesh.material.color.set(pal.sea);
+    for (const globe of earthGlobes) {
+      if (globe.rim && globe.rim.material) {
+        const m = globe.rim.material;
+        if (m.color && m.color.set) m.color.set(pal.rim);
+        if (THREE && THREE[pal.rimBlending] !== undefined) m.blending = THREE[pal.rimBlending];
+      }
+      const mat = globe.mesh && globe.mesh.material;
+      if (mat && !mat.map && mat.color) mat.color.set(pal.sea);
     }
     // Rebuild whenever a photo is held, finished or not: the build token cancels
     // a build still running on the old palette.
@@ -1932,6 +2260,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     else earthBaseStale = true;
     rebuildEarthPins();
     rebuildEarthHeatSprites();
+    recolourGroundGlobe();
   }
 
   // Switches the VR tokens; on a change every canvas repaints once and the scene recolours.
@@ -2230,8 +2559,70 @@ window.WebXRVR = window.WebXRVR || (function () {
     return Math.max(MIN_DIST, Math.min(MAX_DIST, n));
   }
 
+  // Locked reels over the ground globe: the dock and the nav strip under it
+  // stand on the place tag's resting spot (the globe turns every place there),
+  // below the video instead of across its lower half. Placed at the tag's
+  // distance, scaled to keep the angular size it has at the shell radius,
+  // and tilted to face the eye. scale is that factor; pos is the full-height
+  // dock's centre, as in computeDockPose.
+  const GROUND_DOCK_GAP_DEG = 1.5;
+  const GROUND_DOCK_SHRINK = 0.85; // 15% under the size that fills the tag-to-video gap
+  // Elevation (radians) of the video's lowest point as seen from head.
+  function screenLowestElevation(head) {
+    if (!screenMesh || !screenMesh.geometry) return null;
+    screenMesh.updateMatrixWorld(true);
+    const pos = screenMesh.geometry.attributes.position;
+    const v = new THREE.Vector3();
+    let lowest = Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      screenMesh.localToWorld(v);
+      const dx = v.x - head.x, dy = v.y - head.y, dz = v.z - head.z;
+      lowest = Math.min(lowest, Math.atan2(dy, Math.hypot(dx, dz)));
+    }
+    return lowest;
+  }
+  function groundDockPose(headPos) {
+    const a = GROUND_REST_DEG * Math.PI / 180;
+    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    const tag = { x: 0, y: groundGlobe.mesh.position.y + r * Math.cos(a), z: -r * Math.sin(a) };
+    // Room-fixed like the globe: the smoothed eye over the globe's axis, so
+    // head sway does not shake the dock.
+    const hx = 0, hz = 0;
+    const hy = groundEyeY !== null ? groundEyeY : ((headPos && Number(headPos.y)) || 1.6);
+    const dx = tag.x - hx, dy = tag.y - hy, dz = tag.z - hz;
+    const flat = Math.hypot(dx, dz) || 1e-6;
+    const d = Math.hypot(flat, dy);
+    const ui = getUICanvas();
+    const tagH = GROUND_TAG_W_M * (ui ? ui.GROUND_TAG_H / ui.GROUND_TAG_W : 120 / 512);
+    const full = dockTargetSize(layoutTuning.screenScale);
+    const fit = dockTargetSize(layoutTuning.screenScale, controlsLogicalW, controlsLogicalH);
+    const navH = SHELL_NAV_SIZE.h * fit.w / SHELL_NAV_SIZE.w;
+    // The unit's bottom edge (nav strip) sits a small gap above the tag's top
+    // edge; it shrinks further when needed so its top stays a gap below the video.
+    const gap = GROUND_DOCK_GAP_DEG * Math.PI / 180;
+    const floor = Math.atan2(dy, flat) + Math.atan(tagH / 2 / d) + gap;
+    const videoLow = screenLowestElevation({ x: hx, y: hy, z: hz });
+    let k = d / SHELL_MAIN_RADIUS;
+    if (videoLow !== null) {
+      const room = videoLow - gap - floor;
+      if (room > 0) k = Math.min(k, 2 * d * Math.tan(room / 2) / (fit.h + navH));
+    }
+    k *= GROUND_DOCK_SHRINK;
+    const unitH = (fit.h + navH) * k;
+    const pitch = floor + Math.atan(unitH / 2 / d);
+    const fx = dx / flat, fz = dz / flat;
+    const c = { x: hx + fx * d * Math.cos(pitch), y: hy + d * Math.sin(pitch), z: hz + fz * d * Math.cos(pitch) };
+    const yaw = Math.atan2(hx - c.x, hz - c.z);
+    const up = { x: Math.sin(pitch) * Math.sin(yaw), y: Math.cos(pitch), z: Math.sin(pitch) * Math.cos(yaw) };
+    // Unit centre → fitted dock centre → full-height dock centre.
+    const s = unitH / 2 - fit.h * k / 2 - (full.h - fit.h) * k / 2;
+    return { pos: { x: c.x + up.x * s, y: c.y + up.y * s, z: c.z + up.z * s }, yaw, pitch, scale: k };
+  }
+
   function computeDockPose(headPos, mode) {
     const m = mode || sceneMode;
+    if (m !== 'earth' && lockToViewer && groundGlobe && groundGlobe.mesh.visible) return groundDockPose(headPos);
     let pos;
     if (m === 'earth') {
       const pin = earthPanelPins.dock || EARTH_DOCK_POS;
@@ -2255,9 +2646,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    const hx = (headPos && Number(headPos.x)) || 0;
-    const hy = (headPos && Number(headPos.y)) || 1.6;
-    const hz = (headPos && Number(headPos.z)) || 0;
+    // Room-fixed like the globe: the smoothed eye over the globe's axis, so
+    // head sway does not shake the dock.
+    const hx = 0, hz = 0;
+    const hy = groundEyeY !== null ? groundEyeY : ((headPos && Number(headPos.y)) || 1.6);
     const dx = hx - pos.x;
     const dy = hy - pos.y;
     const dz = hz - pos.z;
@@ -2420,11 +2812,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     // Legacy-exact dock sizing: earth 1.2, locked DEFAULT_SCALE, else live.
     const base = (sceneMode === 'earth') ? 1.2 : (lockToViewer ? layoutTuning.screenScale : screenScale);
+    const k = pose.scale || 1;
     const size = dockTargetSize(base, controlsLogicalW, controlsLogicalH);
-    try { controlsMesh.scale.set(size.w / 1.6, size.h / 0.6, 1); } catch (e) {}
+    try { controlsMesh.scale.set(size.w * k / 1.6, size.h * k / 0.6, 1); } catch (e) {}
     // Keep the top edge where the full-height dock had it (same gap below the
     // screen) when the fitted canvas is shorter.
-    const lift = (dockTargetSize(base).h - size.h) / 2;
+    const lift = (dockTargetSize(base).h - size.h) / 2 * k;
     if (lift > 0) {
       try { controlsMesh.position.add(new THREE.Vector3(0, lift, 0).applyQuaternion(controlsMesh.quaternion)); } catch (e) {}
     }
@@ -2833,6 +3226,23 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Mipmapped + anisotropic sampling for map tiles only (UI textures keep
   // applyLinearSampling). Text on a tilted, receding map minifies hard;
   // without mips it shimmers and aliases under VR resampling.
+  // Every globe texture goes through here, so Earth view and the reels globe
+  // map texels to the same geographic directions.
+  function configureEarthMapTexture(tex) {
+    applyEarthTileSampling(tex);
+    if (!tex || !THREE) return tex;
+    try { if (THREE.SRGBColorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
+    try {
+      // Compensate the SphereGeometry UV seam (see earthZoneUV): shift
+      // the texture +90° so standard-equirect texels land on the matching
+      // geographic directions. Repeat wrap is mandatory — Clamp would
+      // smear the dateline edge.
+      if (THREE.RepeatWrapping !== undefined) tex.wrapS = THREE.RepeatWrapping;
+      tex.offset.x = 0.25;
+    } catch (e) {}
+    return tex;
+  }
+
   function applyEarthTileSampling(tex) {
     if (!tex || !THREE) return tex;
     try {
@@ -2985,6 +3395,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Photo base is now live: prevent refreshEarthTexture() from
       // repainting the fallback gradient over it.
       earthBaseStale = false;
+      earthBaseVersion++;
       earthMapDirty = true;
       refreshEarthTexture();
     };
@@ -3191,6 +3602,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         paintEarthBase(baseCtx);
         paintEarthGrid(baseCtx);
         earthBaseStale = false;
+        earthBaseVersion++;
       }
       // Recompose from the persistent base so previous rings are erased.
       if (baseCtx !== ctx) ctx.drawImage(earthBaseCanvas, 0, 0);
@@ -3278,6 +3690,32 @@ window.WebXRVR = window.WebXRVR || (function () {
   // re-seat it in the LIVE warp frame every frame (cheap vector math, no
   // rebuild) — cones track the zoom continuously instead of lagging until
   // the next rebuild gate.
+  // The one pin shape, shared by Earth view's pin field and the reels globe's
+  // place pin, so a restyle lands on both. Tip at y=-0.035, head top at 0.0385.
+  function earthPinGeometry() {
+    if (pinSharedGeo || !THREE) return pinSharedGeo;
+    // Map-marker teardrop: tip touches the surface, round head faces out.
+    // Falls back to the legacy cone where LatheGeometry is unavailable.
+    try {
+      const prof = [[0, -0.035], [0.0035, -0.029], [0.010, -0.013], [0.0165, 0.006], [0.0195, 0.021],
+        [0.0160, 0.032], [0.0085, 0.0375], [0, 0.0385]].map((p) => new THREE.Vector2(p[0], p[1]));
+      pinSharedGeo = new THREE.LatheGeometry(prof, 16);
+      const pos = pinSharedGeo.attributes.position;
+      const col = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const t = Math.max(0, Math.min(1, (pos.getY(i) + 0.035) / 0.0735));
+        const v = 0.55 + 0.75 * t * t; // darker tip → blown-out highlight on the head
+        col[i * 3] = v; col[i * 3 + 1] = v; col[i * 3 + 2] = v;
+      }
+      pinSharedGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      pinSharedGeo.userData = { vertexColored: true };
+    } catch (e) { pinSharedGeo = new THREE.ConeGeometry(0.022, 0.07, 10); }
+    return pinSharedGeo;
+  }
+  function earthPinMaterialOptions(color) {
+    return pinSharedGeo && pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color };
+  }
+
   function rebuildEarthPins() {
     if (!earthPinsGroup || !THREE) return;
     try {
@@ -3288,24 +3726,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           try { child.material.dispose(); } catch (e) {}
         }
       }
-      if (!pinSharedGeo) {
-        // Map-marker teardrop: tip touches the surface, round head faces out.
-        // Falls back to the legacy cone where LatheGeometry is unavailable.
-        try {
-          const prof = [[0, -0.035], [0.0035, -0.029], [0.010, -0.013], [0.0165, 0.006], [0.0195, 0.021],
-            [0.0160, 0.032], [0.0085, 0.0375], [0, 0.0385]].map((p) => new THREE.Vector2(p[0], p[1]));
-          pinSharedGeo = new THREE.LatheGeometry(prof, 16);
-          const pos = pinSharedGeo.attributes.position;
-          const col = new Float32Array(pos.count * 3);
-          for (let i = 0; i < pos.count; i++) {
-            const t = Math.max(0, Math.min(1, (pos.getY(i) + 0.035) / 0.0735));
-            const v = 0.55 + 0.75 * t * t; // darker tip → blown-out highlight on the head
-            col[i * 3] = v; col[i * 3 + 1] = v; col[i * 3 + 2] = v;
-          }
-          pinSharedGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-          pinSharedGeo.userData = { vertexColored: true };
-        } catch (e) { pinSharedGeo = new THREE.ConeGeometry(0.022, 0.07, 10); }
-      }
+      earthPinGeometry();
       const up = new THREE.Vector3(0, 1, 0);
       const ranked = earthLocations.slice()
         .sort((a, b) => earthHeatOf(b) - earthHeatOf(a))
@@ -3314,8 +3735,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         const u = earthRenderedDirection(loc.lat, loc.lon);
         const heat = earthHeatOf(loc);
         const color = earthHeatInkHex(heat);
-        const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(
-          pinSharedGeo.userData && pinSharedGeo.userData.vertexColored ? { color, vertexColors: true } : { color }));
+        const mesh = new THREE.Mesh(pinSharedGeo, new THREE.MeshBasicMaterial(earthPinMaterialOptions(color)));
         mesh.frustumCulled = false;
         const dir = new THREE.Vector3(u.x, u.y, u.z);
         mesh.position.copy(dir).multiplyScalar(EARTH_RADIUS + 0.035);
@@ -4430,6 +4850,64 @@ window.WebXRVR = window.WebXRVR || (function () {
     const angle = Math.acos(d);
     return 1 - Math.max(0, Math.min(1, (angle - Math.PI * 0.5) / (Math.PI * (10 / 180))));
   }
+  // ─── Shared globe ───────────────────────────────────────────────────
+  // The one globe build. Earth view and the reels ground globe are both
+  // instances of it, so a change to the globe here shows in both places.
+  // Returns { mesh, rim }; rim is null where the Fresnel shell cannot build.
+  const earthGlobes = [];
+  function createEarthGlobe(radius, segW, segH, map) {
+    const geo = new THREE.SphereGeometry(radius, segW, segH);
+    const mat = new THREE.MeshBasicMaterial({
+      map: map || null,
+      color: map ? 0xffffff : earthPalette().sea,
+    });
+    installEarthWarpShader(mat);
+    geo.setAttribute('earthRendered', geo.attributes.position.clone());
+    const mesh = new THREE.Mesh(geo, mat);
+    // R2: shader-deformed + group-scaled globe must never be frustum-culled
+    // from stale CPU bounds. Single-object cost, always visible when earth shown.
+    mesh.frustumCulled = false;
+    // A low-cost additive shell supplies a stable atmospheric limb while
+    // warped map tiles retain their visible curvature.
+    // R5 Fresnel-rim spec (owner): view-dependent limb glow at 1.03×Rvis
+    // (ratio preserved through group scale). BackSide + depthTest means only
+    // limb fragments outside the globe silhouette survive — the far-side
+    // shell depth-fails against the opaque base, so there is no washed-out
+    // disk and no glow over label centers. renderOrder 4 draws after tiles
+    // (2) and heat (3). No cap discard by design: atmosphere extends past
+    // the map cap. Opacity breathes with table tilt (0.12→0.20).
+    let rim = null;
+    try {
+      const atmosphereGeo = new THREE.SphereGeometry(radius * 1.03, 32, 20);
+      const rimPal = earthPalette();
+      earthRimOpacity = rimPal.rimOpacity;
+      const atmosphereMat = new THREE.MeshBasicMaterial({
+        color: rimPal.rim, transparent: true, opacity: rimPal.rimOpacity,
+        blending: THREE[rimPal.rimBlending], side: THREE.BackSide, depthWrite: false,
+        depthTest: true,
+      });
+      atmosphereMat.onBeforeCompile = (shader) => {
+        shader.vertexShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
+          shader.vertexShader
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\n vEarthRimNormal = normalize(normalMatrix * normalize(transformed));')
+            .replace('#include <project_vertex>', '#include <project_vertex>\n vEarthRimViewPosition = - mvPosition.xyz;');
+        shader.fragmentShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
+          shader.fragmentShader.replace('#include <opaque_fragment>', `
+            float earthRim = pow(1.0 - abs(dot(normalize(vEarthRimNormal), normalize(vEarthRimViewPosition))), 3.0);
+            diffuseColor.a *= earthRim;
+            #include <opaque_fragment>
+          `);
+      };
+      rim = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+      rim.renderOrder = 4;
+      rim.frustumCulled = false;
+      mesh.add(rim);
+    } catch (e) { rim = null; }
+    const globe = { mesh, rim };
+    earthGlobes.push(globe);
+    return globe;
+  }
+
   function installEarthWarpShader(material) {
     if (!material) return;
     material.userData = material.userData || {};
@@ -6672,16 +7150,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     if (!earthMapTexture && earthMapCanvas && THREE) {
-      earthMapTexture = applyEarthTileSampling(new THREE.CanvasTexture(earthMapCanvas));
-      try { if (THREE.SRGBColorSpace !== undefined) earthMapTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-      try {
-        // Compensate the SphereGeometry UV seam (see earthZoneUV): shift
-        // the texture +90° so standard-equirect texels land on the matching
-        // geographic directions. Repeat wrap is mandatory — Clamp would
-        // smear the dateline edge.
-        if (THREE.RepeatWrapping !== undefined) earthMapTexture.wrapS = THREE.RepeatWrapping;
-        earthMapTexture.offset.x = 0.25;
-      } catch (e) {}
+      earthMapTexture = configureEarthMapTexture(new THREE.CanvasTexture(earthMapCanvas));
       earthMapDirty = true;
     }
     // Kick off the Natural Earth photo re-style (async; fallback paints now).
@@ -6692,54 +7161,11 @@ window.WebXRVR = window.WebXRVR || (function () {
 
       // Legacy full-globe geometry is retained at S=1. Zoomed views switch to
       // inverse-mapped rendered-space tessellation in updateEarthBaseGeometry.
-      const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 48, 32);
-      const earthMat = new THREE.MeshBasicMaterial({
-        map: earthMapTexture || null,
-        color: earthMapTexture ? 0xffffff : earthPalette().sea,
-      });
-      installEarthWarpShader(earthMat);
-      earthLegacyGeometry = earthGeo;
-      earthGeo.setAttribute('earthRendered', earthGeo.attributes.position.clone());
-      earthMesh = new THREE.Mesh(earthGeo, earthMat);
-      // R2: shader-deformed + group-scaled globe must never be frustum-culled
-      // from stale CPU bounds. Single-object cost, always visible when earth shown.
-      earthMesh.frustumCulled = false;
+      const earthGlobe = createEarthGlobe(EARTH_RADIUS, 48, 32, earthMapTexture);
+      earthMesh = earthGlobe.mesh;
+      earthLegacyGeometry = earthMesh.geometry;
+      earthAtmosphereMesh = earthGlobe.rim;
       earthGroup.add(earthMesh);
-      // A low-cost additive shell supplies a stable atmospheric limb while
-      // warped map tiles retain their visible curvature.
-      // R5 Fresnel-rim spec (owner): view-dependent limb glow at 1.03×Rvis
-      // (ratio preserved through group scale). BackSide + depthTest means only
-      // limb fragments outside the globe silhouette survive — the far-side
-      // shell depth-fails against the opaque base, so there is no washed-out
-      // disk and no glow over label centers. renderOrder 4 draws after tiles
-      // (2) and heat (3). No cap discard by design: atmosphere extends past
-      // the map cap. Opacity breathes with table tilt (0.12→0.20).
-      try {
-        const atmosphereGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.03, 32, 20);
-        const rimPal = earthPalette();
-        earthRimOpacity = rimPal.rimOpacity;
-          const atmosphereMat = new THREE.MeshBasicMaterial({
-          color: rimPal.rim, transparent: true, opacity: rimPal.rimOpacity,
-          blending: THREE[rimPal.rimBlending], side: THREE.BackSide, depthWrite: false,
-          depthTest: true,
-        });
-        atmosphereMat.onBeforeCompile = (shader) => {
-              shader.vertexShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
-            shader.vertexShader
-              .replace('#include <begin_vertex>', '#include <begin_vertex>\n vEarthRimNormal = normalize(normalMatrix * normalize(transformed));')
-              .replace('#include <project_vertex>', '#include <project_vertex>\n vEarthRimViewPosition = - mvPosition.xyz;');
-          shader.fragmentShader = 'varying vec3 vEarthRimNormal; varying vec3 vEarthRimViewPosition;\n' +
-            shader.fragmentShader.replace('#include <opaque_fragment>', `
-              float earthRim = pow(1.0 - abs(dot(normalize(vEarthRimNormal), normalize(vEarthRimViewPosition))), 3.0);
-              diffuseColor.a *= earthRim;
-              #include <opaque_fragment>
-            `);
-        };
-        earthAtmosphereMesh = new THREE.Mesh(atmosphereGeo, atmosphereMat);
-        earthAtmosphereMesh.renderOrder = 4;
-        earthAtmosphereMesh.frustumCulled = false;
-        earthMesh.add(earthAtmosphereMesh);
-      } catch (e) { earthAtmosphereMesh = null; }
 
       earthPinsGroup = new THREE.Group();
       earthPinsGroup.frustumCulled = false;
@@ -6838,6 +7264,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       scene.add(earthGroup);
       earthResourcesReady = true;
     }
+    buildGroundGlobe();
 
     applySceneVisibility();
     return renderer;
@@ -8245,6 +8672,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     updatePreviewSize(previewCanvas);
     applySceneVisibility();
     updateWorld(time);
+    updateGroundGlobe(time);
+    updateScreenLookFade();
 
     if (sceneMode === 'reels') {
       updateVisualTexture(getVisualSource());
@@ -9530,6 +9959,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   function applySceneVisibility() {
     const isEarth = (sceneMode === 'earth');
     if (earthGroup) earthGroup.visible = isEarth;
+    if (groundGlobe) groundGlobe.mesh.visible = !isEarth;
+    if (groundTag && isEarth) groundTag.mesh.visible = false;
     // Label/preview are scene-rooted (Z1 zoom), so they gate explicitly.
     if (earthLabelMesh) earthLabelMesh.visible = isEarth;
     if (earthPreviewMesh && !isEarth) earthPreviewMesh.visible = false;
@@ -11098,6 +11529,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     layoutTuning = defaultLayoutTuning();
     isInitialPoseSet = false;
     sessionEyeY = null;
+    groundEyeY = null;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
@@ -11341,6 +11773,8 @@ window.WebXRVR = window.WebXRVR || (function () {
         captureSessionEye(frame);
         applySceneVisibility();
         updateWorld(time);
+        updateGroundGlobe(time);
+    updateScreenLookFade();
         if (sceneMode === 'reels') {
           updateVisualTexture(getVisualSource());
           updateGlowColor(time, 800);
@@ -11541,6 +11975,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     worldMeteorNext = -1;
     worldLastT = -1;
     earthGroup = null;
+    earthGlobes.length = 0;
+    groundGlobe = groundGlobeTexture = groundHighlight = groundTag = null;
+    groundSeek = groundPlace = groundKey = null;
+    groundSpinning = true;
+    groundHighlightAlpha = groundHighlightTarget = 0;
+    groundBaseVersion = groundLastT = -1;
     if (earthLegacyGeometry) earthLegacyGeometry.dispose();
     if (earthAdaptiveGeometry) earthAdaptiveGeometry.dispose();
     earthLegacyGeometry = earthAdaptiveGeometry = earthAdaptiveTemplate = null;
@@ -12107,6 +12547,52 @@ window.WebXRVR = window.WebXRVR || (function () {
           meteor: !!(worldMeteor && worldMeteor.visible),
           glow: !!(ambilightMesh && ambilightMesh.visible),
         };
+      },
+      groundGlobeState() {
+        if (!groundGlobe) return null;
+        const mesh = groundGlobe.mesh;
+        mesh.updateMatrixWorld(true);
+        const world = (obj, y) => {
+          const v = new THREE.Vector3(0, y, 0);
+          obj.updateMatrixWorld(true);
+          return obj.localToWorld(v);
+        };
+        const parts = groundHighlight && groundHighlight.userData;
+        return {
+          visible: !!mesh.visible,
+          globe: groundGlobe,
+          texture: groundGlobeTexture,
+          baseCanvas: earthBaseCanvas,
+          quat: { ...groundQuat },
+          seeking: !!groundSeek,
+          spinning: groundSpinning,
+          highlight: groundHighlightAlpha,
+          highlightVisible: !!(groundHighlight && groundHighlight.visible),
+          placeText: groundPlace ? groundPlace.text : null,
+          pinColor: parts && parts.pin ? parts.pin.material.color.getHexString() : null,
+          tagKey: groundTag ? groundTag.key : null,
+          beamTopWorld: parts && parts.beam ? world(parts.beam, GROUND_BEAM_H) : null,
+          tagTopWorld: groundTag && groundTag.mesh.visible
+            ? world(groundTag.mesh, groundTag.mesh.geometry.parameters.height / 2) : null,
+        };
+      },
+      groundTargetQuat,
+      GROUND_REST_DEG,
+      screenFadeState() {
+        const mat = screenMesh && screenMesh.material;
+        return {
+          fade: screenLookFade,
+          opacity: mat ? mat.opacity : null,
+          transparent: mat ? mat.transparent : null,
+          depthWrite: mat ? mat.depthWrite : null,
+          visible: !!(screenMesh && screenMesh.visible),
+        };
+      },
+      earthGlobes: () => earthGlobes.slice(),
+      // Lowest point of the video, in degrees below the eye (negative = below).
+      screenLowestDeg() {
+        const low = screenLowestElevation(getHeadPosition());
+        return low === null ? null : low * 180 / Math.PI;
       },
       postXRDiag,
       locationToUnit,

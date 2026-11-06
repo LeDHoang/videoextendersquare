@@ -2161,6 +2161,8 @@ test('fix27: the first VR entry shows the dock and guide once (localStorage flag
 test('locked UI takes the eye height from the first XR viewer pose, not the default camera', async () => {
   const { renderer } = await enterLiveSession();
   const api = renderer.__test;
+  // The shell-anchored layout (no ground globe to stand the dock on).
+  api.groundGlobeState().globe.mesh.visible = false;
   // Before a pose arrives the camera still sits at its default 1.6 m; the
   // dock must not latch onto that.
   const before = api.computeDockPose({ x: 0, y: 1.6, z: 0 }).pos.y;
@@ -2917,14 +2919,15 @@ test('dock canvas shrinks to fit its live controls and keeps their physical size
   const info = api.getSceneInfo();
   const base = info.screenState.scale;
   const fitted = api.dockTargetSize(base, 800, 260);
-  closeTo(info.dock.scale[0], fitted.w / 1.6);
-  closeTo(info.dock.scale[1], fitted.h / 0.6);
+  const center = api.computeDockPose(null).pos;
+  const k = api.computeDockPose(null).scale || 1;
+  closeTo(info.dock.scale[0], fitted.w * k / 1.6);
+  closeTo(info.dock.scale[1], fitted.h * k / 0.6);
   closeTo(fitted.w / 800, api.dockTargetSize(base).w / 1024); // same metres per px
   // Top edge stays where the full-height dock had it: the center moves up
   // the (tilted) panel by half the height difference.
-  const center = api.computeDockPose(null).pos;
   const [x, y, z] = info.dock.pos;
-  closeTo(Math.hypot(x - center.x, y - center.y, z - center.z), (api.dockTargetSize(base).h - fitted.h) / 2);
+  closeTo(Math.hypot(x - center.x, y - center.y, z - center.z), (api.dockTargetSize(base).h - fitted.h) / 2 * k);
   assert.ok(y > center.y, 'moved up');
   // Play button center (x 364-436, y 60-132) on the fitted 800x260 canvas.
   const play = api.controlIndexFromUV({ x: 400 / 800, y: 1 - 96 / 260 });
@@ -4499,7 +4502,7 @@ test('R2: pins/heat/tiles/hits coincide through the warp at every scale', () => 
     }
   }
   // Shader-deformed globe is never frustum-culled from stale CPU bounds.
-  assert.match(rendererSource, /earthMesh\.frustumCulled = false/);
+  assert.match(rendererSource, /\n    mesh\.frustumCulled = false;/);
   assert.match(rendererSource, /earthTileGroup\.frustumCulled = false/);
   renderer.stopPreview();
 });
@@ -4947,9 +4950,10 @@ test('rim normal is transformed to view space before Fresnel comparison',()=>{
 test('R5: atmosphere is a limb-only Fresnel shell, never a glow disk', () => {
   // BackSide + depthTest(true) + opaque base ⇒ far-side shell fragments fail
   // depth; only the limb silhouette survives. renderOrder after tiles/heat.
-  assert.match(rendererSource, /EARTH_RADIUS \* 1\.03/);
+  assert.match(rendererSource, /createEarthGlobe\(EARTH_RADIUS, 48, 32, earthMapTexture\)/);
+  assert.match(rendererSource, /SphereGeometry\(radius \* 1\.03/);
   assert.match(rendererSource, /side: THREE\.BackSide, depthWrite: false,\n\s*depthTest: true,/);
-  assert.match(rendererSource, /earthAtmosphereMesh\.renderOrder = 4/);
+  assert.match(rendererSource, /rim\.renderOrder = 4/);
   assert.match(rendererSource, /pow\(1\.0 - abs\(dot\(normalize\(vEarthRimNormal\), normalize\(vEarthRimViewPosition\)\)\), 3\.0\)/);
 });
 
@@ -7125,5 +7129,263 @@ test('globe pins and heat sprites re-ink with the mode', () => {
     pins: ['#f3d34a', '#ff3b1f'],
     sprites: [{ hex: '#f3d34a', additive: true }, { hex: '#ff3b1f', additive: true }],
   });
+  renderer.stopPreview();
+});
+
+// ─── Ground globe: the shared globe, a second time, under the viewer in reels ──
+function startGround(playlist, { theme = 'light', reduced = false, globals } = {}) {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, theme, withShell: true, search: '?vrtex=canvas', globals });
+  const video = {
+    paused: false, ended: false, readyState: 4, currentTime: 1, duration: 10, muted: true,
+    addEventListener() {}, removeEventListener() {},
+    requestVideoFrameCallback() { return 1; }, cancelVideoFrameCallback() {},
+    pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); },
+  };
+  const at = { index: 0 };
+  renderer.init(video, { getPlaylist: () => playlist, getCurrentIndex: () => at.index });
+  if (reduced) renderer.setReducedMotion(true);
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  let t = 0;
+  const run = (ms) => { for (let spent = 0; spent < ms; spent += 100) { t += 100; renderer.__runScheduledFrame(t); } };
+  return { renderer, run, at, api: renderer.__test, THREE: renderer.getThree() };
+}
+
+const KYOTO = { location: { city: 'Kyoto', country: 'Japan', lat: 35.01, lon: 135.77 } };
+const NO_COORDS = { location: { city: 'Somewhere', country: '', lat: null, lon: null } };
+
+// Where a place on the ground globe sits in the world, and which way its north points.
+function groundPlacePose(api, THREE, lat, lon) {
+  const st = api.groundGlobeState();
+  const q = new THREE.Quaternion(st.quat.x, st.quat.y, st.quat.z, st.quat.w);
+  const unit = (la, lo) => { const u = api.locationToUnit(la, lo); return new THREE.Vector3(u.x, u.y, u.z); };
+  const normal = unit(lat, lon).applyQuaternion(q);
+  const north = unit(lat + 0.01, lon).sub(unit(lat, lon)).normalize().applyQuaternion(q);
+  return { normal, north };
+}
+function restNormal(THREE, api) {
+  const a = api.GROUND_REST_DEG * Math.PI / 180;
+  return new THREE.Vector3(0, Math.cos(a), -Math.sin(a));
+}
+const degBetween = (a, b) => a.angleTo(b) * 180 / Math.PI;
+
+test('ground globe is a second instance of the shared Earth globe', () => {
+  const { renderer, api, THREE } = startGround([KYOTO]);
+  const globes = api.earthGlobes();
+  assert.equal(globes.length, 2);
+  const [earth, ground] = globes;
+  const st = api.groundGlobeState();
+  assert.equal(ground, st.globe);
+  assert.equal(earth.mesh.material.customProgramCacheKey(), ground.mesh.material.customProgramCacheKey());
+  assert.ok(earth.rim && ground.rim, 'both globes carry the rim');
+  assert.equal(ground.mesh.geometry.parameters.radius, 1.5);
+  // Same equirect mapping, drawn from the base map without Earth view's heat zones.
+  const a = earth.mesh.material.map, b = ground.mesh.material.map;
+  assert.ok(a && b && a !== b);
+  assert.equal(b, st.texture);
+  assert.equal(b.image, st.baseCanvas);
+  assert.equal(b.offset.x, a.offset.x);
+  assert.equal(b.offset.x, 0.25);
+  assert.equal(b.wrapS, THREE.RepeatWrapping);
+  assert.equal(b.wrapS, a.wrapS);
+  renderer.stopPreview();
+});
+
+test('a theme switch recolours both globes, the ground pin and its tag', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  run(4000);
+  const before = api.groundGlobeState();
+  assert.ok(before.tagKey.startsWith('light|'));
+  api.setVRTheme('dark');
+  run(200);
+  const [earth, ground] = api.earthGlobes();
+  assert.equal(ground.rim.material.color.getHexString(), earth.rim.material.color.getHexString());
+  assert.equal(ground.rim.material.blending, earth.rim.material.blending);
+  assert.equal(api.earthAtmosphere().color, earth.rim.material.color.getHexString());
+  const after = api.groundGlobeState();
+  assert.notEqual(after.pinColor, before.pinColor);
+  assert.ok(after.tagKey.startsWith('dark|'));
+  renderer.stopPreview();
+});
+
+test('ground globe shows in reels mode and hides in Earth mode', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  run(200);
+  assert.equal(api.groundGlobeState().visible, true);
+  renderer.setSceneMode('earth');
+  run(200);
+  assert.equal(api.groundGlobeState().visible, false);
+  assert.equal(api.groundGlobeState().tagTopWorld, null);
+  renderer.setSceneMode('reels');
+  run(200);
+  assert.equal(api.groundGlobeState().visible, true);
+  renderer.stopPreview();
+});
+
+test('a reel with a place turns it ahead and below, north away, then marks it', () => {
+  const { renderer, api, run, THREE } = startGround([KYOTO]);
+  run(200);
+  assert.equal(api.groundGlobeState().seeking, true);
+  assert.equal(api.groundGlobeState().highlight, 0);
+  run(4000);
+  const st = api.groundGlobeState();
+  assert.equal(st.seeking, false);
+  assert.equal(st.spinning, false);
+  assert.equal(st.highlight, 1);
+  assert.equal(st.highlightVisible, true);
+  assert.equal(st.placeText, 'Kyoto, Japan');
+  const pose = groundPlacePose(api, THREE, 35.01, 135.77);
+  assert.ok(degBetween(pose.normal, restNormal(THREE, api)) < 1, `place normal off by ${degBetween(pose.normal, restNormal(THREE, api))}°`);
+  assert.ok(pose.north.z < -0.9, `north points away: ${pose.north.toArray()}`);
+  const q1 = st.quat;
+  run(1000);
+  assert.deepEqual(api.groundGlobeState().quat, q1, 'it stays put');
+  renderer.stopPreview();
+});
+
+test('a reel without coordinates keeps the globe spinning, never seeking to 0,0', () => {
+  const { renderer, api, run, THREE } = startGround([NO_COORDS]);
+  run(300);
+  const a = api.groundGlobeState();
+  assert.equal(a.seeking, false);
+  assert.equal(a.spinning, true);
+  assert.equal(a.highlight, 0);
+  assert.equal(a.placeText, null);
+  run(1000);
+  assert.notDeepEqual(api.groundGlobeState().quat, a.quat);
+  assert.ok(degBetween(groundPlacePose(api, THREE, 0, 0).normal, restNormal(THREE, api)) > 5);
+  renderer.stopPreview();
+});
+
+test('moving from a place to no place clears the mark and resumes the spin', () => {
+  const { renderer, api, run, at } = startGround([KYOTO, NO_COORDS]);
+  run(4000);
+  assert.equal(api.groundGlobeState().highlight, 1);
+  at.index = 1;
+  run(4000);
+  const st = api.groundGlobeState();
+  assert.equal(st.highlight, 0);
+  assert.equal(st.highlightVisible, false);
+  assert.equal(st.seeking, false);
+  assert.equal(st.spinning, true);
+  assert.equal(st.tagTopWorld, null);
+  run(500);
+  assert.notDeepEqual(api.groundGlobeState().quat, st.quat);
+  renderer.stopPreview();
+});
+
+test('reduced motion: no spin, and the seek snaps', () => {
+  const still = startGround([NO_COORDS], { reduced: true });
+  still.run(300);
+  const q = still.api.groundGlobeState().quat;
+  still.run(1000);
+  assert.deepEqual(still.api.groundGlobeState().quat, q);
+  still.renderer.stopPreview();
+
+  const { renderer, api, run, THREE } = startGround([KYOTO], { reduced: true });
+  run(200);
+  const st = api.groundGlobeState();
+  assert.equal(st.seeking, false);
+  assert.equal(st.highlight, 1);
+  assert.ok(degBetween(groundPlacePose(api, THREE, 35.01, 135.77).normal, restNormal(THREE, api)) < 1);
+  renderer.stopPreview();
+});
+
+test('the place, beam and tag all sit below the video', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  run(4000);
+  const head = api.getHeadPosition();
+  const below = (p) => Math.atan2(p.y - head.y, Math.hypot(p.x - head.x, p.z - head.z)) * 180 / Math.PI;
+  const st = api.groundGlobeState();
+  const videoLow = api.screenLowestDeg();
+  assert.ok(Number.isFinite(videoLow));
+  assert.ok(st.beamTopWorld && st.tagTopWorld);
+  assert.ok(below(st.beamTopWorld) < videoLow, `beam top ${below(st.beamTopWorld)}° vs video ${videoLow}°`);
+  assert.ok(below(st.tagTopWorld) < videoLow, `tag top ${below(st.tagTopWorld)}° vs video ${videoLow}°`);
+  renderer.stopPreview();
+});
+
+test('locked reels stand the dock and nav strip on the place tag, below the video', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  api.setScreenState({ locked: true });
+  run(4000);
+  const pose = api.computeDockPose(api.getHeadPosition());
+  assert.ok(pose.scale > 0 && pose.scale < 1, `scaled to the nearer spot: ${pose.scale}`);
+  closeTo(pose.yaw, 0);
+  assert.ok(pose.pitch < 0, 'tilted up toward the eye');
+  // Rebuild the unit's edges along the tilted panel: full-height dock top,
+  // fitted dock, then the nav strip under it.
+  const info = api.getSceneInfo();
+  const base = info.screenState.scale;
+  const full = api.dockTargetSize(base);
+  const fit = api.dockTargetSize(base, 800, 260);
+  const navH = 0.16 * fit.w / 1.5;
+  const k = pose.scale;
+  const up = { y: Math.cos(pose.pitch), z: Math.sin(pose.pitch) };
+  const along = (s) => ({ x: pose.pos.x, y: pose.pos.y + up.y * s, z: pose.pos.z + up.z * s });
+  const top = along(full.h * k / 2);
+  const bottom = along(full.h * k / 2 - (fit.h + navH) * k);
+  const head = { x: 0, y: api.groundGlobeState().globe.mesh.position.y + 1.6 + 1.5, z: 0 };
+  const deg = (p) => Math.atan2(p.y - head.y, Math.hypot(p.x - head.x, p.z - head.z)) * 180 / Math.PI;
+  const tagTop = deg(api.groundGlobeState().tagTopWorld);
+  assert.ok(deg(top) < api.screenLowestDeg(), `dock top ${deg(top)}° vs video ${api.screenLowestDeg()}°`);
+  assert.ok(deg(bottom) > tagTop, `nav bottom ${deg(bottom)}° vs tag top ${tagTop}°`);
+  assert.ok(deg(bottom) - tagTop < 3, `nav strip rests just above the tag: ${deg(bottom) - tagTop}°`);
+  closeTo(info.dock.scale[0], fit.w * k / 1.6);
+  renderer.stopPreview();
+});
+
+test('reels mode loads the photo map for the ground globe without opening Earth view', () => {
+  const requested = [];
+  const Image = class { set src(value) { requested.push(value); } };
+  const { renderer, api, run } = startGround([KYOTO], { globals: { Image } });
+  run(200);
+  assert.notEqual(api.getScene(), 'earth');
+  assert.equal(requested[0], '/assets/earth-natural-4096x2048.jpg');
+  renderer.stopPreview();
+});
+
+test('the globe top follows the live eye 1.6 m down: sitting glides, a nod does not', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  const camera = api.getCamera();
+  run(200);
+  const top = () => api.groundGlobeState().globe.mesh.position.y + 1.5;
+  // The headset preview re-seats the camera at 1.6 m every frame; hold the simulated eye instead.
+  let eye = camera.position.y;
+  const set = camera.position.set.bind(camera.position);
+  camera.position.set = (x, _y, z) => set(x, eye, z);
+  const eyeAt = (y) => { eye = y; set(camera.position.x, y, camera.position.z); };
+  assert.ok(Math.abs(top() - (camera.position.y - 1.6)) < 1e-6, `top ${top()} vs eye ${camera.position.y}`);
+  eyeAt(1.1); // sit down
+  run(200);
+  const mid = top();
+  assert.ok(mid < 1.6 - 1.6 && mid > 1.1 - 1.6, `glides, not jumps: ${mid}`);
+  run(12000);
+  assert.ok(Math.abs(top() - (1.1 - 1.6)) < 1e-3, `settles 1.6 m below the seated eye: ${top()}`);
+  eyeAt(1.05); // a nod
+  run(100);
+  assert.ok(Math.abs(top() - (1.1 - 1.6)) < 0.005, `a nod barely moves it: ${top()}`);
+  renderer.stopPreview();
+});
+
+test('looking down past 30° fades the video out, and looking up brings it back', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(100); };
+  look(20);
+  assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
+  look(35);
+  const mid = api.screenFadeState();
+  assert.ok(mid.fade > 0 && mid.fade < 1, `half faded at 35°: ${mid.fade}`);
+  assert.equal(mid.opacity, mid.fade);
+  assert.equal(mid.transparent, true);
+  assert.equal(mid.depthWrite, false);
+  look(45);
+  assert.equal(api.screenFadeState().fade, 0);
+  assert.equal(api.screenFadeState().visible, false);
+  look(10);
+  assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
+  renderer.setSceneMode('earth');
+  look(60);
+  assert.equal(api.screenFadeState().fade, 1, 'Earth view never fades its screen');
   renderer.stopPreview();
 });
