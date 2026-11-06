@@ -129,7 +129,7 @@ function renderPage() {
 }
 
 async function pick(names) {
-  const input = view.container.querySelector('.sx-studio-drop input[type=file]') || view.container.querySelector('.sx-studio-replace input');
+  const input = view.container.querySelector('.sx-studio-drop input[type=file]') || view.container.querySelector('.sx-studio-reset input');
   fireEvent.change(input, { target: { files: names.map(fileOf) } });
 }
 
@@ -167,8 +167,8 @@ describe('UploadPage studio — video extender parity', () => {
   it('maps a portrait clip onto the square stage with its outpaint bands', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    expect(await screen.findByText('ORIGINAL CLIP (1080×1920)')).toBeInTheDocument();
-    expect(screen.getByText('PAD: 420px [L/R]')).toBeInTheDocument();
+    expect(await screen.findByText('1080×1920 ➔ 3840×3840')).toBeInTheDocument();
+    expect(screen.queryByText('PAD: 420px [L/R]')).toBeNull();
     expect(screen.getAllByText('+420px OUTPAINT')).toHaveLength(2);
     // The stage stays uncluttered: no zone names, telemetry box or spec grid.
     expect(screen.queryByText(/GENERATIVE ZONE/)).toBeNull();
@@ -184,7 +184,7 @@ describe('UploadPage studio — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v1' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
 
     fireEvent.click(radio('Outpaint Model', /LTX 2\.3 Quality \+ LoRA/));
     const addLora = () => fireEvent.click(screen.getByRole('button', { name: '+ ADD LoRA' }));
@@ -257,7 +257,7 @@ describe('UploadPage studio — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v2' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     fireEvent.click(radio('Upscale Engine', 'FAL AI'));
     const group = screen.getByRole('group', { name: 'Bytedance upscaler settings' });
     fireEvent.change(within(group).getByLabelText('TARGET RESOLUTION'), { target: { value: '2k' } });
@@ -301,7 +301,7 @@ describe('UploadPage studio — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, vapoursynth: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeInTheDocument();
     fireEvent.click(radio('Upscale Engine', 'STUDIO'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
@@ -317,7 +317,7 @@ describe('UploadPage studio — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     fireEvent.click(radio('Upscale Engine', 'STUDIO'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
@@ -327,7 +327,7 @@ describe('UploadPage studio — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, cas: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeDisabled();
     expect(screen.getByText('CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED')).toBeInTheDocument();
   });
@@ -343,7 +343,7 @@ describe('UploadPage studio — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     fireEvent.click(radio('Upscale Engine', 'FAL AI'));
     expect(radio('FAL Upscale Model', /CUSTOM \(my-upscaler\)/)).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
@@ -356,8 +356,8 @@ describe('UploadPage studio — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i1' });
     renderPage();
     await pick(['wide.png']);
-    expect(await screen.findByText('ORIGINAL IMAGE (1600×900)')).toBeInTheDocument();
-    expect(screen.getByText('PAD: 350px [T/B]')).toBeInTheDocument();
+    expect(await screen.findByText('1600×900 ➔ 3840×3840')).toBeInTheDocument();
+    expect(screen.queryByText('PAD: 350px [T/B]')).toBeNull();
     const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent);
     expect(engines).toEqual(['FAST', 'FAL AI']);
     fireEvent.click(radio('Upscale Engine', 'FAL AI'));
@@ -387,7 +387,7 @@ describe('UploadPage studio — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i2' });
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('ORIGINAL IMAGE (1600×900)');
+    await screen.findByText('1600×900 ➔ 3840×3840');
     fireEvent.click(radio('Pipeline Mode', 'UPSCALE ONLY'));
     expect(screen.getByText('UPSCALE ONLY · STRETCHED TO 1:1')).toBeInTheDocument();
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
@@ -410,7 +410,7 @@ describe('UploadPage studio — image extender parity', () => {
     mocks.models = { ...MODELS, outpaint_img: 'me/my-outpaint' };
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('ORIGINAL IMAGE (1600×900)');
+    await screen.findByText('1600×900 ➔ 3840×3840');
     expect(screen.getAllByText(/CUSTOM OUTPAINT \(my-outpaint\)|CUSTOM \(my-outpaint\)/).length).toBeGreaterThan(0);
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
   });
@@ -438,15 +438,15 @@ describe('UploadPage studio — image extender parity', () => {
   it('keeps each kind\'s settings when another file is staged', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     fireEvent.change(screen.getByLabelText('OUTPAINT EXTENSION PROMPT'), { target: { value: 'video prompt' } });
     fireEvent.click(radio('Upscale Engine', 'STUDIO'));
     await pick(['wide.png']);
-    await screen.findByText('ORIGINAL IMAGE (1600×900)');
+    await screen.findByText('1600×900 ➔ 3840×3840');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT);
     expect(radio('Upscale Engine', 'FAST')).toHaveAttribute('aria-checked', 'true');
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue('video prompt');
     expect(radio('Upscale Engine', 'STUDIO')).toHaveAttribute('aria-checked', 'true');
   });
@@ -514,14 +514,14 @@ describe('UploadPage studio — post flows', () => {
   it('refuses mixed or oversized picks and keeps the staged source', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('ORIGINAL CLIP (1080×1920)');
+    await screen.findByText('1080×1920 ➔ 3840×3840');
     await pick(['a.png', 'portrait.mp4']);
-    expect(await screen.findByText(/Use BATCH EXTEND to render several videos/)).toBeInTheDocument();
+    expect(await screen.findByText(/Use BATCH to render several videos/)).toBeInTheDocument();
     await pick(Array.from({ length: 11 }, (_, i) => `img-${i}.png`));
     expect(await screen.findByText('An image post holds at most 10 images (you picked 11).')).toBeInTheDocument();
     await pick(['notes.txt']);
     expect(await screen.findByText(/Unsupported file type: notes\.txt/)).toBeInTheDocument();
-    expect(screen.getByText('ORIGINAL CLIP (1080×1920)')).toBeInTheDocument();
+    expect(screen.getByText('1080×1920 ➔ 3840×3840')).toBeInTheDocument();
   });
 });
 
@@ -531,7 +531,7 @@ describe('UploadPage studio — batch extend', () => {
       .mockRejectedValueOnce(Object.assign(new Error('Stage expired for portrait'), { status: 400 }))
       .mockResolvedValueOnce({ job_id: 'job-b2' });
     renderPage();
-    fireEvent.click(radio('Studio mode', 'BATCH EXTEND'));
+    fireEvent.click(radio('Studio mode', 'BATCH'));
     await pick(['square.png', 'portrait.mp4']);
     expect(await screen.findByText(/A batch is all videos or all images/)).toBeInTheDocument();
     await pick(['portrait.mp4', 'square.mp4']);
@@ -563,7 +563,7 @@ describe('UploadPage studio — batch extend', () => {
   it('locks the other mode while a batch is rendering', async () => {
     mocks.form.mockResolvedValueOnce({ job_id: 'job-b3' }).mockResolvedValueOnce({ job_id: 'job-b4' });
     renderPage();
-    fireEvent.click(radio('Studio mode', 'BATCH EXTEND'));
+    fireEvent.click(radio('Studio mode', 'BATCH'));
     await pick(['a.png', 'b.png']);
     await screen.findByRole('list', { name: 'Batch queue' });
     expect(renderButton()).toHaveTextContent('RENDER 2 IMAGE(S) 4K SQUARE');

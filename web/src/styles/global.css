@@ -11270,10 +11270,11 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 .sx-studio-banner-title h1 {
   margin: 0;
   font-family: var(--sx-font-display);
-  font-size: clamp(1.1rem, 1.5vw, 1.35rem);
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: -0.01em;
+  font-size: calc(var(--sx-t-hero) * 0.8);
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
   color: var(--sx-ink);
 }
 
@@ -11377,17 +11378,35 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   }
 }
 
+.sx-studio-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sx-2);
+}
+
+.sx-studio-tabs .sx-seg {
+  min-height: 0;
+}
+
+.sx-studio-tabs .sx-seg button {
+  height: 30px;
+}
+
 .sx-studio-pills {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-left: auto;
 }
 
 .sx-studio-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 8px;
   background: var(--sx-surface-2);
   border: 1px solid var(--sx-rule);
   color: var(--sx-ink-2);
@@ -11575,30 +11594,27 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   color: var(--sx-warn-hi);
 }
 
-.sx-studio-replace {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 12px;
+.sx-studio-reset {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.8);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--sx-surface);
   border: 1px solid var(--sx-rule-strong);
   color: var(--sx-ink);
-  font: 700 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
   cursor: pointer;
   transition: background-color var(--sx-duration-fast) ease, color var(--sx-duration-fast) ease;
 }
 
-.sx-studio-replace:hover,
-.sx-studio-replace:focus-within {
+.sx-studio-reset:hover,
+.sx-studio-reset:focus-within {
   background: var(--sx-accent);
   color: var(--sx-on-accent);
 }
 
-.sx-studio-replace input {
+.sx-studio-reset input {
   position: absolute;
   width: 1px;
   height: 1px;

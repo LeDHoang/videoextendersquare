@@ -185,6 +185,7 @@ export default function StudioStage({
   onRemoveGalleryItem,
   onRemoveBatchItem,
   locked,
+  modeSwitch,
 }) {
   const replaceRef = useRef(null);
   const [view, setView] = useState('original');
@@ -214,27 +215,30 @@ export default function StudioStage({
       ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
       : isSlideshow
         ? 'PLAYER VIEW · 1:1 CROP'
-        : geometry ? `ORIGINAL ${kind === 'video' ? 'CLIP' : 'IMAGE'} (${geometry.width}×${geometry.height})` : '';
+        : '';
 
   return (
     <div className="sx-studio-stage-col">
       <div className="sx-studio-stage-wrap">
         <div className="sx-studio-toolbar">
-          <div className="sx-seg sx-studio-view" role="radiogroup" aria-label="Stage view" onKeyDown={onRovingKeyDown}>
-            {['original', 'extended'].map((option) => (
-              <button
-                type="button"
-                key={option}
-                role="radio"
-                aria-checked={(showExtended ? 'extended' : 'original') === option}
-                tabIndex={(showExtended ? 'extended' : 'original') === option ? 0 : -1}
-                className={(showExtended ? 'extended' : 'original') === option ? 'sx-selected' : ''}
-                disabled={option === 'extended' && !resultUrl}
-                onClick={() => setView(option)}
-              >
-                {option === 'extended' && resultStereo ? '3D' : option.toUpperCase()}
-              </button>
-            ))}
+          <div className="sx-studio-tabs">
+            {modeSwitch}
+            <div className="sx-seg sx-studio-view" role="radiogroup" aria-label="Stage view" onKeyDown={onRovingKeyDown}>
+              {['original', 'extended'].map((option) => (
+                <button
+                  type="button"
+                  key={option}
+                  role="radio"
+                  aria-checked={(showExtended ? 'extended' : 'original') === option}
+                  tabIndex={(showExtended ? 'extended' : 'original') === option ? 0 : -1}
+                  className={(showExtended ? 'extended' : 'original') === option ? 'sx-selected' : ''}
+                  disabled={option === 'extended' && !resultUrl}
+                  onClick={() => setView(option)}
+                >
+                  {option === 'extended' && resultStereo ? '3D' : option.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="sx-studio-pills">
             {stereoEye ? (
@@ -245,12 +249,34 @@ export default function StudioStage({
             ) : geometry && !isSlideshow ? (
               <>
                 <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{geometry.width}×{geometry.height} ➔ {MASTER_SIDE}×{MASTER_SIDE}</span>
-                <span className="sx-studio-pill sx-accent">PAD: {geometry.padLabel}</span>
               </>
             ) : (
               <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : `TARGET ${MASTER_SIDE}×${MASTER_SIDE} · 1:1`}</span>
             )}
           </div>
+          {selected && onFiles && !locked ? (
+            <label
+              className="sx-studio-reset"
+              title={layout === 'batch' ? 'Replace batch' : 'Replace source'}
+              aria-label={layout === 'batch' ? 'Replace batch' : 'Replace source'}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v5h5" />
+              </svg>
+              <input
+                ref={replaceRef}
+                type="file"
+                accept={accept}
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  e.target.value = '';
+                  if (files.length) onFiles(files);
+                }}
+              />
+            </label>
+          ) : null}
         </div>
 
         <div className={`sx-studio-stage ${layout === 'empty' ? 'sx-empty' : ''}`} role="region" aria-label="Square master stage">
@@ -321,24 +347,6 @@ export default function StudioStage({
           ) : null}
           {showExtended && kind === 'video' && !result.preview_url && !resultStereo ? (
             <span className="sx-studio-flag sx-warn">HEVC MASTER — BROWSER PREVIEW NEEDS AN H.264 PROXY</span>
-          ) : null}
-
-          {selected && onFiles && !locked ? (
-            <label className="sx-studio-replace">
-              <span aria-hidden="true">⇪</span>
-              <span>{layout === 'batch' ? 'REPLACE BATCH' : 'REPLACE SOURCE'}</span>
-              <input
-                ref={replaceRef}
-                type="file"
-                accept={accept}
-                multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  e.target.value = '';
-                  if (files.length) onFiles(files);
-                }}
-              />
-            </label>
           ) : null}
 
           {staging ? (

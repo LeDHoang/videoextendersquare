@@ -25,7 +25,7 @@ import { DetailsSection, ShareSection, TITLE_MAX, TAGS_MAX } from '../components
 // share. BATCH EXTEND renders many files with one configuration and no
 // publishing, like the standalone pages' multi-file mode.
 
-const STUDIO_MODES = ['POST', 'BATCH EXTEND'];
+const STUDIO_MODES = ['POST', 'BATCH'];
 const PATH_OPTS = ['SHARE DIRECTLY', 'EXTEND ANYWAY'];
 const MAKE_3D = 'MAKE 3D';
 // One post is either a single video or 1–10 images (a slideshow), never both.
@@ -298,7 +298,7 @@ export default function UploadPage() {
       return;
     }
     if (list.length > 1 && list.some((entry) => kindOf(entry.name) === 'video')) {
-      setPickError('A post is either one video or up to 10 images. Images and videos cannot be mixed, and a post holds one video. Use BATCH EXTEND to render several videos.');
+      setPickError('A post is either one video or up to 10 images. Images and videos cannot be mixed, and a post holds one video. Use BATCH to render several videos.');
       return;
     }
     if (list.length > MAX_POST_IMAGES) {
@@ -837,13 +837,6 @@ export default function UploadPage() {
           <span className="sx-studio-dot sx-pulse" aria-hidden="true" />
           <h1>UPLOAD STUDIO</h1>
         </div>
-        <Segmented
-          options={STUDIO_MODES}
-          value={isBatch ? STUDIO_MODES[1] : STUDIO_MODES[0]}
-          onChange={(value) => setStudioMode(value === STUDIO_MODES[1] ? 'batch' : 'post')}
-          disabledOptions={postRendering ? [STUDIO_MODES[1]] : batchRendering ? [STUDIO_MODES[0]] : []}
-          ariaLabel="Studio mode"
-        />
         <div className="sx-studio-banner-meta">{activeKind ? 'PIPELINE: ' : null}<b>{summary}</b></div>
       </div>
 
@@ -856,6 +849,15 @@ export default function UploadPage() {
 
       <div className="sx-studio-grid">
         <StudioStage
+          modeSwitch={
+            <Segmented
+              options={STUDIO_MODES}
+              value={isBatch ? STUDIO_MODES[1] : STUDIO_MODES[0]}
+              onChange={(value) => setStudioMode(value === STUDIO_MODES[1] ? 'batch' : 'post')}
+              disabledOptions={postRendering ? [STUDIO_MODES[1]] : batchRendering ? [STUDIO_MODES[0]] : []}
+              ariaLabel="Studio mode"
+            />
+          }
           layout={stageLayoutMode}
           entries={stageEntries}
           selectedKey={stageSelected}
