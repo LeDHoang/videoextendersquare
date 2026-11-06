@@ -30,15 +30,12 @@ export default function MessagesPage() {
           <span className="sx-mx-icon" aria-hidden="true"><IndustrialMessageIcon className="sx-hero-icon-svg" /></span>
           <div>
             <h1>MESSAGES</h1>
-            <div className="sx-mx-kicker">ECHO · DIRECT CONVERSATIONS</div>
           </div>
         </div>
         <div className="sx-mx-telemetry" aria-label="Message totals">
           <span>UNREAD <strong className={messaging.unread.total ? 'sx-hot' : ''}>{messaging.unread.total}</strong></span>
           <i aria-hidden="true" />
           <span>REQUESTS <strong>{messaging.unread.requests}</strong></span>
-          <i aria-hidden="true" />
-          <span title="Messages are encrypted on the server, not end-to-end">SECURITY <strong>NOT END-TO-END</strong></span>
         </div>
       </header>
       <MessagingPanel onConversationRoute={route} />

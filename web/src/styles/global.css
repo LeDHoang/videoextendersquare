@@ -912,12 +912,10 @@ button {
 }
 
 .sx-sidebar-title {
-  font-family: var(--sx-font-mono);
-  font-size: var(--sx-t-eyebrow);
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  font: 400 clamp(1.7rem, 4vw, 2.5rem)/1 var(--sx-font-display);
+  letter-spacing: -0.02em;
   text-transform: uppercase;
-  color: var(--sx-ink-3);
+  color: var(--sx-ink);
 }
 
 .sx-sidebar-close-btn {
@@ -3297,6 +3295,10 @@ code {
   font-size: var(--sx-t-eyebrow);
   color: var(--sx-ink-2);
   box-shadow: var(--sx-shadow-card);
+}
+
+.sx-cost-panel > .sx-eyebrow:first-child {
+  margin-top: 0;
 }
 
 .sx-cost-head {
@@ -11355,6 +11357,10 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   padding: 6px;
   background: var(--sx-surface);
   border: 1px solid var(--sx-rule-strong);
+}
+
+.sx-studio-view {
+  min-height: 0;
 }
 
 .sx-studio-view button {

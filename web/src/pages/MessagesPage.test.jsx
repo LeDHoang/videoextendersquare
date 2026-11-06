@@ -45,12 +45,11 @@ describe('MessagesPage', () => {
     };
   });
 
-  it('shows the live unread, request and security telemetry', () => {
+  it('shows the live unread and request telemetry', () => {
     renderAt('/messages');
     const totals = screen.getByLabelText('Message totals');
     expect(totals).toHaveTextContent('UNREAD 3');
     expect(totals).toHaveTextContent('REQUESTS 1');
-    expect(totals).toHaveTextContent('NOT END-TO-END');
     expect(screen.getByRole('heading', { name: 'MESSAGES' })).toBeInTheDocument();
     expect(screen.getByTestId('panel')).toBeInTheDocument();
   });
