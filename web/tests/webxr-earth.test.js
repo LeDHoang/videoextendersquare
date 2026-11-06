@@ -2477,6 +2477,22 @@ test('fix24: NEXT hides the dock at once; other presses restart the auto-hide ti
   renderer.stopPreview();
 });
 
+test('preview: a paused reel reveals the hidden dock (XR parity)', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const video = makeVideoMock();
+  renderer.init(video, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  if (renderer.getPreviewState().controlsVisible) renderer.toggleControls();
+  renderer.__runScheduledFrame(32);
+  assert.equal(renderer.getPreviewState().controlsVisible, false, 'stays hidden while playing');
+  video.paused = true;
+  renderer.__runScheduledFrame(48);
+  assert.equal(renderer.getPreviewState().controlsVisible, true, 'pause brings the dock back');
+  renderer.stopPreview();
+});
+
 test('fix26: a reel with a media error shows SKIP / RETRY after the hold', () => {
   const clock = { t: 0 };
   const gl = makeMockGl({ deleted: 0 });

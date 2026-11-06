@@ -8680,6 +8680,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       updateGlowColor(time, 120);
       applyGlowColor();
       refreshOverlayTexture(time);
+      // Paused reels reveal the dock (same rule as the XR loop).
+      if (getVisualSource().paused && !controlsVisible) showControls();
       renderStats.earthDrawCalls = 0;
       renderStats.reelDrawCalls = 1;
     } else if (sceneMode === 'earth') {
