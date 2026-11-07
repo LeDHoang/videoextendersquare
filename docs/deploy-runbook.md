@@ -12,7 +12,7 @@ Related docs:
 
 Complete each item once per environment. Tick it in your own copy of this list.
 
-**Production progress (2026-10-29).** The domain is not bought yet, so every step that needs `<domain>` is still open.
+**Production progress (2026-11-07).** The domain `echomultiverse.com` is registered at Cloudflare and live through the Tunnel. The Cloudflare steps below are done, except HSTS.
 - Done:
   - Cloudflare account, with a payment method on file (R2 requires one).
   - R2 public bucket `publicmedia` and the private backup bucket, both with location hint `apac`. `r2.dev` is not enabled.
@@ -23,28 +23,31 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - VPS (2026-10-29): OVHcloud VPS-2 in Hillsboro, Debian 13, provisioned and hardened (section "OVHcloud VPS" below). Docker is installed and the repo is cloned to `/opt/echo`.
   - Server `.env` (2026-10-29): built from `deploy/env.example`. The secrets were generated on the VPS with `openssl rand`, and a copy is kept off the box. The `<domain>` URL values and SMTP are still placeholders.
   - App and Postgres (2026-10-29): `docker compose up -d --build` runs both, healthy. The app listens on `127.0.0.1:8000` only. `/api/readyz` reports the database ok at schema `20261022_0017` and the output directory writable. cloudflared is not started yet.
-- Waiting for the domain:
-  - the Tunnel public hostname, then `docker compose --profile tunnel up -d`;
-  - the `media.<domain>` custom domain and `SX_MEDIA_BASE_URL`;
-  - CORS, the Transform Rule, the Cache Rules and SSL/TLS.
-- Next on the VPS (no domain needed): the restore drill (`docs/backup-restore-runbook.md`). The nightly backup to the private bucket runs since 2026-11-01.
-- Not confirmed: the 30-day lifecycle rule on the backup bucket.
+- Done with the domain (2026-11-07):
+  - the Tunnel public hostname `echomultiverse.com` → `http://app:8000`, with cloudflared running;
+  - the `media.echomultiverse.com` custom domain, the `jobs/` lifecycle rule and CORS;
+  - the Transform Rule, the Cache Rules, SSL/TLS Full and Always Use HTTPS;
+  - the 30-day lifecycle rule on the backup bucket;
+  - `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` and `SX_MEDIA_BASE_URL` in the VPS `.env`, app restarted.
+  - Checked with curl: HTTP→HTTPS 301; `/api/*` always `cf-cache-status: DYNAMIC`; media returns 206 with ACAO, `Vary: Origin` and `Content-Range`, and `MISS` then `HIT`.
+- Origin traffic is restricted to the Tunnel (checked 2026-11-07): ufw allows only 22/tcp, the app listens on loopback only, and a forged `CF-Connecting-IP` is rejected by Cloudflare.
+- Still open: HSTS and SMTP. The restore drill and the nightly backup to the private bucket are done (2026-11-01).
 
 ### Cloudflare
 
-- [ ] **Tunnel.** Go to Zero Trust → Networks → Tunnels and create a tunnel. Copy its connector token into `TUNNEL_TOKEN` in `.env`.
+- [x] **Tunnel.** Go to Zero Trust → Networks → Tunnels and create a tunnel. Copy its connector token into `TUNNEL_TOKEN` in `.env`.
   - Add a public hostname: `<domain>` → service `http://app:8000`. `app` is the compose service name.
   - Leave **HTTP Host Header** empty, which is the default. cloudflared then keeps the browser's `Host`. `validate_origin` in `server/social/auth.py` compares `Origin` with `Host`, so every mutating request returns 403 `ORIGIN_DENIED` if you override `Host`.
-- [ ] **R2 public bucket.** Create it with location hint **`apac`** (Asia-Pacific).
+- [x] **R2 public bucket.** Create it with location hint **`apac`** (Asia-Pacific).
   - Connect the custom domain `media.<domain>`. Do not enable the `r2.dev` URL.
   - Set `R2_PUBLIC_BUCKET` and `SX_MEDIA_BASE_URL=https://media.<domain>`.
   - Add a lifecycle rule that deletes objects with the prefix `jobs/` after **30 days**. Completed job results live there (`docs/storage-design.md` §Job results).
-- [ ] **R2 private backup bucket.** Create it with location hint `apac`, and leave it with no public access and no custom domain.
+- [x] **R2 private backup bucket.** Create it with location hint `apac`, and leave it with no public access and no custom domain.
   - Add a lifecycle rule that deletes objects after **30 days**.
-- [ ] **R2 API tokens.** Create two tokens:
+- [x] **R2 API tokens.** Create two tokens:
   - The app token: Object Read & Write, scoped to the **public bucket only**. It goes into `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
   - The backup token: Object Read & Write, scoped to the **backup bucket only**. It goes into the host's rclone config only, never into `.env`.
-- [ ] **Public bucket CORS policy:**
+- [x] **Public bucket CORS policy:**
   ```json
   [
     {
@@ -56,7 +59,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
     }
   ]
   ```
-- [ ] **Response Header Transform Rule on `media.<domain>`.** Go to Rules → Transform Rules → Modify Response Header.
+- [x] **Response Header Transform Rule on `media.<domain>`.** Go to Rules → Transform Rules → Modify Response Header.
   - When the hostname equals `media.<domain>`, *set static* `Access-Control-Allow-Origin: https://<domain>`.
   - Also set `Vary: Origin`.
   - Why the rule is needed:
@@ -64,7 +67,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
     - R2 then answers without ACAO, and the edge caches that copy.
     - WebXR loads the same URL with `crossOrigin = "anonymous"` and gets the cached copy without ACAO. The texture is tainted and the reel renders black.
     - A static header makes every cached copy CORS-safe, whichever request filled the cache.
-- [ ] **Cache Rules** (Caching → Cache Rules), in this order:
+- [x] **Cache Rules** (Caching → Cache Rules), in this order:
   1. When the hostname is `<domain>`, the URI path starts with `/api/` and does **not** start with `/api/reels/map-tiles/`: **Bypass cache**. Without this rule, authenticated JSON and SSE could be cached at the edge.
   2. When the hostname is `media.<domain>`: **Eligible for cache** ("Cache Everything"), with edge TTL respecting origin or 1 day.
   - Map tiles (`/api/reels/map-tiles/*`) stay cacheable. They are public, and the app sends cache headers for them.
@@ -76,10 +79,10 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - Attribution is a license requirement. Every tile response carries `X-Map-Attribution`, and the VR map shows "© OPENSTREETMAP" (from `/api/reels/map-tiles/attribution`) whenever tiles are visible. Keep it visible if the map UI changes.
   - If OSM blocks or rate-limits the server, the Earth view still works: the globe uses the bundled texture, and city zoom falls back to "MAP OFFLINE — CITY VIEW".
   - **Before the public launch**, switch to a provider with a commercial plan by setting `SX_MAP_TILES_URL` (and `SX_MAP_LABELS_URL` for split label layers, for example keyed CARTO or Esri), and update the attribution and the privacy page.
-- [ ] **SSL/TLS:**
+- [x] **SSL/TLS:**
   - Set the mode to Full.
   - Turn on **Always Use HTTPS**.
-  - Turn on **HSTS** only after HTTPS is verified end to end on both hosts. Start with a short `max-age`, and do not turn on preload for the beta.
+  - **HSTS: still open (2026-11-07).** Turn it on only after HTTPS is verified end to end on both hosts. Start with a short `max-age`, and do not turn on preload for the beta.
 
 ### OVHcloud VPS
 
