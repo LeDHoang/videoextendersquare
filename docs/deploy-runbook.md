@@ -12,7 +12,7 @@ Related docs:
 
 Complete each item once per environment. Tick it in your own copy of this list.
 
-**Production progress (2026-11-07).** The domain `echomultiverse.com` is registered at Cloudflare and live through the Tunnel. The Cloudflare steps below are done, except HSTS.
+**Production progress (2026-11-07).** The domain `echomultiverse.com` is registered at Cloudflare and live through the Tunnel. The Cloudflare steps below are all done.
 - Done:
   - Cloudflare account, with a payment method on file (R2 requires one).
   - R2 public bucket `publicmedia` and the private backup bucket, both with location hint `apac`. `r2.dev` is not enabled.
@@ -31,7 +31,8 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` and `SX_MEDIA_BASE_URL` in the VPS `.env`, app restarted.
   - Checked with curl: HTTP→HTTPS 301; `/api/*` always `cf-cache-status: DYNAMIC`; media returns 206 with ACAO, `Vary: Origin` and `Content-Range`, and `MISS` then `HIT`.
 - Origin traffic is restricted to the Tunnel (checked 2026-11-07): ufw allows only 22/tcp, the app listens on loopback only, and a forged `CF-Connecting-IP` is rejected by Cloudflare.
-- Still open: HSTS and SMTP. The restore drill and the nightly backup to the private bucket are done (2026-11-01).
+- HSTS is on (2026-11-07): `max-age=2592000`, 1 month, the lowest the dashboard offers; no includeSubDomains, no preload.
+- Still open: SMTP. The restore drill and the nightly backup to the private bucket are done (2026-11-01).
 
 ### Cloudflare
 
@@ -82,7 +83,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [x] **SSL/TLS:**
   - Set the mode to Full.
   - Turn on **Always Use HTTPS**.
-  - **HSTS: still open (2026-11-07).** Turn it on only after HTTPS is verified end to end on both hosts. Start with a short `max-age`, and do not turn on preload for the beta.
+  - **HSTS: done (2026-11-07).** Turned on after HTTPS was verified on both hosts, at 1 month (the dashboard has no shorter value). includeSubDomains and preload are off, and preload stays off for the beta.
 
 ### OVHcloud VPS
 
