@@ -28,10 +28,13 @@ WORKDIR /app
 # procps provides `ps` for checking ffmpeg niceness in production.
 # apt is listed so the build takes its trixie-security update (CVE-2026-109518,
 # fixed in 3.0.4); drop it once the pinned base image ships the fixed apt.
+# zlib1g is listed for the same reason (CVE-2026-76844, CVE-2026-85091, fixed
+# in 1:1.3.dfsg+really1.3.1-1+deb13u1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt \
     ffmpeg \
     procps \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 # Every call site runs bare `ffmpeg` via PATH; /usr/local/bin wins over
