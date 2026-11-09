@@ -1868,6 +1868,29 @@ def _recommendation_feed_data(
         videos = [video for video in videos if video["rel_path"] in positions]
         videos.sort(key=lambda video: positions[video["rel_path"]])
 
+    # A reel opened from a creator, tag, location or search list plays the rest
+    # of that list first (from the opened reel on, then the ones before it), and
+    # only then the other reels.
+    scope_first = None
+    if requested_surface == "related" and seed_post and (search.strip() or tag or location or author):
+        scoped = _apply_filters(
+            raw, folder, search, sort, media, tag, location, recent_activity=recent_activity, db=db,
+        )
+        if scoped_paths is not None:
+            positions = {value: index for index, value in enumerate(scoped_paths)}
+            scoped = [video for video in scoped if video["rel_path"] in positions]
+            scoped.sort(key=lambda video: positions[video["rel_path"]])
+        scoped_list = [video["rel_path"] for video in scoped]
+        if seed_post.media_path in scoped_list:
+            at = scoped_list.index(seed_post.media_path)
+            scoped_list = scoped_list[at:] + scoped_list[:at]
+        else:
+            scoped_list.insert(0, seed_post.media_path)
+        in_scope = set(scoped_list)
+        scope_first = scoped_list + [video["rel_path"] for video in videos if video["rel_path"] not in in_scope]
+        by_path = {video["rel_path"]: video for video in [*videos, *scoped]}
+        videos = [by_path[path] for path in scope_first if path in by_path]
+
     paths = [video["rel_path"] for video in videos]
     path_to_post_id = {
         media_path: post_id
@@ -1879,7 +1902,7 @@ def _recommendation_feed_data(
     explicit_scope = bool(search.strip() or tag or location or author)
     personalized = requested_surface == "for_you" and sort in {"for_you", "personalized"} and not explicit_scope
     manual_order = None
-    if requested_surface == "for_you" and not personalized:
+    if scope_first is not None or (requested_surface == "for_you" and not personalized):
         manual_order = [path_to_post_id[path] for path in paths if path in path_to_post_id]
 
     anonymous_hash = ensure_anonymous_cookie(request, response)

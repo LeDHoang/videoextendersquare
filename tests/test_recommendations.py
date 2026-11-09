@@ -932,3 +932,49 @@ def test_every_player_selector_is_scoped_to_the_embed_root():
     # the docked-column rules in particular must have survived scoping
     assert "#sxReelsRoot #sxReelsHost.sx-reels-docked #commentsDrawer" in scoped
     assert "#sxReelsRoot .reels-side-inner" in scoped
+
+
+def test_a_reel_opened_from_a_creator_plays_that_creator_first(app):
+    posts = seed_catalog(app, creators=3, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        creator = db.query(User).filter(User.username == "creator_1").one()
+        own = [post.id for post in posts if post.owner_id == creator.id]
+    # Newest first: own[1] is the middle reel of the creator's three.
+    with TestClient(app) as client:
+        body = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "author": "creator_1", "post": own[1], "limit": 12},
+        ).json()
+    ids = [item["post_id"] for item in body["items"]]
+    assert ids[:3] == [own[1], own[2], own[0]]
+    assert len(ids) == 9 and set(ids[3:]).isdisjoint(own)
+
+
+def test_a_reel_opened_from_a_tag_plays_that_tag_first(app):
+    posts = seed_catalog(app, creators=3, posts_per_creator=3)
+    tagged = [posts[1].id, posts[4].id, posts[7].id, posts[8].id]
+    with app.state.testing_session() as db:
+        neon = Tag(name="neon", slug="neon")
+        db.add(neon)
+        db.flush()
+        db.add_all([PostTag(post_id=post_id, tag_id=neon.id) for post_id in tagged])
+        db.commit()
+    with TestClient(app) as client:
+        body = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "tag": "neon", "post": tagged[2], "limit": 12},
+        ).json()
+    ids = [item["post_id"] for item in body["items"]]
+    assert ids[:4] == [tagged[2], tagged[3], tagged[0], tagged[1]]
+    assert len(ids) == 9
+
+
+def test_a_reel_opened_without_a_scope_still_gets_related_reels(app):
+    posts = seed_catalog(app, creators=2, posts_per_creator=2)
+    with TestClient(app) as client:
+        body = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "post": posts[2].id, "limit": 12},
+        ).json()
+    ids = [item["post_id"] for item in body["items"]]
+    assert ids[0] == posts[2].id and len(ids) == 4
