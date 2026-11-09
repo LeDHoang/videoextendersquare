@@ -50,23 +50,35 @@ def rank_candidates(
     source_hits: dict[str, dict],
 ) -> list[Candidate]:
     if context.manual_order is not None:
-        order = {post_id: index for index, post_id in enumerate(context.manual_order)}
-        candidates = []
-        for post_id, hits in source_hits.items():
-            item = context.items[post_id]
-            hit = hits["manual_order"]
-            candidates.append(
-                Candidate(
-                    item=item,
-                    hits=hits,
-                    retrieval_score=hit.raw_score,
-                    final_score=float(len(order) - order.get(post_id, len(order))),
-                    primary_source="manual_order",
-                    reason_key="selected_order",
-                    features={"manual_order": hit.raw_score},
-                )
+        return _ordered_candidates(context, source_hits, context.manual_order)
+    if context.scope_order is not None:
+        scoped = {post_id: hits for post_id, hits in source_hits.items() if "manual_order" in hits}
+        rest = {post_id: hits for post_id, hits in source_hits.items() if "manual_order" not in hits}
+        return _ordered_candidates(context, scoped, context.scope_order) + _ranked_candidates(context, rest)
+    return _ranked_candidates(context, source_hits)
+
+
+def _ordered_candidates(context: PipelineContext, source_hits: dict[str, dict], order_list: list[str]) -> list[Candidate]:
+    order = {post_id: index for index, post_id in enumerate(order_list)}
+    candidates = []
+    for post_id, hits in source_hits.items():
+        item = context.items[post_id]
+        hit = hits["manual_order"]
+        candidates.append(
+            Candidate(
+                item=item,
+                hits=hits,
+                retrieval_score=hit.raw_score,
+                final_score=float(len(order) - order.get(post_id, len(order))),
+                primary_source="manual_order",
+                reason_key="selected_order",
+                features={"manual_order": hit.raw_score},
             )
-        return sorted(candidates, key=lambda candidate: order.get(candidate.item.post_id, len(order)))
+        )
+    return sorted(candidates, key=lambda candidate: order.get(candidate.item.post_id, len(order)))
+
+
+def _ranked_candidates(context: PipelineContext, source_hits: dict[str, dict]) -> list[Candidate]:
 
     if context.surface == "following":
         candidates = []
@@ -156,7 +168,13 @@ def rerank_page(candidates: list[Candidate], limit: int) -> list[Candidate]:
     if not candidates or limit <= 0:
         return []
     if candidates[0].primary_source in {"manual_order", "following_recent"}:
-        return candidates[:limit]
+        # A scope plays in its own order; the ranked posts after it still get the diversity pass.
+        prefix = 0
+        while prefix < len(candidates) and candidates[prefix].primary_source == candidates[0].primary_source:
+            prefix += 1
+        if prefix >= limit or prefix == len(candidates):
+            return candidates[:limit]
+        return candidates[:prefix] + rerank_page(candidates[prefix:], limit - prefix)
 
     remaining = list(candidates)
     selected: list[Candidate] = []

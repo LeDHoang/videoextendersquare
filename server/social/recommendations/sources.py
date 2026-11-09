@@ -31,9 +31,10 @@ class ManualOrderSource:
     name = "manual_order"
 
     def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
-        if context.manual_order is None:
+        order = context.manual_order if context.manual_order is not None else context.scope_order
+        if order is None:
             return []
-        ordered = [post_id for post_id in context.manual_order if post_id in context.items]
+        ordered = [post_id for post_id in order if post_id in context.items]
         total = max(1, len(ordered))
         return [
             (
@@ -176,4 +177,8 @@ def gather_source_hits(context: PipelineContext) -> dict[str, dict[str, SourceHi
     for source in sources:
         for post_id, hit in source.generate(context):
             merged.setdefault(post_id, {})[hit.source] = hit
+    if context.scope_order is not None:
+        # Scoped posts keep only their place in the scope; the others rank as usual.
+        for post_id, hit in ManualOrderSource().generate(context):
+            merged[post_id] = {hit.source: hit}
     return merged

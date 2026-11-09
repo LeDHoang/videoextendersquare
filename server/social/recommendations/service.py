@@ -300,6 +300,7 @@ def _pipeline_context(
     seed_post_id: str | None,
     allowed_post_ids: set[str] | None,
     manual_order: list[str] | None,
+    scope_order: list[str] | None = None,
 ) -> PipelineContext:
     delivered = {
         row[0]
@@ -439,6 +440,7 @@ def _pipeline_context(
         session_id=session.id,
         seed_post_id=seed_post_id,
         manual_order=manual_order,
+        scope_order=scope_order,
         items=items,
         following_ids=following_ids,
         creator_affinity=creator_affinity,
@@ -510,6 +512,7 @@ def get_reel_page(
     seed_post_id: str | None = None,
     allowed_post_ids: set[str] | None = None,
     manual_order: list[str] | None = None,
+    scope_order: list[str] | None = None,
     filters: dict | None = None,
     cursor: str | None = None,
     limit: int = DEFAULT_PAGE_SIZE,
@@ -555,6 +558,7 @@ def get_reel_page(
             seed_post_id=seed_post_id,
             allowed_post_ids=allowed_post_ids,
             manual_order=manual_order,
+            scope_order=scope_order,
             page_index=page_index,
             restarted=restarted,
             limit=limit,
@@ -625,6 +629,7 @@ def _materialize_reel_page(
     seed_post_id: str | None,
     allowed_post_ids: set[str] | None,
     manual_order: list[str] | None,
+    scope_order: list[str] | None,
     page_index: int,
     restarted: bool,
     limit: int,
@@ -638,6 +643,7 @@ def _materialize_reel_page(
         seed_post_id=seed_post_id,
         allowed_post_ids=allowed_post_ids,
         manual_order=manual_order,
+        scope_order=scope_order,
     )
     hits = gather_source_hits(context)
     ranked = rank_candidates(context, hits)

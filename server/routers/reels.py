@@ -1870,7 +1870,7 @@ def _recommendation_feed_data(
 
     # A reel opened from a creator, tag, location or search list plays the rest
     # of that list first (from the opened reel on, then the ones before it), and
-    # only then the other reels.
+    # only then the other reels, ranked as related to the opened reel.
     scope_first = None
     if requested_surface == "related" and seed_post and (search.strip() or tag or location or author):
         scoped = _apply_filters(
@@ -1902,8 +1902,11 @@ def _recommendation_feed_data(
     explicit_scope = bool(search.strip() or tag or location or author)
     personalized = requested_surface == "for_you" and sort in {"for_you", "personalized"} and not explicit_scope
     manual_order = None
-    if scope_first is not None or (requested_surface == "for_you" and not personalized):
+    if requested_surface == "for_you" and not personalized:
         manual_order = [path_to_post_id[path] for path in paths if path in path_to_post_id]
+    scope_order = None
+    if scope_first is not None:
+        scope_order = [path_to_post_id[path] for path in scoped_list if path in path_to_post_id]
 
     anonymous_hash = ensure_anonymous_cookie(request, response)
     actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
@@ -1928,6 +1931,7 @@ def _recommendation_feed_data(
             seed_post_id=seed_post.id if seed_post else None,
             allowed_post_ids=allowed_post_ids,
             manual_order=manual_order,
+            scope_order=scope_order,
             filters=feed_filters,
             cursor=cursor,
             limit=limit,

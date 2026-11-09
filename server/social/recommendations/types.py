@@ -50,6 +50,8 @@ class PipelineContext:
     session_id: str
     seed_post_id: str | None
     manual_order: list[str] | None
+    # Posts that play first, in this order; the rest are ranked as usual after them.
+    scope_order: list[str] | None
     items: dict[str, CatalogItem]
     following_ids: set[str]
     creator_affinity: dict[str, float]

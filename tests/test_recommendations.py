@@ -950,6 +950,27 @@ def test_a_reel_opened_from_a_creator_plays_that_creator_first(app):
     assert len(ids) == 9 and set(ids[3:]).isdisjoint(own)
 
 
+
+def test_after_the_creator_the_reels_related_to_the_opened_one_come_next(app):
+    posts = seed_catalog(app, creators=3, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        creator = db.query(User).filter(User.username == "creator_1").one()
+        own = [post.id for post in posts if post.owner_id == creator.id]
+        # posts[7] is an older reel of another creator; it shares a tag with the opened reel.
+        neon = Tag(name="neon", slug="neon")
+        db.add(neon)
+        db.flush()
+        db.add_all([PostTag(post_id=post_id, tag_id=neon.id) for post_id in (own[1], posts[7].id)])
+        db.commit()
+    with TestClient(app) as client:
+        body = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "author": "creator_1", "post": own[1], "limit": 12},
+        ).json()
+    ids = [item["post_id"] for item in body["items"]]
+    assert ids[:3] == [own[1], own[2], own[0]]
+    assert ids[3] == posts[7].id
+
 def test_a_reel_opened_from_a_tag_plays_that_tag_first(app):
     posts = seed_catalog(app, creators=3, posts_per_creator=3)
     tagged = [posts[1].id, posts[4].id, posts[7].id, posts[8].id]
