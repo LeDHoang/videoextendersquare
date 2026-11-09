@@ -133,6 +133,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` | `https://<domain>` | Must be `https://` |
 | `SX_MEDIA_BASE_URL` | `https://media.<domain>` | R2 public bucket custom domain; must be `https://` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BUCKET` | set | Token scoped to the public bucket only |
+| `R2_LOG_BUCKET`, `R2_LOG_ACCESS_KEY_ID`, `R2_LOG_SECRET_ACCESS_KEY` | set | Private upload-log bucket and its own read/write token (`server/upload_log.py`). Unset turns upload logs off |
 | `SX_TRUST_PROXY_HEADERS` | `1` | Correct behind Cloudflare Tunnel (only cloudflared reaches the app) |
 | `SX_COOKIE_SECURE` | `1` | HTTPS-only cookies |
 | `SX_DEV_ORIGINS` | _(empty)_ | Localhost origins are rejected at boot |

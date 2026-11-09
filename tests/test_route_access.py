@@ -40,6 +40,7 @@ admin     PUT    /api/admin/switches
 moderator GET    /api/admin/content
 moderator POST   /api/admin/content/{content_type}/{content_id}/remove
 admin     POST   /api/admin/content/{content_type}/{content_id}/restore
+moderator GET    /api/admin/upload-logs/{post_id}
 moderator GET    /api/admin/users
 moderator GET    /api/admin/users/{user_id}
 admin     POST   /api/admin/users/{user_id}/credits

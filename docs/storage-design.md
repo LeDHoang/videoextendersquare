@@ -21,6 +21,7 @@ R2 is an object store, not a database. Postgres holds the records; R2 holds the 
 | Files of posts removed before 2026-11-01, whose R2 objects were deleted (moderation evidence) | `output` volume, `/app/output/uploads` | Only on this host | No (see `docs/backup-restore-runbook.md` §3) |
 | Media being built: a fresh publish, a lazy rebuild, a fetched original | `output` volume, `/app/output/uploads` | No: dropped when the job ends | No |
 | Staged uploads (picked but not yet published) | Container `/tmp/square_extender_api/uploads` | No: 6 h TTL, lost on restart | No |
+| Upload logs: one trace per upload (staging, processing, publish, encodes) with timing, costs and errors | Private log R2 bucket, `traces/<stage_id>.json` and the pointer `by-post/<post_id>.json` | Yes, until the bucket's lifecycle rule | No |
 | API job results (outpaint, upscale, MAKE 3D) | Container `/tmp/square_extender_api/<job_id>`; once complete, also the public R2 bucket under `jobs/<hash>/` | 30 days in R2 (lifecycle rule) | No |
 | Map-tile cache | `data` volume, `/app/data/map_tiles` | Rebuildable | No |
 | Legacy reel metadata and comments | `output/reels_meta.json`, `output/reels_comments.json` | Legacy | No |
@@ -36,14 +37,15 @@ Outside the VPS:
 
 The compose stack is `app` (uvicorn, one worker), `postgres:16` and `cloudflared`, with the volumes `data`, `output` and `pgdata`. Container `/tmp` is not a volume.
 
-## The two R2 buckets
+## The R2 buckets
 
 | Bucket | Holds | Written by | Read by |
 |---|---|---|---|
 | Public (`R2_PUBLIC_BUCKET`) | Post media, keyed by the path under `output/` (`uploads/<name>`); completed job results (`jobs/<hash>/`) | The app (`server/media_store.py`, `server/output.py`) | Browsers, through `SX_MEDIA_BASE_URL`; the app, when it fetches an original or a job result back |
 | Private backup | `<date>/` folders with the DB dump and the avatars tarball | `deploy/backup.sh` on the host, with its own backup-only token | Restores only |
+| Private upload logs (`R2_LOG_BUCKET`) | Upload traces (`traces/<stage_id>.json`) and their post pointers (`by-post/<post_id>.json`) | The app (`server/upload_log.py`), with its own log-only token (`R2_LOG_ACCESS_KEY_ID`, `R2_LOG_SECRET_ACCESS_KEY`) | Staff, through `GET /api/admin/upload-logs/<post_id>` |
 
-The app's R2 token (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`) reaches the public bucket only. The backup bucket holds no media: published media is not copied anywhere.
+The app's R2 token (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`) reaches the public bucket only. Upload logs hold user ids, server paths and Fal costs, so they never go to the public bucket. The backup bucket holds no media: published media is not copied anywhere.
 
 R2 is on when `SX_MEDIA_BASE_URL` and `R2_PUBLIC_BUCKET` are both set; production requires them (`server/settings.py`). Without them (local development) URLs fall back to the `/media` static mount over `output/`, nothing is uploaded, and nothing is dropped, because the disk then holds the only copy.
 
@@ -185,3 +187,4 @@ Run it in a quiet window (see the limits below).
 | Record column | `server/social/models.py`, `migrations/versions/20261031_0018_post_media_files.py` |
 | One-off prune | `scripts/prune_local_media.py` |
 | Nightly backup | `deploy/backup.sh` |
+| Upload logs | `server/upload_log.py`, hooks in `server/routers/video.py`, `image.py`, `uploads.py` and `server/jobs.py`; read in `server/routers/admin.py` |

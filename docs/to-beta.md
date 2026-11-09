@@ -21,7 +21,7 @@ Ranked view of what is still open in this file; the items themselves, with detai
 - Send one DM on prod and decrypt it from the next nightly backup. The 67 older undecryptable DMs are kept for now (decision 2026-11-01).
 - ~~Check that `privatemedia` has the 30-day lifecycle rule~~ — done 2026-11-07 (confirmed in the dashboard).
 - Quest smoke test on the real domain, and the two-browser pass with two accounts.
-- Publish and delete through the deployed app on real R2; re-time a 95 MB 4K publish on the VPS.
+- Publish and delete through the deployed app on real R2; re-time a 95 MB 4K publish on the VPS. **Publish done 2026-11-09:** `test22` ran upload → Fal extend → local upscale → publish on `echomultiverse.com/upload` (post `96ed4274-cd80-48f8-bf25-1cc83d271189`, see "Latest recorded automated verification"). **Still open:** delete, and the 95 MB re-time.
 
 **3. Before opening registration (public beta):**
 - Age gate, cookie-consent banner, DSAR export, retention periods, refund policy (Privacy section).
@@ -571,6 +571,12 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment. Email verificati
 - [x] Prod-env fixes (2026-09-20): `load_dotenv(override=False)`, immersive-preview behind auth, rewards IP floor removal.
 
 ## Latest recorded automated verification
+
+**2026-11-09 upload pipeline on prod (`echomultiverse.com/upload`, account `test22`):**
+
+- One video went through the whole Upload Studio path: upload, extend on Fal AI, local upscale, publish. It is post `96ed4274-cd80-48f8-bf25-1cc83d271189` (`source: extended`, 3840×3840, 5.1 s), served from `media.echomultiverse.com/uploads/`.
+- The extend was paid with the account's own Fal key (My Fal Key / BYOK). ECHO Credits are off on prod (`/api/billing/quote` → 503 `CREDITS_DISABLED`), and the wallet shows no transactions. A free `upscale_only` + `fast` job also started, with `payment_source: local`.
+- This upload has no trace: it ran before per-upload logs existed. `server/upload_log.py` now writes one trace per upload (staging, processing with Fal timing and costs, publish, background encodes, and any error or cancel) to a private R2 bucket; staff read it at `GET /api/admin/upload-logs/<post_id>`. **To turn it on in prod:** create a private R2 bucket with a lifecycle (retention) rule, an API token with Object Read & Write on that bucket only, and set `R2_LOG_BUCKET`, `R2_LOG_ACCESS_KEY_ID`, `R2_LOG_SECRET_ACCESS_KEY` in the VPS `.env`.
 
 **2026-11-01 VPS checks (prod at `b6af68d`, schema `20261101_0020`):**
 

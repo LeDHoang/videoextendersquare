@@ -37,6 +37,16 @@ TERMINAL_STATUSES = frozenset({JobStatus.COMPLETE, JobStatus.FAILED, JobStatus.C
 _PRIVATE_RESULT_KEYS = ("path", "preview")
 
 
+def _log_outcome(record: "JobRecord", seconds: float | None) -> None:
+    """Add how the job ended to its upload's trace (server/upload_log.py); never raises."""
+    try:
+        from server import upload_log
+
+        upload_log.job_finished(record, seconds)
+    except Exception:
+        logger.exception("Could not log the outcome of job %s", record.job_id)
+
+
 class QueueFull(Exception):
     """A processing slot could not be reserved (server-wide or per-user cap)."""
 
@@ -322,8 +332,10 @@ class JobManager:
                 from server.output import keep
 
                 keep(record)
+                _log_outcome(record, time.monotonic() - t0)
             except JobCancelled as ex:
-                self._finish_cancelled(record, ex, elapsed=fmt_elapsed(time.monotonic() - t0))
+                seconds = time.monotonic() - t0
+                self._finish_cancelled(record, ex, elapsed=fmt_elapsed(seconds), seconds=seconds)
             except Exception as ex:
                 metrics.incr("job_failed")
                 if on_failure is not None:
@@ -336,6 +348,7 @@ class JobManager:
                     record.phase = "FAILED"
                     record.elapsed = fmt_elapsed(time.monotonic() - t0)
                     record.error = format_error(ex)
+                _log_outcome(record, time.monotonic() - t0)
 
         record.future = pool.submit(_run)
 
@@ -373,6 +386,7 @@ class JobManager:
         ex: BaseException,
         elapsed: str | None = None,
         reason: str = "Cancelled by user.",
+        seconds: float | None = None,
     ) -> None:
         if record.on_failure is not None:
             try:
@@ -385,6 +399,7 @@ class JobManager:
             if elapsed is not None:
                 record.elapsed = elapsed
             record.error = ("CANCELLED", reason)
+        _log_outcome(record, seconds)
 
     def cleanup_old(self, max_age_seconds: float | None = None) -> int:
         """Remove finished jobs older than *max_age_seconds* and their job dirs."""

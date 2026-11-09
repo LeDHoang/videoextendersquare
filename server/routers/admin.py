@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from server import kill_switch, media_store
+from server import kill_switch, media_store, upload_log
 from server.billing.service import debit_credits, get_wallet, grant_credits, list_transactions
 from server.jobs import job_manager
 from server.routers.account_safety import erase_account, serialize_report
@@ -581,3 +581,18 @@ def audit_log(
     if target_id:
         query = query.filter(StaffAction.target_id == target_id)
     return keyset_page(query, StaffAction, cursor, limit, lambda row: serialize_action(db, row))
+
+
+@router.get("/upload-logs/{post_id}")
+def upload_log_for_post(post_id: str, context: AuthContext = Depends(require_moderator)):
+    """The upload trace of a post: each step from staging to the background encodes, with timing and errors."""
+    del context
+    if not upload_log.enabled():
+        fail(503, "UPLOAD_LOGS_OFF", "Upload logging is not configured (R2_LOG_BUCKET).")
+    try:
+        trace = upload_log.read_by_post(post_id)
+    except Exception:
+        fail(503, "UPLOAD_LOGS_UNAVAILABLE", "The upload log bucket could not be read. Try later.")
+    if trace is None:
+        fail(404, "UPLOAD_LOG_NOT_FOUND", "No upload log for this post.")
+    return trace

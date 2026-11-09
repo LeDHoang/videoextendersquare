@@ -14,6 +14,7 @@ import re
 import shutil
 import uuid
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import kill_switch, media_store, metrics, output, quotas, trust
+from server import kill_switch, media_store, metrics, output, quotas, trust, upload_log
 from server.jobs import JobStatus, job_manager
 from server.social.auth import AuthContext, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
@@ -441,20 +442,29 @@ def _fetch_inputs(dest: Path, rel: str) -> bool:
     return True
 
 
-def _run_derived_job(dest: Path, rel: str, build) -> None:
+def _run_derived_job(dest: Path, rel: str, build, trace_id: str | None = None) -> None:
     """Run *build* for a published upload, then tidy up whatever happened."""
     from server.routers import reels as reels_router
 
+    started = time.monotonic()
+    outcome, error = "ok", None
     try:
         if _fetch_inputs(dest, rel):
             build()
         else:
             logger.warning("The original of %s is neither on disk nor in R2", dest.name)
             metrics.incr("derived_failed")
-    except Exception:
+            outcome = "original_missing"
+    except Exception as ex:
         logger.exception("Derived assets of %s failed", dest.name)
         metrics.incr("derived_failed")
+        outcome, error = "error", repr(ex)
     finally:
+        upload_log.record(
+            trace_id, "assets_built", outcome=outcome, error=error,
+            ms=round((time.monotonic() - started) * 1000),
+            files=[path.name for path in SM.derived_files(dest)[1:] if path.is_file()],
+        )
         SM.discard_part_files(dest)
         SM.clear_derived_pending(dest)
         # R2 holds the post now, deleted or not.
@@ -462,10 +472,10 @@ def _run_derived_job(dest: Path, rel: str, build) -> None:
         reels_router.invalidate_scan_cache()
 
 
-def _queue_derived_assets(dest: Path, rel: str, build) -> bool:
+def _queue_derived_assets(dest: Path, rel: str, build, trace_id: str | None = None) -> bool:
     SM.mark_derived_pending(dest)
     try:
-        _submit_derived_assets(lambda: _run_derived_job(dest, rel, build))
+        _submit_derived_assets(lambda: _run_derived_job(dest, rel, build, trace_id))
     except RuntimeError:
         # Shutting down; the next boot queues it again (requeue_missing_derived)
         # and /explore-preview builds the grid assets on demand meanwhile.
@@ -539,6 +549,31 @@ def publish_upload(
     db: Session = Depends(get_db),
 ):
     """Copy the chosen file into output/uploads/ and create an owned post."""
+    trace_id = req.stage_id or upload_log.trace_for_job(req.job_id)
+    started = time.monotonic()
+    try:
+        body = _publish_upload(req, request, context, db, trace_id)
+    except Exception as ex:
+        upload_log.record(
+            trace_id, "publish_failed", user_id=context.user.id, job_id=req.job_id,
+            ms=round((time.monotonic() - started) * 1000),
+            error=ex.detail if isinstance(ex, HTTPException) else repr(ex),
+        )
+        raise
+    upload_log.record(
+        trace_id, "publish", post_id=body["post_id"], user_id=context.user.id, kind=req.kind,
+        job_id=req.job_id, rel_path=body["rel_path"], ms=round((time.monotonic() - started) * 1000),
+    )
+    return body
+
+
+def _publish_upload(
+    req: PublishRequest,
+    request: Request,
+    context: AuthContext,
+    db: Session,
+    trace_id: str | None,
+):
     from server.routers import reels as reels_router
 
     kill_switch.require_open(db, paid=False)
@@ -674,9 +709,9 @@ def publish_upload(
         raise
 
     if stereo_video:
-        _queue_derived_assets(dest, rel, lambda: _build_stereo_video_assets(dest, stereo))
+        _queue_derived_assets(dest, rel, lambda: _build_stereo_video_assets(dest, stereo), trace_id)
     elif req.kind == "video":
-        _queue_derived_assets(dest, rel, lambda: _build_video_assets(dest))
+        _queue_derived_assets(dest, rel, lambda: _build_video_assets(dest), trace_id)
     # The job records what it built in its own session; read that back.
     db.refresh(post)
     reels_router.invalidate_scan_cache()

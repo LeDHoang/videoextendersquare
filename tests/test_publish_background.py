@@ -373,3 +373,30 @@ def test_startup_sweep_removes_stale_part_files(tmp_path, monkeypatch):
     (uploads_dir / "clip.mp4").write_bytes(b"keep")
     assert SM.sweep_part_files() == 1
     assert [path.name for path in uploads_dir.iterdir()] == ["clip.mp4"]
+
+
+def test_publish_and_its_encodes_land_in_the_upload_log(setup, tmp_path, monkeypatch):
+    from server import upload_log
+    from test_upload_log import FakeLogS3
+
+    monkeypatch.setenv("R2_LOG_BUCKET", "upload-logs")
+    monkeypatch.setenv("R2_LOG_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("R2_LOG_SECRET_ACCESS_KEY", "secret")
+    logs = FakeLogS3()
+    upload_log.set_client(logs)
+    try:
+        client, Session, s3, ffmpeg, futures = setup
+        body = publish_video(client, tmp_path)
+        ffmpeg.gate.set()
+        futures[0].result(timeout=10)
+        upload_log.flush()
+
+        trace = upload_log.read_by_post(body["post_id"])
+        assert trace["trace_id"] == "bg-video"
+        events = {event["event"]: event for event in trace["events"]}
+        assert events["publish"]["rel_path"] == body["rel_path"]
+        assert isinstance(events["publish"]["ms"], int)
+        assert events["assets_built"]["outcome"] == "ok"
+        assert any(name.endswith("-explore.mp4") for name in events["assets_built"]["files"])
+    finally:
+        upload_log.set_client(None)

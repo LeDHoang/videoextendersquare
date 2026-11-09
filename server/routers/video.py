@@ -22,6 +22,7 @@ from server.billing.service import BillingError, create_billing_job, finalize_jo
 from pipeline.video_worker import process_video
 from pipeline.stereo_detect import detect_stereo
 from server import media as SM
+from server import upload_log
 from server import output
 from server import kill_switch, quotas, trust
 from server.jobs import JobStatus, QueueFull, job_manager, public_result
@@ -148,6 +149,7 @@ def upload_video(
     """
     validate_origin(request)
     quotas.check_upload_rate(db, request, context)
+    started = time.monotonic()
     stage_id = uuid.uuid4().hex[:10]
     try:
         dest_path, size_bytes = SM.stage_upload_stream(
@@ -167,6 +169,11 @@ def upload_video(
     shown_w, shown_h, _ = get_video_dimensions_and_duration(dest_path, display=True)
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
+    upload_log.record(
+        stage_id, "upload", kind="video", user_id=context.user.id, filename=file.filename,
+        size_bytes=size_bytes, width=w, height=h, duration=round(dur, 2),
+        ms=round((time.monotonic() - started) * 1000),
+    )
 
     return {
         "stage_id": stage_id,
@@ -408,6 +415,11 @@ def start_video_process(
         rec["download_url"] = f"/api/video/jobs/{job_id}/download"
         return rec
 
+    upload_log.link_job(job_id, stage_id)
+    upload_log.record(
+        stage_id, "process_queued", kind="video", job_id=job_id, user_id=owner_id,
+        payment_source=payment_source if cloud_required else "local", params=params,
+    )
     try:
         job_manager.submit(
             job_id,
@@ -419,6 +431,7 @@ def start_video_process(
         )
     except Exception as exc:
         job_manager.discard_job(job_id)
+        upload_log.record(stage_id, "process_enqueue_failed", job_id=job_id, error=repr(exc))
         if cloud_required:
             finalize_job_failure(db, job_id, error_code="enqueue_failed")
         message = "Processing could not be queued."
