@@ -7562,6 +7562,17 @@ window.WebXRVR = window.WebXRVR || (function () {
     return true;
   }
 
+  // three uploads a map lazily at the first draw that samples it: for the
+  // screen that is midway through the left eye, after the world is drawn.
+  // Quest's tiled GPU then drops the screen from some tiles of that eye (the
+  // world shows through in flickering blocks), so upload before any draw.
+  function uploadScreenMapsBeforeDraw() {
+    for (const mesh of [screenMesh, eyeMeshL, eyeMeshR]) {
+      const map = mesh && mesh.visible && mesh.material.visible && mesh.material.map;
+      if (map) renderer.initTexture(map);
+    }
+  }
+
   function releaseDirectVideoBinding() {
     if (eyeTextures && eyeTextures.base === directVideoTexture) releaseEyeTextures();
     if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
@@ -11803,6 +11814,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           vrLastUiUploadT = time;
           updateUiTextures();
         }
+        uploadScreenMapsBeforeDraw();
         renderer.render(scene, camera);
         postXRDiag(time);
       });

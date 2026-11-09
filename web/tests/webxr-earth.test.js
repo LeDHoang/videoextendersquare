@@ -6063,6 +6063,58 @@ test('each eye texture re-uploads on every stereo video frame (no first-frame fr
   renderer.stopPreview();
 });
 
+// Quest's tiled GPU drops the video draw from some screen tiles of the left eye
+// (the world shows through) when the video uploads between that eye's draws.
+test('an XR frame uploads the stereo video before its first draw call', async () => {
+  const calls = [];
+  const base = makeMockGl({ deleted: 0 });
+  const gl = new Proxy(base, {
+    get(target, prop) {
+      const value = target[prop];
+      if (prop === 'texImage2D' || prop === 'texSubImage2D') return (...args) => { calls.push(args.at(-1)); return value(...args); };
+      if (prop === 'drawElements' || prop === 'drawArrays') return (...args) => { calls.push('draw'); return value(...args); };
+      return value;
+    },
+  });
+  const source = stereoVideo('tb-xr', 'tb', 1920, 3840);
+  source.element.HAVE_CURRENT_DATA = 2; // three's VideoTexture polls this without requestVideoFrameCallback
+  const XRWebGLLayer = class {
+    constructor() { this.framebuffer = null; this.framebufferWidth = 200; this.framebufferHeight = 100; }
+    getViewport(view) { return view.viewport; }
+  };
+  const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1.6, 0, 1];
+  const transform = { position: { x: 0, y: 1.6, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 }, matrix: identity };
+  const eyeView = (eye, x) => ({
+    eye,
+    transform,
+    projectionMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.002, -1, 0, 0, -0.2002, 0],
+    viewport: { x, y: 0, width: 100, height: 100 },
+  });
+  const pose = { transform, views: [eyeView('left', 0), eyeView('right', 100)] };
+  const renderer = loadRenderer({ gl, globals: { XRWebGLLayer } });
+  renderer.init(source.element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  let xrFrame = null;
+  const session = makeLiveXrSession({ requestAnimationFrame: (cb) => { xrFrame = cb; return 1; } });
+  await renderer.enterVR({ xr: { requestSession: async () => session } });
+  assert.equal(typeof xrFrame, 'function', 'precondition: the XR loop is scheduled');
+  for (let i = 0; i < 3; i++) {
+    source.currentTime += 1;
+    source.element.currentTime += 1;
+    calls.length = 0;
+    xrFrame(16 * (i + 1), { session, getViewerPose: () => pose });
+    const firstDraw = calls.indexOf('draw');
+    const upload = calls.indexOf(source.element);
+    assert.ok(firstDraw >= 0, `frame ${i} draws`);
+    assert.ok(upload >= 0, `frame ${i} uploads the new video frame`);
+    assert.ok(upload < firstDraw, `frame ${i}: video upload (call ${upload}) precedes the first draw (call ${firstDraw})`);
+  }
+  assert.equal(renderer.__test.getStereoState().eyesAreVideo, true);
+});
+
 test('a top-bottom image uses a 2048x4096 proxy with the left eye on top', () => {
   const image = {
     kind: 'image', element: { complete: true, naturalWidth: 1920, naturalHeight: 3840 },
