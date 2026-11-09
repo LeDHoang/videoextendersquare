@@ -400,15 +400,6 @@ export default function ProfilePage() {
                     {profile.website.replace(/^https?:\/\//, '')} ↗
                   </a>
                 ) : null}
-                {profile.top_tags?.length ? (
-                  <div className="sx-pf-tags" aria-label="Most used tags">
-                    {profile.top_tags.map((tag) => (
-                      <Link key={tag.slug} to={'/explore/tag/' + encodeURIComponent(tag.slug)} className="sx-pf-tag" title={tag.count + ' post' + (tag.count === 1 ? '' : 's')}>
-                        <span aria-hidden="true">#</span>{tag.name}
-                      </Link>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
             <div className="sx-pf-actions">

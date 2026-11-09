@@ -64,9 +64,7 @@ from server.social.models import (
     Post,
     PostLike,
     PostSave,
-    PostTag,
     ReelPackView,
-    Tag,
     User,
     UserBlock,
     ViewDedup,
@@ -708,32 +706,20 @@ def change_password(
     return {"ok": True}
 
 
-PROFILE_TOP_TAGS = 6
 PROFILE_POST_SORTS = {"newest", "views", "likes"}
 
 
 def profile_stats(db: Session, owner_id: str) -> dict:
-    """Public aggregates for a profile header: total likes received and the
-    creator's most-used tags. Counts only published, non-deleted posts."""
+    """Public aggregates for a profile header: total likes received.
+    Counts only published, non-deleted posts."""
     published = and_(
         Post.owner_id == owner_id,
         Post.status == "published",
         Post.deleted_at.is_(None),
     )
     like_total = db.query(func.coalesce(func.sum(Post.like_count), 0)).filter(published).scalar()
-    tag_rows = (
-        db.query(Tag.name, Tag.slug, func.count(PostTag.post_id).label("uses"))
-        .join(PostTag, PostTag.tag_id == Tag.id)
-        .join(Post, Post.id == PostTag.post_id)
-        .filter(published)
-        .group_by(Tag.id, Tag.name, Tag.slug)
-        .order_by(func.count(PostTag.post_id).desc(), Tag.name.asc())
-        .limit(PROFILE_TOP_TAGS)
-        .all()
-    )
     return {
         "like_count": int(like_total or 0),
-        "top_tags": [{"name": name, "slug": slug, "count": int(uses)} for name, slug, uses in tag_rows],
     }
 
 

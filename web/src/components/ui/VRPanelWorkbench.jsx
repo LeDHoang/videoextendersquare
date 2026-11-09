@@ -206,7 +206,6 @@ function shellRequest(path, query) {
       user: {
         ...p, avatar_color: '#ff3b1f', created_at: daysAgo(420), website: 'https://mika.example/tokyo',
         bio: 'Night walks through Tokyo in stereo 3D. Rain, neon and quiet backstreets, shot handheld on a 360 rig.',
-        top_tags: [{ name: 'tokyo', slug: 'tokyo' }, { name: 'night', slug: 'night' }, { name: 'rain', slug: 'rain' }],
         post_count: 9, follower_count: 12400, following_count: 310, like_count: 86300, is_following: false,
       },
     };

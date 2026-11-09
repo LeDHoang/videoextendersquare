@@ -365,7 +365,7 @@ def test_profile_stats_top_tags_and_post_sorting(app):
 
         profile = viewer_client.get("/api/users/stats_owner").json()["user"]
         assert profile["like_count"] == 9
-        assert [(t["slug"], t["count"]) for t in profile["top_tags"]] == [("neon", 2), ("retro", 1)]
+        assert "top_tags" not in profile
 
         def ids(sort, **extra):
             body = viewer_client.get("/api/users/stats_owner/posts", params={"sort": sort, **extra}).json()
