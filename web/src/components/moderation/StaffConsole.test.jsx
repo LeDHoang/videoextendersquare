@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AuditPanel from './AuditPanel.jsx';
 import ContentPanel from './ContentPanel.jsx';
+import UploadLogsPanel from './UploadLogsPanel.jsx';
 import UserDetail from './UserDetail.jsx';
 import UsersPanel from './UsersPanel.jsx';
 
@@ -177,5 +178,52 @@ describe('AuditPanel', () => {
     expect(onOpenUser).toHaveBeenCalledWith('u1');
     fireEvent.click(screen.getByText('LOAD MORE'));
     await waitFor(() => expect(mocks.api.get).toHaveBeenLastCalledWith('/api/admin/audit', { actor: '', target_id: '', action: '', limit: 50, cursor: 'next' }));
+  });
+});
+
+describe('UploadLogsPanel', () => {
+  const row = {
+    id: 'stage1', user_id: 'u1', username: 'bob', kind: 'video', filename: 'beach.mp4', status: 'failed',
+    job_id: 'job1', post_id: null, size_bytes: 3 * 1024 * 1024, process_ms: 41200, cost: 0.35, error: 'Fal timed out',
+    event_count: 3, file_count: 1, created_at: '2026-11-09T10:00:00.000+00:00', updated_at: '2026-11-09T10:01:00.000+00:00',
+  };
+  const trace = {
+    summary: row,
+    trace: { events: [
+      { event: 'upload', at: '2026-11-09T10:00:00.120+00:00', ms: 120, filename: 'beach.mp4' },
+      { event: 'process_failed', at: '2026-11-09T10:01:00.000+00:00', ms: 41200, error: { headline: 'Fal timed out' } },
+    ] },
+    files: [
+      { role: 'source', filename: 'beach.mp4', size_bytes: 3145728, content_type: 'video/mp4', url: 'https://signed.example/a', expired: false },
+      { role: 'result', filename: 'result_preview.mp4', size_bytes: null, content_type: 'video/mp4', url: null, expired: true },
+    ],
+  };
+
+  it('filters, sorts and opens one upload with its files and timeline', async () => {
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path.includes('/trace/') ? trace : { items: [row], next_cursor: null }));
+    const onOpenUser = vi.fn();
+    render(<UploadLogsPanel onOpenUser={onOpenUser} />);
+    await waitFor(() => expect(screen.getByText('beach.mp4')).toBeTruthy());
+    expect(screen.getByText('Fal timed out')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'failed' } });
+    fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'cost' } });
+    fireEvent.click(screen.getByLabelText('Sort order'));
+    fireEvent.change(screen.getByLabelText('Uploader'), { target: { value: ' @bob ' } });
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(mocks.api.get).toHaveBeenLastCalledWith('/api/admin/upload-logs', {
+      q: '', user: '@bob', status: 'failed', kind: '', sort: 'cost', order: 'asc', limit: 25,
+    }));
+
+    await waitFor(() => expect(screen.getByText('beach.mp4')).toBeTruthy());
+    fireEvent.click(screen.getByText('@bob'));
+    expect(onOpenUser).toHaveBeenCalledWith('u1');
+    fireEvent.click(screen.getByRole('button', { name: 'beach.mp4' }));
+    await waitFor(() => expect(screen.getByText('DOWNLOAD')).toBeTruthy());
+    expect(screen.getByText(/EXPIRED \(JOB RESULTS ARE DELETED AFTER 30 DAYS\)/)).toBeTruthy();
+    expect(document.querySelectorAll('video')).toHaveLength(1);
+    expect(mocks.api.get).toHaveBeenLastCalledWith('/api/admin/upload-logs/trace/stage1');
+    expect(document.querySelector('video').getAttribute('src')).toBe('https://signed.example/a');
+    expect(screen.getByText('process_failed')).toBeTruthy();
   });
 });

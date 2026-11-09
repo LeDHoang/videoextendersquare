@@ -1885,6 +1885,48 @@ button:hover .sx-sidebar-hero-logo,
   cursor: pointer;
 }
 
+/* Upload logs tab: one upload's kept files and event timeline. */
+.sx-upload-detail {
+  display: grid;
+  gap: var(--sx-2);
+  margin-top: var(--sx-2);
+}
+
+.sx-upload-file {
+  display: grid;
+  gap: 4px;
+}
+
+.sx-upload-file video,
+.sx-upload-file img {
+  max-width: 100%;
+  max-height: 320px;
+  background: var(--sx-bg);
+}
+
+.sx-upload-events {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sx-upload-events pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--sx-rule);
+  font-family: var(--sx-font-mono);
+  font-size: 0.8em;
+  white-space: pre-wrap;
+}
+
+.sx-upload-error {
+  color: var(--sx-warn-hi);
+}
+
 /* Unfilled legal values: loud on purpose so a placeholder can't ship unnoticed */
 .sx-legal-todo {
   padding: 0 4px;

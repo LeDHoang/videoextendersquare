@@ -10,18 +10,31 @@ Traces hold user ids, server paths and Fal costs, so they go to their own
 bucket (``R2_LOG_BUCKET``) with their own token, never the public media bucket.
 Without ``R2_LOG_BUCKET`` and its keys every call is a no-op.
 
+Every event also updates the trace's row in the ``upload_traces`` table, so
+staff can filter and sort uploads (the moderation page's Upload logs tab).
+The upload's own file is copied to ``files/<trace_id>/`` in the same bucket
+(:func:`attach`), so staff can review it later: staged uploads only live in the
+container's /tmp. The job's result is not copied: ``output.keep`` already stores
+it in the public bucket under ``jobs/<hash>/``, so the ``process_complete`` event
+records that key (``result_key``) and staff open it there until the ``jobs/``
+lifecycle rule deletes it (:data:`JOB_RESULT_DAYS`).
+
 Logging never fails the pipeline: writes run on one background thread (which
 also keeps each trace's events in order) and errors are only logged locally.
+File copies run on a second thread, so a large video never delays events.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 
 from server import media_store
 
@@ -29,12 +42,29 @@ logger = logging.getLogger(__name__)
 
 TRACE_PREFIX = "traces/"
 POST_PREFIX = "by-post/"
+FILE_PREFIX = "files/"
 JOB_MESSAGES_KEPT = 40
+FILE_URL_SECONDS = 15 * 60
+# The public bucket's lifecycle rule deletes ``jobs/`` objects after this many days.
+JOB_RESULT_DAYS = 30
+# How each event moves the upload along; other events leave the status as it is.
+STATUS_BY_EVENT = {
+    "upload": "staged",
+    "process_queued": "processing",
+    "process_complete": "processed",
+    "process_failed": "failed",
+    "process_cancelled": "cancelled",
+    "process_enqueue_failed": "failed",
+    "publish": "published",
+    "publish_failed": "publish_failed",
+}
 
 _client = None
 _client_lock = threading.Lock()
 _writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="upload-log")
 _last_write: Future | None = None
+_files = ThreadPoolExecutor(max_workers=1, thread_name_prefix="upload-log-files")
+_last_file: Future | None = None
 # job_id -> trace_id, so job events and a publish by job_id find their upload.
 _job_traces: dict[str, str] = {}
 
@@ -113,6 +143,63 @@ def _append(trace_id: str, event: dict, post_id: str | None) -> None:
             _put(f"{POST_PREFIX}{post_id}.json", {"trace_id": trace_id, "post_id": post_id})
     except Exception as ex:
         logger.warning("Upload log %s: could not write the %s event: %s", trace_id, event.get("event"), ex)
+    try:
+        _index(trace_id, event, post_id)
+    except Exception as ex:
+        logger.warning("Upload log %s: could not index the %s event: %s", trace_id, event.get("event"), ex)
+
+
+def _error_text(error) -> str | None:
+    if not error:
+        return None
+    if isinstance(error, dict):
+        error = error.get("headline") or error.get("detail") or json.dumps(error, default=str)
+    return str(error)[:500]
+
+
+def _cost(metrics) -> float | None:
+    if not isinstance(metrics, dict):
+        return None
+    costs = [value for key, value in metrics.items() if key.endswith("_cost") and isinstance(value, (int, float))]
+    return round(sum(costs), 4) if costs else None
+
+
+def _index(trace_id: str, event: dict, post_id: str | None) -> None:
+    """Fold one event into the trace's ``upload_traces`` row."""
+    from server.social import database
+    from server.social.models import UploadTrace
+
+    name = event["event"]
+    at = datetime.fromisoformat(event["at"])
+    db = database.SessionLocal()
+    try:
+        row = db.get(UploadTrace, trace_id)
+        if row is None:
+            row = UploadTrace(id=trace_id, status="staged", created_at=at, event_count=0, file_count=0)
+            db.add(row)
+        row.updated_at = at
+        row.event_count = (row.event_count or 0) + 1
+        row.status = STATUS_BY_EVENT.get(name, row.status)
+        for field in ("user_id", "kind", "job_id"):
+            if event.get(field):
+                setattr(row, field, str(event[field]))
+        if post_id:
+            row.post_id = post_id
+        if name == "upload":
+            row.filename = (event.get("filename") or "")[:255] or None
+            row.size_bytes = event.get("size_bytes")
+        if name.startswith("process_") and name != "process_queued":
+            row.process_ms = event.get("ms")
+            row.cost = _cost(event.get("metrics"))
+        if name == "process_complete":
+            row.error = None
+        elif name.endswith("_failed") and name != "attachment_failed":
+            row.error = _error_text(event.get("error"))
+        if name == "attachment":
+            row.file_count = (row.file_count or 0) + 1
+        db.commit()
+    finally:
+        db.close()
 
 
 def record(trace_id: str | None, event: str, *, post_id: str | None = None, **fields) -> None:
@@ -128,10 +215,48 @@ def record(trace_id: str | None, event: str, *, post_id: str | None = None, **fi
 
 
 def flush(timeout: float = 10.0) -> None:
-    """Wait until queued events are written (tests, shutdown)."""
-    pending = _last_write
-    if pending is not None:
-        pending.result(timeout=timeout)
+    """Wait until queued file copies and events are written (tests, shutdown)."""
+    if _last_file is not None:
+        _last_file.result(timeout=timeout)
+    # Read after the copies finish: each copy queues an event of its own.
+    if _last_write is not None:
+        _last_write.result(timeout=timeout)
+
+
+def attach(trace_id: str | None, role: str, path, *, filename: str | None = None) -> None:
+    """Queue a copy of one file of the upload (``source``, ``result``) to the log bucket; never raises."""
+    global _last_file
+    if not trace_id or not path or not enabled():
+        return
+    try:
+        _last_file = _files.submit(_store_file, trace_id, role, str(path), filename)
+    except RuntimeError:
+        logger.warning("Upload log %s: file writer stopped, %s file dropped", trace_id, role)
+
+
+def _store_file(trace_id: str, role: str, path: str, filename: str | None) -> None:
+    source = Path(path)
+    key = f"{FILE_PREFIX}{trace_id}/{role}{source.suffix.lower()}"
+    content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    started = time.monotonic()
+    try:
+        size = source.stat().st_size
+        client().upload_file(str(source), _bucket(), key, ExtraArgs={"ContentType": content_type})
+    except Exception as ex:
+        logger.warning("Upload log %s: could not copy the %s file: %s", trace_id, role, ex)
+        record(trace_id, "attachment_failed", role=role, error=str(ex)[:300])
+        return
+    record(
+        trace_id, "attachment", role=role, key=key, filename=filename or source.name,
+        size_bytes=size, content_type=content_type, ms=round((time.monotonic() - started) * 1000),
+    )
+
+
+def file_url(key: str) -> str:
+    """A short-lived signed link to a copied file (the log bucket is private)."""
+    return client().generate_presigned_url(
+        "get_object", Params={"Bucket": _bucket(), "Key": key}, ExpiresIn=FILE_URL_SECONDS,
+    )
 
 
 def link_job(job_id: str, trace_id: str) -> None:
@@ -162,7 +287,26 @@ def job_finished(record_, seconds: float | None) -> None:
     if record_.error:
         fields["error"] = {"headline": record_.error[0], "detail": record_.error[1]}
     fields["messages"] = list(record_.messages[-JOB_MESSAGES_KEPT:])
+    if status == "complete":
+        fields["result_key"] = _result_key(record_)
     record(trace_id, f"process_{status}", **fields)
+
+
+def _result_key(record_) -> str | None:
+    """Public-bucket key of the job's kept result (``output.keep``), or None when it kept none."""
+    from server import output
+
+    result = record_.result if isinstance(record_.result, dict) else {}
+    # The H.264 preview plays in any browser; the HEVC master may not.
+    path = result.get("preview") or result.get("path")
+    if not (path and media_store.enabled()):
+        return None
+    return output._r2_prefix(record_.job_id) + Path(path).name
+
+
+def read_trace(trace_id: str) -> dict | None:
+    """The trace *trace_id*, or None. Raises when R2 fails."""
+    return _get(f"{TRACE_PREFIX}{trace_id}.json")
 
 
 def read_by_post(post_id: str) -> dict | None:

@@ -95,6 +95,7 @@ def upload_image(
         stage_id, "upload", kind="image", user_id=context.user.id, filename=file.filename,
         size_bytes=size_bytes, width=w, height=h, ms=round((time.monotonic() - started) * 1000),
     )
+    upload_log.attach(stage_id, "source", dest_path, filename=file.filename)
 
     return {
         "stage_id": stage_id,

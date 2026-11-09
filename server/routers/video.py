@@ -174,6 +174,7 @@ def upload_video(
         size_bytes=size_bytes, width=w, height=h, duration=round(dur, 2),
         ms=round((time.monotonic() - started) * 1000),
     )
+    upload_log.attach(stage_id, "source", dest_path, filename=file.filename)
 
     return {
         "stage_id": stage_id,

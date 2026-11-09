@@ -8,7 +8,9 @@ staff_actions row in the same transaction.
 
 from __future__ import annotations
 
+import mimetypes
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -40,6 +42,7 @@ from server.social.models import (
     StaffAction,
     StripePurchase,
     SupportRequest,
+    UploadTrace,
     User,
     utcnow,
 )
@@ -596,3 +599,150 @@ def upload_log_for_post(post_id: str, context: AuthContext = Depends(require_mod
     if trace is None:
         fail(404, "UPLOAD_LOG_NOT_FOUND", "No upload log for this post.")
     return trace
+
+
+UPLOAD_LOG_SORTS = {
+    "created_at": UploadTrace.created_at,
+    "updated_at": UploadTrace.updated_at,
+    "process_ms": UploadTrace.process_ms,
+    "cost": UploadTrace.cost,
+    "size_bytes": UploadTrace.size_bytes,
+}
+UPLOAD_LOG_STATUSES = sorted(set(upload_log.STATUS_BY_EVENT.values()))
+
+
+def serialize_upload_trace(row: UploadTrace, usernames: dict[str, str]) -> dict:
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "username": usernames.get(row.user_id or ""),
+        "kind": row.kind,
+        "filename": row.filename,
+        "status": row.status,
+        "job_id": row.job_id,
+        "post_id": row.post_id,
+        "size_bytes": row.size_bytes,
+        "process_ms": row.process_ms,
+        "cost": row.cost,
+        "error": row.error,
+        "event_count": row.event_count,
+        "file_count": row.file_count,
+        "created_at": iso(row.created_at),
+        "updated_at": iso(row.updated_at),
+    }
+
+
+def _usernames(db: Session, user_ids) -> dict[str, str]:
+    ids = {user_id for user_id in user_ids if user_id}
+    if not ids:
+        return {}
+    return dict(db.query(User.id, User.username).filter(User.id.in_(ids)).all())
+
+
+@router.get("/upload-logs")
+def list_upload_logs(
+    q: str = "",
+    user: str = "",
+    status: str = "",
+    kind: Literal["", "video", "image"] = "",
+    sort: Literal["created_at", "updated_at", "process_ms", "cost", "size_bytes"] = "created_at",
+    order: Literal["desc", "asc"] = "desc",
+    cursor: str | None = None,
+    limit: int = 25,
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    """Uploads from the trace index, filtered and sorted. The cursor is a plain offset:
+    sorts other than time make keyset paging awkward, and staff lists stay small."""
+    del context
+    limit = max(1, min(int(limit), 50))
+    offset = int(cursor) if cursor and cursor.isdigit() else 0
+    query = db.query(UploadTrace)
+    term = q.strip()
+    if term:
+        query = query.filter(or_(
+            UploadTrace.id == term,
+            UploadTrace.job_id == term,
+            UploadTrace.post_id == term,
+            UploadTrace.filename.icontains(term, autoescape=True),
+        ))
+    if user.strip():
+        user_ids = select(User.id).where(User.username_norm == user.strip().lstrip("@").casefold())
+        query = query.filter(UploadTrace.user_id.in_(user_ids))
+    if status:
+        query = query.filter(UploadTrace.status == status)
+    if kind:
+        query = query.filter(UploadTrace.kind == kind)
+    column = UPLOAD_LOG_SORTS[sort]
+    ordered = column.desc() if order == "desc" else column.asc()
+    rows = (
+        query.order_by(ordered.nulls_last(), UploadTrace.id.desc() if order == "desc" else UploadTrace.id.asc())
+        .offset(offset).limit(limit + 1).all()
+    )
+    more = len(rows) > limit
+    rows = rows[:limit]
+    usernames = _usernames(db, (row.user_id for row in rows))
+    return {
+        "items": [serialize_upload_trace(row, usernames) for row in rows],
+        "next_cursor": str(offset + limit) if more else None,
+        "statuses": UPLOAD_LOG_STATUSES,
+    }
+
+
+@router.get("/upload-logs/trace/{trace_id}")
+def upload_log_detail(
+    trace_id: str,
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    """One upload: its index row, every event from R2, a signed link to its copied source,
+    and the public link to its job result (gone once the ``jobs/`` lifecycle rule deletes it)."""
+    del context
+    if not upload_log.enabled():
+        fail(503, "UPLOAD_LOGS_OFF", "Upload logging is not configured (R2_LOG_BUCKET).")
+    row = db.get(UploadTrace, trace_id)
+    try:
+        trace = upload_log.read_trace(trace_id)
+    except Exception:
+        fail(503, "UPLOAD_LOGS_UNAVAILABLE", "The upload log bucket could not be read. Try later.")
+    if trace is None and row is None:
+        fail(404, "UPLOAD_LOG_NOT_FOUND", "No upload log with this id.")
+    files = []
+    for event in (trace or {}).get("events", []):
+        if event.get("event") != "attachment" or not event.get("key"):
+            continue
+        try:
+            url = upload_log.file_url(event["key"])
+        except Exception:
+            url = None
+        files.append({
+            "role": event.get("role"),
+            "filename": event.get("filename"),
+            "size_bytes": event.get("size_bytes"),
+            "content_type": event.get("content_type"),
+            "url": url,
+            "expired": False,
+        })
+    completed = [
+        event for event in (trace or {}).get("events", [])
+        if event.get("event") == "process_complete" and event.get("result_key")
+    ]
+    if completed:
+        event = completed[-1]
+        key = event["result_key"]
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(event["at"])
+        expired = age > timedelta(days=upload_log.JOB_RESULT_DAYS)
+        files.append({
+            "role": "result",
+            "filename": key.rsplit("/", 1)[-1],
+            "size_bytes": None,
+            "content_type": mimetypes.guess_type(key)[0],
+            "url": None if expired else media_store.public_url(key),
+            "expired": expired,
+        })
+    usernames = _usernames(db, [row.user_id] if row else [])
+    return {
+        "summary": serialize_upload_trace(row, usernames) if row else None,
+        "trace": trace,
+        "files": files,
+    }

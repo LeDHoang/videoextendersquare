@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -836,6 +837,34 @@ class AppSetting(Base):
     value = Column(JSON, nullable=False)
     updated_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class UploadTrace(Base):
+    """Searchable summary of one upload trace; the full events live in the R2 log bucket.
+
+    Written by ``server.upload_log`` on every event. ``user_id`` has no foreign key:
+    the log outlives a deleted account.
+    """
+
+    __tablename__ = "upload_traces"
+
+    id = Column(String(64), primary_key=True)  # the trace id (stage id)
+    user_id = Column(String(36), nullable=True, index=True)
+    kind = Column(String(8), nullable=True)
+    filename = Column(String(255), nullable=True)
+    status = Column(String(24), nullable=False, default="staged")
+    job_id = Column(String(64), nullable=True, index=True)
+    post_id = Column(String(36), nullable=True, index=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    process_ms = Column(Integer, nullable=True)
+    cost = Column(Float, nullable=True)
+    error = Column(String(500), nullable=True)
+    event_count = Column(Integer, nullable=False, default=0)
+    file_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (Index("ix_upload_traces_status_created", "status", "created_at"),)
 
 
 class Conversation(Base):

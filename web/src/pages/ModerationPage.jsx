@@ -11,6 +11,7 @@ import { OpsPanel, OverviewPanel } from '../components/moderation/OverviewDashbo
 import ReportTarget from '../components/moderation/ReportTarget.jsx';
 import StaffActionDialog from '../components/moderation/StaffActionDialog.jsx';
 import UserDetail from '../components/moderation/UserDetail.jsx';
+import UploadLogsPanel from '../components/moderation/UploadLogsPanel.jsx';
 import UsersPanel from '../components/moderation/UsersPanel.jsx';
 import { when } from '../components/moderation/usePagedList.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
@@ -21,6 +22,7 @@ const TABS = [
   { value: 'support', label: 'SUPPORT' },
   { value: 'users', label: 'USERS' },
   { value: 'content', label: 'CONTENT' },
+  { value: 'uploads', label: 'UPLOAD LOGS' },
 ];
 const ADMIN_TABS = [...TABS, { value: 'audit', label: 'AUDIT' }];
 // Tabs backed by the report / support queue loader; the others load their own data.
@@ -298,6 +300,7 @@ export default function ModerationPage() {
           : <UsersPanel onOpen={openUser} />
       ) : tab === 'content' ? <ContentPanel viewer={user} onOpenUser={openUser} />
         : tab === 'audit' ? <AuditPanel onOpenUser={openUser} />
+        : tab === 'uploads' ? <UploadLogsPanel onOpenUser={openUser} />
         : tab === 'overview' ? (
         stats ? (
           <>
