@@ -636,6 +636,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the screen material, bypassing the canvas blit + re-upload entirely.
   let directVideoTexture = null;
   let directVideoElement = null;
+  // The file the direct texture was bound for: the reels player swaps src on
+  // one element, so a new file rebinds like a fresh element.
+  let directVideoVersion = '';
   // Stereoscopic 3D sources (docs/stereo-3d-reels.md). sourceStereo is what
   // the host says is loaded ('mono' | 'sbs' | 'tb'); textureStereo is the
   // layout of the frame actually in the screen texture, so a switch only
@@ -7530,13 +7533,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!directVideoEligible(source)) return false;
     const el = source.element;
     const layout = sourceStereoLayout(source);
-    if (directVideoTexture && directVideoElement === el &&
+    if (directVideoTexture && directVideoElement === el && directVideoVersion === source.version &&
         screenMesh.material.map === monoScreenMap(directVideoTexture)) {
       if (layout !== textureStereo) commitTextureStereo(directVideoTexture, layout);
       return true;
     }
     const rs = Number((el && el.readyState) || 0);
-    const isFresh = !directVideoTexture || directVideoElement !== el;
+    const isFresh = !directVideoTexture || directVideoElement !== el || directVideoVersion !== source.version;
     const need = isFresh ? 3 : 2;
     if (rs < need && !force) return false; // hold previous map
     try {
@@ -7548,6 +7551,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       return false;
     }
     directVideoElement = el;
+    directVideoVersion = source.version;
     commitTextureStereo(directVideoTexture, layout);
     lastUploadedSource = el;
     lastVisualKind = source.kind;
@@ -7578,6 +7582,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (directVideoTexture) { try { directVideoTexture.dispose(); } catch (e) {} }
     directVideoTexture = null;
     directVideoElement = null;
+    directVideoVersion = '';
   }
 
   function shouldUploadVisual(source) {

@@ -1134,6 +1134,53 @@ test('videos bind a direct VideoTexture by default and static sources rebind the
   renderer.stopPreview();
 });
 
+// The reels player swaps src on one element and sets the new layout at once:
+// the old reel's last frame must not be split into eyes by the new layout.
+test('a src swap on the same video element keeps the old layout until the new file has frames', () => {
+  const counters = { deleted: 0, textureSources: [] };
+  const gl = makeMockGl(counters);
+  const element = {
+    readyState: 4, paused: false, currentTime: 5, duration: 10, muted: true,
+    videoWidth: 1080, videoHeight: 1920,
+    getVideoPlaybackQuality: () => ({ totalVideoFrames: 10 }),
+    addEventListener() {}, removeEventListener() {},
+    requestVideoFrameCallback() { return 1; }, cancelVideoFrameCallback() {},
+  };
+  let source = {
+    kind: 'video', element, ready: true, paused: false,
+    currentTime: 5, duration: 10, version: 'mono.mp4', stereo: 'mono',
+  };
+  const renderer = loadRenderer({ gl });
+  renderer.init(element, {
+    getVisualSource: () => source,
+    getPlaylist: () => [],
+    getCurrentIndex: () => 0,
+  });
+  renderer.startPreview(makePreviewCanvas(gl));
+  renderer.__runScheduledFrame(16);
+  assert.equal(renderer.__test.getStereoState().textureStereo, 'mono');
+
+  element.readyState = 0;
+  source = { ...source, ready: false, currentTime: 0, version: 'tb.mp4', stereo: 'tb' };
+  renderer.onVideoChange();
+  renderer.__runScheduledFrame(32);
+  assert.equal(renderer.__test.getStereoState().textureStereo, 'mono',
+    'the old frame keeps its mono layout while the new file loads');
+
+  element.readyState = 4;
+  element.videoWidth = 1920;
+  element.videoHeight = 3840;
+  source = { ...source, ready: true };
+  renderer.__runScheduledFrame(48);
+  assert.equal(renderer.__test.getStereoState().textureStereo, 'tb');
+  assert.equal(renderer.__test.getSceneInfo().screen.mapSize.join(','), '1920,3840');
+  // The new texture holds the current frame at once; waiting for the next
+  // presented frame showed black.
+  renderer.__test.initEyeTexturesForTest();
+  assert.ok(counters.textureSources.includes(element), 'the rebound texture uploads the current frame');
+  renderer.stopPreview();
+});
+
 test('session defaults are minimal with xrfull opt-out (v8.15 flash fix)', () => {
   const renderer = loadRenderer({});
   renderer.init(null, {});
