@@ -44,6 +44,10 @@ MONO_SUFFIX = "-mono"
 STEREO_PROXY_LONG_SIDE = 4096
 # Left-eye 2D video renditions match the square web preview cap.
 MONO_VIDEO_MAX_SIDE = 2160
+# VR rendition (<stem>-2k.mp4): 2048 px per eye, HEVC, for slow links in VR
+# (docs/vr-playback-review.md). Mono 2048 square ~8 Mbps; stereo ~14 Mbps.
+VR2K_SUFFIX = "-2k.mp4"
+VR2K_EYE_SIDE = 2048
 # Left-eye 2D stills keep up to the square master size.
 MONO_IMAGE_MAX_SIDE = 3840
 # Published uploads and their derived siblings live here (see media_store).
@@ -377,6 +381,54 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
     return _commit_part(part, dest)
 
 
+def vr2k_path(src: str) -> Path:
+    return Path(src).with_name(Path(src).stem + VR2K_SUFFIX)
+
+
+def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
+    """Write the VR rendition of a video: HEVC (hvc1), faststart, 2048 px per eye.
+
+    Mono: long side at most VR2K_EYE_SIDE, ~8 Mbps peak. Stereo ("sbs" /
+    "tb"): the full frame, VR2K_EYE_SIDE per eye, ~14 Mbps peak. The player
+    picks it over the master in VR when the link is slow.
+    """
+    stereo = stereo if stereo in ("sbs", "tb") else None
+    dest = vr2k_path(src)
+    try:
+        if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
+            return str(dest)
+    except OSError:
+        return None
+    if stereo == "sbs":
+        vf = f"scale='2*trunc(min(iw,{2 * VR2K_EYE_SIDE})/2)':-2"
+    elif stereo == "tb":
+        vf = f"scale=-2:'2*trunc(min(ih,{2 * VR2K_EYE_SIDE})/2)'"
+    else:
+        vf = (f"scale='if(gte(iw,ih),2*trunc(min(iw,{VR2K_EYE_SIDE})/2),-2)'"
+              f":'if(gte(iw,ih),-2,2*trunc(min(ih,{VR2K_EYE_SIDE})/2))'")
+    rate_args = ["-maxrate", "14M", "-bufsize", "28M"] if stereo else ["-maxrate", "8M", "-bufsize", "16M"]
+    part = _part_path(dest)
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error",
+        "-i", src,
+        "-vf", vf,
+        "-c:v", "libx265", "-crf", "24", "-preset", "veryfast", *rate_args,
+        "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-c:a", "aac", "-b:a", "192k",
+        "-f", "mp4", str(part),
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=900,
+                           creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        part.unlink(missing_ok=True)
+        return None
+    if p.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        return None
+    return _commit_part(part, dest)
+
+
 def _part_path(dest: Path) -> Path:
     """Hidden temp sibling a generator writes before committing *dest*."""
     return dest.with_name(f".{dest.name}.part")
@@ -401,6 +453,7 @@ def derived_files(stored: Path) -> list[Path]:
         explore_preview_path(str(stored)),
         explore_poster_path(str(stored)),
         stored.with_name(stored.stem + "-preview.mp4"),
+        vr2k_path(str(stored)),
         mono,
         explore_preview_path(str(mono)),
         explore_poster_path(str(mono)),
@@ -584,7 +637,7 @@ def legacy_stereo_layout(
 
 def is_derived_media(name: str) -> bool:
     """True for generated siblings that must never surface as their own tile."""
-    if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg")):
+    if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg", VR2K_SUFFIX)):
         return True
     return Path(name).stem.endswith(MONO_SUFFIX)
 

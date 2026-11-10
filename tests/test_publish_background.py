@@ -26,7 +26,7 @@ from server.social.models import Post
 from server.social.services import post_card, post_media_items
 from test_media_store import FakeS3, register
 
-DERIVED = ("-poster.jpg", "-explore.mp4", "-preview.mp4")
+DERIVED = ("-poster.jpg", "-explore.mp4", "-preview.mp4", "-2k.mp4")
 
 
 class OrderedS3(FakeS3):
@@ -177,6 +177,7 @@ def test_publish_returns_before_encodes_and_assets_land_after(setup, tmp_path):
         f".{stored.stem}-poster.jpg.part",
         f".{stored.stem}-explore.mp4.part",
         f".{stored.stem}-preview.mp4.part",
+        f".{stored.stem}-2k.mp4.part",
     ]
     for suffix in DERIVED:
         assert media_store.rel_path(sibling(stored, suffix)) in s3.objects
@@ -254,13 +255,14 @@ def test_failed_encodes_are_logged_and_leave_a_usable_post(setup, tmp_path, capl
 
     assert "Could not build the explore preview" in caplog.text
     assert "Could not build the web preview" in caplog.text
-    assert set(s3.objects) == {body["rel_path"], media_store.rel_path(sibling(stored, "-poster.jpg"))}
+    landed = {body["rel_path"], *(media_store.rel_path(sibling(stored, s)) for s in ("-poster.jpg", "-2k.mp4"))}
+    assert set(s3.objects) == landed
     assert not any(path.exists() for path in SM.derived_files(stored))
     assert part_files() == []
     with Session() as db:
         post = db.query(Post).one()
         assert post.status == "published"
-        assert set(post.media_files) == {body["rel_path"], media_store.rel_path(sibling(stored, "-poster.jpg"))}
+        assert set(post.media_files) == landed
         card = post_card(post, db)
     assert card["preview_url"] == body["media_url"]
     assert card["poster_url"].endswith("-poster.jpg")
@@ -400,3 +402,49 @@ def test_publish_and_its_encodes_land_in_the_upload_log(setup, tmp_path, monkeyp
         assert any(name.endswith("-explore.mp4") for name in events["assets_built"]["files"])
     finally:
         upload_log.set_client(None)
+
+
+def test_the_vr_rendition_lands_last_and_reaches_the_feed(setup, tmp_path):
+    client, Session, s3, ffmpeg, futures = setup
+    body = publish_video(client, tmp_path)
+    stored = stored_path(body)
+    with Session() as db:
+        payload = reels._build_payload(post_media_items(db), "h264", db=db)
+    assert [item["vr2k_url"] for item in payload] == [None]
+
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+    assert ffmpeg.encodes[-1] == f".{stored.stem}-2k.mp4.part"
+    with Session() as db:
+        payload = reels._build_payload(post_media_items(db), "h264", db=db)
+    assert [item["vr2k_url"] for item in payload] == [f"https://media.example.com/uploads/{stored.stem}-2k.mp4"]
+
+
+@pytest.mark.parametrize(("stereo", "scale", "maxrate"), [
+    (None, "2*trunc(min(iw,2048)/2)", "8M"),
+    ("sbs", "scale='2*trunc(min(iw,4096)/2)':-2", "14M"),
+    ("tb", "scale=-2:'2*trunc(min(ih,4096)/2)'", "14M"),
+])
+def test_vr_rendition_is_hevc_at_2048_per_eye(tmp_path, monkeypatch, stereo, scale, maxrate):
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"master")
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        Path(cmd[-1]).write_bytes(b"2k")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(SM.subprocess, "run", run)
+    monkeypatch.setattr(SM, "_commit_part", lambda part, dest: (part.replace(dest), str(dest))[1])
+    assert SM.make_vr2k_rendition(str(src), stereo) == str(tmp_path / "clip-2k.mp4")
+    cmd = calls[0]
+    assert cmd[cmd.index("-c:v") + 1] == "libx265"
+    assert cmd[cmd.index("-preset") + 1] == "veryfast"
+    assert cmd[cmd.index("-tag:v") + 1] == "hvc1"
+    assert cmd[cmd.index("-maxrate") + 1] == maxrate
+    assert scale in cmd[cmd.index("-vf") + 1]
+    assert SM.is_derived_media("clip-2k.mp4")
+    # Fresh rendition on disk: not encoded again.
+    assert SM.make_vr2k_rendition(str(src), stereo) == str(tmp_path / "clip-2k.mp4")
+    assert len(calls) == 1

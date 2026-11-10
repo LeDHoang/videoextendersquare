@@ -45,7 +45,8 @@ test('dock header falls back to filename, then path basename, and truncates long
 test('webxr passes the playlist item at the current index to the dock renderer', () => {
   const call = webxrSource.match(/ui\.renderControlsCanvas\(controlsCtx, \{([\s\S]*?)\}\);/);
   assert.ok(call, 'renderControlsCanvas call present');
-  assert.match(call[1], /\bitem: playlist\[idx\] \|\| null,/);
+  assert.match(webxrSource, /\bconst item = playlist\[idx\] \|\| null;/);
+  assert.match(call[1], /\bitem,/);
   assert.doesNotMatch(canvasSource, /SYS_RENDER_004/);
 });
 
@@ -89,5 +90,6 @@ test('dock header shows a 3D chip only while the reel is drawn per eye', () => {
 test('webxr passes the on-screen stereo layout (not the stored one) to the dock', () => {
   const call = webxrSource.match(/ui\.renderControlsCanvas\(controlsCtx, \{([\s\S]*?)\}\);/);
   assert.ok(call, 'renderControlsCanvas call present');
-  assert.match(call[1], /\bstereo: textureStereo !== 'mono' && eyeTextures \? textureStereo : 'mono',/);
+  assert.match(webxrSource, /\bconst stereo = textureStereo !== 'mono' && eyeTextures \? textureStereo : 'mono';/);
+  assert.match(call[1], /\bstereo,/);
 });

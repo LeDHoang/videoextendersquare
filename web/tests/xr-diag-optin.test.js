@@ -145,3 +145,11 @@ test('diag payload counts mid-play stalls of the active video', () => {
   last = posts.at(-1).body;
   assert.deepEqual([last.stalls, last.stallMs, last.stalling], [0, 200, false]);
 });
+
+test('?vrtexcap picks the mono proxy edge; anything else keeps 2048', () => {
+  assert.equal(loadEngine('').engine.__test.getDebugFlags().texCap, 2048);
+  assert.equal(loadEngine('?vrtexcap=3840').engine.__test.getDebugFlags().texCap, 3840);
+  assert.equal(loadEngine('?xrdiag=0&vrtexcap=2048').engine.__test.getDebugFlags().texCap, 2048);
+  assert.equal(loadEngine('?vrtexcap=4096').engine.__test.getDebugFlags().texCap, 2048);
+  assert.equal(loadEngine('?vrtexcap=3840x').engine.__test.getDebugFlags().texCap, 2048);
+});

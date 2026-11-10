@@ -2842,6 +2842,46 @@
       } catch (e) { return false; }
     }
 
+    // Adaptive VR source (docs/vr-playback-review.md): in the headset a post
+    // plays its 2048-per-eye rendition (vr2k_url) unless the link has been
+    // measured at VR_MASTER_MIN_MBPS or more. Quest Browser caps
+    // navigator.connection.downlink at 10 Mbps and hides <video> requests from
+    // Resource Timing, so the estimate is the page's own whole-file preload
+    // fetches (noteDownload). The estimate is the median of the last
+    // VR_LINK_SAMPLES samples and needs VR_LINK_MIN_SAMPLES of them, so one
+    // fast file (a local server, a hot CDN edge) can't switch to the master;
+    // 0 means not measured yet. A file served from the HTTP cache says nothing
+    // about the link: those fetch()es do show in Resource Timing, with
+    // transferSize 0 and a non-zero decodedBodySize. Cross-origin without
+    // Timing-Allow-Origin zeroes both, so such a sample (or one with no entry)
+    // can't be told apart and counts.
+    const VR_MASTER_MIN_MBPS = 60;
+    const VR_MIN_SAMPLE_BYTES = 1 << 20;
+    const VR_LINK_SAMPLES = 5;
+    const VR_LINK_MIN_SAMPLES = 3;
+    const vrLinkSamples = [];
+    function fetchedFromCache(url) {
+      try {
+        const entries = performance.getEntriesByName(url, 'resource');
+        const timing = entries[entries.length - 1];
+        return !!timing && timing.transferSize === 0 && timing.decodedBodySize > 0;
+      } catch (e) { return false; }
+    }
+    function noteDownload(url, bytes, ms) {
+      if (bytes < VR_MIN_SAMPLE_BYTES || !(ms > 0) || fetchedFromCache(url)) return;
+      vrLinkSamples.push((bytes * 8) / (ms * 1000));
+      if (vrLinkSamples.length > VR_LINK_SAMPLES) vrLinkSamples.shift();
+    }
+    function vrLinkMbps() {
+      if (vrLinkSamples.length < VR_LINK_MIN_SAMPLES) return 0;
+      const sorted = vrLinkSamples.slice().sort((a, b) => a - b);
+      return sorted[(sorted.length - 1) >> 1];
+    }
+    function wantsVr2k(entry) {
+      if (!entry.vr2k_url || vrLinkMbps() >= VR_MASTER_MIN_MBPS) return false;
+      try { return typeof WebXRVR !== 'undefined' && !!(WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
+    }
+
     // What to load for a post or slide right now: {url, layout, crop}.
     // `layout` is the stereo layout of that file; `crop` names the layout to
     // crop to the left eye in 2D when no rendition exists yet.
@@ -2849,8 +2889,9 @@
       const layout = entryStereoLayout(entry);
       const failed = !!(item && item.stereoFailed);
       if (layout !== 'mono' && entry.stereo_url && !failed && wantsStereoSource()) {
-        return { url: entry.stereo_url, layout: layout, crop: '' };
+        return { url: wantsVr2k(entry) ? entry.vr2k_url : entry.stereo_url, layout: layout, crop: '' };
       }
+      if (layout === 'mono' && wantsVr2k(entry)) return { url: entry.vr2k_url, layout: 'mono', crop: '' };
       const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
       return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
     }
@@ -3231,31 +3272,52 @@
     // PNG with a 26 KB profile. img.decode() and createImageBitmap(img) still
     // block the main thread for that long; createImageBitmap(blob) does not.
     // Until the bitmap is ready the engine keeps the last frame.
-    let vrImageBitmap = { url: '', bitmap: null, failed: false };
+    // The cache holds the current image and one prefetched for the next reel.
+    let vrImageCurrent = { url: '', bitmap: null, failed: false };
+    let vrImageNext = null;
+    function vrImageLoad(url) {
+      const entry = { url, bitmap: null, failed: false, released: false };
+      // cache: 'reload' because the <img> fetched this URL without CORS, and
+      // R2 sends no Access-Control-Allow-Origin (or Vary: Origin) to a
+      // request without Origin. Reusing that cached copy fails the CORS check.
+      fetch(url, { cache: 'reload' })
+        .then((response) => {
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          return response.blob();
+        })
+        .then((blob) => createImageBitmap(blob))
+        .then((bitmap) => {
+          if (!entry.released) entry.bitmap = bitmap;
+          else bitmap.close();
+        })
+        .catch(() => { entry.failed = true; });
+      return entry;
+    }
+    function vrImageRelease(entry) {
+      if (!entry) return;
+      entry.released = true;
+      if (entry.bitmap) entry.bitmap.close();
+      entry.bitmap = null;
+    }
+    // Fetch the bitmap ahead of the switch so vrImageSource finds it ready.
+    function vrImagePrefetch(url) {
+      if (!url || typeof createImageBitmap !== 'function' || typeof fetch !== 'function') return;
+      if (vrImageCurrent.url === url || (vrImageNext && vrImageNext.url === url)) return;
+      vrImageRelease(vrImageNext);
+      vrImageNext = vrImageLoad(url);
+    }
     function vrImageSource(image) {
       const url = image ? image.getAttribute('src') : '';
       const fallback = { element: image, ready: !!(image && image.complete && image.naturalWidth) };
       if (!url || typeof createImageBitmap !== 'function' || typeof fetch !== 'function') return fallback;
-      if (vrImageBitmap.url !== url) {
-        if (vrImageBitmap.bitmap) vrImageBitmap.bitmap.close();
-        const entry = (vrImageBitmap = { url, bitmap: null, failed: false });
-        // cache: 'reload' because the <img> fetched this URL without CORS, and
-        // R2 sends no Access-Control-Allow-Origin (or Vary: Origin) to a
-        // request without Origin. Reusing that cached copy fails the CORS check.
-        fetch(url, { cache: 'reload' })
-          .then((response) => {
-            if (!response.ok) throw new Error('HTTP ' + response.status);
-            return response.blob();
-          })
-          .then((blob) => createImageBitmap(blob))
-          .then((bitmap) => {
-            if (vrImageBitmap === entry) entry.bitmap = bitmap;
-            else bitmap.close();
-          })
-          .catch(() => { entry.failed = true; });
+      if (vrImageCurrent.url !== url) {
+        const prefetched = vrImageNext && vrImageNext.url === url && !vrImageNext.failed ? vrImageNext : null;
+        vrImageRelease(vrImageCurrent);
+        if (prefetched) vrImageNext = null;
+        vrImageCurrent = prefetched || vrImageLoad(url);
       }
-      if (vrImageBitmap.bitmap) return { element: vrImageBitmap.bitmap, ready: true };
-      if (vrImageBitmap.failed) return fallback;
+      if (vrImageCurrent.bitmap) return { element: vrImageCurrent.bitmap, ready: true };
+      if (vrImageCurrent.failed) return fallback;
       return { element: image, ready: false };
     }
     // </reels-vr-image-bitmap>
@@ -5759,7 +5821,9 @@
         cancelPendingPreload();
         if (idx === currentIndex) warmNext(currentIndex);
       };
-      if (!isImageItem(videoData[currentIndex]) && !video.paused && video.readyState >= 3) {
+      // An image post loads no video and never fires 'playing', so the next
+      // reel is warmed at once instead of after the fallback delay.
+      if (isImageItem(videoData[currentIndex]) || (!video.paused && video.readyState >= 3)) {
         run();
         return;
       }
@@ -5783,6 +5847,12 @@
           const warmer = new Image();
           const nextUrl = playbackUrlFor(nextItem, nextItem);
           warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
+          if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) {
+            // Key by the cover URL resolveSlideUrl gives showImageSlide(0).
+            const cover = imageSlidesFor(nextItem)[0];
+            const coverUrl = cover ? playbackUrlFor(cover, nextItem) : '';
+            vrImagePrefetch(blobFor(nextIdx, coverUrl) || coverUrl);
+          }
         } catch (e) {}
         return;
       }
@@ -6200,10 +6270,12 @@
           continue;
         }
         try {
+          const fetchStart = performance.now();
           const res = await fetch(url, {
             signal: preloadController ? preloadController.signal : undefined,
           });
           const blob = await res.blob();
+          noteDownload(res.url, blob.size, performance.now() - fetchStart);
           const blobUrl = URL.createObjectURL(blob);
           if (generation !== feedGeneration) {
             URL.revokeObjectURL(blobUrl);

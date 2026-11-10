@@ -1470,7 +1470,50 @@ test('dockfreeze stops dock texture re-uploads after the first paint', () => {
   assert.equal(uploadsOf(), painted, 'frozen: no further dock uploads');
   api.setDebugFlags({ dockfreeze: false });
   renderer.__runScheduledFrame(600);
-  assert.ok(uploadsOf() > painted, 'unfrozen: uploads resume');
+  assert.equal(uploadsOf(), painted, 'unfrozen with nothing changed: dock stays as painted');
+  renderer.showNotification('DOCK CHANGED');
+  renderer.__runScheduledFrame(800);
+  assert.ok(uploadsOf() > painted, 'unfrozen: uploads resume once the dock changes');
+  renderer.stopPreview();
+});
+
+test('a playing reel repaints the dock for its seek thumb at most ~4 times a second', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  let clock = 0;
+  const renderer = loadRenderer({ gl, now: () => clock });
+  const video = { videoWidth: 1080, videoHeight: 1920, readyState: 4, paused: false, addEventListener() {}, removeEventListener() {} };
+  // A 20 s reel moves its thumb by more than 1/1024 on every 100 ms UI tick.
+  const source = { kind: 'video', element: video, ready: true, paused: false, muted: true, currentTime: 0, duration: 20, version: 'v' };
+  renderer.init(video, { getVisualSource: () => source });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const uploadsOf = () => renderer.getPreviewState().renderStats.dockUploads;
+  const tick = (dt = 0.1) => { clock += 100; source.currentTime += dt; renderer.__runScheduledFrame(clock); };
+  tick(0);
+  const start = uploadsOf();
+  for (let i = 0; i < 20; i += 1) tick();
+  const played = uploadsOf() - start;
+  assert.ok(played >= 4, `the thumb still moves while playing: ${played}`);
+  assert.ok(played <= 10, `2 s of playback repaints at most ~4/s plus the whole-second clock: ${played}`);
+
+  // A jump within the same whole second, 100 ms after a paint, repaints at once.
+  source.currentTime = 7.05;
+  tick(0);
+  const before = uploadsOf();
+  source.currentTime = 7.65;
+  tick(0);
+  assert.equal(uploadsOf(), before + 1, 'a seek jump repaints on the next tick');
+  tick();
+  assert.equal(uploadsOf(), before + 1, 'playback 100 ms after a paint waits for the gate');
+
+  // Paused: the thumb only moves on seeks, so every move repaints at once.
+  source.paused = true;
+  tick(0);
+  const paused = uploadsOf();
+  source.currentTime = 7.85;
+  tick(0);
+  assert.equal(uploadsOf(), paused + 1, 'a paused scrub repaints on the next tick');
+  tick(0);
+  assert.equal(uploadsOf(), paused + 1, 'nothing changed: no repaint');
   renderer.stopPreview();
 });
 
@@ -6312,10 +6355,10 @@ test('?vrtex=canvas opts out of the direct texture; ?vrfov sets foveation', () =
   assert.equal(clamped.__test.getDebugFlags().fov, 1);
 });
 
-test('?vrfbs sets the XR framebuffer scale; default 1.5, clamped to 0.5..2', () => {
+test('?vrfbs sets the XR framebuffer scale; default 1.25, clamped to 0.5..2', () => {
   const defaults = loadRenderer({ search: '' });
   defaults.init(null, {});
-  assert.equal(defaults.__test.getDebugFlags().fbs, 1.5);
+  assert.equal(defaults.__test.getDebugFlags().fbs, 1.25);
   const native = loadRenderer({ search: '?vrfbs=1' });
   native.init(null, {});
   assert.equal(native.__test.getDebugFlags().fbs, 1);

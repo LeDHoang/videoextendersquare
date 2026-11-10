@@ -302,9 +302,9 @@ def requeue_missing_derived(limit: int = REQUEUE_MAX_PER_BOOT) -> int:
             logger.exception("Could not check the derived assets of %s", dest.name)
             continue
         if stereo:
-            build = (lambda d, s: lambda: _build_stereo_video_assets(d, s))(dest, stereo)
+            build = (lambda d, s: lambda: _build_stereo_video_assets(d, s, vr2k=False))(dest, stereo)
         else:
-            build = (lambda d: lambda: _build_video_assets(d))(dest)
+            build = (lambda d: lambda: _build_video_assets(d, vr2k=False))(dest)
         if not _queue_derived_assets(dest, rel, build):
             break
         queued += 1
@@ -380,26 +380,31 @@ def _record_files(dest: Path) -> None:
         logger.exception("Could not record the files of %s", dest.name)
 
 
-def _build_video_assets(dest: Path) -> None:
+def _build_video_assets(dest: Path, vr2k: bool = True) -> None:
     """Background: grid poster, grid preview and web proxy of a published 2D video.
 
     Cheapest first, so tiles get a poster within seconds. Every generator
     writes a .part file and commits it (R2 first), so a sibling exists
-    locally only once its object does.
+    locally only once its object does. The VR rendition comes last and only
+    on publish (vr2k); the boot requeue does not backfill it.
     """
     _derived_step("poster", dest, SM.make_explore_poster, str(dest))
     _derived_step("explore preview", dest, SM.make_explore_preview, str(dest))
     _derived_step("web preview", dest, SM.make_web_preview, str(dest))
+    if vr2k:
+        _derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest))
     _submit_captions(dest)
 
 
-def _build_stereo_video_assets(dest: Path, layout: str) -> None:
+def _build_stereo_video_assets(dest: Path, layout: str, vr2k: bool = True) -> None:
     """Background: every derived asset of a published stereo video."""
     mono = _derived_step("left-eye rendition", dest, SM.make_left_eye_rendition, str(dest), layout)
     _derived_step("stereo web preview", dest, SM.make_web_preview, str(dest), stereo=layout)
     if mono:
         _derived_step("left-eye explore preview", dest, SM.make_explore_preview, mono)
         _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
+    if vr2k:
+        _derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest), stereo=layout)
     _submit_captions(dest)
 
 

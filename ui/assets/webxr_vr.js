@@ -7,11 +7,14 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.28-20261026-glow-probe-gpu-scale';
+  const VR_VERSION = 'v8.30-20261110-vr-fixes-integration';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
+  // Edge of the square mono video proxy. ?vrtexcap=3840 A/B tests a 4K
+  // proxy (docs/vr-playback-review.md); the default stays 2048 until measured.
   const VR_TEX_CAP = 2048;
+  const VR_TEX_CAP_OPTIONS = [2048, 3840];
   // Per-eye edge of the stereo proxy (docs/stereo-3d-reels.md): SBS sources
   // blit into a 2E x E canvas, top-bottom into E x 2E. ?vrstereoeye=1536 A/B.
   const VR_STEREO_EYE_CAP = 2048;
@@ -137,10 +140,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     lock: true, overlay: true, guide: true, glow: true,
     dockfreeze: false, glowprobe: true, domoverlay: true, vrtex: true,
     fov: 0,          // XR fixed foveation (?vrfov=0..1); 0 = off
-    fbs: 1.5,        // XR framebuffer scale factor (?vrfbs=0.5..2); 1 = native
+    fbs: 1.25,       // XR framebuffer scale factor (?vrfbs=0.5..2); 1 = native
     xrminimal: false, xrfull: false, earthmap: true, earthstyle: 'holo',
     topdown: true,   // zoomed view faces the focus head-on (?topdown=0 → legacy tilted table)
     stereoEye: VR_STEREO_EYE_CAP, // per-eye stereo proxy edge (?vrstereoeye=1536)
+    texCap: VR_TEX_CAP, // mono video proxy edge (?vrtexcap=2048|3840); read once, before the proxy exists
     xrdiag: false,   // XR frame telemetry POST to /api/reels/diag — opt-in only (?xrdiag=1); off by default so nothing leaves the headset
     vrshell: true,   // in-VR site shell (?vrshell=0 → in-VR navigation leaves XR, pre-shell behaviour)
   };
@@ -175,6 +179,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (has('vrshell', '0')) debugFlags.vrshell = false;
       const eye = q.match(/(?:\?|&)vrstereoeye=(\d+)(?:&|$)/);
       if (eye) debugFlags.stereoEye = Math.max(256, Math.min(VR_STEREO_EYE_CAP, Number(eye[1]) || VR_STEREO_EYE_CAP));
+      const texCap = q.match(/(?:\?|&)vrtexcap=(\d+)(?:&|$)/);
+      if (texCap && VR_TEX_CAP_OPTIONS.includes(Number(texCap[1]))) debugFlags.texCap = Number(texCap[1]);
     } catch (e) {}
   }
   // Face-following applies only when locked AND not bisected off.
@@ -464,6 +470,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   let overlayHasPopups = false;
   let lastOverlayUploadT = -1;
   let lastOverlayKey = '';
+  // Key of the last dock paint; an unchanged key skips the repaint and upload.
+  let lastDockKey = '';
+  // The seek thumb is kept out of that key: playback alone repaints it at
+  // most every VR_DOCK_SEEK_MIN_MS; seeks and every other change repaint at once.
+  let lastDockSeek = 0;
+  let lastDockPaintTime = 0;
+  let lastDockPaintMs = 0;
+  const VR_DOCK_SEEK_MIN_MS = 250;
   // Guide panel upload-once state
   let vrGuideUploaded = false;
   // Canvases wait (at most 3 s) for the paper fonts; see initThreeScene.
@@ -715,6 +729,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     shellPainted.kbHover = null;
     vrGuideUploaded = false;
     lastOverlayKey = '';
+    lastDockKey = '';
     lastEarthLabelKey = '';
     lastEarthPreviewUpdate = -1e9;
     earthMapDirty = true;
@@ -6843,8 +6858,8 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     if (!vrProxyCanvas && typeof document !== 'undefined') {
       vrProxyCanvas = document.createElement('canvas');
-      vrProxyCanvas.width = VR_TEX_CAP;
-      vrProxyCanvas.height = VR_TEX_CAP;
+      vrProxyCanvas.width = debugFlags.texCap;
+      vrProxyCanvas.height = debugFlags.texCap;
       vrProxyCtx = vrProxyCanvas.getContext('2d');
     }
 
@@ -7635,8 +7650,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     const layout = sourceStereoLayout(source);
     const stereoBase = layout !== 'mono' ? ensureStereoProxy(layout) : null;
     const ctx = stereoBase ? stereoCtx : vrProxyCtx;
-    const texW = stereoBase ? stereoCanvas.width : VR_TEX_CAP;
-    const texH = stereoBase ? stereoCanvas.height : VR_TEX_CAP;
+    const monoCap = vrProxyCanvas ? vrProxyCanvas.width : debugFlags.texCap;
+    const texW = stereoBase ? stereoCanvas.width : monoCap;
+    const texH = stereoBase ? stereoCanvas.height : monoCap;
     try {
       if (source.kind === 'static-card' || source.kind === 'image') {
         // Trust the caller's ready flag: a genuinely incomplete image
@@ -7723,9 +7739,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     renderStats.transClears += 1;
     if (vrProxyCtx) {
       try {
-        vrProxyCtx.clearRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        vrProxyCtx.clearRect(0, 0, vrProxyCanvas.width, vrProxyCanvas.height);
         vrProxyCtx.fillStyle = '#000';
-        vrProxyCtx.fillRect(0, 0, VR_TEX_CAP, VR_TEX_CAP);
+        vrProxyCtx.fillRect(0, 0, vrProxyCanvas.width, vrProxyCanvas.height);
       } catch (e) {}
     }
     if (videoTexture) videoTexture.needsUpdate = true;
@@ -7986,34 +8002,73 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (controlsCtx && !(debugFlags.dockfreeze && dockFreezePainted)) {
       const playlist = (callbacks.getPlaylist && callbacks.getPlaylist()) || [];
       const idx = callbacks.getCurrentIndex ? callbacks.getCurrentIndex() : 0;
-      resizeControlsCanvas(ui.controlsCanvasSize({
-        source, itemState, sceneMode, packMode: isPackExperience(),
-      }));
-      ui.renderControlsCanvas(controlsCtx, {
-        source,
-        itemState,
-        packMode: isPackExperience(),
-        packContext: getPackContext(),
-        playlist,
-        idx,
-        item: playlist[idx] || null,
-        comments: callbacks.getComments ? callbacks.getComments() : [],
-        hoveredButton,
-        pressedButton,
-        isCurved,
-        curvatureMode,
-        lockToViewer,
-        autoNext: getAutoNext(),
-        sceneMode,
-        earth: sceneMode === 'earth' ? earthDockStatus() : null,
-        notificationText,
-        notificationUntil,
-        stereo: textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono',
-        callbacks,
+      const packMode = isPackExperience();
+      const packContext = getPackContext();
+      const size = ui.controlsCanvasSize({
+        source, itemState, sceneMode, packMode,
       });
-      if (controlsTexture) {
-        controlsTexture.needsUpdate = true;
-        renderStats.dockUploads += 1;
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      const earth = sceneMode === 'earth' ? earthDockStatus() : null;
+      const autoNext = getAutoNext();
+      const stereo = textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono';
+      const item = playlist[idx] || null;
+      const duration = Number(source.duration) || 0;
+      const currentTime = Number(source.currentTime) || 0;
+      // Every input the dock draws. The seek thumb is quantised to 1/1024 of
+      // the track (finer than its 632 px) and the clocks to whole seconds,
+      // so a playing reel repaints only when those pixels can change.
+      const dockSeek = duration > 0 ? Math.floor(Math.max(0, Math.min(1, currentTime / duration)) * 1024) : 0;
+      const dockKey = [
+        source.kind, source.paused !== false, source.muted !== false,
+        size.w, size.h, Math.floor(duration), Math.floor(currentTime),
+        itemState.liked, itemState.saved, itemState.following, itemState.available,
+        item ? (item.title || item.filename || item.path || item.rel_path || '') : '',
+        comments.length, hoveredButton, pressedButton, isCurved, curvatureMode,
+        lockToViewer, autoNext, sceneMode, packMode, playlist.length, idx,
+        packContext ? (packContext.title || '') + '/' + !!packContext.queueOpen : '',
+        stereo, earth ? JSON.stringify(earth) : '',
+        notificationText && notificationUntil > nowMs() ? notificationText : '',
+      ].join('|');
+      // Playback moves the thumb by the wall time since the last paint;
+      // anything else (scrub, jump, paused move) is a seek and skips the gate.
+      // Frozen clocks (test mocks) never throttle: only a positive gap blocks.
+      const sinceDockPaintMs = nowMs() - lastDockPaintMs;
+      const seekJump = source.paused !== false ||
+        Math.abs(currentTime - lastDockPaintTime - Math.max(0, sinceDockPaintMs) / 1000) > 0.5;
+      const seekDue = dockSeek !== lastDockSeek &&
+        (seekJump || !(sinceDockPaintMs > 0 && sinceDockPaintMs < VR_DOCK_SEEK_MIN_MS));
+      if (dockKey !== lastDockKey || seekDue) {
+        lastDockKey = dockKey;
+        lastDockSeek = dockSeek;
+        lastDockPaintTime = currentTime;
+        lastDockPaintMs = nowMs();
+        resizeControlsCanvas(size);
+        ui.renderControlsCanvas(controlsCtx, {
+          source,
+          itemState,
+          packMode,
+          packContext,
+          playlist,
+          idx,
+          item,
+          comments,
+          hoveredButton,
+          pressedButton,
+          isCurved,
+          curvatureMode,
+          lockToViewer,
+          autoNext,
+          sceneMode,
+          earth,
+          notificationText,
+          notificationUntil,
+          stereo,
+          callbacks,
+        });
+        if (controlsTexture) {
+          controlsTexture.needsUpdate = true;
+          renderStats.dockUploads += 1;
+        }
       }
       dockFreezePainted = true;
     }
@@ -11895,6 +11950,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     clearAutoHideTimer();
     closeVrKeyboard();
     dockFreezePainted = false;
+    lastDockKey = '';
     hasDisplayedVisual = false;
     freshVisualSince = 0;
     cPanelDrag = false;

@@ -122,3 +122,24 @@ test('an image next item warms the browser cache instead of the video preloader'
   assert.equal(calls.warmedImages.length, 1);
   assert.equal(calls.warmedImages[0].src, '/media/still.jpg');
 });
+
+test('a switch clears the preloader even when it holds the reel now on screen', () => {
+  // Keeping it left two elements on one file: the active one sat at
+  // readyState 0 for 2.8 s while the preloader held the file (Quest, int-default).
+  const { preloadNext, context, preloadVideo, calls } = loadPreload(items);
+  preloadVideo.src = '/media/b.mp4';
+  context.idx = 1;
+  context.video.src = '/media/b.mp4';
+  preloadNext(1);
+  assert.equal(calls.clears, 1);
+  assert.equal(preloadVideo.src, '');
+});
+
+test('an image post warms the next reel immediately', () => {
+  const withImage = [{ media_type: 'image', url: '/media/still.jpg' }, items[1]];
+  const { preloadNext, preloadVideo, timers } = loadPreload(withImage);
+  preloadNext(0);
+  assert.equal(preloadVideo.src, '/media/b.mp4', 'no wait for a playing event an image never fires');
+  assert.equal(preloadVideo.loads, 1);
+  assert.equal(timers.size, 0);
+});

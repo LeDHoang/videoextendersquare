@@ -1517,6 +1517,9 @@ def _build_payload(
         # Auto captions (<stem>.vtt) of a video's original; the 2D rendition and stereo file share its audio.
         base["captions_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.captions_path(src_path), output_root, files)
+        # VR rendition (<stem>-2k.mp4): the player picks it over the master in VR on slow links.
+        base["vr2k_url"] = None if _is_image_item(item) else _sibling_media_url(
+            src_path, SM.vr2k_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
