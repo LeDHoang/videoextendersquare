@@ -39,6 +39,8 @@ STAGED_BYTES_MAX = 4 * 1024 * _MB
 # is the VR source; <stem>-mono.<ext> holds the left eye for 2D surfaces.
 STEREO_LAYOUTS = ("mono", "sbs", "tb")
 MONO_SUFFIX = "-mono"
+# A 2D post's spatial version (colour | nearness grey, layout "sbsd") for VR.
+DEPTH_SUFFIX = "-depth"
 # Long side of the H.264 stereo proxy: 2048 px per eye, inside the Quest
 # H.264 decoder limits.
 STEREO_PROXY_LONG_SIDE = 4096
@@ -458,6 +460,7 @@ def derived_files(stored: Path) -> list[Path]:
         explore_preview_path(str(mono)),
         explore_poster_path(str(mono)),
         captions_path(str(stored)),
+        depth_sibling_path(str(stored)),
     ]
 
 
@@ -608,6 +611,13 @@ def mono_sibling_path(src: str) -> Path:
     return path.with_name(path.stem + MONO_SUFFIX + ext)
 
 
+def depth_sibling_path(src: str) -> Path:
+    """Sibling path for the spatial version of a 2D original: <stem>-depth.mp4 or .jpg."""
+    path = Path(src)
+    ext = ".mp4" if path.suffix.lower().lstrip(".") in VIDEO_EXTS else ".jpg"
+    return path.with_name(path.stem + DEPTH_SUFFIX + ext)
+
+
 # Folders whose loose files predate stored stereo metadata and are known to
 # hold full SBS (admin spatialize output). Only consulted for media without a
 # post row, and by the 20261015_0013 backfill.
@@ -639,7 +649,7 @@ def is_derived_media(name: str) -> bool:
     """True for generated siblings that must never surface as their own tile."""
     if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg", VR2K_SUFFIX)):
         return True
-    return Path(name).stem.endswith(MONO_SUFFIX)
+    return Path(name).stem.endswith((MONO_SUFFIX, DEPTH_SUFFIX))
 
 
 def stereo_paths(src: str, files: dict | None = None) -> tuple[Path | None, Path]:

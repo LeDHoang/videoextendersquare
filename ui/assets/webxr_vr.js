@@ -668,6 +668,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let eyeTextures = null; // { base, layout, L, R }
   let eyeMeshL = null;
   let eyeMeshR = null;
+  const DEPTH_WARP_MAX_SHIFT = 0.013867; // far-plane parallax per eye width (spatial_worker.py MAX_SHIFT)
+  let depthWarpStrength = 1;             // 'sbsd' depth multiplier (setDepthStrength)
   let screenMapBeforeDebug = null;
   let controlsCanvas = null;
   let controlsCtx = null;
@@ -7374,8 +7376,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     return String(source.kind || '') + '|' + String(source.version || '');
   }
 
+  // 'sbsd' (prototype): colour in the left half, nearness as grey in the
+  // right half; both eyes sample the colour half, shifted by that depth.
   function normalizeStereoLayout(layout) {
-    return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
+    return layout === 'sbs' || layout === 'tb' || layout === 'sbsd' ? layout : 'mono';
   }
 
   // Layout of a visual source: the per-source field wins (it follows the
@@ -7390,6 +7394,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // the top row, so the top-bottom left eye sits at offset y = 0.5).
   function stereoEyeUv(layout) {
     if (layout === 'tb') return { repeat: [1, 0.5], L: [0, 0.5], R: [0, 0] };
+    if (layout === 'sbsd') return { repeat: [0.5, 1], L: [0, 0], R: [0, 0] };
     return { repeat: [0.5, 1], L: [0, 0], R: [0.5, 0] };
   }
 
@@ -7475,6 +7480,39 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (eyeMeshL && eyeMeshL.parent === screenMesh) return;
     const make = (layer) => {
       const mesh = new THREE.Mesh(screenMesh.geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+      // 'sbsd': look the colour up where the depth says this eye sees it. Far
+      // content moves apart between the eyes, the nearest stays on the
+      // screen plane (spatial_worker.py MAX_SHIFT with POP_OUT 0, split
+      // between the eyes). Three refinements settle the lookup at depth edges.
+      const shift = { value: 0 };
+      const eyeSign = layer === 1 ? -1 : 1;
+      mesh.onBeforeRender = function () {
+        // Half the parallax per eye, in a UV space where an eye is half the texture.
+        shift.value = textureStereo === 'sbsd' ? eyeSign * 0.25 * DEPTH_WARP_MAX_SHIFT * depthWarpStrength : 0;
+      };
+      mesh.material.onBeforeCompile = function (shader) {
+        shader.uniforms.uDepthShift = shift;
+        shader.fragmentShader = 'uniform float uDepthShift;\n' + shader.fragmentShader.replace('#include <map_fragment>', `
+          #ifdef USE_MAP
+            vec2 warpUv = vMapUv;
+            if ( uDepthShift != 0.0 ) {
+              float sx = vMapUv.x;
+              for ( int i = 0; i < 3; i ++ ) {
+                float near = texture2D( map, vec2( clamp( sx, 0.001, 0.499 ) + 0.5, vMapUv.y ) ).g;
+                #ifndef DECODE_VIDEO_TEXTURE
+                  near = sRGBTransferOETF( vec4( near ) ).g;
+                #endif
+                sx = vMapUv.x - uDepthShift * ( 1.0 - near );
+              }
+              warpUv.x = clamp( sx, 0.001, 0.499 );
+            }
+            vec4 sampledDiffuseColor = texture2D( map, warpUv );
+            #ifdef DECODE_VIDEO_TEXTURE
+              sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+            #endif
+            diffuseColor *= sampledDiffuseColor;
+          #endif`);
+      };
       mesh.layers.set(layer);
       mesh.visible = false;
       mesh.renderOrder = screenMesh.renderOrder || 0;
@@ -7799,7 +7837,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (glowProbePending) return;
         glowProbePending = true;
         createImageBitmap(source.element, 0, 0,
-          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh,
+          layout === 'sbs' || layout === 'sbsd' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh,
           { resizeWidth: 8, resizeHeight: 8, resizeQuality: 'low' })
           .then((bmp) => {
             glowProbeCtx.drawImage(bmp, 0, 0);
@@ -7813,7 +7851,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (layout !== 'mono' && vw > 0 && vh > 0) {
         // Stereo: average the left eye only.
         glowProbeCtx.drawImage(source.element, 0, 0,
-          layout === 'sbs' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh, 0, 0, 8, 8);
+          layout === 'sbs' || layout === 'sbsd' ? vw / 2 : vw, layout === 'tb' ? vh / 2 : vh, 0, 0, 8, 8);
       } else {
         glowProbeCtx.drawImage(source.element, 0, 0, 8, 8);
       }
@@ -8011,6 +8049,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const earth = sceneMode === 'earth' ? earthDockStatus() : null;
       const autoNext = getAutoNext();
       const stereo = textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono';
+      const spatial = spatialDockState();
       const item = playlist[idx] || null;
       const duration = Number(source.duration) || 0;
       const currentTime = Number(source.currentTime) || 0;
@@ -8027,6 +8066,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         lockToViewer, autoNext, sceneMode, packMode, playlist.length, idx,
         packContext ? (packContext.title || '') + '/' + !!packContext.queueOpen : '',
         stereo, earth ? JSON.stringify(earth) : '',
+        spatial ? spatial.on + '/' + spatial.available : '',
         notificationText && notificationUntil > nowMs() ? notificationText : '',
       ].join('|');
       // Playback moves the thumb by the wall time since the last paint;
@@ -8063,6 +8103,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           notificationText,
           notificationUntil,
           stereo,
+          spatial,
           callbacks,
         });
         if (controlsTexture) {
@@ -12196,6 +12237,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     return callbacks.getPackContext ? callbacks.getPackContext() : null;
   }
 
+  // {on, available} for the dock's 3D button; null hides it (hosts without spatial).
+  function spatialDockState() {
+    if (!callbacks.getSpatialState) return null;
+    try { return callbacks.getSpatialState() || null; } catch (e) { return null; }
+  }
+
   // Screen-local hit (meters, upstream overlayCommentAtHit convention) →
   // normalized UV. Divided by the live screenScale so grip-scaled screens
   // keep mapping the full canvas.
@@ -12253,6 +12300,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         else if (videoElement) videoElement.muted = !videoElement.muted;
         break;
       case 'comments': toggleCommentsPanel(); break;
+      case 'spatial': if (callbacks.onToggleSpatial) callbacks.onToggleSpatial(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
         else if (sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();
@@ -12584,12 +12632,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Stereo layout of the loaded visual: 'mono' | 'sbs' | 'tb'.
     setSourceStereo,
     getSourceStereo() { return sourceStereo; },
+    // Depth multiplier of a colour+depth ('sbsd') source; 0 is flat.
+    setDepthStrength(value) { depthWarpStrength = Math.max(0, Math.min(4, Number(value) || 0)); },
 
     __test: {
       setVRTheme,
       earthGradeColors,
       makeEarthTileUniforms,
       buildEarthBase: (image) => buildHolographicEarthBase(image),
+      eyeMeshes: () => ({ L: eyeMeshL, R: eyeMeshR }),
       earthAtmosphere() {
         const m = earthAtmosphereMesh && earthAtmosphereMesh.material;
         return m ? { color: m.color.getHexString(), blending: m.blending } : null;

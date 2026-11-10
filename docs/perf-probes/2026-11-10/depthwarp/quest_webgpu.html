@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>quest webgpu probe</title>
+<!-- Reports navigator.gpu support and a small compute benchmark to PUT /work/quest_gpu.json (serve.py).
+     Open on the headset via: adb reverse tcp:8801 tcp:8801, then http://localhost:8801/docs/perf-probes/2026-11-10/depthwarp/quest_webgpu.html -->
+<body style="background:#111;color:#eee;font:28px sans-serif"><pre id="o">probing...</pre>
+<script>
+const out = { ua: navigator.userAgent, secure: isSecureContext, hasGpu: 'gpu' in navigator };
+const show = () => { document.getElementById('o').textContent = JSON.stringify(out, null, 1); };
+const send = () => fetch('/work/quest_gpu.json', { method: 'PUT', body: JSON.stringify(out) });
+
+// Square f32 matmul (naive 16x16-tiled workgroups); GFLOPS = 2*n^3 / time.
+async function matmul(device, n, runs) {
+  const mod = device.createShaderModule({ code: `
+    @group(0) @binding(0) var<storage, read> a: array<f32>;
+    @group(0) @binding(1) var<storage, read> b: array<f32>;
+    @group(0) @binding(2) var<storage, read_write> c: array<f32>;
+    @compute @workgroup_size(16, 16) fn main(@builtin(global_invocation_id) g: vec3<u32>) {
+      let n = ${n}u; if (g.x >= n || g.y >= n) { return; }
+      var s = 0.0; for (var k = 0u; k < n; k++) { s += a[g.y * n + k] * b[k * n + g.x]; }
+      c[g.y * n + g.x] = s; }` });
+  const pipe = device.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
+  const mk = (u) => device.createBuffer({ size: n * n * 4, usage: GPUBufferUsage.STORAGE | u });
+  const A = mk(GPUBufferUsage.COPY_DST), B = mk(GPUBufferUsage.COPY_DST), C = mk(GPUBufferUsage.COPY_SRC);
+  const bg = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries:
+    [A, B, C].map((buffer, binding) => ({ binding, resource: { buffer } })) });
+  const go = async () => {
+    const e = device.createCommandEncoder(), p = e.beginComputePass();
+    p.setPipeline(pipe); p.setBindGroup(0, bg); p.dispatchWorkgroups(Math.ceil(n / 16), Math.ceil(n / 16)); p.end();
+    device.queue.submit([e.finish()]); await device.queue.onSubmittedWorkDone();
+  };
+  await go();
+  const t = performance.now();
+  for (let i = 0; i < runs; i++) await go();
+  const ms = (performance.now() - t) / runs;
+  return { n, ms: +ms.toFixed(2), gflops: +(2 * n ** 3 / (ms / 1000) / 1e9).toFixed(1) };
+}
+
+(async () => {
+  try {
+    if (!out.hasGpu) { out.note = 'navigator.gpu missing'; return; }
+    const adapter = await navigator.gpu.requestAdapter();
+    out.adapter = !!adapter;
+    if (!adapter) return;
+    out.info = adapter.info ? Object.fromEntries(['vendor', 'architecture', 'device', 'description', 'backend'].map(k => [k, adapter.info[k]])) : null;
+    out.features = [...adapter.features];
+    out.limits = Object.fromEntries(['maxBufferSize', 'maxStorageBufferBindingSize', 'maxComputeWorkgroupStorageSize', 'maxComputeInvocationsPerWorkgroup'].map(k => [k, adapter.limits[k]]));
+    const device = await adapter.requestDevice();
+    out.bench = [await matmul(device, 512, 10), await matmul(device, 1024, 5)];
+  } catch (e) { out.error = String(e); }
+})().then(() => { show(); return send(); }).catch((e) => { out.sendError = String(e); show(); });
+</script>

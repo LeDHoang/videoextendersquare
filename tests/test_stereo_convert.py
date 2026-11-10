@@ -318,3 +318,188 @@ def test_takes_a_queue_slot_and_is_rate_limited(client, tmp_path, monkeypatch):
         _wait(ok.json()["job_id"])
     limited = _convert(client, {"kind": "image", "stage_id": stage})
     assert limited.status_code == 429 and limited.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_depth_pack_image_makes_the_sbsd_spatial_version(client, tmp_path, monkeypatch):
+    user = _register(client, "spatial_img")
+    stage = _stage(tmp_path, user, "sq")
+    monkeypatch.delenv("SX_STEREO_CONVERT_ENABLED")  # the spatial version has its own switch
+    response = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    rec = _wait(response.json()["job_id"])
+    assert rec.status == JobStatus.COMPLETE, rec.error
+    assert rec.result["stereo_layout"] == "sbsd"
+    assert rec.result["converted_from"] == {"stage_id": stage, "job_id": None}
+    assert rec.result["metrics"]["format"] == "colour+depth"
+    eye = (lambda rw, rh, crop: rw - 2 * crop)(*sw.eye_geometry(96, 96))
+    with Image.open(rec.result["path"]) as img:
+        assert img.size == (2 * eye, eye)
+
+    monkeypatch.setenv("SX_SPATIAL_DEFAULT_ENABLED", "0")
+    assert _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True}).status_code == 404
+
+
+def test_depth_pack_video_from_an_extend_render(client, tmp_path):
+    user = _register(client, "spatial_vid")
+    render = tmp_path / "render.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=96x96:r=10:d=1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(render)], check=True)
+    extend_job = _finished_job("video", user["id"], render)
+    response = _convert(client, {"kind": "video", "job_id": extend_job, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    rec = _wait(response.json()["job_id"])
+    assert rec.status == JobStatus.COMPLETE, rec.error
+    assert rec.result["stereo_layout"] == "sbsd"
+    assert rec.result["converted_from"] == {"stage_id": None, "job_id": extend_job}
+    assert media.get_video_codec(rec.result["path"]) == "hevc"
+
+
+def test_spatial_jobs_have_their_own_rate_bucket(client, tmp_path, monkeypatch):
+    user = _register(client, "spatial_caps")
+    stage = _stage(tmp_path, user, "sq")
+    monkeypatch.setattr(stereo_convert, "CONVERTS_PER_HOUR", 1)
+    _wait(_convert(client, {"kind": "image", "stage_id": stage}).json()["job_id"])
+    assert _convert(client, {"kind": "image", "stage_id": stage}).status_code == 429
+    ok = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert ok.status_code == 200, ok.text
+    _wait(ok.json()["job_id"])
+    monkeypatch.setattr(stereo_convert, "MAX_POST_IMAGES", 0)
+    limited = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert limited.status_code == 429 and limited.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_config_reports_spatial_default(client, monkeypatch):
+    import server.features as features
+
+    monkeypatch.setattr(features, "stereo_convert_installed", lambda: True)
+    assert client.get("/api/config").json()["features"]["spatial_default"] is True
+    monkeypatch.setenv("SX_SPATIAL_DEFAULT_ENABLED", "0")
+    assert client.get("/api/config").json()["features"]["spatial_default"] is False
+    monkeypatch.delenv("SX_SPATIAL_DEFAULT_ENABLED")
+    monkeypatch.setattr(features, "stereo_convert_installed", lambda: False)
+    assert client.get("/api/config").json()["features"]["spatial_default"] is False
+
+
+@pytest.fixture
+def r2(client, monkeypatch):
+    from server import media_store
+    from test_media_store import FakeS3
+
+    monkeypatch.setenv("SX_MEDIA_BASE_URL", "https://media.example.com")
+    monkeypatch.setenv("R2_PUBLIC_BUCKET", "public-media")
+    fake = FakeS3()
+    media_store.set_client(fake)
+    yield fake
+    media_store.set_client(None)
+
+
+def _spatial(client, body):
+    response = _convert(client, {**body, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    rec = _wait(response.json()["job_id"])
+    assert rec.status == JobStatus.COMPLETE, rec.error
+    return response.json()["job_id"]
+
+
+def _published_log(monkeypatch):
+    events = []
+    monkeypatch.setattr(uploads.upload_log, "record", lambda trace, event, **fields: events.append((event, fields)))
+    return events
+
+
+def test_slideshow_publishes_a_spatial_version_per_slide_to_r2(client, r2, tmp_path, monkeypatch):
+    user = _register(client, "spatial_pub_img")
+    cover, extra = _stage(tmp_path, user, "cover"), _stage(tmp_path, user, "extra")
+    spatial = [_spatial(client, {"kind": "image", "stage_id": cover}),
+               _spatial(client, {"kind": "image", "stage_id": extra})]
+    log = _published_log(monkeypatch)
+
+    # The spatial version is never a post of its own, and goes with the file it was made from.
+    alone = _publish(client, {"kind": "image", "title": "Deep", "job_id": spatial[0]})
+    assert alone.status_code == 422 and "spatial_job_ids" in alone.text
+    swapped = _publish(client, {"kind": "image", "title": "Deep", "stage_id": cover, "extra_stage_ids": [extra],
+                                "spatial_job_ids": spatial[::-1]})
+    assert swapped.status_code == 422
+    short = _publish(client, {"kind": "image", "title": "Deep", "stage_id": cover, "extra_stage_ids": [extra],
+                              "spatial_job_ids": spatial[:1]})
+    assert short.status_code == 422
+
+    published = _publish(client, {"kind": "image", "title": "Deep", "stage_id": cover, "extra_stage_ids": [extra],
+                                  "spatial_job_ids": spatial})
+    assert published.status_code == 200, published.text
+    body = published.json()
+    assert "spatial" not in body
+    stem = Path(body["rel_path"]).stem
+    depth_keys = [f"uploads/{stem}-depth.jpg", f"uploads/{stem}-2-depth.jpg"]
+    assert all(key in r2.objects for key in depth_keys)
+    with client.testing_session() as db:
+        post = db.query(Post).one()
+        assert (post.stereo_layout, post.source) == ("mono", "upload")
+        assert all(key in post.media_files for key in depth_keys)
+    # Image posts live in R2 only after publish; the feed reads the record, not the disk.
+    assert not any((Path("output") / key).exists() for key in depth_keys)
+    meta = body["meta"]
+    assert meta["depth_url"] == f"https://media.example.com/{depth_keys[0]}"
+    assert [image["depth_url"] for image in meta["images"]] == [f"https://media.example.com/{key}" for key in depth_keys]
+    event, fields = [entry for entry in log if entry[0] == "publish"][0]
+    assert fields["spatial"]["files"] == [Path(key).name for key in depth_keys]
+    assert fields["spatial"]["bytes"] > 0
+
+
+def test_video_spatial_version_is_recorded_after_the_background_assets(client, r2, tmp_path, monkeypatch):
+    user = _register(client, "spatial_pub_vid")
+    clip = _stage_video(tmp_path, user, "clip")
+    spatial = _spatial(client, {"kind": "video", "stage_id": clip})
+    published = _publish(client, {"kind": "video", "title": "Deep", "stage_id": clip, "spatial_job_ids": [spatial]})
+    assert published.status_code == 200, published.text
+    depth_key = f"uploads/{Path(published.json()['rel_path']).stem}-depth.mp4"
+    assert depth_key in r2.objects
+    with client.testing_session() as db:
+        post = db.query(Post).one()
+        # The faststart original is newer than the job's file; the copy must not look stale.
+        assert depth_key in post.media_files
+        from server.social.services import post_card
+        assert post_card(post, db, user["id"])["depth_url"] == f"https://media.example.com/{depth_key}"
+
+
+def test_flat_publish_has_no_spatial_version(client, tmp_path, monkeypatch):
+    user = _register(client, "spatial_none")
+    stage = _stage(tmp_path, user, "sq")
+    log = _published_log(monkeypatch)
+    published = _publish(client, {"kind": "image", "title": "Flat", "stage_id": stage})
+    assert published.status_code == 200, published.text
+    assert published.json()["meta"]["depth_url"] is None
+    assert [fields["spatial"] for event, fields in log if event == "publish"] == [None]
+    # A MAKE 3D (sbs) job is not a spatial version.
+    sbs = _convert(client, {"kind": "image", "stage_id": stage}).json()["job_id"]
+    _wait(sbs)
+    wrong = _publish(client, {"kind": "image", "title": "Flat", "stage_id": stage, "spatial_job_ids": [sbs]})
+    assert wrong.status_code == 422
+
+
+def test_depth_sibling_is_derived_media():
+    assert media.depth_sibling_path("output/uploads/a.mp4").name == "a-depth.mp4"
+    assert media.depth_sibling_path("output/uploads/a.png").name == "a-depth.jpg"
+    assert media.is_derived_media("a-depth.jpg") and not media.is_derived_media("a.jpg")
+    assert Path("output/uploads/a-depth.jpg") in media.derived_files(Path("output/uploads/a.png"))
+
+
+def test_failed_spatial_commit_discards_the_whole_publish(client, r2, tmp_path):
+    user = _register(client, "spatial_fail")
+    stage = _stage(tmp_path, user, "sq")
+    spatial = _spatial(client, {"kind": "image", "stage_id": stage})
+    upload = r2.upload_file
+
+    def depth_down(filename, bucket, key, ExtraArgs=None):
+        if "-depth" in key:
+            raise RuntimeError("R2 down")
+        upload(filename, bucket, key, ExtraArgs)
+
+    r2.upload_file = depth_down
+    failed = _publish(client, {"kind": "image", "title": "Deep", "stage_id": stage, "spatial_job_ids": [spatial]})
+    assert failed.status_code == 503
+    with client.testing_session() as db:
+        assert db.query(Post).count() == 0
+    # The 2D original went up first; a half-made post leaves nothing behind.
+    assert not any(key.startswith("uploads/") for key in r2.objects)
+    assert not list(Path("output/uploads").glob("*"))

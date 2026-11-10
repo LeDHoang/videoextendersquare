@@ -461,9 +461,14 @@ def process_video_spatial(
     depth_max_dim: int = 518,
     max_seconds: float | None = MAX_VIDEO_SECONDS,
     codec: str = "h264",
+    depth_pack: bool = False,
 ) -> tuple[str, dict]:
     """Convert one monocular video to a side-by-side stereo MP4 (H.264, or HEVC
     with codec="hevc": about half the bytes at the same quality, measured 2026-10-26).
+
+    depth_pack=True (prototype) skips the right-eye render and packs the
+    nearness map as grey in the right half instead; the VR player shifts each
+    eye from it at playback (webxr_vr.js, layout 'sbsd').
 
     Returns (output_path, metrics). Depth and render go one shot at a time,
     so memory holds one shot's depth-resolution frames (about 0.8 MB each at
@@ -544,7 +549,11 @@ def process_video_spatial(
                 # A short last read keeps the source's own frame count.
                 for i, frame in enumerate(itertools.islice(render_frames, b - a)):
                     d = condition_depth(near[i], rw, rh)
-                    right = render_right_eye(frame, d, strength)[crop:rh - crop, crop:rw - crop]
+                    if depth_pack:
+                        right = np.repeat((d * 255.0 + 0.5).astype(np.uint8)[:, :, None], 3, axis=2)
+                    else:
+                        right = render_right_eye(frame, d, strength)
+                    right = right[crop:rh - crop, crop:rw - crop]
                     left = frame[crop:rh - crop, crop:rw - crop]
                     if half_sbs:
                         left = cv2.resize(left, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
@@ -578,7 +587,7 @@ def process_video_spatial(
         "frames": encoded,
         "shots": len(shots),
         "resolution": f"{out_w}x{out_h}",
-        "format": "half-SBS" if half_sbs else "full-SBS",
+        "format": "colour+depth" if depth_pack else "half-SBS" if half_sbs else "full-SBS",
         "engine": f"W8T ({DEPTH_ENCODER}, {device})",
     }
     log(f"Done: {output_path} ({metrics['total_time']}s)")
@@ -590,8 +599,12 @@ def process_image_spatial(
     output_path: str,
     status_callback=None,
     strength: float = 1.0,
+    depth_pack: bool = False,
 ) -> tuple[str, dict]:
-    """Convert one still to a side-by-side stereo JPEG. Returns (output_path, metrics)."""
+    """Convert one still to a side-by-side stereo JPEG. Returns (output_path, metrics).
+
+    depth_pack: put the nearness map as grey in the right half instead of the
+    right eye, as process_video_spatial does (layout 'sbsd')."""
     import cv2
     from PIL import Image, ImageOps
 
@@ -617,7 +630,11 @@ def process_image_spatial(
     log("Rendering 3D...")
     rw, rh, crop = eye_geometry(width, height, strength)
     frame = rgb if (rw, rh) == (width, height) else cv2.resize(rgb, (rw, rh), interpolation=cv2.INTER_AREA)
-    right = render_right_eye(frame, condition_depth(near, rw, rh), strength)
+    d = condition_depth(near, rw, rh)
+    if depth_pack:
+        right = np.repeat((d * 255.0 + 0.5).astype(np.uint8)[:, :, None], 3, axis=2)
+    else:
+        right = render_right_eye(frame, d, strength)
     sbs = np.concatenate([frame[crop:rh - crop, crop:rw - crop], right[crop:rh - crop, crop:rw - crop]], axis=1)
     Image.fromarray(sbs).save(output_path, "JPEG", quality=95)
 
@@ -625,7 +642,7 @@ def process_image_spatial(
         "total_time": round(time.time() - t0, 2),
         "frames": 1,
         "resolution": f"{sbs.shape[1]}x{sbs.shape[0]}",
-        "format": "full-SBS",
+        "format": "colour+depth" if depth_pack else "full-SBS",
         "engine": f"W8T ({DEPTH_ENCODER}, {device})",
     }
     log(f"Done: {output_path} ({metrics['total_time']}s)")

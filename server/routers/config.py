@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from core import models as _models
 from server import kill_switch
 from server import media as SM
-from server.features import reel_pack_features, stereo_convert_enabled
+from server.features import reel_pack_features, spatial_default_enabled, stereo_convert_enabled
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 from server.social.database import get_db
 from server.social.turnstile import turnstile_site_key
@@ -42,7 +42,11 @@ def get_config(db: Session = Depends(get_db)):
     """
     return {
         "models": _models.config_payload(_model_config),
-        "features": {"reel_packs": reel_pack_features(), "stereo_convert": stereo_convert_enabled()},
+        "features": {
+            "reel_packs": reel_pack_features(),
+            "stereo_convert": stereo_convert_enabled(),
+            "spatial_default": spatial_default_enabled(),
+        },
         # The kill switches, so the SPA can say why a job button is off.
         "processing": kill_switch.state(db),
         # Public by design; the SPA renders the Turnstile widget with it. Empty = no challenge.

@@ -2826,6 +2826,11 @@
     // ('mono' | 'sbs' | 'tb'), and the left-eye CSS crop applied in 2D.
     let activeVisualLayout = 'mono';
     let activeCropLayout = '';
+    // Spatial viewing in VR: a 2D post's colour+depth sibling ('sbsd').
+    // On by default; the 3D button in the VR dock turns it off in this browser.
+    const SPATIAL_PREF_KEY = 'echo_reels_spatial_v1';
+    let spatialEnabled = true;
+    try { spatialEnabled = window.localStorage.getItem(SPATIAL_PREF_KEY) !== 'off'; } catch (e) {}
 
     function entryStereoLayout(entry) {
       const layout = entry && entry.stereo_layout;
@@ -2888,6 +2893,11 @@
     function playbackFor(entry, item) {
       const layout = entryStereoLayout(entry);
       const failed = !!(item && item.stereoFailed);
+      // A 2D post with a spatial sibling (colour | depth) plays it in VR
+      // while spatial viewing is on.
+      if (layout === 'mono' && entry.depth_url && spatialEnabled && !failed && wantsStereoSource()) {
+        return { url: entry.depth_url, layout: 'sbsd', crop: '' };
+      }
       if (layout !== 'mono' && entry.stereo_url && !failed && wantsStereoSource()) {
         return { url: wantsVr2k(entry) ? entry.vr2k_url : entry.stereo_url, layout: layout, crop: '' };
       }
@@ -3462,6 +3472,30 @@
       if (!item) return;
       item.stereoFailed = false;
       item.stereoFailures = 0;
+    }
+
+    // The 3D button of the VR dock: on = spatial viewing is on, available =
+    // the post (or image slide) now shown has a spatial version.
+    function spatialState() {
+      const item = videoData[idx];
+      const entry = isImageItem(item) ? imagePostSlides[imageSlideIndex] : item;
+      return { on: spatialEnabled, available: !!(entry && entry.depth_url) };
+    }
+
+    function toggleSpatial() {
+      const notify = (message) => {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) WebXRVR.showNotification(message);
+      };
+      // A post without a spatial version leaves the setting as it is.
+      if (!spatialState().available) {
+        notify('NO SPATIAL VERSION');
+        return;
+      }
+      spatialEnabled = !spatialEnabled;
+      try { window.localStorage.setItem(SPATIAL_PREF_KEY, spatialEnabled ? 'on' : 'off'); } catch (e) {}
+      if (spatialEnabled) clearStereoFailure(videoData[idx]);
+      notify(spatialEnabled ? 'SPATIAL ON' : 'SPATIAL OFF');
+      syncStereoSource();
     }
     // </reels-stereo-sync>
 
@@ -7368,6 +7402,9 @@
           syncStereoSource();
           window.dispatchEvent(new CustomEvent('echo:vr-exit'));
         },
+        // 2D posts with a spatial version: the dock's 3D button.
+        onToggleSpatial: toggleSpatial,
+        getSpatialState: spatialState,
         onShellHandoff: function(path) { dispatchNavigation(path); },
         onShellPlayFeed: replaceFeedForVr,
         shellRequest: function(path) {

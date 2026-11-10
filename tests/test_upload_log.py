@@ -75,6 +75,7 @@ def logs(monkeypatch, sessions):
     upload_log.flush()
     upload_log.set_client(None)
     upload_log._job_traces.clear()
+    upload_log._job_events.clear()
 
 
 def test_nothing_is_written_without_the_log_bucket(monkeypatch):
@@ -145,6 +146,35 @@ def test_job_outcomes_land_in_the_upload_trace(logs, monkeypatch):
     assert failed["event"] == "process_failed" and failed["job_id"] == bad_id
     assert "ffmpeg exited 1" in json.dumps(failed["error"])
     assert failed["messages"] == ["Upscaling locally…"]
+
+
+def test_a_spatial_job_never_moves_the_upload_status(logs, sessions, monkeypatch):
+    monkeypatch.setattr("server.output.keep", lambda record: None)
+    manager = JobManager(1, 1)
+    upload_log.record("stage-sp", "process_complete", job_id="extend-1", ms=40_000, metrics={"outpaint_cost": 0.3})
+
+    def ok(status_callback):
+        return {"metrics": {"total_time": 9.0}, "stereo_layout": "sbsd"}
+
+    def boom(status_callback):
+        raise RuntimeError("depth model ran out of memory")
+
+    for fn in (ok, boom):
+        job_id = manager.reserve_job("video", owner_id="owner-1")
+        upload_log.link_job(job_id, "stage-sp", events="spatial")
+        manager.submit(job_id, fn, {})
+        manager.get_job(job_id).future.result()
+    manager.shutdown(0)
+    upload_log.flush()
+
+    events = logs.json("traces/stage-sp.json")["events"]
+    assert [e["event"] for e in events] == ["process_complete", "spatial_complete", "spatial_error"]
+    assert "out of memory" in json.dumps(events[-1]["error"])
+    with sessions() as db:
+        row = db.get(UploadTrace, "stage-sp")
+        # The extend job's status, job, timing and cost stay; a spatial failure is no upload error.
+        assert (row.status, row.job_id, row.process_ms, row.error) == ("processed", "extend-1", 40_000, None)
+        assert row.cost == pytest.approx(0.3)
 
 
 def test_a_cancelled_job_is_logged(logs):

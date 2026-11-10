@@ -1,0 +1,62 @@
+{
+ "T": 32,
+ "size": 518,
+ "torch": "2.13.0",
+ "ort": "1.31.1",
+ "export_s": 42.9,
+ "onnx_mb": 116.3,
+ "clips": {
+  "street": {
+   "frames": 150,
+   "torch_cpu_s": 118.9,
+   "onnx_cpu_s": 330.2,
+   "onnx_ms_per_window": 43409.0,
+   "raw_max_rel": 6.5e-05,
+   "disparity_px": {
+    "mean": 0.0,
+    "p99": 0.0,
+    "p999": 0.0002,
+    "max": 0.0071
+   }
+  },
+  "tron": {
+   "frames": 150,
+   "torch_cpu_s": 130.5,
+   "onnx_cpu_s": 258.2,
+   "onnx_ms_per_window": 35578.0,
+   "raw_max_rel": 4.1e-05,
+   "disparity_px": {
+    "mean": 0.0,
+    "p99": 0.0,
+    "p999": 0.0004,
+    "max": 0.0071
+   }
+  },
+  "lyrics": {
+   "frames": 150,
+   "torch_cpu_s": 131.8,
+   "onnx_cpu_s": 241.9,
+   "onnx_ms_per_window": 32866.0,
+   "raw_max_rel": 7.3e-05,
+   "disparity_px": {
+    "mean": 0.0,
+    "p99": 0.0,
+    "p999": 0.0018,
+    "max": 0.0071
+   }
+  },
+  "street4k": {
+   "frames": 90,
+   "torch_cpu_s": 96.4,
+   "onnx_cpu_s": 183.0,
+   "onnx_ms_per_window": 33640.0,
+   "raw_max_rel": 2.6e-05,
+   "disparity_px": {
+    "mean": 0.0,
+    "p99": 0.0,
+    "p999": 0.0009,
+    "max": 0.0139
+   }
+  }
+ }
+}

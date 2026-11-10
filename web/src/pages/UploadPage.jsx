@@ -128,6 +128,13 @@ export default function UploadPage() {
   const [convertSettled, setConvertSettled] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const [convertError, setConvertError] = useState('');
+  // SPATIAL 3D: a colour+depth version of each 1:1 file, made on its own and
+  // published beside the 2D file. Keyed by source (stage id, or the extend
+  // job id) so a reordered slideshow keeps its finished jobs.
+  // source key → { jobId, status: 'running' | 'done' | 'failed', error }
+  const [spatialOff, setSpatialOff] = useState(false);
+  const [spatialJobs, setSpatialJobs] = useState({});
+  const spatialStarting = useRef(false);
   // Why the last file selection was refused (a refused selection keeps
   // whatever was staged before).
   const [pickError, setPickError] = useState('');
@@ -193,6 +200,35 @@ export default function UploadPage() {
   const batchRendering = batchBusy || batch.some((entry) => entry.status === 'rendering');
   const canShareSource = path === 'skip' ? !!staged : path === 'convert' ? !!convertDone : !!jobDone;
 
+  // Only a 2D post gets a spatial version; MAKE 3D and stereo uploads don't.
+  const spatialShown = !!cfgCtx?.config?.features?.spatial_default && !!staged && !stereo && path !== 'convert' && !convertJob;
+  const spatialSlots = !spatialShown || spatialOff ? []
+    : path === 'extend' ? (jobDone && job ? [job.jobId] : [])
+      : isSlideshow ? gallery.map((entry) => entry.meta.stage_id) : [staged.stage_id];
+  const spatialPending = spatialSlots.some((key) => !['done', 'failed'].includes(spatialJobs[key]?.status));
+  const spatialReady = spatialSlots.length > 0 && spatialSlots.every((key) => spatialJobs[key]?.status === 'done');
+  const spatialFailed = spatialSlots.some((key) => spatialJobs[key]?.status === 'failed');
+  const spatialSlotsKey = spatialSlots.join('|');
+  // One spatial job at a time: the next slide starts when the last one ends.
+  useEffect(() => {
+    if (spatialStarting.current || spatialSlots.some((key) => spatialJobs[key]?.status === 'running')) return;
+    const key = spatialSlots.find((slot) => !spatialJobs[slot]);
+    if (!key) return;
+    spatialStarting.current = true;
+    const source = path === 'extend' ? { job_id: key } : { stage_id: key };
+    api.post('/api/stereo/convert', { kind, depth_pack: true, ...source }).then(
+      (res) => {
+        spatialStarting.current = false;
+        setSpatialJobs((jobs) => ({ ...jobs, [key]: { jobId: res.job_id, status: 'running' } }));
+      },
+      (requestError) => {
+        spatialStarting.current = false;
+        setSpatialJobs((jobs) => ({ ...jobs, [key]: { status: 'failed', error: billingErrorMessage(requestError, 'Could not start the spatial version.') } }));
+      },
+    );
+    // spatialSlotsKey stands for spatialSlots.
+  }, [spatialSlotsKey, spatialJobs, path, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const captionTags = useMemo(() => {
     const found = [];
     const re = /#([A-Za-z0-9_]{1,30})/g;
@@ -212,7 +248,7 @@ export default function UploadPage() {
     return merged;
   }, [tags, captionTags]);
 
-  const shareDisabled = blocked.length > 0 || !staged || !title.trim() || !canShareSource || publishing || postRendering;
+  const shareDisabled = blocked.length > 0 || !staged || !title.trim() || !canShareSource || publishing || postRendering || spatialPending;
 
   // ── POST intake ──
   const suggestTitle = (name) => {
@@ -312,6 +348,7 @@ export default function UploadPage() {
     setJobDone(null);
     setJobSettled(false);
     clearConvert();
+    setSpatialJobs({});
     releaseEntries(gallery);
     setGallery([]);
     setGalleryView(null);
@@ -540,6 +577,8 @@ export default function UploadPage() {
           : path === 'skip' ? { stage_id: staged.stage_id } : { job_id: job.jobId }),
         ...(isSlideshow ? { extra_stage_ids: gallery.slice(1).map((entry) => entry.meta.stage_id) } : {}),
         ...(stereo && path === 'skip' ? { stereo_layout: stereo } : {}),
+        // All slides or none: a failed spatial job publishes the post 2D only.
+        ...(spatialReady ? { spatial_job_ids: spatialSlots.map((key) => spatialJobs[key].jobId) } : {}),
       };
       const res = await api.post('/api/uploads/publish', body);
       setPublished(res);
@@ -574,6 +613,7 @@ export default function UploadPage() {
     setShareError('');
     setPath('skip');
     setStereoOn(false);
+    setSpatialJobs({});
   };
 
   const onStereoToggle = (on) => {
@@ -790,6 +830,38 @@ export default function UploadPage() {
               />
             ) : null}
             {convertDone ? <Mono>✓ 3D RENDER COMPLETE — READY TO SHARE IN 3D</Mono> : null}
+          </DeckSection>
+        ) : null}
+        {spatialShown ? (
+          <DeckSection num={next()} title="SPATIAL 3D" badge={spatialOff ? 'OFF' : 'COLOUR + DEPTH · NO CREDITS'} badgeTone={spatialReady ? 'ok' : spatialOff ? 'muted' : 'accent'}>
+            <ToggleRow label="SPATIAL 3D" checked={!spatialOff} onChange={(on) => setSpatialOff(!on)} help="A depth version for VR, published beside the 2D file" />
+            <p className="sx-studio-note">
+              {path === 'extend' && !jobDone
+                ? 'Starts once the 4K square master is rendered. '
+                : ''}
+              VR viewers see the post in 3D; 2D views never load it. Videos up to 60 s.
+            </p>
+            {spatialSlots.map((key, index) => {
+              const entry = spatialJobs[key];
+              return entry?.jobId ? (
+                <JobRunner
+                  key={entry.jobId}
+                  jobId={entry.jobId}
+                  name={isSlideshow ? `SLIDE ${index + 1}/${spatialSlots.length}` : file?.name || 'upload'}
+                  kind={kind}
+                  showMedia={false}
+                  doneLabel="✓ SPATIAL VERSION READY"
+                  downloadLabel="↓ DOWNLOAD SPATIAL VERSION"
+                  onSettled={(state) => setSpatialJobs((jobs) => ({ ...jobs, [key]: { ...jobs[key], status: state?.status === 'complete' ? 'done' : 'failed' } }))}
+                />
+              ) : null;
+            })}
+            {spatialFailed ? (
+              <div className="sx-error-box" role="alert">
+                <div className="sx-error-title">SPATIAL VERSION FAILED — SHARE PUBLISHES 2D ONLY</div>
+                {spatialSlots.map((key) => spatialJobs[key]?.error).filter(Boolean).map((error) => <div key={error}>{error}</div>)}
+              </div>
+            ) : null}
           </DeckSection>
         ) : null}
         {staged ? (

@@ -158,6 +158,22 @@ def test_half_sbs_packs_two_half_width_eyes(textured_clip, depth_calls, tmp_path
     assert metrics["format"] == "half-SBS"
 
 
+def test_depth_pack_puts_grey_nearness_beside_the_colour(textured_clip, depth_calls, tmp_path):
+    out = tmp_path / "packed.mp4"
+    _, metrics = sw.process_video_spatial(str(textured_clip), str(out), depth_pack=True)
+    src = frames_of(textured_clip)
+    packed = frames_of(out)
+    rw, rh, crop = sw.eye_geometry(160, 160)
+    eye = rw - 2 * crop
+    assert packed.shape[1:3] == (rh - 2 * crop, 2 * eye) and metrics["format"] == "colour+depth"
+    # 4:2:0 chroma bleeds some columns across the seam; the player reads green.
+    colour, depth = packed[0, :, :eye].astype(int), packed[0, :, eye + 16:].astype(int)
+    assert psnr(colour, src[0, crop:rh - crop, crop:rw - crop]) > 30
+    # Grey, and not flat: the fake depth is a ramp.
+    assert np.abs(depth[..., 0] - depth[..., 1]).max() <= 3 and np.abs(depth[..., 1] - depth[..., 2]).max() <= 3
+    assert depth[..., 1].max() - depth[..., 1].min() > 100
+
+
 def test_depth_runs_once_per_shot(depth_calls, tmp_path):
     src = tmp_path / "cut.mp4"
     ffmpeg("-f", "lavfi", "-i", f"testsrc2=s=128x128:r={FPS}:d=1",
@@ -237,6 +253,24 @@ def test_square_image_gives_square_eyes(depth_calls, tmp_path):
     sw.process_image_spatial(str(src), str(out))
     with Image.open(out) as img:
         assert img.size == (2 * 288, 288)  # crop ceil(0.013867 * 300) = 5, rounded up to even
+
+
+def test_image_depth_pack_puts_grey_nearness_beside_the_colour(depth_calls, tmp_path):
+    ramp = np.linspace(0, 255, 300, dtype=np.float32)
+    rgb = np.stack([np.broadcast_to(ramp, (300, 300)), np.broadcast_to(ramp[:, None], (300, 300)),
+                    np.full((300, 300), 128.0)], axis=2).astype(np.uint8)  # smooth, so JPEG keeps it
+    src = tmp_path / "sq.png"
+    Image.fromarray(rgb).save(src)
+    out = tmp_path / "sq_sbsd.jpg"
+    _, metrics = sw.process_image_spatial(str(src), str(out), depth_pack=True)
+    with Image.open(out) as img:
+        assert img.size == (2 * 288, 288)
+        packed = np.asarray(img.convert("RGB")).astype(int)
+    assert metrics["format"] == "colour+depth"
+    assert psnr(packed[:, :288], rgb[6:294, 6:294].astype(int)) > 30
+    depth = packed[:, 288 + 8:]
+    assert np.abs(depth[..., 0] - depth[..., 1]).max() <= 3 and np.abs(depth[..., 1] - depth[..., 2]).max() <= 3
+    assert depth[..., 1].max() - depth[..., 1].min() > 100
 
 
 def test_unreadable_image_is_a_spatialize_error(depth_calls, tmp_path):
