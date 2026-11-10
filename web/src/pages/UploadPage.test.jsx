@@ -38,6 +38,10 @@ vi.mock('../components/ui/JobRunner.jsx', () => ({
     <button
       type="button"
       onClick={() => {
+        if (jobId.includes('-fail')) {
+          onSettled?.({ status: 'failed' });
+          return;
+        }
         onDone?.({
           download_url: `/api/jobs/${jobId}/download`,
           preview_url: null,
@@ -809,5 +813,93 @@ describe('UploadPage studio — MAKE 3D', () => {
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
     expect(within(screen.getByRole('radiogroup', { name: 'Publish path' })).queryByRole('radio', { name: 'MAKE 3D' })).toBeNull();
+  });
+});
+
+describe('UploadPage studio — SPATIAL 3D', () => {
+  // Each spatial job is named after its source; a source named in failOn fails.
+  let failOn;
+  const answer = () => mocks.post.mockImplementation(async (path, body) => (
+    path === '/api/stereo/convert'
+      ? { job_id: `job-sp-${body.stage_id || body.job_id}${failOn === (body.stage_id || body.job_id) ? '-fail' : ''}`, status: 'queued' }
+      : { meta: { title: 'x' }, rel_path: 'uploads/x.jpg', media_url: '/m' }
+  ));
+  const share = () => screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' });
+  const convertCalls = () => mocks.post.mock.calls.filter(([path]) => path === '/api/stereo/convert');
+  const publishBody = () => mocks.post.mock.calls.find(([path]) => path === '/api/uploads/publish')[1];
+
+  beforeEach(() => {
+    failOn = null;
+    mocks.features = { spatial_default: true, stereo_convert: true };
+    answer();
+  });
+
+  it('makes the spatial version on its own and publishes it beside the 2D file', async () => {
+    renderPage();
+    await pick(['square.png']);
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', depth_pack: true, stage_id: 'st-square.png' }));
+    expect(screen.getByRole('checkbox', { name: 'SPATIAL 3D' })).toBeChecked();
+    expect(share()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-square.png' }));
+    await waitFor(() => expect(share()).toBeEnabled());
+    fireEvent.click(share());
+    await waitFor(() => expect(publishBody()).toMatchObject({ stage_id: 'st-square.png', spatial_job_ids: ['job-sp-st-square.png'] }));
+  });
+
+  it('publishes 2D only when switched off or when the spatial job fails', async () => {
+    failOn = 'st-square.mp4';
+    renderPage();
+    await pick(['square.mp4']);
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.mp4-fail' }));
+    expect(await screen.findByText('SPATIAL VERSION FAILED — SHARE PUBLISHES 2D ONLY')).toBeInTheDocument();
+    fireEvent.click(share());
+    await waitFor(() => expect(publishBody()).toBeDefined());
+    expect(publishBody().spatial_job_ids).toBeUndefined();
+  });
+
+  it('starts nothing when switched off', async () => {
+    renderPage();
+    await pick(['square.png']);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'SPATIAL 3D' }));
+    expect(share()).toBeEnabled();
+    fireEvent.click(share());
+    await waitFor(() => expect(publishBody()).toBeDefined());
+    expect(publishBody().spatial_job_ids).toBeUndefined();
+  });
+
+  it('runs one slide at a time and keeps finished slides through a removal', async () => {
+    renderPage();
+    await pick(['a.png', 'b.png', 'c.png']);
+    await waitFor(() => expect(convertCalls()).toHaveLength(1));
+    expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, stage_id: 'st-a.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-a.png' }));
+    await waitFor(() => expect(convertCalls()).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-b.png' }));
+    await waitFor(() => expect(convertCalls()).toHaveLength(3));
+    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-c.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove b.png' }));
+    await waitFor(() => expect(share()).toBeEnabled());
+    fireEvent.click(share());
+    await waitFor(() => expect(publishBody()).toBeDefined());
+    expect(publishBody()).toMatchObject({ extra_stage_ids: ['st-c.png'], spatial_job_ids: ['job-sp-st-a.png', 'job-sp-st-c.png'] });
+    expect(convertCalls()).toHaveLength(3);
+  });
+
+  it('waits for the extend render and converts that render', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-ext' });
+    renderPage();
+    await pick(['wide.png']);
+    fireEvent.click(await screen.findByRole('button', { name: /RENDER .*4K SQUARE/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
+    await waitFor(() => expect(convertCalls()).toHaveLength(1));
+    expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, job_id: 'job-ext' });
+  });
+
+  it('is not made for MAKE 3D or as-is stereo posts', async () => {
+    renderPage();
+    await pick(['eyes1.png']);
+    await screen.findByLabelText(/STEREOSCOPIC 3D/);
+    expect(screen.queryByRole('checkbox', { name: 'SPATIAL 3D' })).toBeNull();
+    expect(convertCalls()).toHaveLength(0);
   });
 });
