@@ -37,3 +37,8 @@ def stereo_convert_installed() -> bool:
 def stereo_convert_enabled() -> bool:
     """MAKE 3D is switched on (off by default) and can run on this host."""
     return feature_enabled("SX_STEREO_CONVERT_ENABLED", default=False) and stereo_convert_installed()
+
+
+def spatial_default_enabled() -> bool:
+    """Every upload gets a colour+depth spatial version (on by default) and this host can make it."""
+    return feature_enabled("SX_SPATIAL_DEFAULT_ENABLED") and stereo_convert_installed()

@@ -58,6 +58,8 @@ STATUS_BY_EVENT = {
     "publish": "published",
     "publish_failed": "publish_failed",
 }
+# Event prefixes of side jobs on an upload (link_job events=...).
+SIDE_JOB_EVENTS = ("spatial_", "convert_")
 
 _client = None
 _client_lock = threading.Lock()
@@ -67,6 +69,9 @@ _files = ThreadPoolExecutor(max_workers=1, thread_name_prefix="upload-log-files"
 _last_file: Future | None = None
 # job_id -> trace_id, so job events and a publish by job_id find their upload.
 _job_traces: dict[str, str] = {}
+# job_id -> event prefix of a side job on the upload (the spatial version,
+# MAKE 3D); its events never move the upload's status. Other jobs log process_*.
+_job_events: dict[str, str] = {}
 
 
 def enabled() -> bool:
@@ -180,8 +185,10 @@ def _index(trace_id: str, event: dict, post_id: str | None) -> None:
         row.updated_at = at
         row.event_count = (row.event_count or 0) + 1
         row.status = STATUS_BY_EVENT.get(name, row.status)
+        # A side job (spatial_*, convert_*) keeps the row's job_id on the job that made the post's file.
+        side_job = name.startswith(SIDE_JOB_EVENTS)
         for field in ("user_id", "kind", "job_id"):
-            if event.get(field):
+            if event.get(field) and not (side_job and field == "job_id"):
                 setattr(row, field, str(event[field]))
         if post_id:
             row.post_id = post_id
@@ -259,8 +266,11 @@ def file_url(key: str) -> str:
     )
 
 
-def link_job(job_id: str, trace_id: str) -> None:
+def link_job(job_id: str, trace_id: str, *, events: str = "process") -> None:
+    """Log *job_id*'s end in *trace_id*'s trace as ``<events>_<status>``."""
     _job_traces[job_id] = trace_id
+    if events != "process":
+        _job_events[job_id] = events
 
 
 def trace_for_job(job_id: str | None) -> str | None:
@@ -289,7 +299,12 @@ def job_finished(record_, seconds: float | None) -> None:
     fields["messages"] = list(record_.messages[-JOB_MESSAGES_KEPT:])
     if status == "complete":
         fields["result_key"] = _result_key(record_)
-    record(trace_id, f"process_{status}", **fields)
+    events = _job_events.get(record_.job_id, "process")
+    # A side job's failure is "<events>_error", not "_failed": it neither fails
+    # the upload nor sets its row's error (_index), since publish goes ahead without it.
+    if events != "process" and status == "failed":
+        status = "error"
+    record(trace_id, f"{events}_{status}", **fields)
 
 
 def _result_key(record_) -> str | None:

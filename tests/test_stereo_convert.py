@@ -318,3 +318,62 @@ def test_takes_a_queue_slot_and_is_rate_limited(client, tmp_path, monkeypatch):
         _wait(ok.json()["job_id"])
     limited = _convert(client, {"kind": "image", "stage_id": stage})
     assert limited.status_code == 429 and limited.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_depth_pack_image_makes_the_sbsd_spatial_version(client, tmp_path, monkeypatch):
+    user = _register(client, "spatial_img")
+    stage = _stage(tmp_path, user, "sq")
+    monkeypatch.delenv("SX_STEREO_CONVERT_ENABLED")  # the spatial version has its own switch
+    response = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    rec = _wait(response.json()["job_id"])
+    assert rec.status == JobStatus.COMPLETE, rec.error
+    assert rec.result["stereo_layout"] == "sbsd"
+    assert rec.result["converted_from"] == {"stage_id": stage, "job_id": None}
+    assert rec.result["metrics"]["format"] == "colour+depth"
+    eye = (lambda rw, rh, crop: rw - 2 * crop)(*sw.eye_geometry(96, 96))
+    with Image.open(rec.result["path"]) as img:
+        assert img.size == (2 * eye, eye)
+
+    monkeypatch.setenv("SX_SPATIAL_DEFAULT_ENABLED", "0")
+    assert _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True}).status_code == 404
+
+
+def test_depth_pack_video_from_an_extend_render(client, tmp_path):
+    user = _register(client, "spatial_vid")
+    render = tmp_path / "render.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=96x96:r=10:d=1",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(render)], check=True)
+    extend_job = _finished_job("video", user["id"], render)
+    response = _convert(client, {"kind": "video", "job_id": extend_job, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    rec = _wait(response.json()["job_id"])
+    assert rec.status == JobStatus.COMPLETE, rec.error
+    assert rec.result["stereo_layout"] == "sbsd"
+    assert rec.result["converted_from"] == {"stage_id": None, "job_id": extend_job}
+
+
+def test_spatial_jobs_have_their_own_rate_bucket(client, tmp_path, monkeypatch):
+    user = _register(client, "spatial_caps")
+    stage = _stage(tmp_path, user, "sq")
+    monkeypatch.setattr(stereo_convert, "CONVERTS_PER_HOUR", 1)
+    _wait(_convert(client, {"kind": "image", "stage_id": stage}).json()["job_id"])
+    assert _convert(client, {"kind": "image", "stage_id": stage}).status_code == 429
+    ok = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert ok.status_code == 200, ok.text
+    _wait(ok.json()["job_id"])
+    monkeypatch.setattr(stereo_convert, "MAX_POST_IMAGES", 0)
+    limited = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert limited.status_code == 429 and limited.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_config_reports_spatial_default(client, monkeypatch):
+    import server.features as features
+
+    monkeypatch.setattr(features, "stereo_convert_installed", lambda: True)
+    assert client.get("/api/config").json()["features"]["spatial_default"] is True
+    monkeypatch.setenv("SX_SPATIAL_DEFAULT_ENABLED", "0")
+    assert client.get("/api/config").json()["features"]["spatial_default"] is False
+    monkeypatch.delenv("SX_SPATIAL_DEFAULT_ENABLED")
+    monkeypatch.setattr(features, "stereo_convert_installed", lambda: False)
+    assert client.get("/api/config").json()["features"]["spatial_default"] is False

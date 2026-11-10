@@ -255,6 +255,24 @@ def test_square_image_gives_square_eyes(depth_calls, tmp_path):
         assert img.size == (2 * 288, 288)  # crop ceil(0.013867 * 300) = 5, rounded up to even
 
 
+def test_image_depth_pack_puts_grey_nearness_beside_the_colour(depth_calls, tmp_path):
+    ramp = np.linspace(0, 255, 300, dtype=np.float32)
+    rgb = np.stack([np.broadcast_to(ramp, (300, 300)), np.broadcast_to(ramp[:, None], (300, 300)),
+                    np.full((300, 300), 128.0)], axis=2).astype(np.uint8)  # smooth, so JPEG keeps it
+    src = tmp_path / "sq.png"
+    Image.fromarray(rgb).save(src)
+    out = tmp_path / "sq_sbsd.jpg"
+    _, metrics = sw.process_image_spatial(str(src), str(out), depth_pack=True)
+    with Image.open(out) as img:
+        assert img.size == (2 * 288, 288)
+        packed = np.asarray(img.convert("RGB")).astype(int)
+    assert metrics["format"] == "colour+depth"
+    assert psnr(packed[:, :288], rgb[6:294, 6:294].astype(int)) > 30
+    depth = packed[:, 288 + 8:]
+    assert np.abs(depth[..., 0] - depth[..., 1]).max() <= 3 and np.abs(depth[..., 1] - depth[..., 2]).max() <= 3
+    assert depth[..., 1].max() - depth[..., 1].min() > 100
+
+
 def test_unreadable_image_is_a_spatialize_error(depth_calls, tmp_path):
     bad = tmp_path / "bad.jpg"
     bad.write_bytes(b"not an image")

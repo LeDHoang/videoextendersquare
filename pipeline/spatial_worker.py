@@ -599,8 +599,12 @@ def process_image_spatial(
     output_path: str,
     status_callback=None,
     strength: float = 1.0,
+    depth_pack: bool = False,
 ) -> tuple[str, dict]:
-    """Convert one still to a side-by-side stereo JPEG. Returns (output_path, metrics)."""
+    """Convert one still to a side-by-side stereo JPEG. Returns (output_path, metrics).
+
+    depth_pack: put the nearness map as grey in the right half instead of the
+    right eye, as process_video_spatial does (layout 'sbsd')."""
     import cv2
     from PIL import Image, ImageOps
 
@@ -626,7 +630,11 @@ def process_image_spatial(
     log("Rendering 3D...")
     rw, rh, crop = eye_geometry(width, height, strength)
     frame = rgb if (rw, rh) == (width, height) else cv2.resize(rgb, (rw, rh), interpolation=cv2.INTER_AREA)
-    right = render_right_eye(frame, condition_depth(near, rw, rh), strength)
+    d = condition_depth(near, rw, rh)
+    if depth_pack:
+        right = np.repeat((d * 255.0 + 0.5).astype(np.uint8)[:, :, None], 3, axis=2)
+    else:
+        right = render_right_eye(frame, d, strength)
     sbs = np.concatenate([frame[crop:rh - crop, crop:rw - crop], right[crop:rh - crop, crop:rw - crop]], axis=1)
     Image.fromarray(sbs).save(output_path, "JPEG", quality=95)
 
@@ -634,7 +642,7 @@ def process_image_spatial(
         "total_time": round(time.time() - t0, 2),
         "frames": 1,
         "resolution": f"{sbs.shape[1]}x{sbs.shape[0]}",
-        "format": "full-SBS",
+        "format": "colour+depth" if depth_pack else "full-SBS",
         "engine": f"W8T ({DEPTH_ENCODER}, {device})",
     }
     log(f"Done: {output_path} ({metrics['total_time']}s)")
