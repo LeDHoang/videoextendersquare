@@ -1477,6 +1477,27 @@ test('dockfreeze stops dock texture re-uploads after the first paint', () => {
   renderer.stopPreview();
 });
 
+test('the 3D toggle repaints the dock, and an unchanged spatial state does not', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  const spatial = { on: true, available: true };
+  renderer.init(null, { getSpatialState: () => spatial });
+  renderer.startPreview(makePreviewCanvas(gl));
+  const uploadsOf = () => renderer.getPreviewState().renderStats.dockUploads;
+  renderer.__runScheduledFrame(0);
+  const painted = uploadsOf();
+  assert.ok(painted >= 1, 'first paint uploads');
+  renderer.__runScheduledFrame(200);
+  assert.equal(uploadsOf(), painted, 'same spatial state: dock stays as painted');
+  spatial.on = false;
+  renderer.__runScheduledFrame(400);
+  assert.equal(uploadsOf(), painted + 1, 'toggled off: one repaint');
+  spatial.available = false;
+  renderer.__runScheduledFrame(600);
+  assert.equal(uploadsOf(), painted + 2, 'a post without a spatial version: one repaint');
+  renderer.stopPreview();
+});
+
 test('a playing reel repaints the dock for its seek thumb at most ~4 times a second', () => {
   const gl = makeMockGl({ deleted: 0 });
   let clock = 0;
