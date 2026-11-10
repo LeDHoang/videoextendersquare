@@ -3421,13 +3421,19 @@
     }
 
     function toggleSpatial() {
-      const state = spatialState();
+      const notify = (message) => {
+        if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) WebXRVR.showNotification(message);
+      };
+      // A post without a spatial version leaves the setting as it is.
+      if (!spatialState().available) {
+        notify('NO SPATIAL VERSION');
+        return;
+      }
       spatialEnabled = !spatialEnabled;
       try { window.localStorage.setItem(SPATIAL_PREF_KEY, spatialEnabled ? 'on' : 'off'); } catch (e) {}
       if (spatialEnabled) clearStereoFailure(videoData[idx]);
-      const message = !state.available ? 'NO SPATIAL VERSION' : (spatialEnabled ? 'SPATIAL ON' : 'SPATIAL OFF');
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) WebXRVR.showNotification(message);
-      if (state.available) syncStereoSource();
+      notify(spatialEnabled ? 'SPATIAL ON' : 'SPATIAL OFF');
+      syncStereoSource();
     }
     // </reels-stereo-sync>
 
