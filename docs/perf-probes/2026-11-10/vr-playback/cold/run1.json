@@ -1,0 +1,403 @@
+{
+ "vids": [
+  {
+   "url": "https://media.echomultiverse.com/testpipeline-3d/square_YTDown.com_YouTube_The-Weeknd-Madonna-Playboi-Carti-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "cold": {
+    "meta": 298,
+    "frame": 430,
+    "w": 4092,
+    "h": 2046,
+    "dur": 15,
+    "rs2": 436,
+    "rs3": 437
+   },
+   "warm": {
+    "meta": 99,
+    "frame": 211,
+    "w": 4092,
+    "h": 2046,
+    "dur": 15,
+    "rs2": 220,
+    "rs3": 220
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/testpipeline/YTDown.com_Shorts_Rock-That-Body-Cyberpunk-2077-Edit-4K-cy_Media_u89Y5Pdhajw_001_1080p_cropped.mp4",
+   "cold": {
+    "meta": 1663,
+    "frame": 1778,
+    "w": 1080,
+    "h": 778,
+    "dur": 29
+   },
+   "warm": {
+    "meta": 10,
+    "frame": 63,
+    "w": 1080,
+    "h": 778,
+    "dur": 29
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/codec-test-hevc-4-6mb-20261026-083757-4c2972-mono.mp4",
+   "cold": {
+    "meta": 65,
+    "rs2": 121,
+    "rs3": 121,
+    "frame": 124,
+    "w": 2046,
+    "h": 2046,
+    "dur": 2
+   },
+   "warm": {
+    "meta": 7,
+    "rs2": 67,
+    "rs3": 68,
+    "frame": 70,
+    "w": 2046,
+    "h": 2046,
+    "dur": 2
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/testpipeline/square_King Von - Back Again (Million Dollaz Worth of Game Lyric Video) (feat. Lil Durk & Prince Dre).mp4",
+   "cold": {
+    "meta": 263,
+    "rs2": 364,
+    "rs3": 364,
+    "frame": 377,
+    "w": 3840,
+    "h": 3840,
+    "dur": 15
+   },
+   "warm": {
+    "meta": 31,
+    "rs2": 110,
+    "rs3": 110,
+    "frame": 116,
+    "w": 3840,
+    "h": 3840,
+    "dur": 15
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/codec-test-h264-9-7mb-20261026-083754-12f4cc-mono.mp4",
+   "cold": {
+    "meta": 113,
+    "rs2": 169,
+    "rs3": 169,
+    "frame": 170,
+    "w": 2046,
+    "h": 2046,
+    "dur": 2
+   },
+   "warm": {
+    "meta": 6,
+    "rs2": 70,
+    "rs3": 70,
+    "frame": 75,
+    "w": 2046,
+    "h": 2046,
+    "dur": 2
+   }
+  }
+ ],
+ "imgs": [
+  {
+   "url": "https://media.echomultiverse.com/uploads/cap-1-20261005-061215-fb17a3.png",
+   "cold": {
+    "ms": 572,
+    "kb": 996
+   },
+   "warm": {
+    "ms": 12,
+    "kb": 996
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/cap-1-20261003-104207-e09360.png",
+   "cold": {
+    "ms": 272,
+    "kb": 725
+   },
+   "warm": {
+    "ms": 11,
+    "kb": 725
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/cap-4-20260922-160846-76c9b9.png",
+   "cold": {
+    "ms": 16,
+    "kb": 951
+   },
+   "warm": {
+    "ms": 11,
+    "kb": 951
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/legacy-20261005-110034-1081ae.png",
+   "cold": {
+    "ms": 209,
+    "kb": 724
+   },
+   "warm": {
+    "ms": 10,
+    "kb": 724
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/legacy-20260922-174209-ce5649.png",
+   "cold": {
+    "ms": 166,
+    "kb": 493
+   },
+   "warm": {
+    "ms": 10,
+    "kb": 493
+   }
+  },
+  {
+   "url": "https://media.echomultiverse.com/uploads/cap-3-20261003-104208-7d1832.png",
+   "cold": {
+    "ms": 15,
+    "kb": 725
+   },
+   "warm": {
+    "ms": 9,
+    "kb": 725
+   }
+  }
+ ],
+ "net": [
+  {
+   "url": "oi-Carti-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=0-",
+   "t": 35344.310177,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 277,
+   "proto": "h2"
+  },
+  {
+   "url": "oi-Carti-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=0-",
+   "t": 35345.543224,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 80,
+   "proto": "h2"
+  },
+  {
+   "url": "oi-Carti-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=2523136-",
+   "t": 35345.632759,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 7,
+   "proto": "h2"
+  },
+  {
+   "url": "oi-Carti-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=35651584-",
+   "t": 35345.650103,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 7,
+   "proto": "h2"
+  },
+  {
+   "url": "it-4K-cy_Media_u89Y5Pdhajw_001_1080p_cropped.mp4",
+   "range": "bytes=0-",
+   "t": 35346.057908,
+   "status": 206,
+   "cf": "HIT",
+   "disk": false,
+   "ttfb": 967,
+   "proto": "h2"
+  },
+  {
+   "url": "it-4K-cy_Media_u89Y5Pdhajw_001_1080p_cropped.mp4",
+   "range": "bytes=393216-",
+   "t": 35348.639049,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 2,
+   "proto": "h2"
+  },
+  {
+   "url": "-test-hevc-4-6mb-20261026-083757-4c2972-mono.mp4",
+   "range": "bytes=0-",
+   "t": 35349.005315,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 29,
+   "proto": "h2"
+  },
+  {
+   "url": "o)%20(feat.%20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "t": 35350.302702,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 245,
+   "proto": "h2"
+  },
+  {
+   "url": "o)%20(feat.%20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "t": 35351.481168,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 5,
+   "proto": "h2"
+  },
+  {
+   "url": "o)%20(feat.%20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=1703936-",
+   "t": 35351.492863,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 10,
+   "proto": "h2"
+  },
+  {
+   "url": "o)%20(feat.%20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=31096832-",
+   "t": 35351.507774,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 7,
+   "proto": "h2"
+  },
+  {
+   "url": "-test-h264-9-7mb-20261026-083754-12f4cc-mono.mp4",
+   "range": "bytes=0-",
+   "t": 35351.904899,
+   "status": 206,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 68,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-1-20261005-061215-fb17a3.png",
+   "t": 35353.263005,
+   "status": 200,
+   "cf": "HIT",
+   "disk": false,
+   "ttfb": 559,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-1-20261005-061215-fb17a3.png",
+   "t": 35353.835277,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 5,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-1-20261003-104207-e09360.png",
+   "t": 35353.847194,
+   "status": 200,
+   "cf": "HIT",
+   "disk": false,
+   "ttfb": 259,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-1-20261003-104207-e09360.png",
+   "t": 35354.119052,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 6,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-4-20260922-160846-76c9b9.png",
+   "t": 35354.130029,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 5,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-4-20260922-160846-76c9b9.png",
+   "t": 35354.145308,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 3,
+   "proto": "h2"
+  },
+  {
+   "url": "se.com/uploads/legacy-20261005-110034-1081ae.png",
+   "t": 35354.155946,
+   "status": 200,
+   "cf": "HIT",
+   "disk": false,
+   "ttfb": 197,
+   "proto": "h2"
+  },
+  {
+   "url": "se.com/uploads/legacy-20261005-110034-1081ae.png",
+   "t": 35354.365271,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 5,
+   "proto": "h2"
+  },
+  {
+   "url": "se.com/uploads/legacy-20260922-174209-ce5649.png",
+   "t": 35354.375071,
+   "status": 200,
+   "cf": "HIT",
+   "disk": false,
+   "ttfb": 153,
+   "proto": "h2"
+  },
+  {
+   "url": "se.com/uploads/legacy-20260922-174209-ce5649.png",
+   "t": 35354.540523,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 3,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-3-20261003-104208-7d1832.png",
+   "t": 35354.550921,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 6,
+   "proto": "h2"
+  },
+  {
+   "url": "rse.com/uploads/cap-3-20261003-104208-7d1832.png",
+   "t": 35354.565849,
+   "status": 200,
+   "cf": "HIT",
+   "disk": true,
+   "ttfb": 4,
+   "proto": "h2"
+  }
+ ]
+}

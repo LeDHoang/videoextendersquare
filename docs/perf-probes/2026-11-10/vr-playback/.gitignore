@@ -1,0 +1,4 @@
+# Raw device logs stay local
+*.log
+logcat.txt
+*vrapi*.txt
