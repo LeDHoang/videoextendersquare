@@ -13,7 +13,9 @@ from sqlalchemy.orm import sessionmaker
 from server.routers import account_safety, social
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import AuthSession, CloudGenerationBilling, DirectMessage, Conversation, Report, User, utcnow
+from server.social.models import (
+    AppSetting, AuthSession, CloudGenerationBilling, Comment, DirectMessage, Conversation, Post, Report, User, utcnow,
+)
 
 PASSWORD = "correct-horse-battery"
 
@@ -220,3 +222,58 @@ def test_flagged_accounts_list_each_signal(app, monkeypatch):
 def test_flagged_accounts_require_a_moderator(app):
     add_user(app, "plain_user")
     assert sign_in(app, "plain_user").get("/api/moderation/stats/accounts").status_code == 403
+
+
+def test_flagged_accounts_cover_reports_and_new_account_bursts(app, monkeypatch):
+    monkeypatch.setenv("SX_ALERT_REPORTERS_PER_TARGET", "3")
+    monkeypatch.setenv("SX_ALERT_REPORTERS_PER_ACCOUNT", "4")
+    monkeypatch.setenv("SX_ALERT_NEW_ACCOUNT_ACTIVITY", "5")
+    monkeypatch.setenv("SX_TRUST_NEW_HOURS", "72")
+    add_user(app, "the_mod", role="moderator", age=timedelta(days=10))
+    author = add_user(app, "author", age=timedelta(days=10))
+    reporters = [add_user(app, f"reporter{index}", age=timedelta(days=10)) for index in range(4)]
+    burster = add_user(app, "burster", age=timedelta(hours=3))
+    veteran = add_user(app, "veteran", age=timedelta(days=10))
+    with app.state.testing_session() as db:
+        post = Post(owner_id=author, media_path="reported.jpg", media_type="image", title="", created_at=utcnow() - timedelta(days=3))
+        db.add(post)
+        db.flush()
+        # Three people report the post today; a fourth reported the profile three days ago.
+        for reporter in reporters[:3]:
+            db.add(Report(reporter_id=reporter, target_type="post", target_id=post.id, reason="hate"))
+        db.add(Report(reporter_id=reporters[3], target_type="user", target_id=author, reason="spam",
+                      created_at=utcnow() - timedelta(days=3)))
+        # A reviewed report no longer counts.
+        db.add(Report(reporter_id=veteran, target_type="post", target_id=post.id, reason="spam", status="dismissed"))
+        # Five comments in the last hour: flagged for the new account, not for the old one.
+        for user_id in (burster, veteran):
+            for index in range(5):
+                db.add(Comment(post_id=post.id, author_id=user_id, text=f"spam {index}"))
+        db.commit()
+        post_id = post.id
+
+    rows = {row["signal"]: row for row in sign_in(app, "the_mod").get("/api/moderation/stats/accounts").json()["accounts"]}
+    assert set(rows) == {"reporters_per_target", "reporters_per_account", "new_account_activity"}
+    assert (rows["reporters_per_target"]["key"], rows["reporters_per_target"]["target_type"]) == (post_id, "post")
+    assert (rows["reporters_per_target"]["value"], rows["reporters_per_target"]["users"][0]["username"]) == (3, "author")
+    assert (rows["reporters_per_account"]["value"], rows["reporters_per_account"]["users"][0]["username"]) == (4, "author")
+    assert (rows["new_account_activity"]["value"], rows["new_account_activity"]["users"][0]["username"]) == (5, "burster")
+
+
+def test_a_stricter_sensitivity_flags_sooner(app, monkeypatch):
+    monkeypatch.setenv("SX_ALERT_REPORTERS_PER_TARGET", "4")
+    add_user(app, "the_mod", role="moderator", age=timedelta(days=10))
+    author = add_user(app, "author", age=timedelta(days=10))
+    with app.state.testing_session() as db:
+        for index in range(2):
+            reporter = add_user(app, f"reporter{index}", age=timedelta(days=10))
+            db.add(Report(reporter_id=reporter, target_type="user", target_id=author, reason="hate"))
+        db.commit()
+    client = sign_in(app, "the_mod")
+    assert client.get("/api/moderation/stats/accounts").json()["accounts"] == []
+    with app.state.testing_session() as db:
+        db.add(AppSetting(key="alert_sensitivity", value={"community": 4, "abuse": 2}))
+        db.commit()
+    # VERY STRICT halves the limit of 4, so two reporters are enough.
+    signals = [row["signal"] for row in client.get("/api/moderation/stats/accounts").json()["accounts"]]
+    assert signals == ["reporters_per_target"]

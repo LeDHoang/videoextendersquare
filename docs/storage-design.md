@@ -119,9 +119,9 @@ A restart loses queued and running encodes. At boot, `requeue_missing_derived` l
 
 Removing a post (owner delete, account deletion, staff takedown) only hides it. The row is marked deleted, readers skip it, and its R2 objects and media record stay.
 
-The object URLs keep working for anyone who has them, and the Cloudflare edge caches them for a day. **So an illegal-content takedown needs two manual steps:** delete the post's objects in R2, then purge their URLs (`docs/deploy-runbook.md` §5).
+The object URLs keep working for anyone who has them, and the Cloudflare edge caches them for a day. **So an illegal-content takedown needs two steps:** PURGE MEDIA on the removed post (admin, `POST /api/admin/content/post/{id}/purge`), which deletes its objects from R2 and this disk and lists their URLs, then a purge of those URLs at the edge (`docs/deploy-runbook.md` §5).
 
-A staff restore (`server/routers/admin.py`) needs the originals in the media record. `record_media_files` first adds any copies it finds on disk; without either it answers `409 MEDIA_MISSING`. It uploads local copies again with `republish_paths` before the commit, and then drops them. A post whose objects were deleted by hand has a record but no media, so do not restore it.
+A staff restore (`server/routers/admin.py`) needs the originals in the media record. `record_media_files` first adds any copies it finds on disk; without either it answers `409 MEDIA_MISSING`. It uploads local copies again with `republish_paths` before the commit, and then drops them. A post whose objects were deleted by hand has a record but no media, so do not restore it. A post purged in the app refuses the restore (`409 MEDIA_PURGED`).
 
 Posts removed before 2026-11-01 are different. Removal then downloaded their dropped copies back to `output/uploads` and deleted the objects. Those unserved local copies are the only ones left, and a restore publishes them again. Nothing re-uploads them otherwise, because that would make staff takedowns public again.
 

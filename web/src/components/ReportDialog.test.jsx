@@ -21,7 +21,7 @@ describe('ReportDialog', () => {
     const select = within(dialog).getByLabelText('Report reason');
     expect(select).toHaveFocus();
     expect(Array.from(select.options).map((o) => o.value)).toEqual([
-      'spam', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other',
+      'spam', 'child_safety', 'illegal', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other',
     ]);
   });
 

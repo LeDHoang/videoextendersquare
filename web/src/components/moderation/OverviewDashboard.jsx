@@ -361,12 +361,15 @@ const SIGNALS = {
   accounts_per_ip: 'ACCOUNTS ON ONE IP',
   accounts_per_device: 'ACCOUNTS ON ONE DEVICE',
   new_account_spend: 'NEW ACCOUNT SPEND',
+  reporters_per_target: 'REPORTERS ON ONE TARGET',
+  reporters_per_account: 'REPORTERS ON ONE ACCOUNT',
+  new_account_activity: 'NEW ACCOUNT ACTIONS IN 1 H',
 };
 
 // Accounts over a per-account alert limit right now (server/routers/account_safety.py flagged_accounts).
 function FlaggedAccounts({ rows, onOpenUser }) {
   return (
-    <Card wide title="FLAGGED ACCOUNTS" note="Over a per-account alert limit right now: credit bursts, many accounts on one IP or device, and fast spending by accounts under a day old.">
+    <Card wide title="FLAGGED ACCOUNTS" note="Over a per-account alert limit right now: credit bursts, many accounts on one IP or device, fast spending or posting by new accounts, and several people reporting one target or account.">
       {rows.length ? (
         <div className="sx-ov-table-wrap">
           <table className="sx-ov-table">

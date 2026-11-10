@@ -1838,6 +1838,12 @@ button:hover .sx-sidebar-hero-logo,
   min-width: 0;
 }
 
+/* Report queue filters sit beside the status pills instead of filling the row. */
+.sx-moderation-tabs select.sx-ps-input {
+  flex: 0 1 12rem;
+  width: auto;
+}
+
 .sx-staff-rows,
 .sx-staff-list {
   display: grid;
@@ -6370,6 +6376,7 @@ button.sx-explore-loc-link:hover {
 .sx-ov-chip { cursor: pointer; transition: transform 240ms var(--sx-ease-out, ease), background 150ms ease; }
 .sx-ov-chip:hover { transform: translateY(-2px); background: var(--sx-surface-2); }
 button.sx-ov-tile { cursor: pointer; }
+.sx-sens input[type="range"] { width: 100%; margin: var(--sx-2) 0; accent-color: var(--sx-accent); }
 button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-ov-chip:focus-visible, button.sx-ov-tile:focus-visible { outline: 2px solid var(--sx-accent); outline-offset: 2px; }
 .sx-ov-chip[data-state=ok] { border-top-color: var(--sx-success); }

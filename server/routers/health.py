@@ -189,10 +189,14 @@ def readyz(db: Session = Depends(get_db)):
 
 
 @router.get("/api/ops/metrics")
-def ops_metrics(response: Response, context: AuthContext = Depends(require_admin)):
+def ops_metrics(
+    response: Response,
+    context: AuthContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Admin-only operations snapshot: request window, events, job queue, DB pool, SSE, disk."""
     del context
     from server import metrics
 
     response.headers["Cache-Control"] = "no-store"
-    return metrics.snapshot()
+    return metrics.snapshot(db)

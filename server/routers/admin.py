@@ -1,9 +1,10 @@
 """Staff console API: user and content lookup, direct actions, credits and the audit log.
 
-Moderators look up users and content, suspend, sign out and remove. Admins also
-reinstate, change roles, delete accounts, adjust credits, restore Reel Packs and
-comments, and read the audit log. Every change needs a reason and writes a
-staff_actions row in the same transaction.
+Moderators look up users and content, suspend, sign out, remove and block tags.
+Admins also reinstate, change roles, delete accounts, adjust credits, restore
+content, purge a removed post's media, unblock tags, set the alert sensitivity
+and read the audit log. Every change needs a reason and writes a staff_actions
+row in the same transaction.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from server import kill_switch, media_store, upload_log
+from server import alert_sensitivity, kill_switch, media_store, metrics, upload_log
 from server.billing.service import debit_credits, get_wallet, grant_credits, list_transactions
 from server.jobs import job_manager
 from server.routers.account_safety import erase_account, serialize_report
@@ -37,18 +38,22 @@ from server.social.models import (
     AuthSession,
     Comment,
     Post,
+    PostTag,
     ReelPack,
+    ReelPackTag,
     Report,
     StaffAction,
     StripePurchase,
     SupportRequest,
+    Tag,
     UploadTrace,
     User,
     utcnow,
 )
-from server.social.services import decode_cursor, encode_cursor
+from server.social.services import decode_cursor, encode_cursor, post_media_files, tag_slug
 from server.social.staff import (
     CONTENT_MODELS,
+    PURGE_ACTION,
     REMOVE_ACTION,
     fail,
     record_action,
@@ -83,6 +88,12 @@ class SwitchesRequest(ReasonRequest):
     paid: bool
     # Also stop queued and running jobs the new state no longer allows.
     cancel_running: bool = False
+
+
+class SensitivityRequest(ReasonRequest):
+    # One step per group, 0 (very relaxed) to 4 (very strict).
+    community: int
+    abuse: int
 
 
 class CreditsRequest(ReasonRequest):
@@ -455,6 +466,41 @@ def set_switches(
     return {"switches": after, "cancelled": cancelled}
 
 
+def sensitivity_payload(db: Session) -> dict:
+    return {
+        "sensitivity": alert_sensitivity.state(db),
+        "labels": list(alert_sensitivity.LABELS),
+        "limits": metrics.alert_limits(db),
+    }
+
+
+@router.get("/alert-sensitivity")
+def get_alert_sensitivity(context: AuthContext = Depends(require_moderator), db: Session = Depends(get_db)):
+    """The alert sensitivity of each group and the limits it gives right now."""
+    del context
+    return sensitivity_payload(db)
+
+
+@router.put("/alert-sensitivity")
+def set_alert_sensitivity(
+    req: SensitivityRequest,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    reason = staff_reason(db, context.user, req.reason)
+    steps = {"community": req.community, "abuse": req.abuse}
+    if not all(0 <= step < len(alert_sensitivity.FACTORS) for step in steps.values()):
+        fail(422, "INVALID_SENSITIVITY", f"Choose a step from 0 to {len(alert_sensitivity.FACTORS) - 1}.")
+    before = alert_sensitivity.state(db)
+    after = alert_sensitivity.set_state(db, context.user, steps)
+    record_action(
+        db, context.user, "system.alert_sensitivity", "system", alert_sensitivity.KEY,
+        reason=reason, details={"before": before, "after": after},
+    )
+    db.commit()
+    return sensitivity_payload(db)
+
+
 ContentType = Literal["post", "pack", "comment"]
 
 
@@ -559,6 +605,133 @@ def restore_content(
     db.commit()
     media_store.drop_local(media_files)
     return {"item": serialize_content(db, content_type, get_content(db, content_type, content_id))}
+
+
+@router.post("/content/post/{content_id}/purge")
+def purge_post_media(
+    content_id: str,
+    req: ReasonRequest,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    """Delete a removed post's media from the bucket and this disk (illegal content, legal and privacy requests).
+
+    It cannot be undone and the post cannot be restored afterwards. The edge can
+    serve a cached copy for up to a day: the response lists every URL to purge there.
+    """
+    reason = staff_reason(db, context.user, req.reason)
+    post = get_content(db, "post", content_id)
+    if post.deleted_at is None:
+        fail(409, "CONTENT_NOT_REMOVED", "Remove the post before purging its media.")
+    local_files = post_media_files([post])
+    rels = set(post.media_files or {})
+    rels.update(rel for rel in map(media_store.rel_path, local_files) if rel)
+    try:
+        deleted = media_store.delete(rels, strict=True)
+    except media_store.MediaStoreError:
+        fail(503, "MEDIA_STORE_UNAVAILABLE", "The post's media could not be deleted from the bucket. Try later.")
+    for path in local_files:
+        path.unlink(missing_ok=True)
+    record_action(
+        db, context.user, PURGE_ACTION, "post", post.id,
+        reason=reason, details={"objects": deleted},
+    )
+    db.commit()
+    return {
+        "item": serialize_content(db, "post", post),
+        "deleted": deleted,
+        "urls": sorted(media_store.public_url(rel) for rel in rels if media_store.is_published(rel)),
+    }
+
+
+def serialize_tag(db: Session, tag: Tag) -> dict:
+    return {
+        "slug": tag.slug,
+        "name": tag.name,
+        "blocked": tag.blocked_at is not None,
+        "blocked_at": iso(tag.blocked_at),
+        "post_count": db.query(func.count()).select_from(PostTag).join(Post, Post.id == PostTag.post_id).filter(
+            PostTag.tag_id == tag.id, Post.deleted_at.is_(None),
+        ).scalar(),
+        "pack_count": db.query(func.count()).select_from(ReelPackTag).join(ReelPack, ReelPack.id == ReelPackTag.pack_id).filter(
+            ReelPackTag.tag_id == tag.id, ReelPack.deleted_at.is_(None),
+        ).scalar(),
+        "created_at": iso(tag.created_at),
+    }
+
+
+@router.get("/tags")
+def search_tags(
+    q: str = "",
+    status: Literal["all", "live", "blocked"] = "all",
+    cursor: str | None = None,
+    limit: int = 25,
+    context: AuthContext = Depends(require_moderator),
+    db: Session = Depends(get_db),
+):
+    del context
+    query = db.query(Tag)
+    term = tag_slug(q)
+    if term:
+        query = query.filter(Tag.slug.contains(term, autoescape=True))
+    if status == "live":
+        query = query.filter(Tag.blocked_at.is_(None))
+    elif status == "blocked":
+        query = query.filter(Tag.blocked_at.is_not(None))
+    return keyset_page(query, Tag, cursor, limit, lambda row: serialize_tag(db, row))
+
+
+def tag_or_422(value: str) -> str:
+    slug = tag_slug(value)
+    if not slug:
+        fail(422, "INVALID_TAG", "Enter a tag.")
+    return slug
+
+
+@router.post("/tags/{tag_name}/block")
+def block_tag(
+    tag_name: str,
+    req: ReasonRequest,
+    context: AuthContext = Depends(require_moderator_csrf),
+    db: Session = Depends(get_db),
+):
+    """Hide a tag from posts, packs, search and its own page, and refuse it on new posts.
+
+    A tag nobody has used yet can be blocked too, so a known bad tag never appears.
+    """
+    reason = staff_reason(db, context.user, req.reason)
+    slug = tag_or_422(tag_name)
+    tag = db.query(Tag).filter(Tag.slug == slug).first()
+    if tag is None:
+        tag = Tag(slug=slug, name=slug)
+        db.add(tag)
+    elif tag.blocked_at is not None:
+        fail(409, "TAG_ALREADY_BLOCKED", "This tag is already blocked.")
+    tag.blocked_at = utcnow()
+    record_action(db, context.user, "tag.block", "tag", slug, reason=reason)
+    db.commit()
+    return {"tag": serialize_tag(db, tag)}
+
+
+@router.post("/tags/{tag_name}/unblock")
+def unblock_tag(
+    tag_name: str,
+    req: ReasonRequest,
+    context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+):
+    """Bring a blocked tag back: posts and packs that carried it show it again."""
+    reason = staff_reason(db, context.user, req.reason)
+    slug = tag_or_422(tag_name)
+    tag = db.query(Tag).filter(Tag.slug == slug).first()
+    if tag is None:
+        fail(404, "TAG_NOT_FOUND", "Tag not found.")
+    if tag.blocked_at is None:
+        fail(409, "TAG_NOT_BLOCKED", "This tag is not blocked.")
+    tag.blocked_at = None
+    record_action(db, context.user, "tag.unblock", "tag", slug, reason=reason)
+    db.commit()
+    return {"tag": serialize_tag(db, tag)}
 
 
 @router.get("/audit")

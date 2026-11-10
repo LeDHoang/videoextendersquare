@@ -10,7 +10,8 @@ legal points marked **(confirm with lawyer)** are working assumptions, not advic
   lower it. Promote or demote in `/moderation` → USERS → CHANGE ROLE. An account cannot
   go below its env role, so remove it from the env list first.
 - Admins are moderators too. Only admins can reinstate accounts, suspend moderators,
-  change roles, adjust credits, delete accounts, restore content and read the audit log.
+  change roles, adjust credits, delete accounts, restore content, purge media, unblock
+  tags, set the alert sensitivity and read the audit log.
 - For the beta, the operator is the only admin. Add one invited moderator once the
   beta has more than about 50 active users.
 - Check the queue at `/moderation` **at least twice a day** (morning and evening),
@@ -36,11 +37,14 @@ for illegal content differ by country **(confirm with lawyer)**.
 - **Reports**: user reports on posts, packs, comments, messages and users.
 - **Support**: requests from `/support`. Categories are `appeal`, `copyright`,
   `privacy`, `account`, `bug`, `report_content` and `other`.
-- **Users**, **Content** and, for admins, **Audit**: see §Staff console.
+- **Users**, **Content**, **Tags** and, for admins, **Audit**: see §Staff console.
 
 Before working on a report, press **CLAIM**. Another moderator then gets 409
 `REPORT_CLAIMED` on that report until you act, press RELEASE, or 30 minutes pass.
 An admin can act over a claim; the override is logged as `forced_claim_of`.
+
+The queue lists `child_safety` and `illegal` reports first, then the oldest. Filter it by
+reason and by target type. A report card shows how many reports the same target has.
 
 Report actions (`PATCH /api/moderation/reports/{id}`):
 
@@ -48,8 +52,8 @@ Report actions (`PATCH /api/moderation/reports/{id}`):
 |---|---|---|
 | `dismiss` | The report is wrong or the content follows the rules | Closes the report; nothing changes |
 | `resolve` | Handled outside the app (a reply, a warning) | Closes the report; nothing changes |
-| `remove_content` | The post, pack, comment or message breaks the rules | Post: marked deleted and its media deleted from the bucket. Pack: marked deleted. Comment or message: hidden (`deleted_at`); a removed message disappears live from the conversation. Not available on user reports. |
-| `suspend_user` | Serious or repeated breaks | Suspends the account and signs it out everywhere. Admins cannot be suspended, moderators only by an admin, and nobody can suspend themselves. |
+| `remove_content` | The post, pack, comment or message breaks the rules | Post: marked deleted and hidden; its media stays in the bucket until an admin purges it (§Takedowns). Pack: marked deleted. Comment or message: hidden (`deleted_at`); a removed message disappears live from the conversation. Not available on user reports. |
+| `suspend_user` | Serious or repeated breaks | Suspends the account and signs it out everywhere. Admins cannot be suspended, moderators only by an admin, and nobody can suspend themselves. An unverified account cannot be suspended (409 `ACCOUNT_NOT_ACTIVE`). |
 | `reinstate_user` | An appeal succeeds | **Admin only.** Sets a suspended account back to active. Works on the report that led to the suspension, even after it was reviewed; it closes that report if it is still open. Deleted accounts cannot be reinstated (409 `ACCOUNT_DELETED`). |
 
 Every action is logged with the moderator, the action and the note, in the report's
@@ -70,8 +74,11 @@ which goes to the audit log, and each staff account is limited to 120 actions an
 | Users | Moderator | Search by username, email or id. A user page shows status, role, sessions, reports against and by them, posts, support requests and staff history. SUSPEND and SIGN OUT EVERYWHERE (not on staff accounts). |
 | Users | Admin | Also REINSTATE, CHANGE ROLE, ADJUST CREDITS and DELETE ACCOUNT, plus the wallet, ledger and purchases with a Stripe link. |
 | Content | Moderator | Search posts, Reel Packs and comments by text, id or owner. REMOVE works as `remove_content`. Messages stay reachable only through reports. |
-| Content | Admin | RESTORE a removed post, pack or comment, here or from its report. A post comes back published: its kept local media is uploaded to the bucket again (409 `MEDIA_MISSING` if the originals are gone, 503 `MEDIA_STORE_UNAVAILABLE` if the upload fails; nothing changes in either case). A pack returns as a draft. Content its author deleted cannot be restored (`NOT_REMOVED_BY_STAFF`). |
+| Content | Admin | RESTORE a removed post, pack or comment, here or from its report. A post comes back published: its kept local media is uploaded to the bucket again (409 `MEDIA_MISSING` if the originals are gone, 503 `MEDIA_STORE_UNAVAILABLE` if the upload fails; nothing changes in either case). A pack returns as a draft. Content its author deleted cannot be restored (`NOT_REMOVED_BY_STAFF`). PURGE MEDIA on a removed post deletes its files for good (§Takedowns); a purged post cannot be restored (`MEDIA_PURGED`). |
+| Tags | Moderator | Search tags. BLOCK hides a tag from posts, packs, search and its own page, and new posts cannot use it; the posts stay up. A tag nobody has used yet can be blocked from the search box. |
+| Tags | Admin | UNBLOCK brings the tag back on every post and pack that carried it. |
 | Overview | Moderator | Open queues as tiles (click to open them), reports by status and reason, and each metric against the period before, as bars. Admins also see the operations block. |
+| Overview | Admin | ALERT SENSITIVITY: one slider for community safety and one for account abuse, five steps from VERY RELAXED (alert limits x2) to VERY STRICT (x0.5). It moves only alert limits (the watchdog, the Overview colours and Flagged accounts); what users may do does not change. The card shows the resulting limits, and moderators see it read-only. |
 | Audit | Admin | Every staff action, newest first. Filter by staff username, action or target id. |
 
 Report cards show what was reported the way users see it: the post's media, or the
@@ -149,7 +156,7 @@ Process:
    the copyright address.
 4. A counter-notice is forwarded to the complainant. Restoring content after a
    counter-notice needs a waiting period and a re-upload by the user, because the
-   takedown deletes the post's media in the bucket **(confirm with lawyer)**.
+   purge deletes the post's media in the bucket **(confirm with lawyer)**.
 5. Repeat infringers: suspend an account after its **third** valid notice.
    Record each notice in the report note so the count is visible.
 
@@ -159,9 +166,13 @@ list for notices, needs a lawyer before the public launch **(confirm with lawyer
 ## Takedowns
 
 For S1 and copyright removals, follow `docs/deploy-runbook.md` §5: remove in the
-app, delete the post's objects in the bucket, purge every media URL of the post by
-URL in Cloudflare, then check that `curl -sI` returns `404` with no
+app, press PURGE MEDIA on the removed post (Content tab, admin only), purge in
+Cloudflare every URL the purge lists, then check that `curl -sI` returns `404` with no
 `cf-cache-status: HIT`.
+
+Deleting an account, or an owner deleting a post, only hides the posts: their files
+stay in the bucket. For a privacy request that asks for the files to go, find the
+posts in the Content tab (status REMOVED) and purge each one.
 
 ## Drill log
 
@@ -197,7 +208,7 @@ Gaps found:
 - **Fixed:** the queue and API did not show which moderator acted (`reports.moderator_id`,
   SQL only). Each report from `/api/moderation/reports` now carries `handled_by` (username),
   and the queue shows `HANDLED BY: @name` on reviewed reports.
-- **Open:** reports have no claim or assignment step, so two moderators can open the same
+- **Fixed later (staff console):** reports had no claim or assignment step, so two moderators could open the same
   report at once; the second action gets 409 `REPORT_ALREADY_REVIEWED`. Adding claims is a
   new feature (schema and UI), not a drill fix.
 - **Open:** `reinstate_user` on an already-reviewed report keeps the original

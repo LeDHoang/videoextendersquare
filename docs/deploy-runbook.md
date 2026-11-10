@@ -192,8 +192,8 @@ Health checks:
 Removing a post only hides it in the app. Its R2 objects stay, and their URLs keep working for anyone who has them. **The Cloudflare edge can also keep serving a cached copy for up to 1 day.** For an urgent takedown (CSAM, legal request, doxxing):
 
 1. Remove the content in the app (admin delete).
-2. Delete the post's objects in R2. Go to R2 → the public bucket and delete `uploads/<stem>.<ext>` and every `uploads/<stem>-*` object (poster, previews, web proxy, stereo variants). Slides have stems of their own. The post's media record (`posts.media_files`) lists every key. Do not restore the post afterwards: it would have no media.
-3. Go to Cloudflare → Caching → Configuration → **Custom Purge** → purge by URL. Purge every `https://media.<domain>/...` URL of the post: the video, the poster, the preview and any stereo variants.
+2. Delete the post's objects in R2: in `/moderation` → CONTENT, find the removed post and press **PURGE MEDIA** (admin only). It deletes every object of the post (video, poster, previews, web proxy, stereo variants, slides) and lists their URLs. It cannot be undone and the post cannot be restored afterwards. If the bucket cannot be reached it answers 503 and changes nothing; then delete `uploads/<stem>.<ext>` and every `uploads/<stem>-*` object by hand in R2 (`posts.media_files` lists every key).
+3. Go to Cloudflare → Caching → Configuration → **Custom Purge** → purge by URL. Purge every URL that PURGE MEDIA listed.
 4. Verify the takedown:
    ```bash
    curl -sI https://media.<domain>/<key>

@@ -342,7 +342,7 @@ describe('ModerationPage reports', () => {
     expect(screen.getByText(/REEL PACK BY @bob · PUBLISHED · PUBLIC · 6 REELS/)).toBeTruthy();
     expect(screen.getByText('OPEN PACK ↗').getAttribute('href')).toBe('/packs/k1');
     const tiles = document.querySelectorAll('.sx-report-pack-items li');
-    expect([...tiles].map((tile) => tile.textContent)).toEqual(['Summit', 'Lake', 'REMOVED · MEDIA UNPUBLISHEDGone']);
+    expect([...tiles].map((tile) => tile.textContent)).toEqual(['Summit', 'Lake', 'REMOVED · HIDDEN FROM USERSGone']);
     expect(tiles[0].querySelector('video').getAttribute('src')).toBe('/m/p3.mp4');
     expect(tiles[1].querySelector('img').getAttribute('src')).toBe('/m/p1.webp');
   });
@@ -356,7 +356,7 @@ describe('ModerationPage reports', () => {
     mocks.api.get.mockResolvedValue({ reports: [removed] });
     mocks.api.post.mockResolvedValue({ item: {} });
     renderReports();
-    await waitFor(() => expect(screen.getByText('REMOVED · MEDIA UNPUBLISHED')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('REMOVED · HIDDEN FROM USERS')).toBeTruthy());
     expect(screen.getByText('No note left.')).toBeTruthy();
     expect(screen.queryByText('VIEW LIVE ↗')).toBeNull();
     fireEvent.click(screen.getByText('RESTORE CONTENT'));
@@ -372,5 +372,25 @@ describe('ModerationPage reports', () => {
     renderReports();
     await waitFor(() => expect(screen.getByText('gone')).toBeTruthy());
     expect(screen.queryByText('RESTORE CONTENT')).toBeNull();
+  });
+
+  it('filters the queue by reason and target, and marks priority and repeated reports', async () => {
+    mocks.api.get.mockResolvedValue({ reports: [{ ...report('r1', 'open', null), reason: 'child_safety', priority: true, reporter_count: 3 }] });
+    renderReports();
+    await waitFor(() => expect(screen.getByText('PRIORITY')).toBeTruthy());
+    expect(screen.getByText('3 REPORTS ON THIS TARGET')).toBeTruthy();
+    expect(mocks.api.get).toHaveBeenLastCalledWith('/api/moderation/reports', { status: 'open', limit: 100 });
+    fireEvent.change(screen.getByLabelText('Report reason'), { target: { value: 'child_safety' } });
+    await waitFor(() => expect(mocks.api.get).toHaveBeenLastCalledWith('/api/moderation/reports', { status: 'open', limit: 100, reason: 'child_safety' }));
+    fireEvent.change(screen.getByLabelText('Report target'), { target: { value: 'post' } });
+    await waitFor(() => expect(mocks.api.get).toHaveBeenLastCalledWith('/api/moderation/reports', { status: 'open', limit: 100, reason: 'child_safety', target_type: 'post' }));
+  });
+
+  it('has a tags tab', async () => {
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/admin/tags' ? { items: [], next_cursor: null } : { reports: [] }));
+    renderReports();
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'TAGS' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('radio', { name: 'TAGS' }));
+    await waitFor(() => expect(mocks.api.get).toHaveBeenCalledWith('/api/admin/tags', { q: '', status: 'all', limit: 25 }));
   });
 });

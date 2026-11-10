@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, literal, or_
+from sqlalchemy import case, func, literal, or_
 from sqlalchemy.orm import Session
 
 from server.social.auth import (
@@ -92,7 +92,11 @@ from server.social.staff import (
 
 router = APIRouter(tags=["account-safety"])
 logger = logging.getLogger(__name__)
-REPORT_REASONS = {"spam", "harassment", "hate", "sexual", "violence", "impersonation", "privacy", "other"}
+REPORT_REASONS = {
+    "child_safety", "illegal", "spam", "harassment", "hate", "sexual", "violence", "impersonation", "privacy", "other",
+}
+# Listed first in the queue, whatever their age (docs/moderation-runbook.md, S1).
+PRIORITY_REASONS = ("child_safety", "illegal")
 # A claim lapses after this, so a report a moderator walked away from is not stuck.
 CLAIM_TTL = timedelta(minutes=30)
 
@@ -177,7 +181,8 @@ def post_preview(post: Post) -> dict:
     removed = post.deleted_at is not None
     preview = {"media_type": post.media_type, "link": f"/reels?post={post.id}", "removed": removed}
     if not removed:
-        # Removed media are unpublished, so their URLs would not load.
+        # A removed post is hidden, so staff get no player for it. Its objects
+        # stay in the bucket until an admin purges them.
         preview.update(shared_preview_urls(post))
     return preview
 
@@ -269,6 +274,11 @@ def serialize_report(db: Session, report: Report) -> dict:
         "target_id": report.target_id,
         "target": target,
         "reason": report.reason,
+        "priority": report.reason in PRIORITY_REASONS,
+        # Everyone who reported this target, open or reviewed.
+        "reporter_count": db.query(func.count(Report.id)).filter(
+            Report.target_type == report.target_type, Report.target_id == report.target_id,
+        ).scalar(),
         "details": report.details,
         "status": report.status,
         "resolution": report.resolution,
@@ -540,15 +550,24 @@ def create_report(
 @router.get("/api/moderation/reports")
 def list_reports(
     status: str = "open",
+    reason: str = "",
+    target_type: str = "",
     limit: int = 50,
     context: AuthContext = Depends(require_moderator),
     db: Session = Depends(get_db),
 ):
+    """Oldest first, with child-safety and illegal-content reports ahead of the rest."""
     del context
     query = db.query(Report)
     if status != "all":
         query = query.filter(Report.status == status)
-    rows = query.order_by(Report.created_at.asc()).limit(max(1, min(limit, 100))).all()
+    if reason:
+        query = query.filter(Report.reason == reason)
+    if target_type:
+        query = query.filter(Report.target_type == target_type)
+    rows = query.order_by(
+        case((Report.reason.in_(PRIORITY_REASONS), 0), else_=1), Report.created_at.asc(),
+    ).limit(max(1, min(limit, 100))).all()
     return {"reports": [serialize_report(db, row) for row in rows]}
 
 
@@ -579,7 +598,8 @@ def moderation_stats(
     from server.routers.health import disk_status
 
     now = utcnow()
-    floor = env_int("SX_MOD_SPIKE_MIN", 10, minimum=1)
+    limits = alert_limits(db)
+    floor = limits["spike_min"]
 
     def between(model_column, *filters):
         def run(start, end):
@@ -637,7 +657,7 @@ def moderation_stats(
         "spike_floor": floor,
         "open_reports": db.query(func.count(Report.id)).filter(Report.status == "open").scalar(),
         "open_support_requests": db.query(func.count(SupportRequest.id)).filter(SupportRequest.status == "open").scalar(),
-        "queue_limits": {key: alert_limits()[key] for key in ("open_reports", "open_support_requests")},
+        "queue_limits": {key: limits[key] for key in ("open_reports", "open_support_requests")},
         "windows": windows,
         "disk": disk_status(),
     }
@@ -650,13 +670,19 @@ def flagged_accounts(db: Session, now) -> list[dict]:
     - ``accounts_per_ip`` / ``accounts_per_device``: distinct accounts signed in
       from one IP or device in the last 24 h.
     - ``new_account_spend``: credits captured by an account younger than 24 h.
+    - ``reporters_per_target``: people with an open report on one post, pack,
+      comment, message or profile, filed in the last 24 h.
+    - ``reporters_per_account``: people with an open report on an account or
+      its content, filed in the last 7 days.
+    - ``new_account_activity``: posts, comments and messages in the last hour
+      by an account younger than ``SX_TRUST_NEW_HOURS``.
 
     Free jobs leave no row, so free-usage bursts are not covered here.
     """
     from server import trust
     from server.metrics import alert_limits
 
-    limits = alert_limits()
+    limits = alert_limits(db)
     day_ago = now - timedelta(hours=24)
     rows: list[dict] = []
     users: dict[str, User] = {}
@@ -698,6 +724,49 @@ def flagged_accounts(db: Session, now) -> list[dict]:
     )
     for user_id, total in newcomers:
         rows.append({"signal": "new_account_spend", "key": user_id, "value": int(total), "limit": limits["new_account_spend"], "users": [summary(user_id)]})
+
+    open_reports = db.query(Report.target_type, Report.target_id, Report.reporter_id, Report.created_at).filter(
+        Report.status == "open", Report.created_at > now - timedelta(days=7), Report.reporter_id.is_not(None),
+    ).all()
+    owners: dict[tuple, User | None] = {}
+    by_target: dict[tuple, set] = {}
+    by_account: dict[str, set] = {}
+    for target_type, target_id, reporter_id, created_at in open_reports:
+        target = (target_type, target_id)
+        if target not in owners:
+            owners[target] = target_owner(db, target_type, target_id)
+        owner = owners[target]
+        if owner:
+            users[owner.id] = owner
+            by_account.setdefault(owner.id, set()).add(reporter_id)
+        if created_at.tzinfo is None:  # SQLite hands back naive UTC
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        if created_at > day_ago:
+            by_target.setdefault(target, set()).add(reporter_id)
+    for (target_type, target_id), reporters in by_target.items():
+        if len(reporters) >= limits["reporters_per_target"]:
+            owner = owners[(target_type, target_id)]
+            rows.append({
+                "signal": "reporters_per_target", "key": target_id, "target_type": target_type,
+                "value": len(reporters), "limit": limits["reporters_per_target"],
+                "users": [summary(owner.id)] if owner else [],
+            })
+    for user_id, reporters in by_account.items():
+        if len(reporters) >= limits["reporters_per_account"]:
+            rows.append({"signal": "reporters_per_account", "key": user_id, "value": len(reporters), "limit": limits["reporters_per_account"], "users": [summary(user_id)]})
+
+    hour_ago = now - timedelta(hours=1)
+    young = now - timedelta(hours=env_int("SX_TRUST_NEW_HOURS", 72, minimum=0))
+    activity: dict[str, int] = {}
+    for created, author in ((Post.created_at, Post.owner_id), (Comment.created_at, Comment.author_id), (DirectMessage.created_at, DirectMessage.sender_id)):
+        counts = db.query(author, func.count()).join(User, User.id == author).filter(
+            User.created_at > young, created > hour_ago,
+        ).group_by(author).all()
+        for user_id, count in counts:
+            activity[user_id] = activity.get(user_id, 0) + int(count)
+    for user_id, total in activity.items():
+        if total >= limits["new_account_activity"]:
+            rows.append({"signal": "new_account_activity", "key": user_id, "value": total, "limit": limits["new_account_activity"], "users": [summary(user_id)]})
     return rows
 
 

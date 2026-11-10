@@ -1,7 +1,8 @@
 """Trust tiers, computed on demand from existing rows (no stored column).
 
 - ``restricted``: in the last 30 days staff suspended the account or removed
-  its content, or one of its Stripe purchases was reversed.
+  its content, or one of its Stripe purchases was reversed. A suspension that
+  was reinstated and a removal that was restored do not count.
 - ``new``: younger than ``SX_TRUST_NEW_HOURS`` (72).
 - ``trusted``: older than ``SX_TRUST_TRUSTED_DAYS`` (30) with a fulfilled purchase.
 - ``standard``: everyone else.
@@ -15,7 +16,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, exists
+from sqlalchemy.orm import Session, aliased
 
 from server.settings import env_int
 from server.social.auth import aware
@@ -38,12 +40,24 @@ def account_age(user: User, now: datetime | None = None) -> timedelta:
     return (now or utcnow()) - aware(user.created_at)
 
 
+def _not_undone(undo_action: str):
+    """No later staff action of ``undo_action`` on the same target."""
+    undo = aliased(StaffAction)
+    return ~exists().where(and_(
+        undo.action == undo_action,
+        undo.target_type == StaffAction.target_type,
+        undo.target_id == StaffAction.target_id,
+        undo.created_at >= StaffAction.created_at,
+    ))
+
+
 def _restricted(db: Session, user: User, since: datetime) -> bool:
     suspended = db.query(StaffAction.id).filter(
         StaffAction.action == "user.suspend",
         StaffAction.target_type == "user",
         StaffAction.target_id == user.id,
         StaffAction.created_at >= since,
+        _not_undone("user.reinstate"),
     ).first()
     if suspended:
         return True
@@ -53,6 +67,7 @@ def _restricted(db: Session, user: User, since: datetime) -> bool:
             StaffAction.target_type == target_type,
             getattr(model, owner_field) == user.id,
             StaffAction.created_at >= since,
+            _not_undone("content.restore"),
         ).first()
         if removed:
             return True

@@ -163,7 +163,7 @@ def get_owned_pack(db: Session, pack_id: str, user_id: str) -> ReelPack:
 
 
 def pack_tags(pack: ReelPack) -> list[str]:
-    return [link.tag.name for link in pack.tags if link.tag]
+    return [link.tag.name for link in pack.tags if link.tag and link.tag.blocked_at is None]
 
 
 def discovery_slug(value: str) -> str:
@@ -196,6 +196,8 @@ def sync_pack_tags(db: Session, pack: ReelPack, values: list[str]) -> None:
                 tag = db.query(Tag).filter(Tag.slug == slug).first()
                 if not tag:
                     raise
+        elif tag.blocked_at is not None:
+            continue
         pack.tags.append(ReelPackTag(tag_id=tag.id))
 
 

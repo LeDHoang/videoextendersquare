@@ -64,6 +64,8 @@ export function lastMessagePreview(conversation, viewerId) {
 
 export const REPORT_REASONS = [
   ['spam', 'SPAM'],
+  ['child_safety', 'CHILD SAFETY'],
+  ['illegal', 'ILLEGAL CONTENT'],
   ['harassment', 'HARASSMENT'],
   ['hate', 'HATE'],
   ['sexual', 'SEXUAL CONTENT'],
