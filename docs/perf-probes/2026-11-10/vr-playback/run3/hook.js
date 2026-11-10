@@ -51,4 +51,14 @@
   im.addEventListener('error', () => push('img-error', { src: base(im.currentSrc) }));
   new MutationObserver(() => push('img-src', { src: base(im.getAttribute('src')), shown: im.style.display !== 'none' })).observe(im, { attributes: true, attributeFilter: ['src', 'style'] });
   return 'img-hooked';
+})(), (() => {
+  const cap = window.__cap; if (!cap || cap.pre) return 'pre-already';
+  cap.pre = true;
+  const pv = document.getElementById('preloadVideo'); if (!pv) return 'no-pre';
+  const base = s => String(s || '').split('?')[0].split('/').pop().slice(-70);
+  const push = (k, x) => cap.ev.push(Object.assign({ k, t: Math.round(performance.now()) }, x || {}));
+  ['loadstart', 'loadedmetadata', 'loadeddata', 'canplaythrough', 'emptied', 'error'].forEach(n =>
+    pv.addEventListener(n, () => push('pre-' + n, { src: base(pv.currentSrc), rs: pv.readyState })));
+  new MutationObserver(() => push('pre-src', { src: base(pv.getAttribute('src')) })).observe(pv, { attributes: true, attributeFilter: ['src'] });
+  return 'pre-hooked';
 })()]

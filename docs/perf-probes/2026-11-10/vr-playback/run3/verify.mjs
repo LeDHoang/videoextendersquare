@@ -9,7 +9,11 @@
 // Usage: node verify.mjs <out.json>
 // Env: REELS_DIFF, WEBXR_JS, AB_QUERY (extra query, e.g. vrtexcap=3840),
 //      STEPS (reel switches, default 10), DWELL (s per reel, default 12),
-//      R2K_FILE, R2K_MATCH, NO_OVERRIDE=1 (control pass on production code).
+//      R2K_FILE, R2K_MATCH, NO_OVERRIDE=1 (control pass on production code),
+//      ORDER (feed order, e.g. vvvivi: v = video, i = image post) with
+//      FRONT_MATCH (the video put first), SPEC (comma list of steps replacing
+//      STEPS: click | end = seek to 2 s before the end and wait for the
+//      auto-advance | fastN = click, wait N ms, click again).
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { hunks, applyToPlayerInline } from './hunks.mjs';
@@ -19,6 +23,7 @@ const STEPS = Number(process.env.STEPS || 10), DWELL = Number(process.env.DWELL 
 const QUERY = process.env.AB_QUERY || '';
 const R2K_FILE = process.env.R2K_FILE, R2K_MATCH = process.env.R2K_MATCH || '';
 const R2K_URL = 'https://media.echomultiverse.com/uploads/__vr2ktest-2k.mp4';
+const ORDER = process.env.ORDER || '', FRONT_MATCH = process.env.FRONT_MATCH || '', SPEC = process.env.SPEC ? process.env.SPEC.split(',') : null;
 const NO_OVERRIDE = process.env.NO_OVERRIDE === '1'; // control pass: production code as served
 const HS = NO_OVERRIDE ? [] : hunks(process.env.REELS_DIFF);
 const WEBXR = NO_OVERRIDE ? null : fs.readFileSync(process.env.WEBXR_JS);
@@ -55,13 +60,35 @@ async function onPaused(p) {
     const r = await send('Fetch.getResponseBody', { requestId: p.requestId });
     const body = r.base64Encoded ? Buffer.from(r.body, 'base64').toString('utf8') : r.body;
     let j; try { j = JSON.parse(body); } catch (e) { log.override.inlineError = String(e); return send('Fetch.continueRequest', { requestId: p.requestId }); }
-    const rep = applyToPlayerInline(j, HS);
+    const rep = NO_OVERRIDE ? [] : applyToPlayerInline(j, HS);
     if (R2K) rep.push(injectR2k(j));
+    if (ORDER) rep.push(reorder(j));
     (log.override.inline = log.override.inline || []).push({ url: u.slice(0, 160), hunks: rep });
     return send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, body: b64(JSON.stringify(j)),
       responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Cache-Control', value: 'no-store' }] });
   }
   return send('Fetch.continueRequest', { requestId: p.requestId });
+}
+
+function reorder(j) {
+  const k = j.scripts.findIndex(s => typeof s === 'string' && s.includes('let videoData = '));
+  if (k < 0) return { order: 'no-videoData' };
+  const s = j.scripts[k], i = s.indexOf('let videoData = ') + 16, e = s.indexOf(';\n', i);
+  const arr = JSON.parse(s.slice(i, e));
+  const ok = x => x.available !== false && x.media_type !== 'static';
+  const vids = arr.filter(x => ok(x) && x.media_type !== 'image'), imgs = arr.filter(x => ok(x) && x.media_type === 'image');
+  // FRONT_MATCH is a comma list; the videos come first in that order.
+  const f = FRONT_MATCH.split(',').filter(Boolean).reverse().map(m => {
+    const at = vids.findIndex(x => x.url && x.url.includes(m));
+    if (at >= 0) vids.unshift(vids.splice(at, 1)[0]);
+    return at;
+  });
+  const head = [];
+  for (const c of ORDER) { const x = (c === 'i' ? imgs : vids).shift(); if (x) head.push(x); }
+  const rest = arr.filter(x => !head.includes(x));
+  const next = head.concat(rest);
+  j.scripts[k] = s.slice(0, i) + JSON.stringify(next).replace(/</g, '\\u003c') + s.slice(e);
+  return { order: head.map(x => (x.media_type === 'image' ? 'i:' : 'v:') + (x.url || '').slice(-30)), front: f };
 }
 
 function injectR2k(j) {
@@ -111,9 +138,9 @@ const ev = async (expression, gesture = false) => {
 await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
 await send('Network.enable', { maxPostDataSize: 65536 });
 await send('Network.setCacheDisabled', { cacheDisabled: false });
-if (!NO_OVERRIDE) await send('Fetch.enable', { patterns: [
+if (!NO_OVERRIDE || ORDER) await send('Fetch.enable', { patterns: [
   { urlPattern: '*/api/reels/player-inline*', requestStage: 'Response' },
-  { urlPattern: '*/player-script/webxr_vr.js*', requestStage: 'Request' },
+  ...(NO_OVERRIDE ? [] : [{ urlPattern: '*/player-script/webxr_vr.js*', requestStage: 'Request' }]),
   ...(R2K ? [{ urlPattern: R2K_URL + '*', requestStage: 'Request' }] : []),
 ] });
 await send('Page.navigate', { url: 'https://echomultiverse.com/reels?xrdiag=1' + (QUERY ? '&' + QUERY : '') });
@@ -143,9 +170,28 @@ if (!presenting) { sampling = false; await sampler; log.net = Object.values(log.
 
 let reel = await cur(); lmark('phase r0 ' + reel); await mark('reel', { i: 0, reel });
 await sleep(DWELL);
-for (let i = 1; i <= STEPS; i++) {
-  await mark('switch-click', { i }); lmark('phase none');
-  await ev(`document.getElementById('edgeNextBtn').click()`, true);
+const NEXT = `document.getElementById('edgeNextBtn').click()`;
+for (let i = 1, n = 0; SPEC ? n < SPEC.length : i <= STEPS; i++, n++) {
+  const step = SPEC ? SPEC[n] : 'click';
+  lmark('phase none');
+  if (step === 'end') {
+    await mark('auto-seek', { i });
+    await ev(`(()=>{const v=document.getElementById('reelsVideo'); v.currentTime=Math.max(0,v.duration-2);})()`);
+    const before = reel;
+    for (let w = 0; w < 75 && (reel = await cur()) === before; w++) await sleep(200);
+    await mark('reel', { i, reel, auto: true });
+    await sleep(DWELL);
+    continue;
+  }
+  await mark('switch-click', { i });
+  await ev(NEXT, true);
+  if (step.startsWith('fast')) {
+    await sleep(Number(step.slice(4)));
+    await mark('reel', { i, reel: await cur(), skipped: true });
+    i++;
+    await mark('switch-click', { i, fast: step });
+    await ev(NEXT, true);
+  }
   await sleep(1500);
   reel = await cur(); lmark('phase r' + i + ' ' + reel); await mark('reel', { i, reel });
   await sleep(DWELL - 1500);

@@ -232,8 +232,26 @@ The dock fix (d38ce26) and the link-estimate fix (419009f) were applied to the `
 
 `preloadNext` in the `vr-fixes-integration` working tree (unstaged, uncommitted) now clears the preloader on every switch again, as the live code does. The integration-only rule that kept a preloader holding the reel now on screen was removed (cause 6 above). On an image post, the next reel is warmed at once instead of after `PRELOAD_DELAY_MS` (cause 3). Web tests passed: 581 node, 563 vitest. Pass `v3-preload` repeated `v2-r2k` on the same Quest over the same Wi-Fi.
 
-- **img→vid warm-up: fixed.** The next video's first request started 713–721 ms after the swipe onto the image (4 of 4), down from 2.0–3.1 s in `prod-control`, `int-r2k` and `v2-r2k`. All 5 video switches were cache hits (`switchFromCache`), with switch times of 67–168 ms and first frames at 326–585 ms.
+- **img→vid warm-up: fixed.** The next video's first request started 713–721 ms after the swipe onto the image (4 of 4), down from 2.0–3.1 s in `prod-control`, `int-r2k` and `v2-r2k`. These figures compare the Mac's clock with the headset's and include their offset; the page-clock figures are in the next section. All 5 video switches were cache hits (`switchFromCache`), with switch times of 67–168 ms and first frames at 326–585 ms.
 - **Held preloader: removed.** No switch sat at `readyState` 0. The worst video switch took 585 ms, against 6.2 s in `int-default`.
-- **Not exercised:** auto-advance from the 4K reel, which is where cause 6 was seen. The driver changes reels by click only. A swipe off an image in under 0.7 s was not tested either; every image stayed on screen for about 12 s.
+- **Not exercised in this pass:** auto-advance from the 4K reel and a fast swipe off an image. Both are covered in the next section.
 - **Still seen:** one stall of 973 ms during the 4092x2046 master `Lyric Video` (cause 5). Its first bytes came from the preloader; the stall came later in the file, on a range request over Wi-Fi.
 - 90–91 fps, dock 3/s (max 5), no console errors.
+
+## Auto-advance and fast swipes on the Quest (2026-11-10, `v4-edge` to `v6-fast*`)
+
+The driver gained a step script (`SPEC`: `end`, `fastN`), a feed order (`ORDER`) and events from the hidden preloader. All times below are from the page's own clock (`performance.now()`), on the committed integration build (16b9736) against the live build, over the same Wi-Fi. Every video file was already in the browser's disk cache.
+
+- **Auto-advance from the 4K reel: no freeze.** In `v4-edge` the 3840x3840 reel played to its end. The next video showed its first frame 135 ms after `ended`. The preloader held it at `readyState` 4 and was cleared at the switch. The following auto-advance, video to image, showed the image in 2 ms.
+- **Warm-up after landing on an image starts at once.** The preloader's `src` was set 10–20 ms after the click that showed the image (5 of 5 in `v4-edge`, `v5-fast`, `v6-fast150`, `v6-fast400`). On the live build it was set 1508 ms after the click (`prod-fast`). The 713–721 ms in `v3-preload` was the clock offset between the Mac and the headset, not a delay in the player.
+- **Fast swipe off an image onto a video:**
+
+| Time on the image | Integration: first frame after the second click | Live: first frame after the second click |
+|---|---|---|
+| about 180–210 ms | 115 ms (`v6-fast150`) | 492 ms (`prod-fast150`) |
+| about 450 ms | 114 ms (`v6-fast400`) | 396 ms (`prod-fast400`) |
+
+  On the integration build the preloader reached `readyState` 4 within 140 ms of the image showing, so the video was ready before the second click. On the live build the preloader had not started, and `loadedmetadata` alone took 333–353 ms.
+- No console errors in any pass. The right reel played after every fast swipe.
+
+**Limits:** one sample per cell. The feed order changed between page loads, so the two builds landed on different videos (integration: the 3840x3840 reel both times; live: a 2 s H.264 test clip and the 1080x778 reel). All files came from the disk cache, so a reel that needs the network was not measured in this case. The `end` step did not need its seek: the reels ended by themselves first.
