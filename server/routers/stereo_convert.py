@@ -103,8 +103,11 @@ def convert_to_3d(
     layout = "sbsd" if req.depth_pack else "sbs"
     out_path = str(output.job_dir(job_id) / f"{layout}.{'mp4' if req.kind == 'video' else 'jpg'}")
     if req.kind == "video":
+        # The spatial version is VR-only (Quest decodes HEVC), so it takes
+        # HEVC: about half the bytes of H.264 at the same quality.
         fn, kwargs = sw.process_video_spatial, {
-            "video_path": src_path, "output_path": out_path, "depth_pack": req.depth_pack}
+            "video_path": src_path, "output_path": out_path, "depth_pack": req.depth_pack,
+            "codec": "hevc" if req.depth_pack else "h264"}
     else:
         fn, kwargs = sw.process_image_spatial, {
             "image_path": src_path, "output_path": out_path, "depth_pack": req.depth_pack}

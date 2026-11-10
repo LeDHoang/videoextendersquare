@@ -351,6 +351,7 @@ def test_depth_pack_video_from_an_extend_render(client, tmp_path):
     assert rec.status == JobStatus.COMPLETE, rec.error
     assert rec.result["stereo_layout"] == "sbsd"
     assert rec.result["converted_from"] == {"stage_id": None, "job_id": extend_job}
+    assert media.get_video_codec(rec.result["path"]) == "hevc"
 
 
 def test_spatial_jobs_have_their_own_rate_bucket(client, tmp_path, monkeypatch):
