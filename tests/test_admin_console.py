@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 
 from verified_signup import register_verified
-from server.routers import account_safety, admin, social, support
+from server.routers import account_safety, admin, packs, social, support
 from server.social import auth
 from server.social.database import Base, get_db
 from server.social.models import AuthSession, Comment, Post, ReelPack, ReelPackItem, Report, StaffAction, Tag, User, utcnow
@@ -596,6 +596,8 @@ def test_purge_deletes_a_removed_posts_media_and_blocks_restore(app, staff, tmp_
     assert "https://media.example.com/uploads/clip-poster.jpg" in purged.json()["urls"]
     assert not local.exists()
     assert actions(app)[-1][:3] == ("content.purge", "post", post_id)
+    listed = admin_client.get("/api/admin/content", params={"type": "post", "status": "removed"}).json()["items"]
+    assert [(row["id"], row["purged"]) for row in listed] == [(post_id, True)]
     restore = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
     assert restore.status_code == 409 and code(restore) == "MEDIA_PURGED"
 
@@ -648,9 +650,18 @@ def test_blocking_a_tag_hides_it_until_unblocked(app, staff):
     with app.state.Session() as db:
         sync_post_tags(db, db.get(Post, post_id), ["badword"])
         db.commit()
+    pack_id = create_pack(app, target["id"])
+    with app.state.Session() as db:
+        packs.sync_pack_tags(db, db.get(ReelPack, pack_id), ["BadWord"])
+        db.commit()
     assert mutate(admin_client, "POST", "/api/admin/tags/badword/block", REASON).status_code == 200
     with app.state.Session() as db:
         assert post_tags(db.get(Post, post_id)) == []
+        pack = db.get(ReelPack, pack_id)
+        assert packs.pack_tags(pack) == []
+        packs.sync_pack_tags(db, pack, ["badword", "alps"])
+        db.commit()
+        assert packs.pack_tags(pack) == ["alps"]
     assert mutate(admin_client, "POST", "/api/admin/tags/badword/unblock", REASON).status_code == 200
     with app.state.Session() as db:
         assert post_tags(db.get(Post, post_id)) == ["badword"]

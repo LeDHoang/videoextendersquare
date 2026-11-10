@@ -235,7 +235,7 @@ describe('ContentPanel purge', () => {
 
   it('lets only an admin purge a removed post and lists the URLs to purge at the edge', async () => {
     mocks.api.get.mockResolvedValue({ items: [removed], next_cursor: null });
-    mocks.api.post.mockResolvedValue({ item: removed, deleted: 2, urls: ['https://media.example.com/uploads/a.mp4', 'https://media.example.com/uploads/a-poster.jpg'] });
+    mocks.api.post.mockResolvedValue({ item: { ...removed, purged: true }, deleted: 2, urls: ['https://media.example.com/uploads/a.mp4', 'https://media.example.com/uploads/a-poster.jpg'] });
     const { unmount } = render(<ContentPanel viewer={MOD} onOpenUser={() => {}} />);
     await waitFor(() => expect(screen.getByText('Bad clip')).toBeTruthy());
     expect(screen.queryByText('PURGE MEDIA')).toBeNull();
@@ -247,6 +247,9 @@ describe('ContentPanel purge', () => {
     reasonAndSubmit('PURGE FOREVER');
     await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/content/post/p1/purge', { reason: 'test reason' }));
     await waitFor(() => expect(screen.getByLabelText('URLs to purge').value).toContain('uploads/a-poster.jpg'));
+    // A purged post has nothing left to restore.
+    expect(screen.getByText(/REMOVED · MEDIA PURGED/)).toBeTruthy();
+    expect(screen.queryByText('RESTORE')).toBeNull();
   });
 });
 

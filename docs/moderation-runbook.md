@@ -170,6 +170,12 @@ app, press PURGE MEDIA on the removed post (Content tab, admin only), purge in
 Cloudflare every URL the purge lists, then check that `curl -sI` returns `404` with no
 `cf-cache-status: HIT`.
 
+PURGE MEDIA deletes the post's published files. Two processing copies stay: the job
+result in the public bucket (`jobs/<hash>/`, deleted by its lifecycle rule after 30 days)
+and the staff-only source copy in the log bucket (`files/<trace_id>/`). The UPLOAD LOGS tab
+shows both for the post. Keep the source copy while an S1 report to the authorities needs
+it; delete both in R2 by hand when the case requires it.
+
 Deleting an account, or an owner deleting a post, only hides the posts: their files
 stay in the bucket. For a privacy request that asks for the files to go, find the
 posts in the Content tab (status REMOVED) and purge each one.
@@ -208,9 +214,9 @@ Gaps found:
 - **Fixed:** the queue and API did not show which moderator acted (`reports.moderator_id`,
   SQL only). Each report from `/api/moderation/reports` now carries `handled_by` (username),
   and the queue shows `HANDLED BY: @name` on reviewed reports.
-- **Fixed later (staff console):** reports had no claim or assignment step, so two moderators could open the same
-  report at once; the second action gets 409 `REPORT_ALREADY_REVIEWED`. Adding claims is a
-  new feature (schema and UI), not a drill fix.
+- **Fixed later (staff console):** reports had no claim or assignment step, so two moderators
+  could open the same report at once; the second action got 409 `REPORT_ALREADY_REVIEWED`.
+  Reports now have CLAIM and RELEASE (§The queue).
 - **Open:** `reinstate_user` on an already-reviewed report keeps the original
   `moderator_id`, so `handled_by` shows who suspended, not which admin reinstated. The
   reinstating admin's id is in the app log only (`Admin ... reinstated user ...`).

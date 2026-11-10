@@ -516,6 +516,10 @@ def serialize_content(db: Session, content_type: str, row) -> dict:
     }
     if content_type == "post":
         item.update(text=row.title or row.caption[:120], status=row.status, link=f"/reels?post={row.id}")
+        # A purge cannot be undone, so one purge row means the media is gone.
+        item["purged"] = row.deleted_at is not None and db.query(StaffAction.id).filter(
+            StaffAction.action == PURGE_ACTION, StaffAction.target_type == "post", StaffAction.target_id == row.id,
+        ).first() is not None
     elif content_type == "pack":
         item.update(text=row.title, status=row.status, link=f"/packs/{row.id}")
     else:
@@ -614,10 +618,14 @@ def purge_post_media(
     context: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ):
-    """Delete a removed post's media from the bucket and this disk (illegal content, legal and privacy requests).
+    """Delete a removed post's published media from the bucket and this disk (illegal content, legal and privacy requests).
 
     It cannot be undone and the post cannot be restored afterwards. The edge can
     serve a cached copy for up to a day: the response lists every URL to purge there.
+
+    Two processing copies are not touched (see the post under UPLOAD LOGS): the
+    job result in the public bucket under ``jobs/``, which its lifecycle rule
+    deletes after 30 days, and the staff-only source copy in the log bucket.
     """
     reason = staff_reason(db, context.user, req.reason)
     post = get_content(db, "post", content_id)
