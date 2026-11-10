@@ -1,0 +1,430 @@
+{
+ "pass": "int-tex3840",
+ "engine": "v8.30-20261110-vr-fixes-integration",
+ "query": "vrtexcap=3840",
+ "override": {
+  "inline": [
+   {
+    "url": "https://echomultiverse.com/api/reels/player-inline?folder=ALL+FOLDERS&codec=hevc&search=&sort=for_you&start=0",
+    "hunks": [
+     {
+      "i": 0,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 1,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 2,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 3,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 4,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 5,
+      "n": 1,
+      "script": 10
+     }
+    ]
+   }
+  ],
+  "webxr": 1
+ },
+ "vrapi": [
+  {
+   "i": 0,
+   "reel": "img:cap-1-20261006-060600-4d1b90.png",
+   "n": 11,
+   "fps": 89,
+   "fpsMin": 51,
+   "stale": 4,
+   "app": 8.01,
+   "gpu": 0.77,
+   "temp": 38.0
+  },
+  {
+   "i": 1,
+   "reel": "img:",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 90,
+   "stale": 0,
+   "app": 8.02,
+   "gpu": 0.81,
+   "temp": 38.0
+  },
+  {
+   "i": 2,
+   "reel": "img:",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 88,
+   "stale": 1,
+   "app": 8.04,
+   "gpu": 0.81,
+   "temp": 38.0
+  },
+  {
+   "i": 3,
+   "reel": "img:mine-20261005-060750-aef68d.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 90,
+   "stale": 0.0,
+   "app": 8.07,
+   "gpu": 0.82,
+   "temp": 38.0
+  },
+  {
+   "i": 4,
+   "reel": "img:cap-0-20261003-110415-55b3fa.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 89,
+   "stale": 0.0,
+   "app": 8.11,
+   "gpu": 0.82,
+   "temp": 38.0
+  },
+  {
+   "i": 5,
+   "reel": "img:legacy-20261005-105246-d13426.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 89,
+   "stale": 0.0,
+   "app": 8.07,
+   "gpu": 0.81,
+   "temp": 38.0
+  },
+  {
+   "i": 6,
+   "reel": "vid:bodycamtestupload-20261109-062834-d3a9f8",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 82,
+   "stale": 3.0,
+   "app": 8.12,
+   "gpu": 0.79,
+   "temp": 38.0
+  },
+  {
+   "i": 7,
+   "reel": "img:cap-0-20260922-061109-8870b5.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 89,
+   "stale": 0.0,
+   "app": 8.02,
+   "gpu": 0.81,
+   "temp": 38.0
+  },
+  {
+   "i": 8,
+   "reel": "vid:267jiA4D1CuZsTZURP_vC_G5SQRf2a_studio_4k",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 88,
+   "stale": 2,
+   "app": 8.04,
+   "gpu": 0.8,
+   "temp": 38.0
+  },
+  {
+   "i": 9,
+   "reel": "img:legacy-20261006-055503-53662b.png",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 88,
+   "stale": 0,
+   "app": 8.05,
+   "gpu": 0.81,
+   "temp": 38.0
+  },
+  {
+   "i": 10,
+   "reel": "img:cap-3-20260919-192150-85076e.png",
+   "n": 9,
+   "fps": 91,
+   "fpsMin": 90,
+   "stale": 0,
+   "app": 8.02,
+   "gpu": 0.82,
+   "temp": 38.0
+  }
+ ],
+ "vrapi_img": {
+  "n": 87,
+  "fps": 90,
+  "stale": 0,
+  "app": 8.05,
+  "gpu": 0.81
+ },
+ "vrapi_vid": {
+  "n": 19,
+  "fps": 90,
+  "stale": 2,
+  "app": 8.09,
+  "gpu": 0.8
+ },
+ "enterHitchMs": 253.8,
+ "switches": [
+  {
+   "i": 1,
+   "reel": "img:",
+   "visMs": null,
+   "xrfps": 89.9,
+   "dtMax": 18.6,
+   "waiting": 0
+  },
+  {
+   "i": 2,
+   "reel": "img:",
+   "visMs": null,
+   "xrfps": 89.6,
+   "dtMax": 33.1,
+   "waiting": 0
+  },
+  {
+   "i": 3,
+   "reel": "img:mine-20261005-060750-aef68d.png",
+   "visMs": 208,
+   "xrfps": 89.9,
+   "dtMax": 26.1,
+   "waiting": 0
+  },
+  {
+   "i": 4,
+   "reel": "img:cap-0-20261003-110415-55b3fa.png",
+   "visMs": 192,
+   "xrfps": 89.9,
+   "dtMax": 18.6,
+   "waiting": 0
+  },
+  {
+   "i": 5,
+   "reel": "img:legacy-20261005-105246-d13426.png",
+   "visMs": 157,
+   "xrfps": 89.9,
+   "dtMax": 17.6,
+   "waiting": 0
+  },
+  {
+   "i": 6,
+   "reel": "vid:bodycamtestupload-20261109-062834-d3a9f8",
+   "visMs": 376,
+   "xrfps": 89.6,
+   "dtMax": 77.9,
+   "waiting": 1,
+   "src": "camtestupload-20261109-062834-d3a9f8.mp4",
+   "vw": 0,
+   "vh": 0,
+   "meta": {
+    "pf": 121,
+    "w": 3840,
+    "h": 3840,
+    "mt": 5.083333,
+    "pd": 0.0253
+   },
+   "drop": 0,
+   "tot": 0
+  },
+  {
+   "i": 7,
+   "reel": "img:cap-0-20260922-061109-8870b5.png",
+   "visMs": 163,
+   "xrfps": 89.8,
+   "dtMax": 26,
+   "waiting": 0
+  },
+  {
+   "i": 8,
+   "reel": "vid:267jiA4D1CuZsTZURP_vC_G5SQRf2a_studio_4k",
+   "visMs": 398,
+   "xrfps": 89.5,
+   "dtMax": 24.6,
+   "waiting": 1,
+   "src": "iA4D1CuZsTZURP_vC_G5SQRf2a_studio_4k.mp4",
+   "vw": 0,
+   "vh": 0,
+   "meta": {
+    "pf": 121,
+    "w": 3840,
+    "h": 3840,
+    "mt": 5,
+    "pd": 0.0402
+   },
+   "drop": 0,
+   "tot": 0
+  },
+  {
+   "i": 9,
+   "reel": "img:legacy-20261006-055503-53662b.png",
+   "visMs": 136,
+   "xrfps": 89.7,
+   "dtMax": 33.4,
+   "waiting": 0
+  },
+  {
+   "i": 10,
+   "reel": "img:cap-3-20260919-192150-85076e.png",
+   "visMs": 98,
+   "xrfps": 89.7,
+   "dtMax": 18.7,
+   "waiting": 0
+  }
+ ],
+ "diag": {
+  "n": 133,
+  "dockPerS": 9,
+  "dockMax": 10,
+  "videoPerS": 0,
+  "overlayPerS": 0,
+  "panelPerS": 0,
+  "stalls": 1,
+  "stallMs": 1012,
+  "fbs": 1.25,
+  "texCap": 3840
+ },
+ "diagSwitch": [
+  {
+   "src": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "ms": 1041,
+   "cache": true
+  },
+  {
+   "src": "estupload-20261109-062834-d3a9f8.mp4",
+   "ms": 70,
+   "cache": true
+  },
+  {
+   "src": "1CuZsTZURP_vC_G5SQRf2a_studio_4k.mp4",
+   "ms": 59,
+   "cache": true
+  }
+ ],
+ "media": [
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": true,
+   "ms": 7961
+  },
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": true,
+   "ms": 22
+  },
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=2883584-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": true,
+   "ms": 17
+  },
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=27656192-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": true,
+   "ms": 4154
+  },
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": false,
+   "ms": 1010
+  },
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=2228224-",
+   "st": null,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": null,
+   "ms": 7080
+  },
+  {
+   "url": "estupload-20261109-062834-d3a9f8.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": false,
+   "fail": null,
+   "disk": true,
+   "ms": 113
+  },
+  {
+   "url": "1CuZsTZURP_vC_G5SQRf2a_studio_4k.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": false,
+   "fail": null,
+   "disk": true,
+   "ms": 50
+  }
+ ],
+ "imgDupes": {
+  "cap-1-20260922-155048-7bc2db.png": 2,
+  "cap-1-20261004-121724-b8c1a6.png": 3,
+  "cap-1-20261006-060600-4d1b90.png": 3,
+  "cap-4-20261004-130649-825c22.png": 2,
+  "cap-4-20261005-054915-34c1ce.png": 2,
+  "cap-0-20260922-155048-0c7bb0.png": 2,
+  "legacy-20260922-061109-fb03e9.png": 2,
+  "cap-0-20261004-132644-19d81d.png": 2,
+  "mine-20261005-060750-aef68d.png": 2,
+  "cap-0-20261005-110034-515054.png": 2,
+  "cap-0-20261003-110415-55b3fa.png": 2,
+  "cap-0-20261005-060745-7ed4a7.png": 2,
+  "legacy-20261005-105246-d13426.png": 2,
+  "cap-0-20261005-061215-aa94a7.png": 2,
+  "mine-20261006-054356-befd8a.png": 2,
+  "legacy-20260922-160316-862e4b.png": 3,
+  "legacy-20261003-104207-357031.png": 2,
+  "cap-0-20260922-061109-8870b5.png": 2,
+  "cap-0-20261003-093458-d4ff1c.png": 2,
+  "cap-1-20260922-061109-e378cd.png": 2,
+  "cap-4-20261006-054351-9a59f7.png": 2,
+  "legacy-20260922-205412-5c4747.png": 2,
+  "legacy-20261006-055503-53662b.png": 2,
+  "mine-20260919-192954-db28cb.png": 2,
+  "cap-3-20260919-192150-85076e.png": 2,
+  "mine-20261003-094409-6b01ba.png": 2,
+  "mine-20260919-193031-31922c.png": 2,
+  "cap-0-20260919-192949-c7daac.png": 2,
+  "mine-20260922-155052-dbf569.png": 2
+ },
+ "imgFetches": 63,
+ "errors": [],
+ "heap": {
+  "first": 20,
+  "max": 60,
+  "last": 30
+ }
+}

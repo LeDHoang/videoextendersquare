@@ -1,0 +1,407 @@
+{
+ "pass": "int-default",
+ "engine": "v8.30-20261110-vr-fixes-integration",
+ "query": "",
+ "override": {
+  "inline": [
+   {
+    "url": "https://echomultiverse.com/api/reels/player-inline?folder=ALL+FOLDERS&codec=hevc&search=&sort=for_you&start=0",
+    "hunks": [
+     {
+      "i": 0,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 1,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 2,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 3,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 4,
+      "n": 1,
+      "script": 10
+     },
+     {
+      "i": 5,
+      "n": 1,
+      "script": 10
+     }
+    ]
+   }
+  ],
+  "webxr": 1
+ },
+ "vrapi": [
+  {
+   "i": 0,
+   "reel": "vid:Lyric%20Video)%20(feat.%20Lil%20Durk%20&",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 51,
+   "stale": 2.0,
+   "app": 7.54,
+   "gpu": 0.76,
+   "temp": 38.0
+  },
+  {
+   "i": 1,
+   "reel": "img:legacy-20261006-055503-53662b.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 89,
+   "stale": 0.5,
+   "app": 8.23,
+   "gpu": 0.84,
+   "temp": 38.0
+  },
+  {
+   "i": 2,
+   "reel": "img:cap-0-20260922-155048-0c7bb0.png",
+   "n": 10,
+   "fps": 90.0,
+   "fpsMin": 90,
+   "stale": 0.0,
+   "app": 8.28,
+   "gpu": 0.84,
+   "temp": 38.0
+  },
+  {
+   "i": 3,
+   "reel": "img:cap-1-20260922-155048-7bc2db.png",
+   "n": 10,
+   "fps": 91.0,
+   "fpsMin": 90,
+   "stale": 0.0,
+   "app": 8.27,
+   "gpu": 0.82,
+   "temp": 38.0
+  },
+  {
+   "i": 4,
+   "reel": "img:cap-1-20261005-061215-fb17a3.png",
+   "n": 10,
+   "fps": 91.0,
+   "fpsMin": 90,
+   "stale": 0.5,
+   "app": 8.29,
+   "gpu": 0.83,
+   "temp": 38.0
+  },
+  {
+   "i": 5,
+   "reel": "img:cap-2-20261006-055503-9da83e.png",
+   "n": 10,
+   "fps": 90.5,
+   "fpsMin": 89,
+   "stale": 0.0,
+   "app": 8.26,
+   "gpu": 0.84,
+   "temp": 38.0
+  },
+  {
+   "i": 6,
+   "reel": "img:cap-1-20261005-054915-16b5b3.png",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 88,
+   "stale": 0,
+   "app": 8.21,
+   "gpu": 0.83,
+   "temp": 38.0
+  },
+  {
+   "i": 7,
+   "reel": "vid:dojacatdancetest-20261109-065726-4e6fb0.",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 87,
+   "stale": 3,
+   "app": 8.21,
+   "gpu": 0.82,
+   "temp": 38.0
+  },
+  {
+   "i": 8,
+   "reel": "img:cap-1-20260922-205412-4d4ec9.png",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 89,
+   "stale": 0,
+   "app": 8.14,
+   "gpu": 0.83,
+   "temp": 38.0
+  },
+  {
+   "i": 9,
+   "reel": "vid:267jiA4D1CuZsTZURP_vC_G5SQRf2a_studio_4k",
+   "n": 9,
+   "fps": 90,
+   "fpsMin": 89,
+   "stale": 3,
+   "app": 8.17,
+   "gpu": 0.82,
+   "temp": 38.0
+  },
+  {
+   "i": 10,
+   "reel": "img:",
+   "n": 10,
+   "fps": 91.0,
+   "fpsMin": 90,
+   "stale": 0.0,
+   "app": 7.97,
+   "gpu": 0.81,
+   "temp": 38.0
+  }
+ ],
+ "vrapi_img": {
+  "n": 78,
+  "fps": 90.0,
+  "stale": 0.0,
+  "app": 8.22,
+  "gpu": 0.83
+ },
+ "vrapi_vid": {
+  "n": 28,
+  "fps": 90.0,
+  "stale": 3.0,
+  "app": 8.09,
+  "gpu": 0.81
+ },
+ "enterHitchMs": 260.5,
+ "switches": [
+  {
+   "i": 1,
+   "reel": "img:legacy-20261006-055503-53662b.png",
+   "visMs": 3834,
+   "xrfps": 89.8,
+   "dtMax": 33.6,
+   "waiting": 0
+  },
+  {
+   "i": 2,
+   "reel": "img:cap-0-20260922-155048-0c7bb0.png",
+   "visMs": 165,
+   "xrfps": 90.0,
+   "dtMax": 12.6,
+   "waiting": 0
+  },
+  {
+   "i": 3,
+   "reel": "img:cap-1-20260922-155048-7bc2db.png",
+   "visMs": 123,
+   "xrfps": 90.0,
+   "dtMax": 13.1,
+   "waiting": 0
+  },
+  {
+   "i": 4,
+   "reel": "img:cap-1-20261005-061215-fb17a3.png",
+   "visMs": 63,
+   "xrfps": 90.0,
+   "dtMax": 13.2,
+   "waiting": 0
+  },
+  {
+   "i": 5,
+   "reel": "img:cap-2-20261006-055503-9da83e.png",
+   "visMs": 58,
+   "xrfps": 89.2,
+   "dtMax": 67.8,
+   "waiting": 0
+  },
+  {
+   "i": 6,
+   "reel": "img:cap-1-20261005-054915-16b5b3.png",
+   "visMs": 557,
+   "xrfps": 89.7,
+   "dtMax": 26.1,
+   "waiting": 0
+  },
+  {
+   "i": 7,
+   "reel": "vid:dojacatdancetest-20261109-065726-4e6fb0.",
+   "visMs": 583,
+   "xrfps": 89.4,
+   "dtMax": 27,
+   "waiting": 1,
+   "src": "acatdancetest-20261109-065726-4e6fb0.mp4",
+   "vw": 0,
+   "vh": 0,
+   "meta": {
+    "pf": 316,
+    "w": 3840,
+    "h": 3840,
+    "mt": 10.5,
+    "pd": 0.0324
+   },
+   "drop": 0,
+   "tot": 0
+  },
+  {
+   "i": 8,
+   "reel": "img:cap-1-20260922-205412-4d4ec9.png",
+   "visMs": 1606,
+   "xrfps": 89.9,
+   "dtMax": 19.2,
+   "waiting": 0
+  },
+  {
+   "i": 9,
+   "reel": "vid:267jiA4D1CuZsTZURP_vC_G5SQRf2a_studio_4k",
+   "visMs": 356,
+   "xrfps": 89.5,
+   "dtMax": 23.7,
+   "waiting": 2,
+   "src": "-Popular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "vw": 4092,
+   "vh": 2046,
+   "meta": {
+    "pf": 1,
+    "w": 4092,
+    "h": 2046,
+    "mt": 0,
+    "pd": 3.3346
+   },
+   "drop": 0,
+   "tot": 2
+  },
+  {
+   "i": 10,
+   "reel": "img:",
+   "visMs": null,
+   "xrfps": 90.0,
+   "dtMax": 13.9,
+   "waiting": 1
+  }
+ ],
+ "diag": {
+  "n": 132,
+  "dockPerS": 9.0,
+  "dockMax": 10,
+  "videoPerS": 0.0,
+  "overlayPerS": 0.0,
+  "panelPerS": 0.0,
+  "stalls": 0,
+  "stallMs": 0,
+  "fbs": 1.25,
+  "texCap": 2048
+ },
+ "diagSwitch": [
+  {
+   "src": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "ms": 156,
+   "cache": false
+  },
+  {
+   "src": "dancetest-20261109-065726-4e6fb0.mp4",
+   "ms": 92,
+   "cache": true
+  },
+  {
+   "src": "1CuZsTZURP_vC_G5SQRf2a_studio_4k.mp4",
+   "ms": 67,
+   "cache": true
+  },
+  {
+   "src": "ular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "ms": 6213,
+   "cache": true
+  }
+ ],
+ "media": [
+  {
+   "url": "20Lil%20Durk%20&%20Prince%20Dre).mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": false,
+   "fail": null,
+   "disk": true,
+   "ms": 1483
+  },
+  {
+   "url": "dancetest-20261109-065726-4e6fb0.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": false,
+   "fail": null,
+   "disk": true,
+   "ms": 48
+  },
+  {
+   "url": "1CuZsTZURP_vC_G5SQRf2a_studio_4k.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": false,
+   "fail": null,
+   "disk": true,
+   "ms": 53
+  },
+  {
+   "url": "ular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": true,
+   "ms": 6550
+  },
+  {
+   "url": "ular_Media_vt0i6nuqNEo_001_1080p.mp4",
+   "range": "bytes=0-",
+   "st": 206,
+   "canceled": true,
+   "fail": "net::ERR_ABORTED",
+   "disk": false,
+   "ms": 7002
+  }
+ ],
+ "imgDupes": {
+  "cap-3-20260919-192150-85076e.png": 3,
+  "mine-20260919-193031-31922c.png": 2,
+  "legacy-20261006-055503-53662b.png": 2,
+  "mine-20260919-192954-db28cb.png": 2,
+  "cap-0-20260922-155048-0c7bb0.png": 2,
+  "mine-20261003-094409-6b01ba.png": 2,
+  "cap-0-20261004-132644-19d81d.png": 2,
+  "cap-1-20260922-155048-7bc2db.png": 2,
+  "cap-0-20261005-110034-515054.png": 2,
+  "cap-1-20261004-121724-b8c1a6.png": 2,
+  "cap-1-20261005-061215-fb17a3.png": 2,
+  "cap-1-20261006-060600-4d1b90.png": 2,
+  "cap-2-20260922-103212-f6785b.png": 2,
+  "cap-2-20261006-055503-9da83e.png": 2,
+  "cap-2-20260922-144813-b209a7.png": 2,
+  "cap-2-20261006-061404-7e3b79.png": 2,
+  "cap-1-20261005-054915-16b5b3.png": 3,
+  "cap-3-20260919-193629-b3c655.png": 2,
+  "cap-3-20261005-070612-77ae3d.png": 3,
+  "cap-2-20261003-113157-feea1d.png": 3,
+  "cap-3-20260919-192850-4ccb16.png": 2,
+  "cap-3-20260922-103212-97977a.png": 2,
+  "cap-0-20261004-121723-066d3c.png": 2,
+  "cap-1-20260922-205412-4d4ec9.png": 2,
+  "cap-0-20260922-073225-b5f225.png": 2,
+  "cap-0-20260922-205412-286700.png": 2,
+  "legacy-20261005-105246-d13426.png": 2,
+  "cap-1-20260922-074215-d57b45.png": 2
+ },
+ "imgFetches": 62,
+ "errors": [],
+ "heap": {
+  "first": 15,
+  "max": 106,
+  "last": 25
+ }
+}
