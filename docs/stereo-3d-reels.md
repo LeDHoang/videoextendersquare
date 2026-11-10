@@ -145,6 +145,19 @@ Branch: `feat/convert-to-3d` (cut from `3dreels`). A signed-in user turns a squa
   - **Allow prompt.** The "Allow … immersive experiences?" prompt no longer accepts injected adb taps, so a person has to press Allow once per origin.
 - **Server.** Production keeps `SX_STEREO_CONVERT_ENABLED=0` and the Docker image has no torch. See the VPS decision in `docs/to-beta.md` (AI inference).
 
+## Spatial version — colour + depth sibling (2026-11-11)
+
+Every square video and image post gets a spatial version next to its 2D file, made in the upload step. The post itself stays 2D (`stereo_layout = "mono"`).
+
+- **File.** `<stem>-depth.mp4` or `<stem>-depth.jpg` (`server/media.py` `depth_sibling_path`). The left half is the colour frame and the right half is nearness as grey (`sbsd`). An image slideshow has one per slide. The file is listed in `Post.media_files` and committed with `media_store.commit`, so it goes to R2 with the original. `derived_files` and `is_derived_media` cover it, and the web-preview step skips it.
+- **Switch.** `SX_SPATIAL_DEFAULT_ENABLED` (default on) is active only where the depth packages are installed (`spatial_default_enabled()`). `/api/config` sends it as `features.spatial_default`. Hosts without it keep the old flow.
+- **Job.** The Upload Studio starts `POST /api/stereo/convert` with `depth_pack: true` once the 1:1 master is ready (staged square file or extend result). Slides run one after another. These jobs have their own quota bucket `spatial` and record `stereo_layout: "sbsd"` and `converted_from` (stage id or extend job id).
+- **Publish.** `PublishRequest.spatial_job_ids` holds one job per stored slide, or one for a video. Each job must be the caller's, complete, `sbsd`, of the same kind, and made from the file published at that slot. An `sbsd` job sent as the main `job_id` gets 422. A failed or missing spatial job never blocks publish: the post goes out 2D.
+- **Upload log.** The job is linked to the upload trace and logs `spatial_queued`, then `spatial_complete`, `spatial_error` or `spatial_cancelled`. These events never change the upload's status or error. The `publish` event carries `spatial: {files, bytes}` or `spatial: null`. The spatial file is not copied to the log bucket; the job result already lives under `jobs/<hash>/`.
+- **Feed.** Mono posts and each image slide carry `depth_url` when the sibling is recorded in `media_files` (works after `drop_local`, when the file is on R2 only). 2D surfaces never load it.
+- **VR player.** `reels.html` `playbackFor` plays `depth_url` with layout `sbsd` while the headset or split preview presents and spatial viewing is on. The dock's header button (`spatial`, `3D ON` / `3D OFF`) flips it. The choice is kept in `localStorage` key `echo_reels_spatial_v1` and is on by default. On a post without a spatial version the button is muted and says `NO SPATIAL VERSION` when pressed. A spatial file that fails to load falls back to 2D through `handleStereoFailure`, like SBS files. True SBS/TB posts and MAKE 3D are unchanged.
+- **Not covered.** No backfill of old posts. No H.264 fallback of the depth file. A spatial image that fails to load in VR has no fallback (the image element has no error handler, same as SBS images).
+
 ## Limits / not supported
 
 - **Not supported:**
