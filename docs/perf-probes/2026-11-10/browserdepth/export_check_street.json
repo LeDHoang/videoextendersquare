@@ -1,0 +1,23 @@
+{
+ "T": 32,
+ "size": 518,
+ "torch": "2.13.0",
+ "ort": "1.31.1",
+ "export_s": 51.5,
+ "onnx_mb": 678.3,
+ "clips": {
+  "street": {
+   "frames": 150,
+   "torch_cpu_s": 84.0,
+   "onnx_cpu_s": 145.5,
+   "onnx_ms_per_window": 18645.0,
+   "raw_max_rel": 6.5e-05,
+   "disparity_px": {
+    "mean": 0.0,
+    "p99": 0.0,
+    "p999": 0.0002,
+    "max": 0.0071
+   }
+  }
+ }
+}

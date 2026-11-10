@@ -21,6 +21,12 @@ def main():
                 return os.path.join(work, os.path.basename(path.split("?")[0]))
             return super().translate_path(path)
 
+        def end_headers(self):
+            # cross-origin isolation, so onnxruntime-web's wasm can use threads (browserdepth/bench.html)
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+            super().end_headers()
+
         def do_PUT(self):
             if not self.path.startswith("/work/"):
                 return self.send_error(403)
