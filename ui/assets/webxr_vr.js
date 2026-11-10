@@ -8047,6 +8047,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         notificationText,
         notificationUntil,
         stereo: textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono',
+        spatial: spatialDockState(),
         callbacks,
       });
       if (controlsTexture) {
@@ -12178,6 +12179,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     return callbacks.getPackContext ? callbacks.getPackContext() : null;
   }
 
+  // {on, available} for the dock's 3D button; null hides it (hosts without spatial).
+  function spatialDockState() {
+    if (!callbacks.getSpatialState) return null;
+    try { return callbacks.getSpatialState() || null; } catch (e) { return null; }
+  }
+
   // Screen-local hit (meters, upstream overlayCommentAtHit convention) →
   // normalized UV. Divided by the live screenScale so grip-scaled screens
   // keep mapping the full canvas.
@@ -12235,6 +12242,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         else if (videoElement) videoElement.muted = !videoElement.muted;
         break;
       case 'comments': toggleCommentsPanel(); break;
+      case 'spatial': if (callbacks.onToggleSpatial) callbacks.onToggleSpatial(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();
         else if (sceneMode !== 'earth' && locationFeedActive()) restoreAllLocations();

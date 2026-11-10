@@ -81,6 +81,10 @@
     // shell nav bar under the dock.
     { label: 'QUEUE', action: 'earth', x: 584, y: 8, w: 72, h: 32 },
 
+    // Spatial viewing toggle (a 2D post's colour+depth version). Sits after
+    // the title, clear of the pack index pill and 3D chip in both modes.
+    { label: '3D', action: 'spatial', x: 360, y: 8, w: 72, h: 32 },
+
     // Header exit button
     { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
 
@@ -483,6 +487,7 @@
     if (action === 'earth') return !!isPackExp;
     if (isPackAction(action)) return !!isPackExp;
     if (action === 'collect') return !isPackExp && sceneMode !== 'earth';
+    if (action === 'spatial') return source.kind !== 'static-card' && sceneMode !== 'earth';
     if (isReelAction(action)) return source.kind !== 'static-card' && (!itemState || itemState.available !== false);
     if (source.kind === 'static-card' &&
         (action === 'rew' || action === 'prev' || action === 'play' ||
@@ -725,6 +730,7 @@
       notificationText = '',
       notificationUntil = 0,
       stereo = 'mono',
+      spatial = null,
       callbacks = {},
     } = options;
 
@@ -836,6 +842,26 @@
       ctx.fillText('QUEUE', earthButton.x + 16 + (earthButton.w - 16) / 2, 24);
     }
 
+    // Spatial toggle: accent while a spatial version plays, muted ink when
+    // the post has none.
+    const spatialBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'spatial');
+    const spatialBtn = CTRL_BUTTONS[spatialBtnIdx];
+    if (spatial && isControlVisible('spatial', source, itemState, packMode, sceneMode)) {
+      const spatialLit = !!(spatial.on && spatial.available);
+      const spatialHover = hoveredButton === spatialBtnIdx;
+      if (spatialLit) {
+        ctx.fillStyle = T.accent;
+        roundRectPath(ctx, spatialBtn.x, spatialBtn.y, spatialBtn.w, spatialBtn.h, TOKENS.radiusPx);
+        ctx.fill();
+      } else {
+        headerPill(spatialBtn, spatialHover);
+      }
+      ctx.fillStyle = spatialLit ? T.onAccent : (!spatial.available ? T.inkMuted : (spatialHover ? T.ink : T.ink2));
+      ctx.font = `600 12.1px ${TOKENS.font.mono}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(spatial.on ? '3D ON' : '3D OFF', spatialBtn.x + spatialBtn.w / 2, 24);
+    }
+
     // Exit button
     const exitBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'exit');
     const exitBtn = CTRL_BUTTONS[exitBtnIdx];
@@ -850,7 +876,7 @@
     };
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
-      if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek') continue;
+      if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek' || btn.action === 'spatial') continue;
       if (!isControlVisible(btn.action, source, itemState, packMode, sceneMode)) continue;
 
       const isHover = (hoveredButton === i);
