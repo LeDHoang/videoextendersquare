@@ -5,6 +5,7 @@ This is a profile of the production VPS as it ran on 2026-10-29. It covers laten
 Related docs:
 - `docs/deploy-runbook.md`: the VPS, compose stack and tunnel setup this profile measured.
 - `docs/to-beta.md`: release blockers and infrastructure verdicts.
+- `docs/perf-probes/2026-11-10/README.md`: a rerun after the named tunnel and the cached media domain, compared with this baseline.
 
 ## 1. Setup and method
 

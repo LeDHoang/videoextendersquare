@@ -1,0 +1,7 @@
+healthz {"codes": [200], "size": 11, "cold_dns": 2, "cold_tcp": 147, "cold_tls": 252, "cold_ttfb": 897, "cold_ttfb_p95": 2491, "cold_total": 897, "warm_ttfb": 311, "warm_ttfb_p95": 663, "warm_total": 313}
+feed {"codes": [200], "size": 5520, "cold_dns": 3, "cold_tcp": 148, "cold_tls": 255, "cold_ttfb": 916, "cold_ttfb_p95": 1494, "cold_total": 1092, "warm_ttfb": 408, "warm_ttfb_p95": 2076, "warm_total": 586}
+reels {"codes": [200], "size": 37705, "cold_dns": 4, "cold_tcp": 149, "cold_tls": 356, "cold_ttfb": 1034, "cold_ttfb_p95": 2104, "cold_total": 2146, "warm_ttfb": 461, "warm_ttfb_p95": 768, "warm_total": 1064}
+player {"codes": [200], "size": 84308, "cold_dns": 3, "cold_tcp": 148, "cold_tls": 852, "cold_ttfb": 1458, "cold_ttfb_p95": 2625, "cold_total": 2493, "warm_ttfb": 462, "warm_ttfb_p95": 800, "warm_total": 2129}
+spa_index {"codes": [200], "size": 1038, "cold_dns": 3, "cold_tcp": 149, "cold_tls": 350, "cold_ttfb": 909, "cold_ttfb_p95": 3197, "cold_total": 910, "warm_ttfb": 313, "warm_ttfb_p95": 731, "warm_total": 328}
+spa_js {"codes": [200], "size": 120035, "cold_dns": 5, "cold_tcp": 150, "cold_tls": 354, "cold_ttfb": 738, "cold_ttfb_p95": 2579, "cold_total": 2292, "warm_ttfb": 174, "warm_ttfb_p95": 366, "warm_total": 2138}
+r2_poster {"codes": [200], "size": 39789, "cold_dns": 4, "cold_tcp": 148, "cold_tls": 165, "cold_ttfb": 568, "cold_ttfb_p95": 1850, "cold_total": 1251, "warm_ttfb": 161, "warm_ttfb_p95": 361, "warm_total": 1104}

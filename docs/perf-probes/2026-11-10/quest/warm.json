@@ -1,0 +1,106 @@
+{
+ "colo": "TPE",
+ "loc": "TW",
+ "ua": "Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/154.1.0.32.54.1101200317 Chrome/154.0.8037.126 VR Safari/537.36",
+ "targets": {
+  "edge_trace": {
+   "codes": [
+    200
+   ],
+   "size": 366,
+   "proto": "h3",
+   "first_total": 103,
+   "first_conn": 0,
+   "warm_ttfb": 103,
+   "warm_total": 106
+  },
+  "healthz": {
+   "codes": [
+    200
+   ],
+   "size": 11,
+   "proto": "h3",
+   "first_total": 303,
+   "first_conn": 0,
+   "warm_ttfb": 302,
+   "warm_total": 305
+  },
+  "feed": {
+   "codes": [
+    200
+   ],
+   "size": 32531,
+   "proto": "h3",
+   "first_total": 452,
+   "first_conn": 0,
+   "warm_ttfb": 387,
+   "warm_total": 409
+  },
+  "reels": {
+   "codes": [
+    200
+   ],
+   "size": 544149,
+   "proto": "h3",
+   "first_total": 719,
+   "first_conn": 0,
+   "warm_ttfb": 384,
+   "warm_total": 450
+  },
+  "player": {
+   "codes": [
+    200
+   ],
+   "size": 405992,
+   "proto": "h3",
+   "first_total": 427,
+   "first_conn": 0,
+   "warm_ttfb": 419,
+   "warm_total": 443
+  },
+  "spa_index": {
+   "codes": [
+    200
+   ],
+   "size": 2626,
+   "proto": "h3",
+   "first_total": 237,
+   "first_conn": 0,
+   "warm_ttfb": 234,
+   "warm_total": 238
+  },
+  "spa_js": {
+   "codes": [
+    200
+   ],
+   "size": 373972,
+   "proto": "h3",
+   "first_total": 301,
+   "first_conn": 0,
+   "warm_ttfb": 114,
+   "warm_total": 149
+  },
+  "r2_poster": {
+   "codes": [
+    200
+   ],
+   "size": 45059,
+   "proto": "",
+   "first_total": 1394,
+   "first_conn": null,
+   "warm_ttfb": null,
+   "warm_total": 283
+  },
+  "r2_mp4_1MB": {
+   "codes": [
+    206
+   ],
+   "size": 1048576,
+   "proto": "",
+   "first_total": 1243,
+   "first_conn": null,
+   "warm_ttfb": null,
+   "warm_total": 456
+  }
+ }
+}

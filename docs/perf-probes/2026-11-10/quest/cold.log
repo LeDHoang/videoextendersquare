@@ -1,0 +1,42 @@
+healthz 0 {"code":200,"proto":"h3","dns":102,"conn":244,"tls":243,"ttfb":949,"req_to_first_byte":595,"total":951}
+healthz 1 {"code":200,"proto":"h3","dns":176,"conn":238,"tls":237,"ttfb":748,"req_to_first_byte":326,"total":750}
+healthz 2 {"code":200,"proto":"h2","dns":82,"conn":695,"tls":119,"ttfb":1296,"req_to_first_byte":509,"total":1297}
+healthz 3 {"code":200,"proto":"h2","dns":228,"conn":206,"tls":112,"ttfb":1843,"req_to_first_byte":1402,"total":1844}
+healthz 4 {"code":200,"proto":"h2","dns":1114,"conn":622,"tls":527,"ttfb":1995,"req_to_first_byte":251,"total":1997}
+healthz 5 {"code":200,"proto":"h2","dns":161,"conn":403,"tls":206,"ttfb":822,"req_to_first_byte":250,"total":824}
+healthz 6 {"code":200,"proto":"h2","dns":156,"conn":1178,"tls":973,"ttfb":1600,"req_to_first_byte":259,"total":1602}
+feed 0 {"code":200,"proto":"h2","dns":99,"conn":209,"tls":109,"ttfb":1230,"req_to_first_byte":914,"total":2461}
+feed 1 {"code":200,"proto":"h2","dns":93,"conn":433,"tls":340,"ttfb":1083,"req_to_first_byte":549,"total":1225}
+feed 2 {"code":200,"proto":"h2","dns":95,"conn":680,"tls":585,"ttfb":1462,"req_to_first_byte":679,"total":1680}
+feed 3 {"code":200,"proto":"h2","dns":106,"conn":244,"tls":145,"ttfb":934,"req_to_first_byte":575,"total":1131}
+feed 4 {"code":200,"proto":"h2","dns":0,"conn":0,"tls":0,"ttfb":702,"req_to_first_byte":392,"total":704}
+feed 5 {"code":200,"proto":"h2","dns":97,"conn":211,"tls":117,"ttfb":827,"req_to_first_byte":512,"total":830}
+feed 6 {"code":200,"proto":"h2","dns":2123,"conn":511,"tls":112,"ttfb":3059,"req_to_first_byte":416,"total":3088}
+player 0 {"code":200,"proto":"h2","dns":94,"conn":230,"tls":125,"ttfb":779,"req_to_first_byte":447,"total":1586}
+player 1 {"code":200,"proto":"h2","dns":90,"conn":484,"tls":381,"ttfb":1094,"req_to_first_byte":510,"total":1702}
+player 2 {"code":200,"proto":"h2","dns":101,"conn":216,"tls":116,"ttfb":742,"req_to_first_byte":416,"total":1347}
+player 3 {"code":200,"proto":"h2","dns":109,"conn":216,"tls":116,"ttfb":1131,"req_to_first_byte":795,"total":1864}
+player 4 {"code":200,"proto":"h2","dns":217,"conn":408,"tls":198,"ttfb":1065,"req_to_first_byte":431,"total":1666}
+player 5 {"code":200,"proto":"h2","dns":116,"conn":243,"tls":119,"ttfb":785,"req_to_first_byte":417,"total":1431}
+player 6 {"code":200,"proto":"h2","dns":97,"conn":225,"tls":124,"ttfb":747,"req_to_first_byte":417,"total":1354}
+spa_index 0 {"code":200,"proto":"h2","dns":111,"conn":223,"tls":120,"ttfb":591,"req_to_first_byte":247,"total":594}
+spa_index 1 {"code":200,"proto":"h2","dns":208,"conn":326,"tls":119,"ttfb":810,"req_to_first_byte":267,"total":812}
+spa_index 2 {"code":200,"proto":"h2","dns":212,"conn":11371,"tls":11166,"ttfb":12202,"req_to_first_byte":612,"total":12204}
+spa_index 3 {"code":200,"proto":"h2","dns":101,"conn":225,"tls":123,"ttfb":604,"req_to_first_byte":268,"total":607}
+spa_index 4 {"code":200,"proto":"h2","dns":114,"conn":273,"tls":171,"ttfb":1148,"req_to_first_byte":752,"total":1150}
+spa_index 5 {"code":200,"proto":"h2","dns":95,"conn":225,"tls":121,"ttfb":706,"req_to_first_byte":379,"total":709}
+spa_index 6 {"code":200,"proto":"h2","dns":214,"conn":220,"tls":118,"ttfb":711,"req_to_first_byte":267,"total":712}
+r2_poster 0 {"code":200,"proto":"h2","dns":224,"conn":364,"tls":161,"ttfb":828,"req_to_first_byte":232,"total":1257}
+r2_poster 1 {"code":200,"proto":"h2","dns":91,"conn":217,"tls":116,"ttfb":484,"req_to_first_byte":169,"total":686}
+r2_poster 2 {"code":200,"proto":"h2","dns":90,"conn":268,"tls":164,"ttfb":511,"req_to_first_byte":146,"total":832}
+r2_poster 3 {"code":200,"proto":"h2","dns":88,"conn":269,"tls":164,"ttfb":511,"req_to_first_byte":146,"total":760}
+r2_poster 4 {"code":200,"proto":"h2","dns":91,"conn":262,"tls":160,"ttfb":510,"req_to_first_byte":148,"total":817}
+r2_poster 5 {"code":200,"proto":"h2","dns":103,"conn":265,"tls":165,"ttfb":544,"req_to_first_byte":168,"total":748}
+r2_poster 6 {"code":200,"proto":"h2","dns":233,"conn":336,"tls":132,"ttfb":689,"req_to_first_byte":112,"total":1024}
+r2_mp4 0 {"err":"no nav timing"}
+r2_mp4 1 {"err":"no nav timing"}
+r2_mp4 2 {"err":"no nav timing"}
+r2_mp4 3 {"err":"no nav timing"}
+r2_mp4 4 {"err":"no nav timing"}
+r2_mp4 5 {"err":"no nav timing"}
+r2_mp4 6 {"err":"no nav timing"}

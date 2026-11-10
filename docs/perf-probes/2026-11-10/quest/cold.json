@@ -1,0 +1,79 @@
+{
+ "healthz": {
+  "n": 7,
+  "codes": [
+   200
+  ],
+  "proto": "h3",
+  "dns": 161,
+  "conn": 403,
+  "tls": 237,
+  "ttfb": 1296,
+  "req_to_first_byte": 326,
+  "total": 1297
+ },
+ "feed": {
+  "n": 7,
+  "codes": [
+   200
+  ],
+  "proto": "h2",
+  "dns": 97,
+  "conn": 244,
+  "tls": 117,
+  "ttfb": 1083,
+  "req_to_first_byte": 549,
+  "total": 1225
+ },
+ "player": {
+  "n": 7,
+  "codes": [
+   200
+  ],
+  "proto": "h2",
+  "dns": 101,
+  "conn": 230,
+  "tls": 124,
+  "ttfb": 785,
+  "req_to_first_byte": 431,
+  "total": 1586
+ },
+ "spa_index": {
+  "n": 7,
+  "codes": [
+   200
+  ],
+  "proto": "h2",
+  "dns": 114,
+  "conn": 225,
+  "tls": 121,
+  "ttfb": 711,
+  "req_to_first_byte": 268,
+  "total": 712
+ },
+ "r2_poster": {
+  "n": 7,
+  "codes": [
+   200
+  ],
+  "proto": "h2",
+  "dns": 91,
+  "conn": 268,
+  "tls": 161,
+  "ttfb": 511,
+  "req_to_first_byte": 148,
+  "total": 817
+ },
+ "r2_mp4": {
+  "n": 0,
+  "codes": [
+   "no nav timing"
+  ],
+  "dns": null,
+  "conn": null,
+  "tls": null,
+  "ttfb": null,
+  "req_to_first_byte": null,
+  "total": null
+ }
+}

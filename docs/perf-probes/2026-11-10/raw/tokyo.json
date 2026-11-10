@@ -1,0 +1,158 @@
+{
+ "label": "tokyo",
+ "host": "echomultiverse.com",
+ "when": "2026-11-10 00:14:36 +0700",
+ "colo": "SJC",
+ "loc": "JP",
+ "targets": {
+  "healthz": {
+   "codes": [
+    200
+   ],
+   "size": 11,
+   "cold_dns": 3,
+   "cold_tcp": 93,
+   "cold_tls": 629,
+   "cold_ttfb": 1445,
+   "cold_ttfb_p95": 2240,
+   "cold_total": 1505,
+   "warm_ttfb": 400,
+   "warm_ttfb_p95": 863,
+   "warm_total": 423
+  },
+  "feed": {
+   "codes": [
+    200
+   ],
+   "size": 5480,
+   "cold_dns": 4,
+   "cold_tcp": 94,
+   "cold_tls": 330,
+   "cold_ttfb": 1283,
+   "cold_ttfb_p95": 3233,
+   "cold_total": 1983,
+   "warm_ttfb": 394,
+   "warm_ttfb_p95": 580,
+   "warm_total": 761
+  },
+  "reels": {
+   "codes": [
+    200
+   ],
+   "size": 37311,
+   "cold_dns": 4,
+   "cold_tcp": 94,
+   "cold_tls": 447,
+   "cold_ttfb": 1381,
+   "cold_ttfb_p95": 1728,
+   "cold_total": 2462,
+   "warm_ttfb": 610,
+   "warm_ttfb_p95": 1073,
+   "warm_total": 2949
+  },
+  "player": {
+   "codes": [
+    200
+   ],
+   "size": 84501,
+   "cold_dns": 4,
+   "cold_tcp": 93,
+   "cold_tls": 674,
+   "cold_ttfb": 1317,
+   "cold_ttfb_p95": 3399,
+   "cold_total": 2999,
+   "warm_ttfb": 564,
+   "warm_ttfb_p95": 1005,
+   "warm_total": 4974
+  },
+  "spa_index": {
+   "codes": [
+    200
+   ],
+   "size": 1039,
+   "cold_dns": 4,
+   "cold_tcp": 93,
+   "cold_tls": 439,
+   "cold_ttfb": 957,
+   "cold_ttfb_p95": 6018,
+   "cold_total": 1313,
+   "warm_ttfb": 269,
+   "warm_ttfb_p95": 19887,
+   "warm_total": 379
+  },
+  "spa_js": {
+   "codes": [
+    0,
+    200
+   ],
+   "size": 120226,
+   "cold_dns": 5,
+   "cold_tcp": 93,
+   "cold_tls": 599,
+   "cold_ttfb": 922,
+   "cold_ttfb_p95": 2061,
+   "cold_total": 3160,
+   "warm_ttfb": 220,
+   "warm_ttfb_p95": 822,
+   "warm_total": 8635
+  },
+  "r2_poster": {
+   "codes": [
+    200
+   ],
+   "size": 39789,
+   "cold_dns": 5,
+   "cold_tcp": 93,
+   "cold_tls": 723,
+   "cold_ttfb": 1078,
+   "cold_ttfb_p95": 1808,
+   "cold_total": 1637,
+   "warm_ttfb": 228,
+   "warm_ttfb_p95": 358,
+   "warm_total": 2284
+  },
+  "r2_mp4_1MB": {
+   "codes": [
+    0,
+    206
+   ],
+   "size": 1048576,
+   "cold_dns": 5,
+   "cold_tcp": 94,
+   "cold_tls": 374,
+   "cold_ttfb": 767,
+   "cold_ttfb_p95": 1800,
+   "cold_total": 11897,
+   "warm_ttfb": 189,
+   "warm_ttfb_p95": 658,
+   "warm_total": 5118
+  }
+ },
+ "r2_keys": [
+  {
+   "key": "testpipeline/luma_square_YTDown.com_YouT",
+   "ttfb": 1362,
+   "total": 5170
+  },
+  {
+   "key": "uploads/dojacatdancetest-20261109-065726",
+   "ttfb": 778,
+   "total": 10365
+  },
+  {
+   "key": "uploads/cap-0-20261003-110415-55b3fa.png",
+   "ttfb": 682,
+   "total": 3923
+  },
+  {
+   "key": "uploads/tb-test-h-264-1920-eye-20261018-",
+   "ttfb": 828,
+   "total": 5293
+  },
+  {
+   "key": "uploads/cap-3-20260922-115427-4ecc00.png",
+   "ttfb": 718,
+   "total": 5853
+  }
+ ]
+}
