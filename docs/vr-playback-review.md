@@ -255,3 +255,19 @@ The driver gained a step script (`SPEC`: `end`, `fastN`), a feed order (`ORDER`)
 - No console errors in any pass. The right reel played after every fast swipe.
 
 **Limits:** one sample per cell. The feed order changed between page loads, so the two builds landed on different videos (integration: the 3840x3840 reel both times; live: a 2 s H.264 test clip and the 1080x778 reel). All files came from the disk cache, so a reel that needs the network was not measured in this case. The `end` step did not need its seek: the reels ended by themselves first.
+
+## Link estimate and network-cold swipes on the Quest (2026-11-10, `v7-link` to `v10-cold-*`)
+
+The driver gained `COLD=1` (HTTP cache off while presenting), `COLD=2` (cache emptied once, then on) and a `link` step that runs the whole-file preload four times and reads the page's own estimate. The access network was slow during these passes: whole-file fetches ran at 5–10 Mbps.
+
+- **Link estimate: works on the device (`v7-link`).** The three real downloads measured 5.9, 9.5 and 9.4 Mbps. The estimate stayed 0 after two samples and was the median, 9.4 Mbps, after the third. The test feed has no `vr2k_url`, so the switch to a 2k rendition was not exercised here.
+- **Cache off (`v8`, `v9`, `v10-cold-int3/live3`):** the same file took 825–903 ms (live) and 1330–2634 ms (integration) to first frame, and 586 ms on a second live run. The cache-off setting also stops a preloaded file from being reused, so this measures only a second download. The 2634 ms run had a cancelled preloader request followed by a request from byte 0.
+- **Cache emptied once, short dwell (`v10-cold-int5/6`, `live5/6`):** first frame after the swipe, same file:
+
+| File | Integration | Live |
+|---|---|---|
+| `d3a9f8` | 364, 292 ms | 277, 519 ms |
+| `4c2972` | 301, 515 ms | 434, 457 ms |
+
+  No systematic difference between builds. The 2634 ms outlier was not reproduced.
+- **Limits:** two samples per cell, a noisy Wi-Fi link, and the headset still returned fast first frames after the cache was emptied, so these were probably not fully network-cold. A video that downloads for tens of seconds on this link was not measured.

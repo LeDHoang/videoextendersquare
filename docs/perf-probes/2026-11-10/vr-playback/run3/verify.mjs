@@ -13,7 +13,11 @@
 //      ORDER (feed order, e.g. vvvivi: v = video, i = image post) with
 //      FRONT_MATCH (the video put first), SPEC (comma list of steps replacing
 //      STEPS: click | end = seek to 2 s before the end and wait for the
-//      auto-advance | fastN = click, wait N ms, click again).
+//      auto-advance | fastN = click, wait N ms, click again | link = run the
+//      whole-file preload (the L key) over 4 reels and log the page's link
+//      estimate), COLD=1 (HTTP cache off while presenting, so every file
+//      comes over the network; the preloaded bytes are never reused), COLD=2
+//      (cache emptied once, then on: preloaded bytes are reused).
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { hunks, applyToPlayerInline } from './hunks.mjs';
@@ -63,6 +67,11 @@ async function onPaused(p) {
     const rep = NO_OVERRIDE ? [] : applyToPlayerInline(j, HS);
     if (R2K) rep.push(injectR2k(j));
     if (ORDER) rep.push(reorder(j));
+    if (SPEC && SPEC.includes('link')) { // expose the page's link estimate to the probe
+      const k = j.scripts.findIndex(x => typeof x === 'string' && x.includes('function wantsVr2k(entry) {'));
+      if (k >= 0) j.scripts[k] = j.scripts[k].replace('function wantsVr2k(entry) {', 'window.__vrLink = () => ({ n: vrLinkSamples.length, samples: vrLinkSamples.map(x => Math.round(x * 10) / 10), mbps: Math.round(vrLinkMbps() * 10) / 10, wants2k: wantsVr2k(videoData[idx]), idx });\nfunction wantsVr2k(entry) {');
+      rep.push({ linkHook: k });
+    }
     (log.override.inline = log.override.inline || []).push({ url: u.slice(0, 160), hunks: rep });
     return send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, body: b64(JSON.stringify(j)),
       responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Cache-Control', value: 'no-store' }] });
@@ -168,6 +177,8 @@ for (let i = 0; i < 40 && !presenting; i++) { presenting = await ev('!!(window.W
 await mark('presenting', { presenting });
 if (!presenting) { sampling = false; await sampler; log.net = Object.values(log.net); fs.writeFileSync(out, JSON.stringify(log, null, 1)); console.log('FAILED to enter VR'); process.exit(2); }
 
+if (process.env.COLD === '2') { await send('Network.clearBrowserCache'); console.log('cache cleared, stays on'); }
+if (process.env.COLD === '1') { await send('Network.setCacheDisabled', { cacheDisabled: true }); console.log('cache disabled'); }
 let reel = await cur(); lmark('phase r0 ' + reel); await mark('reel', { i: 0, reel });
 await sleep(DWELL);
 const NEXT = `document.getElementById('edgeNextBtn').click()`;
@@ -181,6 +192,17 @@ for (let i = 1, n = 0; SPEC ? n < SPEC.length : i <= STEPS; i++, n++) {
     for (let w = 0; w < 75 && (reel = await cur()) === before; w++) await sleep(200);
     await mark('reel', { i, reel, auto: true });
     await sleep(DWELL);
+    continue;
+  }
+  if (step === 'link') {
+    const probe = 'window.__vrLink()';
+    for (let k = 0; k < Number(process.env.LINKN || 4); k++) {
+      await ev(`document.getElementById('preloadBtn') ? document.getElementById('preloadBtn').click() : preloadAllVideos()`, true);
+      await sleep(1000);
+      for (let w = 0; w < 240 && /LOADING/.test(await ev(`document.getElementById('preloadLabel').textContent`)); w++) await sleep(500);
+      await mark('link', { k, ...(await ev(probe)) });
+      await ev(NEXT, true); await sleep(1500);
+    }
     continue;
   }
   await mark('switch-click', { i });
