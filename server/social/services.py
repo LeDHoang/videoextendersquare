@@ -367,12 +367,16 @@ def stereo_fields(media_path: str, layout: str | None, files: dict | None = None
     the VR player samples per eye, and "stereo_crop" when no rendition exists
     yet so 2D shows the raw file cropped to the left eye instead. *files* is
     the post's media record (posts.media_files); without it the disk is read.
+    A mono post with a spatial version (<stem>-depth, colour | nearness grey)
+    also gets "depth_url", which only the VR player loads; else it is None.
     """
     from server import media as media_service
 
     layout = layout if layout in media_service.STEREO_LAYOUTS else "mono"
     if layout == "mono":
-        return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False}
+        depth = media_service.depth_sibling_path(str(Path("output") / media_path))
+        depth_url = _output_url(depth) if media_service.has_media_file(depth, files) else None
+        return {"stereo_layout": "mono", "stereo_url": None, "stereo_crop": False, "depth_url": depth_url}
     source = Path("output") / media_path
     mono, stereo = media_service.stereo_paths(str(source), files)
     raw_url = public_url(media_path)
@@ -382,6 +386,7 @@ def stereo_fields(media_path: str, layout: str | None, files: dict | None = None
         "url": mono_url or raw_url,
         "stereo_url": _output_url(stereo) or raw_url,
         "stereo_crop": mono_url is None,
+        "depth_url": None,
     }
 
 
@@ -426,6 +431,7 @@ def _image_entry(
         "stereo_layout": stereo["stereo_layout"],
         "stereo_url": stereo["stereo_url"],
         "stereo_crop": stereo["stereo_crop"],
+        "depth_url": stereo["depth_url"],
     }
 
 

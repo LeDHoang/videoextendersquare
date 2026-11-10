@@ -1520,6 +1520,7 @@ def _build_payload(
         base["stereo_layout"] = stereo["stereo_layout"]
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
+        base["depth_url"] = stereo["depth_url"]
         is_stereo = stereo["stereo_layout"] != "mono"
 
 
@@ -1547,6 +1548,7 @@ def _build_payload(
                     "stereo_layout": "mono",
                     "stereo_url": None,
                     "stereo_crop": False,
+                    "depth_url": stereo["depth_url"],
                 }]
             payload.append({
                 **base,
@@ -1687,6 +1689,7 @@ def _pack_feed_data(
             "stereo_layout": card.get("stereo_layout") or "mono",
             "stereo_url": card.get("stereo_url"),
             "stereo_crop": bool(card.get("stereo_crop")),
+            "depth_url": card.get("depth_url"),
             "images": card.get("images") or [],
             "dwell_ms": card.get("dwell_ms"),
             "comments": [],

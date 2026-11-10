@@ -69,6 +69,10 @@ class PublishRequest(BaseModel):
     # Stereoscopic layout of an as-is upload: "sbs" (full side-by-side, 2:1)
     # or "tb" (full top-bottom, 1:2). Every image of a slideshow must match.
     stereo_layout: Literal["mono", "sbs", "tb"] = "mono"
+    # Spatial versions of a 2D post (stereo_convert depth_pack jobs, layout
+    # "sbsd"): none, or one per stored file in order (cover, then extras).
+    # Each is stored beside its file as <stem>-depth for the VR player.
+    spatial_job_ids: list[str] = []
 
     @field_validator("title")
     @classmethod
@@ -142,6 +146,11 @@ def _check_stereo_pointer(req: "PublishRequest", context: AuthContext) -> None:
     """Stereo posts are published as-is or from a MAKE 3D job in that layout:
     extended renders are always 2D."""
     converted = _converted_layout(req, context)
+    if converted == "sbsd":
+        raise HTTPException(
+            status_code=422,
+            detail="This is the spatial version of an upload; send it in spatial_job_ids beside its 2D file.",
+        )
     if converted:
         if job_manager.get_job(req.job_id).kind != req.kind:
             raise HTTPException(status_code=422, detail="This MAKE 3D render is a different media kind.")
@@ -178,6 +187,34 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
         eye_w, eye_h = eye_size(layout, width, height)
         if eye_w < 64 or eye_h < 64:
             raise HTTPException(status_code=422, detail="3D stereo frames need at least 64x64 per eye.")
+
+
+def _resolve_spatial_sources(
+    req: "PublishRequest",
+    request: Request,
+    context: AuthContext,
+    slot_count: int,
+) -> list[str]:
+    """Files of the spatial versions in spatial_job_ids, one per stored slot, checked
+    to be the caller's finished depth_pack jobs made from the file at that slot."""
+    if not req.spatial_job_ids:
+        return []
+    if req.stereo_layout != "mono":
+        raise HTTPException(status_code=422, detail="A 3D stereo post has no separate spatial version.")
+    if len(req.spatial_job_ids) != slot_count:
+        raise HTTPException(status_code=422, detail="Send one spatial version per file of the post.")
+    extras = [stage_id for stage_id in req.extra_stage_ids if stage_id]
+    slots = [{"stage_id": req.stage_id, "job_id": req.job_id}]
+    slots += [{"stage_id": stage_id, "job_id": None} for stage_id in extras]
+    paths = []
+    for job_id, slot in zip(req.spatial_job_ids, slots):
+        path, _name = _resolve_source(req.kind, None, job_id, request, context)
+        rec = job_manager.get_job(job_id)
+        if (rec.kind != req.kind or rec.result.get("stereo_layout") != "sbsd"
+                or rec.result.get("converted_from") != slot):
+            raise HTTPException(status_code=422, detail="This spatial version was not made from the file it is sent with.")
+        paths.append(path)
+    return paths
 
 
 def _discard_stored(stored_files) -> None:
@@ -437,7 +474,8 @@ def _fetch_inputs(dest: Path, rel: str) -> bool:
     if not media_store.fetch_local(dest):
         return False
     for path in SM.derived_files(dest)[1:]:
-        if SM.has_media_file(path, files):
+        # No generator reads the spatial version.
+        if SM.has_media_file(path, files) and path != SM.depth_sibling_path(str(dest)):
             media_store.fetch_local(path)
     return True
 
@@ -560,9 +598,11 @@ def publish_upload(
             error=ex.detail if isinstance(ex, HTTPException) else repr(ex),
         )
         raise
+    spatial = body.pop("spatial")
     upload_log.record(
         trace_id, "publish", post_id=body["post_id"], user_id=context.user.id, kind=req.kind,
         job_id=req.job_id, rel_path=body["rel_path"], ms=round((time.monotonic() - started) * 1000),
+        spatial=spatial,
     )
     return body
 
@@ -585,6 +625,7 @@ def _publish_upload(
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     extra_sources = _resolve_extra_images(req, request, context)
     _check_stereo_sources(req, [src_path, *extra_sources])
+    spatial_sources = _resolve_spatial_sources(req, request, context, 1 + len(extra_sources))
     stereo = req.stereo_layout if req.stereo_layout != "mono" else None
     src_ext = Path(src_path).suffix.lstrip(".").lower() or ("png" if req.kind == "image" else "mp4")
 
@@ -597,8 +638,9 @@ def _publish_upload(
         for index, extra in enumerate(extra_sources, start=2)
     ]
     copied: list[Path] = []
+    spatial_files: list[Path] = []
     try:
-        for source, target in [(src_path, dest), *zip(extra_sources, extra_dests)]:
+        for index, (source, target) in enumerate([(src_path, dest), *zip(extra_sources, extra_dests)]):
             # Copy to a hidden part file; commit uploads it to R2 (when on)
             # before it appears under its real name.
             part = target.with_name(f".{target.name}.part")
@@ -610,6 +652,16 @@ def _publish_upload(
             finally:
                 part.unlink(missing_ok=True)
             copied.append(target)
+            if spatial_sources:
+                depth = SM.depth_sibling_path(str(target))
+                depth_part = depth.with_name(f".{depth.name}.part")
+                try:
+                    # copyfile, not copy2: media_files leaves out a sibling older than its original.
+                    shutil.copyfile(spatial_sources[index], depth_part)
+                    media_store.commit(depth_part, depth)
+                finally:
+                    depth_part.unlink(missing_ok=True)
+                spatial_files.append(depth)
     except media_store.MediaStoreError as ex:
         _discard_stored(copied)
         raise HTTPException(
@@ -727,4 +779,9 @@ def _publish_upload(
         "preview_url": preview_url,
         "poster_url": poster_url,
         "meta": entry,
+        # For the upload log only (publish_upload pops it).
+        "spatial": {
+            "files": [path.name for path in spatial_files],
+            "bytes": sum(Path(source).stat().st_size for source in spatial_sources),
+        } if spatial_files else None,
     }
