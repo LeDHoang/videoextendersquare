@@ -158,6 +158,22 @@ def test_half_sbs_packs_two_half_width_eyes(textured_clip, depth_calls, tmp_path
     assert metrics["format"] == "half-SBS"
 
 
+def test_depth_pack_puts_grey_nearness_beside_the_colour(textured_clip, depth_calls, tmp_path):
+    out = tmp_path / "packed.mp4"
+    _, metrics = sw.process_video_spatial(str(textured_clip), str(out), depth_pack=True)
+    src = frames_of(textured_clip)
+    packed = frames_of(out)
+    rw, rh, crop = sw.eye_geometry(160, 160)
+    eye = rw - 2 * crop
+    assert packed.shape[1:3] == (rh - 2 * crop, 2 * eye) and metrics["format"] == "colour+depth"
+    # 4:2:0 chroma bleeds some columns across the seam; the player reads green.
+    colour, depth = packed[0, :, :eye].astype(int), packed[0, :, eye + 16:].astype(int)
+    assert psnr(colour, src[0, crop:rh - crop, crop:rw - crop]) > 30
+    # Grey, and not flat: the fake depth is a ramp.
+    assert np.abs(depth[..., 0] - depth[..., 1]).max() <= 3 and np.abs(depth[..., 1] - depth[..., 2]).max() <= 3
+    assert depth[..., 1].max() - depth[..., 1].min() > 100
+
+
 def test_depth_runs_once_per_shot(depth_calls, tmp_path):
     src = tmp_path / "cut.mp4"
     ffmpeg("-f", "lavfi", "-i", f"testsrc2=s=128x128:r={FPS}:d=1",

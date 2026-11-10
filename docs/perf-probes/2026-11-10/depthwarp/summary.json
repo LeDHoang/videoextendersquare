@@ -1,0 +1,417 @@
+{
+ "date": "2026-11-10",
+ "clips": {
+  "street": {
+   "source": "12492094_3840_3840.mp4",
+   "duration_s": 5.0,
+   "render": "1080x1080",
+   "eye_px": 1048,
+   "sampled_frames": 30,
+   "old": {
+    "total_s": 69.27,
+    "frames": 150,
+    "ms_per_frame": 461.8,
+    "stages_s": {
+     "depth": 18.98,
+     "condition": 1.06,
+     "render": 46.63,
+     "other": 2.6
+    },
+    "bytes": 7772159,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "new": {
+    "total_s": 22.41,
+    "frames": 150,
+    "ms_per_frame": 149.4,
+    "stages_s": {
+     "depth": 18.32,
+     "condition": 0.99,
+     "render": 0.0,
+     "other": 3.1
+    },
+    "bytes": 5520251,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "speedup": 3.09,
+   "size_ratio": 0.71,
+   "depth_codec_err_px": {
+    "all": {
+     "mean": 0.022,
+     "p99": 0.09,
+     "max": 2.213
+    },
+    "edges": {
+     "mean": 0.093,
+     "p99": 0.558,
+     "max": 2.213
+    },
+    "flat": {
+     "mean": 0.022,
+     "p99": 0.085,
+     "max": 1.45
+    }
+   },
+   "flicker_px": {
+    "all": {
+     "mean": 0.021,
+     "p99": 0.11,
+     "max": 2.198
+    },
+    "edges": {
+     "mean": 0.1,
+     "p99": 0.635,
+     "max": 2.198
+    }
+   },
+   "seam": {
+    "depth_err_px_cols_0_8_16_32": [
+     0.077,
+     0.018,
+     0.017,
+     0.017
+    ],
+    "depth_err_px_interior": 0.022,
+    "colour_err_cols_from_seam_1_8_16_32": [
+     2.85,
+     2.38,
+     1.74,
+     1.73
+    ]
+   },
+   "new_colour_psnr_db": 40.04,
+   "new_warp_decoded_depth": {
+    "stretch_pct": 0.751,
+    "fold_pct": 0.011,
+    "unconverged_pct": 0.056,
+    "clamped_pct": 0.748
+   },
+   "new_warp_clean_depth": {
+    "stretch_pct": 0.751,
+    "fold_pct": 0.011,
+    "unconverged_pct": 0.056,
+    "clamped_pct": 0.748
+   },
+   "new_eye_psnr_decoded_vs_clean_depth_db": 64.11,
+   "old_hole_pct": 0.032,
+   "old_stretch_pct": 0.028,
+   "old_right_codec_psnr_db": 39.4,
+   "method_psnr_db": {
+    "all": 54.79,
+    "edges": 46.89
+   },
+   "crop_frame": 10
+  },
+  "tron": {
+   "source": "square_YTDown.com_YouTube_Tron-Legacy-Lightbike-Scene-4K_Media_SqSuRdkglxM_001_1080p.mp4",
+   "duration_s": 5.0,
+   "render": "1080x1080",
+   "eye_px": 1048,
+   "sampled_frames": 30,
+   "old": {
+    "total_s": 65.03,
+    "frames": 150,
+    "ms_per_frame": 433.5,
+    "stages_s": {
+     "depth": 17.17,
+     "condition": 0.99,
+     "render": 44.73,
+     "other": 2.14
+    },
+    "bytes": 6878866,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "new": {
+    "total_s": 21.12,
+    "frames": 150,
+    "ms_per_frame": 140.8,
+    "stages_s": {
+     "depth": 17.22,
+     "condition": 0.88,
+     "render": 0.0,
+     "other": 3.02
+    },
+    "bytes": 5228925,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "speedup": 3.08,
+   "size_ratio": 0.76,
+   "depth_codec_err_px": {
+    "all": {
+     "mean": 0.025,
+     "p99": 0.121,
+     "max": 2.136
+    },
+    "edges": {
+     "mean": 0.128,
+     "p99": 0.737,
+     "max": 2.136
+    },
+    "flat": {
+     "mean": 0.023,
+     "p99": 0.093,
+     "max": 1.715
+    }
+   },
+   "flicker_px": {
+    "all": {
+     "mean": 0.03,
+     "p99": 0.15,
+     "max": 3.354
+    },
+    "edges": {
+     "mean": 0.16,
+     "p99": 0.912,
+     "max": 3.354
+    }
+   },
+   "seam": {
+    "depth_err_px_cols_0_8_16_32": [
+     0.075,
+     0.026,
+     0.023,
+     0.022
+    ],
+    "depth_err_px_interior": 0.023,
+    "colour_err_cols_from_seam_1_8_16_32": [
+     2.45,
+     1.55,
+     1.18,
+     1.16
+    ]
+   },
+   "new_colour_psnr_db": 41.94,
+   "new_warp_decoded_depth": {
+    "stretch_pct": 0.781,
+    "fold_pct": 0.059,
+    "unconverged_pct": 0.29,
+    "clamped_pct": 0.696
+   },
+   "new_warp_clean_depth": {
+    "stretch_pct": 0.78,
+    "fold_pct": 0.059,
+    "unconverged_pct": 0.289,
+    "clamped_pct": 0.695
+   },
+   "new_eye_psnr_decoded_vs_clean_depth_db": 67.6,
+   "old_hole_pct": 0.228,
+   "old_stretch_pct": 0.187,
+   "old_right_codec_psnr_db": 40.98,
+   "method_psnr_db": {
+    "all": 45.83,
+    "edges": 36.72
+   },
+   "crop_frame": 51
+  },
+  "lyrics": {
+   "source": "square_King Von - Back Again (Million Dollaz Worth of Game Lyric Video) (feat. Lil Durk & Prince Dre).mp4",
+   "duration_s": 5.0,
+   "render": "1080x1080",
+   "eye_px": 1048,
+   "sampled_frames": 30,
+   "old": {
+    "total_s": 77.46,
+    "frames": 150,
+    "ms_per_frame": 516.4,
+    "stages_s": {
+     "depth": 27.37,
+     "condition": 0.94,
+     "render": 46.83,
+     "other": 2.33
+    },
+    "bytes": 7373796,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "new": {
+    "total_s": 26.86,
+    "frames": 150,
+    "ms_per_frame": 179.1,
+    "stages_s": {
+     "depth": 22.84,
+     "condition": 0.96,
+     "render": 0.0,
+     "other": 3.07
+    },
+    "bytes": 5862934,
+    "resolution": "2096x1048",
+    "engine": "W8T (vits, mps)"
+   },
+   "speedup": 2.88,
+   "size_ratio": 0.795,
+   "depth_codec_err_px": {
+    "all": {
+     "mean": 0.028,
+     "p99": 0.159,
+     "max": 2.427
+    },
+    "edges": {
+     "mean": 0.108,
+     "p99": 0.639,
+     "max": 2.427
+    },
+    "flat": {
+     "mean": 0.025,
+     "p99": 0.107,
+     "max": 1.452
+    }
+   },
+   "flicker_px": {
+    "all": {
+     "mean": 0.037,
+     "p99": 0.225,
+     "max": 2.949
+    },
+    "edges": {
+     "mean": 0.134,
+     "p99": 0.748,
+     "max": 2.949
+    }
+   },
+   "seam": {
+    "depth_err_px_cols_0_8_16_32": [
+     0.093,
+     0.031,
+     0.028,
+     0.03
+    ],
+    "depth_err_px_interior": 0.025,
+    "colour_err_cols_from_seam_1_8_16_32": [
+     2.17,
+     1.47,
+     1.18,
+     1.31
+    ]
+   },
+   "new_colour_psnr_db": 41.41,
+   "new_warp_decoded_depth": {
+    "stretch_pct": 0.808,
+    "fold_pct": 0.099,
+    "unconverged_pct": 0.461,
+    "clamped_pct": 0.651
+   },
+   "new_warp_clean_depth": {
+    "stretch_pct": 0.808,
+    "fold_pct": 0.1,
+    "unconverged_pct": 0.461,
+    "clamped_pct": 0.651
+   },
+   "new_eye_psnr_decoded_vs_clean_depth_db": 61.22,
+   "old_hole_pct": 0.319,
+   "old_stretch_pct": 0.235,
+   "old_right_codec_psnr_db": 40.72,
+   "method_psnr_db": {
+    "all": 45.4,
+    "edges": NaN
+   },
+   "crop_frame": 111
+  },
+  "street4k": {
+   "source": "12827489_3840_3840.mp4",
+   "duration_s": 3.0,
+   "render": "2106x2106",
+   "eye_px": 2046,
+   "sampled_frames": 18,
+   "old": {
+    "total_s": 144.7,
+    "frames": 90,
+    "ms_per_frame": 1607.8,
+    "stages_s": {
+     "depth": 13.38,
+     "condition": 2.6,
+     "render": 121.68,
+     "other": 7.04
+    },
+    "bytes": 14341685,
+    "resolution": "4092x2046",
+    "engine": "W8T (vits, mps)"
+   },
+   "new": {
+    "total_s": 25.68,
+    "frames": 90,
+    "ms_per_frame": 285.4,
+    "stages_s": {
+     "depth": 13.06,
+     "condition": 2.94,
+     "render": 0.0,
+     "other": 9.68
+    },
+    "bytes": 10407595,
+    "resolution": "4092x2046",
+    "engine": "W8T (vits, mps)"
+   },
+   "speedup": 5.63,
+   "size_ratio": 0.726,
+   "depth_codec_err_px": {
+    "all": {
+     "mean": 0.162,
+     "p99": 0.326,
+     "max": 2.078
+    },
+    "edges": {
+     "mean": 0.203,
+     "p99": 0.646,
+     "max": 2.036
+    },
+    "flat": {
+     "mean": 0.161,
+     "p99": 0.305,
+     "max": 2.078
+    }
+   },
+   "flicker_px": {
+    "all": {
+     "mean": 0.025,
+     "p99": 0.216,
+     "max": 2.377
+    },
+    "edges": {
+     "mean": 0.118,
+     "p99": 0.623,
+     "max": 2.377
+    }
+   },
+   "seam": {
+    "depth_err_px_cols_0_8_16_32": [
+     0.231,
+     0.198,
+     0.198,
+     0.199
+    ],
+    "depth_err_px_interior": 0.161,
+    "colour_err_cols_from_seam_1_8_16_32": [
+     3.54,
+     2.43,
+     2.13,
+     2.16
+    ]
+   },
+   "new_colour_psnr_db": 38.14,
+   "new_warp_decoded_depth": {
+    "stretch_pct": 0.803,
+    "fold_pct": 0.001,
+    "unconverged_pct": 0.2,
+    "clamped_pct": 0.74
+   },
+   "new_warp_clean_depth": {
+    "stretch_pct": 0.805,
+    "fold_pct": 0.001,
+    "unconverged_pct": 0.204,
+    "clamped_pct": 0.737
+   },
+   "new_eye_psnr_decoded_vs_clean_depth_db": 49.39,
+   "old_hole_pct": 0.068,
+   "old_stretch_pct": 0.164,
+   "old_right_codec_psnr_db": 37.68,
+   "method_psnr_db": {
+    "all": 45.88,
+    "edges": 41.54
+   },
+   "crop_frame": 51
+  }
+ }
+}

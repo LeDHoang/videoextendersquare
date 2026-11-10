@@ -461,9 +461,14 @@ def process_video_spatial(
     depth_max_dim: int = 518,
     max_seconds: float | None = MAX_VIDEO_SECONDS,
     codec: str = "h264",
+    depth_pack: bool = False,
 ) -> tuple[str, dict]:
     """Convert one monocular video to a side-by-side stereo MP4 (H.264, or HEVC
     with codec="hevc": about half the bytes at the same quality, measured 2026-10-26).
+
+    depth_pack=True (prototype) skips the right-eye render and packs the
+    nearness map as grey in the right half instead; the VR player shifts each
+    eye from it at playback (webxr_vr.js, layout 'sbsd').
 
     Returns (output_path, metrics). Depth and render go one shot at a time,
     so memory holds one shot's depth-resolution frames (about 0.8 MB each at
@@ -544,7 +549,11 @@ def process_video_spatial(
                 # A short last read keeps the source's own frame count.
                 for i, frame in enumerate(itertools.islice(render_frames, b - a)):
                     d = condition_depth(near[i], rw, rh)
-                    right = render_right_eye(frame, d, strength)[crop:rh - crop, crop:rw - crop]
+                    if depth_pack:
+                        right = np.repeat((d * 255.0 + 0.5).astype(np.uint8)[:, :, None], 3, axis=2)
+                    else:
+                        right = render_right_eye(frame, d, strength)
+                    right = right[crop:rh - crop, crop:rw - crop]
                     left = frame[crop:rh - crop, crop:rw - crop]
                     if half_sbs:
                         left = cv2.resize(left, (eye_w, eye_h), interpolation=cv2.INTER_AREA)
@@ -578,7 +587,7 @@ def process_video_spatial(
         "frames": encoded,
         "shots": len(shots),
         "resolution": f"{out_w}x{out_h}",
-        "format": "half-SBS" if half_sbs else "full-SBS",
+        "format": "colour+depth" if depth_pack else "half-SBS" if half_sbs else "full-SBS",
         "engine": f"W8T ({DEPTH_ENCODER}, {device})",
     }
     log(f"Done: {output_path} ({metrics['total_time']}s)")

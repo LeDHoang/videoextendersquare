@@ -2874,7 +2874,10 @@
         videoWrap.classList.toggle('stereo-crop-tb', crop === 'tb');
       }
       if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceStereo) {
-        WebXRVR.setSourceStereo(activeVisualLayout);
+        // Prototype (?depthwarp=1): the right half of a side-by-side file is
+        // its depth map and the VR engine shifts each eye from it.
+        const depthWarp = activeVisualLayout === 'sbs' && /[?&]depthwarp=1(&|$)/.test(location.search);
+        WebXRVR.setSourceStereo(depthWarp ? 'sbsd' : activeVisualLayout);
       }
     }
     // </reels-stereo>

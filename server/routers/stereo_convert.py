@@ -34,6 +34,8 @@ class ConvertRequest(BaseModel):
     # Exactly one: a staged square upload or a finished extend job.
     stage_id: str | None = None
     job_id: str | None = None
+    # Prototype: pack colour + depth for the playback-time warp (video only).
+    depth_pack: bool = False
 
 
 def _reject(code: str, message: str) -> HTTPException:
@@ -85,7 +87,8 @@ def convert_to_3d(
 
     out_path = str(output.job_dir(job_id) / ("sbs.mp4" if req.kind == "video" else "sbs.jpg"))
     if req.kind == "video":
-        fn, kwargs = sw.process_video_spatial, {"video_path": src_path, "output_path": out_path}
+        fn, kwargs = sw.process_video_spatial, {
+            "video_path": src_path, "output_path": out_path, "depth_pack": req.depth_pack}
     else:
         fn, kwargs = sw.process_image_spatial, {"image_path": src_path, "output_path": out_path}
 

@@ -1,0 +1,52 @@
+<!doctype html><meta charset="utf-8"><title>depth warp harness</title>
+<!-- Plays a colour+depth ('sbsd') file in the real VR player preview.
+     Open via serve.py: /docs/perf-probes/2026-11-10/depthwarp/harness.html?src=/work/<clip>.new.mp4
+     ?layout=sbs shows a baked file, ?k= sets the depth strength.
+     gpuCapture(frame) uploads the decoded frame and each eye's shader output
+     to /work/ for compare.py --gpu-check. -->
+<body style="margin:0;background:#000">
+<video id="v" muted loop playsinline style="position:absolute;width:10px;opacity:.01"></video>
+<canvas id="c" style="width:1200px;height:600px;display:block"></canvas>
+<script src="../../../../ui/assets/three.min.js"></script><script src="../../../../ui/assets/webxr_vr.js"></script>
+<script>
+const q = new URLSearchParams(location.search);
+const v = document.getElementById('v');
+v.src = q.get('src') || '/work/street.new.mp4';
+WebXRVR.init(v, {});
+v.addEventListener('loadeddata', () => {
+  WebXRVR.startPreview(document.getElementById('c'), { stereo: true, showControls: false });
+  WebXRVR.setSourceStereo(q.get('layout') || 'sbsd');
+  if (q.has('k')) WebXRVR.setDepthStrength(Number(q.get('k')));
+  WebXRVR.onVideoChange();
+});
+
+async function put(name, canvas) {
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  await fetch('/work/' + name, { method: 'PUT', body: blob });
+}
+
+// Render each eye mesh's own material, full-screen at one texel per pixel.
+async function gpuCapture(frame, fps = 30) {
+  v.pause();
+  v.currentTime = (frame + 0.5) / fps;
+  await new Promise((r) => v.addEventListener('seeked', r, { once: true }));
+  await new Promise((r) => v.requestVideoFrameCallback(r));
+  const W = v.videoWidth, H = v.videoHeight, E = W / 2;
+  const raw = Object.assign(document.createElement('canvas'), { width: W, height: H });
+  raw.getContext('2d').drawImage(v, 0, 0);
+  await put('gpu_raw.png', raw);
+  const out = Object.assign(document.createElement('canvas'), { width: E, height: H });
+  const renderer = new THREE.WebGLRenderer({ canvas: out, preserveDrawingBuffer: true });
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const eyes = WebXRVR.__test.eyeMeshes();
+  for (const [tag, mesh] of Object.entries(eyes)) {
+    mesh.onBeforeRender();
+    const scene = new THREE.Scene();
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mesh.material));
+    renderer.render(scene, cam);
+    await put(`gpu_${tag}.png`, out);
+  }
+  renderer.dispose();
+  return { W, H, E, frame };
+}
+</script>
