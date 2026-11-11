@@ -2103,7 +2103,21 @@ def _list_page_key(sort: str, scoped: bool, seed: int | None, videos: list[dict]
     def mtime(item: dict) -> float:
         return float(item.get("mtime") or 0.0)
 
-    if scoped or sort not in ("oldest", "alphabetical", "shuffle", "recent_trending", "views", "likes", "trending"):
+    if scoped:
+        # Same order as scoped_media_paths: post created_at, then post id, both
+        # newest first. Hex digits are flipped so an ascending sort of the id
+        # runs descending.
+        flip = str.maketrans("0123456789abcdef", "fedcba9876543210")
+        posts = {
+            row.media_path: (
+                -_as_utc_datetime(row.created_at).timestamp(),
+                row.id.lower().translate(flip),
+            )
+            for row in db.query(Post.media_path, Post.created_at, Post.id)
+            .filter(Post.media_path.in_([item["rel_path"] for item in videos]))
+        }
+        return lambda item: (*posts[item["rel_path"]], item["rel_path"])
+    if sort not in ("oldest", "alphabetical", "shuffle", "recent_trending", "views", "likes", "trending"):
         return lambda item: (-mtime(item), item["rel_path"])
     if sort == "oldest":
         return lambda item: (mtime(item), item["rel_path"])

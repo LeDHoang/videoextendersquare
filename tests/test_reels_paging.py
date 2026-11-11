@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
@@ -176,6 +177,21 @@ def test_an_author_feed_pages_newest_first(db, scan):
 
     assert sum((paths(page) for page in pages), []) == paths(call(db, author="ann"))
     assert [len(page["videos"]) for page in pages] == [2, 1]
+
+
+def test_an_author_feed_pages_by_post_time_not_file_time(db, scan):
+    owner = db.get(User, "ann")
+    # Posted newest file first, so post order and file order disagree.
+    for minute, entry in enumerate(reversed(scan[:3])):
+        post = create_or_update_post(db, media_path=entry["rel_path"], media_type="image", owner=owner)
+        post.created_at = datetime(2026, 11, 1, 12, minute)
+    db.commit()
+
+    pages = all_pages(db, 2, author="ann")
+
+    whole = paths(call(db, author="ann"))
+    assert whole == [entry["rel_path"] for entry in scan[:3]]
+    assert sum((paths(page) for page in pages), []) == whole
 
 
 def test_a_post_deep_link_with_a_limit_is_one_page(db, scan):
