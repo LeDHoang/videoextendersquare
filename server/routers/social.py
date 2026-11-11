@@ -1599,7 +1599,7 @@ def recommended_creators(
     anonymous_hash = ensure_anonymous_cookie(request, response)
     actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
     limiter_key = viewer_id if viewer_id else f"ip:{request_identity(request)}"
-    rate_limiter.check(db, f"rec-creators:{limiter_key}", 60, 60)
+    rate_limiter.check(db, f"rec-creators:{limiter_key}", 60, 60, shared=True)
     try:
         page, creators = get_creator_page(db, actor=actor, cursor=cursor, limit=limit)
     except RecommendationCursorError as exc:

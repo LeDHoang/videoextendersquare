@@ -1,0 +1,41 @@
+# The proxy service of compose.yaml: it sits between cloudflared and the app
+# and splits requests between the one writer process (app) and the read-only
+# processes (app-read). Why there are two: server/read_routes.py.
+{
+	auto_https off
+	admin off
+	servers {
+		# cloudflared is the only client, on the compose network. Trusting it
+		# keeps its X-Forwarded-Proto (https) and X-Forwarded-For as sent;
+		# otherwise the app would see every request as plain http.
+		trusted_proxies static private_ranges
+	}
+}
+
+:8000 {
+	# To the readers: an anonymous GET of a read route. A request with a
+	# session cookie stays on the writer, so a signed-in user reads their own
+	# writes at once. The path list must equal READ_PATHS in
+	# server/read_routes.py (tests/test_read_service.py checks it); the reader
+	# refuses any other request.
+	@read {
+		method GET
+		path /api/reels /api/reels/feed /api/reels/player /api/reels/player-inline /api/reels/tags /api/recommendations/creators
+		not header_regexp Cookie (^|;\s*)echo_session=
+	}
+	handle @read {
+		# The writer serves the same routes, so it is the fallback while the
+		# readers restart or are down: the first upstream that answers wins.
+		reverse_proxy app-read:8000 app:8000 {
+			lb_policy first
+			lb_try_duration 3s
+			fail_duration 10s
+		}
+	}
+	# Everything else: writes, jobs, uploads, SSE, admin, the SPA.
+	# Upstream keepalive stays at Caddy's default (2m); uvicorn's
+	# --timeout-keep-alive (deploy/entrypoint.sh) must stay above it.
+	handle {
+		reverse_proxy app:8000
+	}
+}

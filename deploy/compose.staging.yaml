@@ -73,7 +73,7 @@ services:
   caddy:
     image: caddy:2
     depends_on:
-      - app
+      - proxy
       - objectstore
     environment:
       PUBLIC_BUCKET: ${R2_PUBLIC_BUCKET}

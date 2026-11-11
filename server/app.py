@@ -33,7 +33,7 @@ load_dotenv(override=False)
 from server.media_store import CACHE_CONTROL  # noqa: E402
 from server.metrics import env_float  # noqa: E402
 from server.observability import RequestIDMiddleware, configure_logging, current_request_id  # noqa: E402
-from server.settings import env_int, is_production, production_config_errors  # noqa: E402
+from server.settings import env_int, is_production, is_reader, production_config_errors  # noqa: E402
 
 logger = logging.getLogger("server.app")
 _CLEANUP_INTERVAL_S = 15 * 60
@@ -127,6 +127,7 @@ async def _cleanup_loop():
     from server.billing.runtime import reap_stale_reservations, reconcile_pending_requests
     from server.jobs import job_manager
     from server.routers import image, messages, video
+    from server.social.auth import prune_shared_rate_limits
 
     while True:
         await asyncio.sleep(_CLEANUP_INTERVAL_S)
@@ -140,6 +141,7 @@ async def _cleanup_loop():
             messages.cleanup_message_events,
             reconcile_pending_requests,
             reap_stale_reservations,
+            prune_shared_rate_limits,
             _backfill_media_info,
             _check_disk,
         ):
@@ -231,6 +233,15 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Production configuration is unsafe:\n- " + "\n- ".join(errors))
 
     init_database()
+    if is_reader():
+        # Jobs, encodes, staged uploads and every startup and periodic task
+        # below belong to the one writer process (server/read_routes.py).
+        _freeze_startup_heap()
+        try:
+            yield
+        finally:
+            gc.unfreeze()
+        return
     from server.social.turnstile import log_turnstile_status
     log_turnstile_status()
     if not is_production():
@@ -378,6 +389,10 @@ def create_app() -> FastAPI:
     from server.security_headers import install_security_headers
 
     install_security_headers(app)
+    if is_reader():
+        from server.read_routes import ReaderOnlyMiddleware
+
+        app.add_middleware(ReaderOnlyMiddleware)
     # Added last, so it is the outermost middleware: CORS preflights and
     # errors get an ID too (security headers sit inside it).
     app.add_middleware(RequestIDMiddleware)

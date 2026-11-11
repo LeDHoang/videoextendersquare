@@ -1,0 +1,7 @@
+reels_feed {"conc": 1, "n": 492, "statuses": {"200": 492}, "good_rps": 24.58, "p50": 40, "p95": 46, "p99": 61, "max": 137}
+reels_feed {"conc": 2, "n": 979, "statuses": {"200": 979}, "good_rps": 48.86, "p50": 40, "p95": 46, "p99": 57, "max": 311}
+reels_feed {"conc": 5, "n": 1248, "statuses": {"200": 1248}, "good_rps": 62.21, "p50": 66, "p95": 126, "p99": 154, "max": 221}
+reels_feed {"conc": 10, "n": 1261, "statuses": {"200": 1261}, "good_rps": 62.47, "p50": 172, "p95": 203, "p99": 235, "max": 290}
+reels_feed {"conc": 15, "n": 1278, "statuses": {"200": 1278}, "good_rps": 63.14, "p50": 241, "p95": 314, "p99": 367, "max": 431}
+reels_feed {"conc": 25, "n": 1295, "statuses": {"200": 1295}, "good_rps": 63.57, "p50": 410, "p95": 472, "p99": 498, "max": 515}
+reels_feed {"conc": 50, "n": 1338, "statuses": {"200": 1338}, "good_rps": 64.43, "p50": 766, "p95": 890, "p99": 991, "max": 1016}

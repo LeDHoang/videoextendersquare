@@ -17,10 +17,11 @@ from urllib.parse import urlsplit
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import Depends, HTTPException, Request, Response
+from sqlalchemy import delete, func, insert, literal, select
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import AuthSession, User, utcnow
+from .models import AuthSession, RateLimitEvent, User, utcnow, uuid4_string
 
 
 SESSION_COOKIE = "echo_session"
@@ -401,21 +402,31 @@ def validate_origin(request: Request) -> None:
 
 
 class RateLimiter:
-    """In-process sliding-window limiter. The app runs as exactly one worker
-    (deploy/entrypoint.sh: --workers 1), so this process sees every request,
-    without the four database round trips per check the table-backed limiter
-    cost. Counts start over when the process restarts."""
+    """In-process sliding-window limiter. The app runs as exactly one writer
+    process (deploy/entrypoint.sh), which sees every request for the routes
+    only it serves, without the four database round trips per check the
+    table-backed limiter cost. Counts start over when the process restarts.
+
+    ``shared=True`` is for a limit that the read-only processes check too
+    (server/read_routes.py): its hits are rows in rate_limit_events, so the
+    limit holds over all processes together instead of once per process.
+    """
 
     _SWEEP_SECONDS = 60
+    # Longest window a shared limit may use; older rows are pruned.
+    SHARED_KEEP_SECONDS = 60 * 60
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._hits: dict[str, tuple[int, deque]] = {}
         self._next_sweep = 0.0
 
-    def check(self, db: Session, key: str, limit: int, window_seconds: int) -> None:
-        # `db` is unused; callers keep passing it.
+    def check(self, db: Session, key: str, limit: int, window_seconds: int, *, shared: bool = False) -> None:
+        # `db` is used by shared limits only; every caller passes it.
         window = max(1, int(window_seconds))
+        if shared:
+            self._check_shared(db, key, limit, window)
+            return
         now = time.monotonic()
         with self._lock:
             if now >= self._next_sweep:
@@ -432,6 +443,42 @@ class RateLimiter:
                 )
             hits.append(now)
 
+    def _check_shared(self, db: Session, key: str, limit: int, window: int) -> None:
+        """One conditional insert and one commit: the hit is stored only while
+        fewer than ``limit`` rows are inside the window, so a refused request
+        is not counted. The key is stored as a keyed hash, never as the IP or
+        user id itself."""
+        events = RateLimitEvent.__table__
+        now = utcnow()
+        key_hash = keyed_hash(key)
+        if db.get_bind().dialect.name == "postgresql":
+            # Checks of one key take turns until the commit. Without it, every
+            # request in flight at limit - 1 sees the same count and passes
+            # (measured: 34 of a limit of 30 from 8 processes). SQLite
+            # already runs one write at a time.
+            db.execute(select(func.pg_advisory_xact_lock(int(key_hash[:15], 16))))
+        recent = (
+            select(func.count())
+            .select_from(events)
+            .where(events.c.key_hash == key_hash, events.c.created_at > now - timedelta(seconds=window))
+            .scalar_subquery()
+        )
+        hit = select(
+            literal(uuid4_string(), events.c.id.type),
+            literal(key_hash, events.c.key_hash.type),
+            literal(now, events.c.created_at.type),
+        ).where(recent < limit)
+        # RETURNING, not rowcount: psycopg reports no rowcount for an INSERT.
+        stored = db.execute(
+            insert(events).from_select(["id", "key_hash", "created_at"], hit).returning(events.c.id)
+        ).first()
+        db.commit()
+        if stored is None:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
+            )
+
     def reset(self) -> None:
         with self._lock:
             self._hits.clear()
@@ -439,6 +486,17 @@ class RateLimiter:
 
 
 rate_limiter = RateLimiter()
+
+
+def prune_shared_rate_limits() -> int:
+    """Delete shared rate-limit hits that no window can still count (writer's cleanup loop)."""
+    from .database import SessionLocal
+
+    cutoff = utcnow() - timedelta(seconds=RateLimiter.SHARED_KEEP_SECONDS)
+    with SessionLocal() as db:
+        removed = db.execute(delete(RateLimitEvent).where(RateLimitEvent.created_at < cutoff)).rowcount
+        db.commit()
+    return removed
 
 
 def request_identity(request: Request) -> str:

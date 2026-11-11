@@ -32,6 +32,11 @@ def is_production() -> bool:
     return os.environ.get("SX_ENV", "").strip().casefold() == "production"
 
 
+def is_reader() -> bool:
+    """A read-only copy of the app (server/read_routes.py), not the one writer process."""
+    return os.environ.get("SX_ROLE", "").strip().casefold() == "reader"
+
+
 def env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
