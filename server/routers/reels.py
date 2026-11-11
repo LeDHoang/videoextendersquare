@@ -3068,6 +3068,66 @@ def reels_player_script(name: str, v: str = ""):
     )
 
 
+_inline_template_cache: dict = {"key": None, "parts": None}
+
+
+def _inline_player_template() -> tuple[list[str], str, str]:
+    """reels.html split for /player-inline: the bodies of its inline <script>
+    tags, its CSS scoped to the mount root, and its body markup. None of that
+    depends on the request, and splitting 400 KB took about 8 ms, so it is
+    redone only when the template or an icon changes on disk."""
+    path = ASSETS_DIR / "reels.html"
+    key = (path, path.stat().st_mtime_ns, dict(_icon_snippets()))
+    if _inline_template_cache["key"] == key:
+        return _inline_template_cache["parts"]
+    html = path.read_text(encoding="utf-8")
+
+    # Resolve shared icon tokens before script extraction so both markup
+    # and inline player JS get artwork from the one icons folder.
+    html = _inject_icons(html)
+
+    tags = re.findall(r"<script>(.*?)</script>", html, re.S)
+
+    style_match = re.search(r"<style>(.*?)</style>", html, re.S)
+    css = _scope_css(style_match.group(1)) if style_match else ""
+    # Also forward any <link rel="stylesheet"> (Google Fonts / Material Symbols) as @import for the SPA mount.
+    for href in re.findall(r'<link[^>]+href="([^"]+)"[^>]*>', html):
+        if ("fonts.googleapis" in href or "material" in href.lower() or "gstatic" in href) and href not in css:
+            css = f'@import url("{href}");\n' + css
+    css += (
+        "\n#sxReelsRoot .reels-phone-frame {"
+        " width: min(92vw, 84dvh, 860px, 100%);"
+        " height: auto;"
+        " aspect-ratio: 1 / 1;"
+        "}"
+        "\n#sxReelsRoot .reels-phone-frame:fullscreen,"
+        " #sxReelsRoot .reels-phone-frame:-webkit-full-screen {"
+        " width: min(100vw, 100vh);"
+        " height: min(100vw, 100vh);"
+        " max-width: none;"
+        " max-height: none;"
+        " position: absolute;"
+        " inset: 0;"
+        " margin: auto;"
+        " border: none;"
+        "}"
+    )
+
+    # Anchor the body search after </style>: a literal "<body>" inside a
+    # head comment would otherwise hijack this naive match and leak raw
+    # CSS into the player markup.
+    _style_end = html.find("</style>")
+    _body_scope = html[_style_end:] if _style_end != -1 else html
+    body_match = re.search(r"<body>(.*?)</body>", _body_scope, re.S)
+    body_html = body_match.group(1) if body_match else ""
+    # Strip <script> tags from body_html so innerHTML gets clean markup without unparsed placeholders
+    body_html = re.sub(r"<script.*?>.*?</script>", "", body_html, flags=re.S)
+
+    parts = (tags, css, body_html)
+    _inline_template_cache.update(key=key, parts=parts)
+    return parts
+
+
 @router.get("/player-inline", dependencies=[HEAVY_READ])
 def reels_player_inline(
     request: Request,
@@ -3154,18 +3214,14 @@ def reels_player_inline(
     feed_data["start_index"] = start_idx
 
     try:
-        html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
+        tags, css, body_html = _inline_player_template()
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
-
-    # Resolve shared icon tokens before script extraction so both markup
-    # and inline player JS get artwork from the one icons folder.
-    html = _inject_icons(html)
 
     # Inline template scripts come back as strings; vendored ones as
     # {"src": url}, which the client loads (in order) from the browser cache.
     scripts: list = []
-    for tag in re.findall(r"<script>(.*?)</script>", html, re.S):
+    for tag in tags:
         name = PLAYER_SCRIPTS.get(tag.strip())
         if name:
             url = _player_script_url(name)
@@ -3216,41 +3272,6 @@ def reels_player_inline(
             "};"
         )
         scripts[-1] = init
-
-    style_match = re.search(r"<style>(.*?)</style>", html, re.S)
-    css = _scope_css(style_match.group(1)) if style_match else ""
-    # Also forward any <link rel="stylesheet"> (Google Fonts / Material Symbols) as @import for the SPA mount.
-    for href in re.findall(r'<link[^>]+href="([^"]+)"[^>]*>', html):
-        if ("fonts.googleapis" in href or "material" in href.lower() or "gstatic" in href) and href not in css:
-            css = f'@import url("{href}");\n' + css
-    css += (
-        "\n#sxReelsRoot .reels-phone-frame {"
-        " width: min(92vw, 84dvh, 860px, 100%);"
-        " height: auto;"
-        " aspect-ratio: 1 / 1;"
-        "}"
-        "\n#sxReelsRoot .reels-phone-frame:fullscreen,"
-        " #sxReelsRoot .reels-phone-frame:-webkit-full-screen {"
-        " width: min(100vw, 100vh);"
-        " height: min(100vw, 100vh);"
-        " max-width: none;"
-        " max-height: none;"
-        " position: absolute;"
-        " inset: 0;"
-        " margin: auto;"
-        " border: none;"
-        "}"
-    )
-
-    # Anchor the body search after </style>: a literal "<body>" inside a
-    # head comment would otherwise hijack this naive match and leak raw
-    # CSS into the player markup.
-    _style_end = html.find("</style>")
-    _body_scope = html[_style_end:] if _style_end != -1 else html
-    body_match = re.search(r"<body>(.*?)</body>", _body_scope, re.S)
-    body_html = body_match.group(1) if body_match else ""
-    # Strip <script> tags from body_html so innerHTML gets clean markup without unparsed placeholders
-    body_html = re.sub(r"<script.*?>.*?</script>", "", body_html, flags=re.S)
 
     result = JSONResponse(
         {
