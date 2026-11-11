@@ -34,6 +34,7 @@ from server.social.models import (
     utcnow,
 )
 from server.social.safety import blocked_user_ids
+from server.social.services import reel_records_version
 
 from .config import (
     CREATOR_ALGORITHM_VERSION,
@@ -239,6 +240,49 @@ def _active_dismissals(db: Session, actor_key: str) -> tuple[set[str], set[str]]
     )
 
 
+# Every published post of an active creator, newest first: the part of the
+# catalog that is the same for every viewer. It is kept with the reel-record
+# store it was built against, so it lasts as long as that store (its TTL) and
+# is dropped by the same writes. One tuple, so a reader never sees a store
+# paired with another store's items.
+_catalog_base_cache: dict = {"entry": (None, ())}
+
+
+def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
+    store = reel_records_version(False)
+    cached_store, items = _catalog_base_cache["entry"]
+    if cached_store is store:
+        return items
+    # Plain columns, not Post entities: the catalog spans every published post
+    # and needs only these.
+    posts = (
+        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
+        .join(User, User.id == Post.owner_id)
+        .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .all()
+    )
+    tags: dict[str, list[str]] = defaultdict(list)
+    if posts:
+        for post_id, tag_id in db.query(PostTag.post_id, PostTag.tag_id).filter(
+            PostTag.post_id.in_([post.id for post in posts])
+        ):
+            tags[post_id].append(tag_id)
+    items = tuple(
+        CatalogItem(
+            post_id=post.id,
+            owner_id=post.owner_id,
+            tag_ids=tuple(tags.get(post.id, ())),
+            created_at=aware(post.created_at),
+            like_count=int(post.like_count or 0),
+            view_count=int(post.view_count or 0),
+        )
+        for post in posts
+    )
+    _catalog_base_cache["entry"] = (store, items)
+    return items
+
+
 def _catalog(
     db: Session,
     *,
@@ -249,46 +293,30 @@ def _catalog(
 ) -> dict[str, CatalogItem]:
     hidden_users = blocked_user_ids(db, actor.user_id)
     dismissed_posts, dismissed_creators = _active_dismissals(db, actor.actor_key)
-    # Plain columns, not Post entities: the catalog spans up to
-    # MAX_CATALOG_SIZE posts on every feed request and needs only these.
-    query = (
-        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
-        .join(User, User.id == Post.owner_id)
-        .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
-    )
-    excluded_creators = hidden_users | dismissed_creators
-    if excluded_creators:
-        query = query.filter(~Post.owner_id.in_(excluded_creators))
-    excluded = excluded_post_ids | dismissed_posts
-    if excluded:
-        query = query.filter(~Post.id.in_(excluded))
-    if allowed_post_ids is not None:
-        if not allowed_post_ids:
-            return {}
-        query = query.filter(Post.id.in_(allowed_post_ids))
+    if allowed_post_ids is not None and not allowed_post_ids:
+        return {}
+    followed = None
     if surface == "following":
         if not actor.user_id:
             return {}
-        followed = db.query(Follow.followee_id).filter(Follow.follower_id == actor.user_id)
-        query = query.filter(or_(Post.owner_id == actor.user_id, Post.owner_id.in_(followed)))
-    posts = query.order_by(Post.created_at.desc(), Post.id.desc()).limit(MAX_CATALOG_SIZE).all()
-    tags: dict[str, list[str]] = defaultdict(list)
-    if posts:
-        for post_id, tag_id in db.query(PostTag.post_id, PostTag.tag_id).filter(
-            PostTag.post_id.in_([post.id for post in posts])
-        ):
-            tags[post_id].append(tag_id)
-    return {
-        post.id: CatalogItem(
-            post_id=post.id,
-            owner_id=post.owner_id,
-            tag_ids=tuple(tags.get(post.id, ())),
-            created_at=aware(post.created_at),
-            like_count=int(post.like_count or 0),
-            view_count=int(post.view_count or 0),
+        followed = {actor.user_id}
+        followed.update(
+            row[0] for row in db.query(Follow.followee_id).filter(Follow.follower_id == actor.user_id)
         )
-        for post in posts
-    }
+    excluded_creators = hidden_users | dismissed_creators
+    excluded = excluded_post_ids | dismissed_posts
+    catalog: dict[str, CatalogItem] = {}
+    for item in _catalog_base(db):
+        if item.owner_id in excluded_creators or item.post_id in excluded:
+            continue
+        if allowed_post_ids is not None and item.post_id not in allowed_post_ids:
+            continue
+        if followed is not None and item.owner_id not in followed:
+            continue
+        catalog[item.post_id] = item
+        if len(catalog) == MAX_CATALOG_SIZE:
+            break
+    return catalog
 
 
 def _pipeline_context(
