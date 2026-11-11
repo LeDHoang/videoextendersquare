@@ -20,6 +20,8 @@ const SORTS = [
   { label: 'SHUFFLE', value: 'shuffle' },
 ];
 const VALID_SORTS = SORTS.map((option) => option.value);
+// /api/reels page size here: enough for the deep-link lookup and empty state.
+const REELS_PAGE_SIZE = 60;
 const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
 const CODEC_OPTS = [
   { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
@@ -118,6 +120,8 @@ export default function ReelsPage() {
         post: deepPost || undefined,
         media: only3d ? 'stereo' : undefined,
         sort,
+        // The player builds its own feed; this page needs only the first page.
+        limit: REELS_PAGE_SIZE,
         refresh: refreshKey > 0,
       })
       .then((r) => {
@@ -191,7 +195,8 @@ export default function ReelsPage() {
   const deepIndex = deepPlay ? videos.findIndex((v) => v.path === deepPlay) : -1;
   const deepPostId = deepPost || (deepIndex >= 0 ? videos[deepIndex]?.post_id : null);
   // The player builds its own feed, so a post-less file is sent by path, not by its index here.
-  const deepPath = !deepPostId && deepIndex >= 0 ? deepPlay : null;
+  // The list is one page, so a ?play= path past it is still sent; /player resolves it.
+  const deepPath = !deepPostId && deepPlay ? deepPlay : null;
   // Without a ?play= deep link the player's params do not depend on the list,
   // so it starts loading alongside /api/reels instead of after it.
   const playerEarly = !deepPlay && feedScope !== 'following' && debouncedSearch === search;

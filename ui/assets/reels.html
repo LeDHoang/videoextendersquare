@@ -3205,7 +3205,25 @@
 
     function getCurrentComments() {
       const item = videoData[idx];
+      if (item && item.comments === undefined) ensureComments(item);
       return (item && item.comments) ? item.comments : [];
+    }
+
+    // Until a paged row's comments arrive, its count comes from comments_count.
+    function currentCommentCount() {
+      const item = videoData[idx];
+      return item && item.comments === undefined ? Number(item.comments_count || 0) : getCurrentComments().length;
+    }
+
+    function ensureComments(item) {
+      const loading = FeedState.loadComments(item, requestJson);
+      if (!loading) return;
+      loading.then((loaded) => {
+        if (!loaded || videoData[idx] !== item) return;
+        renderDrawerComments();
+        renderCommentMarkers();
+        updateSideLive();
+      });
     }
 
     function getCookie(name) {
@@ -5564,12 +5582,13 @@
     function renderDrawerComments() {
       if (!commentsList) return;
       const comments = getCurrentComments();
+      const total = currentCommentCount();
       const countEl = drawerTitle ? drawerTitle.querySelector('.drawer-title-count') : null;
-      if (countEl) countEl.textContent = `(${comments.length})`;
-      else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${comments.length})`;
-      if (commentBadge) commentBadge.textContent = String(comments.length);
-      if (commentBtn) commentBtn.setAttribute('aria-label', 'Comments, ' + comments.length);
-      if (sideComms) sideComms.textContent = fmtCount(comments.length);
+      if (countEl) countEl.textContent = `(${total})`;
+      else if (drawerTitle) drawerTitle.textContent = `COMMENTS (${total})`;
+      if (commentBadge) commentBadge.textContent = String(total);
+      if (commentBtn) commentBtn.setAttribute('aria-label', 'Comments, ' + total);
+      if (sideComms) sideComms.textContent = fmtCount(total);
 
       let filtered = comments;
       if (activeTab === 'general') {
@@ -7266,7 +7285,7 @@
       const unavailable = !item || item.available === false;
       sideLikes.textContent = unavailable ? '0' : fmtCount(item.likes);
       sideViews.textContent = unavailable ? '0' : fmtCount(item.views);
-      sideComms.textContent = unavailable ? '0' : fmtCount(getCurrentComments().length);
+      sideComms.textContent = unavailable ? '0' : fmtCount(currentCommentCount());
       if (sideFollow && followPill) {
         const following = followPill.classList.contains('active');
         sideFollow.hidden = followPill.hidden || unavailable;

@@ -1,6 +1,7 @@
 """Reels router — output scan, filtering, H.264 proxy generation, time-synced comments,
 and the full Reels/VR player page (replaces the Streamlit reels_view iframe)."""
 
+import base64
 import gzip
 import hashlib
 import json
@@ -1331,6 +1332,16 @@ def _is_image_item(item: dict) -> bool:
     return Path(item.get("filename", "")).suffix.lstrip(".").lower() in SM.IMAGE_EXTS
 
 
+def _engagement_score(sort: str, meta: dict) -> int:
+    views = _safe_int(meta.get("views"))
+    likes = _safe_int(meta.get("likes"))
+    if sort == "views":
+        return views
+    if sort == "likes":
+        return likes
+    return views + likes * 20
+
+
 def _apply_filters(raw: list[dict], folder: str | None, search: str,
                    sort: str, media: str | None = None,
                    tag: str | None = None, location: str | None = None,
@@ -1393,16 +1404,7 @@ def _apply_filters(raw: list[dict], folder: str | None, search: str,
         metadata = metadata or _metadata_snapshot(videos, db)
 
         def _engagement(item: dict) -> tuple[int, float]:
-            meta = _item_meta(item, metadata)
-            views = _safe_int(meta.get("views"))
-            likes = _safe_int(meta.get("likes"))
-            if sort == "views":
-                score = views
-            elif sort == "likes":
-                score = likes
-            else:
-                score = views + likes * 20
-            return score, float(item.get("mtime", 0))
+            return _engagement_score(sort, _item_meta(item, metadata)), float(item.get("mtime", 0))
 
         videos.sort(key=_engagement, reverse=True)
     else:
@@ -2064,6 +2066,60 @@ def _recommendation_feed_data(
     }
 
 
+_REELS_PAGE_MAX = 100
+
+
+def _invalid_cursor() -> HTTPException:
+    return HTTPException(status_code=400, detail={"code": "INVALID_CURSOR", "message": "This list cursor is invalid. Reload the list."})
+
+
+def _encode_list_cursor(filters: str, key: tuple, seed: int | None) -> str:
+    body = json.dumps({"v": 1, "f": filters, "k": list(key), "seed": seed}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(body.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_list_cursor(cursor: str, filters: str) -> tuple[tuple, int | None]:
+    try:
+        body = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        key, seed = tuple(body["k"]), body["seed"]
+        valid = body["v"] == 1 and body["f"] == filters and (seed is None or isinstance(seed, int))
+    except (ValueError, TypeError, KeyError):
+        raise _invalid_cursor()
+    if not valid:
+        raise _invalid_cursor()
+    return key, seed
+
+
+def _list_page_key(sort: str, scoped: bool, seed: int | None, videos: list[dict],
+                   recent_activity: dict[str, dict] | None, db: Session):
+    """A total order for one page of the list, in the order _apply_filters gives.
+
+    Each key ends with the path, so the cursor (the last item's key) still
+    marks its place after that item or any other is added or removed. A
+    shuffle orders by a hash of the path with the seed the first page drew.
+    Engagement scores can move between pages, so those sorts may repeat or
+    skip an item at a page boundary.
+    """
+    def mtime(item: dict) -> float:
+        return float(item.get("mtime") or 0.0)
+
+    if scoped or sort not in ("oldest", "alphabetical", "shuffle", "recent_trending", "views", "likes", "trending"):
+        return lambda item: (-mtime(item), item["rel_path"])
+    if sort == "oldest":
+        return lambda item: (mtime(item), item["rel_path"])
+    if sort == "alphabetical":
+        return lambda item: (item["filename"].lower(), item["rel_path"])
+    if sort == "shuffle":
+        return lambda item: (hashlib.blake2b(f"{seed}:{item['rel_path']}".encode("utf-8"), digest_size=8).hexdigest(), item["rel_path"])
+    if sort == "recent_trending":
+        activity = recent_activity or {}
+        return lambda item: (
+            -float((activity.get(item["rel_path"]) or {}).get("score") or 0.0), -mtime(item), item["rel_path"],
+        )
+    metadata = _metadata_snapshot(videos, db)
+    return lambda item: (-_engagement_score(sort, _item_meta(item, metadata)), -mtime(item), item["rel_path"])
+
+
 # response_model makes FastAPI serialize the ~600 KB list with pydantic-core
 # instead of walking it with jsonable_encoder (about 4 ms vs 42 ms in production).
 @router.get("", response_model=dict, dependencies=[HEAVY_READ])
@@ -2080,6 +2136,8 @@ def list_reels(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
@@ -2087,6 +2145,13 @@ def list_reels(
 
     media: all (default) | video | image — lets callers filter to one kind;
     stereo keeps only 3D (SBS/TB) reels, a testing filter for now.
+
+    With ``limit`` (1-100) the list comes in pages: ``videos`` holds one page
+    without comments (each entry has ``comments_count``; clients load the
+    comments from /api/posts/{id}/comments), ``count`` stays the whole
+    filtered count, and ``next_cursor`` (null on the last page) fetches the
+    next page with the same filters. Without ``limit`` the whole list comes
+    with comments, as before; that form is deprecated.
     """
     if refresh:
         _scan_cache["at"] = 0.0
@@ -2124,12 +2189,40 @@ def list_reels(
         positions = {value: index for index, value in enumerate(scoped_paths)}
         videos = [video for video in videos if video["rel_path"] in positions]
         videos.sort(key=lambda video: positions[video["rel_path"]])
+    count = len(videos)
+    next_cursor = None
+    if limit is not None or cursor:
+        if not post:
+            limit = _REELS_PAGE_MAX if limit is None else max(1, min(int(limit), _REELS_PAGE_MAX))
+            filters = hashlib.blake2b(
+                json.dumps([folder, search, sort, window_days, media, tag, location, feed, author]).encode("utf-8"),
+                digest_size=8,
+            ).hexdigest()
+            anchor, seed = _decode_list_cursor(cursor, filters) if cursor else (None, None)
+            if sort == "shuffle" and seed is None:
+                seed = int(time.time()) // 60
+            key = _list_page_key(sort, scoped_paths is not None, seed, videos, recent_activity, db)
+            videos.sort(key=key)
+            if anchor is not None:
+                try:
+                    videos = [video for video in videos if key(video) > anchor]
+                except TypeError:
+                    raise _invalid_cursor()
+            if len(videos) > limit:
+                videos = videos[:limit]
+                next_cursor = _encode_list_cursor(filters, key(videos[-1]), seed)
+        payload = _build_payload(videos, codec, viewer_id=viewer_id, db=db)
+        for entry in payload:
+            entry["comments_count"] = len(entry.pop("comments", None) or [])
+    else:
+        payload = _build_payload(videos, codec, viewer_id=viewer_id, db=db)
     return {
         "total": len(raw),
-        "count": len(videos),
+        "count": count,
         "folders": sorted({v["folder"] for v in raw}),
         "active_tag": _tag_slug(tag) if tag else None,
-        "videos": _build_payload(videos, codec, viewer_id=viewer_id, db=db),
+        "videos": payload,
+        "next_cursor": next_cursor,
     }
 
 

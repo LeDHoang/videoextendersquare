@@ -1,29 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 
 const PREVIEW_BATCH = 24;
 // The first request covers roughly one screen, so the tiles in view get previews before the rest are generated.
 const FIRST_PREVIEW_BATCH = 8;
 
+// A new videos array that starts with the previous one (a loaded page appended)
+// adds its new tiles and keeps the previews already made and still being made.
 export default function useExplorePreviews(videos) {
   const [items, setItems] = useState([]);
   const [previewMessage, setPreviewMessage] = useState('');
+  const shown = useRef({ videos: [], run: 0 });
+
+  useEffect(() => () => {
+    shown.current.run += 1;
+  }, []);
 
   useEffect(() => {
-    let alive = true;
     const nextItems = Array.isArray(videos) ? videos : [];
-    setItems(nextItems);
+    const before = shown.current.videos;
+    const appended = before.length > 0 && nextItems.length > before.length
+      && before.every((video, index) => nextItems[index] === video);
+    const added = appended ? nextItems.slice(before.length) : nextItems;
+    if (!appended) shown.current.run += 1;
+    shown.current.videos = nextItems;
+    const run = shown.current.run;
+    const alive = () => shown.current.run === run;
+    setItems(appended ? (current) => [...current, ...added] : nextItems);
     setPreviewMessage('');
 
-    const missing = nextItems
+    const missing = added
       .filter((video) => !video.preview_url || !video.poster_url)
       .map((video) => video.path);
 
-    if (!missing.length) {
-      return () => {
-        alive = false;
-      };
-    }
+    if (!missing.length) return;
 
     setPreviewMessage('LOADING PREVIEWS… 0/' + missing.length);
 
@@ -37,7 +47,7 @@ export default function useExplorePreviews(videos) {
           const response = await api.post('/api/reels/explore-preview', batch);
           const previews = response.generated || {};
           const posters = response.posters || {};
-          if (alive && (Object.keys(previews).length || Object.keys(posters).length)) {
+          if (alive() && (Object.keys(previews).length || Object.keys(posters).length)) {
             setItems((current) => current.map((video) => {
               const previewUrl = previews[video.path];
               const posterUrl = posters[video.path];
@@ -54,16 +64,12 @@ export default function useExplorePreviews(videos) {
         }
 
         done += batch.length;
-        if (alive) {
+        if (alive()) {
           setPreviewMessage('LOADING PREVIEWS… ' + Math.min(done, missing.length) + '/' + missing.length);
         }
       }
-      if (alive) setPreviewMessage('');
+      if (alive()) setPreviewMessage('');
     })();
-
-    return () => {
-      alive = false;
-    };
   }, [videos]);
 
   return { items, setItems, previewMessage };

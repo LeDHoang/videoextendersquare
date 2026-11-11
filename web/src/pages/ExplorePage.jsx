@@ -36,6 +36,8 @@ const CONTENT_OPTS = [
   { label: 'PACKS', value: 'packs' },
 ];
 const PACK_PAGE_SIZE = 24;
+// /api/reels comes in pages of this many reels; LOAD MORE REELS fetches the next.
+const REEL_PAGE_SIZE = 48;
 const TRENDING_TAGS = 8;
 const TRENDING_PLACES = 4;
 const PACK_ALL_LIMIT = 12;
@@ -69,6 +71,7 @@ export default function ExplorePage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [packData, setPackData] = useState(null);
   const [packLoadingMore, setPackLoadingMore] = useState(false);
+  const [reelsLoadingMore, setReelsLoadingMore] = useState(false);
   const [packError, setPackError] = useState('');
   const [folder, setFolder] = useState('ALL FOLDERS');
   const [codec, setCodec] = useState(CODEC_DEFAULT);
@@ -108,6 +111,7 @@ export default function ExplorePage() {
   useEffect(() => {
     let alive = true;
     setData(null);
+    setReelsLoadingMore(false);
     setPackData(null);
     setPackLoadingMore(false);
     setPackError('');
@@ -118,7 +122,8 @@ export default function ExplorePage() {
         search: debouncedSearch,
         sort: 'shuffle',
         refresh: refreshKey > 0,
-      }).catch(() => ({ total: 0, count: 0, folders: [], videos: [] })),
+        limit: REEL_PAGE_SIZE,
+      }).catch(() => ({ total: 0, count: 0, folders: [], videos: [], next_cursor: null })),
       packDiscoveryEnabled
         ? api.get('/api/packs', {
             search: debouncedSearch,
@@ -222,6 +227,35 @@ export default function ExplorePage() {
     }));
   };
 
+  const loadMoreReels = async () => {
+    const cursor = data?.next_cursor;
+    if (!cursor || reelsLoadingMore) return;
+    setReelsLoadingMore(true);
+    try {
+      const next = await api.get('/api/reels', {
+        folder,
+        codec: codecParam,
+        search: debouncedSearch,
+        sort: 'shuffle',
+        limit: REEL_PAGE_SIZE,
+        cursor,
+      });
+      setData((current) => {
+        if (current?.next_cursor !== cursor) return current;
+        const seen = new Set(current.videos.map((video) => video.path));
+        return {
+          ...current,
+          next_cursor: next.next_cursor,
+          videos: [...current.videos, ...(next.videos || []).filter((video) => !seen.has(video.path))],
+        };
+      });
+    } catch {
+      /* Keep the loaded reels; LOAD MORE REELS stays to retry. */
+    } finally {
+      setReelsLoadingMore(false);
+    }
+  };
+
   const loadMorePacks = async () => {
     const nextOffset = packData?.next_offset;
     if (contentType !== 'packs' || nextOffset == null || packLoadingMore) return;
@@ -249,6 +283,7 @@ export default function ExplorePage() {
   const packsVisible = packDiscoveryEnabled && contentType !== 'reels';
   const loading = data === null || (packDiscoveryEnabled && packData === null);
   const empty = (!reelsVisible || !order.length) && (!packsVisible || !packs.length);
+  const reelCount = data ? data.count ?? order.length : null;
 
   return (
     <div className="sx-wide-page">
@@ -280,7 +315,7 @@ export default function ExplorePage() {
       <div id="sx-explore-filters" className={'sx-explore-filters' + (filtersOpen ? ' sx-open' : '')}>
       <StatStrip
         stats={[
-          { label: 'TOTAL REELS', value: data ? order.length : '—' },
+          { label: 'TOTAL REELS', value: data ? reelCount : '—' },
           ...(packDiscoveryEnabled ? [{ label: 'CURATED PACKS', value: packData ? packData.total : '—' }] : []),
           ...(isAdmin ? [{ label: 'FOLDERS', value: data ? (data.folders || []).length : '—' }] : []),
         ]}
@@ -329,9 +364,9 @@ export default function ExplorePage() {
             label: row.label,
             value: row.value,
             count: !data ? null
-              : row.value === 'reels' ? order.length
+              : row.value === 'reels' ? reelCount
               : row.value === 'packs' ? (packData ? packData.total : null)
-              : order.length + (packDiscoveryEnabled ? packData?.total ?? 0 : 0),
+              : reelCount + (packDiscoveryEnabled ? packData?.total ?? 0 : 0),
           }))}
           value={contentType}
           onChange={setType}
@@ -376,6 +411,13 @@ export default function ExplorePage() {
               {reelsVisible ? order.map((video) => (
                 <ExploreTile key={video.path} video={video} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
               )) : null}
+            </div>
+          ) : null}
+          {reelsVisible && data?.next_cursor ? (
+            <div className="sx-profile-load-more">
+              <Button loading={reelsLoadingMore} disabled={reelsLoadingMore} onClick={loadMoreReels}>
+                LOAD MORE REELS
+              </Button>
             </div>
           ) : null}
           {contentType === 'packs' && packData?.next_offset != null ? (

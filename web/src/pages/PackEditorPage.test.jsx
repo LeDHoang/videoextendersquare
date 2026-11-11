@@ -27,8 +27,8 @@ const ROWS = [
   feedRow(3, { media_type: 'image', title: 'Still 3', images: [{ url: 'a' }] }),
 ];
 
-function renderEditor() {
-  mocks.api.get.mockResolvedValue({ videos: ROWS });
+function renderEditor(firstPage = { videos: ROWS }) {
+  mocks.api.get.mockResolvedValue(firstPage);
   return render(
     <MemoryRouter initialEntries={['/packs/new']}>
       <Routes>
@@ -78,5 +78,20 @@ describe('PackEditorPage', () => {
     const created = mocks.api.post.mock.calls.find(([path]) => path === '/api/packs')[1];
     expect(created.post_ids).toEqual(['post-1', 'post-2', 'post-3']);
     expect(created.cover_post_id).toBe('post-1');
+  });
+
+  it('loads the library a page at a time and appends the next page', async () => {
+    renderEditor({ videos: ROWS, next_cursor: 'c1' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'LOAD MORE' })).toBeTruthy(), { timeout: 2000 });
+    expect(mocks.api.get.mock.calls[0][1]).toMatchObject({ search: '', limit: 60 });
+    mocks.api.get.mockResolvedValueOnce({ videos: [feedRow(3), feedRow(4)], next_cursor: null });
+    expect(mocks.api.get.mock.calls[0][1].cursor).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'LOAD MORE' }));
+
+    await waitFor(() => expect(addButton('Reel 4')).toBeTruthy());
+    expect(mocks.api.get.mock.calls[1][1]).toMatchObject({ search: '', limit: 60, cursor: 'c1' });
+    expect(screen.getAllByRole('button').filter((button) => button.textContent.includes('Still 3'))).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'LOAD MORE' })).toBeNull();
   });
 });

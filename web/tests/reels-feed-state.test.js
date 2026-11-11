@@ -87,3 +87,36 @@ test('generation tokens reject stale feed responses after cancellation', () => {
   assert.equal(state.isCurrent(first, afterCancel), false);
   assert.equal(state.isCurrent(afterCancel, afterCancel), true);
 });
+
+test('a paged row loads its comments once and keeps one posted meanwhile', async () => {
+  const state = loadFeedState();
+  const calls = [];
+  let reply;
+  const request = (path) => { calls.push(path); return new Promise((resolve) => { reply = resolve; }); };
+  const item = { post_id: 'post 1', comments_count: 2 };
+
+  const loading = state.loadComments(item, request);
+  assert.equal(state.loadComments(item, request), loading);
+  await Promise.resolve();
+  item.comments = [{ id: 'mine' }];
+  reply({ comments: [{ id: 'a' }, { id: 'b' }] });
+  assert.equal(await loading, item);
+
+  assert.deepEqual(calls, ['/api/posts/post%201/comments']);
+  assert.deepEqual(item.comments.map((comment) => comment.id), ['a', 'b', 'mine']);
+  assert.equal(item.comments_count, 3);
+  assert.equal(state.loadComments(item, request), null, 'already loaded');
+  assert.equal(state.loadComments({ comments_count: 0 }, request), null, 'no post, nothing to fetch');
+});
+
+test('a failed comment fetch is not retried on every redraw', async () => {
+  const state = loadFeedState();
+  let calls = 0;
+  const item = { post_id: 'p', comments_count: 4 };
+  const request = () => { calls += 1; return Promise.reject(new Error('down')); };
+
+  assert.equal(await state.loadComments(item, request), null);
+  await state.loadComments(item, request);
+  assert.equal(calls, 1);
+  assert.equal(item.comments, undefined);
+});

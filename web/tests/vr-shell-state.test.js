@@ -153,7 +153,7 @@ test('grid sections load from the API and drop stale replies', async () => {
   replies['/api/reels'] = Promise.reject(new Error('x'));
   s.open('/explore?q=cats');
   await tick();
-  assert.deepEqual(calls[1], ['/api/reels', { search: 'cats', sort: 'shuffle' }]);
+  assert.deepEqual(calls[1], ['/api/reels', { search: 'cats', sort: 'shuffle', limit: 24 }]);
   assert.equal(s.getRenderState().route.status, 'error');
 
   let resolveLate;
@@ -174,6 +174,36 @@ test('scroll is clamped to the grid rows', async () => {
   assert.equal(s.scroll(1), true);
   s.scroll(10);
   assert.equal(s.getRenderState().route.scroll, 4, 'ceil(23/4) - 2 rows');
+});
+
+test('scrolling near the end of a reel grid appends the next page once', async () => {
+  const reel = (n) => ({ path: 'r' + n + '.mp4', post_id: 'p' + n });
+  const calls = [];
+  const pages = {
+    first: { videos: Array.from({ length: 24 }, (_, i) => reel(i)), next_cursor: 'c1' },
+    c1: { videos: [reel(23), reel(24), reel(25)], next_cursor: null },
+  };
+  const s = loadShell().create({
+    request: (path, query) => { calls.push({ ...query }); return Promise.resolve(pages[query.cursor || 'first']); },
+  });
+  s.open('/explore');
+  await tick();
+  assert.equal(calls[0].limit, 24);
+  s.scroll(2);
+  assert.equal(calls.length, 1, 'no fetch far from the end');
+  s.scroll(10);
+  s.scroll(-1);
+  s.scroll(1);
+  await tick();
+  assert.equal(calls.length, 2, 'one fetch while a page is in flight');
+  assert.equal(calls[1].cursor, 'c1');
+  assert.equal(calls[1].sort, 'shuffle');
+  const route = s.getRenderState().route;
+  assert.equal(route.items.length, 26, 'repeat dropped by path');
+  assert.equal(route.cursor, null);
+  s.scroll(10);
+  await tick();
+  assert.equal(calls.length, 2, 'last page: nothing more to fetch');
 });
 
 test('search field: focus, type, backspace, enter opens the search route', () => {
@@ -244,7 +274,7 @@ test('profile loads the author grid, user card and highlights in parallel', asyn
   });
   s.open('/profile/bo%20b');
   await tick();
-  assert.deepEqual(calls, [['/api/reels', { author: 'bo b', sort: 'newest' }], ['/api/users/bo%20b', {}],
+  assert.deepEqual(calls, [['/api/reels', { author: 'bo b', sort: 'newest', limit: 24 }], ['/api/users/bo%20b', {}],
     ['/api/users/bo%20b/packs', {}]]);
   const route = s.getRenderState().route;
   assert.equal(route.status, 'ready');
