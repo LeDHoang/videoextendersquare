@@ -2891,6 +2891,30 @@ def _json_for_script(payload) -> str:
     return json.dumps(payload).replace("</", "<\\/")
 
 
+_player_template_cache: dict = {"key": None, "html": None}
+
+
+def _player_template() -> str:
+    """reels.html for /player with its icons injected and each vendored-script
+    placeholder turned into a <script src>. None of that depends on the
+    request, and the nine regex passes over 400 KB took about 10 ms, so it is
+    redone only when the template, an icon or a vendored script changes."""
+    path = ASSETS_DIR / "reels.html"
+    urls = {placeholder: _player_script_url(name) for placeholder, name in PLAYER_SCRIPTS.items()}
+    key = (path, path.stat().st_mtime_ns, dict(_icon_snippets()), urls)
+    if _player_template_cache["key"] == key:
+        return _player_template_cache["html"]
+    html = _inject_icons(path.read_text(encoding="utf-8"))
+    for placeholder, url in urls.items():
+        html = re.sub(
+            rf"(<script\b[^>]*)>\s*{placeholder}\s*</script>",
+            (lambda m, url=url: f'{m.group(1)} src="{url}"></script>') if url else "",
+            html,
+        )
+    _player_template_cache.update(key=key, html=html)
+    return html
+
+
 @router.get("/player", response_class=HTMLResponse, dependencies=[HEAVY_READ])
 def reels_player(
     request: Request,
@@ -2956,22 +2980,12 @@ def reels_player(
     feed_data["start_index"] = start_idx
 
     try:
-        html = (ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
+        html = _player_template()
     except OSError as ex:
         raise HTTPException(status_code=500, detail=f"Template missing: {ex}") from ex
 
-    # CSP nonce on the template's own <script> tags, before vendored JS is
-    # substituted in (server/security_headers.py).
+    # CSP nonce on every <script> tag (server/security_headers.py).
     html = nonce_request_html(request, html)
-    html = _inject_icons(html)
-
-    for placeholder, name in PLAYER_SCRIPTS.items():
-        url = _player_script_url(name)
-        html = re.sub(
-            rf"(<script\b[^>]*)>\s*{placeholder}\s*</script>",
-            (lambda m, url=url: f'{m.group(1)} src="{url}"></script>') if url else "",
-            html,
-        )
 
     html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
     html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
