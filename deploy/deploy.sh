@@ -11,6 +11,10 @@
 #   ECHO_DIR   checkout holding compose.yaml (default: /opt/echo)
 set -euo pipefail
 
+# bash reads a braced group to its end before running any of it. Without the
+# braces, a command that reads stdin takes the rest of this script as its input
+# when the script is streamed, and bash stops there with exit status 0.
+{
 SHA="${1:?usage: deploy.sh <commit sha>}"
 cd "${ECHO_DIR:-/opt/echo}"
 
@@ -25,7 +29,7 @@ git merge --ff-only "$SHA"
 if ! git diff --quiet "$old" HEAD -- migrations/; then
     dump="$HOME/pre-deploy-$(date -u +%Y%m%dT%H%M).dump"
     echo "migrations changed: dumping the database to $dump"
-    docker compose exec -T postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$dump"
+    docker compose exec -T postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' < /dev/null > "$dump"
 fi
 
 short="$(git rev-parse --short=12 HEAD)"
@@ -44,3 +48,4 @@ done
 echo "app not ready after 120s; last logs:" >&2
 docker compose logs --tail 50 app >&2
 exit 1
+}
