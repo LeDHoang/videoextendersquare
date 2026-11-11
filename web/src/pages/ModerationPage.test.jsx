@@ -24,7 +24,7 @@ const stats = (reportSpike) => ({
   spike_floor: 10,
   open_reports: 7,
   open_support_requests: 2,
-  accounts: { total: 1234, active_now: 56, active_window_min: 15 },
+  accounts: { total: 1234, active_now: 56, active_window_min: 15, capacity: 800, capacity_warn: 560 },
   queue_limits: { open_reports: 20, open_support_requests: 10 },
   windows: { '24h': windowStats(reportSpike), '7d': windowStats(false) },
   disk: [{ volume: 'output', ok: true, free_gb: 42.5 }],
@@ -88,7 +88,8 @@ describe('ModerationPage overview', () => {
     expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats/hourly');
     expect(screen.getByText('300')).toBeTruthy();
     expect(screen.getByText('1,234')).toBeTruthy();
-    expect(screen.getByText('56')).toBeTruthy();
+    expect(screen.getAllByText('56')).toHaveLength(2); // ONLINE NOW tile and PEOPLE ONLINE chip
+    expect(screen.getByText(/of 800 the server can serve/)).toBeTruthy();
     expect(screen.getByRole('img', { name: '@loud 12' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'OPEN 9, RESOLVED 0, DISMISSED 0' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'SPAM 9' })).toBeTruthy();

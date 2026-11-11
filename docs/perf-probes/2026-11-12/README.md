@@ -113,3 +113,11 @@ What to compare against:
 
 - the "before" edge run in `docs/perf-probes/2026-11-11/raw/{latency,ramp,mixed}.json` (release `4e05762`)
 - `/api/reels`, tags and config, which should now be edge cache hits for anonymous visitors (`cf-cache-status: HIT`, `cache-control: public, max-age=0, s-maxage=30`), so they should be about as fast as `cdn-cgi/trace`
+
+## Online capacity on the moderation Overview
+
+The PEOPLE ONLINE chip and the ONLINE NOW tile compare signed-in people seen in the last 15 minutes against `SX_CAPACITY_ONLINE` (default 800). The watchdog alerts at 70% of it (560), and the tile turns red at the full number.
+
+Where 800 comes from: signed-in requests stay on the writer, whose feed ceiling here was 18.6 rps. A viewer fetches a feed page about every 5 reels, which is about every 50 s, so the writer serves about 930 viewers. 800 leaves room for the `/api/events` posts, which this probe did not measure. Signed-out viewers are not counted, and this run had no edge data.
+
+After a new probe, set `SX_CAPACITY_ONLINE` in the server env to the new writer feed ceiling × 50, rounded down for headroom. Then note the new number here.

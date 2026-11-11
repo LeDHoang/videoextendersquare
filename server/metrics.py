@@ -179,6 +179,7 @@ def alert_limits(db=None) -> dict:
         "p95_ms": env_int("SX_ALERT_P95_MS", 2000, minimum=1),
         "failures": env_int("SX_ALERT_FAILURES", 3, minimum=1),
         "disk_min_free_gb": env_int("SX_DISK_MIN_FREE_GB", 5, minimum=0),
+        **_online_limits(),
         "spike_min": scaled("community", "SX_MOD_SPIKE_MIN", 10, 1),
         "open_reports": scaled("community", "SX_ALERT_OPEN_REPORTS", 20, 1),
         "open_support_requests": scaled("community", "SX_ALERT_OPEN_SUPPORT", 10, 1),
@@ -190,6 +191,34 @@ def alert_limits(db=None) -> dict:
         "accounts_per_device": scaled("abuse", "SX_ALERT_ACCOUNTS_PER_DEVICE", 3, 2),
         "new_account_spend": scaled("abuse", "SX_ALERT_NEW_ACCOUNT_SPEND", 100, 1),
     }
+
+
+def _online_limits() -> dict:
+    """How many signed-in people the server can serve at once, from the latest load probe.
+
+    docs/perf-probes/2026-11-12/README.md: signed-in requests stay on the single writer,
+    whose feed ceiling was 18.6 rps. A viewer fetches a feed page about every 5 reels
+    (~50 s), so ~930 viewers; 800 leaves room for the unprobed /api/events posts.
+    Rerun the probe and update SX_CAPACITY_ONLINE when the server or code changes.
+    """
+    capacity = env_int("SX_CAPACITY_ONLINE", 800, minimum=1)
+    return {"online_capacity": capacity, "online_warn": max(1, capacity * 7 // 10)}
+
+
+def _online_capacity() -> dict[str, str]:
+    """Warn when signed-in people online reach 70% of the probed capacity."""
+    from server.routers.account_safety import online_now
+    from server.social.database import SessionLocal
+    from server.social.models import utcnow
+
+    limits = _online_limits()
+    with SessionLocal() as db:
+        _, online = online_now(db, utcnow())
+    if online < limits["online_warn"]:
+        return {}
+    return {"online_capacity": (
+        f"{online} people online (warning at {limits['online_warn']}, capacity {limits['online_capacity']})"
+    )}
 
 
 def _registration_and_report_spikes() -> dict[str, str]:
@@ -280,6 +309,10 @@ def check_alerts() -> list[str]:
         alerts.update(_per_account_alerts())
     except Exception:
         logger.exception("Could not compute per-account alerts")
+    try:
+        alerts.update(_online_capacity())
+    except Exception:
+        logger.exception("Could not count people online")
     cooldown = env_int("SX_ALERT_COOLDOWN_S", 900, minimum=0)
     now = time.time()
     logged = []

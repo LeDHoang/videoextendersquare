@@ -576,6 +576,16 @@ SPIKE_FACTOR = 3
 ACTIVE_NOW_WINDOW = timedelta(minutes=15)
 
 
+def online_now(db: Session, now) -> tuple[int, int]:
+    """(active real accounts, those seen in the last ACTIVE_NOW_WINDOW).
+
+    last_seen_at is refreshed at most every 5 min (server/social/auth.py), so the
+    window must be longer; signed-out viewers are not counted.
+    """
+    real_accounts = db.query(func.count(User.id)).filter(User.account_type == "real", User.status == "active")
+    return real_accounts.scalar(), real_accounts.filter(User.last_seen_at > now - ACTIVE_NOW_WINDOW).scalar()
+
+
 def _spike(current: int, previous: int, floor: int) -> bool:
     """A metric spikes when it is at least 3x the previous window and above the noise floor."""
     return current >= floor and current >= SPIKE_FACTOR * previous
@@ -653,14 +663,14 @@ def moderation_stats(
             "credits_captured": _windowed(captured, now, delta, floor),
             "support_requests": _windowed(between(SupportRequest.created_at), now, delta, floor),
         }
-    real_accounts = db.query(func.count(User.id)).filter(User.account_type == "real", User.status == "active")
+    total_accounts, active_now = online_now(db, now)
     return {
-        # last_seen_at is refreshed at most every 5 min (server/social/auth.py), so the
-        # window must be longer; signed-out viewers are not counted.
         "accounts": {
-            "total": real_accounts.scalar(),
-            "active_now": real_accounts.filter(User.last_seen_at > now - ACTIVE_NOW_WINDOW).scalar(),
+            "total": total_accounts,
+            "active_now": active_now,
             "active_window_min": int(ACTIVE_NOW_WINDOW.total_seconds() // 60),
+            "capacity": limits["online_capacity"],
+            "capacity_warn": limits["online_warn"],
         },
         "generated_at": now.isoformat(),
         "spike_floor": floor,

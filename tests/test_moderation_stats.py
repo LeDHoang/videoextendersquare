@@ -117,7 +117,7 @@ def test_stats_count_accounts_and_people_active_now(app):
     # Signing in stamps the moderator's own last_seen_at, so they count as active too.
     body = sign_in(app, "the_mod").get("/api/moderation/stats").json()
     # Active real accounts: the_mod, idle_user, recent_user, stale_user.
-    assert body["accounts"] == {"total": 4, "active_now": 2, "active_window_min": 15}
+    assert body["accounts"] == {"total": 4, "active_now": 2, "active_window_min": 15, "capacity": 800, "capacity_warn": 560}
 
 
 def test_small_counts_below_the_floor_do_not_flag(app, monkeypatch):

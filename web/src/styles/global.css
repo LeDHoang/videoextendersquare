@@ -6383,6 +6383,7 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-ov-chip[data-state=warn] { border-top-color: var(--sx-warn); }
 .sx-ov-chip[data-state=bad],
 .sx-ov-tile-bad { background: var(--sx-danger-dim); border-color: var(--sx-danger-border); border-top-color: var(--sx-danger); }
+.sx-ov-tile-warn { background: var(--sx-warn-dim); border-color: var(--sx-warn-border); border-top-color: var(--sx-warn); }
 
 .sx-ov-chip-label,
 .sx-ov-tile-label {

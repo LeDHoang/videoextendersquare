@@ -151,6 +151,7 @@ function healthChecks(stats, w, ops) {
   const checks = [
     { key: 'spikes', label: 'ACTIVITY SPIKES', state: spikes.length ? 'bad' : 'ok', value: fmt(spikes.length), note: spikes.length ? spikes.join(', ') : 'nothing unusual', target: 'sx-ov-community' },
     { key: 'reports', label: 'REPORT QUEUE', state: level(stats.open_reports, q.open_reports, 1), value: fmt(stats.open_reports), note: (stats.open_reports ? 'waiting for review' : 'queue clear') + ' · limit ' + q.open_reports, tab: 'reports' },
+    { key: 'online', label: 'PEOPLE ONLINE', state: level(stats.accounts.active_now, stats.accounts.capacity, stats.accounts.capacity_warn), value: fmt(stats.accounts.active_now), note: 'of ' + fmt(stats.accounts.capacity) + ' the server can serve · alert at ' + fmt(stats.accounts.capacity_warn), target: 'sx-ov-community' },
     { key: 'support', label: 'SUPPORT INBOX', state: level(stats.open_support_requests, q.open_support_requests, 1), value: fmt(stats.open_support_requests), note: (stats.open_support_requests ? 'waiting' : 'inbox clear') + ' · limit ' + q.open_support_requests, tab: 'support' },
   ];
   if (ops) {
@@ -444,10 +445,10 @@ export function OverviewPanel({ stats, hourly, ops, flagged, windowKey, onOpenTa
               <Heatmap hourly={hourly} metric={metric} />
             </Card>
           ) : null}
-          <Card title="ACCOUNTS" note={'Active real accounts. Online counts signed-in people seen in the last ' + stats.accounts.active_window_min + ' minutes; signed-out viewers are not counted.'}>
+          <Card title="ACCOUNTS" note={'Active real accounts. Online counts signed-in people seen in the last ' + stats.accounts.active_window_min + ' minutes; signed-out viewers are not counted. Capacity is from the latest load probe (SX_CAPACITY_ONLINE); staff are alerted at ' + fmt(stats.accounts.capacity_warn) + '.'}>
             <div className="sx-ov-tiles">
               <div className="sx-ov-tile"><span className="sx-ov-tile-label">TOTAL ACCOUNTS</span><b className="sx-ov-big">{fmt(stats.accounts.total)}</b></div>
-              <div className="sx-ov-tile"><span className="sx-ov-tile-label">ONLINE NOW</span><b className="sx-ov-big">{fmt(stats.accounts.active_now)}</b><span className="sx-ov-note">last {stats.accounts.active_window_min} min</span></div>
+              <div className={'sx-ov-tile' + { bad: ' sx-ov-tile-bad', warn: ' sx-ov-tile-warn', ok: '' }[level(stats.accounts.active_now, stats.accounts.capacity, stats.accounts.capacity_warn)]}><span className="sx-ov-tile-label">ONLINE NOW</span><b className="sx-ov-big">{fmt(stats.accounts.active_now)}</b><span className="sx-ov-note">last {stats.accounts.active_window_min} min · of {fmt(stats.accounts.capacity)} capacity</span></div>
             </div>
           </Card>
           <Card title="SIGN-UP VERIFICATION" note={'Accounts created in ' + win.now + ', and how many have confirmed their email. A low share can mean bots or broken email.'}>

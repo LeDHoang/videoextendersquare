@@ -232,6 +232,20 @@ def test_open_queue_backlog_raises_an_alert(app, monkeypatch, caplog):
     assert "2 open reports waiting for staff (limit 2)" in caplog.records[-1].getMessage()
 
 
+def test_online_users_near_capacity_raise_an_alert(app, monkeypatch, caplog):
+    monkeypatch.setenv("SX_CAPACITY_ONLINE", "10")
+    monkeypatch.setattr(metrics, "snapshot", _snapshot)
+    for index in range(7):
+        user_id = add_user(app, f"viewer{index}")
+        with app.state.testing_session() as db:
+            db.get(User, user_id).last_seen_at = utcnow()
+            db.commit()
+    caplog.set_level(logging.ERROR, logger="sx.alerts")
+    # 7 of 10 is the 70% warning share.
+    assert metrics.check_alerts() == ["online_capacity"]
+    assert "7 people online (warning at 7, capacity 10)" in caplog.records[-1].getMessage()
+
+
 def test_burst_spend_raises_a_per_account_alert(app, monkeypatch, caplog):
     monkeypatch.setenv("SX_ALERT_USER_SPEND_HOURLY", "40")
     monkeypatch.setattr(metrics, "snapshot", _snapshot)
