@@ -49,6 +49,15 @@ def _fresh_rate_limits():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_reel_records():
+    """Cached reel records live in process memory, keyed by media path; each
+    test has its own database, so each starts with none."""
+    from server.social.services import invalidate_reel_records
+
+    invalidate_reel_records()
+
+
+@pytest.fixture(autouse=True)
 def _roomy_device_limits(monkeypatch):
     """Tests sign up several users from one TestClient cookie jar, which is one
     device; tests/test_device_limits.py lowers these again."""

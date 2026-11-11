@@ -9,12 +9,13 @@ import logging
 import math
 import re
 import stat
+import time
 import uuid
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, event, inspect, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from server import metrics
@@ -195,125 +196,230 @@ def _session_scope(db: Session | None):
     return SessionLocal()
 
 
+# Viewer-independent reel records by media path (None: no published post),
+# one store with comments and one without. Building them is most of the cost
+# of every reel list route, so they are kept for _REEL_RECORDS_TTL and dropped
+# as soon as a commit changes something they show.
+_REEL_RECORDS_TTL = 10.0
+_reel_records_cache: dict = {"at": 0.0, True: {}, False: {}}
+_REEL_RECORD_MODELS = (Post, Comment, User, Tag, PostTag, PostSlide)
+# Written on every view or request. They never drop the cache, so a view count
+# can be up to _REEL_RECORDS_TTL old.
+_REEL_RECORD_QUIET_COLUMNS = {"view_count", "last_seen_at"}
+
+
+def invalidate_reel_records() -> None:
+    # New stores, not cleared ones: a lookup that started before this call
+    # finishes into the store it holds, which nobody reads any more.
+    _reel_records_cache.update({"at": time.monotonic(), True: {}, False: {}})
+
+
+def _changes_reel_records(session: Session) -> bool:
+    for row in (*session.new, *session.deleted):
+        if isinstance(row, _REEL_RECORD_MODELS):
+            return True
+    for row in session.dirty:
+        if isinstance(row, _REEL_RECORD_MODELS):
+            changed = {attr.key for attr in inspect(row).attrs if attr.history.has_changes()}
+            if changed - _REEL_RECORD_QUIET_COLUMNS:
+                return True
+    return False
+
+
+@event.listens_for(Session, "before_flush")
+def _note_reel_record_write(session, flush_context, instances) -> None:
+    if _changes_reel_records(session):
+        session.info["reel_records_changed"] = True
+        # Now too, so this session reads its own write back before it commits.
+        invalidate_reel_records()
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _drop_reel_records_after_write(session) -> None:
+    if session.info.pop("reel_records_changed", False):
+        invalidate_reel_records()
+
+
 def reel_records(
     paths: list[str],
     viewer_id: str | None = None,
     include_comments: bool = True,
     db: Session | None = None,
 ) -> dict[str, dict]:
+    """Published posts of ``paths`` as player records, keyed by media path.
+
+    Without a viewer the records are the cached ones themselves: read them,
+    never change them.
+    """
     if not paths:
         return {}
     normalized = [normalize_media_path(path) for path in paths]
     with _session_scope(db) as db:
-        from .safety import blocked_user_ids
+        records = _anonymous_reel_records(db, normalized, include_comments)
+        if not viewer_id:
+            return records
+        return _reel_records_for_viewer(db, records, viewer_id, include_comments)
 
-        hidden_ids = blocked_user_ids(db, viewer_id)
-        posts = (
-            db.query(Post)
-            .join(User, User.id == Post.owner_id)
-            .options(
-                joinedload(Post.owner),
-                selectinload(Post.tags).selectinload(PostTag.tag),
-                selectinload(Post.slides),
-            )
-            .filter(
-                Post.media_path.in_(normalized),
-                Post.status == "published",
-                Post.deleted_at.is_(None),
-                User.status == "active",
-            )
+
+def _anonymous_reel_records(db: Session, normalized: list[str], include_comments: bool) -> dict[str, dict]:
+    if time.monotonic() - _reel_records_cache["at"] > _REEL_RECORDS_TTL:
+        invalidate_reel_records()
+    store = _reel_records_cache[include_comments]
+    missing = [path for path in dict.fromkeys(normalized) if path not in store]
+    if missing:
+        loaded = _load_reel_records(db, missing, include_comments)
+        for path in missing:
+            store[path] = loaded.get(path)
+    return {path: store[path] for path in normalized if store[path] is not None}
+
+
+def _load_reel_records(db: Session, normalized: list[str], include_comments: bool) -> dict[str, dict]:
+    posts = (
+        db.query(Post)
+        .join(User, User.id == Post.owner_id)
+        .options(
+            joinedload(Post.owner),
+            selectinload(Post.tags).selectinload(PostTag.tag),
+            selectinload(Post.slides),
+        )
+        .filter(
+            Post.media_path.in_(normalized),
+            Post.status == "published",
+            Post.deleted_at.is_(None),
+            User.status == "active",
+        )
+        .all()
+    )
+    post_ids = [post.id for post in posts]
+    comments_by_post: dict[str, list[Comment]] = {}
+    if include_comments and post_ids:
+        comments = (
+            db.query(Comment)
+            .join(User, User.id == Comment.author_id)
+            .options(joinedload(Comment.author))
+            .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None), User.status == "active")
+            .order_by(Comment.created_at.asc())
             .all()
         )
-        if hidden_ids:
-            posts = [post for post in posts if post.owner_id not in hidden_ids]
-        post_ids = [post.id for post in posts]
-        liked_posts: set[str] = set()
-        saved_posts: set[str] = set()
-        following_ids: set[str] = set()
-        liked_comments: set[str] = set()
-        if viewer_id and post_ids:
-            liked_posts = {
-                row[0]
-                for row in db.query(PostLike.post_id)
-                .filter(PostLike.user_id == viewer_id, PostLike.post_id.in_(post_ids))
-                .all()
-            }
-            saved_posts = {
-                row[0]
-                for row in db.query(PostSave.post_id)
-                .filter(PostSave.user_id == viewer_id, PostSave.post_id.in_(post_ids))
-                .all()
-            }
-            owner_ids = {post.owner_id for post in posts}
-            following_ids = {
-                row[0]
-                for row in db.query(Follow.followee_id)
-                .filter(Follow.follower_id == viewer_id, Follow.followee_id.in_(owner_ids))
-                .all()
-            }
+        for comment in comments:
+            comments_by_post.setdefault(comment.post_id, []).append(comment)
 
-        comments_by_post: dict[str, list[Comment]] = {}
-        if include_comments and post_ids:
-            comments = (
-                db.query(Comment)
-                .join(User, User.id == Comment.author_id)
-                .options(joinedload(Comment.author))
-                .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None), User.status == "active")
-                .order_by(Comment.created_at.asc())
-                .all()
-            )
-            if hidden_ids:
-                comments = [comment for comment in comments if comment.author_id not in hidden_ids]
-            for comment in comments:
-                comments_by_post.setdefault(comment.post_id, []).append(comment)
-            if viewer_id and comments:
-                comment_ids = [comment.id for comment in comments]
-                liked_comments = {
-                    row[0]
-                    for row in db.query(CommentLike.comment_id)
-                    .filter(CommentLike.user_id == viewer_id, CommentLike.comment_id.in_(comment_ids))
-                    .all()
+    records: dict[str, dict] = {}
+    for post in posts:
+        records[post.media_path] = {
+            "post_id": post.id,
+            "title": post.title,
+            "caption": post.caption,
+            "tags": post_tags(post),
+            "location": post.location or {},
+            "source": post.source,
+            "created_at": post.created_at.isoformat() if post.created_at else "",
+            "likes": post.like_count,
+            "views": post.view_count,
+            "comments_count": post.comment_count,
+            "saves": post.save_count,
+            "duration_ms": post.duration_ms,
+            "width": post.width,
+            "height": post.height,
+            "stereo_layout": post.stereo_layout or "mono",
+            "media_files": post.media_files,
+            **post_image_fields(post),
+            "author_name": post.owner.username,
+            "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
+            "author_avatar_url": avatar_url(post.owner),
+            "creator": serialize_creator(post.owner, None),
+            "viewer_state": {
+                "liked": False,
+                "saved": False,
+                "following_creator": False,
+                "can_edit": False,
+            },
+            "liked_by_me": False,
+            "saved_by_me": False,
+            "comments": [serialize_comment(comment) for comment in comments_by_post.get(post.id, [])],
+        }
+    return records
+
+
+def _reel_records_for_viewer(
+    db: Session,
+    anonymous: dict[str, dict],
+    viewer_id: str,
+    include_comments: bool,
+) -> dict[str, dict]:
+    """Copies of the anonymous records with this viewer's state, minus what the viewer's blocks hide."""
+    from .safety import blocked_user_ids
+
+    hidden_ids = blocked_user_ids(db, viewer_id)
+    shown = {
+        path: record for path, record in anonymous.items() if record["creator"]["id"] not in hidden_ids
+    }
+    post_ids = [record["post_id"] for record in shown.values()]
+    liked_posts: set[str] = set()
+    saved_posts: set[str] = set()
+    following_ids: set[str] = set()
+    liked_comments: set[str] = set()
+    if post_ids:
+        liked_posts = {
+            row[0]
+            for row in db.query(PostLike.post_id)
+            .filter(PostLike.user_id == viewer_id, PostLike.post_id.in_(post_ids))
+            .all()
+        }
+        saved_posts = {
+            row[0]
+            for row in db.query(PostSave.post_id)
+            .filter(PostSave.user_id == viewer_id, PostSave.post_id.in_(post_ids))
+            .all()
+        }
+        owner_ids = {record["creator"]["id"] for record in shown.values()}
+        following_ids = {
+            row[0]
+            for row in db.query(Follow.followee_id)
+            .filter(Follow.follower_id == viewer_id, Follow.followee_id.in_(owner_ids))
+            .all()
+        }
+    comments_by_path = {
+        path: [comment for comment in record["comments"] if comment["author_id"] not in hidden_ids]
+        for path, record in shown.items()
+    }
+    comment_ids = [comment["id"] for comments in comments_by_path.values() for comment in comments]
+    if include_comments and comment_ids:
+        liked_comments = {
+            row[0]
+            for row in db.query(CommentLike.comment_id)
+            .filter(CommentLike.user_id == viewer_id, CommentLike.comment_id.in_(comment_ids))
+            .all()
+        }
+
+    records: dict[str, dict] = {}
+    for path, record in shown.items():
+        owner_id = record["creator"]["id"]
+        liked = record["post_id"] in liked_posts
+        saved = record["post_id"] in saved_posts
+        following = owner_id in following_ids
+        records[path] = {
+            **record,
+            "creator": {**record["creator"], "is_me": viewer_id == owner_id, "is_following": following},
+            "viewer_state": {
+                "liked": liked,
+                "saved": saved,
+                "following_creator": following,
+                "can_edit": viewer_id == owner_id,
+            },
+            "liked_by_me": liked,
+            "saved_by_me": saved,
+            "comments": [
+                {
+                    **comment,
+                    "liked_by_me": comment["id"] in liked_comments,
+                    "can_delete": viewer_id == comment["author_id"],
                 }
-
-        records: dict[str, dict] = {}
-        for post in posts:
-            creator = serialize_creator(post.owner, viewer_id, following_ids)
-            records[post.media_path] = {
-                "post_id": post.id,
-                "title": post.title,
-                "caption": post.caption,
-                "tags": post_tags(post),
-                "location": post.location or {},
-                "source": post.source,
-                "created_at": post.created_at.isoformat() if post.created_at else "",
-                "likes": post.like_count,
-                "views": post.view_count,
-                "comments_count": post.comment_count,
-                "saves": post.save_count,
-                "duration_ms": post.duration_ms,
-                "width": post.width,
-                "height": post.height,
-                "stereo_layout": post.stereo_layout or "mono",
-                "media_files": post.media_files,
-                **post_image_fields(post),
-                "author_name": post.owner.username,
-                "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
-                "author_avatar_url": avatar_url(post.owner),
-                "creator": creator,
-                "viewer_state": {
-                    "liked": post.id in liked_posts,
-                    "saved": post.id in saved_posts,
-                    "following_creator": post.owner_id in following_ids,
-                    "can_edit": viewer_id == post.owner_id,
-                },
-                "liked_by_me": post.id in liked_posts,
-                "saved_by_me": post.id in saved_posts,
-                "comments": [
-                    serialize_comment(comment, viewer_id, liked_comments)
-                    for comment in comments_by_post.get(post.id, [])
-                ],
-            }
-        return records
+                for comment in comments_by_path[path]
+            ],
+        }
+    return records
 
 
 def metadata_for_paths(paths: list[str], db: Session | None = None) -> dict[str, dict]:
