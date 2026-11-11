@@ -573,6 +573,7 @@ def list_reports(
 
 STATS_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
 SPIKE_FACTOR = 3
+ACTIVE_NOW_WINDOW = timedelta(minutes=15)
 
 
 def _spike(current: int, previous: int, floor: int) -> bool:
@@ -652,7 +653,15 @@ def moderation_stats(
             "credits_captured": _windowed(captured, now, delta, floor),
             "support_requests": _windowed(between(SupportRequest.created_at), now, delta, floor),
         }
+    real_accounts = db.query(func.count(User.id)).filter(User.account_type == "real", User.status == "active")
     return {
+        # last_seen_at is refreshed at most every 5 min (server/social/auth.py), so the
+        # window must be longer; signed-out viewers are not counted.
+        "accounts": {
+            "total": real_accounts.scalar(),
+            "active_now": real_accounts.filter(User.last_seen_at > now - ACTIVE_NOW_WINDOW).scalar(),
+            "active_window_min": int(ACTIVE_NOW_WINDOW.total_seconds() // 60),
+        },
         "generated_at": now.isoformat(),
         "spike_floor": floor,
         "open_reports": db.query(func.count(Report.id)).filter(Report.status == "open").scalar(),

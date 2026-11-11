@@ -99,6 +99,27 @@ def test_stats_count_windows_and_flag_spikes(app, monkeypatch):
     assert body["disk"]
 
 
+def test_stats_count_accounts_and_people_active_now(app):
+    add_user(app, "the_mod", role="moderator")
+    add_user(app, "idle_user")
+    add_user(app, "unverified", status="pending")
+    add_user(app, "banned", status="suspended")
+    recent = add_user(app, "recent_user")
+    stale = add_user(app, "stale_user")
+    demo = add_user(app, "demo_user")
+    with app.state.testing_session() as db:
+        db.get(User, recent).last_seen_at = utcnow() - timedelta(minutes=10)
+        db.get(User, stale).last_seen_at = utcnow() - timedelta(minutes=40)
+        demo_user = db.get(User, demo)
+        demo_user.account_type = "demo"
+        demo_user.last_seen_at = utcnow()
+        db.commit()
+    # Signing in stamps the moderator's own last_seen_at, so they count as active too.
+    body = sign_in(app, "the_mod").get("/api/moderation/stats").json()
+    # Active real accounts: the_mod, idle_user, recent_user, stale_user.
+    assert body["accounts"] == {"total": 4, "active_now": 2, "active_window_min": 15}
+
+
 def test_small_counts_below_the_floor_do_not_flag(app, monkeypatch):
     monkeypatch.setenv("SX_MOD_SPIKE_MIN", "10")
     add_user(app, "the_mod", role="moderator")

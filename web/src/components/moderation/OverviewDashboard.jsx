@@ -444,6 +444,12 @@ export function OverviewPanel({ stats, hourly, ops, flagged, windowKey, onOpenTa
               <Heatmap hourly={hourly} metric={metric} />
             </Card>
           ) : null}
+          <Card title="ACCOUNTS" note={'Active real accounts. Online counts signed-in people seen in the last ' + stats.accounts.active_window_min + ' minutes; signed-out viewers are not counted.'}>
+            <div className="sx-ov-tiles">
+              <div className="sx-ov-tile"><span className="sx-ov-tile-label">TOTAL ACCOUNTS</span><b className="sx-ov-big">{fmt(stats.accounts.total)}</b></div>
+              <div className="sx-ov-tile"><span className="sx-ov-tile-label">ONLINE NOW</span><b className="sx-ov-big">{fmt(stats.accounts.active_now)}</b><span className="sx-ov-note">last {stats.accounts.active_window_min} min</span></div>
+            </div>
+          </Card>
           <Card title="SIGN-UP VERIFICATION" note={'Accounts created in ' + win.now + ', and how many have confirmed their email. A low share can mean bots or broken email.'}>
             <Funnel w={w} windowKey={windowKey} />
           </Card>
