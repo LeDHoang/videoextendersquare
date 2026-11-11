@@ -6,11 +6,10 @@
 	skip_install_trust
 }
 
-# App origin, standing in for https://<domain> through the Tunnel.
-# Upstream keepalive stays at Caddy's default (2m); uvicorn's
-# --timeout-keep-alive (deploy/entrypoint.sh) must stay above it.
+# App origin, standing in for https://<domain> through the Tunnel. Like
+# cloudflared, it hands every request to the proxy service (deploy/Caddyfile).
 https://localhost:8443 {
-	reverse_proxy app:8000
+	reverse_proxy proxy:8000
 }
 
 # Media origin, standing in for https://media.<domain> (R2 public bucket).

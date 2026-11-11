@@ -9,7 +9,7 @@ edges are replaced:
 |---|---|---|
 | Cloudflare R2 public + backup buckets | SeaweedFS S3 (`objectstore`, buckets `echo-public`, `echo-backups`) | `deploy/compose.staging.yaml` |
 | `media.<domain>` custom domain + Transform Rule (static ACAO) | Caddy on `https://localhost:9443` (`header_down` replaces CORS headers, like "set static") | `deploy/Caddyfile.staging` |
-| `https://<domain>` through the Cloudflare Tunnel | Caddy on `https://localhost:8443` (internal CA) | `deploy/Caddyfile.staging` |
+| `https://<domain>` through the Cloudflare Tunnel | Caddy on `https://localhost:8443` (internal CA), which hands requests to the same `proxy` service as cloudflared does | `deploy/Caddyfile.staging` |
 | SMTP provider | Mailpit, inbox UI on `http://127.0.0.1:8025` | `deploy/compose.staging.yaml` |
 | `/etc/echo-backup.env` + host rclone remote | `rclone` service in the `tools` profile | `deploy/compose.staging.yaml` |
 
@@ -44,7 +44,8 @@ node scripts/verify_staging.cjs
 and `SX_ENV_FILE`, so every `docker compose --env-file .env.staging ...` command
 targets the staging project and never touches a production `.env`. The app's
 loopback port is `127.0.0.1:8001` (`SX_APP_PORT`), so a dev server on 8000 keeps
-running.
+running. The proxy's is `127.0.0.1:8081` (`SX_PROXY_PORT`): the writer and the
+read-only processes behind one port (`docs/deploy-runbook.md`, "Read service").
 
 Browsers warn about the Caddy certificate. Accept it once for both
 `https://localhost:8443` and `https://localhost:9443`. If you do not, media loads

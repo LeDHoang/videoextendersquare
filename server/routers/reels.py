@@ -2251,7 +2251,7 @@ def reels_feed(
 ):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
-    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60)
+    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60, shared=True)
     return _recommendation_feed_data(
         request=request,
         response=response,

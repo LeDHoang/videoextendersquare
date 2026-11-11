@@ -1,6 +1,6 @@
 # Deploy runbook — invite-only beta
 
-One OVHcloud VPS (VPS-2 in Hillsboro, Oregon: 4 vCPU / 8 GB / 75 GB) runs `compose.yaml`: the app, `postgres:16` and `cloudflared`. Nothing listens on a public port. Traffic arrives through a Cloudflare Tunnel, and public media is served from a Cloudflare R2 bucket on `media.<domain>`.
+One OVHcloud VPS (VPS-2 in Hillsboro, Oregon: 4 vCPU / 8 GB / 75 GB) runs `compose.yaml`: the app (`app`), its read-only processes (`app-read`), the proxy that splits requests between them (`proxy`), `postgres:16` and `cloudflared`. Nothing listens on a public port. Traffic arrives through a Cloudflare Tunnel, and public media is served from a Cloudflare R2 bucket on `media.<domain>`.
 
 Related docs:
 - `deploy/env.example`: the production `.env` template.
@@ -37,7 +37,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
 ### Cloudflare
 
 - [x] **Tunnel.** Go to Zero Trust → Networks → Tunnels and create a tunnel. Copy its connector token into `TUNNEL_TOKEN` in `.env`.
-  - Add a public hostname: `<domain>` → service `http://app:8000`. `app` is the compose service name.
+  - Add a public hostname: `<domain>` → service `http://proxy:8000`. `proxy` is the compose service name (section "Read service" below). Production still points at `http://app:8000` until the switch in that section is made.
   - Leave **HTTP Host Header** empty, which is the default. cloudflared then keeps the browser's `Host`. `validate_origin` in `server/social/auth.py` compares `Origin` with `Host`, so every mutating request returns 403 `ORIGIN_DENIED` if you override `Host`.
 - [x] **R2 public bucket.** Create it with location hint **`apac`** (Asia-Pacific).
   - Connect the custom domain `media.<domain>`. Do not enable the `r2.dev` URL.
@@ -132,7 +132,7 @@ docker compose --profile tunnel up -d             # start cloudflared
 
 If the app exits immediately, read `docker compose logs app`. With `SX_ENV=production`, the boot check lists every missing or unsafe value at once.
 
-The entrypoint runs `alembic upgrade head` on every start. It then starts **one** uvicorn worker. Never scale the app service or add `--workers`: JobManager and the staged-upload registries are in-process.
+The entrypoint runs `alembic upgrade head` on every start. It then starts **one** uvicorn worker. Never scale the `app` service or add `--workers` to it: JobManager and the staged-upload registries are in-process. Read capacity is added with `app-read` instead (section "Read service" below).
 
 ## 3. Routine deploy
 
@@ -165,7 +165,7 @@ A restart drops in-flight jobs and staged uploads, because both live in containe
 
 | Task | Command |
 |---|---|
-| Tail logs | `docker compose logs -f --tail=200 app` |
+| Tail logs | `docker compose logs -f --tail=200 app` (`app-read` and `proxy` have their own) |
 | Check CPU and memory | `docker stats` |
 | Check ffmpeg niceness | `docker compose exec app ps -o ni,comm -C ffmpeg` |
 | Open a psql shell | `docker compose exec postgres psql -U echo echo` |
@@ -176,9 +176,10 @@ Logs rotate at 10 MB × 5 files per service (json-file driver).
 
 Resource caps:
 - app: 3 CPUs, 6 GB memory. ffmpeg also runs under `nice 10`.
+- app-read: 2 CPUs, 2 GB memory, for `SX_READ_WORKERS` processes (default 2).
 - postgres: 1.5 CPUs.
 
-Encodes cannot starve the database.
+The caps add up to more than the 4 vCPUs. Each is a ceiling, not a reservation: the readers use what the writer and encodes leave idle. Encodes cannot starve the database.
 
 Health checks:
 - The Docker HEALTHCHECK calls `/api/healthz` every 30 s, with a 10 s timeout and 3 retries. After about 90 s with no answer, the container is marked unhealthy. `restart: unless-stopped` restarts the app only when it exits, not when it is unhealthy.
@@ -199,3 +200,44 @@ Removing a post only hides it in the app. Its R2 objects stay, and their URLs ke
    curl -sI https://media.<domain>/<key>
    ```
    Expect `404`, with no `cf-cache-status: HIT`.
+
+## 6. Read service
+
+One process cannot use more than one core, and the `app` service must stay one process. `app-read` runs more processes of the same image with `SX_ROLE=reader`, and `proxy` (Caddy, `deploy/Caddyfile`) decides per request which service answers. The reasons and the code-side list are in `server/read_routes.py`.
+
+**What goes where**
+
+| Request | Served by |
+|---|---|
+| `GET` of `/api/reels`, `/api/reels/feed`, `/api/reels/player`, `/api/reels/player-inline`, `/api/reels/tags` or `/api/recommendations/creators`, with no `echo_session` cookie | `app-read` |
+| The same while `app-read` is down or restarting | `app` (the proxy falls back within 3 s) |
+| Everything else: signed-in requests, every write, jobs, uploads, SSE, admin, the SPA | `app` |
+
+A reader refuses any other request with 404 `NOT_ON_READER`, so a mistake in the proxy rule cannot reach a write route on a reader. It runs no migrations, jobs, encodes or periodic tasks, and mounts `data` and `output` read-only.
+
+**What differs on a reader**
+
+- **Staleness, at most 10 s.** A reader does not hear the writer's cache invalidation. A new or edited post, a comment or a like count can be up to 10 s old for an anonymous visitor. Deleted, unpublished and blocked posts are filtered by a query on every request, so a takedown applies at once. Signed-in users are served by the writer and see their own writes at once.
+- **Rate limits.** The 60 per minute limits on the feed and on creators are counted in the `rate_limit_events` table, so they hold over all processes together. This costs one more insert and commit per feed or creators request. The writer's cleanup loop deletes rows older than one hour.
+- **Metrics.** `/admin` Overview and the alert watchdog (`SX_ALERT_*`) count the writer's requests only. Reader requests are in `docker compose logs app-read` (`sx.access` lines) and in Sentry traces.
+- **Database connections.** Each process holds up to 15 (pool 5 plus 10 overflow): 15 for the writer plus 15 per reader process, against Postgres's default of 100. Keep `SX_READ_WORKERS` at 4 or lower.
+
+**Sizing.** `SX_READ_WORKERS` in `.env` sets the number of reader processes (default 2). Raise the `cpus` cap of `app-read` in `compose.yaml` with it: one core per process.
+
+**Ports on the VPS.** `127.0.0.1:8000` is the writer alone, as before; `deploy/deploy.sh` waits for `/api/readyz` there. `127.0.0.1:8080` (`SX_PROXY_PORT`) is the proxy, which is what visitors get.
+
+**Turning it on in production (one time).** A deploy starts `app-read` and `proxy`, but visitors keep reaching `app` directly until the Tunnel points at the proxy:
+
+1. Deploy, then check both paths on the VPS:
+   ```bash
+   docker compose ps                                              # app, app-read, proxy up
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/readyz    # 200, from the writer
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/reels      # 200, from a reader
+   docker compose logs --tail=5 app-read | grep sx.access          # the /api/reels line is here
+   ```
+2. In Zero Trust → Networks → Tunnels → the tunnel → Public hostname, change the service from `http://app:8000` to `http://proxy:8000`. Leave **HTTP Host Header** empty, as before.
+3. Load the site signed out and signed in, publish a post, and watch `docker compose logs -f proxy app-read` for errors.
+
+**Turning it off.** Change the public hostname back to `http://app:8000`. Nothing else has to change; `app` serves every route by itself. `docker compose stop app-read` alone also works: the proxy then sends reads to the writer.
+
+**Adding a route to the readers.** Add the path to `READ_PATHS` in `server/read_routes.py` and to the `@read` matcher in `deploy/Caddyfile` (a test keeps the two equal). The route must be a GET with no other method on the same path, must keep nothing in process memory that another process needs, and any rate limit it checks must pass `shared=True`.

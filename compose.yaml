@@ -5,9 +5,12 @@
 #   docker compose build --build-arg GIT_SHA=$(git rev-parse HEAD)
 #   docker compose --profile tunnel up -d
 #
-# Without `--profile tunnel` the app is reachable only on 127.0.0.1:8000 (local
-# smoke tests). The app runs exactly one uvicorn worker: JobManager and the
-# staged-upload registries live in process memory.
+# Without `--profile tunnel` the app is reachable only on 127.0.0.1:8000 (the
+# writer alone) and 127.0.0.1:8080 (through the proxy), for local smoke tests.
+# The app runs exactly one uvicorn worker: JobManager and the staged-upload
+# registries live in process memory. app-read is more processes of the same
+# image for the anonymous read routes only, and proxy splits requests between
+# the two (deploy/Caddyfile, server/read_routes.py).
 
 x-logging: &default-logging
   driver: json-file
@@ -33,7 +36,7 @@ services:
     environment:
       # Built from the POSTGRES_* values in .env so the two can never drift.
       # Overrides any DATABASE_URL line in .env.
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-echo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-echo}
+      DATABASE_URL: &database-url postgresql+psycopg://${POSTGRES_USER:-echo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-echo}
     ports:
       # Loopback only: public traffic arrives through cloudflared on the
       # compose network, never on a host port.
@@ -52,6 +55,51 @@ services:
     # (SSE streams), then the lifespan drains workers for up to
     # SX_SHUTDOWN_DRAIN_S (15 s). Leave headroom before SIGKILL.
     stop_grace_period: 45s
+    logging: *default-logging
+
+  # Read-only processes: the same image with SX_ROLE=reader. They serve only
+  # the routes in server/read_routes.py, run no jobs, encodes or periodic
+  # tasks and never migrate. This is the service to size for read traffic
+  # (SX_READ_WORKERS); never scale `app` instead.
+  app-read:
+    image: echo-app:latest
+    restart: unless-stopped
+    init: true
+    env_file: ${SX_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: *database-url
+      SX_ROLE: reader
+      # Each process holds up to 15 database connections (pool 5 + 10
+      # overflow), next to the writer's 15, against Postgres's 100.
+      SX_READ_WORKERS: ${SX_READ_WORKERS:-2}
+    volumes:
+      - data:/app/data:ro
+      - output:/app/output:ro
+    depends_on:
+      # The writer runs the migrations; a reader must not start on an older
+      # schema. Until the readers answer, the proxy sends reads to the writer.
+      app:
+        condition: service_healthy
+    # One core per process. With the app's 3 and Postgres's 1.5 the caps add
+    # up to more than the 4 vCPUs on purpose: each is a ceiling, and the
+    # readers only take what encodes and the writer leave idle.
+    cpus: 2
+    mem_limit: 2g
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  # Sends anonymous GETs of the read routes to app-read and everything else
+  # to app (deploy/Caddyfile). The Tunnel's public hostname points here.
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      # Loopback only, like the app port.
+      - "127.0.0.1:${SX_PROXY_PORT:-8080}:8000"
+    depends_on:
+      - app
     logging: *default-logging
 
   postgres:
@@ -80,7 +128,7 @@ services:
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
     depends_on:
-      - app
+      - proxy
     logging: *default-logging
 
 volumes:

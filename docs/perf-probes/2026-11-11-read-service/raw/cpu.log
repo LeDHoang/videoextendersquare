@@ -1,0 +1,505 @@
+15:20:45
+echo-readsvc-app-read-1 0.27% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 74.83% 122.1MiB / 6GiB
+echo-readsvc-postgres-1 21.25% 154.7MiB / 7.661GiB
+15:20:55
+echo-readsvc-app-read-1 30.55% 246.5MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 99.00% 135MiB / 6GiB
+echo-readsvc-postgres-1 18.30% 157.7MiB / 7.661GiB
+15:21:06
+echo-readsvc-app-read-1 0.45% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 97.62% 122.2MiB / 6GiB
+echo-readsvc-postgres-1 27.58% 160.8MiB / 7.661GiB
+15:21:17
+echo-readsvc-app-read-1 0.28% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 99.43% 122.2MiB / 6GiB
+echo-readsvc-postgres-1 25.56% 165.9MiB / 7.661GiB
+15:21:28
+echo-readsvc-app-read-1 0.49% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 60.81% 122.2MiB / 6GiB
+echo-readsvc-postgres-1 16.28% 169.6MiB / 7.661GiB
+15:21:38
+echo-readsvc-app-read-1 1.17% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.35% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 78.91% 122.2MiB / 6GiB
+echo-readsvc-postgres-1 24.48% 173.5MiB / 7.661GiB
+15:21:49
+echo-readsvc-app-read-1 0.73% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.03% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 1.84% 122.3MiB / 6GiB
+echo-readsvc-postgres-1 0.94% 175.2MiB / 7.661GiB
+15:22:00
+echo-readsvc-app-read-1 0.29% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 97.75% 122.5MiB / 6GiB
+echo-readsvc-postgres-1 29.52% 179.9MiB / 7.661GiB
+15:22:11
+echo-readsvc-app-read-1 0.75% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 90.06% 122.5MiB / 6GiB
+echo-readsvc-postgres-1 5.15% 185MiB / 7.661GiB
+15:22:21
+echo-readsvc-app-read-1 0.37% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 100.69% 122.4MiB / 6GiB
+echo-readsvc-postgres-1 25.20% 186.6MiB / 7.661GiB
+15:22:32
+echo-readsvc-app-read-1 1.05% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 83.16% 122.9MiB / 6GiB
+echo-readsvc-postgres-1 84.84% 187.6MiB / 7.661GiB
+15:22:43
+echo-readsvc-app-read-1 0.40% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 83.56% 122.4MiB / 6GiB
+echo-readsvc-postgres-1 24.51% 187.2MiB / 7.661GiB
+15:22:54
+echo-readsvc-app-read-1 0.32% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 91.36% 122.4MiB / 6GiB
+echo-readsvc-postgres-1 30.70% 189.5MiB / 7.661GiB
+15:23:04
+echo-readsvc-app-read-1 0.31% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 101.67% 123MiB / 6GiB
+echo-readsvc-postgres-1 30.60% 188.3MiB / 7.661GiB
+15:23:15
+echo-readsvc-app-read-1 0.26% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 98.97% 122.8MiB / 6GiB
+echo-readsvc-postgres-1 24.80% 188.2MiB / 7.661GiB
+15:23:26
+echo-readsvc-app-read-1 0.37% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 81.84% 127.8MiB / 6GiB
+echo-readsvc-postgres-1 15.49% 188.8MiB / 7.661GiB
+15:23:36
+echo-readsvc-app-read-1 0.28% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 80.96% 129.2MiB / 6GiB
+echo-readsvc-postgres-1 16.76% 188.8MiB / 7.661GiB
+15:23:47
+echo-readsvc-app-read-1 0.35% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 112.26% 127.9MiB / 6GiB
+echo-readsvc-postgres-1 20.87% 188.9MiB / 7.661GiB
+15:23:58
+echo-readsvc-app-read-1 33.25% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 141.53% 128.2MiB / 6GiB
+echo-readsvc-postgres-1 21.02% 190MiB / 7.661GiB
+15:24:08
+echo-readsvc-app-read-1 0.43% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.16% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 111.26% 137.4MiB / 6GiB
+echo-readsvc-postgres-1 24.78% 189.8MiB / 7.661GiB
+15:24:19
+echo-readsvc-app-read-1 0.30% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 114.38% 131.2MiB / 6GiB
+echo-readsvc-postgres-1 21.35% 190.2MiB / 7.661GiB
+15:24:30
+echo-readsvc-app-read-1 1.89% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 108.11% 128MiB / 6GiB
+echo-readsvc-postgres-1 24.91% 190.5MiB / 7.661GiB
+15:24:41
+echo-readsvc-app-read-1 2.52% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 107.91% 131.2MiB / 6GiB
+echo-readsvc-postgres-1 21.35% 191.9MiB / 7.661GiB
+15:24:50
+echo-readsvc-app-read-1 0.37% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 0.26% 131.1MiB / 6GiB
+echo-readsvc-postgres-1 0.86% 191.7MiB / 7.661GiB
+15:25:01
+echo-readsvc-app-read-1 0.36% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 113.70% 131.1MiB / 6GiB
+echo-readsvc-postgres-1 20.50% 191.8MiB / 7.661GiB
+15:25:11
+echo-readsvc-app-read-1 0.31% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 114.15% 131.3MiB / 6GiB
+echo-readsvc-postgres-1 14.41% 192.4MiB / 7.661GiB
+15:25:21
+echo-readsvc-app-read-1 0.29% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 113.28% 135.3MiB / 6GiB
+echo-readsvc-postgres-1 19.57% 192.5MiB / 7.661GiB
+15:25:32
+echo-readsvc-app-read-1 0.64% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 112.64% 131.5MiB / 6GiB
+echo-readsvc-postgres-1 61.72% 204.9MiB / 7.661GiB
+15:25:43
+echo-readsvc-app-read-1 0.27% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 113.48% 135.3MiB / 6GiB
+echo-readsvc-postgres-1 19.95% 205.3MiB / 7.661GiB
+15:25:53
+echo-readsvc-app-read-1 0.51% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 113.75% 131.3MiB / 6GiB
+echo-readsvc-postgres-1 19.70% 205.7MiB / 7.661GiB
+15:26:04
+echo-readsvc-app-read-1 0.26% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 65.08% 133.9MiB / 6GiB
+echo-readsvc-postgres-1 16.90% 205.5MiB / 7.661GiB
+15:26:15
+echo-readsvc-app-read-1 0.47% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 74.65% 134.4MiB / 6GiB
+echo-readsvc-postgres-1 16.75% 206MiB / 7.661GiB
+15:26:25
+echo-readsvc-app-read-1 0.38% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 97.51% 134MiB / 6GiB
+echo-readsvc-postgres-1 20.75% 206.1MiB / 7.661GiB
+15:26:36
+echo-readsvc-app-read-1 0.32% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 96.77% 134.7MiB / 6GiB
+echo-readsvc-postgres-1 19.63% 206.7MiB / 7.661GiB
+15:26:47
+echo-readsvc-app-read-1 0.27% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 97.88% 139.2MiB / 6GiB
+echo-readsvc-postgres-1 23.44% 207MiB / 7.661GiB
+15:26:57
+echo-readsvc-app-read-1 0.33% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 100.58% 139.5MiB / 6GiB
+echo-readsvc-postgres-1 21.60% 207MiB / 7.661GiB
+15:27:08
+echo-readsvc-app-read-1 0.56% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.12% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 100.13% 139.1MiB / 6GiB
+echo-readsvc-postgres-1 24.44% 207MiB / 7.661GiB
+15:27:19
+echo-readsvc-app-read-1 0.30% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.02% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 102.19% 139.6MiB / 6GiB
+echo-readsvc-postgres-1 19.96% 207.2MiB / 7.661GiB
+15:27:29
+echo-readsvc-app-read-1 0.26% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 101.36% 137.3MiB / 6GiB
+echo-readsvc-postgres-1 1.76% 207.5MiB / 7.661GiB
+15:27:40
+echo-readsvc-app-read-1 0.41% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 101.46% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 20.73% 224.1MiB / 7.661GiB
+15:27:51
+echo-readsvc-app-read-1 1.22% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 0.48% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 0.55% 224.2MiB / 7.661GiB
+15:28:01
+echo-readsvc-app-read-1 29.44% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 99.96% 139.3MiB / 6GiB
+echo-readsvc-postgres-1 21.38% 224.6MiB / 7.661GiB
+15:28:12
+echo-readsvc-app-read-1 0.28% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 102.77% 137.3MiB / 6GiB
+echo-readsvc-postgres-1 20.05% 224.8MiB / 7.661GiB
+15:28:23
+echo-readsvc-app-read-1 0.41% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 104.86% 137.4MiB / 6GiB
+echo-readsvc-postgres-1 26.05% 224.9MiB / 7.661GiB
+15:28:33
+echo-readsvc-app-read-1 0.32% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.51MiB / 7.661GiB
+echo-readsvc-app-1 101.43% 137.5MiB / 6GiB
+echo-readsvc-postgres-1 20.64% 225.2MiB / 7.661GiB
+15:28:44
+echo-readsvc-app-read-1 0.72% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.21% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 0.35% 225MiB / 7.661GiB
+15:28:55
+echo-readsvc-app-read-1 0.88% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.19% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 0.59% 225MiB / 7.661GiB
+15:29:05
+echo-readsvc-app-read-1 0.80% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.48% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 0.78% 225.1MiB / 7.661GiB
+15:29:16
+echo-readsvc-app-read-1 1.40% 233.6MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.42% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 4.01% 225.1MiB / 7.661GiB
+15:29:27
+echo-readsvc-app-read-1 0.94% 233.6MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.38% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 1.22% 225.1MiB / 7.661GiB
+15:29:37
+echo-readsvc-app-read-1 0.75% 233.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 14.52MiB / 7.661GiB
+echo-readsvc-app-1 0.32% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 4.67% 225.1MiB / 7.661GiB
+15:29:48
+echo-readsvc-app-read-1 72.78% 234.2MiB / 2GiB
+echo-readsvc-proxy-1 1.63% 16.45MiB / 7.661GiB
+echo-readsvc-app-1 0.26% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 25.76% 225.5MiB / 7.661GiB
+15:29:59
+echo-readsvc-app-read-1 75.77% 233.9MiB / 2GiB
+echo-readsvc-proxy-1 1.86% 19.36MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 20.82% 225.6MiB / 7.661GiB
+15:30:10
+echo-readsvc-app-read-1 148.45% 246.2MiB / 2GiB
+echo-readsvc-proxy-1 3.25% 20.02MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 38.33% 229.7MiB / 7.661GiB
+15:30:20
+echo-readsvc-app-read-1 150.90% 247MiB / 2GiB
+echo-readsvc-proxy-1 3.64% 20.72MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 40.95% 230.9MiB / 7.661GiB
+15:30:31
+echo-readsvc-app-read-1 175.40% 248.9MiB / 2GiB
+echo-readsvc-proxy-1 4.34% 20.77MiB / 7.661GiB
+echo-readsvc-app-1 0.10% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 75.91% 252.9MiB / 7.661GiB
+15:30:42
+echo-readsvc-app-read-1 178.59% 248.9MiB / 2GiB
+echo-readsvc-proxy-1 4.17% 20.83MiB / 7.661GiB
+echo-readsvc-app-1 0.13% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 44.34% 278.1MiB / 7.661GiB
+15:30:52
+echo-readsvc-app-read-1 182.67% 251.1MiB / 2GiB
+echo-readsvc-proxy-1 4.47% 21.28MiB / 7.661GiB
+echo-readsvc-app-1 0.14% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 87.12% 283.6MiB / 7.661GiB
+15:31:03
+echo-readsvc-app-read-1 202.42% 251.5MiB / 2GiB
+echo-readsvc-proxy-1 4.11% 21.41MiB / 7.661GiB
+echo-readsvc-app-1 0.63% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 49.25% 285.3MiB / 7.661GiB
+15:31:14
+echo-readsvc-app-read-1 202.45% 252MiB / 2GiB
+echo-readsvc-proxy-1 5.31% 21.5MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 51.88% 285.9MiB / 7.661GiB
+15:31:25
+echo-readsvc-app-read-1 183.72% 251.9MiB / 2GiB
+echo-readsvc-proxy-1 4.45% 23.64MiB / 7.661GiB
+echo-readsvc-app-1 0.12% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 50.36% 286.8MiB / 7.661GiB
+15:31:35
+echo-readsvc-app-read-1 201.59% 252.2MiB / 2GiB
+echo-readsvc-proxy-1 4.24% 23.77MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 49.95% 327.2MiB / 7.661GiB
+15:31:46
+echo-readsvc-app-read-1 202.21% 252.2MiB / 2GiB
+echo-readsvc-proxy-1 3.56% 26.12MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 50.60% 329.1MiB / 7.661GiB
+15:31:57
+echo-readsvc-app-read-1 96.04% 252.4MiB / 2GiB
+echo-readsvc-proxy-1 3.74% 26.31MiB / 7.661GiB
+echo-readsvc-app-1 0.24% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 22.91% 330.3MiB / 7.661GiB
+15:32:07
+echo-readsvc-app-read-1 202.06% 252.9MiB / 2GiB
+echo-readsvc-proxy-1 4.40% 28.35MiB / 7.661GiB
+echo-readsvc-app-1 0.16% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 50.65% 331.2MiB / 7.661GiB
+15:32:18
+echo-readsvc-app-read-1 3.05% 252.9MiB / 2GiB
+echo-readsvc-proxy-1 0.12% 28.24MiB / 7.661GiB
+echo-readsvc-app-1 0.40% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 1.67% 333.2MiB / 7.661GiB
+15:32:29
+echo-readsvc-app-read-1 79.51% 255.7MiB / 2GiB
+echo-readsvc-proxy-1 1.43% 28.25MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 14.96% 333.7MiB / 7.661GiB
+15:32:39
+echo-readsvc-app-read-1 57.79% 256MiB / 2GiB
+echo-readsvc-proxy-1 1.71% 28.25MiB / 7.661GiB
+echo-readsvc-app-1 0.31% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 16.39% 385.3MiB / 7.661GiB
+15:32:50
+echo-readsvc-app-read-1 109.32% 260.5MiB / 2GiB
+echo-readsvc-proxy-1 1.93% 26.05MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 22.97% 385.9MiB / 7.661GiB
+15:33:01
+echo-readsvc-app-read-1 111.03% 259.6MiB / 2GiB
+echo-readsvc-proxy-1 1.61% 26.32MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 19.48% 386.4MiB / 7.661GiB
+15:33:11
+echo-readsvc-app-read-1 204.68% 265.1MiB / 2GiB
+echo-readsvc-proxy-1 3.69% 26.33MiB / 7.661GiB
+echo-readsvc-app-1 0.15% 137.1MiB / 6GiB
+echo-readsvc-postgres-1 35.85% 387.1MiB / 7.661GiB
+15:33:22
+echo-readsvc-app-read-1 198.78% 267MiB / 2GiB
+echo-readsvc-proxy-1 3.49% 26.32MiB / 7.661GiB
+echo-readsvc-app-1 0.23% 137.7MiB / 6GiB
+echo-readsvc-postgres-1 38.92% 388.7MiB / 7.661GiB
+15:33:33
+echo-readsvc-app-read-1 198.25% 268.5MiB / 2GiB
+echo-readsvc-proxy-1 5.79% 26.33MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 138.2MiB / 6GiB
+echo-readsvc-postgres-1 37.55% 390.7MiB / 7.661GiB
+15:33:43
+echo-readsvc-app-read-1 203.03% 266.8MiB / 2GiB
+echo-readsvc-proxy-1 3.32% 26.34MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 138.2MiB / 6GiB
+echo-readsvc-postgres-1 34.86% 397.2MiB / 7.661GiB
+15:33:54
+echo-readsvc-app-read-1 201.24% 266.4MiB / 2GiB
+echo-readsvc-proxy-1 3.73% 26.34MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 138.2MiB / 6GiB
+echo-readsvc-postgres-1 35.79% 398.7MiB / 7.661GiB
+15:34:05
+echo-readsvc-app-read-1 218.44% 279.4MiB / 2GiB
+echo-readsvc-proxy-1 3.44% 26.39MiB / 7.661GiB
+echo-readsvc-app-1 60.98% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 51.97% 399.6MiB / 7.661GiB
+15:34:16
+echo-readsvc-app-read-1 203.94% 268.2MiB / 2GiB
+echo-readsvc-proxy-1 3.84% 26.38MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 38.02% 404.8MiB / 7.661GiB
+15:34:26
+echo-readsvc-app-read-1 204.02% 265.1MiB / 2GiB
+echo-readsvc-proxy-1 4.87% 26.35MiB / 7.661GiB
+echo-readsvc-app-1 0.15% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 39.20% 406.4MiB / 7.661GiB
+15:34:37
+echo-readsvc-app-read-1 202.20% 272.9MiB / 2GiB
+echo-readsvc-proxy-1 3.40% 26.48MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 35.91% 420MiB / 7.661GiB
+15:34:48
+echo-readsvc-app-read-1 205.93% 270.4MiB / 2GiB
+echo-readsvc-proxy-1 3.53% 26.57MiB / 7.661GiB
+echo-readsvc-app-1 0.41% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 37.90% 422.5MiB / 7.661GiB
+15:34:59
+echo-readsvc-app-read-1 72.13% 273.4MiB / 2GiB
+echo-readsvc-proxy-1 2.28% 26.43MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 16.54% 423.7MiB / 7.661GiB
+15:35:09
+echo-readsvc-app-read-1 73.77% 271.6MiB / 2GiB
+echo-readsvc-proxy-1 2.80% 26.34MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 17.03% 425.1MiB / 7.661GiB
+15:35:20
+echo-readsvc-app-read-1 139.31% 274.3MiB / 2GiB
+echo-readsvc-proxy-1 4.21% 26.34MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 31.67% 425.4MiB / 7.661GiB
+15:35:31
+echo-readsvc-app-read-1 144.26% 275.4MiB / 2GiB
+echo-readsvc-proxy-1 4.42% 26.52MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 32.58% 426.2MiB / 7.661GiB
+15:35:42
+echo-readsvc-app-read-1 199.27% 278.4MiB / 2GiB
+echo-readsvc-proxy-1 4.60% 26.63MiB / 7.661GiB
+echo-readsvc-app-1 0.11% 138.6MiB / 6GiB
+echo-readsvc-postgres-1 42.03% 425.6MiB / 7.661GiB
+15:35:52
+echo-readsvc-app-read-1 190.80% 282.8MiB / 2GiB
+echo-readsvc-proxy-1 4.26% 26.69MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 42.15% 426.8MiB / 7.661GiB
+15:36:03
+echo-readsvc-app-read-1 168.93% 281.5MiB / 2GiB
+echo-readsvc-proxy-1 8.65% 26.68MiB / 7.661GiB
+echo-readsvc-app-1 0.22% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 49.23% 428.1MiB / 7.661GiB
+15:36:14
+echo-readsvc-app-read-1 200.71% 289MiB / 2GiB
+echo-readsvc-proxy-1 4.57% 27.83MiB / 7.661GiB
+echo-readsvc-app-1 0.10% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 39.32% 429.6MiB / 7.661GiB
+15:36:24
+echo-readsvc-app-read-1 8.69% 288.5MiB / 2GiB
+echo-readsvc-proxy-1 1.75% 27.21MiB / 7.661GiB
+echo-readsvc-app-1 0.36% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 4.36% 429.6MiB / 7.661GiB
+15:36:35
+echo-readsvc-app-read-1 201.48% 286MiB / 2GiB
+echo-readsvc-proxy-1 4.48% 27.21MiB / 7.661GiB
+echo-readsvc-app-1 0.09% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 90.26% 503.5MiB / 7.661GiB
+15:36:46
+echo-readsvc-app-read-1 0.88% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 27.44MiB / 7.661GiB
+echo-readsvc-app-1 0.74% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 5.30% 505.5MiB / 7.661GiB
+15:36:57
+echo-readsvc-app-read-1 201.22% 290.6MiB / 2GiB
+echo-readsvc-proxy-1 6.24% 27.55MiB / 7.661GiB
+echo-readsvc-app-1 0.10% 140.5MiB / 6GiB
+echo-readsvc-postgres-1 40.39% 507.6MiB / 7.661GiB
+15:37:07
+echo-readsvc-app-read-1 183.29% 300MiB / 2GiB
+echo-readsvc-proxy-1 4.28% 27.52MiB / 7.661GiB
+echo-readsvc-app-1 24.73% 141.5MiB / 6GiB
+echo-readsvc-postgres-1 35.04% 510MiB / 7.661GiB
+15:37:18
+echo-readsvc-app-read-1 200.80% 288.7MiB / 2GiB
+echo-readsvc-proxy-1 5.19% 30.01MiB / 7.661GiB
+echo-readsvc-app-1 0.10% 141.5MiB / 6GiB
+echo-readsvc-postgres-1 40.26% 512MiB / 7.661GiB
+15:37:29
+echo-readsvc-app-read-1 202.19% 288.4MiB / 2GiB
+echo-readsvc-proxy-1 5.02% 30.4MiB / 7.661GiB
+echo-readsvc-app-1 0.08% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 39.89% 513.4MiB / 7.661GiB
+15:37:39
+echo-readsvc-app-read-1 1.37% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.38% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 2.85% 515.2MiB / 7.661GiB
+15:37:50
+echo-readsvc-app-read-1 0.92% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.34% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 0.09% 514.9MiB / 7.661GiB
+15:38:01
+echo-readsvc-app-read-1 1.16% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.53% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 0.13% 514.9MiB / 7.661GiB
+15:38:11
+echo-readsvc-app-read-1 1.73% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.04% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.59% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 0.12% 514.9MiB / 7.661GiB
+15:38:22
+echo-readsvc-app-read-1 1.81% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.54% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 1.00% 514.2MiB / 7.661GiB
+15:38:33
+echo-readsvc-app-read-1 1.32% 288.3MiB / 2GiB
+echo-readsvc-proxy-1 0.00% 30.61MiB / 7.661GiB
+echo-readsvc-app-1 0.96% 143.6MiB / 6GiB
+echo-readsvc-postgres-1 2.65% 514.3MiB / 7.661GiB
