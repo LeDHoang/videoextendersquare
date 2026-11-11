@@ -142,7 +142,7 @@ def _sse_gauges() -> dict:
     return {"open_streams": sum(messages._SSE_STREAMS.values())}
 
 
-def snapshot() -> dict:
+def snapshot(db=None) -> dict:
     from server.jobs import job_manager
     from server.routers.health import disk_status
 
@@ -156,24 +156,39 @@ def snapshot() -> dict:
         "db_pool": _pool_gauges(),
         "sse": _sse_gauges(),
         "disk": disk_status(),
-        "limits": alert_limits(),
+        "limits": alert_limits(db),
     }
 
 
-def alert_limits() -> dict:
-    """The watchdog's thresholds, served with the snapshot so the Overview colours by the same numbers."""
+def alert_limits(db=None) -> dict:
+    """The watchdog's thresholds, served with the snapshot so the Overview colours by the same numbers.
+
+    The community and abuse limits are scaled by the staff-set sensitivity
+    (``server/alert_sensitivity.py``); callers holding a request ``db`` pass it.
+    """
+    from server import alert_sensitivity
+
+    steps = alert_sensitivity.state(db)
+
+    def scaled(group: str, name: str, default: int, minimum: int) -> int:
+        return alert_sensitivity.scale(env_int(name, default, minimum=minimum), steps[group], minimum)
+
     return {
         "min_requests": MIN_REQUESTS_FOR_ALERT,
         "error_rate": env_float("SX_ALERT_5XX_RATE", 0.05),
         "p95_ms": env_int("SX_ALERT_P95_MS", 2000, minimum=1),
         "failures": env_int("SX_ALERT_FAILURES", 3, minimum=1),
         "disk_min_free_gb": env_int("SX_DISK_MIN_FREE_GB", 5, minimum=0),
-        "open_reports": env_int("SX_ALERT_OPEN_REPORTS", 20, minimum=1),
-        "open_support_requests": env_int("SX_ALERT_OPEN_SUPPORT", 10, minimum=1),
-        "user_spend_hourly": env_int("SX_ALERT_USER_SPEND_HOURLY", 300, minimum=1),
-        "accounts_per_ip": env_int("SX_ALERT_ACCOUNTS_PER_IP", 5, minimum=2),
-        "accounts_per_device": env_int("SX_ALERT_ACCOUNTS_PER_DEVICE", 3, minimum=2),
-        "new_account_spend": env_int("SX_ALERT_NEW_ACCOUNT_SPEND", 100, minimum=1),
+        "spike_min": scaled("community", "SX_MOD_SPIKE_MIN", 10, 1),
+        "open_reports": scaled("community", "SX_ALERT_OPEN_REPORTS", 20, 1),
+        "open_support_requests": scaled("community", "SX_ALERT_OPEN_SUPPORT", 10, 1),
+        "reporters_per_target": scaled("community", "SX_ALERT_REPORTERS_PER_TARGET", 3, 2),
+        "reporters_per_account": scaled("community", "SX_ALERT_REPORTERS_PER_ACCOUNT", 5, 2),
+        "new_account_activity": scaled("community", "SX_ALERT_NEW_ACCOUNT_ACTIVITY", 30, 1),
+        "user_spend_hourly": scaled("abuse", "SX_ALERT_USER_SPEND_HOURLY", 300, 1),
+        "accounts_per_ip": scaled("abuse", "SX_ALERT_ACCOUNTS_PER_IP", 5, 2),
+        "accounts_per_device": scaled("abuse", "SX_ALERT_ACCOUNTS_PER_DEVICE", 3, 2),
+        "new_account_spend": scaled("abuse", "SX_ALERT_NEW_ACCOUNT_SPEND", 100, 1),
     }
 
 
@@ -188,10 +203,11 @@ def _registration_and_report_spikes() -> dict[str, str]:
     from server.social.database import SessionLocal
     from server.social.models import Report, SupportRequest, User, utcnow
 
-    floor = env_int("SX_MOD_SPIKE_MIN", 10, minimum=1)
     now = utcnow()
     spikes = {}
     with SessionLocal() as db:
+        limits = alert_limits(db)
+        floor = limits["spike_min"]
         for label, column in (("reports", Report.created_at), ("registrations", User.created_at)):
             def count(start, end, column=column):
                 return db.query(func.count()).select_from(column.class_).filter(column > start, column <= end).scalar()
@@ -201,7 +217,6 @@ def _registration_and_report_spikes() -> dict[str, str]:
                 spikes[f"{label}_spike"] = (
                     f"{label} spike: {window['current']} in the last hour (previous hour {window['previous']})"
                 )
-        limits = alert_limits()
         for key, model, name in (("open_reports", Report, "reports"), ("open_support_requests", SupportRequest, "support requests")):
             waiting = db.query(func.count(model.id)).filter(model.status == "open").scalar() or 0
             if waiting >= limits[key]:
@@ -229,7 +244,7 @@ def _per_account_alerts() -> dict[str, str]:
 def evaluate_alerts(snap: dict) -> dict[str, str]:
     """Alert key -> message for every threshold the snapshot crosses."""
     alerts: dict[str, str] = {}
-    limits = alert_limits()
+    limits = snap.get("limits") or alert_limits()
     requests = snap["requests"]
     if requests["count"] >= MIN_REQUESTS_FOR_ALERT:
         max_rate = limits["error_rate"]

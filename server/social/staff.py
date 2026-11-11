@@ -2,7 +2,8 @@
 
 The helpers change rows inside the caller's transaction and never commit. A
 removal only hides content: a removed post keeps its R2 objects, so a restore
-can publish it again.
+can publish it again. A purge (``PURGE_ACTION``, see ``server/routers/admin.py``)
+deletes those objects; a purged post cannot be restored.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ CONTENT_MODELS = {
     "message": (DirectMessage, "sender_id"),
 }
 REMOVE_ACTION = "content.remove"
+PURGE_ACTION = "content.purge"
 
 
 def fail(status: int, code: str, message: str, field: str | None = None):
@@ -89,6 +91,10 @@ def suspend_user(db: Session, actor: User, target: User) -> None:
         fail(422, "SELF_SUSPENSION", "You cannot suspend your own account.")
     if actor.role != "admin" and target.role == "moderator":
         fail(403, "MODERATOR_PROTECTED", "Only an administrator can suspend a moderator.")
+    # An unverified account cannot sign in; suspending it would let a later
+    # reinstate make it active without the email check.
+    if target.status == "pending":
+        fail(409, "ACCOUNT_NOT_ACTIVE", "This account is not verified yet; it cannot be suspended.")
     # A deleted account stays deleted: "suspended" would make it appealable
     # and show its hidden DMs again.
     if target.status != "deleted":
@@ -150,7 +156,8 @@ def restore_target(db: Session, target_type: str, target_id: str) -> list:
 
     Content the author deleted themselves, or that went with a deleted account,
     stays deleted: only the latest staff action on the target being a removal
-    allows a restore. A post's media files are returned: a post removed while
+    allows a restore, and a purged post has no media left to publish. A post's
+    media files are returned: a post removed while
     removals still deleted its R2 objects kept local copies, which the caller
     uploads again before commit.
     """
@@ -165,8 +172,10 @@ def restore_target(db: Session, target_type: str, target_id: str) -> list:
     last = db.query(StaffAction.action).filter(
         StaffAction.target_type == target_type,
         StaffAction.target_id == target_id,
-        StaffAction.action.in_((REMOVE_ACTION, "content.restore")),
+        StaffAction.action.in_((REMOVE_ACTION, "content.restore", PURGE_ACTION)),
     ).order_by(StaffAction.created_at.desc(), StaffAction.id.desc()).first()
+    if last and last[0] == PURGE_ACTION:
+        fail(409, "MEDIA_PURGED", "This post's media was purged; it cannot be restored.")
     if not last or last[0] != REMOVE_ACTION:
         fail(409, "NOT_REMOVED_BY_STAFF", "Only content removed by staff can be restored.")
     owner = db.get(User, getattr(row, owner_field))

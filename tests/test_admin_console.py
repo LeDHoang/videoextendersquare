@@ -20,10 +20,11 @@ import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 
 from verified_signup import register_verified
-from server.routers import account_safety, admin, social, support
+from server.routers import account_safety, admin, packs, social, support
 from server.social import auth
 from server.social.database import Base, get_db
-from server.social.models import AuthSession, Comment, Post, ReelPack, ReelPackItem, Report, StaffAction, User, utcnow
+from server.social.models import AuthSession, Comment, Post, ReelPack, ReelPackItem, Report, StaffAction, Tag, User, utcnow
+from server.social.services import post_tags, sync_post_tags
 
 REPO = Path(__file__).resolve().parents[1]
 PASSWORD = "correct-horse-battery-99"
@@ -546,6 +547,195 @@ def test_staff_actions_are_immutable(app, staff):
         db.delete(db.query(StaffAction).first())
         with pytest.raises(ValueError):
             db.commit()
+
+
+def test_purge_deletes_a_removed_posts_media_and_blocks_restore(app, staff, tmp_path, monkeypatch):
+    admin_client, _ = staff["admin"]
+    mod_client, _ = staff["mod"]
+    _, target = staff["user"]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SX_MEDIA_BASE_URL", "https://media.example.com")
+    monkeypatch.setenv("R2_PUBLIC_BUCKET", "bucket")
+    deleted: list = []
+    failing = {"on": True}
+
+    def fake_delete(rels, *, strict=False):
+        assert strict
+        if failing["on"]:
+            raise admin.media_store.MediaStoreError("down")
+        deleted.extend(sorted(rels))
+        return len(deleted)
+
+    monkeypatch.setattr(admin.media_store, "delete", fake_delete)
+    with app.state.Session() as db:
+        post = Post(
+            owner_id=target["id"], media_path="uploads/clip.mp4", media_type="video", title="Clip",
+            caption="", location={}, source="upload", status="published",
+            media_files={"uploads/clip.mp4": {"bytes": 4}, "uploads/clip-poster.jpg": {"bytes": 2}},
+        )
+        db.add(post)
+        db.commit()
+        post_id = post.id
+    local = tmp_path / "output" / "uploads" / "clip.mp4"
+    local.parent.mkdir(parents=True)
+    local.write_bytes(b"clip")
+    path = f"/api/admin/content/post/{post_id}/purge"
+
+    assert code(mutate(admin_client, "POST", path, REASON)) == "CONTENT_NOT_REMOVED"
+    assert mutate(mod_client, "POST", f"/api/admin/content/post/{post_id}/remove", REASON).status_code == 200
+    assert mutate(mod_client, "POST", path, REASON).status_code == 403
+    down = mutate(admin_client, "POST", path, REASON)
+    assert down.status_code == 503 and code(down) == "MEDIA_STORE_UNAVAILABLE"
+    assert local.is_file() and "content.purge" not in [row[0] for row in actions(app)]
+
+    failing["on"] = False
+    purged = mutate(admin_client, "POST", path, {"reason": "court order"})
+    assert purged.status_code == 200, purged.text
+    assert {"uploads/clip.mp4", "uploads/clip-poster.jpg"} <= set(deleted)
+    assert "https://media.example.com/uploads/clip.mp4" in purged.json()["urls"]
+    assert "https://media.example.com/uploads/clip-poster.jpg" in purged.json()["urls"]
+    assert not local.exists()
+    assert actions(app)[-1][:3] == ("content.purge", "post", post_id)
+    listed = admin_client.get("/api/admin/content", params={"type": "post", "status": "removed"}).json()["items"]
+    assert [(row["id"], row["purged"]) for row in listed] == [(post_id, True)]
+    restore = mutate(admin_client, "POST", f"/api/admin/content/post/{post_id}/restore", REASON)
+    assert restore.status_code == 409 and code(restore) == "MEDIA_PURGED"
+
+
+def test_tags_are_blocked_and_unblocked(app, staff):
+    admin_client, _ = staff["admin"]
+    mod_client, _ = staff["mod"]
+    user_client, target = staff["user"]
+    post_id = create_post(app, target["id"])
+    with app.state.Session() as db:
+        sync_post_tags(db, db.get(Post, post_id), ["Sunset", "badword"])
+        db.commit()
+
+    assert user_client.get("/api/admin/tags").status_code == 403
+    found = mod_client.get("/api/admin/tags", params={"q": "#BadWord"}).json()["items"]
+    assert [(row["slug"], row["blocked"], row["post_count"]) for row in found] == [("badword", False, 1)]
+    assert code(mutate(mod_client, "POST", "/api/admin/tags/badword/block", {"reason": "x"})) == "REASON_REQUIRED"
+    blocked = mutate(mod_client, "POST", "/api/admin/tags/BadWord/block", REASON)
+    assert blocked.status_code == 200 and blocked.json()["tag"]["blocked"] is True
+    assert code(mutate(mod_client, "POST", "/api/admin/tags/badword/block", REASON)) == "TAG_ALREADY_BLOCKED"
+    with app.state.Session() as db:
+        post = db.get(Post, post_id)
+        assert post_tags(post) == ["sunset"]
+        # A new post cannot use the blocked tag; its other tags are kept.
+        sync_post_tags(db, post, ["badword", "sunset", "lake"])
+        db.commit()
+        assert post_tags(post) == ["sunset", "lake"]
+    only_blocked = mod_client.get("/api/admin/tags", params={"status": "blocked"}).json()["items"]
+    assert [row["slug"] for row in only_blocked] == ["badword"]
+
+    # A tag nobody used yet can be blocked ahead of time.
+    assert mutate(mod_client, "POST", "/api/admin/tags/never-used/block", REASON).status_code == 200
+    with app.state.Session() as db:
+        assert db.query(Tag).filter(Tag.slug == "never-used").one().blocked_at is not None
+
+    assert mutate(mod_client, "POST", "/api/admin/tags/badword/unblock", REASON).status_code == 403
+    assert code(mutate(admin_client, "POST", "/api/admin/tags/sunset/unblock", REASON)) == "TAG_NOT_BLOCKED"
+    assert code(mutate(admin_client, "POST", "/api/admin/tags/no-such-tag/unblock", REASON)) == "TAG_NOT_FOUND"
+    unblocked = mutate(admin_client, "POST", "/api/admin/tags/badword/unblock", REASON)
+    assert unblocked.status_code == 200 and unblocked.json()["tag"]["blocked"] is False
+    assert [row[:3] for row in actions(app)] == [
+        ("tag.block", "tag", "badword"), ("tag.block", "tag", "never-used"), ("tag.unblock", "tag", "badword"),
+    ]
+
+
+def test_blocking_a_tag_hides_it_until_unblocked(app, staff):
+    admin_client, _ = staff["admin"]
+    _, target = staff["user"]
+    post_id = create_post(app, target["id"])
+    with app.state.Session() as db:
+        sync_post_tags(db, db.get(Post, post_id), ["badword"])
+        db.commit()
+    pack_id = create_pack(app, target["id"])
+    with app.state.Session() as db:
+        packs.sync_pack_tags(db, db.get(ReelPack, pack_id), ["BadWord"])
+        db.commit()
+    assert mutate(admin_client, "POST", "/api/admin/tags/badword/block", REASON).status_code == 200
+    with app.state.Session() as db:
+        assert post_tags(db.get(Post, post_id)) == []
+        pack = db.get(ReelPack, pack_id)
+        assert packs.pack_tags(pack) == []
+        packs.sync_pack_tags(db, pack, ["badword", "alps"])
+        db.commit()
+        assert packs.pack_tags(pack) == ["alps"]
+    assert mutate(admin_client, "POST", "/api/admin/tags/badword/unblock", REASON).status_code == 200
+    with app.state.Session() as db:
+        assert post_tags(db.get(Post, post_id)) == ["badword"]
+
+
+def test_report_queue_filters_and_lists_priority_reasons_first(app, staff):
+    mod_client, _ = staff["mod"]
+    user_client, target = staff["user"]
+    other_client, other = staff["other"]
+    post_id = create_post(app, target["id"])
+
+    def report(client, target_type, target_id, reason):
+        response = mutate(client, "POST", "/api/reports", {"target_type": target_type, "target_id": target_id, "reason": reason})
+        assert response.status_code == 200, response.text
+
+    report(other_client, "user", target["id"], "spam")
+    report(other_client, "post", post_id, "child_safety")
+    report(mod_client, "post", post_id, "harassment")
+    report(user_client, "user", other["id"], "illegal")
+
+    queue = mod_client.get("/api/moderation/reports").json()["reports"]
+    assert [row["reason"] for row in queue] == ["child_safety", "illegal", "spam", "harassment"]
+    assert [row["priority"] for row in queue] == [True, True, False, False]
+    assert {row["target_id"]: row["reporter_count"] for row in queue} == {post_id: 2, target["id"]: 1, other["id"]: 1}
+    posts = mod_client.get("/api/moderation/reports", params={"target_type": "post"}).json()["reports"]
+    assert [row["reason"] for row in posts] == ["child_safety", "harassment"]
+    spam = mod_client.get("/api/moderation/reports", params={"reason": "spam"}).json()["reports"]
+    assert [row["target_id"] for row in spam] == [target["id"]]
+
+
+def test_a_report_cannot_suspend_an_unverified_account(app, staff):
+    mod_client, _ = staff["mod"]
+    other_client, _ = staff["other"]
+    with app.state.Session() as db:
+        pending = User(username="not_verified", username_norm="not_verified", status="pending")
+        db.add(pending)
+        db.commit()
+        pending_id = pending.id
+    report_id = file_report(other_client, pending_id)
+    refused = mutate(mod_client, "PATCH", f"/api/moderation/reports/{report_id}", {"action": "suspend_user"})
+    assert refused.status_code == 409 and code(refused) == "ACCOUNT_NOT_ACTIVE"
+    with app.state.Session() as db:
+        assert db.get(User, pending_id).status == "pending"
+        assert db.get(Report, report_id).status == "open"
+
+
+def test_alert_sensitivity_scales_the_limits_and_is_audited(app, staff, monkeypatch):
+    admin_client, _ = staff["admin"]
+    mod_client, _ = staff["mod"]
+    user_client, _ = staff["user"]
+    monkeypatch.setenv("SX_ALERT_ACCOUNTS_PER_IP", "5")
+    monkeypatch.setenv("SX_MOD_SPIKE_MIN", "10")
+    path = "/api/admin/alert-sensitivity"
+
+    assert user_client.get(path).status_code == 403
+    start = mod_client.get(path).json()
+    assert start["sensitivity"] == {"community": 2, "abuse": 2}
+    assert (start["limits"]["accounts_per_ip"], start["limits"]["spike_min"]) == (5, 10)
+    assert len(start["labels"]) == 5
+
+    assert mutate(mod_client, "PUT", path, {"community": 4, "abuse": 2, **REASON}).status_code == 403
+    assert code(mutate(admin_client, "PUT", path, {"community": 9, "abuse": 2, **REASON})) == "INVALID_SENSITIVITY"
+    strict = mutate(admin_client, "PUT", path, {"community": 4, "abuse": 0, "reason": "spam wave"})
+    assert strict.status_code == 200, strict.text
+    assert strict.json()["sensitivity"] == {"community": 4, "abuse": 0}
+    # Stricter community alerts fire sooner; relaxed abuse alerts fire later.
+    assert (strict.json()["limits"]["spike_min"], strict.json()["limits"]["accounts_per_ip"]) == (5, 10)
+    # Operations limits are not scaled.
+    assert strict.json()["limits"]["p95_ms"] == start["limits"]["p95_ms"]
+    assert mod_client.get(path).json()["sensitivity"] == {"community": 4, "abuse": 0}
+    with app.state.Session() as db:
+        row = db.query(StaffAction).filter(StaffAction.action == "system.alert_sensitivity").one()
+        assert row.reason == "spam wave"
+        assert row.details == {"before": {"community": 2, "abuse": 2}, "after": {"community": 4, "abuse": 0}}
 
 
 def _alembic(url: str, monkeypatch) -> Config:

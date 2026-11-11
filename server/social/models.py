@@ -202,6 +202,9 @@ class Tag(Base):
     name = Column(String(60), nullable=False)
     slug = Column(String(60), nullable=False, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    # Set by staff: a blocked tag is hidden from posts, packs, search and its
+    # own page, and new posts cannot use it. Clearing it brings the tag back.
+    blocked_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class PostTag(Base):

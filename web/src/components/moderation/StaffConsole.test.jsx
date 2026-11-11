@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AuditPanel from './AuditPanel.jsx';
 import ContentPanel from './ContentPanel.jsx';
+import SensitivityCard from './SensitivityCard.jsx';
+import TagsPanel from './TagsPanel.jsx';
 import UploadLogsPanel from './UploadLogsPanel.jsx';
 import UserDetail from './UserDetail.jsx';
 import UsersPanel from './UsersPanel.jsx';
@@ -225,5 +227,93 @@ describe('UploadLogsPanel', () => {
     expect(mocks.api.get).toHaveBeenLastCalledWith('/api/admin/upload-logs/trace/stage1');
     expect(document.querySelector('video').getAttribute('src')).toBe('https://signed.example/a');
     expect(screen.getByText('process_failed')).toBeTruthy();
+  });
+});
+
+describe('ContentPanel purge', () => {
+  const removed = { type: 'post', id: 'p1', text: 'Bad clip', status: 'deleted', removed: true, owner: 'bob', owner_id: 'u1', created_at: '2026-10-20T10:00:00', link: '/reels?post=p1' };
+
+  it('lets only an admin purge a removed post and lists the URLs to purge at the edge', async () => {
+    mocks.api.get.mockResolvedValue({ items: [removed], next_cursor: null });
+    mocks.api.post.mockResolvedValue({ item: { ...removed, purged: true }, deleted: 2, urls: ['https://media.example.com/uploads/a.mp4', 'https://media.example.com/uploads/a-poster.jpg'] });
+    const { unmount } = render(<ContentPanel viewer={MOD} onOpenUser={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Bad clip')).toBeTruthy());
+    expect(screen.queryByText('PURGE MEDIA')).toBeNull();
+    unmount();
+
+    render(<ContentPanel viewer={ADMIN} onOpenUser={() => {}} />);
+    await waitFor(() => expect(screen.getByText('PURGE MEDIA')).toBeTruthy());
+    fireEvent.click(screen.getByText('PURGE MEDIA'));
+    reasonAndSubmit('PURGE FOREVER');
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/content/post/p1/purge', { reason: 'test reason' }));
+    await waitFor(() => expect(screen.getByLabelText('URLs to purge').value).toContain('uploads/a-poster.jpg'));
+    // A purged post has nothing left to restore.
+    expect(screen.getByText(/REMOVED · MEDIA PURGED/)).toBeTruthy();
+    expect(screen.queryByText('RESTORE')).toBeNull();
+  });
+});
+
+describe('TagsPanel', () => {
+  const tag = (overrides = {}) => ({ slug: 'badword', name: 'badword', blocked: false, blocked_at: null, post_count: 3, pack_count: 1, created_at: '2026-10-01T10:00:00', ...overrides });
+
+  it('lets a moderator block a tag but not unblock one', async () => {
+    mocks.api.get.mockResolvedValue({ items: [tag(), tag({ slug: 'old', name: 'old', blocked: true, blocked_at: '2026-10-02T10:00:00' })], next_cursor: null });
+    mocks.api.post.mockResolvedValue({ tag: tag({ blocked: true }) });
+    render(<TagsPanel viewer={MOD} />);
+    await waitFor(() => expect(screen.getByText('#badword')).toBeTruthy());
+    expect(screen.queryByText('UNBLOCK')).toBeNull();
+    fireEvent.click(screen.getByText('BLOCK'));
+    reasonAndSubmit('BLOCK');
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/tags/badword/block', { reason: 'test reason' }));
+  });
+
+  it('lets an admin unblock, and block a tag nobody used yet', async () => {
+    mocks.api.get.mockResolvedValue({ items: [tag({ blocked: true, blocked_at: '2026-10-02T10:00:00' })], next_cursor: null });
+    mocks.api.post.mockResolvedValue({});
+    render(<TagsPanel viewer={ADMIN} />);
+    await waitFor(() => expect(screen.getByText('UNBLOCK')).toBeTruthy());
+    fireEvent.click(screen.getByText('UNBLOCK'));
+    reasonAndSubmit('UNBLOCK');
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/tags/badword/unblock', { reason: 'test reason' }));
+
+    mocks.api.get.mockResolvedValue({ items: [], next_cursor: null });
+    fireEvent.change(screen.getByLabelText('Search tags'), { target: { value: '#newbad' } });
+    fireEvent.submit(screen.getByRole('search'));
+    await waitFor(() => expect(screen.getByText('BLOCK #newbad')).toBeTruthy());
+    fireEvent.click(screen.getByText('BLOCK #newbad'));
+    reasonAndSubmit('BLOCK');
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/admin/tags/newbad/block', { reason: 'test reason' }));
+  });
+});
+
+describe('SensitivityCard', () => {
+  const body = (community = 2) => ({
+    sensitivity: { community, abuse: 2 },
+    labels: ['VERY RELAXED', 'RELAXED', 'NORMAL', 'STRICT', 'VERY STRICT'],
+    limits: { spike_min: 10, open_reports: 20, reporters_per_target: 3, reporters_per_account: 5, new_account_activity: 30, accounts_per_ip: 5, accounts_per_device: 3, user_spend_hourly: 300, new_account_spend: 100 },
+  });
+
+  it('shows a moderator the sliders read-only', async () => {
+    mocks.api.get.mockResolvedValue(body());
+    render(<SensitivityCard viewer={MOD} />);
+    await waitFor(() => expect(screen.getByLabelText('COMMUNITY SAFETY')).toBeTruthy());
+    expect(screen.getByLabelText('COMMUNITY SAFETY').disabled).toBe(true);
+    expect(screen.queryByText('SAVE SENSITIVITY')).toBeNull();
+    expect(screen.getByText(/REPORTERS \/ TARGET 3/)).toBeTruthy();
+  });
+
+  it('lets an admin move a slider and save it with a reason', async () => {
+    mocks.api.get.mockResolvedValue(body());
+    mocks.api.put.mockResolvedValue(body(4));
+    const onSaved = vi.fn();
+    render(<SensitivityCard viewer={ADMIN} onSaved={onSaved} />);
+    await waitFor(() => expect(screen.getByText('SAVE SENSITIVITY')).toBeTruthy());
+    expect(screen.getByText('SAVE SENSITIVITY').closest('button').disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('COMMUNITY SAFETY'), { target: { value: '4' } });
+    expect(screen.getByText('VERY STRICT')).toBeTruthy();
+    fireEvent.click(screen.getByText('SAVE SENSITIVITY'));
+    reasonAndSubmit('SAVE');
+    await waitFor(() => expect(mocks.api.put).toHaveBeenCalledWith('/api/admin/alert-sensitivity', { community: 4, abuse: 2, reason: 'test reason' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
 });

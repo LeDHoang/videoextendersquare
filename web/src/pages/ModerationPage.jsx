@@ -9,12 +9,15 @@ import ContentPanel from '../components/moderation/ContentPanel.jsx';
 import KillSwitchCard from '../components/moderation/KillSwitchCard.jsx';
 import { OpsPanel, OverviewPanel } from '../components/moderation/OverviewDashboard.jsx';
 import ReportTarget from '../components/moderation/ReportTarget.jsx';
+import SensitivityCard from '../components/moderation/SensitivityCard.jsx';
 import StaffActionDialog from '../components/moderation/StaffActionDialog.jsx';
+import TagsPanel from '../components/moderation/TagsPanel.jsx';
 import UserDetail from '../components/moderation/UserDetail.jsx';
 import UploadLogsPanel from '../components/moderation/UploadLogsPanel.jsx';
 import UsersPanel from '../components/moderation/UsersPanel.jsx';
 import { when } from '../components/moderation/usePagedList.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
+import { REPORT_REASONS } from '../utils/messageFormat.js';
 
 const TABS = [
   { value: 'overview', label: 'OVERVIEW' },
@@ -22,6 +25,7 @@ const TABS = [
   { value: 'support', label: 'SUPPORT' },
   { value: 'users', label: 'USERS' },
   { value: 'content', label: 'CONTENT' },
+  { value: 'tags', label: 'TAGS' },
   { value: 'uploads', label: 'UPLOAD LOGS' },
 ];
 const ADMIN_TABS = [...TABS, { value: 'audit', label: 'AUDIT' }];
@@ -45,6 +49,8 @@ const STATUS_FILTERS = {
     { value: 'all', label: 'ALL' },
   ],
 };
+
+const REPORT_TYPES = ['post', 'pack', 'comment', 'message', 'user'];
 
 // Inline moderator note (replaces the old window.prompt); one per queue item.
 function NoteField({ id, value, onChange, placeholder }) {
@@ -73,6 +79,7 @@ export default function ModerationPage() {
   const tab = tabs.some((option) => option.value === tabParam) ? tabParam : 'reports';
   const openUserId = tab === 'users' ? searchParams.get('user') : null;
   const [status, setStatus] = useState('open');
+  const [reportFilter, setReportFilter] = useState({ reason: '', target_type: '' });
   const [statsWindow, setStatsWindow] = useState('24h');
   const [stats, setStats] = useState(null);
   const [ops, setOps] = useState(null);
@@ -82,7 +89,9 @@ export default function ModerationPage() {
   // Rows carry the tab and filter they were loaded for, so a tab switch never renders
   // report rows with the support renderer (or the reverse) before the reload lands.
   const [loaded, setLoaded] = useState({ key: '', rows: null });
-  const queueKey = tab + ':' + status;
+  const { reason: filterReason, target_type: filterType } = reportFilter;
+  const filterKey = tab === 'reports' ? ':' + filterReason + ':' + filterType : '';
+  const queueKey = tab + ':' + status + filterKey;
   const items = loaded.key === queueKey ? loaded.rows : null;
   const setItems = (update) => setLoaded((current) => ({ ...current, rows: update(current.rows) }));
   const [notes, setNotes] = useState({});
@@ -111,17 +120,19 @@ export default function ModerationPage() {
       }
       return;
     }
-    const key = tab + ':' + status;
+    const key = tab + ':' + status + filterKey;
     try {
+      // Only the filters that are set go out, so an unfiltered queue asks as before.
+      const filters = { ...(filterReason && { reason: filterReason }), ...(filterType && { target_type: filterType }) };
       const rows = tab === 'support'
         ? (await api.get('/api/moderation/support', { status, limit: 100 })).requests
-        : (await api.get('/api/moderation/reports', { status, limit: 100 })).reports;
+        : (await api.get('/api/moderation/reports', { status, limit: 100, ...filters })).reports;
       setLoaded({ key, rows: rows || [] });
     } catch (requestError) {
       setError(requestError.message || 'Could not load the queue.');
       setLoaded({ key, rows: [] });
     }
-  }, [tab, status, loadOps]);
+  }, [tab, status, loadOps, filterKey, filterReason, filterType]);
 
   useEffect(() => {
     if (user?.can_moderate) load();
@@ -134,6 +145,7 @@ export default function ModerationPage() {
   const setNote = (id) => (value) => setNotes((current) => ({ ...current, [id]: value }));
   const switchTab = (value) => {
     setStatus('open');
+    setReportFilter({ reason: '', target_type: '' });
     setNotes({});
     setSearchParams(value === 'reports' ? {} : { tab: value }, { replace: true });
   };
@@ -206,6 +218,8 @@ export default function ModerationPage() {
       <div className="sx-moderation-report">
         <div className="sx-report-chips">
           <span className={'sx-report-chip sx-report-' + report.status}>{report.status.toUpperCase()}</span>
+          {report.priority ? <span className="sx-report-chip sx-report-open">PRIORITY</span> : null}
+          {report.reporter_count > 1 ? <span className="sx-report-chip sx-report-claimed">{report.reporter_count} REPORTS ON THIS TARGET</span> : null}
           <span className="sx-report-chip">REPORTED BY @{report.reporter || 'deleted'}</span>
           {report.claimed_by ? <span className="sx-report-chip sx-report-claimed">CLAIMED BY: @{report.claimed_by} · {when(report.claimed_at)}</span> : null}
         </div>
@@ -282,6 +296,7 @@ export default function ModerationPage() {
     reports: 'USER REPORTS · BETA SAFETY QUEUE',
     users: 'ACCOUNTS · SEARCH AND ACT',
     content: 'POSTS, REEL PACKS AND COMMENTS',
+    tags: 'TAGS · BLOCK AND UNBLOCK',
     audit: 'STAFF ACTIONS · ADMIN ONLY',
   };
   const emptyText = tab === 'support' ? 'There are no support requests here.' : 'There are no reports here.';
@@ -292,6 +307,18 @@ export default function ModerationPage() {
         <Pills options={tabs} value={tab} onChange={switchTab} ariaLabel="Moderation queue" />
         {tab === 'overview' ? <Pills options={WINDOW_OPTIONS} value={statsWindow} onChange={setStatsWindow} ariaLabel="Time window" /> : null}
         {STATUS_FILTERS[tab] ? <Pills options={STATUS_FILTERS[tab]} value={status} onChange={setStatus} ariaLabel="Status filter" /> : null}
+        {tab === 'reports' ? (
+          <>
+            <select className="sx-ps-input" aria-label="Report reason" value={reportFilter.reason} onChange={(event) => setReportFilter({ ...reportFilter, reason: event.target.value })}>
+              <option value="">ANY REASON</option>
+              {REPORT_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <select className="sx-ps-input" aria-label="Report target" value={reportFilter.target_type} onChange={(event) => setReportFilter({ ...reportFilter, target_type: event.target.value })}>
+              <option value="">ANY TARGET</option>
+              {REPORT_TYPES.map((value) => <option key={value} value={value}>{value.toUpperCase()}</option>)}
+            </select>
+          </>
+        ) : null}
       </div>
       {error ? <div className="sx-error-box" role="alert">{error}</div> : null}
       {tab === 'users' ? (
@@ -299,12 +326,14 @@ export default function ModerationPage() {
           ? <UserDetail userId={openUserId} viewer={user} onBack={() => setSearchParams({ tab: 'users' })} />
           : <UsersPanel onOpen={openUser} />
       ) : tab === 'content' ? <ContentPanel viewer={user} onOpenUser={openUser} />
+        : tab === 'tags' ? <TagsPanel viewer={user} />
         : tab === 'audit' ? <AuditPanel onOpenUser={openUser} />
         : tab === 'uploads' ? <UploadLogsPanel onOpenUser={openUser} />
         : tab === 'overview' ? (
         stats ? (
           <>
             {isAdmin ? <KillSwitchCard /> : null}
+            <SensitivityCard viewer={user} onSaved={load} />
             <OverviewPanel stats={stats} hourly={hourly} ops={ops} flagged={flagged} windowKey={statsWindow} onOpenTab={switchTab} onOpenUser={openUser} />
             {ops ? <OpsPanel ops={ops} /> : null}
           </>

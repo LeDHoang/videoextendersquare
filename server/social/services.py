@@ -111,6 +111,8 @@ def sync_post_tags(db: Session, post: Post, values: list[str]) -> None:
             tag = Tag(slug=slug, name=name)
             db.add(tag)
             db.flush()
+        elif tag.blocked_at is not None:
+            continue
         post.tags.append(PostTag(tag_id=tag.id))
 
 
@@ -148,7 +150,7 @@ def get_post_by_reference(
 
 
 def post_tags(post: Post) -> list[str]:
-    return [link.tag.name for link in post.tags if link.tag]
+    return [link.tag.name for link in post.tags if link.tag and link.tag.blocked_at is None]
 
 
 def serialize_creator(user: User, viewer_id: str | None, following_ids: set[str] | None = None) -> dict:

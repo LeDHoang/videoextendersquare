@@ -7,7 +7,8 @@ import { usePagedList, when } from './usePagedList.js';
 const ACTIONS = [
   'report.claim', 'report.release', 'report.dismiss', 'report.resolve',
   'user.suspend', 'user.reinstate', 'user.sign_out', 'user.role', 'user.credits', 'user.delete',
-  'content.remove', 'content.restore', 'support.update', 'support.file_report',
+  'content.remove', 'content.restore', 'content.purge', 'tag.block', 'tag.unblock',
+  'support.update', 'support.file_report', 'system.kill_switch', 'system.alert_sensitivity',
 ];
 
 function detailText(details) {

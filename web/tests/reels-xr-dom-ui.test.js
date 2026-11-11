@@ -198,8 +198,8 @@ test('REPORT posts the reason and details chosen in the dialog, and nothing when
 test('the report <dialog> lists exactly the reasons the server accepts', () => {
   const dialog = html.match(/<dialog[^>]*id="reportDialog"[\s\S]*?<\/dialog>/);
   assert.ok(dialog, 'reportDialog markup present');
-  const values = [...dialog[0].matchAll(/<option value="([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(values, ['spam', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other']);
+  const values = [...dialog[0].matchAll(/<option value="([a-z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(values, ['spam', 'child_safety', 'illegal', 'harassment', 'hate', 'sexual', 'violence', 'impersonation', 'privacy', 'other']);
   assert.match(dialog[0], /<textarea[^>]*maxlength="500"/);
 });
 

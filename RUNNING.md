@@ -147,6 +147,9 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_ALERT_OPEN_REPORTS` / `SX_ALERT_OPEN_SUPPORT` | `20` / `10` | Open reports / open support requests waiting before an alert; the Overview turns those checks red at the same numbers |
 | `SX_ALERT_USER_SPEND_HOURLY` / `SX_ALERT_NEW_ACCOUNT_SPEND` | `300` / `100` | Credits one account reserves in an hour, and credits an account younger than 24 h spends, before a per-account alert. Free jobs leave no billing row, so they are not counted |
 | `SX_ALERT_ACCOUNTS_PER_IP` / `SX_ALERT_ACCOUNTS_PER_DEVICE` | `5` / `3` | Distinct accounts signed in from one IP / one device (`sx_device` cookie) in 24 h before a per-account alert (minimum 2) |
+| `SX_ALERT_REPORTERS_PER_TARGET` / `SX_ALERT_REPORTERS_PER_ACCOUNT` | `3` / `5` | People with an open report on one target in 24 h, and on one account or its content in 7 days, before a per-account alert (minimum 2) |
+| `SX_ALERT_NEW_ACCOUNT_ACTIVITY` | `30` | Posts, comments and messages in one hour by an account younger than `SX_TRUST_NEW_HOURS` before a per-account alert |
+| Alert sensitivity (no variable) | NORMAL | Set by an admin on Moderation ▸ Overview and stored in the database. It scales the report, queue, spike and per-account alert limits above from x2 (VERY RELAXED) to x0.5 (VERY STRICT); the operations limits are not scaled |
 | `SX_ALERT_INTERVAL_S` / `SX_ALERT_COOLDOWN_S` | `60` / `900` | How often the watchdog checks, and how long one alert stays quiet after it fires |
 | `SX_LOG_FORMAT` | `json` | `json` (default in production) or `text`; every line carries the `request_id` echoed in `X-Request-ID` |
 | `SX_CSP_MODE` | `report` | `off` (default outside production), `report` (default in production; reports go to `POST /api/csp-report` and the log) or `enforce` |

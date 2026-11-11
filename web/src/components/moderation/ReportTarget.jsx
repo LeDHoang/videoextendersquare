@@ -7,7 +7,7 @@ function LiveLink({ href, children = 'VIEW LIVE ↗' }) {
 // Square like all our media; videos play in place so reviewers need not open the reel.
 function Media({ target }) {
   const className = 'sx-report-media';
-  if (target.removed) return <div className={className + ' sx-report-media-gone'}>REMOVED · MEDIA UNPUBLISHED</div>;
+  if (target.removed) return <div className={className + ' sx-report-media-gone'}>REMOVED · HIDDEN FROM USERS</div>;
   if (!target.preview_url && !target.poster_url) return <div className={className + ' sx-report-media-gone'}>NO PREVIEW</div>;
   if (target.media_type === 'image') {
     return <a className={className} href={target.link} target="_blank" rel="noreferrer"><img src={target.poster_url || target.preview_url} alt="" loading="lazy" /></a>;

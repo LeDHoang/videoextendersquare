@@ -311,11 +311,13 @@ def republish_paths(paths: Iterable[str | Path]) -> int:
     return count
 
 
-def delete(rels: Iterable[str]) -> int:
+def delete(rels: Iterable[str], *, strict: bool = False) -> int:
     """Best-effort removal of published objects; returns how many were requested.
 
-    Errors are logged, never raised. The CDN can keep serving a cached copy
-    for up to a day (purge by URL when urgent, see docs/deploy-runbook.md).
+    Errors are logged, never raised, unless *strict* (a staff takedown must
+    know that an object stayed): then the first failure raises MediaStoreError.
+    The CDN can keep serving a cached copy for up to a day (purge by URL when
+    urgent, see docs/deploy-runbook.md).
     """
     keys = sorted({rel for rel in rels if is_published(rel)})
     if not keys or not enabled():
@@ -327,9 +329,15 @@ def delete(rels: Iterable[str]) -> int:
                 Bucket=_bucket(),
                 Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
             )
-            for error in (result or {}).get("Errors", []):
+            errors = (result or {}).get("Errors", [])
+            for error in errors:
                 logger.error("R2 delete of %s failed: %s", error.get("Key"), error.get("Message"))
-        except Exception:
+        except Exception as ex:
             logger.exception("R2 delete of %d objects failed", len(batch))
+            if strict:
+                raise MediaStoreError(f"R2 delete failed: {ex}") from ex
+            continue
+        if strict and errors:
+            raise MediaStoreError(f"R2 delete of {errors[0].get('Key')} failed")
     return len(keys)
 

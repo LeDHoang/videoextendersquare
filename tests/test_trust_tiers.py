@@ -73,6 +73,34 @@ def test_removed_content_restricts_its_author(db):
     assert trust.tier(db, user) == "restricted"
 
 
+def test_a_reinstated_suspension_no_longer_restricts(db):
+    user = add_user(db, age=timedelta(days=40))
+    db.add(StaffAction(action="user.suspend", target_type="user", target_id=user.id, created_at=utcnow() - timedelta(days=2)))
+    db.add(StaffAction(action="user.reinstate", target_type="user", target_id=user.id, created_at=utcnow() - timedelta(days=1)))
+    db.commit()
+    assert trust.tier(db, user) == "standard"
+    # A new suspension after the reinstate restricts again.
+    db.add(StaffAction(action="user.suspend", target_type="user", target_id=user.id))
+    db.commit()
+    assert trust.tier(db, user) == "restricted"
+
+
+def test_a_restored_removal_no_longer_restricts(db):
+    user = add_user(db)
+    post = Post(owner_id=user.id, media_path="restored.jpg", media_type="image", title="")
+    other = Post(owner_id=user.id, media_path="other.jpg", media_type="image", title="")
+    db.add_all([post, other])
+    db.flush()
+    db.add(StaffAction(action="content.remove", target_type="post", target_id=post.id, created_at=utcnow() - timedelta(days=2)))
+    db.add(StaffAction(action="content.restore", target_type="post", target_id=post.id, created_at=utcnow() - timedelta(days=1)))
+    db.commit()
+    assert trust.tier(db, user) == "standard"
+    # The restore of one post does not excuse the removal of another.
+    db.add(StaffAction(action="content.remove", target_type="post", target_id=other.id))
+    db.commit()
+    assert trust.tier(db, user) == "restricted"
+
+
 def test_a_reversed_purchase_restricts(db):
     user = add_user(db, age=timedelta(days=40))
     add_purchase(db, user, "reversed", reversed_at=utcnow())
