@@ -384,6 +384,10 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "X-CSRF-Token"],
         expose_headers=["X-Request-ID"],
     )
+    # Edge-cache headers on the anonymous list routes (server/edge_cache.py).
+    from server.edge_cache import EdgeCacheMiddleware
+
+    app.add_middleware(EdgeCacheMiddleware)
     # Security headers + CSP (+ POST /api/csp-report). Wraps CORS; the
     # request-ID middleware is added after this so it stays outermost.
     from server.security_headers import install_security_headers
