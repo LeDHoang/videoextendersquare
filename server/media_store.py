@@ -90,8 +90,9 @@ def rel_path(path: str | Path) -> str | None:
     case (a path spelled under the real output root) is answered without
     touching the filesystem. Anything else takes the resolving path.
     """
-    if isinstance(path, str) and path.startswith(_ROOT_PREFIX) and ".." not in path and "//" not in path:
-        return path[len(_ROOT_PREFIX):] or None
+    text = path.as_posix() if isinstance(path, Path) else path
+    if isinstance(text, str) and text.startswith(_ROOT_PREFIX) and ".." not in text and "//" not in text:
+        return text[len(_ROOT_PREFIX):] or None
     root = _resolved_root(os.getcwd(), str(OUTPUT_ROOT))
     lexical = os.path.normpath(os.path.join(os.getcwd(), path))
     if lexical.startswith(root + os.sep):

@@ -430,3 +430,14 @@ def test_rel_path_answers_without_resolving_and_rejects_outside(tmp_path, monkey
     link = tmp_path / "link"
     link.symlink_to(tmp_path / "output")
     assert media_store.rel_path(link / "uploads" / "a.mp4") == "uploads/a.mp4"
+
+
+def test_rel_path_fast_path_covers_path_objects(monkeypatch):
+    # The reels list passes Path objects hundreds of times per request; they
+    # must not fall through to the cwd-based lookup.
+    def no_cwd():
+        raise AssertionError("rel_path touched the working directory")
+
+    monkeypatch.setattr(media_store.os, "getcwd", no_cwd)
+    assert media_store.rel_path(Path("output/uploads/a.mp4")) == "uploads/a.mp4"
+    assert media_store.rel_path(Path("output") / "uploads" / "a-poster.jpg") == "uploads/a-poster.jpg"
