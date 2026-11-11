@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import and_, event, inspect, or_
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Bundle, Session, joinedload, selectinload
 
 from server import metrics
 from server.media_store import public_url
@@ -163,12 +163,23 @@ def serialize_comment(
     viewer_id: str | None = None,
     liked_ids: set[str] | None = None,
 ) -> dict:
-    author = comment.author
+    video_path = comment.post.media_path if getattr(comment, "post", None) else None
+    return _comment_fields(comment, comment.author, video_path, viewer_id, liked_ids)
+
+
+def _comment_fields(
+    comment,
+    author,
+    video_path: str | None,
+    viewer_id: str | None = None,
+    liked_ids: set[str] | None = None,
+) -> dict:
+    """serialize_comment for any objects with the comment's and author's columns as attributes."""
     timestamp = None if comment.timestamp_ms is None else round(comment.timestamp_ms / 1000, 2)
     return {
         "id": comment.id,
         "post_id": comment.post_id,
-        "video_path": comment.post.media_path if getattr(comment, "post", None) else None,
+        "video_path": video_path,
         "timestamp": timestamp,
         "author_id": author.id,
         "author_name": author.username,
@@ -281,15 +292,61 @@ def _anonymous_reel_records(db: Session, normalized: list[str], include_comments
     return {path: store[path] for path in normalized if store[path] is not None}
 
 
+# The columns the records show, loaded as plain rows: hydrating entities cost
+# more than the queries themselves, and the entities carried every user column.
+_RECORD_POST = Bundle(
+    "post",
+    Post.id,
+    Post.media_path,
+    Post.media_type,
+    Post.title,
+    Post.caption,
+    Post.location,
+    Post.source,
+    Post.created_at,
+    Post.like_count,
+    Post.view_count,
+    Post.comment_count,
+    Post.save_count,
+    Post.duration_ms,
+    Post.width,
+    Post.height,
+    Post.dwell_ms,
+    Post.stereo_layout,
+    Post.media_files,
+)
+# What public_user and avatar_url read.
+_RECORD_CREATOR = Bundle(
+    "owner",
+    User.id,
+    User.username,
+    User.display_name,
+    User.bio,
+    User.website,
+    User.avatar_path,
+    User.avatar_color,
+    User.account_type,
+    User.post_count,
+    User.follower_count,
+    User.following_count,
+    User.created_at,
+)
+_RECORD_COMMENT = Bundle(
+    "comment",
+    Comment.id,
+    Comment.post_id,
+    Comment.author_id,
+    Comment.text,
+    Comment.timestamp_ms,
+    Comment.like_count,
+    Comment.created_at,
+)
+
+
 def _load_reel_records(db: Session, normalized: list[str], include_comments: bool) -> dict[str, dict]:
-    posts = (
-        db.query(Post)
+    rows = (
+        db.query(_RECORD_POST, _RECORD_CREATOR)
         .join(User, User.id == Post.owner_id)
-        .options(
-            joinedload(Post.owner),
-            selectinload(Post.tags).selectinload(PostTag.tag),
-            selectinload(Post.slides),
-        )
         .filter(
             Post.media_path.in_(normalized),
             Post.status == "published",
@@ -298,27 +355,53 @@ def _load_reel_records(db: Session, normalized: list[str], include_comments: boo
         )
         .all()
     )
-    post_ids = [post.id for post in posts]
-    comments_by_post: dict[str, list[Comment]] = {}
+    post_ids = [row.post.id for row in rows]
+    media_paths = {row.post.id: row.post.media_path for row in rows}
+    tags_by_post: dict[str, list[str]] = {}
+    slides_by_post: dict[str, list] = {}
+    comments_by_post: dict[str, list[dict]] = {}
+    if post_ids:
+        # The statement selectinload sent, so each post's tags keep the order the database returns.
+        links = (
+            db.query(PostTag.post_id, PostTag.tag_id, PostTag.created_at)
+            .filter(PostTag.post_id.in_(post_ids))
+            .all()
+        )
+        names: dict[str, str] = {}
+        if links:
+            tag_ids = list(dict.fromkeys(link.tag_id for link in links))
+            names = dict(db.query(Tag.id, Tag.name).filter(Tag.id.in_(tag_ids), Tag.blocked_at.is_(None)).all())
+        for link in links:
+            if link.tag_id in names:
+                tags_by_post.setdefault(link.post_id, []).append(names[link.tag_id])
+        slides = (
+            db.query(PostSlide.post_id, PostSlide.media_path, PostSlide.width, PostSlide.height)
+            .filter(PostSlide.post_id.in_(post_ids))
+            .order_by(PostSlide.position)
+            .all()
+        )
+        for slide in slides:
+            slides_by_post.setdefault(slide.post_id, []).append(slide)
     if include_comments and post_ids:
         comments = (
-            db.query(Comment)
+            db.query(_RECORD_COMMENT, _RECORD_CREATOR)
             .join(User, User.id == Comment.author_id)
-            .options(joinedload(Comment.author))
             .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None), User.status == "active")
             .order_by(Comment.created_at.asc())
             .all()
         )
-        for comment in comments:
-            comments_by_post.setdefault(comment.post_id, []).append(comment)
+        for comment, author in comments:
+            comments_by_post.setdefault(comment.post_id, []).append(
+                _comment_fields(comment, author, media_paths[comment.post_id])
+            )
 
     records: dict[str, dict] = {}
-    for post in posts:
+    for post, owner in rows:
         records[post.media_path] = {
             "post_id": post.id,
             "title": post.title,
             "caption": post.caption,
-            "tags": post_tags(post),
+            "tags": tags_by_post.get(post.id, []),
             "location": post.location or {},
             "source": post.source,
             "created_at": post.created_at.isoformat() if post.created_at else "",
@@ -331,11 +414,11 @@ def _load_reel_records(db: Session, normalized: list[str], include_comments: boo
             "height": post.height,
             "stereo_layout": post.stereo_layout or "mono",
             "media_files": post.media_files,
-            **post_image_fields(post),
-            "author_name": post.owner.username,
-            "author_avatar": (post.owner.display_name or post.owner.username or "?")[:1].upper(),
-            "author_avatar_url": avatar_url(post.owner),
-            "creator": serialize_creator(post.owner, None),
+            **post_image_fields(post, slides_by_post.get(post.id, [])),
+            "author_name": owner.username,
+            "author_avatar": (owner.display_name or owner.username or "?")[:1].upper(),
+            "author_avatar_url": avatar_url(owner),
+            "creator": serialize_creator(owner, None),
             "viewer_state": {
                 "liked": False,
                 "saved": False,
@@ -344,7 +427,7 @@ def _load_reel_records(db: Session, normalized: list[str], include_comments: boo
             },
             "liked_by_me": False,
             "saved_by_me": False,
-            "comments": [serialize_comment(comment) for comment in comments_by_post.get(post.id, [])],
+            "comments": comments_by_post.get(post.id, []),
         }
     return records
 
@@ -548,18 +631,20 @@ def _image_entry(
     }
 
 
-def post_image_fields(post: Post) -> dict:
+def post_image_fields(post: Post, slides: list | None = None) -> dict:
     """Slideshow fields for an image post: every image in order and the dwell.
 
     Video posts get an empty image list so callers can branch on media_type.
-    Every slide of a stereo post shares the post's stereo layout.
+    Every slide of a stereo post shares the post's stereo layout. *slides*
+    stands in for post.slides when *post* is a plain row.
     """
     if post.media_type != "image":
         return {"images": [], "dwell_ms": None}
     layout = post.stereo_layout or "mono"
     files = post.media_files
     images = [_image_entry(post.media_path, post.width, post.height, layout, files)]
-    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout, files) for slide in post.slides)
+    slides = post.slides if slides is None else slides
+    images.extend(_image_entry(slide.media_path, slide.width, slide.height, layout, files) for slide in slides)
     return {"images": images, "dwell_ms": int(post.dwell_ms or IMAGE_POST_DWELL_MS)}
 
 
