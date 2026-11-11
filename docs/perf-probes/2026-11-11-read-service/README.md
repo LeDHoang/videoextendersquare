@@ -22,9 +22,9 @@ What saturates (`raw/cpu.log`, `docker stats` every 8 s):
 - Through the proxy: `app-read` at 200–218 %, its `cpus: 2` cap; the writer
   idle; Postgres up to ~90 % at the feed's peak. The gain is bounded by the
   readers' cap, so `SX_READ_WORKERS` and `cpus` are the knobs.
-- The player gains less than the feed: its response is larger and its per-
-  request work is mostly the shared reel-record build, so the proxy and the
-  load generator on the same laptop take a larger share.
+- The player gains less than the feed. Not measured why; one guess is that its
+  larger response gives the proxy and the load generator, on the same laptop,
+  a larger share of the CPU.
 
 The writer-alone baseline is this branch's writer, so it already pays the
 shared rate-limit insert and commit on the feed. Both runs used one stack and
@@ -75,6 +75,9 @@ on PostgreSQL:
 
 Under READ COMMITTED every check in flight at `limit - 1` sees the same count.
 The per-key advisory lock makes the checks take turns until the commit. It made
-no measurable difference to the feed's ceiling (63.6 → 64.4 rps).
+no measurable difference to the feed's ceiling (63.6 → 64.4 rps), but that run
+sends a new IP per request, so no two checks ever waited on one lock. Requests
+from one IP queue behind each other for one insert and commit each; a single IP
+is held to 60 per minute anyway.
 `tests/test_rate_limiter.py -k shared` runs the cross-process check on
 PostgreSQL in CI.
