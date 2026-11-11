@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Button, Dropdown, Field } from '../components/ui/controls.jsx';
@@ -15,6 +15,13 @@ const VISIBILITY_OPTIONS = [
 
 const PACK_MIN_PUBLISHED_ITEMS = 3;
 const PACK_MAX_ITEMS = 30;
+// The reel library comes from /api/reels in pages of this many; LOAD MORE fetches the next.
+const LIBRARY_PAGE_SIZE = 60;
+
+// Feed rows carry post_id; the editor keys members (and post_ids) on id.
+function libraryPosts(result) {
+  return (result.videos || []).filter((row) => row && row.post_id).map((row) => ({ ...row, id: row.post_id }));
+}
 
 function move(items, from, to) {
   if (to < 0 || to >= items.length || from === to) return items;
@@ -32,6 +39,10 @@ export default function PackEditorPage() {
   const packCreationEnabled = config?.features?.reel_packs?.creation !== false;
   const [available, setAvailable] = useState(null);
   const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryCursor, setLibraryCursor] = useState(null);
+  const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
+  const librarySearchNow = useRef(librarySearch);
+  librarySearchNow.current = librarySearch;
   const [selected, setSelected] = useState([]);
   const [form, setForm] = useState({
     title: '',
@@ -77,18 +88,40 @@ export default function PackEditorPage() {
   useEffect(() => {
     let alive = true;
     const timer = setTimeout(() => {
-      api.get('/api/reels', { search: librarySearch, sort: 'alphabetical', codec: 'all' })
+      api.get('/api/reels', { search: librarySearch, sort: 'alphabetical', codec: 'all', limit: LIBRARY_PAGE_SIZE })
         .then((result) => {
           if (!alive) return;
-          // Feed rows carry post_id; the editor keys members (and post_ids) on id.
-          setAvailable((result.videos || []).filter((row) => row && row.post_id).map((row) => ({ ...row, id: row.post_id })));
+          setAvailable(libraryPosts(result));
+          setLibraryCursor(result.next_cursor || null);
         })
         .catch(() => {
-          if (alive) setAvailable([]);
+          if (!alive) return;
+          setAvailable([]);
+          setLibraryCursor(null);
         });
     }, 250);
     return () => { alive = false; clearTimeout(timer); };
   }, [librarySearch]);
+
+  const loadMoreLibrary = async () => {
+    const cursor = libraryCursor;
+    const search = librarySearch;
+    if (!cursor || libraryLoadingMore) return;
+    setLibraryLoadingMore(true);
+    try {
+      const result = await api.get('/api/reels', { search, sort: 'alphabetical', codec: 'all', limit: LIBRARY_PAGE_SIZE, cursor });
+      if (librarySearchNow.current !== search) return;
+      setAvailable((rows) => {
+        const seen = new Set((rows || []).map((post) => post.id));
+        return [...(rows || []), ...libraryPosts(result).filter((post) => !seen.has(post.id))];
+      });
+      setLibraryCursor(result.next_cursor || null);
+    } catch {
+      /* Keep the loaded reels; LOAD MORE stays to retry. */
+    } finally {
+      setLibraryLoadingMore(false);
+    }
+  };
 
   const selectedIds = useMemo(() => new Set(selected.map((post) => post.id)), [selected]);
 
@@ -303,6 +336,11 @@ export default function PackEditorPage() {
             );
           })}
         </div>
+        {libraryCursor ? (
+          <div className="sx-profile-load-more">
+            <Button loading={libraryLoadingMore} disabled={libraryLoadingMore} onClick={loadMoreLibrary}>LOAD MORE</Button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

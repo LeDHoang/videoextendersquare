@@ -59,5 +59,24 @@ window.ReelsFeedState = window.ReelsFeedState || (function () {
     return Number(expected) === Number(current);
   }
 
-  return { capture, locationParams, fromPage, restore, nextGeneration, isCurrent };
+  // Paged /api/reels rows carry comments_count, not comments: the list is fetched once,
+  // when the reel is viewed. A failed fetch is not retried; a comment posted meanwhile is kept.
+  const commentLoads = new WeakMap();
+  function loadComments(item, request) {
+    if (!item || item.comments !== undefined || !item.post_id) return null;
+    if (!commentLoads.has(item)) {
+      commentLoads.set(item, Promise.resolve()
+        .then(() => request('/api/posts/' + encodeURIComponent(item.post_id) + '/comments'))
+        .then((res) => {
+          const fetched = res && Array.isArray(res.comments) ? res.comments : [];
+          const ids = new Set(fetched.map((comment) => comment && comment.id));
+          item.comments = fetched.concat((item.comments || []).filter((comment) => comment && !ids.has(comment.id)));
+          item.comments_count = item.comments.length;
+          return item;
+        }, () => null));
+    }
+    return commentLoads.get(item);
+  }
+
+  return { capture, locationParams, fromPage, restore, nextGeneration, isCurrent, loadComments };
 })();

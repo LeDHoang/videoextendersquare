@@ -76,6 +76,9 @@
     profile: [PROFILE_COLS, GRID_ROWS],
   };
 
+  // /api/reels grids load this many tiles; scrolling near the end fetches the next page.
+  const REEL_PAGE = 24;
+
   function maxScroll(route) {
     const page = PAGE[route.section] || [GRID_COLS, GRID_ROWS];
     return Math.max(0, Math.ceil((route.items || []).length / page[0]) - page[1]);
@@ -144,8 +147,8 @@
   // Data source for each grid section: request path + query, and how to read the reply.
   function sourceFor(route) {
     switch (route.section) {
-      case 'explore': return { path: '/api/reels', query: { sort: 'shuffle' } };
-      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'shuffle' } };
+      case 'explore': return { path: '/api/reels', query: { sort: 'shuffle', limit: REEL_PAGE }, paged: true };
+      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'shuffle', limit: REEL_PAGE }, paged: true };
       case 'tag': return {
         path: '/api/reels/tags/' + enc(route.arg), query: {},
         related: (r) => chips(r.related_tags, '/explore/tag/'),
@@ -159,7 +162,7 @@
       // Profile: the author's reels in player shape, the user card for the hero
       // column, and their packs for the highlights strip.
       case 'profile': return {
-        path: '/api/reels', query: { author: route.arg, sort: 'newest' },
+        path: '/api/reels', query: { author: route.arg, sort: 'newest', limit: REEL_PAGE }, paged: true,
         detail: '/api/users/' + enc(route.arg),
         highlights: '/api/users/' + enc(route.arg) + '/packs',
         detailOf: (r, det) => (det && det.user) || null,
@@ -319,6 +322,7 @@
       route.items = [];
       route.related = [];
       route.scroll = 0;
+      route.cursor = null;
       route.detail = null;
       route.highlights = [];
       route.label = src.label ? src.label({}) : '';
@@ -333,6 +337,7 @@
         if (stack.indexOf(route) < 0) return;
         const r = res || {};
         route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
+        route.cursor = (src.paged && r.next_cursor) || null;
         route.detail = src.detailOf ? src.detailOf(r, det) : null;
         route.highlights = ((hl && hl.items) || []).filter((p) => p.status === 'published');
         route.related = src.related ? src.related(r) : [];
@@ -363,8 +368,25 @@
       const next = Math.max(0, Math.min(maxScroll(route), (route.scroll || 0) + (delta | 0)));
       if (next === route.scroll) return false;
       route.scroll = next;
+      if (next >= maxScroll(route) - 1) loadMore(route);
       dirty();
       return true;
+    }
+
+    // Next /api/reels page onto the grid; a reply for a route no longer on the stack is dropped.
+    function loadMore(route) {
+      const src = route.cursor && !route.loadingMore && d.request ? sourceFor(route) : null;
+      if (!src || !src.paged) return;
+      const cursor = route.cursor;
+      route.loadingMore = true;
+      Promise.resolve().then(() => d.request(src.path, Object.assign({}, src.query, { cursor }))).then((r) => {
+        route.loadingMore = false;
+        if (stack.indexOf(route) < 0 || route.cursor !== cursor) return;
+        const seen = new Set(route.items.map((v) => v.path));
+        route.items = route.items.concat(((r && r.videos) || []).filter((v) => v && !seen.has(v.path)));
+        route.cursor = (r && r.next_cursor) || null;
+        dirty();
+      }, () => { route.loadingMore = false; });
     }
 
     // New message: people matching the typed name, as the 2D NEW MESSAGE search lists them

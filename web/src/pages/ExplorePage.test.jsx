@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ExplorePage from './ExplorePage.jsx';
@@ -102,5 +102,28 @@ describe('ExplorePage beta controls', () => {
     expect(screen.getByTitle('Refresh discovery')).toBeInTheDocument();
     const stats = within(screen.getByRole('group', { name: 'Summary statistics' }));
     expect(stats.getByText('FOLDERS')).toBeInTheDocument();
+  });
+
+  it('loads reels a page at a time and appends the next page', async () => {
+    const reel = (name) => ({ path: 'published/' + name + '.mp4', title: 'Reel ' + name, preview_url: '/p.mp4', poster_url: '/p.jpg' });
+    mocks.api.get.mockImplementation(async (path, params) => {
+      if (path === '/api/packs') return { total: 0, items: [], next_offset: null };
+      return params.cursor === 'page-2'
+        ? { ...reels, count: 3, videos: [reel('B'), reel('C')], next_cursor: null }
+        : { ...reels, count: 3, videos: [reel('A')], next_cursor: 'page-2' };
+    });
+    renderPage();
+    await screen.findByText('Reel A');
+
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ limit: 48 }));
+    expect(mocks.api.get.mock.calls.find(([path]) => path === '/api/reels')[1]).not.toHaveProperty('cursor');
+    expect(within(screen.getByRole('group', { name: 'Summary statistics' })).getByText('3')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'LOAD MORE REELS' }));
+
+    await screen.findByText('Reel C');
+    expect(screen.getAllByTestId('tile').map((tile) => tile.textContent)).toEqual(['Reel A', 'Reel B', 'Reel C']);
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ cursor: 'page-2', limit: 48, sort: 'shuffle' }));
+    expect(screen.queryByRole('button', { name: 'LOAD MORE REELS' })).not.toBeInTheDocument();
   });
 });

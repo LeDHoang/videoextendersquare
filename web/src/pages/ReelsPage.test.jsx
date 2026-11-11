@@ -53,6 +53,21 @@ describe('ReelsPage ?play= deep link', () => {
     expect(screen.queryByText(/PLAYING/)).toBeNull();
     expect(mocks.playerProps.initialIndex ?? 0).toBe(0);
   });
+
+  it('fetches one page and still sends a ?play= path that is past it', async () => {
+    mocks.api.get.mockResolvedValue({
+      total: 90,
+      count: 90,
+      folders: [],
+      videos: [{ path: 'first.mp4', filename: 'first.mp4', post_id: 'post-1' }],
+      next_cursor: 'c1',
+    });
+    renderAt('/reels?play=later/deep.mp4');
+
+    await waitFor(() => expect(mocks.playerProps?.params.play).toBe('later/deep.mp4'));
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ limit: 60 }));
+    expect(mocks.playerProps.params.post).toBeUndefined();
+  });
 });
 
 const reels = {
