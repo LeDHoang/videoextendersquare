@@ -1,0 +1,12 @@
+reels_feed {"conc": 1, "n": 223, "statuses": {"200": 223}, "good_rps": 11.13, "p50": 87, "p95": 104, "p99": 221, "max": 225}
+reels_feed {"conc": 2, "n": 249, "statuses": {"200": 249}, "good_rps": 12.31, "p50": 155, "p95": 246, "p99": 299, "max": 307}
+reels_feed {"conc": 5, "n": 238, "statuses": {"200": 238}, "good_rps": 11.8, "p50": 404, "p95": 559, "p99": 630, "max": 1041}
+reels_feed {"conc": 10, "n": 217, "statuses": {"200": 217}, "good_rps": 10.65, "p50": 926, "p95": 1118, "p99": 1206, "max": 2394}
+reels_feed {"conc": 15, "n": 217, "statuses": {"200": 217}, "good_rps": 10.48, "p50": 1403, "p95": 1608, "p99": 1841, "max": 3651}
+reels_feed {"conc": 25, "n": 224, "statuses": {"200": 224}, "good_rps": 10.55, "p50": 2167, "p95": 3842, "p99": 5050, "max": 5236}
+creators {"conc": 1, "n": 404, "statuses": {"200": 404}, "good_rps": 20.18, "p50": 42, "p95": 63, "p99": 183, "max": 210}
+creators {"conc": 2, "n": 404, "statuses": {"200": 404}, "good_rps": 20.15, "p50": 77, "p95": 216, "p99": 227, "max": 231}
+creators {"conc": 5, "n": 384, "statuses": {"200": 384}, "good_rps": 19.1, "p50": 233, "p95": 374, "p99": 428, "max": 444}
+creators {"conc": 10, "n": 360, "statuses": {"200": 360}, "good_rps": 17.64, "p50": 562, "p95": 734, "p99": 851, "max": 981}
+creators {"conc": 15, "n": 331, "statuses": {"200": 331}, "good_rps": 15.96, "p50": 912, "p95": 1265, "p99": 1414, "max": 1732}
+creators {"conc": 25, "n": 350, "statuses": {"200": 350}, "good_rps": 16.47, "p50": 1446, "p95": 2261, "p99": 2774, "max": 3676}
