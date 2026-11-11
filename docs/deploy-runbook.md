@@ -29,7 +29,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - the Transform Rule, the Cache Rules, SSL/TLS Full and Always Use HTTPS;
   - the 30-day lifecycle rule on the backup bucket;
   - `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` and `SX_MEDIA_BASE_URL` in the VPS `.env`, app restarted.
-  - Checked with curl: HTTP→HTTPS 301; `/api/*` always `cf-cache-status: DYNAMIC`; media returns 206 with ACAO, `Vary: Origin` and `Content-Range`, and `MISS` then `HIT`.
+  - Checked with curl: HTTP→HTTPS 301; `/api/*` always `cf-cache-status: DYNAMIC` (until the anonymous list rule below is applied); media returns 206 with ACAO, `Vary: Origin` and `Content-Range`, and `MISS` then `HIT`.
 - Origin traffic is restricted to the Tunnel (checked 2026-11-07): ufw allows only 22/tcp, the app listens on loopback only, and a forged `CF-Connecting-IP` is rejected by Cloudflare.
 - HSTS is on (2026-11-07): `max-age=2592000`, 1 month, the lowest the dashboard offers; no includeSubDomains, no preload.
 - Still open: SMTP. The restore drill and the nightly backup to the private bucket are done (2026-11-01).
@@ -72,6 +72,40 @@ Complete each item once per environment. Tick it in your own copy of this list.
   1. When the hostname is `<domain>`, the URI path starts with `/api/` and does **not** start with `/api/reels/map-tiles/`: **Bypass cache**. Without this rule, authenticated JSON and SSE could be cached at the edge.
   2. When the hostname is `media.<domain>`: **Eligible for cache** ("Cache Everything"), with edge TTL respecting origin or 1 day.
   - Map tiles (`/api/reels/map-tiles/*`) stay cacheable. They are public, and the app sends cache headers for them.
+- [ ] **Cache Rule for anonymous list responses (not applied yet).** It lets the edge answer anonymous visitors from the nearest colo instead of Oregon, about 200 ms per request from Asia (`docs/perf-probes/2026-11-11/bottlenecks.md`, fix 5).
+  - What the app sends (`server/edge_cache.py`), for `GET` and `HEAD` of exactly `/api/reels`, `/api/reels/tags`, `/api/reels/locations` and `/api/config`:
+    - no `echo_session` cookie, status 200, no `refresh` parameter: `Cache-Control: public, max-age=0, s-maxage=30`;
+    - anything else (a session cookie, valid or not; an error; `refresh=true`): `Cache-Control: private, no-store`;
+    - `Vary: Cookie` on both.
+  - Why only these four: an anonymous response of each has no viewer fields and depends only on the URL. Auth is the `echo_session` cookie only, and none of them sets a cookie. `/api/reels/feed`, `/api/reels/tags/<tag>`, `/api/reels/locations/<key>`, `/api/reels/locations/activity` and `/api/config/models` are not included.
+  - The cookie check in the expression is the only guard at the edge. As far as we know, Cloudflare ignores `Vary: Cookie` when it builds the cache key, so a rule without the cookie check would serve one cached copy to everybody. The app still marks signed-in responses `private, no-store` in case the rule is wrong.
+  - Steps:
+    1. Edit rule 1 so it leaves these requests out. Append to its expression:
+       ```
+       and not (http.request.uri.path in {"/api/reels" "/api/reels/tags" "/api/reels/locations" "/api/config"} and not http.cookie contains "echo_session=")
+       ```
+    2. Add a rule after rule 1, named "Anonymous list responses":
+       - Expression:
+         ```
+         (http.host eq "<domain>" and http.request.method in {"GET" "HEAD"} and http.request.uri.path in {"/api/reels" "/api/reels/tags" "/api/reels/locations" "/api/config"} and not http.cookie contains "echo_session=")
+         ```
+       - Cache eligibility: **Eligible for cache**.
+       - Edge TTL: **Use cache-control header if present, bypass cache if not**. The app's `s-maxage=30` sets the TTL. Errors and signed-in responses carry `no-store`, so they are never stored.
+       - Browser TTL: **Respect origin TTL**. A zone-wide Browser Cache TTL must not raise `max-age=0`, or a browser would show the anonymous list after sign-in.
+       - Cache key: leave the default. The query string is part of the key, and the key must not ignore it.
+    - Use exact paths (`in {...}`), never "starts with". A prefix would also catch `/api/reels/feed` and `/api/config/models`.
+    - Edits to rule 1 make the order safe either way. Cloudflare applies every matching Cache Rule in order, and a later rule overrides an earlier one's setting.
+  - Verify after applying:
+    ```bash
+    curl -s -o /dev/null -D - 'https://<domain>/api/reels/tags' | grep -iE 'cf-cache-status|cache-control'
+    curl -s -o /dev/null -D - 'https://<domain>/api/reels/tags' | grep -iE 'cf-cache-status|cache-control'
+    curl -s -o /dev/null -D - -H 'Cookie: echo_session=x' 'https://<domain>/api/reels/tags' | grep -iE 'cf-cache-status|cache-control'
+    curl -s -o /dev/null -D - 'https://<domain>/api/reels/feed' | grep -iE 'cf-cache-status'
+    ```
+    Expect `MISS` then `HIT` with `public, max-age=0, s-maxage=30` unchanged. With the cookie, expect `DYNAMIC` (or `BYPASS`) and `private, no-store`. `/api/reels/feed` stays `DYNAMIC`.
+  - Signed in, the site must still show your likes, saves and follows after a reload. Sign out, then check that the feed shows none of them.
+  - What goes stale for anonymous visitors, per colo, for up to 30 s: a new post, a removed or hidden post, counts (likes, views), tag and location suggestions, and the kill-switch state in `/api/config`. Publishing clears the app's own caches, and the app filters hidden posts on every request, so for those the edge TTL is the whole delay. Counts can lag 10 s more, from the app's reel-record cache. The kill switch is enforced on the server, so a stale `/api/config` only shows a job button as on for up to 30 s. Signed-in viewers see no added staleness.
+  - To roll back, disable the new rule. Rule 1 then sends the four paths to the default behaviour, which does not cache JSON.
 - [ ] **Map tiles: keep OpenStreetMap for the beta.** The tile proxy (`server/routers/map_tiles.py`) defaults to the keyless OSM standard tiles. It meets the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) at invite-only scale:
   - it sends an identifying `User-Agent`;
   - it fetches each tile upstream at most once and caches it on disk;
@@ -194,6 +228,7 @@ Removing a post only hides it in the app. Its R2 objects stay, and their URLs ke
 1. Remove the content in the app (admin delete).
 2. Delete the post's objects in R2: in `/moderation` → CONTENT, find the removed post and press **PURGE MEDIA** (admin only). It deletes every object of the post (video, poster, previews, web proxy, stereo variants, slides) and lists their URLs. It cannot be undone and the post cannot be restored afterwards. It does not delete the job result under `jobs/<hash>/` (public, removed by the lifecycle rule after 30 days) or the source copy in the log bucket: open the post under UPLOAD LOGS to find both, and delete them in R2 by hand when the case requires it. If the bucket cannot be reached it answers 503 and changes nothing; then delete `uploads/<stem>.<ext>` and every `uploads/<stem>-*` object by hand in R2 (`posts.media_files` lists every key).
 3. Go to Cloudflare → Caching → Configuration → **Custom Purge** → purge by URL. Purge every URL that PURGE MEDIA listed.
+   - Once the anonymous list rule is applied, the edge also keeps listing a removed post to anonymous visitors for up to 30 s per colo (in `/api/reels`, tag and location suggestions). That expires by itself, and purge by URL cannot reach every query-string variant. If it cannot wait 30 s, use **Purge Everything** for the zone. That also empties the media cache, so R2 serves every object again once.
 4. Verify the takedown:
    ```bash
    curl -sI https://media.<domain>/<key>
