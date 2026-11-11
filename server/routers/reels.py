@@ -40,6 +40,7 @@ from server.social.services import (
     get_post_by_reference,
     metadata_for_paths,
     reel_records,
+    reel_records_version,
     rerecord_media_files,
     scoped_media_paths,
     slide_media_paths,
@@ -173,6 +174,7 @@ def _save_comments_raw(data: dict[str, list[dict]]) -> None:
     """Save all comments to output/reels_comments.json."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     COMMENTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _payload_cache.update(entries={})  # entries carry this file's data
 
 
 def _generate_seed_comments(rel_path: str, filename: str) -> list[dict]:
@@ -1167,6 +1169,7 @@ def _save_meta_raw(data: dict[str, dict]) -> None:
     """Save all reel metadata to output/reels_meta.json."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     META_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _payload_cache.update(entries={})  # entries carry this file's data
 
 
 def _seed_meta(rel_path: str, filename: str, rng: random.Random) -> dict:
@@ -1436,7 +1439,67 @@ def _sibling_media_url(play_path: str, sibling: Path, output_root: Path, files: 
     return None
 
 
+# Anonymous payload entries by (rel_path, codec mode), each with the scanned
+# item it was built from. They live as long as the reel records they were
+# built from (see reel_records_version) and that item.
+_payload_cache: dict = {"records": None, "entries": {}}
+_PAYLOAD_VIEWER_FIELDS = ("creator", "viewer_state", "liked_by_me", "saved_by_me", "comments")
+
+
 def _build_payload(
+    videos: list[dict],
+    codec: str | None,
+    tunnel: str = "",
+    viewer_id: str | None = None,
+    db: Session | None = None,
+) -> list[dict]:
+    """_build_payload_entries, building each entry once per reel record version.
+
+    Only a post's viewer fields differ between viewers, so a signed-in viewer
+    gets the anonymous entry with those fields from their own record.
+    """
+    if tunnel.strip():
+        return _build_payload_entries(videos, codec, tunnel=tunnel, viewer_id=viewer_id, db=db)
+    records = reel_records_version()
+    if _payload_cache["records"] is not records:
+        _payload_cache.update(records=records, entries={})
+    entries = _payload_cache["entries"]
+    mode = _codec_key(codec)
+    missing = [item for item in videos if entries.get((item["rel_path"], mode), (None,))[0] is not item]
+    if missing:
+        built = {entry["path"]: entry for entry in _build_payload_entries(missing, codec, db=db)}
+        for item in missing:
+            entries[(item["rel_path"], mode)] = (item, built.get(item["rel_path"]))
+    shared = {item["rel_path"]: entries[(item["rel_path"], mode)][1] for item in videos}
+    if viewer_id is None:
+        return [dict(shared[item["rel_path"]]) for item in videos if shared[item["rel_path"]] is not None]
+
+    try:
+        own_rows = reel_records([item["rel_path"] for item in videos], viewer_id=viewer_id, db=db)
+    except SQLAlchemyError as exc:
+        raise _reel_data_unavailable() from exc
+    # A post this viewer has no record of (its owner is blocked) is built as before.
+    unshared = [
+        item for item in videos
+        if item["rel_path"] not in own_rows and (shared[item["rel_path"]] or {}).get("post_id")
+    ]
+    own = {
+        entry["path"]: entry
+        for entry in (_build_payload_entries(unshared, codec, viewer_id=viewer_id, db=db) if unshared else [])
+    }
+    unshared_paths = {item["rel_path"] for item in unshared}
+    payload = []
+    for item in videos:
+        path = item["rel_path"]
+        entry = own.get(path) if path in unshared_paths else shared[path]
+        if entry is None:
+            continue
+        row = own_rows.get(path)
+        payload.append({**entry, **{field: row[field] for field in _PAYLOAD_VIEWER_FIELDS}} if row else dict(entry))
+    return payload
+
+
+def _build_payload_entries(
     videos: list[dict],
     codec: str | None,
     tunnel: str = "",

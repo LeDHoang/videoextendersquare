@@ -262,10 +262,15 @@ def reel_records(
         return _reel_records_for_viewer(db, records, viewer_id, include_comments)
 
 
-def _anonymous_reel_records(db: Session, normalized: list[str], include_comments: bool) -> dict[str, dict]:
+def reel_records_version(include_comments: bool = True) -> dict:
+    """The current store of cached records. A different object means the records may have changed."""
     if time.monotonic() - _reel_records_cache["at"] > _REEL_RECORDS_TTL:
         invalidate_reel_records()
-    store = _reel_records_cache[include_comments]
+    return _reel_records_cache[include_comments]
+
+
+def _anonymous_reel_records(db: Session, normalized: list[str], include_comments: bool) -> dict[str, dict]:
+    store = reel_records_version(include_comments)
     missing = [path for path in dict.fromkeys(normalized) if path not in store]
     if missing:
         loaded = _load_reel_records(db, missing, include_comments)
