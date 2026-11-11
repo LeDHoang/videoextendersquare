@@ -26,6 +26,7 @@ from server import settings
 from server.settings import env_int
 from server.billing.service import flag_enabled, grant_credits
 from server.media_store import public_url
+from server.read_limit import HEAVY_READ
 from server import media as media_service
 from server.social.auth import (
     AuthContext,
@@ -1663,7 +1664,7 @@ def get_feed(
     }
 
 
-@router.get("/api/search/suggestions")
+@router.get("/api/search/suggestions", dependencies=[HEAVY_READ])
 def search_suggestions(
     q: str = "",
     limit: int = 6,

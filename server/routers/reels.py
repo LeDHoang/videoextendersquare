@@ -25,6 +25,7 @@ from server.security_headers import nonce_request_html
 from server import media as SM
 from server import kill_switch, metrics, quotas
 from server.jobs import job_manager
+from server.read_limit import HEAVY_READ
 from server.settings import is_production
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
@@ -2002,7 +2003,7 @@ def _recommendation_feed_data(
 
 # response_model makes FastAPI serialize the ~600 KB list with pydantic-core
 # instead of walking it with jsonable_encoder (about 4 ms vs 42 ms in production).
-@router.get("", response_model=dict)
+@router.get("", response_model=dict, dependencies=[HEAVY_READ])
 def list_reels(
     folder: str | None = None,
     codec: str | None = "hevc",
@@ -2069,7 +2070,7 @@ def list_reels(
     }
 
 
-@router.get("/feed")
+@router.get("/feed", dependencies=[HEAVY_READ])
 def reels_feed(
     request: Request,
     response: Response,
@@ -2139,13 +2140,13 @@ def tag_suggestions(q: str = "", limit: int = 8, db: Session | None = None) -> d
     }
 
 
-@router.get("/tags")
+@router.get("/tags", dependencies=[HEAVY_READ])
 def list_reel_tags(q: str = "", limit: int = 8):
     """Return ranked tag suggestions for header search and discovery UI."""
     return tag_suggestions(q, limit)
 
 
-@router.get("/tags/{tag_name}")
+@router.get("/tags/{tag_name}", dependencies=[HEAVY_READ])
 def get_reel_tag(
     tag_name: str,
     codec: str | None = "hevc",
@@ -2191,7 +2192,7 @@ def get_reel_tag(
     }
 
 
-@router.get("/locations")
+@router.get("/locations", dependencies=[HEAVY_READ])
 def list_reel_locations(q: str = "", limit: int = 8):
     """Return ranked location suggestions for discovery UI."""
     bounded_limit = max(1, min(int(limit), 20))
@@ -2231,7 +2232,7 @@ def reels_earth_texture():
     )
 
 
-@router.get("/locations/activity")
+@router.get("/locations/activity", dependencies=[HEAVY_READ])
 def list_reel_location_activity(
     window_days: int = RECENT_ACTIVITY_DEFAULT_DAYS,
     limit: int = 128,
@@ -2291,7 +2292,7 @@ def list_reel_location_activity(
     }
 
 
-@router.get("/locations/{location_key}")
+@router.get("/locations/{location_key}", dependencies=[HEAVY_READ])
 def get_reel_location(
     location_key: str,
     codec: str | None = "hevc",
@@ -2827,7 +2828,7 @@ def _json_for_script(payload) -> str:
     return json.dumps(payload).replace("</", "<\\/")
 
 
-@router.get("/player", response_class=HTMLResponse)
+@router.get("/player", response_class=HTMLResponse, dependencies=[HEAVY_READ])
 def reels_player(
     request: Request,
     response: Response,
@@ -3067,7 +3068,7 @@ def reels_player_script(name: str, v: str = ""):
     )
 
 
-@router.get("/player-inline")
+@router.get("/player-inline", dependencies=[HEAVY_READ])
 def reels_player_inline(
     request: Request,
     response: Response,
