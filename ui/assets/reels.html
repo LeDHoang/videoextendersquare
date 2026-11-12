@@ -2888,6 +2888,22 @@
       if (!entry.vr2k_url || vrLinkMbps() >= VR_MASTER_MIN_MBPS) return false;
       try { return typeof WebXRVR !== 'undefined' && !!(WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
     }
+    // 2D viewers play the 2k rendition too: a 654 px player gains nothing
+    // from a 3840 px master. Mono posts only (a stereo post's 2k file holds
+    // both eyes), and since it is HEVC only where this browser decodes HEVC
+    // and the feed did not hand this viewer an H.264 proxy. One that fails
+    // to load falls back to `url` (handleVr2kFailure).
+    let hevcPlayable = null;
+    function canPlayHevc() {
+      if (hevcPlayable === null) {
+        try { hevcPlayable = !!(video.canPlayType && video.canPlayType('video/mp4; codecs="hvc1.1.6.L150.90"')); }
+        catch (e) { hevcPlayable = false; }
+      }
+      return hevcPlayable;
+    }
+    function wantsVr2kIn2d(entry, item) {
+      return !!entry.vr2k_url && !entry.is_proxy && !(item && item.vr2kFailed) && canPlayHevc();
+    }
 
     // What to load for a post or slide right now: {url, layout, crop}.
     // `layout` is the stereo layout of that file; `crop` names the layout to
@@ -2904,6 +2920,9 @@
         return { url: wantsVr2k(entry) ? entry.vr2k_url : entry.stereo_url, layout: layout, crop: '' };
       }
       if (layout === 'mono' && wantsVr2k(entry)) return { url: entry.vr2k_url, layout: 'mono', crop: '' };
+      if (layout === 'mono' && !wantsStereoSource() && wantsVr2kIn2d(entry, item)) {
+        return { url: entry.vr2k_url, layout: 'mono', crop: '' };
+      }
       const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
       return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
     }
@@ -3485,6 +3504,17 @@
       } else {
         showFlash('3D UNAVAILABLE — SHOWING 2D');
       }
+      return true;
+    }
+
+    // A 2k rendition that fails in 2D (no HEVC decoder after all, or a lost
+    // file) falls back to the post's url for the rest of the visit.
+    // Returns true when handled.
+    function handleVr2kFailure(failedItem) {
+      if (!failedItem || failedItem.vr2kFailed || wantsStereoSource()) return false;
+      if (!failedItem.vr2k_url || playbackFor(failedItem, failedItem).url !== failedItem.vr2k_url) return false;
+      failedItem.vr2kFailed = true;
+      syncStereoSource(video.currentTime || 0);
       return true;
     }
 
@@ -6183,6 +6213,10 @@
       const stereoSrc = video.src;
       if (handleStereoFailure(videoData[idx])) {
         console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', stereoSrc);
+        return;
+      }
+      if (handleVr2kFailure(videoData[idx])) {
+        console.warn('[ReelsPlayer] 2k rendition failed, falling back to the post url:', stereoSrc);
         return;
       }
       

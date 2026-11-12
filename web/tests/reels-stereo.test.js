@@ -47,7 +47,7 @@ function fakeVideo() {
 }
 
 // Runs the real stereo helpers + VR swap from reels.html.
-function loadStereo(items, { presenting = false } = {}) {
+function loadStereo(items, { presenting = false, hevc = false } = {}) {
   const engine = {
     presenting,
     previewSplit: false,
@@ -61,7 +61,7 @@ function loadStereo(items, { presenting = false } = {}) {
     console,
     WebXRVR: engine,
     videoWrap: { classList: classList() },
-    video: fakeVideo(),
+    video: Object.assign(fakeVideo(), { canPlayType: (type) => (hevc && type.includes('hvc1') ? 'probably' : '') }),
     videoData: items,
     idx: 0,
     isMuted: false,
@@ -90,7 +90,7 @@ function loadStereo(items, { presenting = false } = {}) {
   vm.runInContext(`${block('reels-stereo')}\n${block('reels-stereo-sync')}
     this.api = {
       playbackFor, playbackUrlFor, blobFor, applyEntryStereo, syncStereoSource,
-      handleStereoFailure, clearStereoFailure, noteDownload,
+      handleStereoFailure, handleVr2kFailure, clearStereoFailure, noteDownload,
       layout: () => activeVisualLayout,
       crop: () => activeCropLayout,
     };`, context);
@@ -129,7 +129,7 @@ test('in VR a slow or unmeasured link plays the 2k rendition, a fast one the mas
   const { playbackFor, noteDownload, engine } = loadStereo([]);
   const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
   const sbs = { ...sbsPost, vr2k_url: '/media/uploads/clip-2k.mp4' };
-  // 2D never uses it.
+  // 2D without an HEVC decoder never uses it.
   assert.equal(playbackFor(mono, mono).url, mono.url);
   assert.equal(playbackFor(sbs, sbs).url, sbs.url);
   engine.presenting = true;
@@ -155,6 +155,50 @@ test('in VR a slow or unmeasured link plays the 2k rendition, a fast one the mas
   engine.presenting = false;
   engine.previewSplit = true;
   assert.equal(playbackFor(sbs, sbs).url, sbs.stereo_url);
+});
+
+test('2D plays the 2k rendition of a mono post where HEVC decodes', () => {
+  const { playbackFor, noteDownload, engine } = loadStereo([], { hevc: true });
+  const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.vr2k_url, layout: 'mono', crop: '' });
+  // A fast link does not bring back the master in 2D.
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
+  // No rendition yet: the url.
+  const plain = { url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: null };
+  assert.equal(playbackFor(plain, plain).url, plain.url);
+  // The feed gave this viewer an H.264 proxy: keep it.
+  const proxied = { ...mono, url: '/media/a-preview.mp4', is_proxy: true };
+  assert.equal(playbackFor(proxied, proxied).url, proxied.url);
+  // A stereo post's 2k file holds both eyes: 2D keeps the left-eye rendition.
+  const sbs = { ...sbsPost, vr2k_url: '/media/uploads/clip-2k.mp4' };
+  assert.equal(playbackFor(sbs, sbs).url, sbs.url);
+  // The split-screen preview keeps the master, as before.
+  engine.previewSplit = true;
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+});
+
+test('in VR on a fast link the master still wins where HEVC decodes', () => {
+  const { playbackFor, noteDownload } = loadStereo([], { presenting: true, hevc: true });
+  const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+});
+
+test('a 2k rendition that fails in 2D falls back to the post url', () => {
+  const mono = { media_type: 'video', url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  const { syncStereoSource, handleVr2kFailure, playbackFor, context } = loadStereo([mono], { hevc: true });
+  syncStereoSource();
+  assert.equal(context.video.src, mono.vr2k_url);
+  context.video.currentTime = 4;
+  assert.equal(handleVr2kFailure(mono), true);
+  assert.equal(context.video.src, mono.url);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+  // The url failing too is not this fallback's to handle.
+  assert.equal(handleVr2kFailure(mono), false);
+  // Nor is a post that was not playing its 2k file.
+  const plain = { media_type: 'video', url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: '/media/p-2k.mp4', is_proxy: true };
+  assert.equal(handleVr2kFailure(plain), false);
 });
 
 test('in VR one fast download does not switch to the master', () => {
