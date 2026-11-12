@@ -86,3 +86,39 @@ def test_sit_env_passes_production_boot_checks(monkeypatch):
     with patch("dotenv.load_dotenv"):
         from server import settings
     assert settings.production_config_errors() == []
+
+
+SIT_DIR = ROOT / "deploy/sit"
+RUNBOOK = ROOT / "docs/sit-runbook.md"
+SIT_SECRETS = ("VPS_HOST", "VPS_KNOWN_HOSTS", "VPS_SIT_USER", "VPS_SIT_SSH_KEY",
+               "SIT_PROBE_EMAIL", "SIT_PROBE_PEER", "SIT_PROBE_PASSWORD")
+
+
+def test_delegate_conf_delegates_cpu_io_memory():
+    text = (SIT_DIR / "delegate.conf").read_text()
+    assert "[Service]" in text
+    assert "Delegate=cpu cpuset io memory pids" in text
+
+
+def test_slice_limits_match_spec():
+    sit = (SIT_DIR / "echosit-slice.conf").read_text()
+    for line in ("CPUWeight=10", "CPUQuota=200%", "MemoryHigh=2.5G", "MemoryMax=3G"):
+        assert line in sit, line
+    assert "CPUWeight=20" in (SIT_DIR / "user-slice.conf").read_text()
+
+
+def test_nft_rule_blocks_echosit_from_prod():
+    text = (SIT_DIR / "echosit.nft").read_text()
+    assert 'meta skuid "echosit"' in text or "skuid echosit" in text
+    for needed in ("127.0.0.1", "8000", "8080", "172.16.0.0/12"):
+        assert needed in text, needed
+    # SIT's own readiness poll and proxy must stay reachable.
+    assert "8001" not in text and "8081" not in text
+
+
+def test_sit_runbook_covers_setup_isolation_and_promotion():
+    text = RUNBOOK.read_text()
+    for needed in ("loginctl enable-linger echosit", "systemctl revert user.slice",
+                   "127.0.0.1:8000", "127.0.0.1:8001", "git push origin <sha>:main",
+                   "ssh -L 8025:127.0.0.1:8025", "environment:production", *SIT_SECRETS):
+        assert needed in text, needed

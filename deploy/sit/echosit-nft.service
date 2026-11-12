@@ -1,0 +1,18 @@
+# Install as /etc/systemd/system/echosit-nft.service, then
+#   systemctl enable --now echosit-nft.service
+# Loads /etc/echosit.nft (deploy/sit/echosit.nft) at boot, before user
+# managers start, so echosit's lingering rootless Docker never runs unguarded.
+# Runbook: docs/sit-runbook.md
+[Unit]
+Description=Block echosit (SIT) from prod's ports and Docker bridges
+After=network-pre.target
+Before=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/echosit.nft
+ExecStop=/usr/sbin/nft delete table inet echosit_guard
+
+[Install]
+WantedBy=multi-user.target
