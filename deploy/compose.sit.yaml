@@ -1,0 +1,42 @@
+# SIT (sit.echomultiverse.com): compose.yaml with this override, on the prod
+# VPS. Every push to dev deploys here (CI job deploy-sit). Runbook:
+# docs/sit-runbook.md.
+#
+# It runs as the unix user echosit on that user's rootless Docker daemon, so
+# its images, volumes and project never touch prod's. The systemd slice for
+# echosit caps SIT's CPU and memory as a whole (deploy/sit/); the limits here
+# only split that budget and make the kernel kill SIT before prod when memory
+# runs out (oom_score_adj).
+#
+#   ~/echo-sit/.env sets COMPOSE_FILE=compose.yaml:deploy/compose.sit.yaml
+#
+# Mailpit catches all mail (password resets, verification). Its UI listens on
+# loopback only; reach it with ssh -L 8025:127.0.0.1:8025.
+
+services:
+  app:
+    oom_score_adj: 500
+
+  app-read:
+    oom_score_adj: 500
+    mem_limit: 512m
+
+  proxy:
+    oom_score_adj: 500
+    mem_limit: 128m
+
+  postgres:
+    oom_score_adj: 500
+    mem_limit: 512m
+
+  cloudflared:
+    oom_score_adj: 500
+    mem_limit: 128m
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
+    oom_score_adj: 500
+    mem_limit: 64m
