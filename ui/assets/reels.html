@@ -2904,8 +2904,12 @@
         return { url: wantsVr2k(entry) ? entry.vr2k_url : entry.stereo_url, layout: layout, crop: '' };
       }
       if (layout === 'mono' && wantsVr2k(entry)) return { url: entry.vr2k_url, layout: 'mono', crop: '' };
+      // Image entries carry WebP renditions: the VR one (up to 2048 px) for
+      // the headset texture, the 2D one (1080p) elsewhere. Both fall back to
+      // the original server-side, and older payloads have neither.
+      if (layout === 'mono' && entry.vr_url && wantsStereoSource()) return { url: entry.vr_url, layout: 'mono', crop: '' };
       const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
-      return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
+      return { url: (!crop && entry.display_url) || entry.url, layout: crop ? layout : 'mono', crop: crop };
     }
 
     function playbackUrlFor(entry, item) {

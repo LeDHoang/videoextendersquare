@@ -596,32 +596,50 @@ def _image_entry(
     """One image of an image post as the player needs it.
 
     For stereo images "url"/"poster_url" are the left-eye rendition and its
-    poster, and "stereo_url" is the full stereo still.
+    poster, and "stereo_url" is the full stereo still. "poster_url" is the
+    WebP tile when one exists, "display_url" the 2D WebP and "vr_url" the VR
+    WebP (media.IMAGE_RENDITIONS); each falls back to the next larger file
+    that exists, ending at "url".
     """
     from server import media as media_service
 
     stereo = stereo_fields(media_path, layout, files)
     url = stereo.get("url") or public_url(media_path)
     poster_url = url
+    renditions: dict[str, str] = {}
     try:
         source = Path("output") / media_path
         if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:
             source = media_service.mono_sibling_path(str(source))
-        poster = Path(media_service.explore_poster_path(str(source)))
-        if files is not None:
-            # The record only holds posters that were fresh when recorded.
-            if media_service.has_media_file(poster, files):
-                poster_url = _output_url(poster) or poster_url
-        else:
-            poster_stat = poster.stat()  # one stat; a missing poster raises and keeps the fallback
-            if stat.S_ISREG(poster_stat.st_mode) and poster_stat.st_size > 0 and poster_stat.st_mtime >= source.stat().st_mtime:
-                poster_url = _output_url(poster) or poster_url
+
+        def sibling_url(sibling: Path) -> str | None:
+            if files is not None:
+                # The record only holds siblings that were fresh when recorded.
+                return _output_url(sibling) if media_service.has_media_file(sibling, files) else None
+            try:
+                sibling_stat = sibling.stat()  # one stat; a missing sibling raises and keeps the fallback
+                if stat.S_ISREG(sibling_stat.st_mode) and sibling_stat.st_size > 0 and sibling_stat.st_mtime >= source.stat().st_mtime:
+                    return _output_url(sibling)
+            except OSError:
+                pass
+            return None
+
+        # A stereo still without its left eye yet has no 2D renditions.
+        cropping = stereo["stereo_layout"] != "mono" and stereo["stereo_crop"]
+        for name in () if cropping else media_service.IMAGE_RENDITIONS:
+            found = sibling_url(media_service.image_rendition_path(str(source), name))
+            if found:
+                renditions[name] = found
+        poster_url = renditions.get("tile") or sibling_url(Path(media_service.explore_poster_path(str(source)))) or poster_url
     except (OSError, ValueError):
         pass
+    display_url = renditions.get("2d") or url
     return {
         "path": media_path,
         "url": url,
         "poster_url": poster_url,
+        "display_url": display_url,
+        "vr_url": renditions.get("vr") or display_url,
         "width": width,
         "height": height,
         "stereo_layout": stereo["stereo_layout"],
@@ -933,10 +951,9 @@ def shared_preview_urls(post: Post) -> dict:
     files = post.media_files
     stereo = stereo_fields(post.media_path, post.stereo_layout, files)
     if post.media_type == "image":
-        if stereo["stereo_layout"] != "mono":
-            cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"], files)
-            return {"preview_url": cover["url"], "poster_url": cover["poster_url"]}
-        return {"preview_url": url, "poster_url": url}
+        # The WebP tile when one exists, else the poster or the full image.
+        cover = _image_entry(post.media_path, post.width, post.height, stereo["stereo_layout"], files)
+        return {"preview_url": cover["poster_url"], "poster_url": cover["poster_url"]}
     try:
         source = Path("output") / post.media_path
         if stereo["stereo_layout"] != "mono" and not stereo["stereo_crop"]:

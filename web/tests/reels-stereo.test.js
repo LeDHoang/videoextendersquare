@@ -157,6 +157,34 @@ test('in VR a slow or unmeasured link plays the 2k rendition, a fast one the mas
   assert.equal(playbackFor(sbs, sbs).url, sbs.stereo_url);
 });
 
+test('image renditions: 2D WebP in 2D, VR WebP in the headset, original without them', () => {
+  const { playbackFor, engine } = loadStereo([]);
+  const image = {
+    media_type: 'image', url: '/media/a.png', stereo_layout: 'mono',
+    display_url: '/media/a-2d.webp', vr_url: '/media/a-vr.webp',
+  };
+  assert.deepEqual({ ...playbackFor(image, image) }, { url: image.display_url, layout: 'mono', crop: '' });
+  engine.presenting = true;
+  assert.deepEqual({ ...playbackFor(image, image) }, { url: image.vr_url, layout: 'mono', crop: '' });
+  // Older payloads have neither field: the original everywhere.
+  const old = { media_type: 'image', url: '/media/b.png', stereo_layout: 'mono' };
+  assert.equal(playbackFor(old, old).url, old.url);
+  engine.presenting = false;
+  assert.equal(playbackFor(old, old).url, old.url);
+  // A stereo still keeps the stereo file in VR and its left eye's 2D WebP in 2D.
+  const sbs = {
+    media_type: 'image', url: '/media/s-mono.png', stereo_url: '/media/s.png', stereo_layout: 'sbs',
+    stereo_crop: false, display_url: '/media/s-mono-2d.webp', vr_url: '/media/s-mono-2d.webp',
+  };
+  assert.equal(playbackFor(sbs, sbs).url, sbs.display_url);
+  engine.presenting = true;
+  assert.deepEqual({ ...playbackFor(sbs, sbs) }, { url: sbs.stereo_url, layout: 'sbs', crop: '' });
+  // A still cropped from the stereo file in 2D never takes display_url.
+  const crop = { ...sbs, url: '/media/s.png', stereo_crop: true, display_url: '/media/s.png' };
+  engine.presenting = false;
+  assert.equal(playbackFor(crop, crop).crop, 'sbs');
+});
+
 test('in VR one fast download does not switch to the master', () => {
   const { playbackFor, noteDownload } = loadStereo([], { presenting: true });
   const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };

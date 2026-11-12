@@ -35,6 +35,9 @@
 #                          .venv/bin/python scripts/batch_stereo_mono.py [--dry-run]
 #                            (builds missing left-eye 2D renditions + grid assets for
 #                             stereo SBS/top-bottom posts; see docs/stereo-3d-reels.md)
+#                          .venv/bin/python scripts/batch_image_renditions.py [--dry-run] [--limit N]
+#                            (builds missing WebP tile / 2D / VR renditions of image
+#                             posts; --dry-run reads post records only)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
 #                          verify_staging.cjs — production-mode checks, backup/restore

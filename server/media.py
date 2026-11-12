@@ -52,6 +52,17 @@ VR2K_SUFFIX = "-2k.mp4"
 VR2K_EYE_SIDE = 2048
 # Left-eye 2D stills keep up to the square master size.
 MONO_IMAGE_MAX_SIDE = 3840
+# WebP renditions of an image post, per stored image: name -> (sibling
+# suffix, max long side, max short side). Never upscaled. "tile" is the
+# Explore tile (preview/poster URL), "2d" the 2D player (a 1080p box either
+# way round), "vr" the VR bitmap (the headset texture is 2048 px). The "vr"
+# file is only written when it would be larger than the "2d" one.
+IMAGE_RENDITIONS = {
+    "tile": ("-tile.webp", 720, 720),
+    "2d": ("-2d.webp", 1920, 1080),
+    "vr": ("-vr.webp", 2048, 2048),
+}
+IMAGE_RENDITION_QUALITY = 80
 # Published uploads and their derived siblings live here (see media_store).
 OUTPUT_UPLOADS = Path("output") / "uploads"
 
@@ -461,6 +472,8 @@ def derived_files(stored: Path) -> list[Path]:
         explore_poster_path(str(mono)),
         captions_path(str(stored)),
         depth_sibling_path(str(stored)),
+        *(image_rendition_path(str(stored), name) for name in IMAGE_RENDITIONS),
+        *(image_rendition_path(str(mono), name) for name in IMAGE_RENDITIONS),
     ]
 
 
@@ -648,6 +661,8 @@ def legacy_stereo_layout(
 def is_derived_media(name: str) -> bool:
     """True for generated siblings that must never surface as their own tile."""
     if name.endswith(("-preview.mp4", "-explore.mp4", "-poster.jpg", VR2K_SUFFIX)):
+        return True
+    if name.endswith(tuple(suffix for suffix, _long, _short in IMAGE_RENDITIONS.values())):
         return True
     return Path(name).stem.endswith((MONO_SUFFIX, DEPTH_SUFFIX))
 
@@ -1144,6 +1159,91 @@ def make_image_poster(src: str, height: int = 720) -> str | None:
         part.unlink(missing_ok=True)
         return None
     return _commit_part(part, dest)
+
+
+def image_rendition_path(src: str, name: str) -> Path:
+    """Sibling path of one WebP rendition of a still (<stem>-tile/-2d/-vr.webp)."""
+    return Path(src).with_name(Path(src).stem + IMAGE_RENDITIONS[name][0])
+
+
+def image_rendition_size(size: tuple[int, int], name: str) -> tuple[int, int]:
+    """Pixel size of rendition *name* for a still of *size*: fit the box, never upscale."""
+    _suffix, long_max, short_max = IMAGE_RENDITIONS[name]
+    w, h = size
+    scale = min(1.0, long_max / max(w, h), short_max / max(1, min(w, h)))
+    return max(1, round(w * scale)), max(1, round(h * scale))
+
+
+def _srgb_image(img):
+    """*img* oriented, converted to sRGB when it carries an ICC profile, as RGB or RGBA."""
+    from PIL import Image, ImageCms, ImageOps
+    import io
+
+    img = ImageOps.exif_transpose(img)
+    has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+    mode = "RGBA" if has_alpha else "RGB"
+    icc = img.info.get("icc_profile")
+    if icc and img.mode in ("RGB", "RGBA"):
+        try:
+            img = ImageCms.profileToProfile(
+                img, ImageCms.ImageCmsProfile(io.BytesIO(icc)), ImageCms.createProfile("sRGB"),
+                outputMode=img.mode,
+            )
+        except (ImageCms.PyCMSError, OSError, ValueError):
+            pass
+    return img.convert(mode) if img.mode != mode else img
+
+
+def make_image_renditions(src: str, vr: bool = True) -> dict[str, str]:
+    """Write the WebP renditions (IMAGE_RENDITIONS) of a still next to it.
+
+    Returns {name: path} for every rendition that exists afterwards; fresh
+    ones are kept. "vr" is skipped when *vr* is False (a stereo post's left
+    eye: VR samples the stereo file) or when it would not be larger than
+    "2d". A rendition that fails is left out; the player falls back to the
+    original.
+    """
+    from PIL import Image
+
+    names = [name for name in IMAGE_RENDITIONS if vr or name != "vr"]
+    built: dict[str, str] = {}
+    todo = []
+    for name in names:
+        dest = image_rendition_path(src, name)
+        try:
+            if dest.exists() and dest.stat().st_size > 0 and _sibling_is_fresh(dest, src):
+                built[name] = str(dest)
+                continue
+        except OSError:
+            continue
+        todo.append(name)
+    if not todo:
+        return built
+    try:
+        with Image.open(src) as opened:
+            img = _srgb_image(opened)
+            img.load()
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return built
+    for name in todo:
+        size = image_rendition_size(img.size, name)
+        if name == "vr" and max(size) <= max(image_rendition_size(img.size, "2d")):
+            continue
+        dest = image_rendition_path(src, name)
+        part = _part_path(dest)
+        try:
+            out = img if size == img.size else img.resize(size, Image.LANCZOS)
+            out.save(part, "WEBP", quality=IMAGE_RENDITION_QUALITY, method=4)
+        except (OSError, ValueError):
+            part.unlink(missing_ok=True)
+            continue
+        if not part.exists() or part.stat().st_size == 0:
+            part.unlink(missing_ok=True)
+            continue
+        committed = _commit_part(part, dest)
+        if committed:
+            built[name] = committed
+    return built
 
 
 def scan_pairs(root: str = "output/pairs") -> list[dict]:

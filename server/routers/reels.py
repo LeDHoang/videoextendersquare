@@ -1599,31 +1599,17 @@ def _build_payload_entries(
                 rel = Path(src_path).resolve().relative_to(output_root).as_posix()
             except (OSError, ValueError):
                 continue
-            if is_stereo:
-                # 2D shows the left-eye rendition; stereo_url is the full still.
-                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout, files)
-                url, poster_url = cover["url"], cover["poster_url"]
-                images = (social_row or {}).get("images") or [cover]
-            else:
-                url = public_url(rel)
-                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path), output_root, files) or url
-                # Every image of the post in order (a loose file is a 1-image post).
-                images = (social_row or {}).get("images") or [{
-                    "path": rel,
-                    "url": url,
-                    "poster_url": poster_url,
-                    "width": meta.get("width"),
-                    "height": meta.get("height"),
-                    "stereo_layout": "mono",
-                    "stereo_url": None,
-                    "stereo_crop": False,
-                    "depth_url": stereo["depth_url"],
-                }]
+            # 2D shows the left-eye rendition of a stereo still; stereo_url is
+            # the full still. The tile is the WebP tile when one exists.
+            cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout if is_stereo else "mono", files)
+            url, poster_url = cover["url"], cover["poster_url"]
+            # Every image of the post in order (a loose file is a 1-image post).
+            images = (social_row or {}).get("images") or [cover]
             payload.append({
                 **base,
                 "media_type": "image",
                 "url": url,
-                "preview_url": url,
+                "preview_url": poster_url,
                 "poster_url": poster_url,
                 "images": images,
                 "dwell_ms": (social_row or {}).get("dwell_ms") or IMAGE_POST_DWELL_MS,
@@ -2601,6 +2587,9 @@ def _gen_explore_assets(
         return _url(str(path)) if files is not None and SM.has_media_file(path, files) else None
 
     if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+        tile_url = _recorded(SM.image_rendition_path(str(p), "tile"))
+        if tile_url:
+            return rel, tile_url, tile_url, None
         poster_url = _recorded(SM.explore_poster_path(str(p)))
         if not poster_url:
             if not media_store.fetch_local(p):
