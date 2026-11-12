@@ -169,7 +169,7 @@ def test_square_image_converts_and_publishes_as_sbs(client, tmp_path):
     assert meta["stereo_layout"] == "sbs"
     assert meta["url"].endswith("-mono.jpg")
     assert meta["stereo_url"] == f"/media/{meta['path']}"
-    assert meta["poster_url"].endswith("-mono-poster.jpg")
+    assert meta["poster_url"].endswith("-mono-tile.webp")
     with Image.open(Path("output") / meta["url"].removeprefix("/media/")) as mono:
         assert mono.size == (eye, eye)
     with client.testing_session() as db:

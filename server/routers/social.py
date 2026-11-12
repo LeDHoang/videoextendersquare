@@ -328,10 +328,10 @@ def media_card(
         card["size"] = ""
     stereo = (post.stereo_layout or "mono") != "mono"
     if post.media_type == "image":
-        card["preview_url"] = card["url"]
-        # A 3D still keeps its left-eye poster from post_card.
-        if not (stereo and card.get("poster_url")):
-            card["poster_url"] = card["url"]
+        # The tile from post_card: the WebP tile, else the poster (a 3D
+        # still's left-eye one), else the full image.
+        card["poster_url"] = card.get("poster_url") or card["url"]
+        card["preview_url"] = card["poster_url"]
         card["codec"] = "IMG"
         return card
     # Grid assets of a 3D video come from its left-eye rendition.

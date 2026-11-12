@@ -2923,12 +2923,24 @@
       if (layout === 'mono' && !wantsStereoSource() && wantsVr2kIn2d(entry, item)) {
         return { url: entry.vr2k_url, layout: 'mono', crop: '' };
       }
+      // Image entries carry WebP renditions: the VR one (up to 2048 px) for
+      // the headset texture, the 2D one (1080p) elsewhere. Both fall back to
+      // the original server-side, and older payloads have neither.
+      if (layout === 'mono' && entry.vr_url && wantsStereoSource()) return { url: entry.vr_url, layout: 'mono', crop: '' };
       const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
-      return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
+      return { url: (!crop && entry.display_url) || entry.url, layout: crop ? layout : 'mono', crop: crop };
     }
 
     function playbackUrlFor(entry, item) {
       return resolveItemUrl({ url: playbackFor(entry, item).url, tunnel_url: item && item.tunnel_url });
+    }
+
+    // An item's first file to load: an image post shows its cover image,
+    // whose renditions the post itself does not carry.
+    function itemPlaybackUrl(item) {
+      if (!isImageItem(item)) return playbackUrlFor(item, item);
+      const cover = imageSlidesFor(item)[0];
+      return cover ? playbackUrlFor(cover, item) : '';
     }
 
     function blobFor(index, url) {
@@ -5930,13 +5942,11 @@
         // decode image files.
         try {
           const warmer = new Image();
-          const nextUrl = playbackUrlFor(nextItem, nextItem);
+          // The cover URL resolveSlideUrl gives showImageSlide(0).
+          const nextUrl = itemPlaybackUrl(nextItem);
           warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
           if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) {
-            // Key by the cover URL resolveSlideUrl gives showImageSlide(0).
-            const cover = imageSlidesFor(nextItem)[0];
-            const coverUrl = cover ? playbackUrlFor(cover, nextItem) : '';
-            vrImagePrefetch(blobFor(nextIdx, coverUrl) || coverUrl);
+            vrImagePrefetch(blobFor(nextIdx, nextUrl) || nextUrl);
           }
         } catch (e) {}
         return;
@@ -6352,7 +6362,8 @@
 
       for (let off = 1; off <= total; off++) {
         const i = idx + off;
-        const url = playbackUrlFor(videoData[i], videoData[i]);
+        const url = itemPlaybackUrl(videoData[i]);
+        if (!url) continue;
         if (blobFor(i, url)) {
           preloadedCount++;
           updatePreloadStatus();

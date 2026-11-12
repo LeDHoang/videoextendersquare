@@ -38,6 +38,9 @@
 #                          .venv/bin/python scripts/batch_vr2k.py [--dry-run]
 #                            (builds the missing 2k VR rendition, <stem>-2k.mp4, of
 #                             published videos; the docstring says how to run it on the VPS)
+#                          .venv/bin/python scripts/batch_image_renditions.py [--dry-run] [--limit N]
+#                            (builds missing WebP tile / 2D / VR renditions of image
+#                             posts; --dry-run reads post records only)
 #   verify_*.cjs       — live-endpoint verification probes (see docs/threejs-
 #                        vr-implementation-plan.md §7.2)
 #                          verify_staging.cjs — production-mode checks, backup/restore

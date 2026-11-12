@@ -706,6 +706,20 @@ def _publish_upload(
         except Exception:
             pass
 
+    # WebP renditions of every image (Explore tile, 2D, VR), from the left eye
+    # of a stereo still, whose VR view is the stereo file. Best-effort: a
+    # missing one leaves that surface on the original.
+    cover_renditions: dict[str, str] = {}
+    if req.kind == "image":
+        for target in (dest, *extra_dests):
+            try:
+                built = SM.make_image_renditions(grid_source(target), vr=not stereo)
+            except Exception:
+                logger.exception("Building the image renditions of %s raised", target.name)
+                built = {}
+            if target == dest:
+                cover_renditions = built
+
     # A 2D video's proxy, preview and poster all encode in the background
     # (_build_video_assets), so its response carries neither URL.
     preview_url: str | None = None
@@ -724,8 +738,9 @@ def _publish_upload(
         elif req.kind == "image":
             try:
                 poster = SM.make_image_poster(grid_source(dest))
-                if poster:
-                    poster_url = media_store.public_url(Path(poster).resolve().relative_to(root).as_posix())
+                tile = cover_renditions.get("tile") or poster
+                if tile:
+                    poster_url = preview_url = media_store.public_url(Path(tile).resolve().relative_to(root).as_posix())
             except Exception:
                 pass
     except ValueError:
