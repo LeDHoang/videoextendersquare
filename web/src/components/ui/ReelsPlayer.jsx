@@ -210,7 +210,17 @@ export default function ReelsPlayer({
         previewFrame = window.requestAnimationFrame(tryStartPreview);
       }
     };
-    runScripts(mount, data.scripts, () => cancelled).then(
+    // Lazy scripts (the VR controller photo) wait for the first video frame,
+    // or 4 s for a feed that opens on an image.
+    let lazyTimer = 0;
+    const firstFrame = new Promise((resolve) => {
+      lazyTimer = window.setTimeout(resolve, 4000);
+      const video = host.querySelector('#reelsVideo');
+      if (!video) return;
+      video.addEventListener('loadeddata', resolve, { once: true });
+      video.addEventListener('error', resolve, { once: true });
+    });
+    runScripts(mount, data.scripts, () => cancelled, document, firstFrame).then(
       () => {
         if (!cancelled) afterScripts();
       },
@@ -222,6 +232,7 @@ export default function ReelsPlayer({
     return () => {
       cancelled = true;
       if (revealTimer) window.clearTimeout(revealTimer);
+      if (lazyTimer) window.clearTimeout(lazyTimer);
       if (previewFrame) window.cancelAnimationFrame(previewFrame);
       if (previewMode && window.WebXRVR?.stopPreview) {
         try {

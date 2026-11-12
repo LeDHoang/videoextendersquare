@@ -1709,10 +1709,13 @@
     try {
       src = (typeof window !== 'undefined' && window.QUEST_CONTROLLER_B64) || '';
     } catch (e) { src = ''; }
-    if (!src || typeof Image === 'undefined') {
+    if (typeof Image === 'undefined') {
       guidePhotoState = 'missing';
       return;
     }
+    // The photo script loads after start-up; until it lands, stay idle so
+    // isGuideArtworkDirty() asks for a redraw once it does.
+    if (!src) return;
     guidePhotoState = 'loading';
     try {
       const img = new Image();
@@ -1728,7 +1731,12 @@
     }
   }
 
-  function isGuideArtworkDirty() { return guideArtworkDirty; }
+  function isGuideArtworkDirty() {
+    if (guideArtworkDirty) return true;
+    try {
+      return guidePhotoState === 'idle' && typeof window !== 'undefined' && !!window.QUEST_CONTROLLER_B64;
+    } catch (e) { return false; }
+  }
   function clearGuideArtworkDirty() { guideArtworkDirty = false; }
   function drawQuestController(ctx, cx, cy, scale) {
     const s = scale || 1.0;
