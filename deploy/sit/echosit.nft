@@ -1,0 +1,28 @@
+#!/usr/sbin/nft -f
+# Template. Render it to /etc/echosit.nft with echosit's uid and subuid range
+# (docs/sit-runbook.md step 4); echosit-nft.service loads the rendered file.
+#
+# Stops anything running as echosit (deploy.sh, and SIT's containers, whose
+# traffic leaves through slirp4netns or pasta as echosit) from reaching prod:
+# the prod app and proxy on loopback, and the root Docker daemon's bridges
+# (prod Postgres). SIT's own loopback ports stay open.
+#
+# The match covers echosit's subuids too: echosit can enter a user namespace,
+# setuid to a subuid there and still use the host's network. A cgroup match
+# is not used because nft resolves a cgroup path once, at load, before
+# echosit's slice exists.
+#
+# Touches only its own table, so ufw's and Docker's rules are left alone, and
+# loading it twice does not duplicate the rules.
+define echosit_uids = { @ECHOSIT_UID@, @ECHOSIT_SUBUIDS@ }
+
+table inet echosit_guard
+delete table inet echosit_guard
+
+table inet echosit_guard {
+    chain output {
+        type filter hook output priority 0; policy accept;
+        meta skuid $echosit_uids ip daddr 127.0.0.1 tcp dport { 8000, 8080 } reject with tcp reset
+        meta skuid $echosit_uids ip daddr 172.16.0.0/12 reject
+    }
+}

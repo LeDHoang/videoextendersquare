@@ -221,7 +221,8 @@ def _fetch_sentry_issues() -> dict:
     project = os.environ.get("SENTRY_PROJECT", "").strip()
     if not (token and org and project):
         return {"configured": False}
-    environment = os.environ.get("SX_ENV", "development")
+    # As in server/app.py _init_sentry: SIT runs SX_ENV=production but tags its events sit.
+    environment = os.environ.get("SENTRY_ENVIRONMENT", "").strip() or os.environ.get("SX_ENV", "development")
     base = os.environ.get("SENTRY_API_URL", "https://sentry.io").strip().rstrip("/")
     try:
         response = httpx.get(
