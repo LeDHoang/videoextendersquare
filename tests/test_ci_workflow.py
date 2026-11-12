@@ -175,3 +175,18 @@ def test_sit_prune_with_few_tags_is_a_no_op(tmp_path):
                               image_tags="latest\n0123456789abcdef\n")
     assert result.returncode == 0, result.stderr
     assert "docker image rm" not in ran
+
+
+def test_sit_deploy_never_dumps_the_database(tmp_path):
+    # SIT's data is throwaway, and a stopped SIT stack would fail the dump and
+    # with it the deploy; the dumps would also pile up on the shared disk.
+    result, ran = _run_deploy(tmp_path, head="refs/heads/dev", env={"DEPLOY_BRANCH": "dev"})
+    assert result.returncode == 0, result.stderr
+    assert "docker compose exec" not in ran
+    assert "dumping the database" not in result.stdout
+
+
+def test_prod_deploy_still_dumps_when_migrations_change(tmp_path):
+    result, ran = _run_deploy(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "docker compose exec -T postgres" in ran

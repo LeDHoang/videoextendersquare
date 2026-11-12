@@ -33,7 +33,9 @@ old="$(git rev-parse HEAD)"
 git fetch --quiet origin "$branch"
 git merge --ff-only "$SHA"
 
-if ! git diff --quiet "$old" HEAD -- migrations/; then
+# Prod only: SIT's data is throwaway, and a stopped SIT stack would fail the
+# dump and with it the deploy.
+if [[ "$branch" == main ]] && ! git diff --quiet "$old" HEAD -- migrations/; then
     dump="$HOME/pre-deploy-$(date -u +%Y%m%dT%H%M).dump"
     echo "migrations changed: dumping the database to $dump"
     docker compose exec -T postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' < /dev/null > "$dump"

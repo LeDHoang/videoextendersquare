@@ -109,7 +109,11 @@ def test_slice_limits_match_spec():
 
 def test_nft_rule_blocks_echosit_from_prod():
     text = (SIT_DIR / "echosit.nft").read_text()
-    assert 'meta skuid "echosit"' in text or "skuid echosit" in text
+    # echosit's uid and its whole subuid range: a process in a user namespace
+    # can setuid to a subuid while staying in the host network namespace.
+    assert "define echosit_uids = { @ECHOSIT_UID@, @ECHOSIT_SUBUIDS@ }" in text
+    rules = [line for line in text.splitlines() if "reject" in line and not line.lstrip().startswith("#")]
+    assert len(rules) == 2 and all("meta skuid $echosit_uids" in rule for rule in rules)
     for needed in ("127.0.0.1", "8000", "8080", "172.16.0.0/12"):
         assert needed in text, needed
     # SIT's own readiness poll and proxy must stay reachable.
@@ -118,7 +122,39 @@ def test_nft_rule_blocks_echosit_from_prod():
 
 def test_sit_runbook_covers_setup_isolation_and_promotion():
     text = RUNBOOK.read_text()
-    for needed in ("loginctl enable-linger echosit", "systemctl revert user.slice",
+    for needed in ("loginctl enable-linger echosit", "50-sit-priority.conf",
                    "127.0.0.1:8000", "127.0.0.1:8001", "git push origin <sha>:main",
                    "ssh -L 8025:127.0.0.1:8025", "environment:production", *SIT_SECRETS):
         assert needed in text, needed
+
+
+def test_user_manager_needs_the_nft_guard():
+    # Fail closed: echosit's user manager, and its Docker daemon, never start
+    # without the guard table in place.
+    text = (SIT_DIR / "user-at-nft.conf").read_text()
+    assert "[Unit]" in text
+    assert "Requires=echosit-nft.service" in text and "After=echosit-nft.service" in text
+
+
+def test_sit_runbook_closes_the_isolation_gaps():
+    text = RUNBOOK.read_text()
+    for needed in (
+        "/etc/cron.deny", "/etc/at.deny",                  # cron and at run outside the slice
+        "/dev/tcp/<prod-pg-ip>/5432",                      # prod Postgres on its bridge IP
+        "setpriv",                                         # the subuid bypass must fail
+        "@ECHOSIT_SUBUIDS@", "user-at-nft.conf",
+        "read-only deploy key", "git fetch origin dev",
+        "show \"origin/dev:deploy/sit/",                   # files come from dev before promotion
+        "apt-get -s", "nftables",                          # no surprise docker-ce upgrade
+        "/opt/echo/.env*", "AllowUsers",
+        "50-sit-priority.conf",
+    ):
+        assert needed in text, needed
+    assert "systemctl revert user.slice" not in text      # it removes more than SIT added
+    assert "10.0.2.2" not in text                          # that check proves nothing
+
+
+def test_sit_env_keeps_the_sentry_read_token_off_by_default():
+    text = ENV_SIT.read_text()
+    assert _env()["SENTRY_AUTH_TOKEN"] == ""
+    assert "prod's issues" in text

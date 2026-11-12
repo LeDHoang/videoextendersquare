@@ -334,3 +334,16 @@ def test_sentry_without_a_token_or_answer_never_fails_the_request(app, sentry_en
     monkeypatch.delenv("SENTRY_AUTH_TOKEN")
     monkeypatch.setitem(sentry_env._sentry_cache, "body", None)
     assert admin.get("/api/ops/sentry").json()["configured"] is False
+
+
+def test_sentry_issues_follow_sentry_environment_over_sx_env(app, sentry_env, monkeypatch):
+    # SIT runs with SX_ENV=production and SENTRY_ENVIRONMENT=sit in the same Sentry
+    # project; its Overview must list SIT's issues, never prod's.
+    import httpx
+
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", " sit ")
+    calls = _sentry_answers(monkeypatch, lambda request: httpx.Response(200, json=[], request=request))
+    add_user(app, "the_admin", role="admin")
+    body = sign_in(app, "the_admin").get("/api/ops/sentry").json()
+    assert body["environment"] == "sit"
+    assert calls[0][1]["params"]["environment"] == "sit"

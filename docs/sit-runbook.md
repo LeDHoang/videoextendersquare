@@ -30,6 +30,8 @@ In Settings → Environments:
 
 There are no repo-level secrets; keep it that way.
 
+Do this step before the first push to `dev` that carries the `deploy-sit` job. GitHub creates a missing environment on first use, with no branch rule and no secrets.
+
 ### 1. The user
 
 ```bash
@@ -37,6 +39,9 @@ sudo useradd --create-home --shell /bin/bash echosit    # no password: SSH keys 
 grep echosit /etc/subuid /etc/subgid                    # rootless Docker needs both ranges
 sudo install -d -m 700 -o echosit -g echosit ~echosit/.ssh
 ssh-keygen -t ed25519 -N '' -C echosit-ci -f echosit_ci # on your machine; private half -> VPS_SIT_SSH_KEY
+echo echosit | sudo tee -a /etc/cron.deny /etc/at.deny  # cron and at jobs would run outside echosit's slice
+sudo -u echosit crontab -l                              # must say echosit is not allowed
+sudo sshd -T | grep -i '^allowusers'                    # if this prints a list, add echosit to AllowUsers
 ```
 
 Write `~echosit/.ssh/authorized_keys` (owner `echosit`, mode 600). The CI key gets `restrict`, which drops forwarding and the pty:
@@ -52,8 +57,16 @@ The second line is optional: your own key, without `restrict`, so you can log in
 
 Check every command against Docker's rootless docs (docs.docker.com/engine/security/rootless) for the package on the box. Section 2 of `docs/deploy-runbook.md` installed `docker-ce` from Docker's repo. Debian's `docker.io` package differs.
 
+Simulate the install first. An upgrade of `docker-ce`, `docker-ce-cli` or `containerd.io` restarts prod's daemon:
+
 ```bash
-sudo apt install docker-ce-rootless-extras uidmap dbus-user-session slirp4netns
+sudo apt-get -s install docker-ce-rootless-extras uidmap dbus-user-session slirp4netns nftables | grep '^Inst'
+```
+
+If the output lists one of those three packages, pin `docker-ce-rootless-extras` to the installed `docker-ce` version (`docker-ce-rootless-extras="$(dpkg-query -W -f='${Version}' docker-ce)"`) and simulate again. Then install:
+
+```bash
+sudo apt-get install docker-ce-rootless-extras uidmap dbus-user-session slirp4netns nftables
 
 # The two host-wide changes and echosit's own limits (deploy/sit/).
 uid="$(id -u echosit)"
@@ -64,7 +77,17 @@ sudo systemctl daemon-reload
 sudo loginctl enable-linger echosit    # echosit's user manager, and its daemon, run without a login
 ```
 
-Run the `deploy/sit/` paths from prod's checkout in `/opt/echo`; the files only need to be readable.
+Run the `deploy/sit/` commands from a directory that holds the `dev` copies of those files. Before SIT's first promotion, `main` (and so `/opt/echo`) does not have them yet:
+
+```bash
+sudo -u <prod-user> git -C /opt/echo fetch --quiet origin dev    # moves only origin/dev, not the checkout
+cd "$(mktemp -d)" && mkdir -p deploy/sit
+for f in delegate.conf user-slice.conf echosit-slice.conf echosit.nft echosit-nft.service user-at-nft.conf; do
+  git -C /opt/echo show "origin/dev:deploy/sit/$f" > "deploy/sit/$f"
+done
+```
+
+After the first promotion, `/opt/echo` has them and this is not needed.
 
 Then, logged in as `echosit`:
 
@@ -87,7 +110,7 @@ As the admin, `systemctl show "user-$uid.slice" -p CPUWeight -p CPUQuotaPerSecUS
 
 ```bash
 sudo rm /etc/systemd/system/user@.service.d/delegate.conf
-sudo systemctl revert user.slice
+sudo rm /etc/systemd/system/user.slice.d/50-sit-priority.conf
 sudo systemctl daemon-reload
 ```
 
@@ -119,41 +142,78 @@ docker network inspect $(docker network ls -q) --format '{{.Name}} {{range .IPAM
 
 The box's firewall is ufw. Do not enable `nftables.service` or add to `/etc/nftables.conf`: Debian's stock file starts with `flush ruleset`, which would wipe ufw's and Docker's rules at boot. `deploy/sit/echosit.nft` touches only its own table, and its own unit loads it:
 
+`echosit.nft` is a template. The rule matches echosit's uid and its whole subuid range (`@ECHOSIT_UID@`, `@ECHOSIT_SUBUIDS@`): echosit can enter a user namespace, switch to a subuid and still use the host's network. `/etc/subuid` must have exactly one `echosit` line.
+
 ```bash
-sudo nft -c -f deploy/sit/echosit.nft                  # syntax check, changes nothing
-sudo install -m 644 deploy/sit/echosit.nft /etc/echosit.nft
+uid="$(id -u echosit)"
+subuids="$(awk -F: '$1 == "echosit" { print $2 "-" ($2 + $3 - 1) }' /etc/subuid)"
+sed -e "s/@ECHOSIT_UID@/$uid/" -e "s/@ECHOSIT_SUBUIDS@/$subuids/" deploy/sit/echosit.nft > echosit.nft
+sudo nft -c -f echosit.nft                             # syntax check, changes nothing
+sudo install -m 644 echosit.nft /etc/echosit.nft
 sudo install -m 644 deploy/sit/echosit-nft.service /etc/systemd/system/echosit-nft.service
 systemctl cat user@.service | grep After=              # must name systemd-user-sessions.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now echosit-nft.service
 sudo nft list table inet echosit_guard
+# Fail closed: echosit's user manager, and its Docker daemon, need the guard.
+sudo install -D -m 644 deploy/sit/user-at-nft.conf "/etc/systemd/system/user@$uid.service.d/10-echosit-nft.conf"
+sudo systemctl daemon-reload
+systemctl show "user@$uid.service" -p Requires         # lists echosit-nft.service
 ```
 
-The unit runs `Before=systemd-user-sessions.service`, so the rule is in place before echosit's user manager starts its daemon. If `user@.service` is not ordered after `systemd-user-sessions.service`, change the unit's `Before=` to match.
+The unit runs `Before=systemd-user-sessions.service`, so the rule is in place before echosit's user manager starts its daemon. If `user@.service` is not ordered after `systemd-user-sessions.service`, change the unit's `Before=` to match. The `user-at-nft.conf` drop-in stops echosit's user manager whenever the guard is not loaded.
+
+Find prod Postgres's address on its bridge, for the checks below:
+
+```bash
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' $(docker compose -f /opt/echo/compose.yaml ps -q postgres)
+```
 
 Isolation checks. Each command must fail, except the last:
 
 ```bash
-sudo -u echosit cat /opt/echo/.env                   # Permission denied
+for f in /opt/echo/.env*; do sudo -u echosit cat "$f"; done   # Permission denied for every file
+sudo -u echosit cat /opt/echo/.git/config            # Permission denied, or a remote URL with no token in it
 sudo -u echosit ls ~<prod-user>                      # Permission denied (VPS_USER's home: dumps, rclone config)
 sudo -u echosit docker -H unix:///var/run/docker.sock ps   # permission denied
 sudo -u echosit ls /var/lib/docker                   # Permission denied
 sudo -u echosit curl -sS -m 5 http://127.0.0.1:8000/api/readyz   # Connection refused
 sudo -u echosit curl -sS -m 5 http://127.0.0.1:8080/              # Connection refused
+sudo -u echosit bash -c 'echo > /dev/tcp/<prod-pg-ip>/5432'        # Connection refused
 sudo -u echosit curl -fsS -m 5 http://127.0.0.1:8001/api/readyz  # 200, once step 5 has run
 ```
 
-Also check from inside a SIT container once step 5 has run. Run `docker compose exec app python -c "import urllib.request; urllib.request.urlopen('http://10.0.2.2:8000/api/readyz', timeout=5)"` as `echosit` in `~/echo-sit`. It must fail. `10.0.2.2` is the host's loopback as slirp4netns sees it.
+Logged in as `echosit`, the subuid route must be blocked too (util-linux 2.38 or later). It must print `Connection refused`:
 
-**Rollback:** `sudo systemctl disable --now echosit-nft.service` deletes the table. Then remove `/etc/echosit.nft` and the unit file.
+```bash
+unshare --user --map-root-user --map-auto setpriv --reuid=1 --regid=1 --clear-groups \
+  bash -c 'echo > /dev/tcp/127.0.0.1/8000'
+```
+
+Once step 5 has run, check from inside a SIT container too. As `echosit` in `~/echo-sit`, this must fail:
+
+```bash
+docker compose exec app python -c "import socket; socket.create_connection(('<prod-pg-ip>', 5432), timeout=5)"
+```
+
+**Rollback:** remove the `user@$uid.service.d/10-echosit-nft.conf` drop-in and run `sudo systemctl daemon-reload` first; otherwise the next step also stops echosit's user manager. Then `sudo systemctl disable --now echosit-nft.service` deletes the table. Then remove `/etc/echosit.nft` and the unit file.
 
 ### 5. First start
 
 Logged in as `echosit`:
 
+Give `echosit` its own read-only deploy key for the repo. Never a personal access token, and never prod's key:
+
 ```bash
-git clone <repo-url> ~/echo-sit && cd ~/echo-sit
+ssh-keygen -t ed25519 -N '' -C echosit-github -f ~/.ssh/github_ro
+printf 'Host github.com\n  IdentityFile ~/.ssh/github_ro\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+cat ~/.ssh/github_ro.pub    # GitHub: Settings -> Deploy keys -> Add, "Allow write access" unticked
+```
+
+```bash
+git clone git@github.com:<owner>/<repo>.git ~/echo-sit && cd ~/echo-sit
 git checkout dev
+git fetch origin dev                               # must work: every deploy runs it
 cp deploy/env.sit.example .env && chmod 600 .env   # fill in every <...>
 docker compose up -d --build
 curl -fsS http://127.0.0.1:8001/api/readyz
