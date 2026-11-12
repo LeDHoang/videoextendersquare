@@ -99,7 +99,8 @@ def _init_sentry() -> None:
 
     sentry_sdk.init(
         dsn=dsn,
-        environment=os.environ.get("SX_ENV", "development"),
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "").strip()
+        or os.environ.get("SX_ENV", "development"),
         release=os.environ.get("GIT_SHA") or None,
         send_default_pii=False,
         traces_sampler=_sentry_traces_sampler,
