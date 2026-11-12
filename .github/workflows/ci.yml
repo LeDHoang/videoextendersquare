@@ -7,8 +7,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Superseded runs are cancelled, except on main: a run there may be mid-deploy.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Superseded runs are cancelled, except on main and dev: a run there may be
+  # mid-deploy (prod and SIT respectively).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
 permissions:
   contents: read
@@ -222,3 +223,59 @@ jobs:
             "$VPS_USER@$VPS_HOST" "bash -s -- $GITHUB_SHA" < deploy/deploy.sh | tee deploy.log
           # The script prints this line only after /api/readyz answers on the new build.
           grep -q '^deployed ' deploy.log
+
+  deploy-sit:
+    name: deploy to SIT
+    # Pushes to dev only, once every check has passed: the dev build goes to
+    # sit.echomultiverse.com and the probe runs against it before anything is
+    # promoted to main (docs/sit-runbook.md).
+    #
+    # Its own environment, user and key: echosit has no docker group and no
+    # sudo, and runs SIT on its own rootless Docker daemon. The prod deploy
+    # key never enters this environment, so dev code and this job can never
+    # reach prod's daemon.
+    needs: [test, postgres, docker, scans]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: sit
+    concurrency:
+      group: deploy-sit
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy over SSH
+        # Secrets of the sit environment: VPS_HOST, VPS_KNOWN_HOSTS (copies of
+        # prod's), VPS_SIT_USER (echosit), VPS_SIT_SSH_KEY.
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SIT_USER: ${{ secrets.VPS_SIT_USER }}
+          VPS_SIT_SSH_KEY: ${{ secrets.VPS_SIT_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SIT_SSH_KEY" > ~/.ssh/sit_key
+          chmod 600 ~/.ssh/sit_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Single quotes: $HOME and $(id -u) expand on the VPS, as echosit.
+          ssh -i ~/.ssh/sit_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_SIT_USER@$VPS_HOST" \
+            'ECHO_DIR="$HOME/echo-sit" DEPLOY_BRANCH=dev DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock" bash -s -- '"$GITHUB_SHA" \
+            < deploy/deploy.sh | tee deploy.log
+          # The script prints this line only after /api/readyz answers on the new build.
+          grep -q '^deployed ' deploy.log
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Probe SIT
+        # The probe accounts exist already (runbook step 6); registering needs
+        # SIT's Mailpit, which the runner cannot reach.
+        env:
+          SIT_PROBE_EMAIL: ${{ secrets.SIT_PROBE_EMAIL }}
+          SIT_PROBE_PEER: ${{ secrets.SIT_PROBE_PEER }}
+          SIT_PROBE_PASSWORD: ${{ secrets.SIT_PROBE_PASSWORD }}
+        run: |
+          node scripts/verify_staging.cjs \
+            --app https://sit.echomultiverse.com --media https://sit-media.echomultiverse.com \
+            --email "$SIT_PROBE_EMAIL" --peer "$SIT_PROBE_PEER" --password "$SIT_PROBE_PASSWORD"

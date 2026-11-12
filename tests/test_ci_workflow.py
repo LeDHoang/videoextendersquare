@@ -46,7 +46,35 @@ def test_deploy_script_refuses_to_run_off_main_or_without_a_fast_forward():
 def test_a_newer_push_to_main_cannot_cancel_a_running_deploy():
     # The workflow-level group applies to the whole run, deploy job included.
     cancel = WORKFLOW["concurrency"]["cancel-in-progress"]
-    assert cancel == "${{ github.ref != 'refs/heads/main' }}"
+    assert cancel == "${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}"
+
+
+def _sit_job_text() -> str:
+    return yaml.safe_dump(WORKFLOW["jobs"]["deploy-sit"])
+
+
+def test_sit_deploy_waits_for_checks_and_runs_only_for_dev_pushes():
+    sit = WORKFLOW["jobs"]["deploy-sit"]
+    assert set(sit["needs"]) == CHECK_JOBS
+    assert sit["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+
+
+def test_sit_deploy_uses_its_own_environment_and_never_the_prod_key():
+    sit = WORKFLOW["jobs"]["deploy-sit"]
+    assert sit["environment"] == "sit"
+    assert sit["concurrency"] == {"group": "deploy-sit", "cancel-in-progress": False}
+    text = _sit_job_text()
+    for prod_only in ("VPS_SSH_KEY", "secrets.VPS_USER", "production"):
+        assert prod_only not in text, prod_only
+
+
+def test_sit_deploy_streams_deploy_sh_as_echosit_on_dev_and_probes():
+    text = "\n".join(str(step.get("run", "")) for step in WORKFLOW["jobs"]["deploy-sit"]["steps"])
+    for needed in ("DEPLOY_BRANCH=dev", "docker.sock", "StrictHostKeyChecking=yes", "deploy/deploy.sh",
+                   "grep -q '^deployed ' deploy.log", "scripts/verify_staging.cjs",
+                   "https://sit.echomultiverse.com", "https://sit-media.echomultiverse.com",
+                   "SIT_PROBE_PASSWORD"):
+        assert needed in text, needed
 
 
 def _run_deploy(tmp_path, *, head="refs/heads/main", env=None, dotenv=None, image_tags=""):
