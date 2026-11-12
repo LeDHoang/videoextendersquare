@@ -167,9 +167,9 @@ test('2D plays the 2k rendition of a mono post where HEVC decodes', () => {
   // No rendition yet: the url.
   const plain = { url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: null };
   assert.equal(playbackFor(plain, plain).url, plain.url);
-  // The feed gave this viewer an H.264 proxy: keep it.
+  // The 2160p H.264 proxy the feed hands out by default is heavier: the 2k wins.
   const proxied = { ...mono, url: '/media/a-preview.mp4', is_proxy: true };
-  assert.equal(playbackFor(proxied, proxied).url, proxied.url);
+  assert.equal(playbackFor(proxied, proxied).url, mono.vr2k_url);
   // A stereo post's 2k file holds both eyes: 2D keeps the left-eye rendition.
   const sbs = { ...sbsPost, vr2k_url: '/media/uploads/clip-2k.mp4' };
   assert.equal(playbackFor(sbs, sbs).url, sbs.url);
@@ -193,11 +193,16 @@ test('a 2k rendition that fails in 2D falls back to the post url', () => {
   context.video.currentTime = 4;
   assert.equal(handleVr2kFailure(mono), true);
   assert.equal(context.video.src, mono.url);
+  // The fallback is the post url, here the feed's H.264 proxy when it has one.
+  const proxied = { media_type: 'video', url: '/media/q-preview.mp4', is_proxy: true, stereo_layout: 'mono', vr2k_url: '/media/q-2k.mp4' };
+  assert.equal(playbackFor(proxied, proxied).url, proxied.vr2k_url);
+  assert.equal(handleVr2kFailure(proxied), true);
+  assert.equal(playbackFor(proxied, proxied).url, proxied.url);
   assert.equal(playbackFor(mono, mono).url, mono.url);
   // The url failing too is not this fallback's to handle.
   assert.equal(handleVr2kFailure(mono), false);
   // Nor is a post that was not playing its 2k file.
-  const plain = { media_type: 'video', url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: '/media/p-2k.mp4', is_proxy: true };
+  const plain = { media_type: 'video', url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: null };
   assert.equal(handleVr2kFailure(plain), false);
 });
 
