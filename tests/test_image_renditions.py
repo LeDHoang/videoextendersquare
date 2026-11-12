@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from verified_signup import register_verified
 from server import media
 from server.routers import image as image_router
-from server.routers import social, uploads
+from server.routers import reels, social, uploads
 from server.social import auth, database
 from server.social.database import Base, get_db
 from server.social.models import Post, User
@@ -28,13 +28,14 @@ from server.social.services import _image_entry, create_or_update_post, record_m
 PASSWORD = "correct horse battery staple 2026"
 
 
+def _noise(size: tuple[int, int]) -> Image.Image:
+    return Image.merge("RGB", [Image.effect_noise(size, 40) for _ in range(3)])
+
+
 def _png(path: Path, size: tuple[int, int]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    img = Image.new("RGB", size)
-    # Some detail, so sizes are not trivially tiny.
-    for x in range(0, size[0], 16):
-        img.paste((x % 256, 90, 200), (x, 0, min(x + 8, size[0]), size[1]))
-    img.save(path, "PNG")
+    # Photo-like grain: a PNG far larger than its WebP, as real uploads are.
+    _noise(size).save(path, "PNG")
     return path
 
 
@@ -96,9 +97,27 @@ def test_fresh_renditions_are_kept_and_stale_ones_rebuilt(tmp_path):
 
 def test_alpha_is_kept(tmp_path):
     src = tmp_path / "alpha.png"
-    Image.new("RGBA", (100, 100), (255, 0, 0, 0)).save(src)
+    img = _noise((100, 100))
+    img.putalpha(Image.linear_gradient("L").resize((100, 100)))
+    img.save(src)
     with Image.open(media.make_image_renditions(str(src))["2d"]) as img:
         assert img.mode == "RGBA"
+
+
+def test_an_animated_still_gets_the_tile_only(tmp_path):
+    src = tmp_path / "anim.webp"
+    frames = [_noise((3000, 2000)) for _ in range(2)]
+    frames[0].save(src, save_all=True, append_images=frames[1:], duration=100)
+    assert set(media.make_image_renditions(str(src))) == {"tile"}
+
+
+def test_a_rendition_not_smaller_than_the_original_is_dropped(tmp_path):
+    # Noise as a low-quality JPEG inside the 2D box: WebP q80 would be larger.
+    src = tmp_path / "noise.jpg"
+    Image.effect_noise((800, 600), 100).convert("RGB").save(src, "JPEG", quality=30)
+    built = media.make_image_renditions(str(src))
+    assert "2d" not in built and not media.image_rendition_path(str(src), "2d").exists()
+    assert all(os.path.getsize(path) < os.path.getsize(src) for path in built.values())
 
 
 def test_renditions_are_derived_siblings():
@@ -208,6 +227,15 @@ def test_publish_builds_and_records_the_renditions(client, tmp_path):
         files = db.query(Post).one().media_files
     stem = Path(meta["path"]).stem
     assert {f"uploads/{stem}-tile.webp", f"uploads/{stem}-2d.webp", f"uploads/{stem}-vr.webp"} <= set(files)
+
+    # The reels feed and the Explore grid serve them too.
+    scanned = [item for item in media.scan_output_media("output") if item["rel_path"] == meta["path"]]
+    item = reels._build_payload(scanned, "h264")[0]
+    assert item["poster_url"].endswith("-tile.webp") and item["preview_url"] == item["poster_url"]
+    assert item["images"][0]["display_url"].endswith("-2d.webp")
+    assert item["images"][0]["vr_url"].endswith("-vr.webp")
+    _rel, preview_url, poster_url, err = reels._gen_explore_assets(meta["path"], "mono", files)
+    assert err is None and preview_url == poster_url and poster_url.endswith("-tile.webp")
 
 
 # ─── Backfill script ────────────────────────────────────────────────────────

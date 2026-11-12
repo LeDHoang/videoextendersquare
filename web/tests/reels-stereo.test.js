@@ -70,6 +70,7 @@ function loadStereo(items, { presenting = false } = {}) {
     imagePostSlides: [],
     imageSlideIndex: 0,
     isImageItem: (item) => !!item && item.media_type === 'image',
+    imageSlidesFor: (item) => item.images || [{ url: item.url }],
     resolveItemUrl: (item) => (item.tunnel_url ? item.tunnel_url + item.url : item.url),
     showImageSlide: (index) => calls.slides.push(index),
     preloadNext: () => { calls.preload += 1; },
@@ -89,7 +90,7 @@ function loadStereo(items, { presenting = false } = {}) {
   vm.createContext(context);
   vm.runInContext(`${block('reels-stereo')}\n${block('reels-stereo-sync')}
     this.api = {
-      playbackFor, playbackUrlFor, blobFor, applyEntryStereo, syncStereoSource,
+      playbackFor, playbackUrlFor, itemPlaybackUrl, blobFor, applyEntryStereo, syncStereoSource,
       handleStereoFailure, clearStereoFailure, noteDownload,
       layout: () => activeVisualLayout,
       crop: () => activeCropLayout,
@@ -183,6 +184,18 @@ test('image renditions: 2D WebP in 2D, VR WebP in the headset, original without 
   const crop = { ...sbs, url: '/media/s.png', stereo_crop: true, display_url: '/media/s.png' };
   engine.presenting = false;
   assert.equal(playbackFor(crop, crop).crop, 'sbs');
+});
+
+test('an image post preloads its cover rendition, a video its own playback url', () => {
+  const { itemPlaybackUrl, engine } = loadStereo([]);
+  const post = {
+    media_type: 'image', url: '/media/a.png', stereo_layout: 'mono',
+    images: [{ url: '/media/a.png', display_url: '/media/a-2d.webp', vr_url: '/media/a-vr.webp' }],
+  };
+  assert.equal(itemPlaybackUrl(post), '/media/a-2d.webp');
+  engine.presenting = true;
+  assert.equal(itemPlaybackUrl(post), '/media/a-vr.webp');
+  assert.equal(itemPlaybackUrl({ media_type: 'video', url: '/media/b.mp4', stereo_layout: 'mono' }), '/media/b.mp4');
 });
 
 test('in VR one fast download does not switch to the master', () => {

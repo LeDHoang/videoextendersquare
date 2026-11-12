@@ -7,7 +7,13 @@ slides), the missing ones of:
 * <stem>-tile.webp — 720 px, the Explore tile (preview_url / poster_url)
 * <stem>-2d.webp   — 1080p box, the 2D player (display_url)
 * <stem>-vr.webp   — 2048 px, the VR bitmap (vr_url); only for originals
-  larger than the 2D box, as nothing is upscaled
+  larger than the 2D box, as nothing is upscaled (and only when the post
+  records its size)
+
+An animated still (WebP, APNG) gets the tile only, and a rendition not
+smaller than its original is not kept: the original serves instead. The
+dry run keeps listing those as missing, and a real run reports them as
+"kept the original".
 
 A stereo still gets tile and 2D from its left eye (<stem>-mono), and no VR
 file: VR shows the stereo still. A stereo still without its left eye yet is
@@ -41,10 +47,9 @@ from server.social.services import rerecord_media_files  # noqa: E402
 def wanted_renditions(width: int | None, height: int | None, stereo: bool) -> list[str]:
     """Renditions an image of this size should have; "vr" only when larger than "2d"."""
     names = ["tile", "2d"]
-    if not stereo:
-        size = (width or 0, height or 0)
-        # Unknown size: the build decides.
-        if not all(size) or max(SM.image_rendition_size(size, "vr")) > max(SM.image_rendition_size(size, "2d")):
+    if not stereo and width and height:
+        size = (width, height)
+        if max(SM.image_rendition_size(size, "vr")) > max(SM.image_rendition_size(size, "2d")):
             names.append("vr")
     return names
 
@@ -108,15 +113,12 @@ def main() -> None:
         if not was_local:
             fetched.append(source)
         result = SM.make_image_renditions(str(source), vr=not stereo)
-        still = [name for name in missing if name not in result and not (name == "vr" and "2d" in result)]
+        kept = [name for name in missing if name not in result]
         if not was_local:
             made.extend(Path(path) for path in result.values())
-        if still:
-            failed += 1
-            print(f"    FAILED {source} — still missing: {', '.join(still)}")
-        else:
-            built += 1
-            print(f"    built {source} ({', '.join(sorted(result))}) in {time.time() - started:.1f}s")
+        built += 1
+        print(f"    built {source} ({', '.join(sorted(result)) or 'none'}) in {time.time() - started:.1f}s"
+              + (f"; kept the original for {', '.join(kept)}" if kept else ""))
     if covers:
         with SessionLocal() as db:
             rerecord_media_files(db, covers)

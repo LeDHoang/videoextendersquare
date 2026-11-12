@@ -1200,8 +1200,10 @@ def make_image_renditions(src: str, vr: bool = True) -> dict[str, str]:
     Returns {name: path} for every rendition that exists afterwards; fresh
     ones are kept. "vr" is skipped when *vr* is False (a stereo post's left
     eye: VR samples the stereo file) or when it would not be larger than
-    "2d". A rendition that fails is left out; the player falls back to the
-    original.
+    "2d". An animated still (WebP, APNG) gets the tile only, so 2D and VR
+    keep its animation. A rendition not smaller than the original file (a
+    noisy, already small JPEG) is dropped too. A rendition left out makes the
+    player fall back to the original.
     """
     from PIL import Image
 
@@ -1221,6 +1223,8 @@ def make_image_renditions(src: str, vr: bool = True) -> dict[str, str]:
         return built
     try:
         with Image.open(src) as opened:
+            if getattr(opened, "is_animated", False):
+                todo = [name for name in todo if name == "tile"]
             img = _srgb_image(opened)
             img.load()
     except (OSError, ValueError, Image.DecompressionBombError):
@@ -1237,7 +1241,7 @@ def make_image_renditions(src: str, vr: bool = True) -> dict[str, str]:
         except (OSError, ValueError):
             part.unlink(missing_ok=True)
             continue
-        if not part.exists() or part.stat().st_size == 0:
+        if not part.exists() or not 0 < part.stat().st_size < os.path.getsize(src):
             part.unlink(missing_ok=True)
             continue
         committed = _commit_part(part, dest)

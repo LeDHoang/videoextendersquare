@@ -2916,6 +2916,14 @@
       return resolveItemUrl({ url: playbackFor(entry, item).url, tunnel_url: item && item.tunnel_url });
     }
 
+    // An item's first file to load: an image post shows its cover image,
+    // whose renditions the post itself does not carry.
+    function itemPlaybackUrl(item) {
+      if (!isImageItem(item)) return playbackUrlFor(item, item);
+      const cover = imageSlidesFor(item)[0];
+      return cover ? playbackUrlFor(cover, item) : '';
+    }
+
     function blobFor(index, url) {
       return blobUrlMap[index] && blobSourceMap[index] === url ? blobUrlMap[index] : '';
     }
@@ -5904,13 +5912,11 @@
         // decode image files.
         try {
           const warmer = new Image();
-          const nextUrl = playbackUrlFor(nextItem, nextItem);
+          // The cover URL resolveSlideUrl gives showImageSlide(0).
+          const nextUrl = itemPlaybackUrl(nextItem);
           warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
           if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) {
-            // Key by the cover URL resolveSlideUrl gives showImageSlide(0).
-            const cover = imageSlidesFor(nextItem)[0];
-            const coverUrl = cover ? playbackUrlFor(cover, nextItem) : '';
-            vrImagePrefetch(blobFor(nextIdx, coverUrl) || coverUrl);
+            vrImagePrefetch(blobFor(nextIdx, nextUrl) || nextUrl);
           }
         } catch (e) {}
         return;
@@ -6322,7 +6328,8 @@
 
       for (let off = 1; off <= total; off++) {
         const i = idx + off;
-        const url = playbackUrlFor(videoData[i], videoData[i]);
+        const url = itemPlaybackUrl(videoData[i]);
+        if (!url) continue;
         if (blobFor(i, url)) {
           preloadedCount++;
           updatePreloadStatus();
