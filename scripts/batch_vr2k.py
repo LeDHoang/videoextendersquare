@@ -20,8 +20,10 @@ Locally: .venv/bin/python scripts/batch_vr2k.py [--dry-run], from the repo root.
 Local ffmpeg (libx265), no paid APIs. One video at a time; a 4K master can
 take several minutes and the encode gives up after 15. Safe to repeat: a
 video whose rendition is recorded is skipped, so a second run picks up only
-the ones that failed. Soft-deleted posts are skipped. Avoid running it while
-a video is being published: both would build that video's rendition.
+the ones that failed. Soft-deleted posts are skipped, and so are videos
+already 2k per eye or less: their rendition would only re-encode them at the
+same size, so they keep playing the original. Avoid running it while a video
+is being published: both would build that video's rendition.
 """
 import argparse
 import sys
@@ -31,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 
 from server import media as SM  # noqa: E402
+from server import media_store  # noqa: E402
 from server.routers import uploads  # noqa: E402
 from server.social import database  # noqa: E402
 from server.social.models import Post  # noqa: E402
@@ -43,9 +46,10 @@ def stereo_of(layout: str | None) -> str | None:
 def plan(rows) -> tuple[list[tuple[str, str | None]], list[str], list[tuple[str, str]]]:
     """Split (media_path, stereo_layout, media_files) rows into (to build, complete, skipped).
 
-    A post's media record answers presence when it has one: a recorded
-    original may live only in R2, and the job fetches it. An unrecorded post
-    is judged from this disk.
+    A post's media record answers presence and size when it has them: a
+    recorded original may live only in R2, and the job fetches it. An
+    unrecorded post is judged from this disk. A size the record lacks is
+    checked by build() once the original is local.
     """
     root = uploads.OUTPUT_DIR.resolve()
     todo, complete, skipped = [], [], []
@@ -63,18 +67,31 @@ def plan(rows) -> tuple[list[tuple[str, str | None]], list[str], list[tuple[str,
             continue
         if SM.has_media_file(SM.vr2k_path(str(dest)), files):
             complete.append(rel)
+            continue
+        size = (files or {}).get(media_store.rel_path(dest)) or {}
+        if files is None:
+            size = SM.probe_media_info(str(dest)) or {}
+        width, height = size.get("width"), size.get("height")
+        if not SM.vr2k_shrinks(width, height, stereo_of(layout)):
+            skipped.append((rel, f"already 2k or less ({width}x{height})"))
         else:
             todo.append((rel, stereo_of(layout)))
     return todo, complete, skipped
 
 
-def build(rel: str, stereo: str | None) -> bool:
-    """Run the publish job's VR step for one video; True when the rendition was built and recorded."""
+def build(rel: str, stereo: str | None) -> str:
+    """Run the publish job's VR step for one video: "built", "small" (already 2k or less) or "failed"."""
     dest = uploads.OUTPUT_DIR / rel
-    built = []
-    uploads._run_derived_job(dest, rel, lambda: built.append(
-        uploads._derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest), stereo=stereo)))
-    return bool(built and built[0])
+    outcome = []
+
+    def job():
+        if not uploads._wants_vr2k(dest, stereo):
+            outcome.append("small")
+        elif uploads._derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest), stereo=stereo):
+            outcome.append("built")
+
+    uploads._run_derived_job(dest, rel, job)
+    return outcome[0] if outcome else "failed"
 
 
 def main(argv=None) -> int:
@@ -100,17 +117,21 @@ def main(argv=None) -> int:
     if args.dry_run or not todo:
         return 0
 
-    built = failed = 0
+    built = small = failed = 0
     for number, (rel, stereo) in enumerate(todo, 1):
         print(f"({number}/{len(todo)}) {rel} ...", flush=True)
         started = time.time()
-        if build(rel, stereo):
+        outcome = build(rel, stereo)
+        if outcome == "built":
             built += 1
             print(f"    built in {time.time() - started:.1f}s", flush=True)
+        elif outcome == "small":
+            small += 1
+            print("    already 2k or less, nothing to build", flush=True)
         else:
             failed += 1
             print(f"    FAILED after {time.time() - started:.1f}s (see the app log above)", flush=True)
-    print(f"Built {built}, failed {failed}.")
+    print(f"Built {built}, already 2k or less {small}, failed {failed}.")
     return 1 if failed else 0
 
 

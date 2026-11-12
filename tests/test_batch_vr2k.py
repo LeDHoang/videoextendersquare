@@ -5,6 +5,9 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+from server import media as SM
 from server.routers import reels, uploads
 from server.social.models import Post
 from server.social.services import post_media_items
@@ -28,6 +31,10 @@ def test_plan_sorts_videos_by_what_they_have(tmp_path, monkeypatch):
         ("uploads/r2only.mp4", "sbs", {"uploads/r2only.mp4": {}}),
         ("uploads/tb.mp4", "tb", {"uploads/tb.mp4": {}}),
         ("uploads/odd.mp4", "unknown", {"uploads/odd.mp4": {}}),
+        # Sized by the record: only sources larger than 2k per eye get one.
+        ("uploads/hd.mp4", "mono", {"uploads/hd.mp4": {"width": 1920, "height": 1080}}),
+        ("uploads/uhd.mp4", "mono", {"uploads/uhd.mp4": {"width": 3840, "height": 2160}}),
+        ("uploads/sbs2k.mp4", "sbs", {"uploads/sbs2k.mp4": {"width": 4096, "height": 2048}}),
         # Unrecorded: judged from this disk.
         ("uploads/local.mp4", None, None),
         ("uploads/gone.mp4", None, None),
@@ -35,8 +42,11 @@ def test_plan_sorts_videos_by_what_they_have(tmp_path, monkeypatch):
     ]
     todo, complete, skipped = batch_vr2k.plan(rows)
     assert complete == ["uploads/done.mp4", "uploads/local.mp4"]
-    assert todo == [("uploads/r2only.mp4", "sbs"), ("uploads/tb.mp4", "tb"), ("uploads/odd.mp4", None)]
+    assert todo == [
+        ("uploads/r2only.mp4", "sbs"), ("uploads/tb.mp4", "tb"), ("uploads/odd.mp4", None), ("uploads/uhd.mp4", None)]
     assert skipped == [
+        ("uploads/hd.mp4", "already 2k or less (1920x1080)"),
+        ("uploads/sbs2k.mp4", "already 2k or less (4096x2048)"),
         ("uploads/gone.mp4", "not recorded and not on this disk"),
         ("../elsewhere.mp4", "outside output/"),
     ]
@@ -81,4 +91,33 @@ def test_a_failed_build_exits_nonzero(setup, tmp_path, capsys):
     ffmpeg.gate.set()
     futures[0].result(timeout=10)
     assert batch_vr2k.main([]) == 1
-    assert "Built 0, failed 1." in capsys.readouterr().out
+    assert "Built 0, already 2k or less 0, failed 1." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("width", "height", "stereo", "shrinks"), [
+    (3840, 2160, None, True),
+    (2160, 3840, None, True),
+    (2048, 1152, None, False),
+    (1920, 1080, None, False),
+    (5760, 2880, "sbs", True),
+    (4096, 2048, "sbs", False),
+    (2880, 5760, "tb", True),
+    (2048, 4096, "tb", False),
+    (None, None, None, True),
+])
+def test_only_sources_larger_than_2k_per_eye_shrink(width, height, stereo, shrinks):
+    assert SM.vr2k_shrinks(width, height, stereo) is shrinks
+
+
+def test_a_video_found_to_be_2k_or_less_is_not_reencoded(setup, tmp_path, monkeypatch, capsys):
+    client, Session, s3, ffmpeg, futures = setup
+    ffmpeg.fail = {"-2k.mp4"}
+    publish_video(client, tmp_path)
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+    # The record has no size (ffprobe fails in tests): build() probes the fetched original.
+    monkeypatch.setattr(SM, "probe_media_info", lambda src: {"duration_ms": 1000, "width": 1920, "height": 1080})
+    encodes = len(ffmpeg.encodes)
+    assert batch_vr2k.main([]) == 0
+    assert len(ffmpeg.encodes) == encodes
+    assert "Built 0, already 2k or less 1, failed 0." in capsys.readouterr().out

@@ -387,6 +387,21 @@ def vr2k_path(src: str) -> Path:
     return Path(src).with_name(Path(src).stem + VR2K_SUFFIX)
 
 
+def vr2k_shrinks(width: int | None, height: int | None, stereo: str | None = None) -> bool:
+    """True when the VR rendition of a width x height video would be smaller than it.
+
+    A source already VR2K_EYE_SIDE per eye or less would only be re-encoded
+    at its own size, so it gets no rendition. An unknown size counts as larger.
+    """
+    if not width or not height:
+        return True
+    if stereo == "sbs":
+        return width > 2 * VR2K_EYE_SIDE
+    if stereo == "tb":
+        return height > 2 * VR2K_EYE_SIDE
+    return max(width, height) > VR2K_EYE_SIDE
+
+
 def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
     """Write the VR rendition of a video: HEVC (hvc1), faststart, 2048 px per eye.
 

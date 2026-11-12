@@ -428,7 +428,7 @@ def _build_video_assets(dest: Path, vr2k: bool = True) -> None:
     _derived_step("poster", dest, SM.make_explore_poster, str(dest))
     _derived_step("explore preview", dest, SM.make_explore_preview, str(dest))
     _derived_step("web preview", dest, SM.make_web_preview, str(dest))
-    if vr2k:
+    if vr2k and _wants_vr2k(dest):
         _derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest))
     _submit_captions(dest)
 
@@ -440,9 +440,18 @@ def _build_stereo_video_assets(dest: Path, layout: str, vr2k: bool = True) -> No
     if mono:
         _derived_step("left-eye explore preview", dest, SM.make_explore_preview, mono)
         _derived_step("left-eye poster", dest, SM.make_explore_poster, mono)
-    if vr2k:
+    if vr2k and _wants_vr2k(dest, layout):
         _derived_step("VR rendition", dest, SM.make_vr2k_rendition, str(dest), stereo=layout)
     _submit_captions(dest)
+
+
+def _wants_vr2k(dest: Path, stereo: str | None = None) -> bool:
+    """False for a video already 2k per eye or less: its rendition would only re-encode it."""
+    info = SM.probe_media_info(str(dest)) or {}
+    if SM.vr2k_shrinks(info.get("width"), info.get("height"), stereo):
+        return True
+    logger.info("No VR rendition for %s: %sx%s is already 2k or less", dest.name, info.get("width"), info.get("height"))
+    return False
 
 
 def _build_captions(dest: Path) -> bool:
