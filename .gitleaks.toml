@@ -11,7 +11,7 @@ paths = ['''^tests/''']
 
 [[allowlists]]
 description = "Env templates hold <placeholder> or empty values only; the filled .env files are gitignored"
-paths = ['''^deploy/env(\.staging)?\.example$''']
+paths = ['''^deploy/env(\.staging|\.sit)?\.example$''']
 
 [[allowlists]]
 description = "<placeholder> values in docs and examples"
