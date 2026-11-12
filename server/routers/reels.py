@@ -76,6 +76,9 @@ PLAYER_SCRIPTS = {
     "__VR_SHELL_JS__": "vr_shell.js",
     "__WEBXR_VR_JS__": "webxr_vr.js",
 }
+# Loaded by /player-inline after the others have run: the controller photo
+# (about 650 KB) is read only when the VR guide panel is drawn.
+LAZY_PLAYER_SCRIPTS = {"quest_controller_img.js"}
 _player_script_hashes: dict = {}
 
 # Tiny mtime-checked cache for icon snippets (14 one-KB files; re-read only
@@ -3410,7 +3413,7 @@ def reels_player_inline(
         if name:
             url = _player_script_url(name)
             if url:
-                scripts.append({"src": url})
+                scripts.append({"src": url, "lazy": True} if name in LAZY_PLAYER_SCRIPTS else {"src": url})
         else:
             scripts.append(
                 tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
