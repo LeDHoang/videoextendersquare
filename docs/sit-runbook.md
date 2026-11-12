@@ -241,11 +241,13 @@ node scripts/verify_staging.cjs \
 
 Both addresses must be in `SX_REGISTRATION_ALLOWLIST`. Store them, and the password, as `SIT_PROBE_EMAIL`, `SIT_PROBE_PEER` and `SIT_PROBE_PASSWORD` in the `sit` environment. From then on, CI runs only log in.
 
+The probe accounts count as `new` for the first `SX_TRUST_NEW_HOURS`, which caps publishes at 2 an hour. SIT's `.env` raises the `SX_NEW_PUBLISH_*` and `SX_NEW_UPLOAD_HOURLY_MAX` limits (see `deploy/env.sit.example`) so a run of dev pushes still passes.
+
 The same tunnel opens Mailpit's UI at `http://127.0.0.1:8025` for password resets.
 
 ### 7. Sentry
 
-SIT reports to the same Sentry project with `environment=sit`. Add the filter `environment:production` to every prod alert rule, so SIT errors do not page you.
+SIT reports to the same Sentry project with `environment=sit`. The three alert rules (watchdog and low disk, high-priority issues, Seer pull requests) have their environment set to `production` (done 2026-11-13), so SIT errors do not page you. Give any new alert rule the same environment.
 
 ## Cloudflare checklist
 
@@ -255,7 +257,7 @@ Mirrors `docs/deploy-runbook.md` §Cloudflare.
 - [ ] R2 bucket for SIT public media, location hint `apac`:
   - custom domain `sit-media.echomultiverse.com`
   - a 30-day lifecycle rule on `jobs/`
-  - CORS that allows `https://sit.echomultiverse.com`
+  - no CORS policy on the bucket: the Transform Rule below sets `Access-Control-Allow-Origin`, and a bucket policy would add a second copy of the header, which browsers reject and the probe flags
   - an app token scoped to this bucket only, with its four values in the SIT `.env`
 - [ ] Transform Rule on `sit-media`: set a static `Access-Control-Allow-Origin: https://sit.echomultiverse.com` and `Vary: Origin`.
 - [ ] Transform Rule on `sit`: set `X-Robots-Tag: noindex, nofollow`.
