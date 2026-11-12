@@ -545,8 +545,8 @@ def _process_video_impl(
             audio_src = temp_fal_vid
         elif os.path.exists(temp_outpaint_path) and has_audio_stream(temp_outpaint_path):
             audio_src = temp_outpaint_path
-        elif has_audio_stream(video_path):
-            audio_src = video_path
+        elif has_audio_stream(video_to_process):
+            audio_src = video_to_process
 
         vf_parts = [] if _is_already_square(temp_fal_vid) else [
             "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
@@ -642,7 +642,7 @@ clip.set_output()
         encoder, encoder_opts = pick_encoder()
         vspipe = find_vspipe()
 
-        audio_src = video_path if has_audio_stream(video_path) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
+        audio_src = video_to_process if has_audio_stream(video_to_process) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
 
         # Honour the user's sharpening slider instead of a hardcoded cas=0.5.
         vf_filter = f"cas={sharpening}" if sharpening > 0.0 else None
@@ -715,7 +715,7 @@ clip.set_output()
 
         encoder, encoder_opts = pick_encoder()
 
-        audio_src = video_path if has_audio_stream(video_path) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
+        audio_src = video_to_process if has_audio_stream(video_to_process) else (temp_outpaint_path if has_audio_stream(temp_outpaint_path) else None)
         if audio_src and audio_src != temp_outpaint_path:
             cmd = [
                 "ffmpeg", "-y",
