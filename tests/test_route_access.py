@@ -117,6 +117,7 @@ moderator GET    /api/moderation/support
 moderator PATCH  /api/moderation/support/{request_id}
 moderator POST   /api/moderation/support/{request_id}/file-report
 admin     GET    /api/ops/metrics
+admin     GET    /api/ops/sentry
 public    GET    /api/packs
 user      POST   /api/packs
 public    GET    /api/packs/{pack_id}

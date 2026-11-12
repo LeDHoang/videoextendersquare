@@ -200,3 +200,76 @@ def ops_metrics(
 
     response.headers["Cache-Control"] = "no-store"
     return metrics.snapshot(db)
+
+
+# GET /api/ops/sentry: the Sentry issues for this server's environment, so admins see
+# them on the Overview without opening Sentry. The DSN only sends; reading needs a
+# token with event:read (SENTRY_AUTH_TOKEN). Cached so Overview loads stay under
+# Sentry's rate limits, and a short timeout because this runs on the writer.
+_SENTRY_TTL_S = 60.0
+_SENTRY_TIMEOUT_S = 4.0
+_sentry_cache: dict = {"at": 0.0, "body": None}
+_sentry_lock = threading.Lock()
+# Red on the Overview: issues Sentry marks as new, back after a resolve, or growing.
+
+
+def _fetch_sentry_issues() -> dict:
+    import httpx
+
+    token = os.environ.get("SENTRY_AUTH_TOKEN", "").strip()
+    org = os.environ.get("SENTRY_ORG", "").strip()
+    project = os.environ.get("SENTRY_PROJECT", "").strip()
+    if not (token and org and project):
+        return {"configured": False}
+    environment = os.environ.get("SX_ENV", "development")
+    base = os.environ.get("SENTRY_API_URL", "https://sentry.io").strip().rstrip("/")
+    try:
+        response = httpx.get(
+            f"{base}/api/0/organizations/{org}/issues/",
+            params={
+                "project": project,
+                "environment": environment,
+                "query": "is:unresolved",
+                "statsPeriod": "24h",
+                "sort": "date",
+                "limit": 25,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=_SENTRY_TIMEOUT_S,
+        )
+        response.raise_for_status()
+        rows = response.json()
+    except Exception as exc:
+        # Never a 500: that would itself count as a server error and reach Sentry.
+        return {"configured": True, "environment": environment, "error": f"Sentry did not answer ({type(exc).__name__})"}
+    issues = [
+        {
+            "short_id": row.get("shortId"),
+            "title": row.get("title"),
+            "culprit": row.get("culprit"),
+            "level": row.get("level"),
+            "substatus": row.get("substatus"),
+            "count": int(row.get("count") or 0),
+            "first_seen": row.get("firstSeen"),
+            "last_seen": row.get("lastSeen"),
+            "url": row.get("permalink"),
+        }
+        for row in rows
+    ]
+    return {"configured": True, "environment": environment, "issues": issues}
+
+
+def sentry_issues() -> dict:
+    with _sentry_lock:
+        if _sentry_cache["body"] is None or time.time() - _sentry_cache["at"] >= _SENTRY_TTL_S:
+            _sentry_cache["body"] = _fetch_sentry_issues()
+            _sentry_cache["at"] = time.time()
+        return {**_sentry_cache["body"], "fetched_at": _sentry_cache["at"]}
+
+
+@router.get("/api/ops/sentry")
+def ops_sentry(response: Response, context: AuthContext = Depends(require_admin)):
+    """Admin-only: unresolved Sentry issues seen in the last 24 h for this environment."""
+    del context
+    response.headers["Cache-Control"] = "no-store"
+    return sentry_issues()

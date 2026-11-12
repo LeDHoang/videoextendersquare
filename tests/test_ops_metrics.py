@@ -266,3 +266,71 @@ def test_snapshot_serves_the_alert_limits(monkeypatch):
     assert limits["p95_ms"] == 1500
     assert limits["min_requests"] == metrics.MIN_REQUESTS_FOR_ALERT
     assert (limits["open_reports"], limits["open_support_requests"]) == (20, 10)
+
+
+@pytest.fixture
+def sentry_env(monkeypatch):
+    from server.routers import health as health_router
+
+    monkeypatch.setitem(health_router._sentry_cache, "body", None)
+    for name, value in (("SENTRY_AUTH_TOKEN", "read-token"), ("SENTRY_ORG", "the-org"), ("SENTRY_PROJECT", "the-project"),
+                        ("SENTRY_API_URL", "https://us.sentry.io"), ("SX_ENV", "production")):
+        monkeypatch.setenv(name, value)
+    return health_router
+
+
+def _sentry_answers(monkeypatch, handler):
+    import httpx
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return handler(httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    return calls
+
+
+def test_sentry_issues_are_admin_only_and_filtered_to_this_environment(app, sentry_env, monkeypatch):
+    import httpx
+
+    issue = {"shortId": "SERVER-Q", "title": "RuntimeError: boom", "culprit": "server.app", "level": "error",
+             "substatus": "new", "count": "3", "firstSeen": "2026-11-11T18:01:31Z", "lastSeen": "2026-11-11T18:05:00Z",
+             "permalink": "https://the-org.sentry.io/issues/1/", "metadata": {"value": "not passed on"}}
+    calls = _sentry_answers(monkeypatch, lambda request: httpx.Response(200, json=[issue], request=request))
+    add_user(app, "the_mod", role="moderator")
+    add_user(app, "the_admin", role="admin")
+    assert TestClient(app).get("/api/ops/sentry").status_code == 401
+    assert sign_in(app, "the_mod").get("/api/ops/sentry").status_code == 403
+
+    admin = sign_in(app, "the_admin")
+    body = admin.get("/api/ops/sentry").json()
+    assert body["configured"] is True and body["environment"] == "production"
+    assert body["issues"] == [{"short_id": "SERVER-Q", "title": "RuntimeError: boom", "culprit": "server.app", "level": "error",
+                               "substatus": "new", "count": 3, "first_seen": "2026-11-11T18:01:31Z",
+                               "last_seen": "2026-11-11T18:05:00Z", "url": "https://the-org.sentry.io/issues/1/"}]
+    url, kwargs = calls[0]
+    assert url == "https://us.sentry.io/api/0/organizations/the-org/issues/"
+    assert kwargs["params"]["project"] == "the-project"
+    assert kwargs["params"]["environment"] == "production"
+    assert kwargs["params"]["query"] == "is:unresolved"
+    assert kwargs["headers"] == {"Authorization": "Bearer read-token"}
+    # The minute-long cache spares Sentry's rate limit.
+    admin.get("/api/ops/sentry")
+    assert len(calls) == 1
+
+
+def test_sentry_without_a_token_or_answer_never_fails_the_request(app, sentry_env, monkeypatch):
+    import httpx
+
+    add_user(app, "the_admin", role="admin")
+    admin = sign_in(app, "the_admin")
+    _sentry_answers(monkeypatch, lambda request: httpx.Response(503, request=request))
+    response = admin.get("/api/ops/sentry")
+    assert response.status_code == 200
+    assert response.json()["error"] == "Sentry did not answer (HTTPStatusError)"
+
+    monkeypatch.delenv("SENTRY_AUTH_TOKEN")
+    monkeypatch.setitem(sentry_env._sentry_cache, "body", None)
+    assert admin.get("/api/ops/sentry").json()["configured"] is False

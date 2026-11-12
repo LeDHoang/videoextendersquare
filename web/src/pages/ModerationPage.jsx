@@ -7,7 +7,7 @@ import { SectionSkeleton } from '../components/ui/Skeleton.jsx';
 import AuditPanel from '../components/moderation/AuditPanel.jsx';
 import ContentPanel from '../components/moderation/ContentPanel.jsx';
 import KillSwitchCard from '../components/moderation/KillSwitchCard.jsx';
-import { OpsPanel, OverviewPanel } from '../components/moderation/OverviewDashboard.jsx';
+import { OpsPanel, OverviewPanel, SentryPanel } from '../components/moderation/OverviewDashboard.jsx';
 import ReportTarget from '../components/moderation/ReportTarget.jsx';
 import SensitivityCard from '../components/moderation/SensitivityCard.jsx';
 import StaffActionDialog from '../components/moderation/StaffActionDialog.jsx';
@@ -137,6 +137,18 @@ export default function ModerationPage() {
   useEffect(() => {
     if (user?.can_moderate) load();
   }, [user?.can_moderate, load]);
+
+  // Admin only: unresolved Sentry issues, refreshed every minute while the overview is open.
+  // Kept apart from load() so a slow Sentry never holds up the overview.
+  const [sentry, setSentry] = useState(null);
+  useEffect(() => {
+    if (tab !== 'overview' || !loadOps) return undefined;
+    let live = true;
+    const fetchSentry = () => api.get('/api/ops/sentry').catch(() => null).then((next) => { if (live) setSentry(next); });
+    fetchSentry();
+    const timer = setInterval(fetchSentry, 60000);
+    return () => { live = false; clearInterval(timer); };
+  }, [tab, loadOps]);
 
   if (loading) return <SectionSkeleton label="Loading moderation queue" />;
   if (!user) return <Navigate to={'/login?next=' + encodeURIComponent('/moderation')} replace />;
@@ -334,8 +346,9 @@ export default function ModerationPage() {
           <>
             {isAdmin ? <KillSwitchCard /> : null}
             <SensitivityCard viewer={user} onSaved={load} />
-            <OverviewPanel stats={stats} hourly={hourly} ops={ops} flagged={flagged} windowKey={statsWindow} onOpenTab={switchTab} onOpenUser={openUser} />
+            <OverviewPanel stats={stats} hourly={hourly} ops={ops} sentry={sentry} flagged={flagged} windowKey={statsWindow} onOpenTab={switchTab} onOpenUser={openUser} />
             {ops ? <OpsPanel ops={ops} /> : null}
+            {sentry ? <SentryPanel sentry={sentry} /> : null}
           </>
         ) : error ? null : <SectionSkeleton label="Loading overview" />
       ) : items === null ? <SectionSkeleton label="Loading queue" /> : items.length

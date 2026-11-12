@@ -142,10 +142,26 @@ function Chip({ check, onSelect }) {
   );
 }
 
+// Sentry marks an issue new, regressed or escalating when it needs a look now.
+const SENTRY_URGENT = ['new', 'regressed', 'escalating'];
+const sentryUrgent = (issue) => SENTRY_URGENT.includes(issue.substatus);
+
+function sentryCheck(sentry) {
+  const base = { key: 'sentry', label: 'SENTRY ISSUES', target: 'sx-ov-sentry' };
+  if (!sentry.configured) return { ...base, state: 'warn', value: 'OFF', note: 'not connected · add SENTRY_AUTH_TOKEN to the server' };
+  if (sentry.error) return { ...base, state: 'warn', value: 'N/A', note: sentry.error };
+  const urgent = sentry.issues.filter(sentryUrgent).length;
+  const count = sentry.issues.length;
+  return {
+    ...base, state: urgent ? 'bad' : count ? 'warn' : 'ok', value: fmt(count),
+    note: urgent ? urgent + ' new, regressed or escalating' : count ? 'unresolved, seen in the last 24 h' : 'no unresolved issues in 24 h',
+  };
+}
+
 const level = (value, bad, warn) => (value >= bad ? 'bad' : value >= warn ? 'warn' : 'ok');
 
 // Red is the server's own alert limit (server/metrics.py alert_limits); amber is a share of it.
-function healthChecks(stats, w, ops) {
+function healthChecks(stats, w, ops, sentry) {
   const q = stats.queue_limits;
   const spikes = METRICS.filter((m) => m.pick(w).spike).map((m) => m.label);
   const checks = [
@@ -173,6 +189,7 @@ function healthChecks(stats, w, ops) {
       checks.push({ key: 'db_pool', label: 'DATABASE CONNECTIONS', state: level(pool.checkedout / pool.capacity, 1, 0.8), value: fmt(pool.checkedout), note: 'of ' + pool.capacity + ' checked out', target: 'sx-ov-capacity' });
     }
   }
+  if (sentry) checks.push(sentryCheck(sentry));
   (stats.disk || []).forEach((volume) => checks.push({
     key: 'disk_' + volume.volume, label: 'DISK · ' + volume.volume.toUpperCase(), state: volume.ok ? 'ok' : 'bad',
     value: volume.free_gb === null ? 'N/A' : volume.free_gb + ' GB', note: volume.ok ? 'free' : 'free · too low for new renders', target: ops ? 'sx-ov-disk' : undefined,
@@ -402,11 +419,11 @@ function FlaggedAccounts({ rows, onOpenUser }) {
   );
 }
 
-export function OverviewPanel({ stats, hourly, ops, flagged, windowKey, onOpenTab, onOpenUser }) {
+export function OverviewPanel({ stats, hourly, ops, sentry, flagged, windowKey, onOpenTab, onOpenUser }) {
   const [metricKey, setMetricKey] = useState('reports');
   const w = stats.windows[windowKey];
   const win = WINDOWS[windowKey];
-  const checks = healthChecks(stats, w, ops);
+  const checks = healthChecks(stats, w, ops, sentry);
   const metric = METRICS.find((m) => m.key === metricKey);
   const trend = windowBuckets(hourly, windowKey, metricKey);
   const reasons = Object.entries(w.reports.by_reason).map(([reason, value]) => ({ label: label(reason), value })).sort((a, b) => b.value - a.value);
@@ -676,6 +693,53 @@ export function OpsPanel({ ops }) {
             </article>
           </div>
         ) : <p className="sx-ov-note">No requests yet.</p>}
+      </section>
+    </div>
+  );
+}
+
+const ago = (time) => {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(time).getTime()) / 60000));
+  if (minutes < 60) return minutes + ' min ago';
+  if (minutes < 1440) return Math.round(minutes / 60) + ' h ago';
+  return Math.round(minutes / 1440) + ' d ago';
+};
+
+// Admin only: unresolved Sentry issues for this server's environment, from GET /api/ops/sentry.
+export function SentryPanel({ sentry }) {
+  const issues = sentry.issues || [];
+  return (
+    <div className="sx-ov">
+      <section className="sx-ov-sec" id="sx-ov-sentry">
+        <h2>SENTRY · LAST 24 H</h2>
+        <p>Unresolved errors Sentry caught{sentry.environment ? ' in ' + sentry.environment : ''}, newest first. Refreshes every minute. Resolve or ignore an issue in Sentry to clear it here.</p>
+        {!sentry.configured ? (
+          <p className="sx-ov-note">Not connected. Set SENTRY_AUTH_TOKEN (scope event:read), SENTRY_ORG, SENTRY_PROJECT and SENTRY_API_URL in the server environment.</p>
+        ) : sentry.error ? (
+          <p className="sx-ov-note">{sentry.error}. Showing nothing until it answers again.</p>
+        ) : issues.length ? (
+          <article className="sx-ov-card">
+            <div className="sx-ov-table-wrap">
+              <table className="sx-ov-table">
+                <thead>
+                  <tr><th>ISSUE</th><th>STATE</th><th className="sx-ov-r">EVENTS</th><th className="sx-ov-r sx-ov-hide-narrow">LAST SEEN</th></tr>
+                </thead>
+                <tbody>
+                  {issues.map((issue) => (
+                    <tr key={issue.short_id}>
+                      <td className="sx-ov-clip" title={issue.title + (issue.culprit ? ' · ' + issue.culprit : '')}>
+                        <a href={issue.url} target="_blank" rel="noreferrer">{issue.short_id}</a> {issue.title}
+                      </td>
+                      <td className={sentryUrgent(issue) ? 'sx-ov-err' : ''}>{label(issue.substatus || issue.level || 'unresolved')}</td>
+                      <td className="sx-ov-r">{fmt(issue.count)}</td>
+                      <td className="sx-ov-r sx-ov-hide-narrow">{ago(issue.last_seen)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        ) : <p className="sx-ov-note">No unresolved issues in the last 24 hours.</p>}
       </section>
     </div>
   );

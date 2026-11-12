@@ -6556,6 +6556,8 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
 .sx-ov-table td { padding: 6px 8px; border-bottom: 1px solid var(--sx-rule); white-space: nowrap; }
 .sx-ov-table tbody tr:hover { background: var(--sx-surface-2); }
 .sx-ov-table .sx-ov-r { text-align: right; }
+/* Takes the spare width and cuts long text, so the columns after it stay in view. */
+.sx-ov-table td.sx-ov-clip { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sx-ov-cellbar { display: flex; align-items: center; gap: 6px; min-width: 9rem; }
 .sx-ov-cellbar .sx-ov-limit { margin-top: 0; }
 .sx-ov-cellbar .sx-ov-track { height: 10px; }
