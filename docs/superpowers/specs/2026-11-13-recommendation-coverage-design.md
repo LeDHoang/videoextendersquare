@@ -78,8 +78,8 @@ All three run on every surface that runs `DEFAULT_SOURCES` (for_you, related). S
 
 ### B3. `creator_other_reels`
 - **Candidates:** other published reels from the same `owner_id` as the opened reel on the related surface, or as the session seed. Newest first, scored by `1 / (1 + rank)`, capped at 20 candidates.
-- **Conflict with diversity rules:** the 3-per-creator page cap and the 2.5 back-to-back penalty stay as they are.
-  - **Intended outcome:** on a related page, the creator's other reels can fill up to the cap (3 per page), spread out, not stacked.
+- **Conflict with diversity rules:** *(amended 2026-11-13, user's decision: penalize, don't cap.)* On the related surface, the opened reel's creator has no hard 3-per-page cap, on every related page, not only the first. The soft penalties still apply: −0.45 per reel of theirs already on the page and −2.5 for back-to-back. Other creators keep the hard cap.
+  - **Intended outcome:** on a related page, more of the creator's other reels can show when they score well, spread out, not stacked.
   - The source gets more of the creator's reels into the candidate pool. The rerank still decides how many show.
   - No special case for this source. *(My call.)*
 - Hidden or dismissed creators stay excluded, through the existing dismissal filter.
@@ -125,6 +125,7 @@ Visual similarity needs an embedding model. The user chose no model for now. The
   - Result: a reel from a favourite creator a few days old can beat a reel from a low-affinity creator posted an hour ago. A reel a week old needs very strong affinity to reach the top.
   - The following branch of `_ranked_candidates` computes the full feature set instead of returning early with `created_at` order.
   - The weights and the 48h decay time are *my call*. The builder may tune them, as long as the checks below hold.
+  - *(Amended 2026-11-13.)* The following score is scaled by 4.0 before the rerank, so the 0.45-per-creator and 2.5 back-to-back penalties keep their usual weight.
 - **Already watched sinks:** a reel the user completed, or saw for 3s or more in the last 7 days, goes below every unwatched reel. Without this, liked older reels would keep coming back to the top. *(My call.)*
 - **Rerank:** the normal diversity rerank applies: 3 per creator per page and the back-to-back penalty. There is no exploration slot, because every candidate is already from a followed creator.
 - **Paging:** session impressions already stop repeats within a session. Every following post still appears exactly once while paging through.
@@ -149,16 +150,16 @@ Visual similarity needs an embedding model. The user chose no model for now. The
   - It creates no session and no impressions.
   - No diversity rerank across the whole grid; the 3-per-creator rule applies per 24-item block.
   - Other sorts are unchanged.
-  - Anonymous viewers are ranked by their cookie actor key (`a:<hash>`), the same way the player ranks them.
+  - *(Amended 2026-11-13.)* Anonymous viewers share one non-personal ranking (quality, freshness, exploration) under the fixed actor key `grid:anonymous`. The grid never reads or sets the anonymous cookie. Anonymous `/api/reels` responses are edge-cached by URL, so they must not vary by cookie. Signed-in viewers get personal ranking; their responses are already `private, no-store`.
   - The VR shell's Explore and Search routes (`ui/assets/vr_shell.js:150-151`) switch from `sort: 'shuffle'` to `sort: 'for_you'`. This is the user's decision.
-  - **Paging stays stable:** these grids page by offset, so the ranked id list is cached per actor, filters and `reel_records_version` for 10 minutes, and each page is a slice of it. Without the cache, affinities that change between pages would duplicate or skip reels. *(My call.)*
+  - **Paging stays stable:** *(amended 2026-11-13)* the grid pages by keyset cursor. The `for_you` key is `(rank_index, -mtime, rel_path)`, and the cursor carries the 10-minute `seed` bucket, as `shuffle` does. The ranked id list is cached per actor, filters and seed for 10 minutes, and pages after the first read that list. The cache is not keyed on `reel_records_version`: that version changes every 10 seconds even without new posts, so keying on it would re-rank between pages. Cost: a reel posted inside the current 10-minute bucket sorts after the ranked set until the bucket rolls. *(My call.)*
 - **Check:** a test signs in a viewer with a strong creator affinity. `/api/reels?sort=for_you` puts that creator's reels in the first block. A test with `sort=newest` gives the same output as today.
 
 ### C4. VR shell tile tap goes through the recommender
 - **Today:** `play()` in `ui/assets/vr_shell.js` (~line 569) hands any route's `items` (Explore, Search, profile, saved, DM-shared) to `replaceFeedForVr` (`ui/assets/reels.html:6550`). That function plays a fixed queue: `feedCursor = null`, `feedHasMore = false`, no impressions, no attribution.
 - **Change:** when the tapped item has a `post_id`, request a related-surface page seeded by that post. The route's items are the scope:
   - The scope ids reach `/api/reels/feed` (with `post=<tapped id>`) as an explicit, ordered `scope_ids` list of post ids, capped at 200, because a shuffled list can't be rebuilt server-side from filter params.
-  - The server uses them like today's `scope_order`: the tapped reel, the rest of the list from there, then the items before it, then related reels with paging.
+  - *(Amended 2026-11-13.)* The client rotates the list so `scope_ids` already starts at the tapped reel: the tapped reel, the rest of the list from there, then the items before it. The server keeps that order as `scope_order`, without rotating, then continues with related reels with paging.
   - A `post_id` not in the catalog is fetched by id. A missing, unpublished or hidden id is dropped silently.
 - **Fallback:** if the tapped item has no `post_id` (unpublished or local media), or the request fails, keep today's static queue.
 - **Check:**
@@ -167,6 +168,7 @@ Visual similarity needs an embedding model. The user chose no model for now. The
 
 ### C5. Long tail beyond the newest 1000
 - **Today:** `MAX_CATALOG_SIZE = 1000` newest posts. Older posts can never be recommended.
+- **Amended 2026-11-13 (user's decision: no age cutoff, penalize old reels in tiers).** Old reels get an age penalty in tiers: small within 3 months, more within 6 months, more within a year, most after that (freshness factor 1.0, 0.85 at 90 days, 0.70 at 180, 0.55 at 365, 0.40 at 730). The penalty depends on age alone. A reel that keeps performing well stays in the pool, and its separate quality score keeps it competitive. The per-request pool is no longer "newest 1000": it is the newest half plus the best-performing older posts of any age. Personal long-tail picks (below) add older posts from creators and tags the viewer likes. It all runs on the cached in-memory catalog. The only new queries are the unrestricted top-20 creator and tag affinities and the seeds' `ItemSimilarity` rows. Only posts outside the pool count toward the 150-extra cap.
 - **Change:** a `long_tail` retrieval step adds older published posts. It runs per request on for_you and related only. It takes, by indexed query:
   - posts by the actor's top 20 positive-affinity creators (≤ 5 each);
   - posts carrying the top 20 positive-affinity tags (≤ 50 total);
@@ -204,7 +206,7 @@ Visual similarity needs an embedding model. The user chose no model for now. The
 - Following blend: 50/50 personalized and recency, 48h decay; watched reels sink.
 - Transcripts deferred until their text is stored in the database.
 - Starting weights in B5, and `max()` to combine related scores.
-- `creator_other_reels` follows the existing diversity cap; no special case.
+- ~~`creator_other_reels` follows the existing diversity cap; no special case.~~ Superseded 2026-11-13 by the user's decision: the opened reel's creator is penalized, not capped, on related pages (see B3).
 - Author scope and admin sorts keep their current order.
 - Version bump to v2. Old sessions restart, through the existing `algorithm_version_changed` path.
 - Builder check was a self-review against the doc, not a separate agent.
