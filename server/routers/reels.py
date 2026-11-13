@@ -2210,8 +2210,13 @@ def list_reels(
                 seed = int(time.time()) // 60
             ranks = path_to_post_id = None
             if grid:
+                current_bucket = int(time.time()) // _GRID_SEED_SECONDS
                 if seed is None:
-                    seed = int(time.time()) // _GRID_SEED_SECONDS
+                    seed = current_bucket
+                elif seed not in (current_bucket, current_bucket - 1):
+                    # Older buckets have expired from the cache; a forged seed
+                    # would only churn it.
+                    raise _invalid_cursor()
                 ranks, path_to_post_id = _grid_ranks(videos, filters, seed, viewer_id, db)
             key = _list_page_key(sort, scoped_paths is not None, seed, videos, recent_activity, db, ranks, path_to_post_id)
             videos.sort(key=key)

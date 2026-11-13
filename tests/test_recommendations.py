@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -1789,3 +1790,43 @@ def test_grid_for_you_puts_affine_creator_first(app):
                 break
         assert len(seen) == len(set(seen)) == 12
         assert {post.id for post in posts} == set(seen)
+
+
+def test_anonymous_grid_keys_cannot_evict_signed_in_entries(app, monkeypatch):
+    from server.social.recommendations import config
+
+    monkeypatch.setattr(service, "rank_pool", lambda *a, **k: [])
+    signed_in = service.ActorIdentity(actor_key="u:someone", user_id="someone", anonymous_id=None)
+    anonymous = service.ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
+    with app.state.testing_session() as db:
+        service.rank_grid(db, actor=signed_in, allowed_post_ids=set(), filters_key="f", seed=1)
+        for seed in range(config.GRID_CACHE_ANON_MAX + 10):
+            service.rank_grid(db, actor=anonymous, allowed_post_ids=set(), filters_key="f", seed=seed)
+    assert ("u:someone", "f", 1) in service._grid_cache
+    anon_keys = [k for k in service._grid_cache if k[0] == "grid:anonymous"]
+    assert len(anon_keys) == config.GRID_CACHE_ANON_MAX
+
+
+def test_grid_list_cursor_seed_must_be_current_or_previous_bucket(app):
+    import time
+
+    seed_catalog(app, creators=4, posts_per_creator=3)
+    bucket = int(time.time()) // reels._GRID_SEED_SECONDS
+    with TestClient(app) as client:
+        first = client.get("/api/reels", params={"sort": "for_you", "limit": 5})
+        assert first.status_code == 200, first.text
+        cursor = first.json()["next_cursor"]
+        assert cursor
+        pad = "=" * (-len(cursor) % 4)
+        body = json.loads(base64.urlsafe_b64decode(cursor + pad))
+
+        def with_seed(seed):
+            body["seed"] = seed
+            raw = json.dumps(body, separators=(",", ":")).encode("utf-8")
+            return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+        stale = client.get("/api/reels", params={"sort": "for_you", "limit": 5, "cursor": with_seed(bucket - 5)})
+        assert stale.status_code == 400
+        assert stale.json()["detail"]["code"] == "INVALID_CURSOR"
+        previous = client.get("/api/reels", params={"sort": "for_you", "limit": 5, "cursor": with_seed(bucket - 1)})
+        assert previous.status_code == 200, previous.text

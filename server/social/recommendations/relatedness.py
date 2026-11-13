@@ -98,7 +98,7 @@ def location_score(a: PostLocation | None, b: PostLocation | None) -> float:
     if a.coords and b.coords:
         score = math.exp(-haversine_km(a.coords, b.coords) / 50.0)
         return score if score >= 0.05 else 0.0
-    if a.country.casefold() == b.country.casefold():
+    if a.country and b.country and a.country.casefold() == b.country.casefold():
         return 0.6 if a.city.casefold() == b.city.casefold() else 0.15
     return 0.0
 

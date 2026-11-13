@@ -48,6 +48,7 @@ from .config import (
     FOLLOWING_WATCHED_MS,
     LONG_TAIL_MAX,
     GRID_BLOCK,
+    GRID_CACHE_ANON_MAX,
     GRID_CACHE_MAX,
     GRID_CACHE_TTL_S,
     GRID_CREATOR_CAP,
@@ -264,11 +265,11 @@ _catalog_base_cache: dict = {"entry": (None, ())}
 
 def _post_location(raw) -> PostLocation | None:
     loc = raw if isinstance(raw, dict) else {}
-    city, country = loc.get("city", ""), loc.get("country", "")
+    city, country = str(loc.get("city") or ""), str(loc.get("country") or "")
     slug = location_key(city, country)
     if not slug:
         return None
-    return PostLocation(slug, str(city), str(country), location_coords(city, country, loc.get("lat"), loc.get("lon")))
+    return PostLocation(slug, city, country, location_coords(city, country, loc.get("lat"), loc.get("lon")))
 
 
 def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
@@ -718,6 +719,7 @@ def rank_pool(db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str]) 
 # keying on it would re-rank between pages.
 _grid_cache: dict[tuple[str, str, int], tuple[float, list[str]]] = {}
 _grid_cache_lock = threading.Lock()
+_GRID_ANONYMOUS_KEY = "grid:anonymous"
 
 
 def rank_grid(
@@ -733,8 +735,14 @@ def rank_grid(
     ids = block_diverse([candidate.item.post_id for candidate in ranked], owner_of, GRID_BLOCK, GRID_CREATOR_CAP)
     with _grid_cache_lock:
         _grid_cache[key] = (now, ids)
-        while len(_grid_cache) > GRID_CACHE_MAX:
-            del _grid_cache[min(_grid_cache, key=lambda k: _grid_cache[k][0])]
+        # Anonymous keys evict only among themselves, so they cannot push out
+        # signed-in entries.
+        anonymous = actor.actor_key == _GRID_ANONYMOUS_KEY
+        peers = [k for k in _grid_cache if (k[0] == _GRID_ANONYMOUS_KEY) == anonymous]
+        while len(peers) > (GRID_CACHE_ANON_MAX if anonymous else GRID_CACHE_MAX):
+            oldest = min(peers, key=lambda k: _grid_cache[k][0])
+            del _grid_cache[oldest]
+            peers.remove(oldest)
     return ids
 
 

@@ -119,3 +119,19 @@ def test_block_diverse_caps_creators_per_block():
     # Only one creator left: fills in input order past the cap.
     only = block_diverse(["a0", "a1", "a2", "a3", "a4"], {f"a{i}": "a" for i in range(5)}, block=4, cap=2)
     assert only == ["a0", "a1", "a2", "a3", "a4"]
+
+
+def test_location_score_city_only_posts_never_share_a_country():
+    assert location_score(_place("hanoi", "Hanoi", "", None), _place("lima", "Lima", "", None)) == 0.0
+    assert location_score(_place("paris", "Paris", "", None), _place("tokyo", "Tokyo", "", None)) == 0.0
+    assert location_score(
+        _place("hanoi--vietnam", "Hanoi", "Vietnam", None), _place("hue--vietnam", "Hue", "Vietnam", None)
+    ) == 0.15
+
+
+def test_post_location_null_country_is_empty_not_none_string():
+    from server.social.recommendations.service import _post_location
+
+    place = _post_location({"city": "Hanoi", "country": None})
+    assert place is not None and place.country == "" and place.city == "Hanoi"
+    assert _post_location({"city": None, "country": "Vietnam"}) is None

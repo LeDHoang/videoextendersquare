@@ -16,6 +16,7 @@ CATALOG_NEWEST_SHARE = 0.5
 LONG_TAIL_MAX = 150
 GRID_CACHE_TTL_S = 600
 GRID_CACHE_MAX = 256
+GRID_CACHE_ANON_MAX = 64
 GRID_BLOCK = 24
 GRID_CREATOR_CAP = 3
 # (age in days, freshness factor): small penalty within 3 months, larger within 6, a year, then the most.
