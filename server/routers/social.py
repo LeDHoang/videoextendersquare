@@ -413,6 +413,7 @@ class PostUpdateRequest(BaseModel):
 class CommentRequest(BaseModel):
     text: str
     timestamp: float | None = None
+    parent_id: str | None = None
 
 
 class ViewRequest(BaseModel):
@@ -1272,12 +1273,26 @@ def create_post_comment(
         error(422, "EMPTY_COMMENT", "Comment text cannot be empty.", "text")
     if len(text) > 500:
         error(422, "COMMENT_TOO_LONG", "Comments are limited to 500 characters.", "text")
+    parent_id = None
+    if req.parent_id:
+        parent = get_visible_comment(db, req.parent_id, context.user.id)
+        if parent.post_id != post.id:
+            error(422, "INVALID_PARENT_COMMENT", "Replies must be on the same post.", "parent_id")
+        # One level of threading: a reply to a reply joins the top-level thread.
+        # Once that top-level comment is deleted (deletes are final), its replies
+        # stand top-level, so a reply to one threads under it instead.
+        root_deleted = parent.parent_id is not None and db.query(Comment.id).filter(
+            Comment.id == parent.parent_id, Comment.deleted_at.is_(None)
+        ).first() is None
+        parent_id = parent.id if root_deleted else (parent.parent_id or parent.id)
     timestamp_ms = None
-    if req.timestamp is not None:
+    # Replies are general: they never pop up on the video timeline.
+    if req.timestamp is not None and parent_id is None:
         timestamp_ms = max(0, min(round(float(req.timestamp) * 1000), 24 * 60 * 60 * 1000))
     comment = Comment(
         post_id=post.id,
         author_id=context.user.id,
+        parent_id=parent_id,
         text=text,
         timestamp_ms=timestamp_ms,
     )

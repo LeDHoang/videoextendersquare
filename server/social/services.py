@@ -179,6 +179,7 @@ def _comment_fields(
     return {
         "id": comment.id,
         "post_id": comment.post_id,
+        "parent_id": comment.parent_id,
         "video_path": video_path,
         "timestamp": timestamp,
         "author_id": author.id,
@@ -336,6 +337,7 @@ _RECORD_COMMENT = Bundle(
     Comment.id,
     Comment.post_id,
     Comment.author_id,
+    Comment.parent_id,
     Comment.text,
     Comment.timestamp_ms,
     Comment.like_count,

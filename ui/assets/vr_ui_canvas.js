@@ -50,6 +50,8 @@
   const CP_SYNC_BTN = { x: 504, y: CP_INFO_H + 12, w: 36, h: 32 };
   // Comment name advance (600 11px IBM Plex Mono, 0.6em per glyph).
   const CP_NAME_CHAR_W = 6.6;
+  // Replies sit indented under the comment they answer.
+  const CP_REPLY_INDENT = 28;
 
   // FOLLOW hugs its label (same 700 11px mono), right-aligned 8px left of close.
   function cpFollowBtn(following) {
@@ -1031,9 +1033,33 @@
     const creator = cpCreator(item);
     return !!(creator && creator.username && (itemState || {}).canFollow !== false);
   }
+  // Replies follow the top-level comment they answer; a reply whose parent is
+  // gone shows top-level. The general tab drops time-synced top-level comments
+  // and their replies with them. Mirrors threadComments in reels.html.
   function filterPanelComments(comments, cPanelTab) {
-    if (cPanelTab !== 'general') return comments;
-    return comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
+    const ids = new Set(comments.map((c) => c.id));
+    const replies = new Map();
+    const roots = [];
+    comments.forEach((c) => {
+      if (c.parent_id && ids.has(c.parent_id)) {
+        if (!replies.has(c.parent_id)) replies.set(c.parent_id, []);
+        replies.get(c.parent_id).push(c);
+      } else {
+        roots.push(c);
+      }
+    });
+    return roots
+      .filter((c) => cPanelTab !== 'general' || c.timestamp === null || c.timestamp === undefined)
+      .flatMap((c) => [c].concat(replies.get(c.id) || []));
+  }
+  // Row geometry, shared by render and hit test: replies are indented.
+  function cpRowBox(c, shownIds) {
+    const indent = c.parent_id && shownIds.has(c.parent_id) ? CP_REPLY_INDENT : 0;
+    return { itemX: CP_LIST_X + 10 + indent, itemW: CP_LIST_W - 20 - indent, isReply: indent > 0 };
+  }
+  // REPLY sits in the head row, left of the like heart.
+  function cpReplyBtn(itemX, itemW, y) {
+    return { x: itemX + itemW - 142, y: y + 8, w: 62, h: 24 };
   }
   // Comment head row, shared by render and hit test: the time pill follows the
   // name; general comments get no pill.
@@ -1050,6 +1076,7 @@
   function resolveCommentsPanelRegion(canvasX, canvasY, options = {}) {
     const { comments = [], cPanelTab = 'all', cPanelScrollY = 0, item = null, itemState = {} } = options;
     const filtered = filterPanelComments(comments, cPanelTab);
+    const shownIds = new Set(filtered.map((c) => c.id));
     const inBox = (b) => canvasX >= b.x && canvasX < b.x + b.w && canvasY >= b.y && canvasY < b.y + b.h;
 
     if (canvasY < CP_INFO_H) {
@@ -1083,12 +1110,13 @@
     if (idx >= 0 && idx < filtered.length) {
       const c = filtered[idx];
       const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
-      const itemX = CP_LIST_X + 10;
-      const itemW = CP_LIST_W - 20;
+      const { itemX, itemW } = cpRowBox(c, shownIds);
       if (canvasY >= y + 4 && canvasY < y + 36) {
         const head = cpCommentHead(c, itemX, y);
         if (canvasX >= itemX + 8 && canvasX < head.nameEnd + 4) return 'profile:' + (c.author_name || '');
         if (head.pill && canvasX >= head.pill.x && canvasX < head.pill.x + head.pill.w) return 'seek:' + c.id;
+        const rb = cpReplyBtn(itemX, itemW, y);
+        if (canvasX >= rb.x && canvasX < rb.x + rb.w) return 'reply:' + c.id;
         if (canvasX >= itemX + itemW - 74 && canvasX < itemX + itemW - 6) return 'like:' + c.id;
       }
     }
@@ -1265,6 +1293,7 @@
     } = options;
     const hover = cPanelHover || '';
     const filtered = filterPanelComments(comments, cPanelTab);
+    const shownIds = new Set(filtered.map((c) => c.id));
 
     const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
     const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
@@ -1341,8 +1370,7 @@
         const y = CP_LIST_TOP + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
         if (y + CP_ITEM_H < CP_LIST_TOP || y > CP_LIST_BOTTOM) return;
 
-        const itemX = CP_LIST_X + 10;
-        const itemW = CP_LIST_W - 20;
+        const { itemX, itemW } = cpRowBox(c, shownIds);
         const border = c.avatar_color || accent;
         const highlighted = (c.id === cPanelHighlightId);
 
@@ -1388,6 +1416,21 @@
           ctx.font = `600 10px ${TOKENS.font.mono}`;
           ctx.fillText(head.time, p.x + 28, p.y + p.h / 2 + 1);
         }
+
+        // Reply: text button left of the like heart
+        const rb = cpReplyBtn(itemX, itemW, y);
+        const replyHover = hover === 'reply:' + c.id;
+        ctx.fillStyle = replyHover ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
+        ctx.strokeStyle = replyHover ? accent : TOKENS.hex.ruleStrong;
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, rb.x, rb.y, rb.w, rb.h, TOKENS.radiusPx);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = replyHover ? accent : TOKENS.hex.ink;
+        ctx.font = `600 10px ${TOKENS.font.mono}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('REPLY', rb.x + rb.w / 2, rb.y + rb.h / 2 + 1);
 
         // Like: heart + count
         const liked = !!c.liked_by_me;
@@ -2594,6 +2637,7 @@
     resolveControlsHit,
     renderCommentsPanelCanvas,
     resolveCommentsPanelRegion,
+    filterPanelComments,
     renderOverlayCanvas,
     resolveOverlayCommentAt,
     filterOverlayComments,

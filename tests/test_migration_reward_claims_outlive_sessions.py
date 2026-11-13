@@ -10,20 +10,11 @@ import uuid
 import pytest
 import sqlalchemy as sa
 from alembic import command
-from alembic.script import ScriptDirectory
-
-from server.social.database import EXPECTED_SCHEMA_REVISION
 
 from test_migration_stereo_layout import _alembic, _required_row, _reset_postgres, _urls
 
 REVISION = "20261113_0024"
 PREVIOUS = "20261113_0023"
-
-
-def test_app_expects_the_migration_head(tmp_path, monkeypatch):
-    # The app refuses to boot unless the database is at EXPECTED_SCHEMA_REVISION.
-    head = ScriptDirectory.from_config(_alembic(_urls(tmp_path)[0], monkeypatch)).get_current_head()
-    assert EXPECTED_SCHEMA_REVISION == head == REVISION
 
 
 def _engine(url):

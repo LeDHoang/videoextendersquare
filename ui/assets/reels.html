@@ -401,6 +401,7 @@
   .comment-time-btn:focus-visible,
   .comment-like-btn:focus-visible,
   .comment-delete-btn:focus-visible,
+  .comment-reply-cancel:focus-visible,
   .follow-pill:focus-visible,
   .meta-creator:focus-visible,
   .twitch-comment-pill:focus-visible,
@@ -1213,6 +1214,8 @@
     margin-bottom: 8px;
   }
   .comment-item-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+  /* Replies sit indented under the comment they answer. */
+  .comment-item.comment-reply { margin-left: 28px; }
   .comment-avatar {
     width: 32px; height: 32px;
     display: flex; align-items: center; justify-content: center;
@@ -1361,6 +1364,16 @@
     letter-spacing: 0.06em;
   }
   .comment-delete-btn:hover { color: var(--sx-accent); }
+  .comment-reply-cancel {
+    border: 0;
+    padding: 0 14px;
+    height: 100%;
+    background: transparent;
+    color: var(--sx-accent);
+    cursor: pointer;
+    font: 700 16px/1 'JetBrains Mono', monospace;
+  }
+  .comment-reply-cancel[hidden] { display: none; }
   .sync-time-toggle {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--sx-surface-3);
@@ -2512,6 +2525,7 @@
       <form class="comment-form" id="commentForm">
         <div class="comment-input-wrap">
           <input type="text" class="comment-input" id="commentInput" aria-label="Add a comment" maxlength="500" placeholder="Add a comment at 0:00..." autocomplete="off" />
+          <button type="button" class="comment-reply-cancel" id="commentReplyCancel" aria-label="Cancel reply" title="Cancel reply" hidden>×</button>
         </div>
         <button type="submit" class="comment-submit-btn" id="commentSubmitBtn">SEND</button>
       </form>
@@ -2606,6 +2620,8 @@
     let isMuted = true;
     let activeTab = 'all';
     let isSyncTimeActive = true;
+    // Comment the composer is replying to ({ id, author_name, prefill }), or null.
+    let replyTarget = null;
     // Docked details column (desktop SPA embed): true while the comments drawer
     // and PREV/NEXT group live in the side column instead of the player frame.
     let isDocked = false;
@@ -2752,6 +2768,7 @@
     const commentForm = document.getElementById('commentForm');
     const commentInput = document.getElementById('commentInput');
     const commentSubmitBtn = document.getElementById('commentSubmitBtn');
+    const commentReplyCancel = document.getElementById('commentReplyCancel');
 
     // <auto-captions>
     // Captions made at publish (a WebVTT file, when the server could run the speech model). A hidden <track>
@@ -3240,6 +3257,26 @@
       const item = videoData[idx];
       if (item && item.comments === undefined) ensureComments(item);
       return (item && item.comments) ? item.comments : [];
+    }
+
+    // Replies follow the top-level comment they answer; a reply whose parent is
+    // gone (deleted, hidden) shows top-level. With generalOnly, time-synced
+    // top-level comments drop out, and their replies with them.
+    function threadComments(list, generalOnly) {
+      const ids = new Set(list.map((comment) => comment.id));
+      const replies = new Map();
+      const roots = [];
+      list.forEach((comment) => {
+        if (comment.parent_id && ids.has(comment.parent_id)) {
+          if (!replies.has(comment.parent_id)) replies.set(comment.parent_id, []);
+          replies.get(comment.parent_id).push(comment);
+        } else {
+          roots.push(comment);
+        }
+      });
+      return roots
+        .filter((comment) => !generalOnly || comment.timestamp === null || comment.timestamp === undefined)
+        .flatMap((comment) => [comment].concat(replies.get(comment.id) || []));
     }
 
     // Until a paged row's comments arrive, its count comes from comments_count.
@@ -4850,7 +4887,7 @@
       else if (pending.kind === 'collect') await openCollectOverlay();
       else if (pending.kind === 'follow') await followCurrentCreator();
       else if (pending.kind === 'comment' && pending.text) {
-        const posted = await postComment(pending.text, pending.timestamp);
+        const posted = await postComment(pending.text, pending.timestamp, pending.parent_id);
         if (posted && commentInput) commentInput.value = '';
       } else if (pending.kind === 'comment-like' && pending.comment_id) {
         await likeComment(pending.comment_id);
@@ -5408,10 +5445,12 @@
       }
     }
 
-    async function postComment(text, timestamp) {
+    async function postComment(text, timestamp, parentId) {
       const item = videoData[idx];
       if (!item || !item.post_id) return null;
-      const normalizedTimestamp = timestamp !== null && timestamp !== undefined
+      const parent = parentId || null;
+      // Replies are general: they never pop up on the timeline.
+      const normalizedTimestamp = timestamp !== null && timestamp !== undefined && !parent
         ? Math.round(Number(timestamp) * 10) / 10
         : null;
       if (!currentUser) {
@@ -5420,6 +5459,7 @@
           post_id: item.post_id,
           text: text,
           timestamp: normalizedTimestamp,
+          parent_id: parent,
         });
         return null;
       }
@@ -5427,14 +5467,19 @@
         const newComment = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/comments', {
           method: 'POST',
           headers: recommendationHeaders(item, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ text: text, timestamp: normalizedTimestamp }),
+          body: JSON.stringify({ text: text, timestamp: normalizedTimestamp, parent_id: parent }),
         });
         if (!item.comments) item.comments = [];
         item.comments.push(newComment);
         item.comments_count = Number(item.comments_count || 0) + 1;
         renderDrawerComments();
         renderCommentMarkers();
-        showFlash('COMMENT POSTED');
+        if (newComment.parent_id) {
+          // A reply lands mid-list under its thread, so bring it into view.
+          const row = document.getElementById('comment-' + newComment.id);
+          if (row) row.scrollIntoView({ block: 'nearest' });
+        }
+        showFlash(newComment.parent_id ? 'REPLY POSTED' : 'COMMENT POSTED');
         return newComment;
       } catch (error) {
         if (error.status === 401 || error.status === 403) {
@@ -5445,6 +5490,7 @@
             post_id: item.post_id,
             text: text,
             timestamp: normalizedTimestamp,
+            parent_id: parent,
           });
         } else {
           showFlash('COMMENT FAILED');
@@ -5649,10 +5695,8 @@
       if (commentBtn) commentBtn.setAttribute('aria-label', 'Comments, ' + total);
       if (sideComms) sideComms.textContent = fmtCount(total);
 
-      let filtered = comments;
-      if (activeTab === 'general') {
-        filtered = comments.filter((comment) => comment.timestamp === null || comment.timestamp === undefined);
-      }
+      const filtered = threadComments(comments, activeTab === 'general');
+      const shownIds = new Set(filtered.map((comment) => comment.id));
 
       commentsList.replaceChildren();
       if (!filtered.length) {
@@ -5671,7 +5715,8 @@
       filtered.forEach((comment) => {
         const border = safeColor(comment.avatar_color, '#ff553a');
         const item = document.createElement('div');
-        item.className = 'comment-item';
+        const isReply = !!(comment.parent_id && shownIds.has(comment.parent_id));
+        item.className = 'comment-item' + (isReply ? ' comment-reply' : '');
         item.id = 'comment-' + comment.id;
         item.style.setProperty('--avatar-border', border);
 
@@ -5730,6 +5775,14 @@
         like.append(likeIcon, likeCountNode);
         like.addEventListener('click', () => likeComment(comment.id));
         actions.appendChild(like);
+
+        const reply = document.createElement('button');
+        reply.type = 'button';
+        reply.className = 'comment-delete-btn';
+        reply.textContent = 'REPLY';
+        reply.title = 'Reply to ' + (comment.author_name ? '@' + comment.author_name : 'this comment');
+        reply.addEventListener('click', () => startReply(comment, isReply));
+        actions.appendChild(reply);
 
         if (comment.can_delete) {
           const remove = document.createElement('button');
@@ -5877,11 +5930,45 @@
     // time-sync toggle and drop the "at 0:00" hint while an image post shows.
     function syncCommentComposer(item) {
       const still = isImageItem(item);
-      if (syncTimeToggle) syncTimeToggle.style.display = still ? 'none' : '';
+      // Replies are never time-synced, so the toggle hides while replying.
+      if (syncTimeToggle) syncTimeToggle.style.display = still || replyTarget ? 'none' : '';
+      if (commentReplyCancel) commentReplyCancel.hidden = !replyTarget;
       if (!commentInput) return;
+      if (replyTarget) {
+        commentInput.placeholder = replyTarget.author_name ? `Reply to @${replyTarget.author_name}...` : 'Reply...';
+        commentInput.setAttribute('aria-label', commentInput.placeholder);
+        return;
+      }
+      commentInput.setAttribute('aria-label', 'Add a comment');
       if (still) commentInput.placeholder = 'Add a comment...';
       else if (isSyncTimeActive) commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime || 0)}...`;
       else commentInput.placeholder = 'Add a general comment...';
+    }
+
+    // Replying to a reply joins the same thread; the "@name" prefill says who it answers.
+    function startReply(comment, isReply) {
+      const name = comment.author_name || '';
+      const prefill = isReply && name ? '@' + name : '';
+      replyTarget = { id: comment.id, author_name: name, prefill: prefill };
+      if (commentInput) {
+        if (prefill && !commentInput.value.trim()) commentInput.value = prefill + ' ';
+        commentInput.focus();
+      }
+      syncCommentComposer(videoData[idx]);
+    }
+
+    function cancelReply() {
+      if (!replyTarget) return;
+      if (commentInput && replyTarget.prefill && commentInput.value.trim() === replyTarget.prefill) commentInput.value = '';
+      replyTarget = null;
+      syncCommentComposer(videoData[idx]);
+    }
+
+    if (commentReplyCancel) {
+      commentReplyCancel.addEventListener('click', () => {
+        cancelReply();
+        if (commentInput) commentInput.focus();
+      });
     }
 
     if (syncTimeToggle) {
@@ -5903,11 +5990,14 @@
       commentForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const txt = (commentInput ? commentInput.value : '').trim();
-        if (!txt) return;
+        const parentId = replyTarget ? replyTarget.id : null;
+        // A reply that is still only its "@name" prefill has nothing to say.
+        if (!txt || (replyTarget && txt === replyTarget.prefill)) return;
         // Stills have no playback clock — always post general comments.
         const ts = (isSyncTimeActive && !isImageItem(videoData[idx])) ? video.currentTime : null;
-        const posted = await postComment(txt, ts);
+        const posted = await postComment(txt, ts, parentId);
         if (posted && commentInput) commentInput.value = '';
+        if (posted && parentId) cancelReply();
       });
     }
 
@@ -6097,6 +6187,8 @@
 
       // Update comments display for this reel
       renderDrawerComments();
+      // A reply target belongs to the reel it was picked on.
+      replyTarget = null;
       syncCommentComposer(item);
 
       if (isImageItem(item)) {
@@ -7035,7 +7127,7 @@
         progressBar.setAttribute('aria-valuenow', String(Math.round(pct)));
         progressBar.setAttribute('aria-valuetext', formatTime(video.currentTime) + ' of ' + formatTime(video.duration));
         if (syncTimeDisplay) syncTimeDisplay.textContent = formatTime(video.currentTime);
-        if (isSyncTimeActive && commentInput && !commentInput.value) {
+        if (isSyncTimeActive && commentInput && !commentInput.value && !replyTarget) {
           commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime)}...`;
         }
       }
@@ -7653,7 +7745,7 @@
           }
         },
         onLikeComment: function(id) { return likeComment(id); },
-        onPostComment: function(text, timestamp) { return postComment(text, timestamp); },
+        onPostComment: function(text, timestamp, parentId) { return postComment(text, timestamp, parentId); },
         onVRError: function(reason, detail) {
           const messages = {
             'webxr-unavailable': 'WEBXR NOT AVAILABLE — REQUIRES HTTPS OR LOCALHOST',

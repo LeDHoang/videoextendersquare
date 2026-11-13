@@ -123,13 +123,16 @@ const COMMENT_TEMPLATES = [
 function makeComments(count) {
   return Array.from({ length: count }, (_, i) => {
     const [author, color, text] = COMMENT_TEMPLATES[i % COMMENT_TEMPLATES.length];
+    // Every fourth comment replies to the one before it; replies are always general.
+    const reply = i % 4 === 3;
     return {
       id: `c${i + 1}`,
+      parent_id: reply ? `c${i}` : null,
       author_name: author,
       avatar_color: color,
       text,
       // Every third comment is general (no timestamp); the rest pop up on the screen.
-      timestamp: i % 3 === 2 ? null : (1 + i * 3.5) % DURATION,
+      timestamp: reply || i % 3 === 2 ? null : (1 + i * 3.5) % DURATION,
       likes: (i * 7) % 12,
       liked_by_me: i === 1,
     };
@@ -284,8 +287,7 @@ function getPosters() {
 }
 
 function filterByTab(comments, tab) {
-  if (tab === 'general') return comments.filter((c) => c.timestamp === null);
-  return comments;
+  return UI.filterPanelComments(comments, tab);
 }
 
 function mockSource(mock, s) {
@@ -599,6 +601,8 @@ export default function VRPanelWorkbench() {
         s.following = !s.following;
       } else if (hit === 'scrollup' || hit === 'scrolldown') {
         scrollComments((hit === 'scrollup' ? -1 : 1) * (UI.CP_ITEM_H + UI.CP_ITEM_GAP));
+      } else if (hit.startsWith('reply:')) {
+        s.highlight = hit.slice(6);
       } else if (hit.startsWith('seek:')) {
         const c = live.current.comments.find((item) => item.id === hit.slice(5));
         if (c) {

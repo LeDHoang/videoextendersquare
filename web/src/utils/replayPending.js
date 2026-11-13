@@ -20,6 +20,7 @@ export async function replayPendingAction() {
     await api.post('/api/posts/' + encodeURIComponent(pending.post_id) + '/comments', {
       text: pending.text,
       timestamp: pending.timestamp ?? null,
+      parent_id: pending.parent_id ?? null,
     });
   } else if (pending.kind === 'comment-like' && pending.comment_id) {
     await api.put('/api/comments/' + encodeURIComponent(pending.comment_id) + '/like');
