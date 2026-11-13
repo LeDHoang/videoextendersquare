@@ -155,6 +155,21 @@ class CreatorOtherReelsSource:
         ]
 
 
+class ScopePoolSource:
+    """Every item of a filtered feed, newest first. Affinity features do the ranking."""
+
+    name = "scope_pool"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        ordered = sorted(
+            context.items.values(), key=lambda item: (-item.created_at.timestamp(), item.post_id)
+        )
+        return [
+            (item.post_id, SourceHit(self.name, rank, 1.0))
+            for rank, item in enumerate(ordered, start=1)
+        ]
+
+
 class SessionContextSource:
     name = "session_context"
 
@@ -220,6 +235,8 @@ def gather_source_hits(context: PipelineContext) -> dict[str, dict[str, SourceHi
     """Return post -> source -> hit while preserving all provenance."""
     if context.manual_order is not None:
         sources: tuple[CandidateSource, ...] = (ManualOrderSource(),)
+    elif context.pool_only:
+        sources = (ScopePoolSource(),)
     elif context.surface == "following":
         sources = (FollowingRecentSource(),)
     else:

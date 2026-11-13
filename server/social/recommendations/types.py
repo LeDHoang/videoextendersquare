@@ -75,6 +75,9 @@ class PipelineContext:
     seed_items: tuple[tuple[CatalogItem, float], ...] = ()
     text_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
     location_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
+    pool_only: bool = False
+    # Following surface only: posts the actor finished or watched 3s+ in the last 7 days.
+    watched_post_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

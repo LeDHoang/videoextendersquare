@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from datetime import timedelta
 
 from argon2 import PasswordHasher
@@ -993,6 +994,48 @@ def test_a_reel_opened_from_a_tag_plays_that_tag_first(app):
     assert len(ids) == 9
 
 
+def test_feed_scope_ids_plays_given_order_then_related(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    scope = [posts[5].id, posts[9].id, posts[1].id, posts[11].id]
+    params = {
+        "folder": "ALL FOLDERS", "post": posts[5].id, "scope_ids": ",".join(scope), "limit": 6,
+    }
+    with TestClient(app) as client:
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        body = first.json()
+        ids = [item["post_id"] for item in body["items"]]
+        assert ids[:4] == scope
+        assert set(ids[4:]).isdisjoint(scope)
+        assert all(item["recommendation"]["impression_id"] for item in body["items"])
+        seen = list(ids)
+        while body["has_more"]:
+            body = client.get("/api/reels/feed", params={**params, "cursor": body["next_cursor"]}).json()
+            seen.extend(item["post_id"] for item in body["items"])
+    assert len(seen) == len(set(seen)) == 12
+
+
+def test_feed_scope_ids_drops_junk(app, monkeypatch):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    hidden = posts[7]
+    with app.state.testing_session() as db:
+        db.get(Post, hidden.id).status = "draft"
+        db.commit()
+    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", safety.unavailable_media_paths_for_viewer)
+    junk = ["nope", hidden.id, posts[2].id, posts[2].id, ""] + [str(uuid.uuid4()) for _ in range(250)]
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/reels/feed",
+            params={
+                "folder": "ALL FOLDERS", "post": posts[4].id, "scope_ids": ",".join(junk), "limit": 12,
+            },
+        )
+    assert response.status_code == 200, response.text
+    ids = [item["post_id"] for item in response.json()["items"]]
+    assert ids[:2] == [posts[4].id, posts[2].id]
+    assert hidden.id not in ids
+
+
 def test_a_reel_opened_without_a_scope_still_gets_related_reels(app):
     posts = seed_catalog(app, creators=2, posts_per_creator=2)
     with TestClient(app) as client:
@@ -1359,3 +1402,390 @@ def test_related_later_pages_keep_seed_creator_uncapped(app):
         )
         feed_owners = [owner_of[item["post_id"]] for item in feed.json()["items"]]
         assert max(feed_owners.count(owner) for owner in set(feed_owners)) <= 3, feed_owners
+
+
+def test_catalog_extras_survive_cap_and_replay(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    posts = seed_catalog(app, creators=2, posts_per_creator=3)
+    oldest_id = min(posts, key=lambda post: post.created_at).id
+    with app.state.testing_session() as db:
+        oldest = db.get(Post, oldest_id)
+        oldest.view_count = oldest.like_count = 0  # seeded engagement grows with age; make it weakest
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 3)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "extras-probe")
+    kwargs = dict(actor=actor, allowed_post_ids=None, excluded_post_ids=set(), surface="for_you")
+    with app.state.testing_session() as db:
+        capped = service._catalog(db, **kwargs)
+        assert len(capped) == 3 and oldest_id not in capped
+        with_extra = service._catalog(db, **kwargs, extra_post_ids=frozenset({oldest_id}))
+        assert set(with_extra) == set(capped) | {oldest_id}
+        assert len(service._catalog(db, **kwargs, capped=False)) == 6
+
+        filters = {"folder": "ALL FOLDERS", "limit": 1}
+        recorded, cursor, page_cursor = [], None, None
+        while True:
+            page = get_reel_page(
+                db, actor=actor, surface="for_you", filters=filters, cursor=cursor,
+                limit=1, extra_post_ids=frozenset({oldest_id}),
+            )
+            recorded.append((page_cursor, tuple(item.target_id for item in page.items)))
+            if not page.has_more:
+                break
+            page_cursor = cursor = page.next_cursor
+        extra_page = next(i for i, (_, ids) in enumerate(recorded) if oldest_id in ids)
+        assert extra_page > 0
+
+        for page_cursor, ids in recorded[1:]:
+            replay = get_reel_page(
+                db, actor=actor, surface="for_you", filters=filters, cursor=page_cursor, limit=1
+            )
+            assert tuple(item.target_id for item in replay.items) == ids
+
+
+def test_tag_feed_keeps_set_and_orders_by_affinity(app, monkeypatch):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    tagged_ids = {post.id for post in posts}
+    oldest_owner = min(posts, key=lambda post: post.created_at).owner_id
+    with app.state.testing_session() as db:
+        for number in (12, 13):
+            path = f"tests/reel-{number}.jpg"
+            db.add(
+                Post(
+                    owner_id=oldest_owner,
+                    media_path=path,
+                    media_type="image",
+                    title=f"Reel {number}",
+                    caption="plain",
+                    location={},
+                    source="upload",
+                    status="published",
+                    created_at=utcnow() - timedelta(minutes=number),
+                )
+            )
+            app.state.scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"reel-{number}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - number,
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 3)
+    service._catalog_base_cache["entry"] = (None, ())
+    with TestClient(app) as client:
+        viewer = register(client, "tag_feed_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=oldest_owner,
+                    score=30.0,
+                )
+            )
+            db.commit()
+        params = {"folder": "ALL FOLDERS", "tag": "cinematic", "sort": "for_you", "limit": 4}
+        pages, cursor = [], None
+        while True:
+            page_params = dict(params, **({"cursor": cursor} if cursor else {}))
+            response = client.get("/api/reels/feed", params=page_params)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            pages.append(body)
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        ids = [item["post_id"] for body in pages for item in body["items"]]
+        assert len(ids) == len(set(ids)) == 12
+        assert set(ids) == tagged_ids
+        assert pages[0]["items"][0]["creator"]["id"] == oldest_owner
+        with app.state.testing_session() as db:
+            rows = db.query(RecommendationImpression).all()
+        names = {source["name"] for row in rows for source in row.provenance["sources"]}
+        assert names.isdisjoint({"fresh_exploration", "global_quality_trending"}), names
+
+
+def test_author_feed_keeps_newest_order(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        owner = db.get(User, next(p.owner_id for p in posts if p.title in {"Reel 3", "Reel 4", "Reel 5"}))
+        username = owner.username
+    expected = [p.id for p in sorted(posts, key=lambda p: p.created_at, reverse=True) if p.owner_id == owner.id]
+    assert len(expected) == 3
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "author": username, "sort": "for_you", "limit": 12},
+        )
+        assert response.status_code == 200, response.text
+        assert [item["post_id"] for item in response.json()["items"]] == expected
+
+
+def _seed_following(app, viewer_id, reels, affinity):
+    """reels: {key: (creator_key, age)}; affinity: {creator_key: score}. Viewer follows every creator."""
+    scan_rows = []
+    post_ids, creator_ids = {}, {}
+    with app.state.testing_session() as db:
+        for key, (creator_key, age) in reels.items():
+            if creator_key not in creator_ids:
+                creator = User(
+                    username=f"fol_{creator_key}",
+                    username_norm=f"fol_{creator_key}",
+                    display_name=creator_key,
+                    account_type="real",
+                    status="active",
+                )
+                db.add(creator)
+                db.flush()
+                db.add(Follow(follower_id=viewer_id, followee_id=creator.id))
+                creator_ids[creator_key] = creator.id
+            path = f"tests/fol-{key}.jpg"
+            post = Post(
+                owner_id=creator_ids[creator_key],
+                media_path=path,
+                media_type="image",
+                title=f"Reel {key}",
+                caption="following test",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - age,
+            )
+            db.add(post)
+            db.flush()
+            post_ids[key] = post.id
+            scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"fol-{key}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - len(scan_rows),
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        for creator_key, score in affinity.items():
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer_id}",
+                    user_id=viewer_id,
+                    creator_id=creator_ids[creator_key],
+                    score=score,
+                )
+            )
+        db.commit()
+    app.state.scan_rows = scan_rows
+    service._catalog_base_cache["entry"] = (None, ())
+    return post_ids
+
+
+def _following_ids(client, limit):
+    ids, cursor = [], None
+    while True:
+        params = {"folder": "ALL FOLDERS", "feed": "following", "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = client.get("/api/reels/feed", params=params)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        ids += [item["post_id"] for item in body["items"]]
+        cursor = body["next_cursor"]
+        if not cursor:
+            return ids
+
+
+def test_following_blends_recency_and_affinity(app):
+    with TestClient(app) as client:
+        viewer = register(client, "blend_viewer")
+        posts = _seed_following(
+            app,
+            viewer["id"],
+            {
+                "A": ("a", timedelta(days=3)),
+                "B": ("b", timedelta(hours=1)),
+                "C": ("c", timedelta(hours=2)),
+                "D": ("d", timedelta(hours=10)),
+                "Dw": ("d", timedelta(minutes=30)),
+            },
+            {"a": 60.0, "c": 12.0, "d": 12.0},
+        )
+        with app.state.testing_session() as db:
+            db.add(
+                EngagementEvent(
+                    user_id=viewer["id"],
+                    post_id=posts["Dw"],
+                    event_type="complete",
+                    source="test",
+                    created_at=utcnow() - timedelta(days=1),
+                )
+            )
+            db.commit()
+        ids = _following_ids(client, 2)
+        assert sorted(ids) == sorted(posts.values())
+        assert ids.index(posts["A"]) < ids.index(posts["B"]), ids
+        assert ids.index(posts["C"]) < ids.index(posts["D"]), ids
+        assert ids[-1] == posts["Dw"], ids
+
+
+def test_following_new_reel_not_buried_by_diversity(app):
+    with TestClient(app) as client:
+        viewer = register(client, "diversity_viewer")
+        posts = _seed_following(
+            app,
+            viewer["id"],
+            {
+                "A1": ("a", timedelta(hours=1)),
+                "A2": ("a", timedelta(hours=2)),
+                "B": ("b", timedelta(days=5)),
+                "C": ("c", timedelta(days=6)),
+            },
+            {"a": 10.0, "b": 10.0, "c": 10.0},
+        )
+        ids = _following_ids(client, 4)
+        assert sorted(ids) == sorted(posts.values())
+        assert ids[0] == posts["A1"], ids
+        assert ids.index(posts["A2"]) < ids.index(posts["C"]), ids
+
+
+def _add_posts(app, specs):
+    """specs: (owner_id, age_days, like_count, view_count) newest-first not required; returns ids in spec order."""
+    ids = []
+    with app.state.testing_session() as db:
+        for number, (owner_id, age_days, likes, views) in enumerate(specs):
+            post = Post(
+                owner_id=owner_id,
+                media_path=f"tests/age-{number}.jpg",
+                media_type="image",
+                title=f"Age {number}",
+                caption="plain",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - timedelta(days=age_days, minutes=number),
+                view_count=views,
+                like_count=likes,
+            )
+            db.add(post)
+            db.flush()
+            ids.append(post.id)
+        db.commit()
+    return ids
+
+
+def _add_creators(app, count):
+    ids = []
+    with app.state.testing_session() as db:
+        for index in range(count):
+            creator = User(
+                username=f"age_creator_{index}",
+                username_norm=f"age_creator_{index}",
+                display_name=f"Age Creator {index}",
+                account_type="real",
+                status="active",
+            )
+            db.add(creator)
+            db.flush()
+            ids.append(creator.id)
+        db.commit()
+    return ids
+
+
+def test_old_banger_enters_pool_and_can_win(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    owner = _add_creators(app, 1)[0]
+    specs = [(owner, 0, 0, 0)] * 10 + [(owner, 730, 300, 5000)]
+    ids = _add_posts(app, specs)
+    banger = ids[-1]
+    with app.state.testing_session() as db:
+        db.add(
+            PostRecommendationStats(
+                post_id=banger, impressions=1000, qualified_views=800, completions=600, likes=300, saves=50
+            )
+        )
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 4)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "banger-probe")
+    with app.state.testing_session() as db:
+        assert banger in {item.post_id for item in service._catalog_pool_order(db)[:4]}
+        catalog = service._catalog(
+            db, actor=actor, allowed_post_ids=None, excluded_post_ids=set(), surface="for_you"
+        )
+        assert banger in catalog
+        page = get_reel_page(
+            db, actor=actor, surface="for_you", filters={"folder": "ALL FOLDERS", "limit": 4}, cursor=None, limit=4
+        )
+        assert banger in {item.target_id for item in page.items}
+
+
+def test_long_tail_post_can_be_recommended(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    a, b, z = _add_creators(app, 3)
+    # Newest first by index; the three oldest belong to Z.
+    owners = [a, b] * 6 + [z] * 3
+    ids = _add_posts(app, [(owner, 0, 0, 0) for owner in owners])
+    oldest = ids[-1]
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 10)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "long-tail-probe")
+    with app.state.testing_session() as db:
+        db.add(
+            ActorCreatorAffinity(
+                actor_key=actor.actor_key, anonymous_id="long-tail-probe", creator_id=z, score=40.0
+            )
+        )
+        db.commit()
+        assert oldest not in {item.post_id for item in service._catalog_pool_order(db)[:10]}
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+        assert oldest in context.items
+        page = get_reel_page(
+            db, actor=actor, surface="for_you", filters={"folder": "ALL FOLDERS", "limit": 15}, cursor=None, limit=15
+        )
+        assert oldest in {item.target_id for item in page.items}
+
+        monkeypatch.setattr(service, "LONG_TAIL_MAX", 2)
+        outside = service._catalog_pool_order(db)[10:]
+        assert len(service._long_tail_ids(db, actor=actor, outside=outside, seed_ids=[])) == 2
+
+
+def test_grid_for_you_puts_affine_creator_first(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    first_creator = next(post.owner_id for post in posts if post.media_path == "tests/reel-11.jpg")  # oldest creator
+    with TestClient(app) as client:
+        viewer = register(client, "grid_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}", user_id=viewer["id"], creator_id=first_creator, score=40.0
+                )
+            )
+            db.commit()
+        for extra in ({}, {"search": "cinematic"}):
+            response = client.get("/api/reels", params={"sort": "for_you", "limit": 24, **extra})
+            assert response.status_code == 200, response.text
+            items = response.json()["videos"]
+            assert len(items) == 12
+            assert [item["creator"]["id"] for item in items[:3]] == [first_creator] * 3
+        seen, cursor = [], None
+        while True:
+            params = {"sort": "for_you", "limit": 5, **({"cursor": cursor} if cursor else {})}
+            body = client.get("/api/reels", params=params).json()
+            seen += [item["post_id"] for item in body["videos"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        assert len(seen) == len(set(seen)) == 12
+        assert {post.id for post in posts} == set(seen)

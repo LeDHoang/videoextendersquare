@@ -58,6 +58,14 @@ def _fresh_reel_records():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_grid_cache():
+    """The for_you grid order is cached in process memory by actor, filters and seed."""
+    from server.social.recommendations import service
+
+    service._grid_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _roomy_device_limits(monkeypatch):
     """Tests sign up several users from one TestClient cookie jar, which is one
     device; tests/test_device_limits.py lowers these again."""

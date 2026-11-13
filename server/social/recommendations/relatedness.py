@@ -9,6 +9,7 @@ from collections.abc import Iterable, Mapping
 
 from server.social.geo import haversine_km
 
+from .config import AGE_FACTOR_POINTS
 from .types import CatalogItem, PostLocation
 
 _URL = re.compile(r"https?://\S+")
@@ -125,3 +126,52 @@ def location_scores(
         if matched:
             scores[post_id] = (best, tuple(matched[:4]))
     return scores
+
+
+def age_factor(age_days: float) -> float:
+    """Freshness factor: linear between AGE_FACTOR_POINTS, flat after the last, never rising with age."""
+    points = AGE_FACTOR_POINTS
+    if age_days <= points[0][0]:
+        return points[0][1]
+    for (d0, f0), (d1, f1) in zip(points, points[1:]):
+        if age_days <= d1:
+            return f0 + (f1 - f0) * (age_days - d0) / (d1 - d0)
+    return points[-1][1]
+
+
+def legacy_prior(like_count: int, view_count: int) -> float:
+    return math.tanh(math.log1p(max(0, view_count) + 5 * max(0, like_count)) / 8.0)
+
+
+def block_diverse(post_ids: list[str], owner_of: Mapping[str, str], block: int, cap: int) -> list[str]:
+    """Fill each block of `block` ids in input order, skipping creators already at `cap` in it.
+
+    Skipped ids stay queued for later blocks. When only capped creators remain,
+    the block fills in input order. The result is a permutation of the input.
+    """
+    queue = list(post_ids)
+    out: list[str] = []
+    while queue:
+        counts: Counter[str] = Counter()
+        taken: list[int] = []
+        for index, post_id in enumerate(queue):
+            owner = owner_of.get(post_id, post_id)
+            if counts[owner] >= cap:
+                continue
+            counts[owner] += 1
+            taken.append(index)
+            if len(taken) == block:
+                break
+        if len(taken) < block:
+            chosen = set(taken)
+            for index in range(len(queue)):
+                if len(taken) == block:
+                    break
+                if index not in chosen:
+                    chosen.add(index)
+                    taken.append(index)
+            taken.sort()
+        out.extend(queue[index] for index in taken)
+        picked = set(taken)
+        queue = [post_id for index, post_id in enumerate(queue) if index not in picked]
+    return out

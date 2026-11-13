@@ -5,7 +5,15 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from .config import RANK_WEIGHTS, RRF_RANK_CONSTANT, SOURCE_WEIGHTS
+from .config import (
+    FOLLOWING_PERSONAL_WEIGHT,
+    FOLLOWING_RECENCY_DECAY_HOURS,
+    FOLLOWING_SCORE_SCALE,
+    RANK_WEIGHTS,
+    RRF_RANK_CONSTANT,
+    SOURCE_WEIGHTS,
+)
+from .relatedness import age_factor, legacy_prior
 from .types import Candidate, PipelineContext
 
 
@@ -21,6 +29,7 @@ REASON_BY_SOURCE = {
     "session_context": "based_on_this_session",
     "global_quality_trending": "popular_now",
     "fresh_exploration": "new_creator",
+    "scope_pool": "matches_your_filter",
 }
 
 
@@ -45,8 +54,7 @@ def _quality(context: PipelineContext, post_id: str, like_count: int, view_count
     complete_rate = (completions + 1.0) / (qualified + 3.0)
     action_rate = (likes + 2.0 * saves + 3.0 * shares + 1.0) / (impressions + 10.0)
     negative_rate = (negatives + 0.5) / (impressions + 10.0)
-    legacy_prior = math.tanh(math.log1p(max(0, view_count) + 5 * max(0, like_count)) / 8.0)
-    return max(0.0, min(1.0, 0.42 * view_rate + 0.25 * complete_rate + 0.20 * action_rate + 0.13 * legacy_prior - 0.5 * negative_rate))
+    return max(0.0, min(1.0, 0.42 * view_rate + 0.25 * complete_rate + 0.20 * action_rate + 0.13 * legacy_prior(like_count, view_count) - 0.5 * negative_rate))
 
 
 def rank_candidates(
@@ -82,26 +90,48 @@ def _ordered_candidates(context: PipelineContext, source_hits: dict[str, dict], 
     return sorted(candidates, key=lambda candidate: order.get(candidate.item.post_id, len(order)))
 
 
+def _features(
+    context: PipelineContext, post_id: str, item, retrieval_norm: float
+) -> tuple[dict[str, float], float]:
+    creator_raw = context.creator_affinity.get(item.owner_id, 0.0) + context.session_creator_affinity.get(item.owner_id, 0.0)
+    tag_values = [
+        context.tag_affinity.get(tag_id, 0.0) + context.session_tag_affinity.get(tag_id, 0.0)
+        for tag_id in item.tag_ids
+    ]
+    topic_raw = sum(value for value in tag_values if value > 0) / max(1, len(tag_values))
+    negative_raw = max([-creator_raw, *[-value for value in tag_values], -context.item_affinity.get(post_id, 0.0), 0.0])
+    related = context.related_scores.get(post_id, (0.0, ()))[0]
+    age_days = max(0.0, (context.now - item.created_at).total_seconds() / 86400.0)
+    freshness = age_factor(age_days)
+    impressions = int(getattr(context.stats.get(post_id), "impressions", 0) or 0)
+    exploration = 1.0 / math.sqrt(1.0 + impressions)
+    exposure_fatigue = min(1.0, context.exposures_by_creator.get(item.owner_id, 0) / 3.0)
+    features = {
+        "retrieval_fusion": retrieval_norm,
+        "creator_affinity": _bounded_affinity(creator_raw),
+        "topic_affinity": _bounded_affinity(topic_raw),
+        "co_watch_similarity": max(0.0, min(1.0, related)),
+        "quality": _quality(context, post_id, item.like_count, item.view_count),
+        "freshness": freshness,
+        "exploration": exploration,
+        "negative_affinity": _negative_affinity(negative_raw),
+        "exposure_fatigue": exposure_fatigue,
+    }
+    score = (
+        RANK_WEIGHTS["retrieval_fusion"] * features["retrieval_fusion"]
+        + RANK_WEIGHTS["creator_affinity"] * features["creator_affinity"]
+        + RANK_WEIGHTS["topic_affinity"] * features["topic_affinity"]
+        + RANK_WEIGHTS["co_watch_similarity"] * features["co_watch_similarity"]
+        + RANK_WEIGHTS["quality"] * features["quality"]
+        + RANK_WEIGHTS["freshness"] * features["freshness"]
+        + RANK_WEIGHTS["exploration"] * features["exploration"]
+        - RANK_WEIGHTS["negative_affinity"] * features["negative_affinity"]
+        - RANK_WEIGHTS["exposure_fatigue"] * features["exposure_fatigue"]
+    )
+    return features, score
+
+
 def _ranked_candidates(context: PipelineContext, source_hits: dict[str, dict]) -> list[Candidate]:
-
-    if context.surface == "following":
-        candidates = []
-        for post_id, hits in source_hits.items():
-            item = context.items[post_id]
-            hit = hits["following_recent"]
-            candidates.append(
-                Candidate(
-                    item=item,
-                    hits=hits,
-                    retrieval_score=hit.raw_score,
-                    final_score=item.created_at.timestamp(),
-                    primary_source="following_recent",
-                    reason_key="from_people_you_follow",
-                    features={"recency": 1.0},
-                )
-            )
-        return sorted(candidates, key=lambda candidate: (-candidate.final_score, candidate.item.post_id))
-
     raw_retrieval: dict[str, float] = {}
     contribution_by_source: dict[str, dict[str, float]] = {}
     for post_id, hits in source_hits.items():
@@ -113,44 +143,52 @@ def _ranked_candidates(context: PipelineContext, source_hits: dict[str, dict]) -
         raw_retrieval[post_id] = sum(contributions.values())
     max_retrieval = max(raw_retrieval.values(), default=1.0) or 1.0
 
+    scored: dict[str, tuple[dict[str, float], float]] = {
+        post_id: _features(context, post_id, context.items[post_id], raw_retrieval[post_id] / max_retrieval)
+        for post_id in source_hits
+    }
+
+    if context.surface == "following":
+        # Recency blends with the personalized score; reels already watched go after all unwatched ones.
+        linear = [score for _, score in scored.values()]
+        low, high = min(linear, default=0.0), max(linear, default=0.0)
+        candidates = []
+        for post_id, hits in source_hits.items():
+            item = context.items[post_id]
+            features, score = scored[post_id]
+            personalized_norm = (score - low) / (high - low) if high > low else 0.0
+            age_hours = max(0.0, (context.now - item.created_at).total_seconds() / 3600.0)
+            recency = math.exp(-age_hours / FOLLOWING_RECENCY_DECAY_HOURS)
+            features["recency"] = recency
+            features["personalized_norm"] = personalized_norm
+            final_score = FOLLOWING_SCORE_SCALE * (
+                FOLLOWING_PERSONAL_WEIGHT * personalized_norm
+                + (1.0 - FOLLOWING_PERSONAL_WEIGHT) * recency
+            )
+            candidates.append(
+                Candidate(
+                    item=item,
+                    hits=hits,
+                    retrieval_score=raw_retrieval[post_id],
+                    final_score=final_score,
+                    primary_source="following_recent",
+                    reason_key="from_people_you_follow",
+                    features=features,
+                )
+            )
+        return sorted(
+            candidates,
+            key=lambda candidate: (
+                candidate.item.post_id in context.watched_post_ids,
+                -candidate.final_score,
+                candidate.item.post_id,
+            ),
+        )
+
     ranked: list[Candidate] = []
     for post_id, hits in source_hits.items():
         item = context.items[post_id]
-        creator_raw = context.creator_affinity.get(item.owner_id, 0.0) + context.session_creator_affinity.get(item.owner_id, 0.0)
-        tag_values = [
-            context.tag_affinity.get(tag_id, 0.0) + context.session_tag_affinity.get(tag_id, 0.0)
-            for tag_id in item.tag_ids
-        ]
-        topic_raw = sum(value for value in tag_values if value > 0) / max(1, len(tag_values))
-        negative_raw = max([-creator_raw, *[-value for value in tag_values], -context.item_affinity.get(post_id, 0.0), 0.0])
-        related = context.related_scores.get(post_id, (0.0, ()))[0]
-        age_days = max(0.0, (context.now - item.created_at).total_seconds() / 86400.0)
-        freshness = math.exp(-age_days / 30.0)
-        impressions = int(getattr(context.stats.get(post_id), "impressions", 0) or 0)
-        exploration = 1.0 / math.sqrt(1.0 + impressions)
-        exposure_fatigue = min(1.0, context.exposures_by_creator.get(item.owner_id, 0) / 3.0)
-        features = {
-            "retrieval_fusion": raw_retrieval[post_id] / max_retrieval,
-            "creator_affinity": _bounded_affinity(creator_raw),
-            "topic_affinity": _bounded_affinity(topic_raw),
-            "co_watch_similarity": max(0.0, min(1.0, related)),
-            "quality": _quality(context, post_id, item.like_count, item.view_count),
-            "freshness": freshness,
-            "exploration": exploration,
-            "negative_affinity": _negative_affinity(negative_raw),
-            "exposure_fatigue": exposure_fatigue,
-        }
-        score = (
-            RANK_WEIGHTS["retrieval_fusion"] * features["retrieval_fusion"]
-            + RANK_WEIGHTS["creator_affinity"] * features["creator_affinity"]
-            + RANK_WEIGHTS["topic_affinity"] * features["topic_affinity"]
-            + RANK_WEIGHTS["co_watch_similarity"] * features["co_watch_similarity"]
-            + RANK_WEIGHTS["quality"] * features["quality"]
-            + RANK_WEIGHTS["freshness"] * features["freshness"]
-            + RANK_WEIGHTS["exploration"] * features["exploration"]
-            - RANK_WEIGHTS["negative_affinity"] * features["negative_affinity"]
-            - RANK_WEIGHTS["exposure_fatigue"] * features["exposure_fatigue"]
-        )
+        features, score = scored[post_id]
         contributions = contribution_by_source[post_id]
         primary_source = max(contributions, key=lambda name: (contributions[name], name))
         ranked.append(
@@ -183,10 +221,10 @@ def rerank_page(
     """
     if not candidates or limit <= 0:
         return []
-    if candidates[0].primary_source in {"manual_order", "following_recent"}:
+    if candidates[0].primary_source == "manual_order":
         # A scope plays in its own order; the ranked posts after it still get the diversity pass.
         prefix = 0
-        while prefix < len(candidates) and candidates[prefix].primary_source == candidates[0].primary_source:
+        while prefix < len(candidates) and candidates[prefix].primary_source == "manual_order":
             prefix += 1
         if prefix >= limit or prefix == len(candidates):
             return candidates[:limit]

@@ -6567,6 +6567,59 @@
       return true;
     }
 
+    // VR Explore/Search tile tap: play through the recommender. The server plays
+    // the grid order (scope_ids, starting at the tapped reel) first, then related
+    // reels. Falls back to the plain grid swap when it cannot.
+    async function playVrShellFeed(feed) {
+      const items = feed && Array.isArray(feed.videoData) ? feed.videoData.filter(Boolean) : [];
+      const start = Math.max(0, Math.min(items.length - 1, Number(feed && feed.startIndex) || 0));
+      const tapped = items[start];
+      if (!tapped || !tapped.post_id) return replaceFeedForVr(feed);
+      const ids = items.slice(start).concat(items.slice(0, start))
+        .map((item) => item && item.post_id)
+        .filter(Boolean)
+        .slice(0, 200);
+      const params = {
+        codec: feedParams.codec,
+        folder: feedParams.folder,
+        post: tapped.post_id,
+        scope_ids: ids.join(','),
+      };
+      captureOriginalFeed();
+      abortFeedWork();
+      const generation = feedGeneration;
+      feedTransitionController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      try {
+        const page = await requestJson(feedRequestUrl(null, params), {
+          signal: feedTransitionController ? feedTransitionController.signal : undefined,
+        });
+        if (!FeedState.isCurrent(generation, feedGeneration)) return false;
+        const nextState = FeedState.fromPage(page, params, { slug: '', name: feed.label || 'EXPLORE' });
+        if (!nextState.videoData.length) return replaceFeedForVr(feed);
+        finishViewTracking('vr_shell_feed');
+        clearImageTimer();
+        clearBlobCache();
+        try { video.pause(); } catch (e) {}
+        videoData = nextState.videoData;
+        feedParams = nextState.feedParams;
+        feedCursor = nextState.feedCursor;
+        feedHasMore = nextState.feedHasMore;
+        activeLocationFeed = { slug: '', name: String(feed.label || 'EXPLORE') };
+        idx = nextState.idx;
+        preloadedCount = 0;
+        loadVideo(0, { autoplay: true });
+        showFlash(activeLocationFeed.name.toUpperCase());
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return false;
+        if (!FeedState.isCurrent(generation, feedGeneration)) return false;
+        console.error('[ReelsPlayer] VR feed failed, playing the grid as is:', error);
+        return replaceFeedForVr(feed);
+      } finally {
+        if (FeedState.isCurrent(generation, feedGeneration)) feedTransitionController = null;
+      }
+    }
+
     async function restoreAllLocations() {
       if (!originalFeedSnapshot) return false;
       const snapshot = FeedState.restore(originalFeedSnapshot);
@@ -7493,7 +7546,7 @@
         onToggleSpatial: toggleSpatial,
         getSpatialState: spatialState,
         onShellHandoff: function(path) { dispatchNavigation(path); },
-        onShellPlayFeed: replaceFeedForVr,
+        onShellPlayFeed: playVrShellFeed,
         shellRequest: function(path) {
           // Grid reels play in this player, so ask for the codec it is using.
           const sep = path.indexOf('?') >= 0 ? '&' : '?';

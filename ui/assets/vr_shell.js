@@ -147,8 +147,8 @@
   // Data source for each grid section: request path + query, and how to read the reply.
   function sourceFor(route) {
     switch (route.section) {
-      case 'explore': return { path: '/api/reels', query: { sort: 'shuffle', limit: REEL_PAGE }, paged: true };
-      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'shuffle', limit: REEL_PAGE }, paged: true };
+      case 'explore': return { path: '/api/reels', query: { sort: 'for_you', limit: REEL_PAGE }, paged: true };
+      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true };
       case 'tag': return {
         path: '/api/reels/tags/' + enc(route.arg), query: {},
         related: (r) => chips(r.related_tags, '/explore/tag/'),

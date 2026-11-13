@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from server.social.recommendations.relatedness import (
+    block_diverse,
     build_idf,
     location_score,
     location_scores,
@@ -92,3 +93,29 @@ def test_location_score_fallbacks_without_coords():
     assert location_score(a, _place("hue--vn", "hue", "VIETNAM", None)) == 0.6
     assert location_score(a, _place("x--vn", "Dalat", "Vietnam", None)) == 0.15
     assert location_score(a, _place("x--th", "Hue", "Thailand", None)) == 0.0
+
+
+def test_age_factor_tiers():
+    from server.social.recommendations.relatedness import age_factor
+
+    assert age_factor(0) == 1.0
+    assert age_factor(90) == 0.85
+    assert age_factor(180) == 0.70
+    assert age_factor(365) == 0.55
+    assert age_factor(2000) == 0.40
+    values = [age_factor(day) for day in range(3001)]
+    assert all(later <= earlier for earlier, later in zip(values, values[1:]))
+
+
+def test_block_diverse_caps_creators_per_block():
+    ids = [f"a{i}" for i in range(10)] + [f"b{i}" for i in range(10)]
+    owner = {post_id: post_id[0] for post_id in ids}
+    out = block_diverse(ids, owner, block=6, cap=3)
+    assert sorted(out) == sorted(ids)
+    for start in range(0, 12, 6):
+        chunk = out[start:start + 6]
+        assert [owner[p] for p in chunk].count("a") <= 3
+        assert [owner[p] for p in chunk].count("b") <= 3
+    # Only one creator left: fills in input order past the cap.
+    only = block_diverse(["a0", "a1", "a2", "a3", "a4"], {f"a{i}": "a" for i in range(5)}, block=4, cap=2)
+    assert only == ["a0", "a1", "a2", "a3", "a4"]
