@@ -210,3 +210,17 @@ Visual similarity needs an embedding model. The user chose no model for now. The
 - Author scope and admin sorts keep their current order.
 - Version bump to v2. Old sessions restart, through the existing `algorithm_version_changed` path.
 - Builder check was a self-review against the doc, not a separate agent.
+
+## Pass 2 amendments (2026-11-13, `reels-heuristic-v3`)
+Second review pass. These supersede the text above where they conflict.
+
+- **No hard creator caps (user's decision: penalize, don't cap).** The rerank drops the hard 3-per-creator cap on every surface. Each reel a creator already has on the page past two costs an extra 1.5 (`CREATOR_OVERFLOW_PENALTY`), on top of the 0.45-per-reel and 2.5 back-to-back penalties. The opened reel's creator on related pages (`seed_owner`) skips only the overflow penalty. Grids replace the 3-per-block cap with a positional penalty: a creator's 4th and later reels in a 24-item block move back 8 places each (`GRID_CREATOR_FREE`, `GRID_CREATOR_STEP`). Nothing is removed; reels only move back.
+- **Watched reels go last everywhere.** The "already watched sinks" rule from C1 now applies to every ranked surface and the grids, not only Following. Manual and scoped orders (`manual_order`, `scope_order`) keep their order. The anonymous grid actor has no watch history.
+- **Exploration swap** never puts the swapped-in reel right after a reel from the same creator.
+- **Session context** uses the same event values as the aggregates (`_event_value`), so watch ratio, navigation skips and fast skips weigh the same in-session.
+- **Trending reads recent engagement.** New table `post_recommendation_daily_stats` (one row per post per UTC day: impressions, qualified views, completions, likes, saves, shares). Trending scores the last 7 days, each day weighted `0.5 ** (days_ago / 2)`, plus 0.1 × the all-time score. With no recent rows the order is unchanged.
+- **Fast skips.** A skip under 1.5s that is not navigation (playback error, background, unload, filter change, not interested, hide creator) and not past half the reel counts in `fast_skips`. Quality subtracts `0.25 × fast_skips / (impressions + 10)`.
+- **Long-tail pool order** ranks older posts by the recommendation-stats quality (times the age factor), not by legacy likes and views. The stats are read when the catalog base is rebuilt.
+- **Tag relatedness** is per-seed Jaccard, shrunk by `overlap / (overlap + 1)` like co-watch support, so one shared tag is weak evidence. *(My call.)*
+- **Caption vectors** are memoized with the IDF table and dropped when the catalog base changes.
+- **Version** bumps to `reels-heuristic-v3`; old sessions restart through `algorithm_version_changed`.

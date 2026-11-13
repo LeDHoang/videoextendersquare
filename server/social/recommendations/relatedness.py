@@ -64,10 +64,24 @@ def text_scores(
     items: Mapping[str, CatalogItem],
     idf: Mapping[str, float],
     threshold: float = 0.1,
+    vectors: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, tuple[float, tuple[str, ...]]]:
-    """Per candidate: the best seed-weighted caption cosine and the seeds that match."""
+    """Per candidate: the best seed-weighted caption cosine and the seeds that match.
+
+    `vectors` is an optional memo of TF-IDF vectors by post id, read first and
+    filled on a miss; the caller owns it and must drop it when `idf` changes.
+    """
+
+    def vector_of(item: CatalogItem) -> dict[str, float]:
+        if vectors is None:
+            return tfidf_vector(item.text_tokens, idf)
+        vector = vectors.get(item.post_id)
+        if vector is None:
+            vector = vectors[item.post_id] = tfidf_vector(item.text_tokens, idf)
+        return vector
+
     seed_ids = {seed.post_id for seed, _ in seeds}
-    seed_vectors = [(seed.post_id, tfidf_vector(seed.text_tokens, idf), weight) for seed, weight in seeds]
+    seed_vectors = [(seed.post_id, vector_of(seed), weight) for seed, weight in seeds]
     seed_vectors = [row for row in seed_vectors if row[1]]
     if not seed_vectors:
         return {}
@@ -75,7 +89,7 @@ def text_scores(
     for post_id, item in items.items():
         if post_id in seed_ids or not item.text_tokens:
             continue
-        vector = tfidf_vector(item.text_tokens, idf)
+        vector = vector_of(item)
         if not vector:
             continue
         best, matched = 0.0, []
@@ -143,35 +157,26 @@ def legacy_prior(like_count: int, view_count: int) -> float:
     return math.tanh(math.log1p(max(0, view_count) + 5 * max(0, like_count)) / 8.0)
 
 
-def block_diverse(post_ids: list[str], owner_of: Mapping[str, str], block: int, cap: int) -> list[str]:
-    """Fill each block of `block` ids in input order, skipping creators already at `cap` in it.
+def block_diverse(post_ids: list[str], owner_of: Mapping[str, str], block: int, free: int, step: int) -> list[str]:
+    """Spread creators across each block of `block` ids with a positional penalty.
 
-    Skipped ids stay queued for later blocks. When only capped creators remain,
-    the block fills in input order. The result is a permutation of the input.
+    Each slot takes the queued id with the lowest input index plus `step` for every
+    reel its creator already has in the block past `free - 1`. A creator far ahead
+    of the rest can still fill more slots. The result is a permutation of the input.
     """
-    queue = list(post_ids)
+    queue = list(enumerate(post_ids))
     out: list[str] = []
     while queue:
         counts: Counter[str] = Counter()
-        taken: list[int] = []
-        for index, post_id in enumerate(queue):
-            owner = owner_of.get(post_id, post_id)
-            if counts[owner] >= cap:
-                continue
-            counts[owner] += 1
-            taken.append(index)
-            if len(taken) == block:
-                break
-        if len(taken) < block:
-            chosen = set(taken)
-            for index in range(len(queue)):
-                if len(taken) == block:
+        for _ in range(min(block, len(queue))):
+            best_position, best_cost = 0, float("inf")
+            for position, (index, post_id) in enumerate(queue):
+                if index >= best_cost:
                     break
-                if index not in chosen:
-                    chosen.add(index)
-                    taken.append(index)
-            taken.sort()
-        out.extend(queue[index] for index in taken)
-        picked = set(taken)
-        queue = [post_id for index, post_id in enumerate(queue) if index not in picked]
+                cost = index + step * max(0, counts[owner_of.get(post_id, post_id)] - free + 1)
+                if cost < best_cost:
+                    best_position, best_cost = position, cost
+            _, post_id = queue.pop(best_position)
+            counts[owner_of.get(post_id, post_id)] += 1
+            out.append(post_id)
     return out

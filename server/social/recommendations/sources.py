@@ -201,7 +201,19 @@ class TrendingSource:
             evidence = (qualified + 2.0) / (impressions + 5.0)
             completion = (completions + 1.0) / (qualified + 3.0)
             legacy = math.log1p(max(0, item.view_count) + 5 * max(0, item.like_count))
-            rows.append((item.post_id, evidence + 0.5 * completion + 0.05 * legacy + math.log1p(positives), ()))
+            all_time = evidence + 0.5 * completion + 0.05 * legacy + math.log1p(positives)
+            # Last week leads; all-time totals only break near-ties. With no recent rows
+            # the recent part is the same for every post, so the all-time order stands.
+            recent = context.recent_stats.get(item.post_id, {})
+            recent_qualified = recent.get("qualified_views", 0.0)
+            recent_positives = recent.get("likes", 0.0) + 2 * recent.get("saves", 0.0) + 3 * recent.get("shares", 0.0)
+            recent_score = (
+                (recent_qualified + 2.0) / (recent.get("impressions", 0.0) + 5.0)
+                + 0.5 * (recent.get("completions", 0.0) + 1.0) / (recent_qualified + 3.0)
+                + math.log1p(recent_positives)
+                + 0.5 * math.log1p(recent_qualified)
+            )
+            rows.append((item.post_id, recent_score + 0.1 * all_time, ()))
         return _ranked_hits(self.name, rows)
 
 

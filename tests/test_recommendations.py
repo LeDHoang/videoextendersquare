@@ -30,6 +30,7 @@ from server.social.models import (
     Follow,
     ItemSimilarity,
     Post,
+    PostRecommendationDailyStats,
     PostRecommendationStats,
     PostTag,
     RecommendationDismissal,
@@ -1157,7 +1158,8 @@ def test_session_context_counts_unattributed_likes(app):
                     manual_order=None,
                 )
 
-        assert context().session_creator_affinity[owners["creator_3"]] == 2.0
+        # Session affinity uses the same event weights as the stored affinity (a like is 3).
+        assert context().session_creator_affinity[owners["creator_3"]] == 3.0
 
         with app.state.testing_session() as db:
             other_session = service._new_session(
@@ -1239,7 +1241,7 @@ def test_text_related_works_on_page_two_when_seed_was_delivered(app):
     assert [item.post_id for item, _ in context.seed_items] == [seed.id]
     # Scored against the whole catalog, whichever reels page 0 happened to deliver.
     with app.state.testing_session() as db:
-        full = text_scores(list(context.seed_items), service._catalog_index(db), service._catalog_idf(db))
+        full = text_scores(list(context.seed_items), service._catalog_index(db), service._catalog_idf(db)[0])
     assert seed.id not in full
     for post in posts[1:3]:
         assert full[post.id][1] == (seed.id,) and full[post.id][0] > 0
@@ -1336,7 +1338,7 @@ def test_related_page_spreads_creator_other_reels(app):
             for row in impressions
             if row.post_id != seed_id
         )
-        # Guard: no seed on for_you keeps the hard cap of 3 per creator.
+        # Guard: with no seed, for_you penalties keep each creator to 3 or fewer here.
         feed = client.get(
             "/api/reels/feed",
             params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8},
@@ -1795,7 +1797,7 @@ def test_grid_for_you_puts_affine_creator_first(app):
 def test_anonymous_grid_keys_cannot_evict_signed_in_entries(app, monkeypatch):
     from server.social.recommendations import config
 
-    monkeypatch.setattr(service, "rank_pool", lambda *a, **k: [])
+    monkeypatch.setattr(service, "rank_pool", lambda *a, **k: ([], frozenset()))
     signed_in = service.ActorIdentity(actor_key="u:someone", user_id="someone", anonymous_id=None)
     anonymous = service.ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
     with app.state.testing_session() as db:
@@ -1830,3 +1832,192 @@ def test_grid_list_cursor_seed_must_be_current_or_previous_bucket(app):
         assert stale.json()["detail"]["code"] == "INVALID_CURSOR"
         previous = client.get("/api/reels", params={"sort": "for_you", "limit": 5, "cursor": with_seed(bucket - 1)})
         assert previous.status_code == 200, previous.text
+
+
+def _mark_watched(app, user_id, post_ids):
+    with app.state.testing_session() as db:
+        for post_id in post_ids:
+            db.add(
+                EngagementEvent(
+                    user_id=user_id,
+                    post_id=post_id,
+                    event_type="complete",
+                    source="test",
+                    created_at=utcnow() - timedelta(days=1),
+                )
+            )
+        db.commit()
+
+
+def test_for_you_feed_puts_watched_reels_last(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    by_path = {post.media_path: post.id for post in posts}
+    # The most popular reels would lead the feed if they were not watched.
+    watched = [by_path["tests/reel-11.jpg"], by_path["tests/reel-10.jpg"]]
+    with TestClient(app) as client:
+        viewer = register(client, "watched_for_you")
+        _mark_watched(app, viewer["id"], watched)
+        ids, cursor = [], None
+        while True:
+            params = {"folder": "ALL FOLDERS", "sort": "for_you", "limit": 5, **({"cursor": cursor} if cursor else {})}
+            body = client.get("/api/reels/feed", params=params).json()
+            ids += [item["post_id"] for item in body["items"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+    assert sorted(ids) == sorted(by_path.values())
+    assert set(ids[-2:]) == set(watched), ids
+
+
+def test_grid_for_you_puts_watched_reels_last(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    by_path = {post.media_path: post.id for post in posts}
+    watched = [by_path["tests/reel-11.jpg"], by_path["tests/reel-10.jpg"]]
+    with TestClient(app) as client:
+        viewer = register(client, "watched_grid")
+        _mark_watched(app, viewer["id"], watched)
+        items = client.get("/api/reels", params={"sort": "for_you", "limit": 24}).json()["videos"]
+    ids = [item["post_id"] for item in items]
+    assert len(ids) == 12
+    assert set(ids[-2:]) == set(watched), ids
+
+
+def test_anonymous_grid_actor_has_no_watched_reels(app):
+    posts = seed_catalog(app, creators=2, posts_per_creator=2)
+    with TestClient(app) as client:
+        viewer = register(client, "watched_signed_in")
+    _mark_watched(app, viewer["id"], [posts[0].id])
+    anonymous = service.ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
+    with app.state.testing_session() as db:
+        context = service._pipeline_context(
+            db, actor=anonymous, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None, pool_only=True, capped=True,
+        )
+    assert context.watched_post_ids == frozenset()
+
+
+def test_events_upsert_one_daily_stats_row_per_post_and_day(app):
+    from datetime import timezone
+
+    from server.social.services import record_event
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    with app.state.testing_session() as db:
+        # Several events for one post in one transaction share one daily row.
+        for event_type in ("impression", "view", "view", "like"):
+            record_event(db, event_type=event_type, post_id=post.id, anonymous_id="daily-probe", source="reels")
+        db.commit()
+        rows = db.query(PostRecommendationDailyStats).filter(PostRecommendationDailyStats.post_id == post.id).all()
+    assert len(rows) == 1
+    assert rows[0].day == utcnow().astimezone(timezone.utc).date()
+    assert (rows[0].impressions, rows[0].qualified_views, rows[0].likes) == (1, 2, 1)
+
+
+def test_pipeline_context_decays_recent_daily_stats(app):
+    from server.social.recommendations import actor_identity
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    today = utcnow().date()
+    with app.state.testing_session() as db:
+        for days_ago, views in ((0, 4), (2, 4), (10, 100)):
+            db.add(PostRecommendationDailyStats(post_id=post.id, day=today - timedelta(days=days_ago), qualified_views=views))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "recent-probe"), session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    # Today counts fully, two days ago at half weight, ten days ago not at all.
+    assert context.recent_stats[post.id]["qualified_views"] == pytest.approx(6.0)
+
+
+def _trending_order(items, stats, recent_stats):
+    from types import SimpleNamespace
+
+    from server.social.recommendations.sources import TrendingSource
+
+    context = SimpleNamespace(items={item.post_id: item for item in items}, stats=stats, recent_stats=recent_stats)
+    return [post_id for post_id, _hit in TrendingSource().generate(context)]
+
+
+def _trending_item(post_id, views=0, likes=0):
+    from server.social.recommendations.types import CatalogItem
+
+    return CatalogItem(post_id, "owner", (), utcnow(), likes, views)
+
+
+def test_trending_prefers_recent_engagement_over_old_totals():
+    from types import SimpleNamespace
+
+    old = _trending_item("old", views=50000, likes=5000)
+    fresh = _trending_item("fresh")
+    stats = {"old": SimpleNamespace(impressions=1000, qualified_views=800, completions=600, likes=300, saves=50, shares=20)}
+    recent = {"fresh": {"impressions": 40.0, "qualified_views": 30.0, "completions": 20.0, "likes": 10.0, "saves": 2.0, "shares": 1.0}}
+    assert _trending_order([old, fresh], stats, recent) == ["fresh", "old"]
+
+
+def test_trending_order_is_unchanged_without_recent_stats():
+    from types import SimpleNamespace
+
+    items = [_trending_item("low", views=10), _trending_item("high", views=10000, likes=500), _trending_item("mid", views=500)]
+    stats = {"mid": SimpleNamespace(impressions=20, qualified_views=10, completions=5, likes=2, saves=0, shares=0)}
+    assert _trending_order(items, stats, {}) == ["mid", "high", "low"]
+
+
+def test_fast_skips_are_counted_apart_from_navigation_and_late_skips(app):
+    from server.social.services import record_event
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    skips = (
+        {"watch_ms": 500},  # fast
+        {"watch_ms": 500, "navigation_reason": "filter_change"},  # navigation, not a judgment
+        {"watch_ms": 5000},  # watched a while
+        {"watch_ms": 1000, "watch_ratio": 0.6},  # most of a short reel
+    )
+    with app.state.testing_session() as db:
+        for index, extra in enumerate(skips):
+            record_event(db, event_type="skip", post_id=post.id, anonymous_id=f"skip-{index}", source="reels", **extra)
+        db.commit()
+        stats = db.get(PostRecommendationStats, post.id)
+    assert (stats.skips, stats.fast_skips) == (4, 1)
+
+
+def test_stats_quality_drops_with_fast_skips():
+    from types import SimpleNamespace
+
+    from server.social.recommendations.ranking import stats_quality
+
+    clean = SimpleNamespace(impressions=100, qualified_views=50, completions=20, fast_skips=0)
+    skipped = SimpleNamespace(impressions=100, qualified_views=50, completions=20, fast_skips=60)
+    assert stats_quality(skipped, 0, 0) < stats_quality(clean, 0, 0)
+
+
+def test_pool_order_uses_recommendation_stats_for_older_posts(app, monkeypatch):
+    owner = _add_creators(app, 1)[0]
+    # Newest first; with a cap of 2 the newest share is 1, the rest sort by quality x age.
+    ids = _add_posts(app, [(owner, 0, 0, 0), (owner, 10, 5, 100), (owner, 20, 0, 0), (owner, 30, 1, 10)])
+    proven = ids[2]
+    with app.state.testing_session() as db:
+        db.add(PostRecommendationStats(post_id=proven, impressions=200, qualified_views=180, completions=150, likes=60))
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 2)
+    service._catalog_base_cache["entry"] = (None, ())
+    with app.state.testing_session() as db:
+        order = [item.post_id for item in service._catalog_pool_order(db)]
+    # The proven post leads the older part; posts without stats keep their legacy order.
+    assert order == [ids[0], proven, ids[1], ids[3]]
+
+
+def test_one_shared_tag_does_not_beat_a_co_watch_similarity(app):
+    from server.social.recommendations import actor_identity
+
+    seed, tag_only, co_watched = seed_catalog(app, creators=1, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        db.add(ItemSimilarity(source_post_id=seed.id, target_post_id=co_watched.id, score=0.6, support=10))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "tag-probe"), session=None, surface="related", seed_post_id=seed.id,
+            allowed_post_ids=None, manual_order=None,
+        )
+    # Every post shares the seed's one tag; that alone is weak evidence.
+    assert context.related_scores[tag_only.id][0] == pytest.approx(0.5)
+    assert context.related_scores[co_watched.id][0] == pytest.approx(0.6)

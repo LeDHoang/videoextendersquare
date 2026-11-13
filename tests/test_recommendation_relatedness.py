@@ -6,6 +6,7 @@ from server.social.recommendations.relatedness import (
     location_score,
     location_scores,
     text_scores,
+    tfidf_vector,
     tokenize,
 )
 from server.social.recommendations.types import CatalogItem, PostLocation
@@ -44,6 +45,25 @@ def test_text_scores_prefers_shared_distinctive_words():
     assert scores["B"][0] > scores.get("C", (0.0,))[0]
     assert scores["B"][1] == ("A",)
     assert "A" not in scores
+
+
+def test_text_scores_reuses_and_fills_a_vector_memo():
+    items = {
+        item.post_id: item
+        for item in (
+            _item("A", "saigon night market"),
+            _item("B", "mountain hiking sunrise"),
+            _item("C", "coffee brewing morning"),
+        )
+    }
+    idf = build_idf(items.values())
+    # A stale memo entry for B that matches A's caption exactly: if the memo is
+    # used, B scores as a perfect match although its own caption shares nothing.
+    vectors = {"B": tfidf_vector(items["A"].text_tokens, idf)}
+    scores = text_scores([(items["A"], 1.0)], items, idf, vectors=vectors)
+    assert scores["B"][0] == 1.0
+    assert set(vectors) == {"A", "B", "C"}
+    assert "B" not in text_scores([(items["A"], 1.0)], items, idf)
 
 
 def test_text_scores_degenerate_inputs():
@@ -107,18 +127,26 @@ def test_age_factor_tiers():
     assert all(later <= earlier for earlier, later in zip(values, values[1:]))
 
 
-def test_block_diverse_caps_creators_per_block():
+def test_block_diverse_penalizes_creators_past_free_slots():
     ids = [f"a{i}" for i in range(10)] + [f"b{i}" for i in range(10)]
     owner = {post_id: post_id[0] for post_id in ids}
-    out = block_diverse(ids, owner, block=6, cap=3)
+    out = block_diverse(ids, owner, block=6, free=3, step=8)
     assert sorted(out) == sorted(ids)
-    for start in range(0, 12, 6):
-        chunk = out[start:start + 6]
-        assert [owner[p] for p in chunk].count("a") <= 3
-        assert [owner[p] for p in chunk].count("b") <= 3
-    # Only one creator left: fills in input order past the cap.
-    only = block_diverse(["a0", "a1", "a2", "a3", "a4"], {f"a{i}": "a" for i in range(5)}, block=4, cap=2)
+    # The first other creator is pulled forward into the first block.
+    assert out[:3] == ["a0", "a1", "a2"]
+    assert "b0" in out[:6]
+    # Only one creator: input order.
+    only = block_diverse(["a0", "a1", "a2", "a3", "a4"], {f"a{i}": "a" for i in range(5)}, block=4, free=2, step=8)
     assert only == ["a0", "a1", "a2", "a3", "a4"]
+
+
+def test_block_diverse_is_a_penalty_not_a_cap():
+    ids = [f"a{i}" for i in range(6)] + ["b0"]
+    owner = {post_id: post_id[0] for post_id in ids}
+    # b0 sits close behind; a small step lets the strong creator keep a 4th slot.
+    assert block_diverse(ids, owner, block=7, free=3, step=2)[:4] == ["a0", "a1", "a2", "a3"]
+    # A large step pushes the 4th a-reel behind b0.
+    assert block_diverse(ids, owner, block=7, free=3, step=8)[:4] == ["a0", "a1", "a2", "b0"]
 
 
 def test_location_score_city_only_posts_never_share_a_country():

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-REELS_ALGORITHM_VERSION = "reels-heuristic-v2"
+REELS_ALGORITHM_VERSION = "reels-heuristic-v3"
 CREATOR_ALGORITHM_VERSION = "creator-heuristic-v1"
 CURSOR_VERSION = 1
 SESSION_IDLE_MINUTES = 30
@@ -18,7 +18,11 @@ GRID_CACHE_TTL_S = 600
 GRID_CACHE_MAX = 256
 GRID_CACHE_ANON_MAX = 64
 GRID_BLOCK = 24
-GRID_CREATOR_CAP = 3
+# Grid creator spread: a creator's reels past GRID_CREATOR_FREE in a block move back GRID_CREATOR_STEP places each.
+GRID_CREATOR_FREE = 3
+GRID_CREATOR_STEP = 8
+# Extra score penalty for each reel a creator has on the page past two.
+CREATOR_OVERFLOW_PENALTY = 1.5
 # (age in days, freshness factor): small penalty within 3 months, larger within 6, a year, then the most.
 AGE_FACTOR_POINTS = ((0, 1.0), (90, 0.85), (180, 0.70), (365, 0.55), (730, 0.40))
 MAX_SOURCE_RESULTS = 160
@@ -28,8 +32,12 @@ FOLLOWING_PERSONAL_WEIGHT = 0.5
 FOLLOWING_RECENCY_DECAY_HOURS = 48.0
 # Scales the following score so the 0.45 creator and 2.5 back-to-back penalties keep their proportion.
 FOLLOWING_SCORE_SCALE = 4.0
-FOLLOWING_WATCHED_DAYS = 7
-FOLLOWING_WATCHED_MS = 3000
+# A reel counts as watched when the actor finished it or watched it this long within these days.
+WATCHED_DAYS = 7
+WATCHED_MS = 3000
+# Trending reads daily stats from this many days back, each day weighted 0.5 ** (days_ago / half-life).
+TRENDING_WINDOW_DAYS = 7
+TRENDING_HALF_LIFE_DAYS = 2.0
 
 SOURCE_WEIGHTS = {
     "manual_order": 8.0,

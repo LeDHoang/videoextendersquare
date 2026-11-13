@@ -27,6 +27,7 @@ from server.social.models import (
     Follow,
     ItemSimilarity,
     Post,
+    PostRecommendationDailyStats,
     PostRecommendationStats,
     PostTag,
     RecommendationDismissal,
@@ -44,23 +45,26 @@ from .config import (
     CREATOR_ALGORITHM_VERSION,
     CURSOR_VERSION,
     DEFAULT_PAGE_SIZE,
-    FOLLOWING_WATCHED_DAYS,
-    FOLLOWING_WATCHED_MS,
     LONG_TAIL_MAX,
     GRID_BLOCK,
     GRID_CACHE_ANON_MAX,
     GRID_CACHE_MAX,
     GRID_CACHE_TTL_S,
-    GRID_CREATOR_CAP,
+    GRID_CREATOR_FREE,
+    GRID_CREATOR_STEP,
     MAX_CATALOG_SIZE,
     MAX_PAGE_SIZE,
     REELS_ALGORITHM_VERSION,
     SESSION_IDLE_MINUTES,
     SESSION_MAX_HOURS,
+    TRENDING_HALF_LIFE_DAYS,
+    TRENDING_WINDOW_DAYS,
+    WATCHED_DAYS,
+    WATCHED_MS,
 )
-from .events import get_or_create
-from .relatedness import age_factor, block_diverse, build_idf, legacy_prior, location_scores, text_scores, tokenize
-from .ranking import rank_candidates, rerank_page
+from .events import _event_value, get_or_create
+from .relatedness import age_factor, block_diverse, build_idf, location_scores, text_scores, tokenize
+from .ranking import rank_candidates, rerank_page, stats_quality
 from .sources import gather_source_hits
 from .types import (
     ActorIdentity,
@@ -313,7 +317,8 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
 
 
 # The per-request pool order, kept against the base tuple and the cap it was
-# built for: the newest share first, then everything else by prior x age factor.
+# built for: the newest share first, then everything else by quality x age factor.
+# Quality reads recommendation stats as of the last rebuild (when the catalog changes).
 _catalog_pool_cache: dict = {"entry": (None, 0, ())}
 
 
@@ -324,10 +329,11 @@ def _catalog_pool_order(db: Session) -> tuple[CatalogItem, ...]:
         return order
     newest = int(MAX_CATALOG_SIZE * CATALOG_NEWEST_SHARE)
     now = datetime.now(timezone.utc)
+    stats = {row.post_id: row for row in db.query(PostRecommendationStats).all()}
     # `base` is newest first, so the stable sort keeps ties newest first.
     rest = sorted(
         base[newest:],
-        key=lambda item: -legacy_prior(item.like_count, item.view_count)
+        key=lambda item: -stats_quality(stats.get(item.post_id), item.like_count, item.view_count)
         * age_factor(max(0.0, (now - item.created_at).total_seconds() / 86400.0)),
     )
     order = (*base[:newest], *rest)
@@ -399,10 +405,11 @@ def _long_tail_ids(
     return frozenset(picked)
 
 
-# The catalog by post id and its IDF table, derived from `_catalog_base` and
-# kept against the same items tuple, so they are rebuilt whenever it is.
+# The catalog by post id, its IDF table and a memo of caption TF-IDF vectors,
+# derived from `_catalog_base` and kept against the same items tuple, so they
+# are rebuilt whenever it is.
 _catalog_index_cache: dict = {"entry": (None, {})}
-_catalog_idf_cache: dict = {"entry": (None, {})}
+_catalog_idf_cache: dict = {"entry": (None, {}, {})}
 
 
 def _catalog_index(db: Session) -> dict[str, CatalogItem]:
@@ -415,14 +422,15 @@ def _catalog_index(db: Session) -> dict[str, CatalogItem]:
     return index
 
 
-def _catalog_idf(db: Session) -> dict[str, float]:
+def _catalog_idf(db: Session) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+    """The IDF table and the vector memo that goes with it."""
     base = _catalog_base(db)
-    cached_base, idf = _catalog_idf_cache["entry"]
+    cached_base, idf, vectors = _catalog_idf_cache["entry"]
     if cached_base is base:
-        return idf
-    idf = build_idf(base)
-    _catalog_idf_cache["entry"] = (base, idf)
-    return idf
+        return idf, vectors
+    idf, vectors = build_idf(base), {}
+    _catalog_idf_cache["entry"] = (base, idf, vectors)
+    return idf, vectors
 
 
 def _catalog(
@@ -537,6 +545,8 @@ def _pipeline_context(
         .all()
     }
     related: dict[str, tuple[float, tuple[str, ...]]] = {}
+    # History seeds count half on Related, where the opened reel is the main seed.
+    affinity_weight = 0.5 if surface == "related" else 1.0
     if seed_ids and post_ids:
         similarities = db.query(ItemSimilarity).filter(
             ItemSimilarity.source_post_id.in_(set(seed_ids)),
@@ -550,27 +560,39 @@ def _pipeline_context(
         for post_id, score in related_scores.items():
             related[post_id] = (score, tuple(related_seeds[post_id][:4]))
 
-        seed_tag_rows = db.query(PostTag).filter(PostTag.post_id.in_(set(seed_ids))).all()
-        seed_tags = {row.tag_id for row in seed_tag_rows}
+        seed_tags: dict[str, set[str]] = defaultdict(set)
+        for row in db.query(PostTag).filter(PostTag.post_id.in_(set(seed_ids))):
+            seed_tags[row.post_id].add(row.tag_id)
         if seed_tags:
             for item in items.values():
-                overlap = len(seed_tags.intersection(item.tag_ids))
-                if overlap:
+                item_tags = set(item.tag_ids)
+                best, matched = 0.0, []
+                for seed_id in dict.fromkeys(seed_ids):
+                    overlap = len(seed_tags.get(seed_id, set()) & item_tags)
+                    if not overlap:
+                        continue
+                    # Per-seed Jaccard, shrunk by overlap / (overlap + 1) like co-watch
+                    # support, so one shared tag is weak evidence.
+                    jaccard = overlap / len(seed_tags[seed_id] | item_tags)
+                    weight = 1.0 if seed_id == seed_post_id else affinity_weight
+                    best = max(best, jaccard * overlap / (overlap + 1.0) * weight)
+                    matched.append(seed_id)
+                if matched:
                     old_score, old_seeds = related.get(item.post_id, (0.0, ()))
-                    related[item.post_id] = (max(old_score, min(1.0, overlap / max(1, len(seed_tags)))), old_seeds or tuple(seed_ids[:2]))
+                    related[item.post_id] = (max(old_score, best), old_seeds or tuple(matched[:4]))
 
     seed_items: tuple[tuple[CatalogItem, float], ...] = ()
     scores_by_text: dict[str, tuple[float, tuple[str, ...]]] = {}
     scores_by_location: dict[str, tuple[float, tuple[str, ...]]] = {}
     if seed_ids:
         index = _catalog_index(db)
-        affinity_weight = 0.5 if surface == "related" else 1.0
         seed_items = tuple(
             (index[post_id], 1.0 if post_id == seed_post_id else affinity_weight)
             for post_id in dict.fromkeys(seed_ids)
             if post_id in index
         )
-        scores_by_text = text_scores(list(seed_items), items, _catalog_idf(db))
+        idf, vectors = _catalog_idf(db)
+        scores_by_text = text_scores(list(seed_items), items, idf, vectors=vectors)
         scores_by_location = location_scores(list(seed_items), items)
         for post_id, (score, seeds) in (*scores_by_text.items(), *scores_by_location.items()):
             if score > related.get(post_id, (0.0, ()))[0]:
@@ -582,6 +604,18 @@ def _pipeline_context(
         .filter(PostRecommendationStats.post_id.in_(post_ids) if post_ids else False)
         .all()
     }
+    # Last week's daily stats, each day decayed by its age, keyed by post then column.
+    recent_stats: dict[str, dict[str, float]] = {}
+    if post_ids:
+        today = utcnow().date()
+        for row in db.query(PostRecommendationDailyStats).filter(
+            PostRecommendationDailyStats.post_id.in_(post_ids),
+            PostRecommendationDailyStats.day > today - timedelta(days=TRENDING_WINDOW_DAYS),
+        ):
+            weight = 0.5 ** (max(0, (today - row.day).days) / TRENDING_HALF_LIFE_DAYS)
+            totals = recent_stats.setdefault(row.post_id, {})
+            for column in ("impressions", "qualified_views", "completions", "likes", "saves", "shares"):
+                totals[column] = totals.get(column, 0.0) + weight * int(getattr(row, column) or 0)
     following_ids = set()
     if actor.user_id:
         following_ids = {
@@ -623,20 +657,11 @@ def _pipeline_context(
         .filter(Post.id.in_(event_post_ids) if event_post_ids else False)
         .all()
     }
-    event_values = {
-        "view": 0.8,
-        "complete": 1.0,
-        "like": 2.0,
-        "save": 2.5,
-        "share": 2.5,
-        "skip": -1.0,
-        "not_interested": -4.0,
-    }
     for event in session_events:
         post = event_posts.get(event.post_id)
         if not post:
             continue
-        value = event_values.get(event.event_type, 0.0)
+        value = _event_value(event)
         session_creator[post.owner_id] += value
         for link in post.tags:
             session_tag[link.tag_id] += value
@@ -653,24 +678,25 @@ def _pipeline_context(
         )
     )
     watched_post_ids: frozenset[str] = frozenset()
-    if surface == "following" and items:
+    # The anonymous grid actor has no ids; its actor_column would match every signed-in event.
+    if manual_order is None and scope_order is None and items and (actor.user_id or actor.anonymous_id):
         watched_post_ids = frozenset(
             post_id
             for (post_id,) in db.query(EngagementEvent.post_id)
             .filter(
                 actor_column,
-                EngagementEvent.post_id.in_(list(items)),
-                EngagementEvent.created_at >= utcnow() - timedelta(days=FOLLOWING_WATCHED_DAYS),
+                EngagementEvent.created_at >= utcnow() - timedelta(days=WATCHED_DAYS),
                 or_(
                     EngagementEvent.event_type == "complete",
                     and_(
                         EngagementEvent.event_type == "view",
-                        EngagementEvent.watch_ms >= FOLLOWING_WATCHED_MS,
+                        EngagementEvent.watch_ms >= WATCHED_MS,
                     ),
                 ),
             )
             .distinct()
             .all()
+            if post_id in items
         )
     return PipelineContext(
         actor=actor,
@@ -689,6 +715,7 @@ def _pipeline_context(
         session_creator_affinity=dict(session_creator),
         session_tag_affinity=dict(session_tag),
         stats=stats,
+        recent_stats=recent_stats,
         exposures_by_creator=dict(exposures),
         seed_items=seed_items,
         text_scores=scores_by_text,
@@ -698,8 +725,13 @@ def _pipeline_context(
     )
 
 
-def rank_pool(db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str]) -> list[Candidate]:
-    """Score every allowed post (capped to the catalog pool) for one actor; no session, no rerank."""
+def rank_pool(
+    db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str]
+) -> tuple[list[Candidate], frozenset[str]]:
+    """Score every allowed post (capped to the catalog pool) for one actor; no session, no rerank.
+
+    Also returns the ids the actor already watched.
+    """
     context = _pipeline_context(
         db,
         actor=actor,
@@ -711,7 +743,7 @@ def rank_pool(db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str]) 
         pool_only=True,
         capped=True,
     )
-    return rank_candidates(context, gather_source_hits(context))
+    return rank_candidates(context, gather_source_hits(context)), context.watched_post_ids
 
 
 # (actor key, filters key, seed) -> (created monotonic, ids). Entries age out by
@@ -730,9 +762,17 @@ def rank_grid(
     entry = _grid_cache.get(key)
     if entry is not None and now - entry[0] < GRID_CACHE_TTL_S:
         return entry[1]
-    ranked = rank_pool(db, actor=actor, allowed_post_ids=allowed_post_ids)
+    ranked, watched = rank_pool(db, actor=actor, allowed_post_ids=allowed_post_ids)
     owner_of = {candidate.item.post_id: candidate.item.owner_id for candidate in ranked}
-    ids = block_diverse([candidate.item.post_id for candidate in ranked], owner_of, GRID_BLOCK, GRID_CREATOR_CAP)
+    # Watched reels go after all unwatched ones; each part is spread on its own.
+    ids = [
+        post_id
+        for part in (
+            [candidate.item.post_id for candidate in ranked if candidate.item.post_id not in watched],
+            [candidate.item.post_id for candidate in ranked if candidate.item.post_id in watched],
+        )
+        for post_id in block_diverse(part, owner_of, GRID_BLOCK, GRID_CREATOR_FREE, GRID_CREATOR_STEP)
+    ]
     with _grid_cache_lock:
         _grid_cache[key] = (now, ids)
         # Anonymous keys evict only among themselves, so they cannot push out
@@ -952,44 +992,26 @@ def _materialize_reel_page(
     pinned = None
     if page_index == 0 and seed_post_id:
         pinned = next((candidate for candidate in ranked if candidate.item.post_id == seed_post_id), None)
-    uncapped_owner = None
+    seed_owner = None
     if surface == "related" and seed_post_id:
         # The seed may already be delivered (pages 1+), so resolve it from the seed items.
-        uncapped_owner = next(
+        seed_owner = next(
             (item.owner_id for item, _ in context.seed_items if item.post_id == seed_post_id), None
         )
-    explore = not context.pool_only
-    if surface == "following":
-        # Unwatched reels fill the page first; the watched ones only top it up.
-        unwatched = [c for c in ranked if c.item.post_id not in context.watched_post_ids]
-        watched = [c for c in ranked if c.item.post_id in context.watched_post_ids]
-        head = [pinned] if pinned else []
-        first = rerank_page(
-            [c for c in unwatched if c is not pinned],
-            limit - len(head),
-            explore=False,
-            preselected=head,
-        )
-        rest = rerank_page(
-            [c for c in watched if c is not pinned],
-            limit - len(head) - len(first),
-            explore=False,
-            preselected=[*head, *first],
-        )
-        selected = [*head, *first, *rest]
-    elif pinned:
-        selected = [
-            pinned,
-            *rerank_page(
-                [candidate for candidate in ranked if candidate is not pinned],
-                limit - 1,
-                preselected=[pinned],
-                explore=explore,
-                uncapped_owner=uncapped_owner,
-            ),
-        ]
-    else:
-        selected = rerank_page(ranked, limit, explore=explore, uncapped_owner=uncapped_owner)
+    explore = not context.pool_only and surface != "following"
+    # Unwatched reels fill the page first; the watched ones only top it up.
+    head = [pinned] if pinned else []
+    unwatched = [c for c in ranked if c is not pinned and c.item.post_id not in context.watched_post_ids]
+    watched = [c for c in ranked if c is not pinned and c.item.post_id in context.watched_post_ids]
+    first = rerank_page(unwatched, limit - len(head), explore=explore, preselected=head, seed_owner=seed_owner)
+    rest = rerank_page(
+        watched,
+        limit - len(head) - len(first),
+        explore=False,
+        preselected=[*head, *first],
+        seed_owner=seed_owner,
+    )
+    selected = [*head, *first, *rest]
     has_more = len(ranked) > len(selected)
     request = RecommendationRequest(
         session_id=session.id,

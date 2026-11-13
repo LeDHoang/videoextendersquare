@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -701,12 +702,29 @@ class PostRecommendationStats(Base):
     qualified_views = Column(Integer, nullable=False, default=0)
     completions = Column(Integer, nullable=False, default=0)
     skips = Column(Integer, nullable=False, default=0)
+    # Skips under 1.5s that were not navigation (filter change, unload, ...).
+    fast_skips = Column(Integer, nullable=False, default=0, server_default="0")
     likes = Column(Integer, nullable=False, default=0)
     saves = Column(Integer, nullable=False, default=0)
     shares = Column(Integer, nullable=False, default=0)
     negative_feedback = Column(Integer, nullable=False, default=0)
     total_watch_ms = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class PostRecommendationDailyStats(Base):
+    """Per-post engagement for one UTC day; trending reads the last week."""
+
+    __tablename__ = "post_recommendation_daily_stats"
+
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    day = Column(Date, primary_key=True, index=True)
+    impressions = Column(Integer, nullable=False, default=0)
+    qualified_views = Column(Integer, nullable=False, default=0)
+    completions = Column(Integer, nullable=False, default=0)
+    likes = Column(Integer, nullable=False, default=0)
+    saves = Column(Integer, nullable=False, default=0)
+    shares = Column(Integer, nullable=False, default=0)
 
 
 class CoWatchPair(Base):

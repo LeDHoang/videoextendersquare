@@ -6,6 +6,7 @@ import math
 from collections.abc import Sequence
 
 from .config import (
+    CREATOR_OVERFLOW_PENALTY,
     FOLLOWING_PERSONAL_WEIGHT,
     FOLLOWING_RECENCY_DECAY_HOURS,
     FOLLOWING_SCORE_SCALE,
@@ -42,7 +43,11 @@ def _negative_affinity(value: float) -> float:
 
 
 def _quality(context: PipelineContext, post_id: str, like_count: int, view_count: int) -> float:
-    stat = context.stats.get(post_id)
+    return stats_quality(context.stats.get(post_id), like_count, view_count)
+
+
+def stats_quality(stat: object | None, like_count: int, view_count: int) -> float:
+    """Quality in [0, 1] from a post's recommendation stats (or None) and its legacy counts."""
     impressions = max(0, int(getattr(stat, "impressions", 0) or 0))
     qualified = max(0, int(getattr(stat, "qualified_views", 0) or 0))
     completions = max(0, int(getattr(stat, "completions", 0) or 0))
@@ -50,11 +55,13 @@ def _quality(context: PipelineContext, post_id: str, like_count: int, view_count
     saves = max(0, int(getattr(stat, "saves", 0) or 0))
     shares = max(0, int(getattr(stat, "shares", 0) or 0))
     negatives = max(0, int(getattr(stat, "negative_feedback", 0) or 0))
+    fast_skips = max(0, int(getattr(stat, "fast_skips", 0) or 0))
     view_rate = (qualified + 2.0) / (impressions + 5.0)
     complete_rate = (completions + 1.0) / (qualified + 3.0)
     action_rate = (likes + 2.0 * saves + 3.0 * shares + 1.0) / (impressions + 10.0)
     negative_rate = (negatives + 0.5) / (impressions + 10.0)
-    return max(0.0, min(1.0, 0.42 * view_rate + 0.25 * complete_rate + 0.20 * action_rate + 0.13 * legacy_prior(like_count, view_count) - 0.5 * negative_rate))
+    fast_skip_rate = fast_skips / (impressions + 10.0)
+    return max(0.0, min(1.0, 0.42 * view_rate + 0.25 * complete_rate + 0.20 * action_rate + 0.13 * legacy_prior(like_count, view_count) - 0.5 * negative_rate - 0.25 * fast_skip_rate))
 
 
 def rank_candidates(
@@ -202,7 +209,16 @@ def _ranked_candidates(context: PipelineContext, source_hits: dict[str, dict]) -
                 features=features,
             )
         )
-    return sorted(ranked, key=lambda candidate: (-candidate.final_score, -candidate.item.created_at.timestamp(), candidate.item.post_id))
+    # Reels the actor already watched go after all unwatched ones.
+    return sorted(
+        ranked,
+        key=lambda candidate: (
+            candidate.item.post_id in context.watched_post_ids,
+            -candidate.final_score,
+            -candidate.item.created_at.timestamp(),
+            candidate.item.post_id,
+        ),
+    )
 
 
 def rerank_page(
@@ -211,13 +227,13 @@ def rerank_page(
     *,
     explore: bool = True,
     preselected: Sequence[Candidate] = (),
-    uncapped_owner: str | None = None,
+    seed_owner: str | None = None,
 ) -> list[Candidate]:
     """Greedy diversity pass with creator/topic/source fatigue.
 
     `preselected` reels (a pinned seed) seed the counters and the back-to-back
-    check but are not returned. `uncapped_owner` skips the hard per-creator cap
-    for that one owner; its soft penalties still apply.
+    check but are not returned. `seed_owner` skips the creator overflow penalty
+    for that one owner; its other penalties still apply.
     """
     if not candidates or limit <= 0:
         return []
@@ -233,7 +249,7 @@ def rerank_page(
             limit - prefix,
             explore=explore,
             preselected=preselected,
-            uncapped_owner=uncapped_owner,
+            seed_owner=seed_owner,
         )
 
     remaining = list(candidates)
@@ -252,16 +268,12 @@ def rerank_page(
         best_adjusted = float("-inf")
         for index, candidate in enumerate(remaining):
             creator_count = creator_counts.get(candidate.item.owner_id, 0)
-            if (
-                creator_count >= 3
-                and candidate.item.owner_id != uncapped_owner
-                and any(creator_counts.get(other.item.owner_id, 0) < 3 for other in remaining)
-            ):
-                continue
             adjusted = candidate.final_score
             if last_owner == candidate.item.owner_id:
                 adjusted -= 2.5
             adjusted -= 0.45 * creator_count
+            if candidate.item.owner_id != seed_owner:
+                adjusted -= CREATOR_OVERFLOW_PENALTY * max(0, creator_count - 2)
             dominant_tag_count = max((tag_counts.get(tag_id, 0) for tag_id in candidate.item.tag_ids), default=0)
             adjusted -= 0.30 * max(0, dominant_tag_count - 1)
             adjusted -= 0.20 * max(0, source_counts.get(candidate.primary_source, 0) - 2)
@@ -277,8 +289,19 @@ def rerank_page(
             tag_counts[tag_id] = tag_counts.get(tag_id, 0) + 1
 
     if explore and selected and not any(candidate.features.get("exploration", 0.0) >= 0.7 for candidate in selected):
+        # The swapped-in reel takes the last slot, so it must not repeat the creator just before it.
+        if len(selected) > 1:
+            previous_owner = selected[-2].item.owner_id
+        else:
+            previous_owner = preselected[-1].item.owner_id if preselected else None
         exploration = next(
-            (candidate for candidate in candidates if candidate not in selected and candidate.features.get("exploration", 0.0) >= 0.7),
+            (
+                candidate
+                for candidate in candidates
+                if candidate not in selected
+                and candidate.features.get("exploration", 0.0) >= 0.7
+                and candidate.item.owner_id != previous_owner
+            ),
             None,
         )
         if exploration is not None:
