@@ -2093,9 +2093,11 @@ def test_negative_affinity_penalizes_disliked_creators_tags_and_reels():
     assert negative() == 0.0
     assert negative(creator=5.0, tag=5.0, reel=5.0) == 0.0
     assert negative(creator=-12.0) == pytest.approx(math.tanh(2.0))
-    assert negative(tag=-3.0) == pytest.approx(math.tanh(0.5))
+    # A disliked tag counts half: one dislike marks every reel that shares a broad tag.
+    assert negative(tag=-3.0) == pytest.approx(math.tanh(0.25))
     # The most negative of the three counts.
     assert negative(creator=-3.0, reel=-8.0) == pytest.approx(math.tanh(8.0 / 6.0))
+    assert negative(creator=-2.0, tag=-6.0) == pytest.approx(math.tanh(0.5))
 
 
 def test_pipeline_context_loads_negative_reel_affinities(app):
@@ -2117,14 +2119,18 @@ def test_pipeline_context_loads_negative_reel_affinities(app):
     assert posts[25].id not in context.item_affinity
 
 
-def test_decayed_affinity_halves_per_half_life_in_whole_days():
-    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+def test_decayed_affinity_halves_positives_and_fades_negatives_in_whole_days():
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS, NEGATIVE_AFFINITY_FADE_DAYS
     from server.social.recommendations.events import decayed_affinity
 
     now = utcnow()
     assert decayed_affinity(10.0, now - timedelta(hours=20), now) == 10.0
     assert decayed_affinity(10.0, now - timedelta(days=AFFINITY_HALF_LIFE_DAYS), now) == pytest.approx(5.0)
-    assert decayed_affinity(-12.0, now - timedelta(days=2 * AFFINITY_HALF_LIFE_DAYS), now) == pytest.approx(-3.0)
+    # Negatives fade in a straight line and are gone after NEGATIVE_AFFINITY_FADE_DAYS.
+    assert decayed_affinity(-12.0, now - timedelta(hours=20), now) == -12.0
+    assert decayed_affinity(-12.0, now - timedelta(days=NEGATIVE_AFFINITY_FADE_DAYS / 2), now) == pytest.approx(-6.0)
+    assert decayed_affinity(-12.0, now - timedelta(days=NEGATIVE_AFFINITY_FADE_DAYS), now) == 0.0
+    assert decayed_affinity(-12.0, now - timedelta(days=2 * NEGATIVE_AFFINITY_FADE_DAYS), now) == 0.0
     # Naive timestamps (SQLite) are UTC; a timestamp after now does not grow the score.
     assert decayed_affinity(10.0, (now - timedelta(days=AFFINITY_HALF_LIFE_DAYS)).replace(tzinfo=None), now) == pytest.approx(5.0)
     assert decayed_affinity(10.0, now + timedelta(days=3), now) == 10.0
@@ -2142,6 +2148,10 @@ def test_affinity_update_decays_the_old_score_before_adding():
     _update_affinity_row(row, 1.0, SimpleNamespace(created_at=now))
     assert row.score == pytest.approx(6.0)
     assert row.last_event_at == now
+    # An expired dislike does not stack onto a new one.
+    row = SimpleNamespace(score=-8.0, positive_count=0, negative_count=0, last_event_at=now - timedelta(days=40), updated_at=None)
+    _update_affinity_row(row, -1.0, SimpleNamespace(created_at=now))
+    assert row.score == pytest.approx(-1.0)
 
 
 def test_pipeline_context_decays_stored_affinities(app):
@@ -2164,5 +2174,5 @@ def test_pipeline_context_decays_stored_affinities(app):
         )
     assert context.creator_affinity[posts[0].owner_id] == pytest.approx(2.0)
     assert context.tag_affinity[tag_id] == pytest.approx(1.0)
-    assert context.item_affinity[posts[0].id] == pytest.approx(-2.0)
+    assert context.item_affinity.get(posts[0].id, 0.0) == 0.0  # a dislike older than the fade is gone
     assert context.item_affinity[posts[1].id] == 6.0

@@ -10,6 +10,7 @@ from .config import (
     FOLLOWING_PERSONAL_WEIGHT,
     FOLLOWING_RECENCY_DECAY_HOURS,
     FOLLOWING_SCORE_SCALE,
+    NEGATIVE_TAG_SHARE,
     RANK_WEIGHTS,
     RRF_RANK_CONSTANT,
     SOURCE_WEIGHTS,
@@ -106,8 +107,10 @@ def _features(
         for tag_id in item.tag_ids
     ]
     topic_raw = sum(value for value in tag_values if value > 0) / max(1, len(tag_values))
-    # The most negative of creator, tags and the reel itself (0 when none is negative).
-    negative_raw = min([creator_raw, *tag_values, context.item_affinity.get(post_id, 0.0), 0.0])
+    # The most negative of creator, tags (at NEGATIVE_TAG_SHARE) and the reel itself (0 when none is negative).
+    negative_raw = min(
+        [creator_raw, *(NEGATIVE_TAG_SHARE * value for value in tag_values), context.item_affinity.get(post_id, 0.0), 0.0]
+    )
     related = context.related_scores.get(post_id, (0.0, ()))[0]
     age_days = max(0.0, (context.now - item.created_at).total_seconds() / 86400.0)
     freshness = age_factor(age_days)

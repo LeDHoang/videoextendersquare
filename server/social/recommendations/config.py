@@ -41,6 +41,10 @@ TRENDING_WINDOW_DAYS = 7
 TRENDING_HALF_LIFE_DAYS = 2.0
 # Stored creator, tag and reel affinities halve every this many whole days since their last event.
 AFFINITY_HALF_LIFE_DAYS = 30.0
+# Negative affinities instead fade in a straight line and are gone after this many whole days.
+NEGATIVE_AFFINITY_FADE_DAYS = 30.0
+# Share of a negative tag affinity that counts toward the negative penalty.
+NEGATIVE_TAG_SHARE = 0.5
 
 SOURCE_WEIGHTS = {
     "manual_order": 8.0,

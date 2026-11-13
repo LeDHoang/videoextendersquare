@@ -24,7 +24,7 @@ from server.social.models import (
     utcnow,
 )
 
-from .config import AFFINITY_HALF_LIFE_DAYS, EVENT_WEIGHTS
+from .config import AFFINITY_HALF_LIFE_DAYS, EVENT_WEIGHTS, NEGATIVE_AFFINITY_FADE_DAYS
 
 
 class RecommendationAttributionError(ValueError):
@@ -229,12 +229,15 @@ def _identity_values(event: EngagementEvent) -> tuple[str | None, str | None, st
 
 
 def decayed_affinity(score: float, last_event_at: datetime | None, now: datetime) -> float:
-    """*score* halved every AFFINITY_HALF_LIFE_DAYS whole days since *last_event_at*."""
+    """*score* halved every AFFINITY_HALF_LIFE_DAYS whole days since *last_event_at*;
+    a negative score fades linearly to 0 over NEGATIVE_AFFINITY_FADE_DAYS instead."""
     if last_event_at is None:
         return score
     if last_event_at.tzinfo is None:
         last_event_at = last_event_at.replace(tzinfo=timezone.utc)
     days = max(0, (now - last_event_at).days)
+    if score < 0:
+        return score * max(0.0, 1.0 - days / NEGATIVE_AFFINITY_FADE_DAYS)
     return score * 0.5 ** (days / AFFINITY_HALF_LIFE_DAYS)
 
 
