@@ -15,6 +15,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from server.social.geo import location_coords, location_key
 from server.social.auth import SECURITY_SECRET, public_user
 from server.social.models import (
     ActorCreatorAffinity,
@@ -47,6 +48,7 @@ from .config import (
     SESSION_MAX_HOURS,
 )
 from .events import get_or_create
+from .relatedness import build_idf, location_scores, text_scores, tokenize
 from .ranking import rank_candidates, rerank_page
 from .sources import gather_source_hits
 from .types import (
@@ -54,6 +56,7 @@ from .types import (
     CatalogItem,
     MaterializedResult,
     PipelineContext,
+    PostLocation,
     RecommendationPage,
 )
 
@@ -248,6 +251,15 @@ def _active_dismissals(db: Session, actor_key: str) -> tuple[set[str], set[str]]
 _catalog_base_cache: dict = {"entry": (None, ())}
 
 
+def _post_location(raw) -> PostLocation | None:
+    loc = raw if isinstance(raw, dict) else {}
+    city, country = loc.get("city", ""), loc.get("country", "")
+    slug = location_key(city, country)
+    if not slug:
+        return None
+    return PostLocation(slug, str(city), str(country), location_coords(city, country, loc.get("lat"), loc.get("lon")))
+
+
 def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
     store = reel_records_version(False)
     cached_store, items = _catalog_base_cache["entry"]
@@ -256,7 +268,10 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
     # Plain columns, not Post entities: the catalog spans every published post
     # and needs only these.
     posts = (
-        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
+        db.query(
+            Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count,
+            Post.title, Post.caption, Post.location,
+        )
         .join(User, User.id == Post.owner_id)
         .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
         .order_by(Post.created_at.desc(), Post.id.desc())
@@ -276,11 +291,39 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
             created_at=aware(post.created_at),
             like_count=int(post.like_count or 0),
             view_count=int(post.view_count or 0),
+            text_tokens=tokenize(f"{post.title} {post.caption}"),
+            location=_post_location(post.location),
         )
         for post in posts
     )
     _catalog_base_cache["entry"] = (store, items)
     return items
+
+
+# The catalog by post id and its IDF table, derived from `_catalog_base` and
+# kept against the same items tuple, so they are rebuilt whenever it is.
+_catalog_index_cache: dict = {"entry": (None, {})}
+_catalog_idf_cache: dict = {"entry": (None, {})}
+
+
+def _catalog_index(db: Session) -> dict[str, CatalogItem]:
+    base = _catalog_base(db)
+    cached_base, index = _catalog_index_cache["entry"]
+    if cached_base is base:
+        return index
+    index = {item.post_id: item for item in base}
+    _catalog_index_cache["entry"] = (base, index)
+    return index
+
+
+def _catalog_idf(db: Session) -> dict[str, float]:
+    base = _catalog_base(db)
+    cached_base, idf = _catalog_idf_cache["entry"]
+    if cached_base is base:
+        return idf
+    idf = build_idf(base)
+    _catalog_idf_cache["entry"] = (base, idf)
+    return idf
 
 
 def _catalog(
@@ -403,6 +446,23 @@ def _pipeline_context(
                     old_score, old_seeds = related.get(item.post_id, (0.0, ()))
                     related[item.post_id] = (max(old_score, min(1.0, overlap / max(1, len(seed_tags)))), old_seeds or tuple(seed_ids[:2]))
 
+    seed_items: tuple[tuple[CatalogItem, float], ...] = ()
+    scores_by_text: dict[str, tuple[float, tuple[str, ...]]] = {}
+    scores_by_location: dict[str, tuple[float, tuple[str, ...]]] = {}
+    if seed_ids:
+        index = _catalog_index(db)
+        affinity_weight = 0.5 if surface == "related" else 1.0
+        seed_items = tuple(
+            (index[post_id], 1.0 if post_id == seed_post_id else affinity_weight)
+            for post_id in dict.fromkeys(seed_ids)
+            if post_id in index
+        )
+        scores_by_text = text_scores(list(seed_items), items, _catalog_idf(db))
+        scores_by_location = location_scores(list(seed_items), items)
+        for post_id, (score, seeds) in (*scores_by_text.items(), *scores_by_location.items()):
+            if score > related.get(post_id, (0.0, ()))[0]:
+                related[post_id] = (score, seeds)
+
     stats = {
         row.post_id: row
         for row in db.query(PostRecommendationStats)
@@ -493,6 +553,9 @@ def _pipeline_context(
         session_tag_affinity=dict(session_tag),
         stats=stats,
         exposures_by_creator=dict(exposures),
+        seed_items=seed_items,
+        text_scores=scores_by_text,
+        location_scores=scores_by_location,
     )
 
 
@@ -692,10 +755,24 @@ def _materialize_reel_page(
     pinned = None
     if page_index == 0 and seed_post_id:
         pinned = next((candidate for candidate in ranked if candidate.item.post_id == seed_post_id), None)
+    uncapped_owner = None
+    if surface == "related" and seed_post_id:
+        # The seed may already be delivered (pages 1+), so resolve it from the seed items.
+        uncapped_owner = next(
+            (item.owner_id for item, _ in context.seed_items if item.post_id == seed_post_id), None
+        )
     if pinned:
-        selected = [pinned, *rerank_page([candidate for candidate in ranked if candidate is not pinned], limit - 1)]
+        selected = [
+            pinned,
+            *rerank_page(
+                [candidate for candidate in ranked if candidate is not pinned],
+                limit - 1,
+                preselected=[pinned],
+                uncapped_owner=uncapped_owner,
+            ),
+        ]
     else:
-        selected = rerank_page(ranked, limit)
+        selected = rerank_page(ranked, limit, uncapped_owner=uncapped_owner)
     has_more = len(ranked) > len(selected)
     request = RecommendationRequest(
         session_id=session.id,

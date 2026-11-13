@@ -17,6 +17,8 @@ from verified_signup import register_verified
 from server.routers import reels, social
 from server.social import auth, database, safety
 from server.social.recommendations import service
+from server.social.recommendations.relatedness import text_scores
+from server.social.recommendations.sources import TextRelatedSource
 from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
@@ -1134,3 +1136,226 @@ def test_session_context_counts_unattributed_likes(app):
             )
             db.commit()
         assert owners["creator_2"] not in context().session_creator_affinity
+
+
+def test_catalog_base_carries_text_and_location(app):
+    posts = seed_catalog(app, creators=1, posts_per_creator=2)
+    with app.state.testing_session() as db:
+        first = db.get(Post, posts[0].id)
+        first.title = "Sunset ride"
+        first.caption = "#motorbike over Hanoi"
+        # Hanoi is not in CITY_COORDS, so the reel carries its own lat/lon.
+        first.location = {"city": "Hanoi", "country": "Vietnam", "lat": 21.0285, "lon": 105.8542}
+        db.commit()
+        service._catalog_base_cache["entry"] = (None, ())
+        items = {item.post_id: item for item in service._catalog_base(db)}
+    item = items[posts[0].id]
+    assert {"sunset", "ride", "motorbike", "hanoi"} <= set(item.text_tokens)
+    assert item.location.slug == "hanoi--vietnam"
+    assert item.location.coords == (21.0285, 105.8542)
+    assert items[posts[1].id].location is None
+
+
+def test_text_related_works_on_page_two_when_seed_was_delivered(app):
+    posts = seed_catalog(app, creators=3, posts_per_creator=3)
+    captions = [
+        "saigon night market neon", "night market neon lights", "night market food stalls",
+        "mountain hiking sunrise", "coffee brewing morning", "guitar practice session",
+        "beach volleyball summer", "city skyline timelapse", "forest waterfall drone",
+    ]
+    with app.state.testing_session() as db:
+        for post, caption in zip(posts, captions):
+            db.get(Post, post.id).caption = caption
+            db.get(Post, post.id).title = ""
+        db.commit()
+        service._catalog_base_cache["entry"] = (None, ())
+    seed = posts[0]
+    with TestClient(app) as client:
+        viewer = register(client, "text_viewer")
+        params = {"folder": "ALL FOLDERS", "sort": "newest", "post": seed.id, "limit": 2}
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert body["items"][0]["post_id"] == seed.id and body["next_cursor"]
+        second = client.get("/api/reels/feed", params={**params, "cursor": body["next_cursor"]})
+        assert second.status_code == 200, second.text
+        actor = service.actor_identity(viewer["id"], None)
+        with app.state.testing_session() as db:
+            session = db.get(RecommendationSession, body["session_id"])
+            context = service._pipeline_context(
+                db,
+                actor=actor,
+                session=session,
+                surface="related",
+                seed_post_id=seed.id,
+                allowed_post_ids=None,
+                manual_order=None,
+            )
+    assert seed.id not in context.items
+    assert [item.post_id for item, _ in context.seed_items] == [seed.id]
+    # Scored against the whole catalog, whichever reels page 0 happened to deliver.
+    with app.state.testing_session() as db:
+        full = text_scores(list(context.seed_items), service._catalog_index(db), service._catalog_idf(db))
+    assert seed.id not in full
+    for post in posts[1:3]:
+        assert full[post.id][1] == (seed.id,) and full[post.id][0] > 0
+    assert posts[3].id not in full
+    # The pipeline's own scores are that same result restricted to undelivered reels.
+    assert context.text_scores == {k: v for k, v in full.items() if k in context.items}
+    hits = {post_id: hit for post_id, hit in TextRelatedSource().generate(context)}
+    assert set(hits) == set(context.text_scores) & set(context.items)
+    assert all(hit.source == "text_related" and hit.seed_post_ids == (seed.id,) for hit in hits.values())
+
+
+def _seed_creator_heavy_catalog(app, extra=5, creators=4):
+    """Creator X (creator_0) with 7 reels, three other creators with 2 reels each."""
+    posts = seed_catalog(app, creators=creators, posts_per_creator=2)
+    with app.state.testing_session() as db:
+        creator = db.query(User).filter(User.username == "creator_0").one()
+        tag = db.query(Tag).filter(Tag.slug == "cinematic").one()
+        extra_ids = []
+        for number in range(100, 100 + extra):
+            path = f"tests/reel-{number}.jpg"
+            post = Post(
+                owner_id=creator.id,
+                media_path=path,
+                media_type="image",
+                title=f"Reel {number}",
+                caption="cinematic test",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - timedelta(minutes=number),
+                view_count=number,
+                like_count=1,
+            )
+            db.add(post)
+            db.flush()
+            db.add(PostTag(post_id=post.id, tag_id=tag.id))
+            extra_ids.append(post.id)
+            app.state.scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"reel-{number}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - number,
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        db.commit()
+        owner_of = {post.id: post.owner_id for post in db.query(Post).all()}
+    newest = max(
+        (post for post in posts if post.owner_id == creator.id), key=lambda post: post.created_at
+    )
+    return creator.id, newest.id, owner_of
+
+
+def test_related_page_spreads_creator_other_reels(app):
+    creator_id, seed_id, owner_of = _seed_creator_heavy_catalog(app)
+    with TestClient(app) as client:
+        viewer = register(client, "spread_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=creator_id,
+                    score=60.0,
+                )
+            )
+            db.commit()
+        related = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "post": seed_id, "limit": 8},
+        )
+        assert related.status_code == 200, related.text
+        body = related.json()
+        ids = [item["post_id"] for item in body["items"]]
+        assert ids[0] == seed_id
+        owners = [owner_of[post_id] for post_id in ids]
+        x_count = owners.count(creator_id)
+        assert x_count > 3, owners
+        assert any(owner != creator_id for owner in owners)
+        back_to_back = sum(1 for a, b in zip(owners, owners[1:]) if a == b == creator_id)
+        assert back_to_back < x_count - 1, owners
+        with app.state.testing_session() as db:
+            impressions = (
+                db.query(RecommendationImpression)
+                .filter(RecommendationImpression.session_id == body["session_id"])
+                .all()
+            )
+        assert any(
+            owner_of[row.post_id] == creator_id
+            and any(source["name"] == "creator_other_reels" for source in row.provenance["sources"])
+            for row in impressions
+            if row.post_id != seed_id
+        )
+        # Guard: no seed on for_you keeps the hard cap of 3 per creator.
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8},
+        )
+        assert feed.status_code == 200, feed.text
+        feed_owners = [owner_of[item["post_id"]] for item in feed.json()["items"]]
+        assert max(feed_owners.count(owner) for owner in set(feed_owners)) <= 3, feed_owners
+
+
+def test_algorithm_version_bump_restarts_session(app):
+    seed_catalog(app)
+    with TestClient(app) as client:
+        first = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        )
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        with app.state.testing_session() as db:
+            db.get(RecommendationSession, first_body["session_id"]).algorithm_version = "reels-heuristic-v1"
+            db.commit()
+        second = client.get(
+            "/api/reels/feed",
+            params={
+                "folder": "ALL FOLDERS",
+                "sort": "for_you",
+                "limit": 4,
+                "cursor": first_body["next_cursor"],
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["restarted"] is True
+        with app.state.testing_session() as db:
+            replacement = db.get(RecommendationSession, second.json()["session_id"])
+            assert replacement.restart_reason == "algorithm_version_changed"
+
+
+def test_related_later_pages_keep_seed_creator_uncapped(app):
+    creator_id, seed_id, owner_of = _seed_creator_heavy_catalog(app, extra=16, creators=9)
+    with TestClient(app) as client:
+        viewer = register(client, "later_viewer")
+        with app.state.testing_session() as db:
+            for post in db.query(Post).filter(Post.owner_id == creator_id):
+                post.like_count, post.view_count = 5000, 50000
+            service._catalog_base_cache["entry"] = (None, ())
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=creator_id,
+                    score=60.0,
+                )
+            )
+            db.commit()
+        params = {"folder": "ALL FOLDERS", "sort": "newest", "post": seed_id, "limit": 8}
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        second = client.get("/api/reels/feed", params={**params, "cursor": first.json()["next_cursor"]})
+        assert second.status_code == 200, second.text
+        owners = [owner_of[item["post_id"]] for item in second.json()["items"]]
+        assert second.json()["items"] and owners.count(creator_id) > 3, ["X" if o == creator_id else "o" for o in owners]
+        feed = client.get(
+            "/api/reels/feed", params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8}
+        )
+        feed_owners = [owner_of[item["post_id"]] for item in feed.json()["items"]]
+        assert max(feed_owners.count(owner) for owner in set(feed_owners)) <= 3, feed_owners

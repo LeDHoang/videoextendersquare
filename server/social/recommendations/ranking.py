@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 from .config import RANK_WEIGHTS, RRF_RANK_CONSTANT, SOURCE_WEIGHTS
 from .types import Candidate, PipelineContext
@@ -14,6 +15,9 @@ REASON_BY_SOURCE = {
     "creator_affinity": "from_creator_you_watch",
     "tag_affinity": "topic_you_watch",
     "recent_item_related": "similar_to_watched",
+    "text_related": "similar_caption",
+    "location_related": "same_place",
+    "creator_other_reels": "more_from_creator",
     "session_context": "based_on_this_session",
     "global_quality_trending": "popular_now",
     "fresh_exploration": "new_creator",
@@ -163,8 +167,20 @@ def _ranked_candidates(context: PipelineContext, source_hits: dict[str, dict]) -
     return sorted(ranked, key=lambda candidate: (-candidate.final_score, -candidate.item.created_at.timestamp(), candidate.item.post_id))
 
 
-def rerank_page(candidates: list[Candidate], limit: int) -> list[Candidate]:
-    """Greedy diversity pass with creator/topic/source fatigue."""
+def rerank_page(
+    candidates: list[Candidate],
+    limit: int,
+    *,
+    explore: bool = True,
+    preselected: Sequence[Candidate] = (),
+    uncapped_owner: str | None = None,
+) -> list[Candidate]:
+    """Greedy diversity pass with creator/topic/source fatigue.
+
+    `preselected` reels (a pinned seed) seed the counters and the back-to-back
+    check but are not returned. `uncapped_owner` skips the hard per-creator cap
+    for that one owner; its soft penalties still apply.
+    """
     if not candidates or limit <= 0:
         return []
     if candidates[0].primary_source in {"manual_order", "following_recent"}:
@@ -174,24 +190,38 @@ def rerank_page(candidates: list[Candidate], limit: int) -> list[Candidate]:
             prefix += 1
         if prefix >= limit or prefix == len(candidates):
             return candidates[:limit]
-        return candidates[:prefix] + rerank_page(candidates[prefix:], limit - prefix)
+        return candidates[:prefix] + rerank_page(
+            candidates[prefix:],
+            limit - prefix,
+            explore=explore,
+            preselected=preselected,
+            uncapped_owner=uncapped_owner,
+        )
 
     remaining = list(candidates)
     selected: list[Candidate] = []
     creator_counts: dict[str, int] = {}
     tag_counts: dict[str, int] = {}
     source_counts: dict[str, int] = {}
+    for earlier in preselected:
+        creator_counts[earlier.item.owner_id] = creator_counts.get(earlier.item.owner_id, 0) + 1
+        source_counts[earlier.primary_source] = source_counts.get(earlier.primary_source, 0) + 1
+        for tag_id in earlier.item.tag_ids:
+            tag_counts[tag_id] = tag_counts.get(tag_id, 0) + 1
+    last_owner = preselected[-1].item.owner_id if preselected else None
     while remaining and len(selected) < limit:
         best_index = 0
         best_adjusted = float("-inf")
         for index, candidate in enumerate(remaining):
             creator_count = creator_counts.get(candidate.item.owner_id, 0)
-            if creator_count >= 3 and any(
-                creator_counts.get(other.item.owner_id, 0) < 3 for other in remaining
+            if (
+                creator_count >= 3
+                and candidate.item.owner_id != uncapped_owner
+                and any(creator_counts.get(other.item.owner_id, 0) < 3 for other in remaining)
             ):
                 continue
             adjusted = candidate.final_score
-            if selected and selected[-1].item.owner_id == candidate.item.owner_id:
+            if last_owner == candidate.item.owner_id:
                 adjusted -= 2.5
             adjusted -= 0.45 * creator_count
             dominant_tag_count = max((tag_counts.get(tag_id, 0) for tag_id in candidate.item.tag_ids), default=0)
@@ -202,12 +232,13 @@ def rerank_page(candidates: list[Candidate], limit: int) -> list[Candidate]:
                 best_index = index
         chosen = remaining.pop(best_index)
         selected.append(chosen)
+        last_owner = chosen.item.owner_id
         creator_counts[chosen.item.owner_id] = creator_counts.get(chosen.item.owner_id, 0) + 1
         source_counts[chosen.primary_source] = source_counts.get(chosen.primary_source, 0) + 1
         for tag_id in chosen.item.tag_ids:
             tag_counts[tag_id] = tag_counts.get(tag_id, 0) + 1
 
-    if selected and not any(candidate.features.get("exploration", 0.0) >= 0.7 for candidate in selected):
+    if explore and selected and not any(candidate.features.get("exploration", 0.0) >= 0.7 for candidate in selected):
         exploration = next(
             (candidate for candidate in candidates if candidate not in selected and candidate.features.get("exploration", 0.0) >= 0.7),
             None,

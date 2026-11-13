@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import NamedTuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +12,13 @@ class ActorIdentity:
     actor_key: str
     user_id: str | None
     anonymous_id: str | None
+
+
+class PostLocation(NamedTuple):
+    slug: str
+    city: str
+    country: str
+    coords: tuple[float, float] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +29,8 @@ class CatalogItem:
     created_at: datetime
     like_count: int
     view_count: int
+    text_tokens: tuple[str, ...] = ()
+    location: PostLocation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +72,9 @@ class PipelineContext:
     session_tag_affinity: dict[str, float]
     stats: dict[str, object]
     exposures_by_creator: dict[str, int]
+    seed_items: tuple[tuple[CatalogItem, float], ...] = ()
+    text_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
+    location_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

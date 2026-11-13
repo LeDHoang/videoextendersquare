@@ -106,6 +106,55 @@ class RelatedItemSource:
         return _ranked_hits(self.name, rows)
 
 
+class TextRelatedSource:
+    name = "text_related"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        rows = [
+            (post_id, score, seeds)
+            for post_id, (score, seeds) in context.text_scores.items()
+            if post_id in context.items and score > 0
+        ]
+        return _ranked_hits(self.name, rows)
+
+
+class LocationRelatedSource:
+    name = "location_related"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        rows = [
+            (post_id, score, seeds)
+            for post_id, (score, seeds) in context.location_scores.items()
+            if post_id in context.items and score > 0
+        ]
+        return _ranked_hits(self.name, rows)
+
+
+class CreatorOtherReelsSource:
+    """The opened reel's creator's other reels, newest first. Not a relatedness score."""
+
+    name = "creator_other_reels"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        if not context.seed_post_id:
+            return []
+        seed = next((item for item, _ in context.seed_items if item.post_id == context.seed_post_id), None)
+        if seed is None:
+            return []
+        own = sorted(
+            (
+                item
+                for item in context.items.values()
+                if item.owner_id == seed.owner_id and item.post_id != seed.post_id
+            ),
+            key=lambda item: (-item.created_at.timestamp(), item.post_id),
+        )[:20]
+        return [
+            (item.post_id, SourceHit(self.name, rank, 1.0 / (1.0 + rank), (seed.post_id,)))
+            for rank, item in enumerate(own, start=1)
+        ]
+
+
 class SessionContextSource:
     name = "session_context"
 
@@ -158,6 +207,9 @@ DEFAULT_SOURCES: tuple[CandidateSource, ...] = (
     CreatorAffinitySource(),
     TagAffinitySource(),
     RelatedItemSource(),
+    TextRelatedSource(),
+    LocationRelatedSource(),
+    CreatorOtherReelsSource(),
     SessionContextSource(),
     TrendingSource(),
     FreshExplorationSource(),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-REELS_ALGORITHM_VERSION = "reels-heuristic-v1"
+REELS_ALGORITHM_VERSION = "reels-heuristic-v2"
 CREATOR_ALGORITHM_VERSION = "creator-heuristic-v1"
 CURSOR_VERSION = 1
 SESSION_IDLE_MINUTES = 30
@@ -20,6 +20,9 @@ SOURCE_WEIGHTS = {
     "creator_affinity": 3.0,
     "tag_affinity": 2.5,
     "recent_item_related": 2.8,
+    "text_related": 0.9,
+    "location_related": 0.7,
+    "creator_other_reels": 0.8,
     "session_context": 3.2,
     "global_quality_trending": 1.5,
     "fresh_exploration": 1.0,

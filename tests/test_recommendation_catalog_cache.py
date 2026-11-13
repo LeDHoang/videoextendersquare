@@ -12,8 +12,10 @@ from sqlalchemy.orm import sessionmaker
 from server.social import services
 from server.social.database import Base
 from server.social.models import Follow, Post, PostTag, RecommendationDismissal, Tag, User, UserBlock
+from server.social.geo import location_coords, location_key
 from server.social.recommendations import actor_identity, service
-from server.social.recommendations.types import CatalogItem
+from server.social.recommendations.relatedness import tokenize
+from server.social.recommendations.types import CatalogItem, PostLocation
 from server.social.safety import blocked_user_ids
 
 START = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -48,12 +50,24 @@ def db(tmp_path):
     engine.dispose()
 
 
+def old_location(raw):
+    loc = raw if isinstance(raw, dict) else {}
+    city, country = loc.get("city", ""), loc.get("country", "")
+    slug = location_key(city, country)
+    if not slug:
+        return None
+    return PostLocation(slug, str(city), str(country), location_coords(city, country, loc.get("lat"), loc.get("lon")))
+
+
 def old_catalog(db, *, actor, allowed_post_ids, excluded_post_ids, surface):
     """The catalog as it was built before the cache: one filtered query per request."""
     hidden_users = blocked_user_ids(db, actor.user_id)
     dismissed_posts, dismissed_creators = service._active_dismissals(db, actor.actor_key)
     query = (
-        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
+        db.query(
+            Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count,
+            Post.title, Post.caption, Post.location,
+        )
         .join(User, User.id == Post.owner_id)
         .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
     )
@@ -87,6 +101,8 @@ def old_catalog(db, *, actor, allowed_post_ids, excluded_post_ids, surface):
             created_at=service.aware(post.created_at),
             like_count=int(post.like_count or 0),
             view_count=int(post.view_count or 0),
+            text_tokens=tokenize(f"{post.title} {post.caption}"),
+            location=old_location(post.location),
         )
         for post in posts
     }
