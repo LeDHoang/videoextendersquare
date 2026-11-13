@@ -16,12 +16,16 @@
   const MAIN_H = 1152;
   const NAV_W = 1536;
   const NAV_H = 160;
+  // Reel-reward popup, hung under the nav bar at the nav's scale.
+  const REWARD_W = 1024;
+  const REWARD_H = 112;
 
   // Fallbacks mirror the light VRUICanvas.TOKENS; the live tokens win when that module is loaded.
   const FALLBACK = {
     hex: { bg: '#f2ede3', surface: '#faf7f0', surface2: '#ebe5d8', surface3: '#e0d8c7', surfaceHover: '#e6dfd0',
       rule: '#d3cab8', ruleStrong: '#17140f', ink: '#17140f', ink2: '#45403a', ink3: '#5c554c', inkMuted: '#635b50',
-      accent: '#c2250e', accentHi: '#a81f0b', onAccent: '#faf7f0', onMedia: '#ffffff' },
+      accent: '#c2250e', accentHi: '#a81f0b', onAccent: '#faf7f0', onMedia: '#ffffff',
+      spot: '#f3d34a', onSpot: '#17140f', success: '#146638', danger: '#be123c' },
     rgba: { mediaScrim: 'rgba(12, 10, 8, 0.72)' },
     font: { display: "'Fraunces', Georgia, 'Times New Roman', serif",
       sans: "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif",
@@ -503,7 +507,24 @@
       ctx.lineWidth = 2;
       ctx.stroke();
       const ink = lit ? T.ink : (off ? T.inkMuted : T.ink2);
-      if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, r.x + r.w / 2, r.y + 44, 44, ink, T.accent, lit ? T.surfaceHover : T.surface2);
+      let iconX = r.x + r.w / 2;
+      if (r.id === 'wallet' && typeof s.credits === 'number') {
+        // Balance beside the icon, the pair centred on the tile.
+        const label = formatCredits(s.credits);
+        let size = 30;
+        ctx.font = '700 ' + size + 'px ' + t.font.mono;
+        while (size > 18 && 54 + ctx.measureText(label).width > r.w - 20) {
+          size -= 2;
+          ctx.font = '700 ' + size + 'px ' + t.font.mono;
+        }
+        const left = r.x + (r.w - 54 - ctx.measureText(label).width) / 2;
+        iconX = left + 22;
+        ctx.fillStyle = ink;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, left + 54, r.y + 46);
+      }
+      if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, iconX, r.y + 44, 44, ink, T.accent, lit ? T.surfaceHover : T.surface2);
       ctx.fillStyle = ink;
       ctx.font = '600 26px ' + t.font.mono;
       ctx.textAlign = 'center';
@@ -593,6 +614,41 @@
       ctx.fillText('NIGHT', cx, r.y + r.h - 22);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // 1,234 below ten thousand, then 12K and 1.2M.
+  function formatCredits(n) {
+    const v = Math.max(0, Math.floor(Number(n) || 0));
+    if (v < 10000) return String(v).replace(/\B(?=(\d{3})+$)/g, ',');
+    if (v < 1000000) return Math.floor(v / 1000) + 'K';
+    return (Math.floor(v / 100000) / 10) + 'M';
+  }
+
+  // Reel-reward popup: reward { amount, jackpot: null | 'big' | 'mega' }.
+  // +1 is an outlined success tile; a jackpot fills with proof yellow (+20) or rose (+50).
+  function renderRewardPopup(ctx, reward) {
+    const t = tokens();
+    const T = t.hex;
+    const r = reward || {};
+    const amount = Math.max(1, Number(r.amount) || 1);
+    ctx.clearRect(0, 0, REWARD_W, REWARD_H);
+    let fill = T.surface;
+    let stroke = T.success;
+    let ink = T.success;
+    if (r.jackpot === 'mega') { fill = T.danger; stroke = T.danger; ink = T.onAccent; }
+    else if (r.jackpot) { fill = T.spot; stroke = T.onSpot; ink = T.onSpot; }
+    tile(ctx, { x: 3, y: 3, w: REWARD_W - 6, h: REWARD_H - 6 }, 12, fill, stroke, 4);
+    const label = r.jackpot ? 'JACKPOT! +' + amount + ' ECHO CREDITS' : '+' + amount + ' ECHO CREDIT' + (amount > 1 ? 'S' : '');
+    ctx.font = '700 44px ' + t.font.mono;
+    const w = 64 + ctx.measureText(label).width;
+    const left = (REWARD_W - w) / 2;
+    const ui = uiKit();
+    // One ink for the whole icon: the accent would clash on the yellow and rose fills.
+    if (ui && ui.drawIcon) ui.drawIcon(ctx, 'credits', left + 24, REWARD_H / 2, 48, ink, ink, fill);
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, left + 64, REWARD_H / 2 + 2);
   }
 
   function drawBadge(ctx, cx, cy, n) {
@@ -1600,6 +1656,10 @@
     themeSwitchRect,
     renderNavBar,
     resolveNavHit,
+    REWARD_W,
+    REWARD_H,
+    renderRewardPopup,
+    formatCredits,
     GRID_COLS,
     GRID_ROWS,
     KB_W,

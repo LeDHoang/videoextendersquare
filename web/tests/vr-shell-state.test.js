@@ -669,3 +669,24 @@ test('a theme hit calls setTheme', () => {
   assert.deepEqual(calls, ['dark']);
   assert.doesNotThrow(() => loadShell().create({}).handleHit({ action: 'theme', arg: 'dark' }));
 });
+
+test('credits: the nav balance loads once signed in and follows claims and the wallet', async () => {
+  const { s, asked } = walletShell();
+  assert.equal(s.getRenderState().credits, null);
+  s.refreshCredits();
+  await tick(); await tick();
+  assert.equal(s.getRenderState().credits, 42);
+  s.noteReward({ progress: 0, remaining: 10, credit_awarded: true, wallet: { available_credits: 62 } });
+  assert.equal(s.getRenderState().credits, 62);
+  s.noteReward({ progress: 1, remaining: 9 });
+  assert.equal(s.getRenderState().credits, 62, 'a reply without a wallet keeps the balance');
+  s.open('/wallet');
+  await tick(); await tick();
+  assert.equal(s.getRenderState().credits, 42, 'the wallet page balance wins');
+
+  const out = walletShell(null);
+  out.s.refreshCredits();
+  await tick();
+  assert.equal(out.s.getRenderState().credits, null);
+  assert.equal(out.asked.length, 0, 'signed out asks nothing');
+});

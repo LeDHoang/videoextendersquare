@@ -8180,6 +8180,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
   let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
   let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
+  let shellRewardCanvas = null, shellRewardCtx = null, shellRewardTexture = null, shellRewardMesh = null;
+  // Reel-reward popup under the nav: { amount, jackpot, until } on the nowMs() clock, null when hidden.
+  let shellReward = null;
+  let shellRewardPainted = null;
+  const SHELL_REWARD_MS = 4200;
+  const SHELL_JACKPOT_MS = 6000;
   let shellKbWasShown = false;
   let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
@@ -8446,8 +8452,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
       shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
     }
+    if (!shellRewardMesh) {
+      const p = makeShellPanel(SHELL_NAV_SIZE.w * sc.REWARD_W / sc.NAV_W, SHELL_NAV_SIZE.h * sc.REWARD_H / sc.NAV_H,
+        sc.REWARD_W, sc.REWARD_H, 1, 7);
+      shellRewardCanvas = p.canvas; shellRewardCtx = p.ctx; shellRewardTexture = p.texture; shellRewardMesh = p.mesh;
+      shellRewardPainted = null;
+    }
     shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
     shell.refreshUnread();
+    shell.refreshCredits();
   }
 
   function headYaw() {
@@ -8495,6 +8508,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       shellNavMesh.quaternion.copy(anchor.quaternion);
       shellNavMesh.position.copy(anchor.position)
         .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+      if (shellRewardMesh) {
+        // The reward popup hangs a quarter nav height under the bar, at its scale.
+        const sc = getShellCanvas();
+        const rewardH = navH * sc.REWARD_H / sc.NAV_H;
+        shellRewardMesh.scale.set(k, k, 1);
+        shellRewardMesh.quaternion.copy(anchor.quaternion);
+        shellRewardMesh.position.copy(shellNavMesh.position)
+          .add(new THREE.Vector3(0, -(navH + rewardH) / 2 - navH * 0.25, 0).applyQuaternion(anchor.quaternion));
+      }
     };
     place(shellNavK);
     const dist = shellNavMesh.position.distanceTo(head);
@@ -8521,6 +8543,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const open = pointerActive && isShellOpen();
     // fix24: the nav strip hides together with the dock (open shell keeps it).
     if (shellNavMesh) shellNavMesh.visible = pointerActive && (controlsVisible || open);
+    // The popup shows even with the dock auto-hidden: rewards land mid-playback.
+    if (shellRewardMesh) shellRewardMesh.visible = pointerActive && !!shellReward;
     if (shellMainMesh) shellMainMesh.visible = open;
     if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
     if (!open) return;
@@ -8617,6 +8641,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       themeT = themeSwitchAnim.to ? k : 1 - k;
       if (k >= 1) themeSwitchAnim = null;
     }
+    if (shellReward && now >= shellReward.until) {
+      shellReward = null;
+      applyShellVisibility();
+    }
+    if (shellRewardCtx && shellRewardMesh && shellRewardMesh.visible &&
+        (themeT !== undefined || shellRewardPainted !== shellReward)) {
+      sc.renderRewardPopup(shellRewardCtx, shellReward);
+      shellRewardTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellRewardPainted = shellReward;
+    }
     if (shellNavCtx && shellNavMesh && shellNavMesh.visible && (themeT !== undefined ||
         shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
       sc.renderNavBar(shellNavCtx, state, navHover, themeT);
@@ -8657,6 +8692,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (shellNavTexture) { try { shellNavTexture.dispose(); } catch (e) {} }
     shellMainCanvas = shellMainCtx = shellMainTexture = shellMainMesh = null;
     if (shellKbTexture) { try { shellKbTexture.dispose(); } catch (e) {} }
+    if (shellRewardTexture) { try { shellRewardTexture.dispose(); } catch (e) {} }
+    shellRewardCanvas = shellRewardCtx = shellRewardTexture = shellRewardMesh = null;
+    shellReward = shellRewardPainted = null;
     shellNavCanvas = shellNavCtx = shellNavTexture = shellNavMesh = null;
     shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
     shellKbWasShown = false;
@@ -8695,7 +8733,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       return !!shell.share(o);
     },
     refreshUnread() { if (shell) shell.refreshUnread(); },
-    noteReward(result) { if (shell) shell.noteReward(result); },
+    noteReward(result) {
+      if (shell) shell.noteReward(result);
+      if (!result || !result.credit_awarded) return;
+      shellReward = {
+        amount: Math.max(1, Number(result.credits_awarded_amount) || 1),
+        jackpot: result.jackpot || null,
+        until: nowMs() + (result.jackpot ? SHELL_JACKPOT_MS : SHELL_REWARD_MS),
+      };
+      applyShellVisibility();
+      vrLastUiUploadT = -1;
+    },
   };
   // </vr-shell-glue>
 
@@ -12032,7 +12080,8 @@ window.WebXRVR = window.WebXRVR || (function () {
                 if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
                     m.map !== commentsTexture && m.map !== overlayTexture &&
                     m.map !== guideTexture && m.map !== earthPreviewTexture &&
-                    m.map !== shellMainTexture && m.map !== shellNavTexture) {
+                    m.map !== shellMainTexture && m.map !== shellNavTexture &&
+                    m.map !== shellRewardTexture) {
                   try { m.map.dispose(); } catch (e) {}
                 }
                 try { m.dispose(); } catch (e) {}

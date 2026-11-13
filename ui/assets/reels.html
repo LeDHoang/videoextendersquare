@@ -4485,9 +4485,6 @@
       try {
         if (window.parent && window.parent !== window) window.parent.postMessage(detail, location.origin);
       } catch (e) {}
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) {
-        WebXRVR.showNotification(message);
-      }
     }
 
     // <reels-reward-claim>

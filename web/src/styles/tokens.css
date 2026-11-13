@@ -356,7 +356,10 @@
   --sx-on-accent: #17140f;
   --sx-success-hi: #4ade80;
   --sx-success-border: rgba(34, 197, 94, 0.35);
+  --sx-warn: #f2c744;
   --sx-warn-hi: #fde047;
   --sx-warn-border: rgba(242, 199, 68, 0.35);
+  --sx-danger: #f43f5e;
+  --sx-danger-hi: #fb7185;
   --sx-focus-halo: inset 0 0 0 3px var(--sx-bg);
 }
