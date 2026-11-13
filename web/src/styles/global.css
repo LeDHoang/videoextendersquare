@@ -4745,6 +4745,59 @@ body.sx-vr-active .sx-reels-mount,
   background: var(--sx-surface-hover);
 }
 
+/* Reel-reward grant: "+N" bubble under the pill; jackpots glow gold, +50 (mega) red. */
+.sx-top-credits-pill.is-awarded {
+  border-color: var(--sx-success-hi);
+}
+
+.sx-top-credits-pill.is-jackpot {
+  --sx-jackpot: var(--sx-warn);
+  border-color: var(--sx-jackpot);
+  color: var(--sx-jackpot);
+  animation: sx-credits-jackpot 900ms ease-in-out 4;
+}
+
+.sx-top-credits-pill.is-mega {
+  --sx-jackpot: var(--sx-danger);
+}
+
+.sx-top-credits-bubble {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 3px 7px;
+  background: var(--sx-bg);
+  border: 1px solid var(--sx-success-hi);
+  color: var(--sx-success-hi);
+  font-size: var(--sx-t-eyebrow);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: sx-credits-bubble 300ms ease-out;
+}
+
+.is-jackpot .sx-top-credits-bubble {
+  border-color: var(--sx-jackpot);
+  color: var(--sx-jackpot);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--sx-jackpot) 45%, transparent);
+}
+
+@keyframes sx-credits-bubble {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sx-credits-jackpot {
+  0%, 100% { box-shadow: 0 0 0 transparent; }
+  50% { box-shadow: 0 0 18px color-mix(in srgb, var(--sx-jackpot) 60%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-top-credits-pill.is-jackpot,
+  .sx-top-credits-bubble { animation: none; }
+}
+
 .sx-top-credits-pill .sx-top-btn-svg {
   width: 18px;
   height: 18px;

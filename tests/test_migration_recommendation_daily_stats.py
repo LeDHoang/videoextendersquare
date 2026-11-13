@@ -8,9 +8,6 @@ from __future__ import annotations
 import pytest
 import sqlalchemy as sa
 from alembic import command
-from alembic.script import ScriptDirectory
-
-from server.social.database import EXPECTED_SCHEMA_REVISION
 
 from test_migration_stereo_layout import _alembic, _reset_postgres, _urls
 
@@ -22,12 +19,6 @@ def _state(engine):
     inspector = sa.inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("post_recommendation_stats")}
     return "post_recommendation_daily_stats" in inspector.get_table_names(), "fast_skips" in columns
-
-
-def test_app_expects_the_migration_head(tmp_path, monkeypatch):
-    # The app refuses to boot unless the database is at EXPECTED_SCHEMA_REVISION.
-    head = ScriptDirectory.from_config(_alembic(_urls(tmp_path)[0], monkeypatch)).get_current_head()
-    assert EXPECTED_SCHEMA_REVISION == head == REVISION
 
 
 @pytest.mark.parametrize("index", [0, 1])

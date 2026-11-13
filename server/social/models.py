@@ -1160,7 +1160,7 @@ class ReelRewardClaim(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
     impression_id = Column(
-        String(36), ForeignKey("recommendation_impressions.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("recommendation_impressions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     utc_date = Column(String(10), nullable=False, index=True)
     ip_hash = Column(String(64), nullable=False, index=True)

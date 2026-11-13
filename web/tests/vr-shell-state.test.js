@@ -153,7 +153,7 @@ test('grid sections load from the API and drop stale replies', async () => {
   replies['/api/reels'] = Promise.reject(new Error('x'));
   s.open('/explore?q=cats');
   await tick();
-  assert.deepEqual(calls[1], ['/api/reels', { search: 'cats', sort: 'shuffle', limit: 24 }]);
+  assert.deepEqual(calls[1], ['/api/reels', { search: 'cats', sort: 'for_you', limit: 24 }]);
   assert.equal(s.getRenderState().route.status, 'error');
 
   let resolveLate;
@@ -197,7 +197,7 @@ test('scrolling near the end of a reel grid appends the next page once', async (
   await tick();
   assert.equal(calls.length, 2, 'one fetch while a page is in flight');
   assert.equal(calls[1].cursor, 'c1');
-  assert.equal(calls[1].sort, 'shuffle');
+  assert.equal(calls[1].sort, 'for_you');
   const route = s.getRenderState().route;
   assert.equal(route.items.length, 26, 'repeat dropped by path');
   assert.equal(route.cursor, null);
@@ -603,9 +603,31 @@ test('noteReward keeps the progress line and reloads an open wallet on an award'
   s.noteReward({ progress: 0, remaining: 10, credit_awarded: true, daily_cap_reached: true });
   assert.equal(s.getRenderState().rewards.capped, true);
   await tick(); await tick();
-  assert.equal(asked.length, before + 2, 'balance and ledger reloaded');
+  assert.equal(asked.length, before + 3, 'balance, ledger and reward status reloaded');
   s.noteReward(null);
   assert.equal(s.getRenderState().rewards.capped, true);
+});
+
+test('opening the wallet loads today\'s reward progress before any claim', async () => {
+  const replies = { '/api/rewards/reels/status': { enabled: true, progress: 6, remaining: 4, daily_cap_reached: false } };
+  const s = loadShell().create({
+    getUser: () => ({ username: 'me' }),
+    request: (path) => Promise.resolve(replies[path] || { transactions: [] }),
+  });
+  assert.equal(s.getRenderState().rewards, null);
+  s.open('/wallet');
+  await tick(); await tick();
+  assert.deepEqual({ ...s.getRenderState().rewards }, { progress: 6, remaining: 4, capped: false });
+});
+
+test('a wallet opened while rewards are off shows no progress line', async () => {
+  const s = loadShell().create({
+    getUser: () => ({ username: 'me' }),
+    request: (path) => Promise.resolve(path === '/api/rewards/reels/status' ? { enabled: false } : { transactions: [] }),
+  });
+  s.open('/wallet');
+  await tick(); await tick();
+  assert.equal(s.getRenderState().rewards, null);
 });
 
 test('drag scroll: small moves stay clicks, drags step and fling decays to rest', () => {

@@ -314,9 +314,18 @@
       dirty();
     }
 
+    // Today's progress for a wallet opened before any claim this session.
+    function refreshRewards() {
+      if (!d.request) return;
+      Promise.resolve().then(() => d.request('/api/rewards/reels/status', {})).then((r) => {
+        if (r && r.enabled) noteReward(r);
+      }, () => {});
+    }
+
     // Fills route.items/related/status; a reply for a route no longer on the stack is dropped.
     function load(route) {
       if (route.section === 'newchat') { findPeople(route, route.query || ''); return; }
+      if (route.section === 'wallet') refreshRewards();
       const src = sourceFor(route);
       if (!src) return;
       route.items = [];

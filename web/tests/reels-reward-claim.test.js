@@ -8,10 +8,11 @@ import vm from 'node:vm';
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, '..', '..', 'ui/assets/reels.html'), 'utf-8');
 
-function httpError(status, code) {
+function httpError(status, code, reason) {
   const err = new Error(code || 'Request failed');
   err.status = status;
   err.code = code || null;
+  err.reason = reason || null;
   return err;
 }
 
@@ -21,6 +22,7 @@ function loadClaim(respond) {
   const match = html.match(/\/\/ <reels-reward-claim>\n([\s\S]*?)\/\/ <\/reels-reward-claim>/);
   assert.ok(match, 'reels-reward-claim markers present');
   const requests = [];
+  const bodies = [];
   const toasts = [];
   const timers = [];
   const context = {
@@ -38,8 +40,13 @@ function loadClaim(respond) {
     showRewardProgress: () => {},
     showRewardToast: (message) => toasts.push(message),
     setTimeout: (fn, delay) => timers.push({ fn, delay }),
-    requestJson: async (path) => {
+    eventId: (() => {
+      let next = 0;
+      return () => 'evt-fresh-' + (next += 1);
+    })(),
+    requestJson: async (path, options) => {
       requests.push(path);
+      bodies.push(options && options.body ? JSON.parse(options.body) : null);
       return respond(path);
     },
   };
@@ -68,7 +75,7 @@ function loadClaim(respond) {
     }
   }
 
-  return { context, requests, toasts, timers, newState, play };
+  return { context, requests, bodies, toasts, timers, newState, play };
 }
 
 test('REWARDS_DISABLED 503 is terminal: no retry, no toast, no claims for later reels', async () => {
@@ -127,4 +134,63 @@ test('409 duplicate stays terminal with its toast', async () => {
   await claim.play(claim.newState());
   assert.equal(claim.requests.length, 2);
   assert.deepEqual(claim.toasts, ['ALREADY CLAIMED FOR THIS REEL']);
+});
+
+test('timing 422 retries re-post the event under a fresh client_event_id', async () => {
+  const claim = loadClaim((path) => {
+    if (path === '/api/rewards/reels/claim') throw httpError(422, 'REWARD_INELIGIBLE', 'below_threshold');
+    return {};
+  });
+  await claim.play(claim.newState());
+
+  const eventIds = claim.bodies
+    .filter((body, index) => claim.requests[index] === '/api/events')
+    .map((body) => body.client_event_id);
+  assert.equal(eventIds.length, 3, 'first attempt plus 2 retries');
+  assert.equal(new Set(eventIds).size, 3, 'a reused id is deduped server-side and never re-measured');
+  assert.deepEqual(claim.toasts, ['REWARD NOT ELIGIBLE YET']);
+});
+
+test('a terminal 422 reason stops this reel without retry or toast', async () => {
+  const claim = loadClaim((path) => {
+    if (path === '/api/rewards/reels/claim') throw httpError(422, 'REWARD_INELIGIBLE', 'self_view');
+    return {};
+  });
+  await claim.play(claim.newState('post-1'));
+  assert.deepEqual(claim.requests, ['/api/events', '/api/rewards/reels/claim']);
+  assert.deepEqual(claim.toasts, []);
+  assert.equal(claim.context.claimsDisabled(), false, 'a per-reel rejection leaves later reels claimable');
+
+  await claim.play(claim.newState('post-2'));
+  assert.equal(claim.requests.length, 4);
+});
+
+for (const reason of ['account_too_new', 'ip_cap']) {
+  test(`a ${reason} 422 stops claims for the rest of the page with one toast`, async () => {
+    const claim = loadClaim((path) => {
+      if (path === '/api/rewards/reels/claim') throw httpError(422, 'REWARD_INELIGIBLE', reason);
+      return {};
+    });
+    await claim.play(claim.newState('post-1'));
+    await claim.play(claim.newState('post-2'));
+    assert.deepEqual(claim.requests, ['/api/events', '/api/rewards/reels/claim']);
+    assert.deepEqual(claim.toasts, ['REWARD NOT ELIGIBLE']);
+    assert.equal(claim.context.claimsDisabled(), true);
+  });
+}
+
+test('a daily-cap reply stops claims for the rest of the page', async () => {
+  const claim = loadClaim((path) => (path === '/api/rewards/reels/claim' ? { daily_cap_reached: true } : {}));
+  await claim.play(claim.newState('post-1'));
+  assert.equal(claim.context.claimsDisabled(), true);
+  await claim.play(claim.newState('post-2'));
+  assert.deepEqual(claim.requests, ['/api/events', '/api/rewards/reels/claim']);
+});
+
+test('a reply under the cap keeps later reels claimable', async () => {
+  const claim = loadClaim((path) => (path === '/api/rewards/reels/claim' ? { progress: 4, daily_cap_reached: false } : {}));
+  await claim.play(claim.newState('post-1'));
+  await claim.play(claim.newState('post-2'));
+  assert.equal(claim.context.claimsDisabled(), false);
+  assert.equal(claim.requests.length, 4);
 });

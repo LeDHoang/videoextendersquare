@@ -177,6 +177,7 @@ public    POST   /api/reels/view
 hidden    GET    /api/reels/vr-video-path-ab
 user      POST   /api/reports
 user      POST   /api/rewards/reels/claim
+user      GET    /api/rewards/reels/status
 public    GET    /api/search/suggestions
 user      POST   /api/stereo/convert
 public    POST   /api/support

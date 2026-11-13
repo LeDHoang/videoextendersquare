@@ -69,7 +69,8 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
   const { user, loading: authLoading, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const messaging = useMessaging();
-  const { wallet } = useWallet();
+  const { wallet, lastAward } = useWallet();
+  const [awardFlash, setAwardFlash] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
@@ -85,6 +86,13 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
   const [activeIndex, setActiveIndex] = useState(-1);
   const [accountOpen, setAccountOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+
+  useEffect(() => {
+    if (!lastAward) return undefined;
+    setAwardFlash(lastAward);
+    const timer = setTimeout(() => setAwardFlash(null), lastAward.jackpot ? 4500 : 2500);
+    return () => clearTimeout(timer);
+  }, [lastAward]);
 
   const selectable = [
     ...userSuggestions.map((item) => ({ type: 'user', item })),
@@ -490,12 +498,17 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
               <>
                 <NavLink
                   to={NAV.credits.to}
-                  className="sx-top-credits-pill"
+                  className={`sx-top-credits-pill${awardFlash ? ' is-awarded' : ''}${awardFlash?.jackpot ? ' is-jackpot' : ''}${awardFlash?.jackpot === 'mega' ? ' is-mega' : ''}`}
                   title="Open ECHO Credits wallet"
                   aria-label={wallet?.available_credits != null ? `${wallet.available_credits} credits` : NAV.credits.label}
                 >
                   <span>{wallet?.available_credits ?? '—'}</span>
                   <NAV.credits.Icon className="sx-top-btn-svg" />
+                  {awardFlash && (
+                    <span key={awardFlash.at} className="sx-top-credits-bubble" role="status" data-testid="credits-award-bubble">
+                      {awardFlash.jackpot ? `JACKPOT +${awardFlash.amount}` : `+${awardFlash.amount}`}
+                    </span>
+                  )}
                 </NavLink>
                 <IconButton
                   as={NavLink}

@@ -1517,6 +1517,8 @@
   }
   .reward-toast.show { opacity: 1; transform: translate(-50%, 0); }
   .reward-toast.award { border-color: var(--sx-success-hi); color: var(--sx-success-hi); box-shadow: 0 0 22px color-mix(in srgb, var(--sx-success-hi) 24%, transparent); }
+  .reward-toast.jackpot { border-color: var(--sx-warn); color: var(--sx-warn); box-shadow: 0 0 26px color-mix(in srgb, var(--sx-warn) 40%, transparent); }
+  .reward-toast.jackpot.mega { border-color: var(--sx-danger); color: var(--sx-danger); box-shadow: 0 0 26px color-mix(in srgb, var(--sx-danger) 45%, transparent); }
 
   .video-error-overlay {
     position: absolute;
@@ -3316,6 +3318,7 @@
         );
         err.status = response.status;
         err.code = detail && typeof detail === 'object' ? detail.code : null;
+        err.reason = detail && typeof detail === 'object' ? detail.reason || null : null;
         throw err;
       }
       return body;
@@ -4471,6 +4474,8 @@
         ? window.ReelsRewards.progressMessage(result)
         : (result.credit_awarded ? '+1 ECHO CREDIT' : String(result.progress || 0) + '/10 TO NEXT CREDIT');
       showRewardToast(message, result.credit_awarded);
+      if (rewardToast) rewardToast.classList.toggle('jackpot', !!(result.credit_awarded && result.jackpot));
+      if (rewardToast) rewardToast.classList.toggle('mega', !!(result.credit_awarded && result.jackpot === 'mega'));
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.shell && WebXRVR.shell.noteReward) WebXRVR.shell.noteReward(result);
       } catch (e) {}
@@ -4490,6 +4495,10 @@
     // SX_REEL_REWARDS_ENABLED=0): no more reward_eligible events or claims this page session.
     let rewardClaimsDisabled = false;
     const REWARD_TRANSIENT_RETRY_LIMIT = 3;
+    // 422 reasons that can still pass on a later attempt; any other reason is terminal.
+    const REWARD_TIMING_REASONS = ['no_telemetry', 'below_threshold', 'too_early'];
+    // Terminal reasons that hold for every reel this page session, not just this one.
+    const REWARD_PAGE_TERMINAL_REASONS = ['account_too_new', 'ip_cap'];
 
     async function maybeClaimReelReward(state) {
       if (rewardClaimsDisabled || !state || state.finished || state.rewardClaimSent || !currentUser) return;
@@ -4531,6 +4540,8 @@
           }),
         });
         showRewardProgress(result);
+        // Capped for today: later reels would only re-post events and claims that earn nothing.
+        if (result && result.daily_cap_reached) rewardClaimsDisabled = true;
       } catch (error) {
         if (error.code === 'REWARDS_DISABLED') {
           // Rewards are off server-side: terminal and silent. Leaving rewardClaimSent set
@@ -4554,6 +4565,11 @@
           } else {
             showRewardToast('REWARDS UNAVAILABLE RIGHT NOW', false);
           }
+        } else if (error.reason && REWARD_PAGE_TERMINAL_REASONS.includes(error.reason)) {
+          rewardClaimsDisabled = true;
+          showRewardToast('REWARD NOT ELIGIBLE', false);
+        } else if (error.reason && !REWARD_TIMING_REASONS.includes(error.reason)) {
+          // Terminal for this reel (self-view, stale impression...): rewardClaimSent stays set.
         } else {
           // Other 4xx (validation / telemetry timing): the server event may
           // land just after the claim — allow up to 2 retries with backoff,
@@ -4561,7 +4577,11 @@
           state.rewardClaimAttempts = (state.rewardClaimAttempts || 0) + 1;
           if (state.rewardClaimAttempts <= 2) {
             setTimeout(() => {
-              if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
+              // A fresh id: the server dedupes client_event_id, so a reused one never re-measures.
+              if (viewTracker === state && !state.finished) {
+                state.rewardEventId = eventId();
+                state.rewardClaimSent = false;
+              }
             }, 4000);
           } else {
             showRewardToast('REWARD NOT ELIGIBLE YET', false);

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   saveFalKey: vi.fn(),
   deleteFalKey: vi.fn(),
   apiGet: vi.fn(),
+  rewardStatus: vi.fn(),
   apiPost: vi.fn(),
   auth: { user: null, loading: false },
   wallet: null,
@@ -16,7 +17,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../api/client.js', () => ({
   api: {
-    get: (...args) => mocks.apiGet(...args),
+    // Reel-reward status has its own mock so ledger tests can queue replies in order.
+    get: (path, ...rest) => (path === '/api/rewards/reels/status' ? mocks.rewardStatus() : mocks.apiGet(path, ...rest)),
     post: (...args) => mocks.apiPost(...args),
   },
 }));
@@ -83,6 +85,7 @@ describe('WalletPage', () => {
     mocks.saveFalKey.mockReset().mockResolvedValue({ configured: true, hint: '••••1234' });
     mocks.deleteFalKey.mockReset().mockResolvedValue({ configured: false, hint: '' });
     mocks.apiGet.mockReset().mockResolvedValue({ transactions: [] });
+    mocks.rewardStatus.mockReset().mockResolvedValue({ enabled: false });
     mocks.apiPost.mockReset();
     mocks.auth.user = OWNER;
     mocks.auth.loading = false;
@@ -372,6 +375,34 @@ describe('WalletPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /Refresh/ }));
       await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith({ silent: true }));
       await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledTimes(2));
+    });
+  });
+
+  describe('reel reward progress', () => {
+    const status = (extra) => ({
+      enabled: true, eligible_reels_today: 6, credits_earned_today: 2, credit_awarded: false,
+      progress: 6, target: 10, remaining: 4, daily_cap_reached: false, ...extra,
+    });
+    const answer = (reply) => mocks.rewardStatus.mockImplementation(() => Promise.resolve(reply()));
+
+    it('shows today\'s progress on open, before any claim', async () => {
+      answer(() => status());
+      renderPage();
+      const line = await screen.findByTestId('reel-reward-progress');
+      expect(line).toHaveTextContent('6/10 reels to your next credit · 2/5 earned today');
+    });
+
+    it('shows the daily cap once reached', async () => {
+      answer(() => status({ progress: 10, remaining: 0, credits_earned_today: 5, daily_cap_reached: true }));
+      renderPage();
+      expect(await screen.findByTestId('reel-reward-progress')).toHaveTextContent('daily cap reached · 5/5 earned today');
+    });
+
+    it('hides the line while reel rewards are off', async () => {
+      answer(() => ({ enabled: false }));
+      renderPage();
+      await waitFor(() => expect(mocks.rewardStatus).toHaveBeenCalled());
+      expect(screen.queryByTestId('reel-reward-progress')).not.toBeInTheDocument();
     });
   });
 });

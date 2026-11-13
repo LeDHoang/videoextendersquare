@@ -79,3 +79,12 @@ def _no_new_account_tier(monkeypatch):
     lower ``new`` tier limits. tests/test_trust_tiers.py sets these again."""
     monkeypatch.setenv("SX_TRUST_NEW_HOURS", "0")
     monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_reel_jackpots(monkeypatch):
+    """Reel milestones rarely roll a jackpot; pin them to +1 so credit
+    balances are deterministic. Jackpot tests patch the roll again."""
+    from server.billing import service
+
+    monkeypatch.setattr(service, "roll_reel_reward", lambda: (1, None))

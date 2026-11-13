@@ -123,6 +123,11 @@ def test_reward_claim_requires_auth_and_accepts_server_attributed_foreground_eve
         assert claim.status_code == 200, claim.text
         assert claim.json()["progress"] == 1
         assert claim.json()["credit_awarded"] is False
+        status = viewer_client.get("/api/rewards/reels/status")
+        assert status.status_code == 200, status.text
+        assert status.json()["enabled"] is True
+        assert status.json()["eligible_reels_today"] == 1
+        assert status.json()["remaining"] == 9
 
 
 def test_a_new_account_cannot_claim_rewards(app, monkeypatch):
@@ -137,3 +142,41 @@ def test_a_new_account_cannot_claim_rewards(app, monkeypatch):
     assert claim.status_code == 422
     assert claim.json()["detail"]["code"] == "REWARD_INELIGIBLE"
     assert claim.json()["detail"]["reason"] == "account_too_new"
+
+
+def test_an_ineligible_claim_reports_its_reason(app, monkeypatch):
+    monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "0")
+    with TestClient(app) as client:
+        register(client, "reward_api_reasoned")
+        claim = client.post(
+            "/api/rewards/reels/claim",
+            headers=csrf_headers(client),
+            json={"post_id": "post", "recommendation_impression_id": "missing"},
+        )
+    assert claim.status_code == 422
+    assert claim.json()["detail"]["code"] == "REWARD_INELIGIBLE"
+    assert claim.json()["detail"]["reason"] == "invalid_impression"
+
+
+def test_reward_status_needs_auth_and_reports_a_fresh_day(app, monkeypatch):
+    monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "0")
+    with TestClient(app) as anonymous:
+        assert anonymous.get("/api/rewards/reels/status").status_code == 401
+    with TestClient(app) as client:
+        register(client, "reward_api_status")
+        status = client.get("/api/rewards/reels/status")
+        assert status.status_code == 200, status.text
+        assert status.json() == {
+            "enabled": True, "eligible_reels_today": 0, "credits_earned_today": 0,
+            "credit_awarded": False, "progress": 0, "target": 10, "remaining": 10,
+            "daily_cap_reached": False,
+        }
+        monkeypatch.setenv("SX_REEL_REWARDS_ENABLED", "0")
+        assert client.get("/api/rewards/reels/status").json() == {"enabled": False}
+
+
+def test_reward_status_hides_progress_from_accounts_too_new_to_earn(app, monkeypatch):
+    monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "72")
+    with TestClient(app) as client:
+        register(client, "reward_api_status_new")
+        assert client.get("/api/rewards/reels/status").json() == {"enabled": False}
