@@ -124,7 +124,7 @@ def test_sit_runbook_covers_setup_isolation_and_promotion():
     text = RUNBOOK.read_text()
     for needed in ("loginctl enable-linger echosit", "50-sit-priority.conf",
                    "127.0.0.1:8000", "127.0.0.1:8001", "git push origin <sha>:main",
-                   "ssh -L 8025:127.0.0.1:8025", "environment:production", *SIT_SECRETS):
+                   "ssh -L 8025:127.0.0.1:8025", "environment set to `production`", *SIT_SECRETS):
         assert needed in text, needed
 
 
