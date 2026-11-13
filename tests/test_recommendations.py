@@ -25,6 +25,7 @@ from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
     ActorItemAffinity,
+    ActorTagAffinity,
     CoWatchPair,
     EngagementEvent,
     Follow,
@@ -2021,3 +2022,147 @@ def test_one_shared_tag_does_not_beat_a_co_watch_similarity(app):
     # Every post shares the seed's one tag; that alone is weak evidence.
     assert context.related_scores[tag_only.id][0] == pytest.approx(0.5)
     assert context.related_scores[co_watched.id][0] == pytest.approx(0.6)
+
+
+def test_session_context_skips_events_without_a_signal(app):
+    from server.social.recommendations import actor_identity
+
+    posts = seed_catalog(app, creators=2, posts_per_creator=1)
+    liked, noisy = posts
+    actor = actor_identity(None, "session-noise")
+    with app.state.testing_session() as db:
+        session = service._new_session(
+            db, actor=actor, surface="for_you", seed_post_id=None, filters={}, algorithm_version="test",
+        )
+        now = utcnow()
+        db.add(EngagementEvent(
+            event_type="like", anonymous_id="session-noise", post_id=liked.id,
+            recommendation_session_id=session.id, source="reels", created_at=now - timedelta(minutes=10),
+        ))
+        # 100 newer events that carry no signal would push the like out of the last 100.
+        for index in range(100):
+            db.add(EngagementEvent(
+                event_type="impression", anonymous_id="session-noise", post_id=noisy.id,
+                recommendation_session_id=session.id, source="reels", created_at=now - timedelta(seconds=index),
+            ))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=session, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.session_creator_affinity.get(liked.owner_id) == 3.0
+
+
+def test_recent_skips_count_as_seen_unless_navigation(app):
+    from server.social.recommendations import actor_identity
+
+    skipped, navigated, untouched = seed_catalog(app, creators=1, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        for post, reason in ((skipped, None), (navigated, "background")):
+            db.add(EngagementEvent(
+                event_type="skip", anonymous_id="skip-probe", post_id=post.id, source="reels",
+                watch_ms=400, navigation_reason=reason, created_at=utcnow() - timedelta(days=1),
+            ))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "skip-probe"), session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.watched_post_ids == frozenset({skipped.id})
+
+
+def test_negative_affinity_penalizes_disliked_creators_tags_and_reels():
+    import math
+
+    from server.social.recommendations import actor_identity, ranking
+    from server.social.recommendations.types import CatalogItem, PipelineContext
+
+    now = utcnow()
+    item = CatalogItem("p1", "creator", ("tag",), now, 0, 0, (), None)
+
+    def negative(creator=0.0, tag=0.0, reel=0.0):
+        context = PipelineContext(
+            actor=actor_identity(None, "neg-probe"), surface="for_you", now=now, session_id="",
+            seed_post_id=None, manual_order=None, scope_order=None, items={"p1": item}, following_ids=set(),
+            creator_affinity={"creator": creator}, tag_affinity={"tag": tag}, item_affinity={"p1": reel},
+            related_scores={}, session_creator_affinity={}, session_tag_affinity={}, stats={},
+            exposures_by_creator={},
+        )
+        return ranking._features(context, "p1", item, 0.0)[0]["negative_affinity"]
+
+    assert negative() == 0.0
+    assert negative(creator=5.0, tag=5.0, reel=5.0) == 0.0
+    assert negative(creator=-12.0) == pytest.approx(math.tanh(2.0))
+    assert negative(tag=-3.0) == pytest.approx(math.tanh(0.5))
+    # The most negative of the three counts.
+    assert negative(creator=-3.0, reel=-8.0) == pytest.approx(math.tanh(8.0 / 6.0))
+
+
+def test_pipeline_context_loads_negative_reel_affinities(app):
+    from server.social.recommendations import actor_identity
+
+    posts = seed_catalog(app, creators=1, posts_per_creator=26)
+    actor = actor_identity(None, "neg-rows")
+    with app.state.testing_session() as db:
+        # 24 liked reels fill the top-24 rows; the disliked one ranks below them all.
+        for post in posts[:24]:
+            db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="neg-rows", post_id=post.id, score=4.0))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="neg-rows", post_id=posts[24].id, score=-8.0))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.item_affinity[posts[24].id] == -8.0
+    assert posts[25].id not in context.item_affinity
+
+
+def test_decayed_affinity_halves_per_half_life_in_whole_days():
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+    from server.social.recommendations.events import decayed_affinity
+
+    now = utcnow()
+    assert decayed_affinity(10.0, now - timedelta(hours=20), now) == 10.0
+    assert decayed_affinity(10.0, now - timedelta(days=AFFINITY_HALF_LIFE_DAYS), now) == pytest.approx(5.0)
+    assert decayed_affinity(-12.0, now - timedelta(days=2 * AFFINITY_HALF_LIFE_DAYS), now) == pytest.approx(-3.0)
+    # Naive timestamps (SQLite) are UTC; a timestamp after now does not grow the score.
+    assert decayed_affinity(10.0, (now - timedelta(days=AFFINITY_HALF_LIFE_DAYS)).replace(tzinfo=None), now) == pytest.approx(5.0)
+    assert decayed_affinity(10.0, now + timedelta(days=3), now) == 10.0
+    assert decayed_affinity(10.0, None, now) == 10.0
+
+
+def test_affinity_update_decays_the_old_score_before_adding():
+    from types import SimpleNamespace
+
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+    from server.social.recommendations.events import _update_affinity_row
+
+    now = utcnow()
+    row = SimpleNamespace(score=10.0, positive_count=0, negative_count=0, last_event_at=now - timedelta(days=AFFINITY_HALF_LIFE_DAYS), updated_at=None)
+    _update_affinity_row(row, 1.0, SimpleNamespace(created_at=now))
+    assert row.score == pytest.approx(6.0)
+    assert row.last_event_at == now
+
+
+def test_pipeline_context_decays_stored_affinities(app):
+    from server.social.recommendations import actor_identity
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+
+    posts = seed_catalog(app, creators=1, posts_per_creator=2)
+    actor = actor_identity(None, "decay-probe")
+    old = utcnow() - timedelta(days=2 * AFFINITY_HALF_LIFE_DAYS)
+    with app.state.testing_session() as db:
+        tag_id = db.query(PostTag.tag_id).filter(PostTag.post_id == posts[0].id).scalar()
+        db.add(ActorCreatorAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", creator_id=posts[0].owner_id, score=8.0, last_event_at=old))
+        db.add(ActorTagAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", tag_id=tag_id, score=4.0, last_event_at=old))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", post_id=posts[0].id, score=-8.0, last_event_at=old))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", post_id=posts[1].id, score=6.0))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.creator_affinity[posts[0].owner_id] == pytest.approx(2.0)
+    assert context.tag_affinity[tag_id] == pytest.approx(1.0)
+    assert context.item_affinity[posts[0].id] == pytest.approx(-2.0)
+    assert context.item_affinity[posts[1].id] == 6.0

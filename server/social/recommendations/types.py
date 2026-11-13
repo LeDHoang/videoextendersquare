@@ -76,7 +76,8 @@ class PipelineContext:
     text_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
     location_scores: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict)
     pool_only: bool = False
-    # Posts the actor finished or watched 3s+ in the last 7 days; empty for manual and scope orders.
+    # Posts the actor finished, watched 3s+ or skipped (not by navigation) in the last 7 days;
+    # empty for manual and scope orders.
     watched_post_ids: frozenset[str] = frozenset()
     # Last week's daily stats per post, decayed by day: column -> weighted count.
     recent_stats: dict[str, dict[str, float]] = field(default_factory=dict)

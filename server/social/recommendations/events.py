@@ -24,7 +24,7 @@ from server.social.models import (
     utcnow,
 )
 
-from .config import EVENT_WEIGHTS
+from .config import AFFINITY_HALF_LIFE_DAYS, EVENT_WEIGHTS
 
 
 class RecommendationAttributionError(ValueError):
@@ -228,13 +228,26 @@ def _identity_values(event: EngagementEvent) -> tuple[str | None, str | None, st
     return None, None, None
 
 
+def decayed_affinity(score: float, last_event_at: datetime | None, now: datetime) -> float:
+    """*score* halved every AFFINITY_HALF_LIFE_DAYS whole days since *last_event_at*."""
+    if last_event_at is None:
+        return score
+    if last_event_at.tzinfo is None:
+        last_event_at = last_event_at.replace(tzinfo=timezone.utc)
+    days = max(0, (now - last_event_at).days)
+    return score * 0.5 ** (days / AFFINITY_HALF_LIFE_DAYS)
+
+
 def _update_affinity_row(row, value: float, event: EngagementEvent) -> None:
-    row.score = max(-40.0, min(80.0, float(row.score or 0.0) + value))
+    at = event.created_at or utcnow()
+    # Decay the old score first, so a new event does not revive a stale one.
+    old = decayed_affinity(float(row.score or 0.0), row.last_event_at, at)
+    row.score = max(-40.0, min(80.0, old + value))
     if value > 0:
         row.positive_count = int(row.positive_count or 0) + 1
     elif value < 0:
         row.negative_count = int(row.negative_count or 0) + 1
-    row.last_event_at = event.created_at or utcnow()
+    row.last_event_at = at
     row.updated_at = utcnow()
 
 

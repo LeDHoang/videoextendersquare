@@ -224,3 +224,12 @@ Second review pass. These supersede the text above where they conflict.
 - **Tag relatedness** is per-seed Jaccard, shrunk by `overlap / (overlap + 1)` like co-watch support, so one shared tag is weak evidence. *(My call.)*
 - **Caption vectors** are memoized with the IDF table and dropped when the catalog base changes.
 - **Version** bumps to `reels-heuristic-v3`; old sessions restart through `algorithm_version_changed`.
+
+## Pass 3 amendments (2026-11-13, `reels-heuristic-v4`)
+Third review pass. These supersede the text above where they conflict.
+
+- **Negative affinity works.** The `negative_affinity` feature (weight 1.5) took the minimum of positive-only values, so it was always 0. It now takes the most negative of the creator, tag and reel affinities, floored at 0 when none is negative. The pipeline also loads the actor's negative reel affinities for the candidates, because the top-24 reel rows hold only the strongest likes.
+- **Session context reads signal events only.** The last 100 session events are taken from types in `EVENT_WEIGHTS`, so impressions and other zero-value events don't push real signals out of the window.
+- **Skips count as seen.** A skip in the last 7 days that is not navigation (playback error, background, unload, filter change, not interested, hide creator) puts the reel in `watched_post_ids`, so it goes to the back like a watched reel. A skip with no navigation reason counts.
+- **Affinities decay.** Stored creator, tag and reel affinities halve every 30 days since their last event (`AFFINITY_HALF_LIFE_DAYS`), counted in whole days so same-day scores are exact. Reads in the pipeline and on the creator page use the decayed value. Each new event first decays the stored score to the event's time, then adds its value, so one new event does not revive a stale score. Reel seeds are picked by decayed score. *(My call: 30 days.)* Two reads still order by the stored score in SQL: the top-24 reel rows and the long-tail seed query. Rows written recently dominate both, so this is left as is.
+- **Version** bumps to `reels-heuristic-v4`; old sessions restart through `algorithm_version_changed`.

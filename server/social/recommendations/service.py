@@ -45,6 +45,7 @@ from .config import (
     CREATOR_ALGORITHM_VERSION,
     CURSOR_VERSION,
     DEFAULT_PAGE_SIZE,
+    EVENT_WEIGHTS,
     LONG_TAIL_MAX,
     GRID_BLOCK,
     GRID_CACHE_ANON_MAX,
@@ -62,7 +63,7 @@ from .config import (
     WATCHED_DAYS,
     WATCHED_MS,
 )
-from .events import _event_value, get_or_create
+from .events import _NAVIGATION_SKIPS, _event_value, decayed_affinity, get_or_create
 from .relatedness import age_factor, block_diverse, build_idf, location_scores, text_scores, tokenize
 from .ranking import rank_candidates, rerank_page, stats_quality
 from .sources import gather_source_hits
@@ -504,8 +505,18 @@ def _pipeline_context(
         .limit(24)
         .all()
     )
-    item_affinity = {row.post_id: float(row.score or 0.0) for row in item_rows}
-    seed_ids = [row.post_id for row in item_rows if row.score > 0][:8]
+    now = utcnow()
+
+    def _score(row) -> float:
+        return decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
+
+    item_affinity = {row.post_id: _score(row) for row in item_rows}
+    # Seeds by decayed score; the stable sort keeps the newest first among ties.
+    seed_ids = [
+        post_id
+        for post_id, score in sorted(item_affinity.items(), key=lambda pair: -pair[1])
+        if score > 0
+    ][:8]
     if seed_post_id:
         seed_ids.insert(0, seed_post_id)
 
@@ -523,11 +534,20 @@ def _pipeline_context(
         capped=capped,
     )
     post_ids = set(items)
+    # Disliked reels among the candidates; the top-24 rows above hold only the strongest.
+    item_affinity.update(
+        (row.post_id, _score(row))
+        for row in db.query(ActorItemAffinity).filter(
+            ActorItemAffinity.actor_key == actor.actor_key,
+            ActorItemAffinity.score < 0,
+            ActorItemAffinity.post_id.in_(post_ids) if post_ids else False,
+        )
+    )
     owner_ids = {item.owner_id for item in items.values()}
     tag_ids = {tag_id for item in items.values() for tag_id in item.tag_ids}
 
     creator_affinity = {
-        row.creator_id: float(row.score or 0.0)
+        row.creator_id: _score(row)
         for row in db.query(ActorCreatorAffinity)
         .filter(
             ActorCreatorAffinity.actor_key == actor.actor_key,
@@ -536,7 +556,7 @@ def _pipeline_context(
         .all()
     }
     tag_affinity = {
-        row.tag_id: float(row.score or 0.0)
+        row.tag_id: _score(row)
         for row in db.query(ActorTagAffinity)
         .filter(
             ActorTagAffinity.actor_key == actor.actor_key,
@@ -644,6 +664,8 @@ def _pipeline_context(
                 ),
             ),
             EngagementEvent.post_id.is_not(None),
+            # Only events that carry a signal, so impressions don't crowd them out of the last 100.
+            EngagementEvent.event_type.in_(EVENT_WEIGHTS),
         )
         .order_by(EngagementEvent.created_at.desc())
         .limit(100)
@@ -692,6 +714,14 @@ def _pipeline_context(
                         EngagementEvent.event_type == "view",
                         EngagementEvent.watch_ms >= WATCHED_MS,
                     ),
+                    # A skip the viewer chose; SQL NOT IN is false for NULL, so allow NULL explicitly.
+                    and_(
+                        EngagementEvent.event_type == "skip",
+                        or_(
+                            EngagementEvent.navigation_reason.is_(None),
+                            EngagementEvent.navigation_reason.notin_(_NAVIGATION_SKIPS),
+                        ),
+                    ),
                 ),
             )
             .distinct()
@@ -730,7 +760,7 @@ def rank_pool(
 ) -> tuple[list[Candidate], frozenset[str]]:
     """Score every allowed post (capped to the catalog pool) for one actor; no session, no rerank.
 
-    Also returns the ids the actor already watched.
+    Also returns the ids the actor already watched or skipped.
     """
     context = _pipeline_context(
         db,
@@ -1265,15 +1295,16 @@ def _materialize_creator_page(
         posts_by_creator[post.owner_id].append(post)
     users = [user for user in users if posts_by_creator.get(user.id)]
     user_ids = {user.id for user in users}
+    now = utcnow()
     affinities = {
-        row.creator_id: float(row.score or 0.0)
+        row.creator_id: decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
         for row in db.query(ActorCreatorAffinity).filter(
             ActorCreatorAffinity.actor_key == actor.actor_key,
             ActorCreatorAffinity.creator_id.in_(user_ids) if user_ids else False,
         ).all()
     }
     tag_scores = {
-        row.tag_id: float(row.score or 0.0)
+        row.tag_id: decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
         for row in db.query(ActorTagAffinity).filter(
             ActorTagAffinity.actor_key == actor.actor_key,
             ActorTagAffinity.score > 0,
@@ -1288,7 +1319,6 @@ def _materialize_creator_page(
             two_hop[creator_id] += 1
 
     scored = []
-    now = utcnow()
     for user in users:
         creator_posts = posts_by_creator[user.id]
         newest = max(aware(post.created_at) for post in creator_posts)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-REELS_ALGORITHM_VERSION = "reels-heuristic-v3"
+REELS_ALGORITHM_VERSION = "reels-heuristic-v4"
 CREATOR_ALGORITHM_VERSION = "creator-heuristic-v1"
 CURSOR_VERSION = 1
 SESSION_IDLE_MINUTES = 30
@@ -32,12 +32,15 @@ FOLLOWING_PERSONAL_WEIGHT = 0.5
 FOLLOWING_RECENCY_DECAY_HOURS = 48.0
 # Scales the following score so the 0.45 creator and 2.5 back-to-back penalties keep their proportion.
 FOLLOWING_SCORE_SCALE = 4.0
-# A reel counts as watched when the actor finished it or watched it this long within these days.
+# A reel counts as watched when the actor finished it, watched it this long or skipped it
+# (not by navigation) within these days.
 WATCHED_DAYS = 7
 WATCHED_MS = 3000
 # Trending reads daily stats from this many days back, each day weighted 0.5 ** (days_ago / half-life).
 TRENDING_WINDOW_DAYS = 7
 TRENDING_HALF_LIFE_DAYS = 2.0
+# Stored creator, tag and reel affinities halve every this many whole days since their last event.
+AFFINITY_HALF_LIFE_DAYS = 30.0
 
 SOURCE_WEIGHTS = {
     "manual_order": 8.0,
