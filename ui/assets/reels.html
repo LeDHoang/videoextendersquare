@@ -6923,12 +6923,33 @@
     };
 
     // Video Ended -> Auto-advance or Loop
+    const replaySent = new Set();
     video.addEventListener('ended', () => {
       finishViewTracking('complete');
       if (isAutoNext) {
         nextVideo('autoplay');
       } else {
         video.currentTime = 0;
+        const replayItem = videoData[idx];
+        if (replayItem && replayItem.post_id) {
+          const replayKey = recommendationImpressionId(replayItem) || replayItem.post_id;
+          if (!replaySent.has(replayKey)) {
+            replaySent.add(replayKey);
+            requestJson('/api/events', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event_type: 'replay',
+                post_id: replayItem.post_id,
+                pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+                source: analyticsSource,
+                client_event_id: eventId(),
+                recommendation_impression_id: recommendationImpressionId(replayItem),
+                client_occurred_at: new Date().toISOString(),
+              }),
+            }).catch(() => {});
+          }
+        }
         startViewTracking(videoData[idx]);
         video.play().catch(() => {});
       }

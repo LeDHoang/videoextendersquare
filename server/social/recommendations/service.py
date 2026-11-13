@@ -11,7 +11,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -418,10 +418,24 @@ def _pipeline_context(
 
     session_creator: dict[str, float] = defaultdict(float)
     session_tag: dict[str, float] = defaultdict(float)
+    # Events sent without an impression (a like from a grid or profile) carry no
+    # session id; count the actor's own since this session began.
+    actor_column = (
+        EngagementEvent.user_id == actor.user_id
+        if actor.user_id
+        else EngagementEvent.anonymous_id == actor.anonymous_id
+    )
     session_events = (
         db.query(EngagementEvent)
         .filter(
-            EngagementEvent.recommendation_session_id == session.id,
+            or_(
+                EngagementEvent.recommendation_session_id == session.id,
+                and_(
+                    EngagementEvent.recommendation_session_id.is_(None),
+                    actor_column,
+                    EngagementEvent.created_at >= session.created_at,
+                ),
+            ),
             EngagementEvent.post_id.is_not(None),
         )
         .order_by(EngagementEvent.created_at.desc())

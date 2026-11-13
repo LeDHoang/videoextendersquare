@@ -62,3 +62,8 @@ def test_prepared_template_matches_the_per_request_build_and_is_reused(tmp_path,
     _write(tmp_path / "three.min.js", "var THREE = 2;", 2_000_000_000)
     assert reels._player_template() != prepared
     assert nonce_html(reels._player_template(), "N0nce") == _per_request(TEMPLATE % 2, "N0nce")
+
+
+def test_player_emits_a_replay_event_when_a_reel_loops():
+    html = (reels.ASSETS_DIR / "reels.html").read_text(encoding="utf-8")
+    assert "event_type: 'replay'" in html

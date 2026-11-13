@@ -1459,7 +1459,7 @@ def create_event(
     validate_origin(request)
     allowed = {
         "impression", "open", "playback", "view", "complete", "skip", "reward_eligible",
-        "search_impression", "search_select", "share", "share_sent",
+        "search_impression", "search_select", "share", "share_sent", "replay",
         "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
         "pack_impression", "pack_open", "pack_start", "pack_resume", "pack_item_view", "pack_complete",
         "pack_share", "pack_message_open", "collection_add",

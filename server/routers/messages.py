@@ -572,7 +572,7 @@ def send_into_conversation(
     if post:
         record_event(
             db,
-            event_type="reel_share_message",
+            event_type="share_sent",
             post_id=post.id,
             user_id=sender.id,
             source="messages",

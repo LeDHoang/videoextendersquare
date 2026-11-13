@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload, sessionmaker
 from verified_signup import register_verified
 from server.routers import reels, social
 from server.social import auth, database, safety
+from server.social.recommendations import service
 from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
@@ -999,3 +1000,137 @@ def test_a_reel_opened_without_a_scope_still_gets_related_reels(app):
         ).json()
     ids = [item["post_id"] for item in body["items"]]
     assert ids[0] == posts[2].id and len(ids) == 4
+
+
+def test_dm_share_records_share_sent_and_moves_affinity(app, monkeypatch):
+    from server.routers import messages
+
+    monkeypatch.setenv("SX_MESSAGE_ENCRYPTION_KEY", "test-only-message-key-with-at-least-32-chars")
+    app.include_router(messages.router)
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    with TestClient(app) as sender_client, TestClient(app) as recipient_client:
+        sender = register(sender_client, "dm_sender")
+        recipient = register(recipient_client, "dm_recipient")
+        shared = sender_client.post(
+            "/api/messages/share-content",
+            headers=csrf_headers(sender_client),
+            json={
+                "kind": "reel",
+                "target_id": post.id,
+                "usernames": [recipient["username"]],
+                "note": "",
+                "client_id": "dm-share-t1",
+            },
+        )
+        assert shared.status_code == 200, shared.text
+        assert shared.json()["succeeded"] == 1
+
+    actor_key = f"u:{sender['id']}"
+    with app.state.testing_session() as db:
+        events = db.query(EngagementEvent).filter(EngagementEvent.post_id == post.id).all()
+        assert [event.event_type for event in events] == ["share_sent"]
+        assert events[0].source == "messages"
+        item = db.query(ActorItemAffinity).filter_by(actor_key=actor_key, post_id=post.id).one()
+        creator = db.query(ActorCreatorAffinity).filter_by(
+            actor_key=actor_key, creator_id=post.owner_id
+        ).one()
+        assert item.score > 0
+        assert creator.score > 0
+
+
+def test_replay_event_counts_once_per_impression(app):
+    seed_catalog(app, creators=3, posts_per_creator=2)
+    with TestClient(app) as client:
+        viewer = register(client, "replay_viewer")
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        ).json()
+        item = feed["items"][0]
+        actor_key = f"u:{viewer['id']}"
+
+        def score() -> float:
+            with app.state.testing_session() as db:
+                row = db.query(ActorItemAffinity).filter_by(
+                    actor_key=actor_key, post_id=item["post_id"]
+                ).first()
+                return row.score if row else 0.0
+
+        before = score()
+        scores = []
+        for index in range(2):
+            response = client.post(
+                "/api/events",
+                headers=csrf_headers(client),
+                json={
+                    "event_type": "replay",
+                    "post_id": item["post_id"],
+                    "source": "reels",
+                    "client_event_id": f"replay-{index}",
+                    "recommendation_impression_id": item["recommendation"]["impression_id"],
+                },
+            )
+            assert 200 <= response.status_code < 300, response.text
+            scores.append(score())
+        assert scores[0] > before
+        assert scores[1] == scores[0]
+
+
+def test_session_context_counts_unattributed_likes(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    with TestClient(app) as client:
+        viewer = register(client, "unattributed_viewer")
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 2},
+        )
+        assert feed.status_code == 200, feed.text
+        session_id = feed.json()["session_id"]
+        with app.state.testing_session() as db:
+            owners = {
+                row.username: row.id
+                for row in db.query(User).filter(User.username.in_(["creator_2", "creator_3"]))
+            }
+        target = next(post for post in posts if post.owner_id == owners["creator_3"])
+        other = next(post for post in posts if post.owner_id == owners["creator_2"])
+        liked = client.put(f"/api/posts/{target.id}/like", headers=csrf_headers(client))
+        assert liked.status_code == 200, liked.text
+
+        actor = service.actor_identity(viewer["id"], None)
+
+        def context():
+            with app.state.testing_session() as db:
+                session = db.get(RecommendationSession, session_id)
+                return service._pipeline_context(
+                    db,
+                    actor=actor,
+                    session=session,
+                    surface=session.surface,
+                    seed_post_id=None,
+                    allowed_post_ids=None,
+                    manual_order=None,
+                )
+
+        assert context().session_creator_affinity[owners["creator_3"]] == 2.0
+
+        with app.state.testing_session() as db:
+            other_session = service._new_session(
+                db,
+                actor=actor,
+                surface="for_you",
+                seed_post_id=None,
+                filters={"other": True},
+                algorithm_version="test",
+            )
+            db.add(
+                EngagementEvent(
+                    event_type="like",
+                    user_id=viewer["id"],
+                    post_id=other.id,
+                    recommendation_session_id=other_session.id,
+                    source="reels",
+                    client_event_id="other-session-like",
+                )
+            )
+            db.commit()
+        assert owners["creator_2"] not in context().session_creator_affinity
