@@ -509,7 +509,7 @@
       const ink = lit ? T.ink : (off ? T.inkMuted : T.ink2);
       let iconX = r.x + r.w / 2;
       if (r.id === 'wallet' && typeof s.credits === 'number') {
-        // Balance beside the icon, the pair centred on the tile.
+        // Balance, then the icon, the pair centred on the tile.
         const label = formatCredits(s.credits);
         let size = 30;
         ctx.font = '700 ' + size + 'px ' + t.font.mono;
@@ -518,11 +518,11 @@
           ctx.font = '700 ' + size + 'px ' + t.font.mono;
         }
         const left = r.x + (r.w - 54 - ctx.measureText(label).width) / 2;
-        iconX = left + 22;
+        iconX = left + ctx.measureText(label).width + 10 + 22;
         ctx.fillStyle = ink;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, left + 54, r.y + 46);
+        ctx.fillText(label, left, r.y + 46);
       }
       if (ui && ui.drawIcon) ui.drawIcon(ctx, r.icon, iconX, r.y + 44, 44, ink, T.accent, lit ? T.surfaceHover : T.surface2);
       ctx.fillStyle = ink;
@@ -1376,12 +1376,11 @@
       ctx.fillStyle = T.ink2;
       ctx.font = '600 26px ' + t.font.mono;
       if (bx + ctx.measureText('CREDITS').width < bal.x + bal.w - 20) ctx.fillText('CREDITS', bx, y + 74);
-      statTile(ctx, { x: 544, y, w: 200, h }, 'RESERVED', fmtCount(w.reserved_credits));
-      statTile(ctx, { x: 760, y, w: 200, h }, 'EARNED', fmtCount(w.lifetime_earned));
-      statTile(ctx, { x: 976, y, w: 200, h }, 'SPENT', fmtCount(w.lifetime_spent));
+      statTile(ctx, { x: 544, y, w: 200, h }, 'EARNED', fmtCount(w.lifetime_earned));
+      statTile(ctx, { x: 760, y, w: 200, h }, 'SPENT', fmtCount(w.lifetime_spent));
       const r = state.rewards;
       if (r) {
-        const p = { x: 1192, y, w: 412, h };
+        const p = { x: 976, y, w: 628, h };
         tile(ctx, p, 12, T.surface, T.rule, 2);
         ctx.textAlign = 'left';
         ctx.fillStyle = T.ink3;

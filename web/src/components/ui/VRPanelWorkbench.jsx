@@ -17,8 +17,8 @@ if (typeof window !== 'undefined' && !window.QUEST_CONTROLLER_B64) {
 }
 
 const DURATION = 42;
-const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH DOCK', 'EARTH CARD', 'EARTH LABEL', 'SHELL NAV', 'SHELL MAIN', 'SHELL KEYBOARD'];
-const SHELL_KEYS = { 'SHELL NAV': 1, 'SHELL MAIN': 1, 'SHELL KEYBOARD': 1 };
+const PANEL_KEYS = ['COMMENTS', 'OVERLAY', 'GUIDE', 'DOCK', 'EARTH DOCK', 'EARTH CARD', 'EARTH LABEL', 'SHELL NAV', 'SHELL REWARD', 'SHELL MAIN', 'SHELL KEYBOARD'];
+const SHELL_KEYS = { 'SHELL NAV': 1, 'SHELL REWARD': 1, 'SHELL MAIN': 1, 'SHELL KEYBOARD': 1 };
 const SIZES = UI ? {
   COMMENTS: { w: UI.CPANEL_W, h: UI.CPANEL_H },
   OVERLAY: { w: UI.OVERLAY_W, h: UI.OVERLAY_H },
@@ -27,14 +27,19 @@ const SIZES = UI ? {
   'EARTH LABEL': { w: UI.EARTH_LABEL_W, h: UI.EARTH_LABEL_H },
   ...(SC ? {
     'SHELL NAV': { w: SC.NAV_W, h: SC.NAV_H },
+    'SHELL REWARD': { w: SC.REWARD_W, h: SC.REWARD_H },
     'SHELL MAIN': { w: SC.MAIN_W, h: SC.MAIN_H },
     'SHELL KEYBOARD': { w: SC.KB_W, h: SC.KB_H },
   } : {}),
 } : {};
 const IDLE_HOVER = {
   DOCK: -1, 'EARTH DOCK': -1, COMMENTS: '', OVERLAY: null, 'EARTH CARD': '', 'EARTH LABEL': '',
-  'SHELL NAV': '', 'SHELL MAIN': '', 'SHELL KEYBOARD': '',
+  'SHELL NAV': '', 'SHELL REWARD': '', 'SHELL MAIN': '', 'SHELL KEYBOARD': '',
 };
+// Mock reel rewards for the popup panel, as the claim endpoint reports them.
+const REWARDS = { '+1': { amount: 1, jackpot: null }, '+20': { amount: 20, jackpot: 'big' }, '+50': { amount: 50, jackpot: 'mega' } };
+// The dock's 3D toggle: a 2D post's colour+depth version is playing, off, or not made.
+const SPATIAL = { OFF: { on: false, available: true }, ON: { on: true, available: true }, 'N/A': { on: false, available: false } };
 const KINDS = { VIDEO: 'video', IMAGE: 'image', 'STATIC CARD': 'static-card' };
 const CURVES = { DOME: 1, 'SQ CURVE': 2, FLAT: 0 };
 const CURVE_ORDER = ['DOME', 'SQ CURVE', 'FLAT'];
@@ -233,6 +238,9 @@ function shellRequest(path, query) {
   if (path === '/api/billing/wallet') {
     return { available_credits: 1240, reserved_credits: 60, lifetime_earned: 3200, lifetime_spent: 1960 };
   }
+  if (path === '/api/rewards/reels/status') {
+    return { enabled: true, progress: 7, remaining: 3, daily_cap_reached: false, wallet: { available_credits: 1240 } };
+  }
   if (path === '/api/billing/transactions') {
     const sources = ['reel_reward', 'video_generation', 'credit_purchase', 'reel_reward', 'image_generation', 'refund'];
     let balance = 1240;
@@ -311,6 +319,7 @@ function drawPanel(key, ctx, mock, comments, s, now) {
   if (SHELL_KEYS[key]) {
     const state = s.shell.getRenderState();
     if (key === 'SHELL NAV') SC.renderNavBar(ctx, state, s.hover[key]);
+    else if (key === 'SHELL REWARD') SC.renderRewardPopup(ctx, REWARDS[mock.reward]);
     else if (key === 'SHELL MAIN') SC.renderMainPanel(ctx, state, s.hover[key], (url) => getPosters()[Number(String(url).slice(5)) || 0]);
     else SC.renderKeyboard(ctx, s.hover[key], state.field);
   } else if (isDock(key)) {
@@ -330,6 +339,7 @@ function drawPanel(key, ctx, mock, comments, s, now) {
       autoNext: mock.autoNext,
       earth: mock.dock === 'EARTH' ? earthDockStatus(mock) : null,
       stereo: mock.stereo.toLowerCase(),
+      spatial: SPATIAL[mock.spatial],
     });
   } else if (key === 'COMMENTS') {
     UI.renderCommentsPanelCanvas(ctx, {
@@ -399,6 +409,8 @@ export default function VRPanelWorkbench() {
     muted: true,
     curve: 'DOME',
     stereo: 'MONO',
+    spatial: 'OFF',
+    reward: '+20',
     lock: true,
     autoNext: true,
     comments: '6',
@@ -441,6 +453,7 @@ export default function VRPanelWorkbench() {
       earthAvailable: () => live.current.mock.dock !== 'PACK',
     });
     interact.current.shell.refreshUnread();
+    interact.current.shell.refreshCredits();
   }
   const canvases = useRef({});
   const stageRef = useRef(null);
@@ -567,6 +580,7 @@ export default function VRPanelWorkbench() {
       else if (a === 'mute') setMock((m) => ({ ...m, muted: !m.muted }));
       else if (a === 'lock') setMock((m) => ({ ...m, lock: !m.lock }));
       else if (a === 'mode') setMock((m) => ({ ...m, autoNext: !m.autoNext }));
+      else if (a === 'spatial') setMock((m) => (m.spatial === 'N/A' ? m : { ...m, spatial: m.spatial === 'ON' ? 'OFF' : 'ON' }));
       else if (a === 'curve') setMock((m) => ({ ...m, curve: CURVE_ORDER[(CURVE_ORDER.indexOf(m.curve) + 1) % CURVE_ORDER.length] }));
       else if (a === 'prev' || a === 'next') {
         s.idx = (s.idx + (a === 'next' ? 1 : PLAYLIST.length - 1)) % PLAYLIST.length;
@@ -641,6 +655,8 @@ export default function VRPanelWorkbench() {
         <Segmented ariaLabel="Source kind" options={Object.keys(KINDS)} value={mock.kind} onChange={set('kind')} />
         <Segmented ariaLabel="Curvature" options={CURVE_ORDER} value={mock.curve} onChange={set('curve')} />
         <Segmented ariaLabel="Stereo" options={['MONO', 'SBS', 'TB']} value={mock.stereo} onChange={set('stereo')} />
+        <Segmented ariaLabel="Spatial 3D" options={Object.keys(SPATIAL)} value={mock.spatial} onChange={set('spatial')} />
+        <Segmented ariaLabel="Reward popup" options={Object.keys(REWARDS)} value={mock.reward} onChange={set('reward')} />
         <Segmented ariaLabel="Comment count" options={['0', '3', '6', '12']} value={mock.comments} onChange={set('comments')} />
         <Segmented ariaLabel="Earth card" options={['READY', 'LOADING', 'ERROR', 'EMPTY']} value={mock.card} onChange={set('card')} />
         <Segmented ariaLabel="Earth zoom" options={Object.keys(EARTH_ZOOMS)} value={mock.earthZoom} onChange={set('earthZoom')} />
