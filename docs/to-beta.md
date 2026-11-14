@@ -19,7 +19,7 @@ Ranked view of what is still open in this file; the items themselves, with detai
 - ~~SMTP, then send a real password-reset email~~ — done 2026-11-14 (Functional section). DMARC is on (`p=none`, reports to Cloudflare DMARC Management). **Still open:** `SX_SUPPORT_EMAIL`.
   - [ ] When the Google Workspace mailbox exists: add Google's MX, SPF and DKIM records on the root `echomultiverse.com` (the `_dmarc` record stays as is).
   - [ ] Set `SX_SUPPORT_EMAIL` in the VPS `.env` to that address, then `docker compose up -d app app-read` (a restart does not reload `.env`).
-  - [ ] In Resend, check click and open tracking are off on `mail.echomultiverse.com` (tracking rewrites the reset and verification links), and turn on 2FA for the Resend account.
+  - [x] In Resend, check click and open tracking are off on `mail.echomultiverse.com` (tracking rewrites the reset and verification links), and turn on 2FA for the Resend account. Done 2026-11-14, by the operator (not checked by me).
   - [ ] After the first DMARC reports (24-48 h) show SPF and DKIM passing for Resend and Workspace, optionally move `p=none` to `p=quarantine`.
 - Set `SX_REGISTRATION_ALLOWLIST` and `SX_ADMIN_USERS` / `SX_MODERATOR_USERS` on the VPS.
 - ~~Send one DM on prod and decrypt it from the next nightly backup~~ — done 2026-11-14 (restore-drill item). The 67 older undecryptable DMs are kept for now (decision 2026-11-01).
