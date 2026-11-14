@@ -29,6 +29,7 @@ import time
 import urllib.parse
 import urllib.request
 from html import unescape
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -40,6 +41,8 @@ from server.social.database import get_db
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 _CACHE_TTL_S = 3600.0
+# Most model ids the cache holds; past it, expired entries go first, then the oldest.
+_CACHE_MAX_ENTRIES = 256
 # Cache misses per user per minute; each miss makes up to two fal.ai fetches.
 MODEL_INFO_FETCHES_PER_MINUTE = 10
 _cache: dict[str, tuple[float, dict]] = {}
@@ -271,14 +274,16 @@ def _fetch_model_info(model_id: str, kind: str) -> dict:
 
 @router.get("/model-info")
 def get_model_info(
-    model: str = Query(..., description="fal.ai model id, e.g. fal-ai/foo/bar"),
-    kind: str = Query("upscale", description="Pipeline slot: outpaint|upscale|image_upscale|image_outpaint"),
+    model: str = Query(..., max_length=300, description="fal.ai model id, e.g. fal-ai/foo/bar"),
+    kind: Literal["outpaint", "upscale", "image_upscale", "image_outpaint"] = Query(
+        "upscale", description="Pipeline slot: outpaint|upscale|image_upscale|image_outpaint"
+    ),
     context: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
     """Pull live requirements, pricing and input/output schema for a model id."""
     norm = _models.normalize_model_id(model)
-    key = f"{norm.lower()}|{kind}"
+    key = f"{norm}|{kind}"
     now = time.time()
     with _cache_lock:
         hit = _cache.get(key)
@@ -291,5 +296,11 @@ def get_model_info(
     payload["fetched_at"] = time.time()
     payload["from_cache"] = False
     with _cache_lock:
+        if len(_cache) >= _CACHE_MAX_ENTRIES:
+            stale = time.time() - _CACHE_TTL_S
+            for old in [k for k, (at, _) in _cache.items() if at < stale]:
+                del _cache[old]
+        while len(_cache) >= _CACHE_MAX_ENTRIES:
+            del _cache[min(_cache, key=lambda k: _cache[k][0])]
         _cache[key] = (time.time(), payload)
     return payload

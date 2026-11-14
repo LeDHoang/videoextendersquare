@@ -93,3 +93,37 @@ def test_model_info_rate_limits_fetches_per_user(app):
         assert mina.get("/api/config/model-info", params={"model": "fal-ai/m/0"}).status_code == 200
         assert omar.get("/api/config/model-info", params={"model": "fal-ai/m/next"}).status_code == 200
         assert len(app.state.fetched) == model_info.MODEL_INFO_FETCHES_PER_MINUTE + 1
+
+
+def test_model_info_cache_is_bounded(app, monkeypatch):
+    monkeypatch.setattr(model_info, "_CACHE_MAX_ENTRIES", 3)
+    monkeypatch.setattr(model_info, "MODEL_INFO_FETCHES_PER_MINUTE", 100)
+    with TestClient(app) as client:
+        register(client, "cache_cap")
+        for index in range(5):
+            assert client.get("/api/config/model-info", params={"model": f"fal-ai/m{index}"}).status_code == 200
+        assert sorted(model_info._cache) == ["fal-ai/m2|upscale", "fal-ai/m3|upscale", "fal-ai/m4|upscale"]
+
+
+def test_model_info_refuses_unknown_kinds_and_long_ids(app):
+    with TestClient(app) as client:
+        register(client, "cache_inputs")
+        assert client.get("/api/config/model-info", params={"model": "fal-ai/a", "kind": "bogus"}).status_code == 422
+        assert client.get("/api/config/model-info", params={"model": "a" * 301}).status_code == 422
+        assert app.state.fetched == []
+
+
+def test_model_info_accepts_a_pasted_playground_url(app):
+    with TestClient(app) as client:
+        register(client, "cache_url")
+        url = "https://fal.ai/models/fal-ai/foo/bar/playground?share=abc#x"
+        assert client.get("/api/config/model-info", params={"model": url, "kind": "outpaint"}).status_code == 200
+        assert app.state.fetched == [("fal-ai/foo/bar/playground", "outpaint")]
+
+
+def test_model_info_caches_each_casing_on_its_own(app):
+    with TestClient(app) as client:
+        register(client, "cache_case")
+        client.get("/api/config/model-info", params={"model": "fal-ai/Foo"})
+        client.get("/api/config/model-info", params={"model": "fal-ai/foo"})
+        assert app.state.fetched == [("fal-ai/Foo", "upscale"), ("fal-ai/foo", "upscale")]
