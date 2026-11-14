@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from test_admin_console import app, code, create_post, mutate, register  # noqa: F401  (app is a fixture)
 from test_migration_stereo_layout import _alembic, _reset_postgres, _urls
 from server.social.database import EXPECTED_SCHEMA_REVISION
-from server.social.models import Post
+from server.social.models import Post, User
 from server.social.services import reel_records
 
 
@@ -97,6 +97,22 @@ def test_replies_survive_their_parent_being_deleted(app, clients):  # noqa: F811
     nested = mutate(ann, "POST", f"/api/posts/{post_id}/comments",
                     {"text": "@bob_user still here", "parent_id": reply["id"]}).json()
     assert nested["parent_id"] == reply["id"]
+
+
+def test_comment_list_hides_inactive_authors_like_the_feed(app, clients):  # noqa: F811
+    ann, ann_user = clients["ann"]
+    bob, bob_user = clients["bob"]
+    post_id = create_post(app, ann_user["id"])
+    mutate(ann, "POST", f"/api/posts/{post_id}/comments", {"text": "from ann"})
+    mutate(bob, "POST", f"/api/posts/{post_id}/comments", {"text": "from bob"})
+
+    with app.state.Session() as db:
+        db.get(User, bob_user["id"]).status = "suspended"
+        db.commit()
+        media_path = db.get(Post, post_id).media_path
+        feed = reel_records([media_path], db=db)[media_path]["comments"]
+    assert [row["text"] for row in feed] == ["from ann"]
+    assert [row["text"] for row in comments(ann, post_id)] == ["from ann"]
 
 
 def test_app_expects_the_migration_head(tmp_path, monkeypatch):

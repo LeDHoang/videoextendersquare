@@ -1238,9 +1238,13 @@ def list_comments(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     post = get_visible_post(db, post_id, auth_user_id(context))
-    rows = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).filter(
+    # Inactive authors' comments are hidden, as in the feed's records.
+    rows = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).join(
+        User, User.id == Comment.author_id
+    ).filter(
         Comment.post_id == post.id,
         Comment.deleted_at.is_(None),
+        User.status == "active",
     ).order_by(Comment.created_at.asc()).all()
     viewer_id = auth_user_id(context)
     hidden_ids = blocked_user_ids(db, viewer_id)
