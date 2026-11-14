@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import collections
 import hashlib
+import math
 import os
 import threading
 import time
@@ -142,15 +143,23 @@ GLOBAL_RATE_LIMIT_WINDOW_S = 3600.0
 # cap cannot keep the shared budget empty for everyone else.
 CLIENT_HOURLY_LIMIT_COUNT = 6000
 CLIENT_HOURLY_WINDOW_S = 3600.0
+# A client with no accepted fetch for this long is dropped from _rate_hits, and
+# its hourly count starts again.
+CLIENT_IDLE_S = 1800.0
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, list[float]] = {}
 _global_hits: collections.deque[float] = collections.deque()
 _next_rate_sweep = 0.0  # monotonic time of the next sweep of idle _rate_hits keys
 
-# Disk cache cap: past it, the oldest-fetched tiles are deleted down to
+# Disk cache cap: past it, the least recently used tiles are deleted down to
 # CACHE_PRUNE_TARGET of the cap. A pruned tile is fetched again on demand.
 MAX_CACHE_BYTES = 2 << 30
 CACHE_PRUNE_TARGET = 0.8
+# A cache hit refreshes a tile's mtime when it is older than this, so "used"
+# is tracked to within a day without a write on every hit.
+CACHE_TOUCH_AFTER_S = 86400.0
+# A temp file older than this was left by a write that crashed; the prune deletes it.
+TEMP_FILE_MAX_AGE_S = 3600.0
 _cache_size_lock = threading.Lock()
 _cache_bytes: int | None = None  # None until the first store measures the directory
 
@@ -221,39 +230,54 @@ def _validate_tile_payload(data: bytes, content_type: str) -> None:
 
 
 def _check_fetch_rate(identity: str) -> bool:
-    """Sliding-window per-IP caps on upstream fetches (cache hits never count):
-    RATE_LIMIT_COUNT a minute and CLIENT_HOURLY_LIMIT_COUNT an hour."""
+    """Sliding-window caps on upstream fetches (cache hits never count): per IP
+    RATE_LIMIT_COUNT a minute and CLIENT_HOURLY_LIMIT_COUNT an hour, and
+    GLOBAL_RATE_LIMIT_COUNT an hour for all clients together. A fetch is
+    recorded only when every cap has room."""
     global _next_rate_sweep
     now = time.monotonic()
     cutoff = now - RATE_LIMIT_WINDOW_S
     hour_cutoff = now - CLIENT_HOURLY_WINDOW_S
+    global_cutoff = now - GLOBAL_RATE_LIMIT_WINDOW_S
     with _rate_lock:
         if now >= _next_rate_sweep:
-            # Drop clients with no hit left in the hour window, so the table stays small.
-            for idle in [key for key, times in _rate_hits.items() if not times or times[-1] <= hour_cutoff]:
+            # Drop clients idle for CLIENT_IDLE_S, so the table stays small.
+            idle_cutoff = now - CLIENT_IDLE_S
+            for idle in [key for key, times in _rate_hits.items() if not times or times[-1] <= idle_cutoff]:
                 del _rate_hits[idle]
             _next_rate_sweep = now + RATE_LIMIT_WINDOW_S
         hits = [t for t in _rate_hits.get(identity, []) if t > hour_cutoff]
+        _rate_hits[identity] = hits
+        while _global_hits and _global_hits[0] <= global_cutoff:
+            _global_hits.popleft()
         recent = sum(1 for t in hits if t > cutoff)
-        if recent >= RATE_LIMIT_COUNT or len(hits) >= CLIENT_HOURLY_LIMIT_COUNT:
-            _rate_hits[identity] = hits
+        if (
+            recent >= RATE_LIMIT_COUNT
+            or len(hits) >= CLIENT_HOURLY_LIMIT_COUNT
+            or len(_global_hits) >= GLOBAL_RATE_LIMIT_COUNT
+        ):
             return False
         hits.append(now)
-        _rate_hits[identity] = hits
-    return True
-
-
-def _check_global_rate() -> bool:
-    """Sliding-window cap on upstream fetches from all clients together."""
-    now = time.monotonic()
-    cutoff = now - GLOBAL_RATE_LIMIT_WINDOW_S
-    with _rate_lock:
-        while _global_hits and _global_hits[0] <= cutoff:
-            _global_hits.popleft()
-        if len(_global_hits) >= GLOBAL_RATE_LIMIT_COUNT:
-            return False
         _global_hits.append(now)
     return True
+
+
+def _retry_after_s(identity: str) -> int:
+    """Seconds until a refused client's next upstream fetch can pass."""
+    now = time.monotonic()
+    waits = [1.0]
+    with _rate_lock:
+        hits = _rate_hits.get(identity, [])
+        recent = [t for t in hits if t > now - RATE_LIMIT_WINDOW_S]
+        if len(recent) >= RATE_LIMIT_COUNT:
+            waits.append(recent[-RATE_LIMIT_COUNT] + RATE_LIMIT_WINDOW_S - now)
+        if len(hits) >= CLIENT_HOURLY_LIMIT_COUNT:
+            # Freed when enough hits leave the hour, or when the idle sweep drops the client.
+            leaves_hour = hits[-CLIENT_HOURLY_LIMIT_COUNT] + CLIENT_HOURLY_WINDOW_S
+            waits.append(min(leaves_hour, hits[-1] + CLIENT_IDLE_S) - now)
+        if len(_global_hits) >= GLOBAL_RATE_LIMIT_COUNT:
+            waits.append(_global_hits[-GLOBAL_RATE_LIMIT_COUNT] + GLOBAL_RATE_LIMIT_WINDOW_S - now)
+    return math.ceil(max(waits))
 
 
 def _tile_cache_path(z: int, x: int, y: int, layer: str = "base") -> Path:
@@ -283,17 +307,23 @@ def _store_tile(cache_file: Path, data: bytes) -> None:
 
 
 def _prune_cache() -> None:
-    """Delete the oldest-fetched tiles until the cache is at or under
-    CACHE_PRUNE_TARGET of MAX_CACHE_BYTES, and record the resulting size."""
+    """Delete the least recently used tiles until the cache is at or under
+    CACHE_PRUNE_TARGET of MAX_CACHE_BYTES, and record the resulting size.
+    Also deletes temp files left by writes that crashed."""
     global _cache_bytes
     tiles = []
-    for path in _cache_dir().rglob("*.png"):
+    stale_before = time.time() - TEMP_FILE_MAX_AGE_S
+    for path in _cache_dir().rglob("*.png*"):
         try:
             stat = path.stat()
         except OSError:
             continue  # vanished while listing
-        if path.is_file():
+        if not path.is_file():
+            continue
+        if path.suffix == ".png":
             tiles.append((stat.st_mtime, stat.st_size, path))
+        elif ".png.tmp-" in path.name and stat.st_mtime < stale_before:
+            path.unlink(missing_ok=True)  # a newer temp file may be a write in flight
     total = sum(size for _, size, _ in tiles)
     if total > MAX_CACHE_BYTES:
         target = MAX_CACHE_BYTES * CACHE_PRUNE_TARGET
@@ -376,14 +406,19 @@ def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
                 media_type = _sniff_image_type(fh.read(12))
         except OSError:
             media_type = "image/png"
+        try:
+            if time.time() - cache_file.stat().st_mtime > CACHE_TOUCH_AFTER_S:
+                os.utime(cache_file)  # mark as used, so the prune deletes unused tiles first
+        except OSError:
+            pass
         return FileResponse(str(cache_file), media_type=media_type, headers=_tile_headers())
 
     identity = request_identity(request)
-    if not _check_fetch_rate(identity) or not _check_global_rate():
+    if not _check_fetch_rate(identity):
         raise HTTPException(
             status_code=429,
             detail={"code": "MAP_TILE_RATE_LIMITED", "message": "Tile fetch budget exhausted; cached tiles still serve."},
-            headers={"Retry-After": str(int(RATE_LIMIT_WINDOW_S))},
+            headers={"Retry-After": str(_retry_after_s(identity))},
         )
 
     url = _upstream_url(layer, z, x, y)
