@@ -412,6 +412,18 @@ describe('AuthPage — bot check on sign-in', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
   });
 
+  it('keeps the wrong-password alert when the widget hands out its next token', async () => {
+    mocks.auth.login.mockRejectedValueOnce(BOT_FAILED).mockRejectedValue(INVALID);
+    renderAt('/login');
+    fillLogin();
+    submit();
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+    submit();
+    await screen.findByText(/Incorrect email/);
+    fireEvent.click(screen.getByRole('button', { name: 'SOLVE BOT CHECK' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Incorrect email');
+  });
+
   it('shows the bot check for the resend from the sign-in hint when the server asks for one', async () => {
     mocks.auth.login.mockRejectedValue(INVALID);
     mocks.api.post.mockRejectedValueOnce(BOT_FAILED).mockResolvedValue({ verification_sent: true });

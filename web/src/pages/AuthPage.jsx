@@ -336,7 +336,8 @@ export default function AuthPage({ mode = 'login' }) {
         )}
         <Turnstile
           {...bot.widget}
-          onToken={(token) => { bot.widget.onToken(token); if (token && error) setError(''); }}
+          // Only a bot-check prompt goes away with a new token; the widget re-issues one after every attempt.
+          onToken={(token) => { bot.widget.onToken(token); if (token && /bot check|verify you are human/i.test(error)) setError(''); }}
         />
         {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
         {!isRegister && unverifiedHint ? (
