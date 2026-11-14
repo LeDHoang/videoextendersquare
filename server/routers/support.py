@@ -34,6 +34,7 @@ from server.social.database import get_db
 from server.social.email import send_support_notification
 from server.social.models import Post, ReelPack, Report, SupportRequest, User, utcnow
 from server.social.staff import record_action
+from server.social.turnstile import verify_turnstile
 
 router = APIRouter(tags=["support"])
 
@@ -52,6 +53,8 @@ class SupportCreateRequest(BaseModel):
     reason: str = "other"
     # Honeypot: hidden from people, filled by naive bots.
     website: str = ""
+    # Bot check for signed-out requests (each one emails the support inbox).
+    turnstile_token: str | None = None
 
 
 class SupportUpdateRequest(BaseModel):
@@ -143,6 +146,7 @@ def create_support_request(
     ip_hash = keyed_hash(f"support-ip:{request_identity(request)}")
     if context is None:
         rate_limiter.check(db, f"support-ip:{ip_hash}", IP_LIMIT_PER_HOUR, 60 * 60)
+        verify_turnstile(req.turnstile_token, request_identity(request))
     else:
         rate_limiter.check(db, f"support-user:{context.user.id}", USER_LIMIT_PER_HOUR, 60 * 60)
 

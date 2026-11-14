@@ -355,6 +355,68 @@ describe('AuthPage — unverified sign-in hint', () => {
   });
 });
 
+describe('AuthPage — bot check on sign-in', () => {
+  const INVALID = new FakeApiError('Incorrect email/username or password.', { code: 'INVALID_CREDENTIALS', status: 401 });
+  beforeEach(() => {
+    vi.stubGlobal('sessionStorage', memoryStorage());
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+    mocks.auth.user = null;
+    mocks.auth.loading = false;
+    mocks.auth.login.mockReset().mockResolvedValue({ id: 'u1' });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const fillLogin = () => {
+    type('EMAIL OR USERNAME', 'me@example.com');
+    type('PASSWORD', 'whatever-123');
+  };
+
+  it('blocks sign-in until the bot check is solved, then sends its token', async () => {
+    renderAt('/login');
+    fillLogin();
+    const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+    submit();
+    expect(mocks.auth.login).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+    fireEvent.click(solve);
+    submit();
+    await waitFor(() => expect(mocks.auth.login).toHaveBeenCalledWith({ identifier: 'me@example.com', password: 'whatever-123', turnstile_token: 'cf-token' }));
+  });
+
+  it('asks for a fresh bot check after a failed sign-in (tokens are single use)', async () => {
+    mocks.auth.login.mockRejectedValue(INVALID);
+    renderAt('/login');
+    fillLogin();
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+    submit();
+    await screen.findByText(/Incorrect email/);
+    type('PASSWORD', 'another-try-1');
+    submit();
+    expect(mocks.auth.login).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+  });
+
+  it('sends a fresh token with the resend from the sign-in hint', async () => {
+    mocks.auth.login.mockRejectedValue(INVALID);
+    mocks.api.post.mockResolvedValue({ verification_sent: true });
+    renderAt('/login');
+    fillLogin();
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+    submit();
+    await screen.findByText(/Incorrect email/);
+    fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
+    expect(mocks.api.post).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+    fireEvent.click(screen.getByRole('button', { name: 'SOLVE BOT CHECK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'me@example.com', turnstile_token: 'cf-token' }));
+  });
+});
+
 describe('AuthPage — create account', () => {
   beforeEach(() => {
     vi.stubGlobal('sessionStorage', memoryStorage());
@@ -526,6 +588,28 @@ describe('AuthPage — create account', () => {
       submit();
       await waitFor(() => expect(mocks.auth.register).toHaveBeenCalled());
       expect(mocks.auth.register.mock.calls[0][0]).not.toHaveProperty('turnstile_token');
+    });
+
+    it('needs a fresh bot check to resend the verification email', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+        mocks.api.post.mockResolvedValue({ verification_sent: true });
+        renderAt('/signup');
+        fillValid();
+        fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+        submit();
+        await screen.findByRole('heading', { name: 'CHECK YOUR EMAIL' });
+        await act(async () => { await vi.advanceTimersByTimeAsync(31000); });
+        fireEvent.click(screen.getByRole('button', { name: 'RESEND EMAIL' }));
+        expect(mocks.api.post).not.toHaveBeenCalled();
+        expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+        fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+        fireEvent.click(screen.getByRole('button', { name: 'RESEND EMAIL' }));
+        await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'New@Example.com', turnstile_token: 'cf-token' }));
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('shows a server BOT_CHECK_FAILED as a form alert', async () => {

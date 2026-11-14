@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from server.social import database, safety
+from server.social import database, safety, turnstile
 
 
 @pytest.fixture(scope="session")
@@ -88,3 +88,26 @@ def _no_reel_jackpots(monkeypatch):
     from server.billing import service
 
     monkeypatch.setattr(service, "roll_reel_reward", lambda: (1, None))
+
+
+# Turns the bot check on with a fake siteverify: only "good-token" passes.
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def json(self):
+        return self._payload
+
+
+@pytest.fixture
+def turnstile_on(monkeypatch):
+    monkeypatch.setenv("SX_TURNSTILE_SECRET", "test-secret")
+    calls: list[dict] = []
+
+    def fake_post(url, data=None, timeout=None):
+        calls.append({"url": url, "data": dict(data), "timeout": timeout})
+        return _FakeResponse({"success": data["response"] == "good-token"})
+
+    monkeypatch.setattr(turnstile.httpx, "post", fake_post)
+    return calls

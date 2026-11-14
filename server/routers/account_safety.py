@@ -89,6 +89,7 @@ from server.social.staff import (
     suspend_user,
     target_owner,
 )
+from server.social.turnstile import verify_turnstile
 
 router = APIRouter(tags=["account-safety"])
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ def fail(status: int, code: str, message: str, field: str | None = None):
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
+    turnstile_token: str | None = None
 
 
 class PasswordResetConfirm(BaseModel):
@@ -297,6 +299,8 @@ def request_password_reset(req: PasswordResetRequest, request: Request, db: Sess
     identity = request_identity(request)
     email = normalize_email(str(req.email))
     rate_limiter.check(db, f"password-reset-ip:{identity}", 8, 60 * 60)
+    # Before the per-account limit, so tokenless bots cannot use up someone's quota.
+    verify_turnstile(req.turnstile_token, identity)
     rate_limiter.check(db, f"password-reset-account:{email}", 3, 60 * 60)
 
     user = db.query(User).filter(

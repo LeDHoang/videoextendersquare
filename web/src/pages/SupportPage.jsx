@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
+import Turnstile from '../components/auth/Turnstile.jsx';
+import useBotCheck from '../components/auth/useBotCheck.js';
 import FormField from '../components/ui/FormField.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { validateEmail } from '../utils/authForm.js';
@@ -40,6 +42,8 @@ export default function SupportPage() {
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState({});
   const [sentId, setSentId] = useState('');
+  // Signed-out requests email the support inbox, so they need the bot check; signed-in ones don't.
+  const bot = useBotCheck(!user);
 
   const isReport = form.category === 'report_content';
   const set = (name) => (event) => {
@@ -62,6 +66,11 @@ export default function SupportPage() {
       setFieldError(problems);
       return;
     }
+    if (bot.needsToken) {
+      setError('Complete the bot check before sending your request.');
+      return;
+    }
+    const turnstileToken = bot.consume();
     setBusy(true);
     setError('');
     try {
@@ -73,6 +82,7 @@ export default function SupportPage() {
         website: form.website,
       };
       if (form.email.trim()) payload.email = form.email.trim();
+      if (turnstileToken) payload.turnstile_token = turnstileToken;
       const result = await api.post('/api/support', payload);
       setSentId(result?.id || '');
     } catch (requestError) {
@@ -150,6 +160,7 @@ export default function SupportPage() {
             <label htmlFor="support-website">Website</label>
             <input id="support-website" name="website" type="text" tabIndex={-1} autoComplete="off" value={form.website} onChange={set('website')} />
           </div>
+          <Turnstile {...bot.widget} onToken={(token) => { bot.widget.onToken(token); if (token && error) setError(''); }} />
           {error ? <div className="sx-ps-feedback sx-ps-feedback--err" role="alert">{error}</div> : null}
           <div className="sx-ps-actions">
             <button type="submit" className="sx-ps-btn sx-ps-btn--primary" disabled={busy}>{busy ? 'SENDING…' : 'SEND REQUEST'}</button>

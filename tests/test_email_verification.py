@@ -310,28 +310,6 @@ def test_honeypot_gets_fake_success_and_creates_nothing(env):
         assert db.query(EmailVerificationToken).count() == 0
 
 
-class _FakeResponse:
-    def __init__(self, payload, status_code=200):
-        self._payload = payload
-        self.status_code = status_code
-
-    def json(self):
-        return self._payload
-
-
-@pytest.fixture
-def turnstile_on(monkeypatch):
-    monkeypatch.setenv("SX_TURNSTILE_SECRET", "test-secret")
-    calls: list[dict] = []
-
-    def fake_post(url, data=None, timeout=None):
-        calls.append({"url": url, "data": dict(data), "timeout": timeout})
-        return _FakeResponse({"success": data["response"] == "good-token"})
-
-    monkeypatch.setattr(turnstile.httpx, "post", fake_post)
-    return calls
-
-
 def test_turnstile_missing_or_bad_token_is_refused(env, turnstile_on):
     client, Session, _sent = env
     for extra in ({}, {"turnstile_token": ""}, {"turnstile_token": "bad-token"}):
@@ -373,6 +351,52 @@ def test_turnstile_skipped_when_secret_unset(env, monkeypatch):
 
     monkeypatch.setattr(turnstile.httpx, "post", never)
     assert _register(client).status_code == 202
+
+
+def _bot_refused(response):
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == "BOT_CHECK_FAILED"
+
+
+def _verified_user(client):
+    token = _register(client, turnstile_token="good-token").json()["debug_token"]
+    assert _verify(client, token).status_code == 200
+    client.cookies.clear()
+
+
+def test_login_needs_turnstile_when_on(env, turnstile_on):
+    client, _Session, _sent = env
+    _verified_user(client)
+    _bot_refused(_login(client, "newbie"))
+    _bot_refused(
+        client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "bad-token"})
+    )
+    assert not client.cookies.get("echo_session")
+    ok = client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "good-token"})
+    assert ok.status_code == 200, ok.text
+
+
+def test_tokenless_logins_do_not_burn_the_account_limit(env, turnstile_on):
+    client, _Session, _sent = env
+    _verified_user(client)
+    for _ in range(12):
+        _bot_refused(_login(client, "newbie", "wrong"))
+    ok = client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "good-token"})
+    assert ok.status_code == 200, ok.text
+
+
+def test_resend_needs_turnstile_when_on(env, turnstile_on):
+    client, _Session, sent = env
+    _register(client, turnstile_token="good-token")
+    sent.clear()
+    # Same refusal for a known and an unknown address, and tokenless tries do not
+    # use up the 3/h per-account quota.
+    for email in ("nobody@example.com", *["newbie@example.com"] * 4):
+        _bot_refused(client.post("/api/auth/resend-verification", json={"email": email}))
+    assert sent == []
+    ok = client.post("/api/auth/resend-verification", json={"email": "newbie@example.com", "turnstile_token": "good-token"})
+    assert ok.status_code == 202, ok.text
+    assert [to for to, _ in sent] == ["newbie@example.com"]
 
 
 def test_turnstile_boot_warning(monkeypatch, caplog):
