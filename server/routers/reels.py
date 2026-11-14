@@ -1828,6 +1828,8 @@ def _recommendation_feed_data(
     limit: int = 12,
 ) -> dict:
     """Build one stable materialized feed page and hydrate its media payload."""
+    limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
+    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60, shared=True)
     if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
@@ -2277,8 +2279,6 @@ def reels_feed(
     db: Session = Depends(get_db),
 ):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
-    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60, shared=True)
     return _recommendation_feed_data(
         request=request,
         response=response,

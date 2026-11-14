@@ -165,3 +165,23 @@ def test_refresh_rescans_for_admins_only(app, monkeypatch, url):
         assert len(scans) == 1               # ignored for both
         admin.get(url)
         assert len(scans) == 2
+
+
+@pytest.mark.parametrize("player", ["/api/reels/player", "/api/reels/player-inline"])
+def test_player_routes_share_the_feed_limit(app, player):
+    with TestClient(app) as client:
+        for _ in range(60):
+            assert client.get(player).status_code == 200
+        for url in (player, "/api/reels/feed"):
+            refused = client.get(url)
+            assert refused.status_code == 429
+            assert refused.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_pack_player_is_outside_the_feed_limit(app):
+    with TestClient(app) as client:
+        for _ in range(60):
+            client.get("/api/reels/feed")
+        assert client.get("/api/reels/feed").status_code == 429
+        # An unknown pack answers as it did before; it is never a 429.
+        assert client.get("/api/reels/player?pack_id=missing").status_code != 429
