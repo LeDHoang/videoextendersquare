@@ -284,9 +284,8 @@ def test_every_production_route_is_classified(production_app):
 
 def test_only_known_routes_are_left_out_of_the_schema(production_app):
     # The checks here walk the OpenAPI schema, which leaves out
-    # include_in_schema=False routes, mounts, websockets and FastAPI's own
-    # docs pages. These are all public today. A new one must be checked by
-    # hand, then listed here.
+    # include_in_schema=False routes, mounts and websockets. These are all
+    # public today. A new one must be checked by hand, then listed here.
     operations = _operations(production_app)
     unlisted = sorted(
         (type(context.route).__name__, method, context.path)
@@ -299,11 +298,13 @@ def test_only_known_routes_are_left_out_of_the_schema(production_app):
         ("APIRoute", "POST", "/api/csp-report"),
         ("Mount", "", "/assets"),
         ("Mount", "", "/avatars"),
-        ("Route", "GET", "/docs"),
-        ("Route", "GET", "/docs/oauth2-redirect"),
-        ("Route", "GET", "/openapi.json"),
-        ("Route", "GET", "/redoc"),
     ]
+
+
+def test_production_serves_no_openapi_schema(production_app):
+    response = TestClient(production_app).get("/openapi.json")
+    assert response.headers["content-type"].startswith("text/html")
+    assert '"paths"' not in response.text
 
 
 def test_anonymous_callers_are_refused_on_non_public_routes(production_app):

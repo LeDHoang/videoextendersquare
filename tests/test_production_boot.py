@@ -43,6 +43,19 @@ def test_production_app_drops_media_mount_and_compare(monkeypatch):
     assert client.get("/api/compare/prepare").status_code == 404
 
 
+DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
+
+
+def test_production_app_serves_no_api_docs(monkeypatch):
+    monkeypatch.setenv("SX_ENV", "production")
+    assert DOCS_PATHS.isdisjoint(_paths(app_module.create_app()))
+
+
+def test_dev_app_keeps_api_docs(monkeypatch):
+    monkeypatch.delenv("SX_ENV", raising=False)
+    assert DOCS_PATHS <= _paths(app_module.create_app())
+
+
 def test_production_boot_refuses_unsafe_config(monkeypatch):
     monkeypatch.setenv("SX_ENV", "production")
     monkeypatch.delenv("SX_SECURITY_SECRET", raising=False)

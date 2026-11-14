@@ -371,7 +371,10 @@ def mount_spa(app: FastAPI, static_dir: Path) -> None:
 def create_app() -> FastAPI:
     configure_logging()
     _init_sentry()
-    app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan)
+    # Production serves no API docs: /docs, /redoc and /openapi.json would
+    # list every route and schema to anyone.
+    docs_off = {"docs_url": None, "redoc_url": None, "openapi_url": None} if is_production() else {}
+    app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan, **docs_off)
 
     # CORS for the Vite dev server (port 5173). Credentials are on, so keep
     # the surface tight: only the methods/headers the frontend actually sends
