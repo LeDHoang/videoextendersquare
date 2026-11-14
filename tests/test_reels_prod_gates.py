@@ -136,3 +136,32 @@ def test_diag_still_works_in_dev(app, monkeypatch):
     with TestClient(app) as client:
         assert client.post("/api/reels/diag", json={"fps": 72}).json() == {"ok": True}
         assert client.get("/api/reels/diag").json()["fps"] == 72
+
+
+REFRESH_URLS = [
+    "/api/reels?refresh=true",
+    "/api/reels/feed?refresh=true",
+    "/api/reels/tags/any?refresh=true",
+    "/api/reels/locations/any?refresh=true",
+]
+
+
+@pytest.mark.parametrize("url", REFRESH_URLS)
+def test_refresh_rescans_for_admins_only(app, monkeypatch, url):
+    monkeypatch.setenv("SX_ADMIN_USERS", "scan_admin")
+    monkeypatch.setitem(reels._scan_cache, "at", 0.0)
+    monkeypatch.setitem(reels._scan_cache, "data", [])
+    scans = []
+    real = reels.post_media_items
+    monkeypatch.setattr(reels, "post_media_items", lambda db: scans.append(1) or real(db))
+    with TestClient(app) as anonymous, TestClient(app) as member, TestClient(app) as admin:
+        user = register(member, "scan_member")
+        register(admin, "scan_admin")
+        add_post(app, user["id"], "uploads/scan.mp4")
+        anonymous.get("/api/reels")          # warms the cache
+        assert len(scans) == 1
+        anonymous.get(url)
+        member.get(url)
+        assert len(scans) == 1               # ignored for both
+        admin.get(url)
+        assert len(scans) == 2

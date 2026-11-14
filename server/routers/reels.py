@@ -1230,6 +1230,12 @@ def invalidate_scan_cache() -> None:
     _scan_cache["at"] = 0.0
 
 
+def _admin_refresh(refresh: bool, viewer: AuthContext | None) -> bool:
+    """`?refresh=true` re-scans only for an admin. Anyone else is ignored
+    silently, as /api/health does: a re-scan reads every post and slide."""
+    return bool(refresh) and isinstance(viewer, AuthContext) and viewer.user.role == "admin"
+
+
 # ─── Pydantic Models for Comments API ────────────────────────────────────
 
 class CommentCreate(BaseModel):
@@ -1822,7 +1828,7 @@ def _recommendation_feed_data(
     limit: int = 12,
 ) -> dict:
     """Build one stable materialized feed page and hydrate its media payload."""
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     requested_surface = (surface or "").strip().casefold()
@@ -2159,7 +2165,7 @@ def list_reels(
     next page with the same filters. Without ``limit`` the whole list comes
     with comments, as before; that form is deprecated.
     """
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
@@ -2339,7 +2345,7 @@ def get_reel_tag(
     slug = _tag_slug(tag_name)
     if not slug:
         raise HTTPException(status_code=400, detail="Tag cannot be empty")
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
@@ -2485,7 +2491,7 @@ def get_reel_location(
     slug = _location_key(*_split_location_key(location_key))
     if not slug:
         raise HTTPException(status_code=400, detail="Location cannot be empty")
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
