@@ -40,6 +40,7 @@ VR Reels strategy review: [Funding in Vietnam 2 investigation](funding-in-vietna
 
 - [x] Domain `echomultiverse.com` live (2026-11-07): Cloudflare Tunnel public hostname to the app, R2 custom domain `media.echomultiverse.com` with `jobs/` lifecycle and CORS, 30-day lifecycle on `privatemedia` (confirmed in the dashboard), Transform Rule (ACAO + `Vary: Origin`), Cache Rules, SSL Full + Always HTTPS. VPS `.env` URL vars set and app restarted. Checked with curl: HTTP→HTTPS 301, `/api/readyz` ok, media 206 with CORS and MISS→HIT, `/api/*` always DYNAMIC. HSTS, SMTP, allowlist, Quest and purge rehearsal remain open in `docs/to-beta.md`.
 - [x] Upload pipeline on prod (2026-11-09): on `echomultiverse.com/upload`, `test22` uploaded one video, extended it on Fal AI (paid with the account's own Fal key; credits are off on prod), upscaled it locally and published it. It is post `96ed4274-cd80-48f8-bf25-1cc83d271189` (`source: extended`, 3840×3840, 5.1 s). Details are in `docs/to-beta.md`.
+- [x] Public hardening batch (2026-11-14, branch `fix/p0-public-hardening`): no API docs or OpenAPI schema in production, `?refresh=` on the reels routes honoured for admins only, the player routes share the feed's 60-a-minute `rec-feed` limit, the model-info cache is capped and validates its inputs, the map-tile proxy has a global fetch budget, a capped disk cache and a swept rate table, and comments by suspended users are hidden. Per-visitor rate-limit buckets confirmed from two networks. Details in `docs/to-beta.md`.
 
 ## Still open
 
