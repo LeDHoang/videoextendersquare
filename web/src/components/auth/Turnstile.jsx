@@ -26,9 +26,10 @@ function loadTurnstile() {
 /*
  * Cloudflare Turnstile widget. Renders nothing without a site key (the server then skips the
  * check too). `onToken(token)` fires with a fresh token, and with '' when it expires or fails;
- * bumping `resetKey` asks for a new challenge (tokens are single use).
+ * bumping `resetKey` asks for a new challenge (tokens are single use). `action` names the form;
+ * the server only accepts a token issued for its own form.
  */
-export default function Turnstile({ siteKey, onToken, onUnavailable, resetKey = 0 }) {
+export default function Turnstile({ siteKey, action, onToken, onUnavailable, resetKey = 0 }) {
   const box = useRef(null);
   const widget = useRef(null);
   const callbacks = useRef({ onToken, onUnavailable });
@@ -42,6 +43,7 @@ export default function Turnstile({ siteKey, onToken, onUnavailable, resetKey = 
         if (cancelled || !box.current) return;
         widget.current = turnstile.render(box.current, {
           sitekey: siteKey,
+          action,
           theme: currentTheme(),
           callback: (token) => callbacks.current.onToken?.(token),
           'expired-callback': () => callbacks.current.onToken?.(''),
@@ -60,7 +62,7 @@ export default function Turnstile({ siteKey, onToken, onUnavailable, resetKey = 
       }
       widget.current = null;
     };
-  }, [siteKey]);
+  }, [siteKey, action]);
 
   useEffect(() => {
     if (resetKey === 0 || widget.current === null) return;

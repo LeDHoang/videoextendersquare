@@ -40,7 +40,7 @@ function RequestForm({ onSent, notice }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const input = useRef(null);
-  const bot = useBotCheck();
+  const bot = useBotCheck('reset');
   const problem = validateEmail(email);
 
   const submit = async (event) => {
@@ -102,7 +102,7 @@ function SentView({ sent, onResend, onChangeEmail }) {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
   const [resent, setResent] = useState(false);
-  const bot = useBotCheck();
+  const bot = useBotCheck('reset');
 
   const counting = cooldown > 0;
   useEffect(() => {

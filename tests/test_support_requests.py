@@ -155,7 +155,7 @@ def test_signed_out_request_needs_turnstile_when_on(app, turnstile_on):
         with app.state.Session() as db:
             assert db.query(SupportRequest).count() == 0
         assert app.state.sent == []
-        ok = client.post("/api/support", json={**payload, "turnstile_token": "good-token"})
+        ok = client.post("/api/support", json={**payload, "turnstile_token": "good-support"})
         assert ok.status_code == 202, ok.text
         assert len(app.state.sent) == 1
 
@@ -167,7 +167,7 @@ def test_signed_in_request_skips_turnstile(app, turnstile_on):
             "username": "member",
             "password": PASSWORD,
             "accept_terms": True,
-            "turnstile_token": "good-token",
+            "turnstile_token": "good-signup",
         })
         calls_before = len(turnstile_on)
         response = mutate(client, "POST", "/api/support", {"category": "bug", "body": "It broke."})
@@ -184,7 +184,7 @@ def test_reset_request_needs_turnstile_when_on(app, turnstile_on, monkeypatch):
             "username": "resetme",
             "password": PASSWORD,
             "accept_terms": True,
-            "turnstile_token": "good-token",
+            "turnstile_token": "good-signup",
         })
         client.cookies.clear()
         # Same refusal for a known and an unknown address, and tokenless tries do not
@@ -194,7 +194,7 @@ def test_reset_request_needs_turnstile_when_on(app, turnstile_on, monkeypatch):
         assert mailed == []
         ok = client.post(
             "/api/auth/password-reset/request",
-            json={"email": "resetme@example.com", "turnstile_token": "good-token"},
+            json={"email": "resetme@example.com", "turnstile_token": "good-reset"},
         )
         assert ok.status_code == 200, ok.text
         assert mailed == ["resetme@example.com"]

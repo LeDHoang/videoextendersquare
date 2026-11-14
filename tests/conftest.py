@@ -90,7 +90,8 @@ def _no_reel_jackpots(monkeypatch):
     monkeypatch.setattr(service, "roll_reel_reward", lambda: (1, None))
 
 
-# Turns the bot check on with a fake siteverify: only "good-token" passes.
+# Turns the bot check on with a fake siteverify: "good-<action>" passes for that action
+# on echomultiverse.com; anything else fails.
 class _FakeResponse:
     def __init__(self, payload, status_code=200):
         self._payload = payload
@@ -103,11 +104,17 @@ class _FakeResponse:
 @pytest.fixture
 def turnstile_on(monkeypatch):
     monkeypatch.setenv("SX_TURNSTILE_SECRET", "test-secret")
+    monkeypatch.setenv("SX_PUBLIC_URL", "https://echomultiverse.com")
     calls: list[dict] = []
 
     def fake_post(url, data=None, timeout=None):
         calls.append({"url": url, "data": dict(data), "timeout": timeout})
-        return _FakeResponse({"success": data["response"] == "good-token"})
+        good = data["response"].startswith("good-")
+        return _FakeResponse({
+            "success": good,
+            "hostname": "echomultiverse.com",
+            "action": data["response"][len("good-"):] if good else None,
+        })
 
     monkeypatch.setattr(turnstile.httpx, "post", fake_post)
     return calls

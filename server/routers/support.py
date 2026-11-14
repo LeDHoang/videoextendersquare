@@ -146,7 +146,7 @@ def create_support_request(
     ip_hash = keyed_hash(f"support-ip:{request_identity(request)}")
     if context is None:
         rate_limiter.check(db, f"support-ip:{ip_hash}", IP_LIMIT_PER_HOUR, 60 * 60)
-        verify_turnstile(req.turnstile_token, request_identity(request))
+        verify_turnstile(req.turnstile_token, request_identity(request), "support")
     else:
         rate_limiter.check(db, f"support-user:{context.user.id}", USER_LIMIT_PER_HOUR, 60 * 60)
 

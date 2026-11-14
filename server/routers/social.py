@@ -543,7 +543,7 @@ def register(
     rate_limiter.check(db, f"register-device-day:{device_hash}", env_int("SX_REGISTER_DEVICE_DAILY", 5, minimum=1), 24 * 60 * 60)
     if req.accept_terms is not True:
         error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
-    verify_turnstile(req.turnstile_token, request_identity(request))
+    verify_turnstile(req.turnstile_token, request_identity(request), "signup")
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
@@ -631,7 +631,8 @@ def resend_verification(
     rate_limiter.check(db, f"resend-verification-ip:{request_identity(request)}", 8, 60 * 60)
     # After the IP limit (no free siteverify calls), before the per-account one
     # (tokenless bots cannot use up someone else's quota).
-    verify_turnstile(req.turnstile_token, request_identity(request))
+    # "login" too: the sign-in page's "Resend the link" reuses that page's widget.
+    verify_turnstile(req.turnstile_token, request_identity(request), "resend", "login")
     rate_limiter.check(db, f"resend-verification-account:{email}", 3, 60 * 60)
     user = db.query(User).filter(
         User.email_norm == email,
@@ -652,7 +653,7 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     if settings.login_rate_limit_enabled():
         rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
     # Before the per-account limit, so tokenless bots cannot lock someone out.
-    verify_turnstile(req.turnstile_token, identity)
+    verify_turnstile(req.turnstile_token, identity, "login")
     if settings.login_rate_limit_enabled():
         rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()

@@ -43,7 +43,7 @@ export default function SupportPage() {
   const [fieldError, setFieldError] = useState({});
   const [sentId, setSentId] = useState('');
   // Signed-out requests email the support inbox, so they need the bot check; signed-in ones don't.
-  const bot = useBotCheck(!user);
+  const bot = useBotCheck('support', !user);
 
   const isReport = form.category === 'report_content';
   const set = (name) => (event) => {

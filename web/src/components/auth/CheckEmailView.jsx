@@ -14,7 +14,7 @@ export default function CheckEmailView({ email, debugToken, onResend, onChangeEm
   const [error, setError] = useState('');
   const [resent, setResent] = useState(false);
   const [token, setToken] = useState(debugToken || '');
-  const bot = useBotCheck();
+  const bot = useBotCheck('resend');
 
   const counting = cooldown > 0;
   useEffect(() => {

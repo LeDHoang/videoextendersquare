@@ -12,8 +12,8 @@ vi.mock('../api/client.js', () => ({ api: mocks.api }));
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => mocks.auth }));
 // The real widget loads Cloudflare's script; this stand-in just hands out a token on click.
 vi.mock('../components/auth/Turnstile.jsx', () => ({
-  default: ({ siteKey, onToken }) => (siteKey
-    ? <button type="button" onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
+  default: ({ siteKey, action, onToken }) => (siteKey
+    ? <button type="button" data-action={action} onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
     : null),
 }));
 
@@ -379,6 +379,7 @@ describe('AuthPage — bot check on sign-in', () => {
     renderAt('/login');
     fillLogin();
     const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+    expect(solve).toHaveAttribute('data-action', 'login');
     submit();
     expect(mocks.auth.login).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
@@ -566,11 +567,25 @@ describe('AuthPage — create account', () => {
   });
 
   describe('Turnstile', () => {
+    it('drops a sign-in token when switching to create account', async () => {
+      // /login and /signup share one AuthPage, and the server refuses a login token at sign-up.
+      mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+      renderAt('/login');
+      fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+      fireEvent.click(screen.getAllByRole('link', { name: 'CREATE ACCOUNT' })[0]);
+      expect(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' })).toHaveAttribute('data-action', 'signup');
+      fillValid();
+      submit();
+      expect(mocks.auth.register).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+    });
+
     it('blocks submit until the bot check is solved, then sends its token', async () => {
       mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
       renderAt('/signup');
       fillValid();
       const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+      expect(solve).toHaveAttribute('data-action', 'signup');
       submit();
       expect(mocks.auth.register).not.toHaveBeenCalled();
       expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
@@ -604,7 +619,9 @@ describe('AuthPage — create account', () => {
         fireEvent.click(screen.getByRole('button', { name: 'RESEND EMAIL' }));
         expect(mocks.api.post).not.toHaveBeenCalled();
         expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
-        fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+        const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+        expect(solve).toHaveAttribute('data-action', 'resend');
+        fireEvent.click(solve);
         fireEvent.click(screen.getByRole('button', { name: 'RESEND EMAIL' }));
         await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'New@Example.com', turnstile_token: 'cf-token' }));
       } finally {

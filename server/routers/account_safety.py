@@ -300,7 +300,7 @@ def request_password_reset(req: PasswordResetRequest, request: Request, db: Sess
     email = normalize_email(str(req.email))
     rate_limiter.check(db, f"password-reset-ip:{identity}", 8, 60 * 60)
     # Before the per-account limit, so tokenless bots cannot use up someone's quota.
-    verify_turnstile(req.turnstile_token, identity)
+    verify_turnstile(req.turnstile_token, identity, "reset")
     rate_limiter.check(db, f"password-reset-account:{email}", 3, 60 * 60)
 
     user = db.query(User).filter(

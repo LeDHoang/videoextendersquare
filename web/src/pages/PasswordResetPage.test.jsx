@@ -12,8 +12,8 @@ vi.mock('../api/client.js', () => ({ api: mocks.api }));
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => mocks.auth }));
 // The real widget loads Cloudflare's script; this stand-in just hands out a token on click.
 vi.mock('../components/auth/Turnstile.jsx', () => ({
-  default: ({ siteKey, onToken }) => (siteKey
-    ? <button type="button" onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
+  default: ({ siteKey, action, onToken }) => (siteKey
+    ? <button type="button" data-action={action} onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
     : null),
 }));
 
@@ -359,6 +359,7 @@ describe('PasswordResetPage — bot check', () => {
     renderAt('/forgot-password');
     type('EMAIL', 'maker@example.com');
     const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+    expect(solve).toHaveAttribute('data-action', 'reset');
     click('SEND RESET LINK');
     expect(mocks.api.post).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');

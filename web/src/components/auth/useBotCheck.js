@@ -4,9 +4,10 @@ import { api } from '../../api/client.js';
 /*
  * Turnstile state for one form. The site key ships with /api/config; an empty key means the
  * server skips the check. `consume()` hands out the token and asks the widget for a new one,
- * since tokens are single use. Pass `enabled = false` to skip the check (signed-in support).
+ * since tokens are single use. `action` names the form (the server checks it). Pass
+ * `enabled = false` to skip the check (signed-in support).
  */
-export default function useBotCheck(enabled = true) {
+export default function useBotCheck(action, enabled = true) {
   const [siteKey, setSiteKey] = useState('');
   const [token, setToken] = useState('');
   const [unavailable, setUnavailable] = useState(false);
@@ -26,6 +27,9 @@ export default function useBotCheck(enabled = true) {
     return () => { cancelled = true; };
   }, [enabled]);
 
+  // A token from another form's widget would be refused, so drop it when the form changes.
+  useEffect(() => { setToken(''); }, [action]);
+
   const active = enabled && Boolean(siteKey);
   const consume = () => {
     const current = token;
@@ -39,6 +43,6 @@ export default function useBotCheck(enabled = true) {
   return {
     needsToken: active && !token && !unavailable,
     consume,
-    widget: { siteKey: active ? siteKey : '', resetKey, onToken: setToken, onUnavailable: () => setUnavailable(true) },
+    widget: { siteKey: active ? siteKey : '', action, resetKey, onToken: setToken, onUnavailable: () => setUnavailable(true) },
   };
 }
