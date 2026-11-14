@@ -21,7 +21,7 @@ Ranked view of what is still open in this file; the items themselves, with detai
   - [ ] Set `SX_SUPPORT_EMAIL` in the VPS `.env` to that address, then `docker compose up -d app app-read` (a restart does not reload `.env`).
   - [x] In Resend, check click and open tracking are off on `mail.echomultiverse.com` (tracking rewrites the reset and verification links), and turn on 2FA for the Resend account. Done 2026-11-14, by the operator (not checked by me).
   - [ ] After the first DMARC reports (24-48 h) show SPF and DKIM passing for Resend and Workspace, optionally move `p=none` to `p=quarantine`.
-- Set `SX_REGISTRATION_ALLOWLIST` and `SX_ADMIN_USERS` / `SX_MODERATOR_USERS` on the VPS.
+- Set `SX_ADMIN_USERS` / `SX_MODERATOR_USERS` on the VPS. **Registration opened to everyone 2026-11-15** (`SX_REGISTRATION_ENABLED=1`, operator's decision for the open beta; the allowlist is not used). Revert: set it to `0`, then `docker compose up -d app app-read`. **Open while public:** Turnstile keys are empty (no bot check), and the age gate and cookie-consent banner are not confirmed. Free Resend allows 100 emails a day, shared by sign-up and reset mail.
 - ~~Send one DM on prod and decrypt it from the next nightly backup~~ — done 2026-11-14 (restore-drill item). The 67 older undecryptable DMs are kept for now (decision 2026-11-01).
 - ~~Check that `privatemedia` has the 30-day lifecycle rule~~ — done 2026-11-07 (confirmed in the dashboard).
 - Quest smoke test on the real domain, and the two-browser pass with two accounts.
