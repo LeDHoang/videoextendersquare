@@ -138,6 +138,10 @@ RATE_LIMIT_COUNT = 720
 RATE_LIMIT_WINDOW_S = 60.0
 GLOBAL_RATE_LIMIT_COUNT = 6000
 GLOBAL_RATE_LIMIT_WINDOW_S = 3600.0
+# One client's share of the hour budget, so a single IP under its per-minute
+# cap cannot keep the shared budget empty for everyone else.
+CLIENT_HOURLY_LIMIT_COUNT = 1000
+CLIENT_HOURLY_WINDOW_S = 3600.0
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, list[float]] = {}
 _global_hits: collections.deque[float] = collections.deque()
@@ -217,18 +221,21 @@ def _validate_tile_payload(data: bytes, content_type: str) -> None:
 
 
 def _check_fetch_rate(identity: str) -> bool:
-    """Sliding-window per-IP cap on upstream fetches (cache hits never count)."""
+    """Sliding-window per-IP caps on upstream fetches (cache hits never count):
+    RATE_LIMIT_COUNT a minute and CLIENT_HOURLY_LIMIT_COUNT an hour."""
     global _next_rate_sweep
     now = time.monotonic()
     cutoff = now - RATE_LIMIT_WINDOW_S
+    hour_cutoff = now - CLIENT_HOURLY_WINDOW_S
     with _rate_lock:
         if now >= _next_rate_sweep:
-            # Drop clients with no hit left in the window, so the table stays small.
-            for idle in [key for key, times in _rate_hits.items() if not times or times[-1] <= cutoff]:
+            # Drop clients with no hit left in the hour window, so the table stays small.
+            for idle in [key for key, times in _rate_hits.items() if not times or times[-1] <= hour_cutoff]:
                 del _rate_hits[idle]
             _next_rate_sweep = now + RATE_LIMIT_WINDOW_S
-        hits = [t for t in _rate_hits.get(identity, []) if t > cutoff]
-        if len(hits) >= RATE_LIMIT_COUNT:
+        hits = [t for t in _rate_hits.get(identity, []) if t > hour_cutoff]
+        recent = sum(1 for t in hits if t > cutoff)
+        if recent >= RATE_LIMIT_COUNT or len(hits) >= CLIENT_HOURLY_LIMIT_COUNT:
             _rate_hits[identity] = hits
             return False
         hits.append(now)

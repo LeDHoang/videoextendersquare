@@ -266,9 +266,18 @@ def test_a_client_over_its_own_limit_spends_no_global_budget(client, monkeypatch
 
 def test_idle_clients_are_dropped_from_the_rate_table(client):
     with map_tiles._rate_lock:
-        map_tiles._rate_hits["idle"] = [time.monotonic() - map_tiles.RATE_LIMIT_WINDOW_S - 1]
+        map_tiles._rate_hits["idle"] = [time.monotonic() - map_tiles.CLIENT_HOURLY_WINDOW_S - 1]
     assert map_tiles._check_fetch_rate("busy")
     assert set(map_tiles._rate_hits) == {"busy"}
+
+
+def test_a_client_gets_at_most_its_hourly_share(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "CLIENT_HOURLY_LIMIT_COUNT", 3)
+    two_minutes_ago = time.monotonic() - 120
+    with map_tiles._rate_lock:
+        map_tiles._rate_hits["heavy"] = [two_minutes_ago] * 3
+    assert not map_tiles._check_fetch_rate("heavy")
+    assert map_tiles._check_fetch_rate("other")
 
 
 def test_cache_is_pruned_oldest_first_when_over_the_cap(client, monkeypatch):
