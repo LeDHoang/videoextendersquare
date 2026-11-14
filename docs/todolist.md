@@ -48,7 +48,7 @@ Ranked by priority (2026-11-07). The domain, Tunnel and edge work that blocks mo
 
 **Before the first invite:**
 
-- [ ] Send one DM on prod and decrypt it from the next nightly backup, to prove the escrowed `SX_MESSAGE_ENCRYPTION_KEY`. The 67 older DMs on prod (2026-09-12 to 2026-10-05) cannot be decrypted with that key, on prod or from the backup; they predate the VPS key and no local key opens them. Kept for now (decision 2026-11-01).
+- [x] Send one DM on prod and decrypt it from the next nightly backup, to prove the escrowed `SX_MESSAGE_ENCRYPTION_KEY`. **Done 2026-11-14:** test22 sent a DM to test23 through the live site (message `6fae386c-99ed-40f7-bdcb-8bebdd5b4827`). A manual `deploy/backup.sh` run wrote `privatemedia/2026-11-14/echo-20261114T101505Z.dump`. That dump was restored into a local `postgres:16`, and the row decrypted with the escrowed `SX_MESSAGE_ENCRYPTION_KEY` to the text that was sent. The test23 account and its conversation were then deleted from prod. The 67 older DMs on prod (2026-09-12 to 2026-10-05) cannot be decrypted with that key, on prod or from the backup; they predate the VPS key and no local key opens them. Kept for now (decision 2026-11-01).
 - [ ] Manual two-browser + Quest validation (see `docs/to-beta.md` checklist; milestone 8 in `docs/messaging-reels-sharing-progress.md`). Includes on-device check of Earth tap-vs-hold feel (`EARTH_DRAG_HOLD_MS`, tap/drag chords) and drag-up direction sign. **Earth Zoom Map comfort pass (2026-09-22):** grip+stickY zoom never moves the camera (globe slides, surface pinned 1.15 m); eases ≤500 ms, `reducedMotion` instant; tap-to-zoom vs tap-to-select disambiguation at the city band; no motion discomfort across globe→street round trips; breadcrumb (`WORLD › CITY · %`) legible at every band.
 - [ ] Complete the Reel Packs release matrix in `docs/reel-packs-implementation-investigation.md`: two-browser concurrency, mobile/keyboard/screen-reader checks, native share/QR/messaging, and physical Quest controller/hand/seated/XR-resume validation.
 - [ ] Quest check of the VR UI panel changes (2026-10-24; verified only in the desktop 3D preview, the flat panel workbench and the test suites). On a Quest 3 or 3S:
@@ -66,6 +66,7 @@ Ranked by priority (2026-11-07). The domain, Tunnel and edge work that blocks mo
 
 **Later:**
 
+- [ ] Explore page: Reel Packs always appear first. Shuffle and recommend them like reels, so packs are interleaved by the same ranking and not pinned to the top of the `ALL` view.
 - [ ] MAKE 3D on the server: decide how 3D video runs in production. Measured 2026-10-23 in a CPX32-shaped container (`--cpus=3 --memory=6g`, torch CPU): an image takes 6 s and 1.0 GB, but a 10 s 1080² video takes 14.3 min and 4.1 GB, and a 30 s video takes 64 min. Video therefore needs a GPU worker (serverless per job, or the L40S at the hybrid trigger); production keeps `SX_STEREO_CONVERT_ENABLED=0` until then. Details are in `docs/to-beta.md` under "AI inference". Open items before enabling it:
   - A single long shot still holds all its depth frames inside the depth model (about 1 MB per frame); depth and render already go one shot at a time.
   - Pin the checkpoint's SHA-256.
