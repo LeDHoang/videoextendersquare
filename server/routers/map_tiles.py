@@ -136,11 +136,11 @@ CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
 # add up to a load the provider's usage policy would block.
 RATE_LIMIT_COUNT = 720
 RATE_LIMIT_WINDOW_S = 60.0
-GLOBAL_RATE_LIMIT_COUNT = 6000
+GLOBAL_RATE_LIMIT_COUNT = 30000
 GLOBAL_RATE_LIMIT_WINDOW_S = 3600.0
 # One client's share of the hour budget, so a single IP under its per-minute
 # cap cannot keep the shared budget empty for everyone else.
-CLIENT_HOURLY_LIMIT_COUNT = 1000
+CLIENT_HOURLY_LIMIT_COUNT = 6000
 CLIENT_HOURLY_WINDOW_S = 3600.0
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, list[float]] = {}
