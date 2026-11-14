@@ -38,7 +38,12 @@ async function handle(res) {
     body = null;
   }
   if (!res.ok) {
-    const detail = body?.detail ?? body;
+    let detail = body?.detail ?? body;
+    // Request validation (422) sends a list of field errors; surface the first one like our own errors.
+    if (Array.isArray(detail) && detail[0]?.msg) {
+      const first = detail[0];
+      detail = { message: first.msg, field: Array.isArray(first.loc) ? first.loc[first.loc.length - 1] : null, errors: detail };
+    }
     const message =
       (detail && typeof detail === 'object' && detail.message) ||
       (typeof detail === 'string' ? detail : '') ||
