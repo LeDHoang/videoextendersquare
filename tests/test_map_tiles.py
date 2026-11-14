@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,9 @@ def client(tmp_path, monkeypatch):
     app.include_router(map_tiles.router)
     with map_tiles._rate_lock:  # isolate per-IP fetch budget between tests
         map_tiles._rate_hits.clear()
+        map_tiles._global_hits.clear()
+    monkeypatch.setattr(map_tiles, "_cache_bytes", None)
+    monkeypatch.setattr(map_tiles, "_next_rate_sweep", 0.0)
     with TestClient(app) as test_client:
         test_client.fetch_calls = []
         yield test_client
@@ -236,3 +241,54 @@ def test_osm_blocked_placeholder_is_an_upstream_failure(monkeypatch):
     monkeypatch.setattr(map_tiles, "_get_http_pool", lambda: FakePool())
     with pytest.raises(map_tiles.UpstreamTileError, match="blocked"):
         map_tiles._fetch_upstream("https://tile.openstreetmap.org/1/0/0.png")
+
+
+def test_global_fetch_budget_counts_misses_from_every_client(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    monkeypatch.setattr(map_tiles, "GLOBAL_RATE_LIMIT_COUNT", 2)
+    assert client.get("/api/reels/map-tiles/3/0/0.png").status_code == 200
+    assert client.get("/api/reels/map-tiles/3/1/0.png").status_code == 200
+    blocked = client.get("/api/reels/map-tiles/3/2/0.png")
+    assert blocked.status_code == 429
+    assert blocked.json()["detail"]["code"] == "MAP_TILE_RATE_LIMITED"
+    assert blocked.headers["retry-after"] == "60"
+    assert client.get("/api/reels/map-tiles/3/0/0.png").status_code == 200  # cached tiles still serve
+    assert len(client.fetch_calls) == 2
+
+
+def test_a_client_over_its_own_limit_spends_no_global_budget(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    monkeypatch.setattr(map_tiles, "RATE_LIMIT_COUNT", 1)
+    client.get("/api/reels/map-tiles/3/0/0.png")
+    assert client.get("/api/reels/map-tiles/3/1/0.png").status_code == 429
+    assert len(map_tiles._global_hits) == 1
+
+
+def test_idle_clients_are_dropped_from_the_rate_table(client):
+    with map_tiles._rate_lock:
+        map_tiles._rate_hits["idle"] = [time.monotonic() - map_tiles.RATE_LIMIT_WINDOW_S - 1]
+    assert map_tiles._check_fetch_rate("busy")
+    assert set(map_tiles._rate_hits) == {"busy"}
+
+
+def test_cache_is_pruned_oldest_first_when_over_the_cap(client, monkeypatch):
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    monkeypatch.setattr(map_tiles, "MAX_CACHE_BYTES", 3 * len(FAKE_TILE_PNG))
+    for x in range(4):
+        assert client.get(f"/api/reels/map-tiles/3/{x}/0.png").status_code == 200
+        os.utime(map_tiles._tile_cache_path(3, x, 0), (1000 + x, 1000 + x))
+    # The 4th store passes the cap; pruning to 80% (2.4 tiles) keeps the newest two.
+    assert [map_tiles._tile_cache_path(3, x, 0).is_file() for x in range(4)] == [False, False, True, True]
+    assert client.get("/api/reels/map-tiles/3/0/0.png").status_code == 200  # fetched again
+    assert len(client.fetch_calls) == 5
+
+
+def test_prune_ignores_temp_files_and_a_missing_directory(client, monkeypatch):
+    map_tiles._prune_cache()  # the cache directory does not exist yet
+    monkeypatch.setattr(map_tiles, "_fetch_upstream", _stub_upstream(client))
+    client.get("/api/reels/map-tiles/3/0/0.png")
+    leftover = map_tiles._tile_cache_path(3, 0, 0).with_name("0.png.tmp-123")
+    leftover.write_bytes(b"x" * (4 << 20))
+    monkeypatch.setattr(map_tiles, "MAX_CACHE_BYTES", 2 * len(FAKE_TILE_PNG))
+    map_tiles._prune_cache()
+    assert map_tiles._tile_cache_path(3, 0, 0).is_file()

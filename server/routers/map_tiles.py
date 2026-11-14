@@ -25,6 +25,7 @@ Hard contracts:
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import os
 import threading
@@ -130,11 +131,24 @@ CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
 
 # Per-IP sliding-window guard counted on upstream fetches only (cache hits are
 # free). A heavy VR zoom session pulls bursts of ≤ ~200 tile slots × 2 layers;
-# the cap blocks whole-planet enumeration without touching legit play.
+# the cap blocks whole-planet enumeration without touching legit play. A second
+# budget caps upstream fetches for all clients together, so many IPs cannot
+# add up to a load the provider's usage policy would block.
 RATE_LIMIT_COUNT = 720
 RATE_LIMIT_WINDOW_S = 60.0
+GLOBAL_RATE_LIMIT_COUNT = 6000
+GLOBAL_RATE_LIMIT_WINDOW_S = 3600.0
 _rate_lock = threading.Lock()
 _rate_hits: dict[str, list[float]] = {}
+_global_hits: collections.deque[float] = collections.deque()
+_next_rate_sweep = 0.0  # monotonic time of the next sweep of idle _rate_hits keys
+
+# Disk cache cap: past it, the oldest-fetched tiles are deleted down to
+# CACHE_PRUNE_TARGET of the cap. A pruned tile is fetched again on demand.
+MAX_CACHE_BYTES = 2 << 30
+CACHE_PRUNE_TARGET = 0.8
+_cache_size_lock = threading.Lock()
+_cache_bytes: int | None = None  # None until the first store measures the directory
 
 
 class UpstreamTileError(Exception):
@@ -204,15 +218,34 @@ def _validate_tile_payload(data: bytes, content_type: str) -> None:
 
 def _check_fetch_rate(identity: str) -> bool:
     """Sliding-window per-IP cap on upstream fetches (cache hits never count)."""
+    global _next_rate_sweep
     now = time.monotonic()
     cutoff = now - RATE_LIMIT_WINDOW_S
     with _rate_lock:
+        if now >= _next_rate_sweep:
+            # Drop clients with no hit left in the window, so the table stays small.
+            for idle in [key for key, times in _rate_hits.items() if not times or times[-1] <= cutoff]:
+                del _rate_hits[idle]
+            _next_rate_sweep = now + RATE_LIMIT_WINDOW_S
         hits = [t for t in _rate_hits.get(identity, []) if t > cutoff]
         if len(hits) >= RATE_LIMIT_COUNT:
             _rate_hits[identity] = hits
             return False
         hits.append(now)
         _rate_hits[identity] = hits
+    return True
+
+
+def _check_global_rate() -> bool:
+    """Sliding-window cap on upstream fetches from all clients together."""
+    now = time.monotonic()
+    cutoff = now - GLOBAL_RATE_LIMIT_WINDOW_S
+    with _rate_lock:
+        while _global_hits and _global_hits[0] <= cutoff:
+            _global_hits.popleft()
+        if len(_global_hits) >= GLOBAL_RATE_LIMIT_COUNT:
+            return False
+        _global_hits.append(now)
     return True
 
 
@@ -231,7 +264,38 @@ def _store_tile(cache_file: Path, data: bytes) -> None:
         tmp.write_bytes(data)
         os.replace(tmp, cache_file)
     except OSError:
-        pass  # caching is an optimization; serving the bytes still succeeded
+        return  # caching is an optimization; serving the bytes still succeeded
+    global _cache_bytes
+    with _cache_size_lock:
+        if _cache_bytes is None:
+            _prune_cache()  # measures the directory (and prunes if already over)
+        else:
+            _cache_bytes += len(data)
+        if _cache_bytes > MAX_CACHE_BYTES:
+            _prune_cache()
+
+
+def _prune_cache() -> None:
+    """Delete the oldest-fetched tiles until the cache is at or under
+    CACHE_PRUNE_TARGET of MAX_CACHE_BYTES, and record the resulting size."""
+    global _cache_bytes
+    tiles = []
+    for path in _cache_dir().rglob("*.png"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue  # vanished while listing
+        if path.is_file():
+            tiles.append((stat.st_mtime, stat.st_size, path))
+    total = sum(size for _, size, _ in tiles)
+    if total > MAX_CACHE_BYTES:
+        target = MAX_CACHE_BYTES * CACHE_PRUNE_TARGET
+        for _, size, path in sorted(tiles, key=lambda tile: tile[0]):
+            if total <= target:
+                break
+            path.unlink(missing_ok=True)
+            total -= size
+    _cache_bytes = total
 
 
 def _tile_headers() -> dict[str, str]:
@@ -308,7 +372,7 @@ def _serve_tile(layer: str, z: int, x: int, y: int, request: Request):
         return FileResponse(str(cache_file), media_type=media_type, headers=_tile_headers())
 
     identity = request_identity(request)
-    if not _check_fetch_rate(identity):
+    if not _check_fetch_rate(identity) or not _check_global_rate():
         raise HTTPException(
             status_code=429,
             detail={"code": "MAP_TILE_RATE_LIMITED", "message": "Tile fetch budget exhausted; cached tiles still serve."},
