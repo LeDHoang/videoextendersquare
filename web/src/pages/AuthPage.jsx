@@ -74,7 +74,9 @@ export default function AuthPage({ mode = 'login' }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(null);
-  const bot = useBotCheck(isRegister ? 'signup' : 'login');
+  // Sign-in shows the bot check only once the server asks for one (after repeated failures).
+  const [botWanted, setBotWanted] = useState(false);
+  const bot = useBotCheck(isRegister ? 'signup' : 'login', isRegister || botWanted);
   const [unverifiedHint, setUnverifiedHint] = useState(false);
   const [suspendedHint, setSuspendedHint] = useState(false);
   const fields = useRef({});
@@ -168,6 +170,9 @@ export default function AuthPage({ mode = 'login' }) {
       if (isRegister && ['email', 'username', 'password', 'accept_terms'].includes(field)) {
         setServerErrors((current) => ({ ...current, [field]: message }));
         focusField(field);
+      } else if (!isRegister && requestError?.code === 'BOT_CHECK_FAILED' && !botWanted) {
+        setBotWanted(true);
+        setError('Too many failed sign-ins. Complete the bot check, then sign in.');
       } else {
         setError(message);
         if (requestError?.code === 'ACCOUNT_SUSPENDED') setSuspendedHint(true);
@@ -205,6 +210,11 @@ export default function AuthPage({ mode = 'login' }) {
       const result = await resendVerification(identifier, turnstileToken);
       setSent({ email: identifier, debugToken: result?.debug_token || '' });
     } catch (requestError) {
+      if (requestError?.code === 'BOT_CHECK_FAILED' && !botWanted) {
+        setBotWanted(true);
+        setError('Complete the bot check before resending the link.');
+        return;
+      }
       setError(requestError?.message || 'Could not resend the email.');
     } finally {
       setBusy(false);

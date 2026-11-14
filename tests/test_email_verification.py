@@ -347,6 +347,7 @@ def test_turnstile_outage_fails_closed(env, turnstile_on, monkeypatch):
 def test_turnstile_token_for_another_form_is_refused(env, turnstile_on):
     client, _Session, _sent = env
     _verified_user(client)
+    _fail_logins(client, ["newbie"] * 5)
     for token in ("good-signup", "good-support", "good-"):
         _bot_refused(
             client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": token})
@@ -397,9 +398,24 @@ def _verified_user(client):
     client.cookies.clear()
 
 
-def test_login_needs_turnstile_when_on(env, turnstile_on):
+def _fail_logins(client, identifiers):
+    for identifier in identifiers:
+        assert _login(client, identifier, "wrong").status_code == 401
+
+
+def test_login_skips_turnstile_before_failures(env, turnstile_on):
     client, _Session, _sent = env
     _verified_user(client)
+    calls = len(turnstile_on)
+    _fail_logins(client, ["newbie"] * 4)
+    assert _login(client, "newbie").status_code == 200
+    assert len(turnstile_on) == calls
+
+
+def test_login_needs_turnstile_after_five_failures_on_the_account(env, turnstile_on):
+    client, _Session, _sent = env
+    _verified_user(client)
+    _fail_logins(client, ["newbie"] * 5)
     _bot_refused(_login(client, "newbie"))
     _bot_refused(
         client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "bad-token"})
@@ -409,9 +425,31 @@ def test_login_needs_turnstile_when_on(env, turnstile_on):
     assert ok.status_code == 200, ok.text
 
 
+def test_login_needs_turnstile_after_five_failures_from_one_ip(env, turnstile_on):
+    # Unknown accounts count too, so the rule is no account-probing oracle.
+    client, _Session, _sent = env
+    _verified_user(client)
+    _fail_logins(client, [f"ghost{n}" for n in range(5)])
+    _bot_refused(_login(client, "newbie"))
+    ok = client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "good-login"})
+    assert ok.status_code == 200, ok.text
+
+
+def test_login_failures_are_forgotten_after_15_minutes(env, turnstile_on, monkeypatch):
+    client, _Session, _sent = env
+    _verified_user(client)
+    now = [1000.0]
+    monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
+    _fail_logins(client, ["newbie"] * 5)
+    _bot_refused(_login(client, "newbie"))
+    now[0] += 15 * 60 + 1
+    assert _login(client, "newbie").status_code == 200
+
+
 def test_tokenless_logins_do_not_burn_the_account_limit(env, turnstile_on):
     client, _Session, _sent = env
     _verified_user(client)
+    _fail_logins(client, ["newbie"] * 5)
     for _ in range(12):
         _bot_refused(_login(client, "newbie", "wrong"))
     ok = client.post("/api/auth/login", json={"identifier": "newbie", "password": PASSWORD, "turnstile_token": "good-login"})

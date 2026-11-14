@@ -646,26 +646,35 @@ def resend_verification(
     return _verification_accepted(raw_token)
 
 
+LOGIN_FAILURES_BEFORE_BOT_CHECK = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+
+
 @router.post("/api/auth/login")
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
     identity = request_identity(request)
     if settings.login_rate_limit_enabled():
         rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
-    # Before the per-account limit, so tokenless bots cannot lock someone out.
-    verify_turnstile(req.turnstile_token, identity, "login")
-    if settings.login_rate_limit_enabled():
-        rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
+    # The bot check starts after LOGIN_FAILURES_BEFORE_BOT_CHECK wrong passwords on this
+    # account or from this IP. Unknown accounts count too, so it is no probing oracle.
+    failure_keys = (f"login-fail-account:{identifier}", f"login-fail-ip:{identity}")
+    if any(rate_limiter.count(key, LOGIN_FAILURE_WINDOW_SECONDS) >= LOGIN_FAILURES_BEFORE_BOT_CHECK for key in failure_keys):
+        # Before the per-account limit, so tokenless bots cannot lock someone out.
+        verify_turnstile(req.turnstile_token, identity, "login")
+    if settings.login_rate_limit_enabled():
+        rate_limiter.check(db, f"login-account:{identifier}", 10, 15 * 60)
     user = db.query(User).filter(
         User.status.in_(("active", "suspended")),
         User.account_type == "real",
         or_(User.email_norm == identifier, User.username_norm == identifier),
     ).first()
-    if not user:
-        _verify_dummy_password(req.password)
-        error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
-    if not verify_password(user.password_hash, req.password):
+    if not user or not verify_password(user.password_hash, req.password):
+        if not user:
+            _verify_dummy_password(req.password)
+        for key in failure_keys:
+            rate_limiter.record(key, LOGIN_FAILURE_WINDOW_SECONDS)
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
     # Only after the right password, so the status is not an account-probing oracle.
     if user.status == "suspended":

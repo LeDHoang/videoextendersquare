@@ -375,46 +375,55 @@ describe('AuthPage — bot check on sign-in', () => {
     type('PASSWORD', 'whatever-123');
   };
 
-  it('blocks sign-in until the bot check is solved, then sends its token', async () => {
+  const BOT_FAILED = new FakeApiError('Bot check failed. Try again.', { code: 'BOT_CHECK_FAILED', field: 'turnstile_token' });
+
+  it('signs in without a bot check before any failed attempts', async () => {
     renderAt('/login');
     fillLogin();
-    const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
-    expect(solve).toHaveAttribute('data-action', 'login');
+    expect(screen.queryByRole('button', { name: 'SOLVE BOT CHECK' })).not.toBeInTheDocument();
     submit();
-    expect(mocks.auth.login).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
-    fireEvent.click(solve);
-    submit();
-    await waitFor(() => expect(mocks.auth.login).toHaveBeenCalledWith({ identifier: 'me@example.com', password: 'whatever-123', turnstile_token: 'cf-token' }));
+    await waitFor(() => expect(mocks.auth.login).toHaveBeenCalledWith({ identifier: 'me@example.com', password: 'whatever-123' }));
   });
 
-  it('asks for a fresh bot check after a failed sign-in (tokens are single use)', async () => {
-    mocks.auth.login.mockRejectedValue(INVALID);
+  it('shows the bot check once the server asks for one, then sends its token', async () => {
+    mocks.auth.login.mockRejectedValueOnce(BOT_FAILED);
     renderAt('/login');
     fillLogin();
+    submit();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many failed sign-ins');
+    const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+    expect(solve).toHaveAttribute('data-action', 'login');
+    fireEvent.click(solve);
+    submit();
+    await waitFor(() => expect(mocks.auth.login).toHaveBeenLastCalledWith({ identifier: 'me@example.com', password: 'whatever-123', turnstile_token: 'cf-token' }));
+  });
+
+  it('asks for a fresh bot check after a failed sign-in once it is shown (tokens are single use)', async () => {
+    mocks.auth.login.mockRejectedValueOnce(BOT_FAILED).mockRejectedValue(INVALID);
+    renderAt('/login');
+    fillLogin();
+    submit();
     fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
     submit();
     await screen.findByText(/Incorrect email/);
     type('PASSWORD', 'another-try-1');
     submit();
-    expect(mocks.auth.login).toHaveBeenCalledTimes(1);
+    expect(mocks.auth.login).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
   });
 
-  it('sends a fresh token with the resend from the sign-in hint', async () => {
+  it('shows the bot check for the resend from the sign-in hint when the server asks for one', async () => {
     mocks.auth.login.mockRejectedValue(INVALID);
-    mocks.api.post.mockResolvedValue({ verification_sent: true });
+    mocks.api.post.mockRejectedValueOnce(BOT_FAILED).mockResolvedValue({ verification_sent: true });
     renderAt('/login');
     fillLogin();
-    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
     submit();
     await screen.findByText(/Incorrect email/);
     fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
-    expect(mocks.api.post).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
-    fireEvent.click(screen.getByRole('button', { name: 'SOLVE BOT CHECK' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Complete the bot check');
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
     fireEvent.click(screen.getByRole('button', { name: 'Resend the link' }));
-    await waitFor(() => expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/resend-verification', { email: 'me@example.com', turnstile_token: 'cf-token' }));
+    await waitFor(() => expect(mocks.api.post).toHaveBeenLastCalledWith('/api/auth/resend-verification', { email: 'me@example.com', turnstile_token: 'cf-token' }));
   });
 });
 
@@ -570,7 +579,11 @@ describe('AuthPage — create account', () => {
     it('drops a sign-in token when switching to create account', async () => {
       // /login and /signup share one AuthPage, and the server refuses a login token at sign-up.
       mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+      mocks.auth.login.mockRejectedValueOnce(new FakeApiError('Bot check failed. Try again.', { code: 'BOT_CHECK_FAILED', field: 'turnstile_token' }));
       renderAt('/login');
+      type('EMAIL OR USERNAME', 'me@example.com');
+      type('PASSWORD', 'whatever-123');
+      submit();
       fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
       fireEvent.click(screen.getAllByRole('link', { name: 'CREATE ACCOUNT' })[0]);
       expect(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' })).toHaveAttribute('data-action', 'signup');
