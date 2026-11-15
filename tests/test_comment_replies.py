@@ -118,7 +118,7 @@ def test_comment_list_hides_inactive_authors_like_the_feed(app, clients):  # noq
 def test_app_expects_the_migration_head(tmp_path, monkeypatch):
     # The app refuses to boot unless the database is at EXPECTED_SCHEMA_REVISION.
     head = ScriptDirectory.from_config(_alembic(_urls(tmp_path)[0], monkeypatch)).get_current_head()
-    assert EXPECTED_SCHEMA_REVISION == head == "20261114_0025"
+    assert EXPECTED_SCHEMA_REVISION == head == "20261115_0026"
 
 
 @pytest.mark.parametrize("index", [0, 1])

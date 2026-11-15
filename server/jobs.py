@@ -37,12 +37,14 @@ TERMINAL_STATUSES = frozenset({JobStatus.COMPLETE, JobStatus.FAILED, JobStatus.C
 _PRIVATE_RESULT_KEYS = ("path", "preview")
 
 
-def _log_outcome(record: "JobRecord", seconds: float | None) -> None:
-    """Add how the job ended to its upload's trace (server/upload_log.py); never raises."""
+def _log_outcome(record: "JobRecord", seconds: float | None, kept: dict | None = None) -> None:
+    """Add how the job ended to its upload's trace (server/upload_log.py) and to its
+    owner's media list (server/render_index.py); never raises. *kept*: what R2 now holds."""
     try:
-        from server import upload_log
+        from server import render_index, upload_log
 
         upload_log.job_finished(record, seconds)
+        render_index.finished(record, kept)
     except Exception:
         logger.exception("Could not log the outcome of job %s", record.job_id)
 
@@ -236,6 +238,11 @@ class JobManager:
         with self._lock:
             return self._jobs.setdefault(job_id, record)
 
+    def is_live(self, job_id: str) -> bool:
+        """Whether this process holds the job's record (no R2 lookup)."""
+        with self._lock:
+            return job_id in self._jobs
+
     def list_jobs(self, kind: str | None = None) -> list[dict]:
         with self._lock:
             jobs = list(self._jobs.values())
@@ -331,8 +338,7 @@ class JobManager:
                     record.result = result
                 from server.output import keep
 
-                keep(record)
-                _log_outcome(record, time.monotonic() - t0)
+                _log_outcome(record, time.monotonic() - t0, keep(record))
             except JobCancelled as ex:
                 seconds = time.monotonic() - t0
                 self._finish_cancelled(record, ex, elapsed=fmt_elapsed(seconds), seconds=seconds)

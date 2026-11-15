@@ -222,3 +222,66 @@ def test_publish_rejects_mixed_or_oversized_posts(client, tmp_path):
     finally:
         for stage_id in stage_ids:
             image_router.STAGED_UPLOADS.pop(stage_id, None)
+
+
+def _job(tmp_path, owner_id, job_id, color, *, size=(32, 32), kind="image", ext="png", **result):
+    """A finished job whose result is an image of one colour."""
+    from server.jobs import JobStatus, job_manager
+
+    path = tmp_path / f"{job_id}.{ext}"
+    Image.new("RGB", size, color).save(path, "PNG")
+    job_manager.create_job(kind=kind, owner_id=owner_id, job_id=job_id)
+    record = job_manager.get_job(job_id)
+    with record._lock:
+        record.status = JobStatus.COMPLETE
+        record.result = {"path": str(path), **result}
+    return job_id
+
+
+def _drop_jobs(*job_ids):
+    from server.jobs import job_manager
+
+    for job_id in job_ids:
+        job_manager.discard_job(job_id)
+
+
+def test_publish_multi_image_post_from_made_square_results(client, tmp_path):
+    user = _register(client, "slide_jobs")
+    cover = _job(tmp_path, user["id"], "slidejobcov1", (10, 0, 0))
+    second = _job(tmp_path, user["id"], "slidejobtwo1", (20, 0, 0))
+    third = _stage(tmp_path, user, "slide-jobs-stage", (30, 0, 0))
+    try:
+        response = _publish(client, {
+            "kind": "image", "title": "Made square", "job_id": cover,
+            "extra_items": [{"job_id": second}, {"stage_id": third}],
+        })
+        assert response.status_code == 200, response.text
+        images = response.json()["meta"]["images"]
+        reds = [Image.open(tmp_path / "output" / image["path"]).convert("RGB").getpixel((0, 0))[0] for image in images]
+        assert reds == [10, 20, 30]
+    finally:
+        _drop_jobs(cover, second)
+        image_router.STAGED_UPLOADS.pop(third, None)
+
+
+def test_publish_rejects_slides_that_are_foreign_3d_or_not_images(client, tmp_path):
+    user = _register(client, "slide_jobs_bad")
+    cover = _stage(tmp_path, user, "slide-bad-cover", (1, 1, 1))
+    foreign = _job(tmp_path, "someone-else", "slidejobfor1", (2, 2, 2))
+    stereo = _job(tmp_path, user["id"], "slidejobsbs1", (3, 3, 3), size=(64, 32), stereo_layout="sbs")
+    clip = _job(tmp_path, user["id"], "slidejobvid1", (4, 4, 4), kind="video", ext="mp4")
+    try:
+        def post(extra):
+            return _publish(client, {"kind": "image", "title": "Bad", "stage_id": cover, "extra_items": [extra]})
+
+        assert post({"job_id": foreign}).status_code == 403
+        assert post({"job_id": stereo}).status_code == 422
+        assert post({"job_id": clip}).status_code == 400
+        assert post({"stage_id": cover}).status_code == 400
+        assert post({"stage_id": cover, "job_id": foreign}).status_code == 400
+        with client.testing_session() as db:
+            assert db.query(Post).count() == 0
+    finally:
+        _drop_jobs(foreign, stereo, clip)
+        image_router.STAGED_UPLOADS.pop(cover, None)
+

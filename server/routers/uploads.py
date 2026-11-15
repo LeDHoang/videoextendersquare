@@ -16,7 +16,7 @@ import uuid
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -26,9 +26,9 @@ from sqlalchemy.orm import Session
 
 from pipeline.stereo_detect import eye_size, layout_matches
 from server import media as SM
-from server import kill_switch, media_store, metrics, output, quotas, trust, upload_log
-from server.jobs import JobStatus, job_manager
-from server.social.auth import AuthContext, require_auth_csrf, stage_owner_matches
+from server import kill_switch, media_store, metrics, output, quotas, render_index, trust, upload_log
+from server.jobs import JobStatus, job_manager, job_retention_seconds
+from server.social.auth import AuthContext, aware, require_auth, require_auth_csrf, stage_owner_matches
 from server.social.database import get_db
 from server.social.services import MAX_POST_IMAGES, create_or_update_post, post_card
 
@@ -43,6 +43,8 @@ _TITLE_MAX = 100
 _CAPTION_MAX = 2200
 _TAGS_MAX = 5
 _TAG_RE = re.compile(r"^[a-z0-9_]{1,30}$")
+# Most results one account lists (GET /mine).
+MINE_LIMIT = 300
 
 
 class UploadLocation(BaseModel):
@@ -54,6 +56,13 @@ class UploadLocation(BaseModel):
     osm_id: str | int | None = None
 
 
+class SlideSource(BaseModel):
+    """One more image of a multi-image post: a staged upload or a finished job, never both."""
+
+    stage_id: str | None = None
+    job_id: str | None = None
+
+
 class PublishRequest(BaseModel):
     kind: Literal["image", "video"]
     title: str
@@ -63,8 +72,9 @@ class PublishRequest(BaseModel):
     # Exactly one source pointer is required.
     stage_id: str | None = None
     job_id: str | None = None
-    # More staged images for a multi-image (slideshow) post, after the cover
-    # stage_id. Image posts only, published as-is (no extend pipeline).
+    # More images of a multi-image (slideshow) post, after the cover, in order.
+    # Image posts only. extra_stage_ids is the older form: staged uploads only.
+    extra_items: list[SlideSource] = []
     extra_stage_ids: list[str] = []
     # Stereoscopic layout of an as-is upload: "sbs" (full side-by-side, 2:1)
     # or "tb" (full top-bottom, 1:2). Every image of a slideshow must match.
@@ -73,6 +83,9 @@ class PublishRequest(BaseModel):
     # "sbsd"): none, or one per stored file in order (cover, then extras).
     # Each is stored beside its file as <stem>-depth for the VR player.
     spatial_job_ids: list[str] = []
+
+    def extras(self) -> list[SlideSource]:
+        return self.extra_items or [SlideSource(stage_id=stage_id) for stage_id in self.extra_stage_ids if stage_id]
 
     @field_validator("title")
     @classmethod
@@ -116,19 +129,29 @@ def _resolve_extra_images(
     request: Request,
     context: AuthContext,
 ) -> list[str]:
-    """Validate and resolve a slideshow's extra staged images, in order."""
-    extras = [stage_id for stage_id in req.extra_stage_ids if stage_id]
+    """Validate and resolve a slideshow's extra images (staged uploads or finished jobs), in order."""
+    extras = req.extras()
     if not extras:
         return []
     if req.kind != "image":
         raise HTTPException(status_code=400, detail="A video post holds exactly one video; images and videos cannot be mixed.")
-    if req.job_id or not req.stage_id:
-        raise HTTPException(status_code=400, detail="Multi-image posts are published as-is; extended images cannot be combined.")
     if len(extras) + 1 > MAX_POST_IMAGES:
         raise HTTPException(status_code=400, detail=f"An image post holds at most {MAX_POST_IMAGES} images.")
-    if len(set(extras)) != len(extras) or req.stage_id in extras:
+    pointers = [(req.stage_id, req.job_id), *((extra.stage_id, extra.job_id) for extra in extras)]
+    if len(set(pointers)) != len(pointers):
         raise HTTPException(status_code=400, detail="The same image was added twice.")
-    return [_resolve_source("image", stage_id, None, request, context)[0] for stage_id in extras]
+    paths = []
+    for extra in extras:
+        path, _name = _resolve_source("image", extra.stage_id, extra.job_id, request, context)
+        if extra.job_id:
+            # _resolve_source checks a staged file's kind, not a job's.
+            if Path(path).suffix.lstrip(".").lower() not in SM.IMAGE_EXTS:
+                raise HTTPException(status_code=400, detail="A multi-image post holds images only.")
+            layout = job_manager.get_job(extra.job_id).result.get("stereo_layout") or "mono"
+            if layout != req.stereo_layout:
+                raise HTTPException(status_code=422, detail="Every image of a post must be 2D, or the same 3D layout.")
+        paths.append(path)
+    return paths
 
 
 _STEREO_NAMES = {"sbs": "side-by-side (2:1)", "tb": "top-bottom (1:2)"}
@@ -203,9 +226,8 @@ def _resolve_spatial_sources(
         raise HTTPException(status_code=422, detail="A 3D stereo post has no separate spatial version.")
     if len(req.spatial_job_ids) != slot_count:
         raise HTTPException(status_code=422, detail="Send one spatial version per file of the post.")
-    extras = [stage_id for stage_id in req.extra_stage_ids if stage_id]
     slots = [{"stage_id": req.stage_id, "job_id": req.job_id}]
-    slots += [{"stage_id": stage_id, "job_id": None} for stage_id in extras]
+    slots += [{"stage_id": extra.stage_id, "job_id": extra.job_id} for extra in req.extras()]
     paths = []
     for job_id, slot in zip(req.spatial_job_ids, slots):
         path, _name = _resolve_source(req.kind, None, job_id, request, context)
@@ -593,6 +615,118 @@ def _resolve_source(
     return src_path, Path(src_path).name
 
 
+def staged_filename(stage_id: str | None) -> str | None:
+    """The name a staged upload had on the user's device, or None."""
+    from server.routers import image as image_router
+    from server.routers import video as video_router
+
+    staged = image_router.STAGED_UPLOADS.get(stage_id or "") or video_router.STAGED_UPLOADS.get(stage_id or "")
+    return staged[3] if staged and len(staged) > 3 else None
+
+
+def _live_stages(user_id: str) -> list[dict]:
+    """The user's staged uploads that can still be processed or published."""
+    from server.routers import image as image_router
+    from server.routers import video as video_router
+
+    owner = f"user:{user_id}"
+    now = time.time()
+    stages = []
+    for kind, module in (("image", image_router), ("video", video_router)):
+        for stage_id, entry in list(module.STAGED_UPLOADS.items()):
+            if entry[2] != owner or now - entry[1] > module.STAGE_TTL_S or not Path(entry[0]).is_file():
+                continue
+            stages.append({
+                "stage_id": stage_id,
+                "kind": kind,
+                "filename": entry[3] if len(entry) > 3 else None,
+                "staged_at": datetime.fromtimestamp(entry[1], timezone.utc).isoformat(),
+            })
+    return stages
+
+
+def _render_item(row, expires_at: datetime | None) -> dict:
+    download = f"/api/{row.kind}/jobs/{row.id}/download"
+    if row.kept and row.file_name:
+        prefix = output._r2_prefix(row.id)
+        # The H.264 preview plays in any browser; the HEVC master may not.
+        media_url = media_store.public_url(prefix + (row.preview_name or row.file_name))
+        thumb_url = media_store.public_url(prefix + row.thumb_name) if row.thumb_name else None
+    else:
+        record = job_manager.get_job(row.id) if job_manager.is_live(row.id) else None
+        preview = bool(record and isinstance(record.result, dict) and record.result.get("preview"))
+        media_url = f"{download}?kind=preview" if preview else download
+        thumb_url = None
+    return {
+        "job_id": row.id,
+        "kind": row.kind,
+        "role": row.role,
+        "source_stage_id": row.source_stage_id,
+        "source_job_id": row.source_job_id,
+        "filename": row.filename,
+        "status": row.status,
+        "kept": bool(row.kept),
+        "post_id": row.post_id,
+        "created_at": aware(row.created_at).isoformat(),
+        "updated_at": aware(row.updated_at).isoformat(),
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "download_url": download,
+        "media_url": media_url,
+        "thumb_url": thumb_url,
+    }
+
+
+@router.get("/mine")
+def my_uploads(
+    sort: Literal["added", "last_action"] = "last_action",
+    context: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """The caller's job results (made square, MAKE 3D, spatial) and their staged uploads still alive.
+
+    A result is listed while its files can be read: 30 days once R2 holds them
+    (``kept``), else as long as this process keeps the job.
+    """
+    from server.routers.image import STAGE_TTL_S
+    from server.social.models import UserRender
+
+    now = datetime.now(timezone.utc)
+    kept_for = timedelta(days=upload_log.JOB_RESULT_DAYS)
+    memory_for = timedelta(seconds=job_retention_seconds())
+    order = UserRender.created_at if sort == "added" else UserRender.updated_at
+    rows = (
+        db.query(UserRender)
+        .filter(UserRender.user_id == context.user.id, UserRender.created_at >= now - kept_for)
+        .order_by(order.desc())
+        .limit(MINE_LIMIT)
+        .all()
+    )
+    items = []
+    for row in rows:
+        live = job_manager.is_live(row.id)
+        if row.status == "working" and not live:
+            # The process restarted under it: the job is gone.
+            row.status = "failed"
+        expires_at = None
+        if row.status == "ready":
+            if row.kept:
+                expires_at = aware(row.finished_at or row.created_at) + kept_for
+            else:
+                expires_at = aware(row.created_at) + memory_for
+            if expires_at <= now or not (row.kept or live):
+                continue
+        items.append(_render_item(row, expires_at))
+    db.commit()
+    return {
+        "items": items,
+        "stages": _live_stages(context.user.id),
+        "retention": {
+            "stage_seconds": STAGE_TTL_S,
+            "result_seconds": int((kept_for if media_store.enabled() else memory_for).total_seconds()),
+        },
+    }
+
+
 @router.post("/publish")
 def publish_upload(
     req: PublishRequest,
@@ -613,6 +747,9 @@ def publish_upload(
         )
         raise
     spatial = body.pop("spatial")
+    render_index.published(
+        [req.job_id, *(extra.job_id for extra in req.extras()), *req.spatial_job_ids], body["post_id"],
+    )
     upload_log.record(
         trace_id, "publish", post_id=body["post_id"], user_id=context.user.id, kind=req.kind,
         job_id=req.job_id, rel_path=body["rel_path"], ms=round((time.monotonic() - started) * 1000),

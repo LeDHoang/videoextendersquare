@@ -24,7 +24,7 @@ from pipeline.stereo_detect import detect_stereo
 from server import media as SM
 from server import upload_log
 from server import output
-from server import kill_switch, quotas, trust
+from server import kill_switch, quotas, render_index, trust
 from server.jobs import JobStatus, QueueFull, job_manager, public_result
 from server.sse import job_progress_stream
 from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf, stage_owner_identity, stage_owner_matches, validate_origin
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/video", tags=["video"])
 # stage_id -> (path, staged_at). Entries older than STAGE_TTL_S are evicted by
 # cleanup_stale_uploads() (called periodically from server/app.py's lifespan)
 # so an abandoned upload doesn't hold its temp file forever.
-STAGED_UPLOADS: dict[str, tuple[str, float, str]] = {}
+STAGED_UPLOADS: dict[str, tuple] = {}
 STAGE_TTL_S = 6 * 3600
 
 # Fields the worker branches on by exact string match (server/pipeline/video_worker.py) —
@@ -161,7 +161,7 @@ def upload_video(
     except SM.StagingFull as ex:
         raise quotas.storage_full_error(str(ex)) from ex
 
-    STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
+    STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context), file.filename)
 
     w, h, dur = get_video_dimensions_and_duration(dest_path)
     # Stereo layout follows the frame as shown (rotation applied): ffmpeg
@@ -417,6 +417,10 @@ def start_video_process(
         return rec
 
     upload_log.link_job(job_id, stage_id)
+    render_index.started(
+        job_id, user_id=owner_id, kind="video", stage_id=stage_id,
+        filename=staged[3] if len(staged) > 3 else None,
+    )
     upload_log.record(
         stage_id, "process_queued", kind="video", job_id=job_id, user_id=owner_id,
         payment_source=payment_source if cloud_required else "local", params=params,

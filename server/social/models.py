@@ -890,6 +890,37 @@ class UploadTrace(Base):
     __table_args__ = (Index("ix_upload_traces_status_created", "status", "created_at"),)
 
 
+class UserRender(Base):
+    """One job result of a user (made square, MAKE 3D, spatial): what the Upload page lists as their media.
+
+    Written by ``server.render_index``. The files live in the job dir and, once ``kept``,
+    in the public R2 bucket under ``jobs/<hash>/`` for 30 days. ``user_id`` has no foreign
+    key, like ``upload_traces``.
+    """
+
+    __tablename__ = "user_renders"
+
+    id = Column(String(64), primary_key=True)  # the job id
+    user_id = Column(String(36), nullable=False, index=True)
+    kind = Column(String(8), nullable=False)
+    role = Column(String(8), nullable=False, default="square")  # square | 3d | spatial
+    # What the job was made from: a staged upload, or (3d / spatial of a render) another job.
+    source_stage_id = Column(String(64), nullable=True)
+    source_job_id = Column(String(64), nullable=True)
+    filename = Column(String(255), nullable=True)
+    status = Column(String(12), nullable=False, default="working")  # working | ready | failed | cancelled
+    kept = Column(Boolean, nullable=False, default=False)
+    file_name = Column(String(80), nullable=True)
+    preview_name = Column(String(80), nullable=True)
+    thumb_name = Column(String(80), nullable=True)
+    post_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_user_renders_user_created", "user_id", "created_at"),)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
