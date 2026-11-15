@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>ECHO Upload Redesign</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* The report and every mockup use ECHO's own Paper & Ink tokens, copied from web/src/styles/tokens.css
+   (the :root:root block, and [data-theme='dark'] for carbon). Mockups (.scr) are drawn at 1440 x 810
+   and sized in em, so they scale with the frame: 1em = 16px when the frame is 1440px wide. */
+:root {
+  color-scheme: light;
+  --sx-bg: #f2ede3; --sx-surface: #faf7f0; --sx-surface-2: #ebe5d8; --sx-surface-3: #e0d8c7;
+  --sx-rule: #d3cab8; --sx-ink: #17140f; --sx-ink-2: #45403a; --sx-ink-3: #5c554c;
+  --sx-accent: #c2250e; --sx-accent-hi: #a81f0b; --sx-accent-dim: rgba(200, 39, 15, .09); --sx-on-accent: #faf7f0;
+  --sx-spot: #f3d34a; --sx-spot-soft: #f8e7a0; --sx-on-spot: #17140f;
+  --sx-success: #146638; --sx-success-dim: rgba(23, 112, 63, .1);
+  --sx-warn: #7a5200; --sx-warn-dim: rgba(243, 211, 74, .32);
+  --sx-danger: #be123c; --sx-danger-dim: rgba(190, 18, 60, .08);
+  --sx-vr: #6d28d9;
+  --sx-shadow-popover: 0 18px 40px -8px rgba(23, 20, 15, .28);
+  --sx-font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --sx-font-sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --sx-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --sx-bg: #0c0b09; --sx-surface: #14130f; --sx-surface-2: #1c1a16; --sx-surface-3: #25221d;
+    --sx-rule: #2e2a24; --sx-ink: #f5f1e8; --sx-ink-2: #c4bdb0; --sx-ink-3: #a39b8e;
+    --sx-accent: #ff3b1f; --sx-accent-hi: #ff5c42; --sx-accent-dim: rgba(255, 59, 31, .12); --sx-on-accent: #17140f;
+    --sx-success: #22c55e; --sx-success-dim: rgba(34, 197, 94, .12);
+    --sx-warn: #f2c744; --sx-warn-dim: rgba(242, 199, 68, .12);
+    --sx-danger: #f43f5e; --sx-danger-dim: rgba(244, 63, 94, .12);
+    --sx-vr: #8b5cf6; --sx-shadow-popover: 0 18px 40px -8px rgba(0, 0, 0, .7);
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --sx-bg: #0c0b09; --sx-surface: #14130f; --sx-surface-2: #1c1a16; --sx-surface-3: #25221d;
+  --sx-rule: #2e2a24; --sx-ink: #f5f1e8; --sx-ink-2: #c4bdb0; --sx-ink-3: #a39b8e;
+  --sx-accent: #ff3b1f; --sx-accent-hi: #ff5c42; --sx-accent-dim: rgba(255, 59, 31, .12); --sx-on-accent: #17140f;
+  --sx-success: #22c55e; --sx-success-dim: rgba(34, 197, 94, .12);
+  --sx-warn: #f2c744; --sx-warn-dim: rgba(242, 199, 68, .12);
+  --sx-danger: #f43f5e; --sx-danger-dim: rgba(244, 63, 94, .12);
+  --sx-vr: #8b5cf6; --sx-shadow-popover: 0 18px 40px -8px rgba(0, 0, 0, .7);
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 64px; }
+body { margin: 0; background: var(--sx-bg); color: var(--sx-ink); font: 17px/1.55 var(--sx-font-sans); font-feature-settings: 'ss01', 'kern'; }
+::selection { background: var(--sx-spot); color: var(--sx-on-spot); }
+a { color: var(--sx-accent); }
+:focus-visible { outline: 2px solid var(--sx-accent); outline-offset: 3px; }
+code { font: .82em var(--sx-font-mono); background: var(--sx-surface-2); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+/* ── Report shell ── */
+.r-top { position: sticky; top: 0; z-index: 20; background: var(--sx-surface); border-bottom: 1px solid var(--sx-ink); box-shadow: 0 3px 0 var(--sx-surface), 0 4px 0 var(--sx-ink); }
+.r-top-in { max-width: 1520px; margin: 0 auto; padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 20px; }
+.r-brand { font: italic 900 24px/1 var(--sx-font-display); color: var(--sx-accent); letter-spacing: -.03em; text-decoration: none; }
+.r-nav { display: flex; gap: 18px; overflow-x: auto; flex: 1; font-size: 14px; font-weight: 600; white-space: nowrap; scrollbar-width: none; }
+.r-nav a { color: var(--sx-ink-2); text-decoration: none; padding: 4px 0; }
+.r-nav a:hover { color: var(--sx-ink); }
+.r-theme { flex: none; font: 600 13px var(--sx-font-sans); height: 34px; padding: 0 12px; border: 1px solid var(--sx-ink); border-radius: 4px; background: transparent; color: var(--sx-ink); cursor: pointer; }
+.r-theme:hover { background: var(--sx-ink); color: var(--sx-surface); }
+main { max-width: 1520px; margin: 0 auto; padding: 40px 16px 96px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 72px; }
+.col { max-width: 1040px; }
+.kick { display: flex; align-items: center; gap: 10px; font: 600 12px var(--sx-font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--sx-ink-2); margin: 0 0 10px; }
+.kick::before { content: ''; flex: 0 0 28px; height: 2px; background: var(--sx-accent); }
+h1 { font: 900 clamp(44px, 7vw, 92px)/.92 var(--sx-font-display); font-variation-settings: 'opsz' 72, 'WONK' 1; letter-spacing: -.035em; margin: 0; }
+.rule2 { border-top: 2px solid var(--sx-ink); border-bottom: 1px solid var(--sx-ink); height: 6px; margin: 18px 0 0; }
+h2 { font: 700 clamp(28px, 3.4vw, 44px)/1 var(--sx-font-display); font-variation-settings: 'opsz' 72; letter-spacing: -.025em; margin: 0; }
+h2 em { font-weight: 400; }
+.sec-head { padding-bottom: 14px; border-bottom: 2px solid var(--sx-ink); box-shadow: 0 3px 0 var(--sx-bg), 0 4px 0 var(--sx-ink); margin-bottom: 26px; }
+h3 { font: 600 20px/1.2 var(--sx-font-display); letter-spacing: -.015em; margin: 0 0 8px; }
+.lede { font-size: 20px; max-width: 70ch; margin: 22px 0 0; }
+.intro { max-width: 74ch; color: var(--sx-ink-2); margin: 0 0 22px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 28px; border-top: 1px solid var(--sx-ink); border-bottom: 1px solid var(--sx-rule); }
+.stat { padding: 14px 18px 14px 0; border-right: 1px solid var(--sx-rule); }
+.stat + .stat { padding-left: 18px; } .stat:last-child { border-right: 0; }
+.stat b { display: block; font: 700 34px/1 var(--sx-font-sans); font-variant-numeric: lining-nums tabular-nums; letter-spacing: -.01em; }
+.stat span { display: block; margin-top: 6px; font-size: 14px; color: var(--sx-ink-2); }
+.box { background: var(--sx-surface); border: 1px solid var(--sx-ink); border-radius: 4px; padding: 18px 22px; }
+.box.lead { box-shadow: inset 4px 0 0 var(--sx-accent); }
+.box ul, .box ol { margin: 0; padding-left: 20px; } .box li + li { margin-top: 5px; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+.tag { display: inline-block; font: 600 11px/1 var(--sx-font-mono); letter-spacing: .08em; text-transform: uppercase; padding: 5px 8px; border-radius: 4px; background: var(--sx-spot); color: var(--sx-on-spot); }
+.tag.good { background: var(--sx-success-dim); color: var(--sx-success); box-shadow: inset 0 0 0 1px var(--sx-success); }
+.tag.bad { background: var(--sx-danger-dim); color: var(--sx-danger); box-shadow: inset 0 0 0 1px var(--sx-danger); }
+.scroll { overflow-x: auto; border-top: 2px solid var(--sx-ink); border-bottom: 1px solid var(--sx-ink); }
+table { border-collapse: collapse; width: 100%; font-size: 15.5px; min-width: 720px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 16px 10px 0; border-bottom: 1px solid var(--sx-rule); }
+th { font: 600 11px var(--sx-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--sx-ink-3); border-bottom: 1px solid var(--sx-ink); }
+tr:last-child td { border-bottom: 0; }
+td.now { font: 12.5px/1.5 var(--sx-font-mono); color: var(--sx-danger); }
+td.new { font-weight: 600; }
+.letter { font: italic 900 64px/.8 var(--sx-font-display); color: var(--sx-accent); margin-right: 14px; }
+.dh { display: flex; align-items: flex-end; }
+.pin { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sx-accent); color: var(--sx-on-accent); font: 700 12px var(--sx-font-sans); flex: none; }
+ol.pins { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+ol.pins li { display: flex; gap: 10px; }
+figure { margin: 0 0 28px; }
+.cap { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; font-size: 14.5px; color: var(--sx-ink-2); }
+.cap b { color: var(--sx-ink); }
+
+/* ── Mock screens ── */
+.frame { container-type: inline-size; }
+.scr { font-size: calc(100cqw / 90); line-height: 1.4; background: var(--sx-bg); color: var(--sx-ink); font-family: var(--sx-font-sans); border: 1px solid var(--sx-ink); border-radius: 4px; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+.scr.fold { aspect-ratio: 1440 / 810; }
+.scr *, .scr *::before, .scr *::after { min-width: 0; }
+.scr u { text-decoration-thickness: 1px; text-underline-offset: 2px; color: var(--sx-accent); }
+.x-mast { flex: none; height: 4.25em; display: flex; align-items: center; gap: 1.1em; padding: 0 1em; background: var(--sx-surface); border-bottom: 1px solid var(--sx-ink); box-shadow: 0 3px 0 var(--sx-surface), 0 4px 0 var(--sx-ink); position: relative; z-index: 2; margin-bottom: 4px; }
+.x-burger { width: 3em; height: 3em; border: 1px solid var(--sx-ink); border-radius: .25em; display: grid; place-items: center; flex: none; }
+.x-burger i { width: 1.1em; height: 2px; background: var(--sx-ink); box-shadow: 0 .35em 0 var(--sx-ink), 0 -.35em 0 var(--sx-ink); }
+.x-brand { font: italic 900 1.9em/1 var(--sx-font-display); color: var(--sx-accent); letter-spacing: -.03em; }
+.x-nav { font-weight: 600; font-size: .95em; color: var(--sx-ink-2); white-space: nowrap; }
+.x-search { flex: 0 1 27em; margin: 0 auto; height: 3.2em; background: var(--sx-bg); border: 1px solid var(--sx-rule); border-radius: .3em; display: flex; align-items: center; padding: 0 1em; font-size: .88em; font-weight: 500; color: var(--sx-ink-3); }
+.x-credits { height: 3.3em; display: inline-flex; align-items: center; padding: 0 .9em; border: 1px solid var(--sx-ink); border-radius: .3em; font: 600 .85em var(--sx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.x-av { width: 3em; height: 3em; border-radius: .25em; background: var(--sx-ink); color: var(--sx-surface); display: grid; place-items: center; font-weight: 700; font-size: .95em; flex: none; }
+.x-body { flex: 1; display: flex; min-height: 0; }
+.x-page { flex: 1; padding: 1.4em 2em 1.5em; display: flex; flex-direction: column; gap: 1.3em; min-height: 0; }
+.x-open { flex: none; display: flex; align-items: flex-end; justify-content: space-between; gap: 2em; padding-bottom: .8em; border-bottom: 2px solid var(--sx-ink); box-shadow: 0 3px 0 var(--sx-bg), 0 4px 0 var(--sx-ink); margin-bottom: 4px; }
+.x-kick { display: flex; align-items: center; gap: .8em; font: 600 .72em var(--sx-font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--sx-ink-2); }
+.x-kick::before { content: ''; flex: 0 0 2.4em; height: 2px; background: var(--sx-accent); }
+.x-h1 { font: 900 3em/.95 var(--sx-font-display); font-variation-settings: 'opsz' 72, 'WONK' 1; letter-spacing: -.035em; margin-top: .12em; }
+.x-h2 { font: 600 1.6em/1.15 var(--sx-font-display); letter-spacing: -.015em; }
+.x-h3 { font: 600 1.2em/1.2 var(--sx-font-display); letter-spacing: -.01em; }
+.x-p { font-size: .95em; color: var(--sx-ink-2); }
+.x-note { font-size: .8em; color: var(--sx-ink-3); }
+.x-tabs { display: flex; gap: .3em; flex-wrap: wrap; }
+.x-tab { padding: .5em 1em; border: 1px solid transparent; border-radius: .28em; font-weight: 600; font-size: .9em; color: var(--sx-ink-2); white-space: nowrap; }
+.x-tab.on { background: var(--sx-ink); border-color: var(--sx-ink); color: var(--sx-surface); }
+.x-btn { display: inline-flex; align-items: center; justify-content: center; height: 2.9em; padding: 0 1.2em; border: 1px solid var(--sx-ink); border-radius: .26em; font-weight: 600; font-size: .95em; white-space: nowrap; flex: none; }
+.x-btn.pri { background: var(--sx-accent); border-color: var(--sx-accent); color: var(--sx-on-accent); font-weight: 700; font-size: 1em; height: 3em; }
+.x-btn.sm { height: 2.4em; font-size: .85em; padding: 0 .9em; }
+.x-btn.grow { flex: 1 1 auto; }
+.x-btn.dim { opacity: .4; }
+.x-row { display: flex; gap: .7em; align-items: center; }
+.x-two { flex: 1; min-height: 0; display: grid; grid-template-columns: 33.4em 36em; gap: 3.2em; justify-content: center; align-items: start; }
+.x-col { display: flex; flex-direction: column; gap: .9em; position: relative; }
+/* The stage is a screening room: carbon in both themes, square corners, corner brackets. */
+.x-stage { position: relative; aspect-ratio: 1; background: #0c0b09; color: #f5f1e8; display: grid; place-items: center; overflow: hidden; }
+.x-stage::before { content: ''; position: absolute; inset: .7em; z-index: 3; pointer-events: none; opacity: .75; background:
+  linear-gradient(#f5f1e8, #f5f1e8) left top / 1.3em 2px, linear-gradient(#f5f1e8, #f5f1e8) left top / 2px 1.3em,
+  linear-gradient(#f5f1e8, #f5f1e8) right top / 1.3em 2px, linear-gradient(#f5f1e8, #f5f1e8) right top / 2px 1.3em,
+  linear-gradient(#f5f1e8, #f5f1e8) left bottom / 1.3em 2px, linear-gradient(#f5f1e8, #f5f1e8) left bottom / 2px 1.3em,
+  linear-gradient(#f5f1e8, #f5f1e8) right bottom / 1.3em 2px, linear-gradient(#f5f1e8, #f5f1e8) right bottom / 2px 1.3em; background-repeat: no-repeat; }
+.x-hatch { position: absolute; inset: 0; background: repeating-linear-gradient(45deg, rgba(255, 59, 31, .24) 0 .5em, transparent .5em 1em); }
+.x-clip { position: relative; z-index: 1; display: block; }
+.x-clip.tall { height: 100%; aspect-ratio: 9 / 16; } .x-clip.wide { width: 100%; aspect-ratio: 16 / 9; } .x-clip.sq { width: 100%; height: 100%; }
+.g1 { background: linear-gradient(160deg, #2b5876, #4e4376 55%, #c0587e); } .g2 { background: linear-gradient(200deg, #f7971e, #c0392b 60%, #2c1e4a); }
+.g3 { background: linear-gradient(140deg, #134e5e, #71b280); } .g4 { background: linear-gradient(20deg, #41295a, #2f0743 50%, #e96443); }
+.g5 { background: linear-gradient(120deg, #0f2027, #2c5364 60%, #e0c097); } .g6 { background: linear-gradient(300deg, #3a1c71, #d76d77 60%, #ffaf7b); }
+.x-flag { position: absolute; z-index: 4; left: 1.7em; bottom: 1.7em; font: 600 .7em var(--sx-font-mono); letter-spacing: .08em; text-transform: uppercase; background: rgba(12, 11, 9, .86); color: #f5f1e8; padding: .4em .65em; border: 1px solid #4a443b; border-radius: .35em; white-space: nowrap; }
+.x-flag.tl { bottom: auto; top: 1.7em; } .x-flag.inv { background: #f5f1e8; color: #0c0b09; border-color: #f5f1e8; }
+.x-flags { position: absolute; z-index: 4; left: 1.2em; top: 1.2em; display: flex; gap: .3em; }
+.x-flags .x-flag { position: static; }
+.x-badge { display: inline-block; font: 600 .68em/1 var(--sx-font-mono); letter-spacing: .08em; text-transform: uppercase; padding: .45em .6em; border-radius: .35em; background: var(--sx-spot); color: var(--sx-on-spot); white-space: nowrap; }
+.x-badge.ok { background: var(--sx-success); color: var(--sx-bg); } .x-badge.acc { background: var(--sx-accent); color: var(--sx-on-accent); }
+.x-badge.ink { background: var(--sx-ink); color: var(--sx-surface); }
+.x-lab { display: flex; justify-content: space-between; font: 600 .7em var(--sx-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--sx-ink-3); margin-bottom: .5em; }
+.x-in { height: 2.9em; display: flex; align-items: center; padding: 0 .85em; background: var(--sx-surface); border: 1px solid var(--sx-ink); border-radius: .26em; font-size: .95em; color: var(--sx-ink-3); }
+.x-in b { color: var(--sx-ink); font-weight: 500; } .x-in.area { height: 5.2em; align-items: flex-start; padding-top: .65em; }
+.x-opt { display: flex; gap: .8em; align-items: center; padding: .65em .9em; border: 1px solid var(--sx-rule); border-radius: .26em; background: var(--sx-surface); font-weight: 600; font-size: .98em; }
+.x-opt.on { border-color: var(--sx-ink); box-shadow: inset 4px 0 0 var(--sx-accent); }
+.x-opt small { display: block; font-weight: 400; font-size: .85em; color: var(--sx-ink-2); }
+.x-rad { flex: none; width: 1.1em; height: 1.1em; border-radius: 50%; border: 2px solid var(--sx-ink-3); }
+.x-opt.on .x-rad { border-color: var(--sx-accent); background: radial-gradient(var(--sx-accent) 42%, transparent 48%); }
+.x-price { margin-left: auto; font-weight: 700; font-variant-numeric: lining-nums tabular-nums; white-space: nowrap; }
+.x-chk { display: flex; gap: .7em; align-items: center; font-size: .95em; }
+.x-chk i { flex: none; width: 1.15em; height: 1.15em; border: 2px solid var(--sx-ink); border-radius: .2em; display: grid; place-items: center; font-style: normal; font-size: .85em; font-weight: 700; }
+.x-chk.on i { background: var(--sx-ink); color: var(--sx-surface); }
+.x-chk small { color: var(--sx-ink-3); }
+.x-tip { background: var(--sx-spot-soft); color: var(--sx-on-spot); padding: .6em .9em; border-radius: .26em; font-size: .9em; }
+.x-tip u { color: var(--sx-on-spot); font-weight: 700; }
+.x-adv { display: flex; justify-content: space-between; align-items: center; padding: .65em 0; border-top: 1px solid var(--sx-rule); border-bottom: 1px solid var(--sx-rule); font-weight: 600; font-size: .95em; }
+.x-steps { display: flex; border-bottom: 1px solid var(--sx-ink); }
+.x-step { display: flex; align-items: baseline; gap: .5em; padding: 0 0 .55em; margin-right: 2em; color: var(--sx-ink-3); font-weight: 600; font-size: .95em; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.x-step i { font: 900 1.5em/1 var(--sx-font-display); font-style: normal; }
+.x-step.on { color: var(--sx-ink); border-bottom-color: var(--sx-accent); } .x-step.on i { color: var(--sx-accent); }
+.x-step.done i { color: var(--sx-success); }
+.x-drop { aspect-ratio: 1; border: 2px dashed var(--sx-ink); border-radius: .26em; background: var(--sx-surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .9em; text-align: center; padding: 2em; }
+.x-drop .x-h2 { font-style: italic; font-size: 2.2em; font-weight: 700; }
+.x-list { display: grid; gap: .7em; }
+.x-li { display: flex; gap: .9em; align-items: baseline; font-size: .98em; }
+.x-li i { font: 900 1.5em/1 var(--sx-font-display); font-style: normal; color: var(--sx-accent); flex: none; width: .8em; }
+.x-thumbs { display: flex; gap: .5em; }
+.x-thumb { position: relative; width: 4.6em; height: 4.6em; background: #0c0b09; border-radius: .25em; overflow: hidden; display: grid; place-items: center; flex: none; }
+.x-thumb.add { background: transparent; border: 2px dashed var(--sx-ink); font-size: 1em; font-weight: 600; }
+.x-thumb b { position: absolute; z-index: 2; right: .3em; bottom: .3em; width: .7em; height: .7em; border-radius: 50%; background: var(--sx-success); border: 2px solid #0c0b09; }
+.x-thumb b.w { background: var(--sx-spot); } .x-thumb b.a { background: var(--sx-accent); }
+.x-thumb.on { outline: 3px solid var(--sx-accent); outline-offset: -3px; }
+/* Gallery (B) */
+.x-rail { flex: none; width: 26em; background: var(--sx-surface); border-left: 1px solid var(--sx-ink); padding: 1.2em 1.5em; display: flex; flex-direction: column; gap: .85em; }
+.x-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.x-tile { position: relative; aspect-ratio: 1; background: #0c0b09; border-radius: .25em; overflow: hidden; display: grid; place-items: center; }
+.x-tile.on { outline: 3px solid var(--sx-accent); outline-offset: -3px; }
+.x-tile.add { background: var(--sx-surface); border: 2px dashed var(--sx-ink); font-weight: 600; text-align: center; }
+.x-tile.add span { font: 400 2.4em/1 var(--sx-font-display); display: block; }
+.x-tile .x-badge { position: absolute; left: .7em; bottom: .7em; z-index: 2; }
+.x-tile .len { position: absolute; right: .7em; bottom: .7em; z-index: 2; font: 600 .68em var(--sx-font-mono); color: #f5f1e8; background: rgba(12, 11, 9, .7); padding: .3em .5em; border-radius: .3em; }
+.x-tile .dev { position: absolute; left: .7em; top: .7em; z-index: 2; font: 600 .68em var(--sx-font-mono); color: #f5f1e8; background: rgba(12, 11, 9, .7); padding: .3em .5em; border-radius: .3em; }
+.x-ck { position: absolute; right: .6em; top: .6em; z-index: 2; width: 1.4em; height: 1.4em; border: 2px solid #f5f1e8; border-radius: .25em; background: rgba(12, 11, 9, .5); display: grid; place-items: center; color: #17140f; font-weight: 700; font-size: .85em; }
+.x-ck.on { background: #f5f1e8; }
+.x-prev { position: relative; height: 14.5em; background: #0c0b09; display: grid; place-items: center; flex: none; }
+.x-prev .x-clip.sq { width: auto; height: 100%; aspect-ratio: 1; }
+.x-items { display: grid; border-top: 1px solid var(--sx-ink); }
+.x-item { display: flex; gap: .7em; align-items: center; padding: .5em 0; border-bottom: 1px solid var(--sx-rule); font-size: .92em; }
+.x-item .x-thumb { width: 2.4em; height: 2.4em; }
+.x-empty { border-top: 2px solid var(--sx-ink); border-bottom: 1px solid var(--sx-ink); padding: 1.6em 0; display: grid; gap: .5em; }
+.x-empty .x-h1 { font-style: italic; font-weight: 700; font-size: 2.8em; }
+.x-zone { border: 2px dashed var(--sx-ink); border-radius: .26em; background: var(--sx-surface); padding: 2.4em; display: flex; align-items: center; justify-content: center; gap: 1.5em; }
+.x-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2em; }
+/* Composer (C) */
+.x-plan { background: var(--sx-surface); border: 1px solid var(--sx-ink); border-radius: .26em; box-shadow: inset 4px 0 0 var(--sx-accent); padding: .85em 1em .85em 1.2em; display: flex; gap: 1em; align-items: center; }
+.x-plan .x-num { font-weight: 700; font-variant-numeric: lining-nums tabular-nums; }
+.x-pop { position: absolute; z-index: 6; left: 0; right: 0; top: 5.6em; background: var(--sx-surface); border: 1px solid var(--sx-ink); border-radius: .26em; box-shadow: var(--sx-shadow-popover); padding: 1.1em 1.2em; display: flex; flex-direction: column; gap: .7em; }
+.x-veil > *:not(.x-plan):not(.x-pop) { opacity: .28; }
+.x-bar { height: .45em; background: #2e2a24; border-radius: .2em; overflow: hidden; } .x-bar i { display: block; height: 100%; width: 62%; background: #ff3b1f; }
+.x-work { position: absolute; z-index: 4; left: 1.7em; right: 1.7em; bottom: 1.7em; background: rgba(12, 11, 9, .86); border: 1px solid #4a443b; border-radius: .35em; padding: .8em 1em; display: grid; gap: .55em; font-size: .9em; }
+/* Today's page, in the look it has now: tokens only, no editorial rules. */
+.t-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 2em; padding-bottom: 1em; border-bottom: 1px solid var(--sx-ink); box-shadow: 0 -2px 0 var(--sx-ink) inset; }
+.t-hero > span:first-child { font: 900 4.5em/.92 var(--sx-font-display); font-variation-settings: 'opsz' 72, 'WONK' 1; letter-spacing: -.035em; }
+.t-meta { font: 500 .78em var(--sx-font-mono); color: var(--sx-ink-3); } .t-meta b { color: var(--sx-ink); }
+.t-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5em; align-items: start; }
+.t-col { display: grid; gap: .8em; }
+.t-bar { display: flex; flex-wrap: wrap; gap: .6em; align-items: center; }
+.t-seg { display: inline-flex; border: 1px solid var(--sx-ink); background: var(--sx-surface); font: 700 .74em var(--sx-font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.t-seg b, .t-seg i { font-style: normal; font-weight: 700; height: 2.9em; padding: 0 .9em; display: inline-flex; align-items: center; color: var(--sx-ink-2); white-space: nowrap; }
+.t-seg b { background: var(--sx-ink); color: var(--sx-bg); }
+.t-pill { display: inline-flex; align-items: center; height: 2.5em; padding: 0 .7em; background: var(--sx-surface-2); border: 1px solid var(--sx-rule); font: 500 .74em var(--sx-font-mono); color: var(--sx-ink-2); white-space: nowrap; }
+.t-stage { border: 2px solid var(--sx-ink); }
+.t-block { border-left: 4px solid var(--sx-accent); background: var(--sx-accent-dim); padding: .8em 1em; font-size: .9em; }
+.t-block.warn { border-left-color: var(--sx-warn); background: var(--sx-warn-dim); }
+.t-block b { display: block; font: 700 .8em var(--sx-font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.t-card { position: relative; background: var(--sx-surface); border: 1px solid var(--sx-ink); padding: 1em; display: grid; gap: .8em; }
+.t-head { display: flex; align-items: center; gap: .6em; padding-bottom: .5em; border-bottom: 1px solid var(--sx-rule); }
+.t-head i { font: 400 1.1em/1 var(--sx-font-display); font-style: normal; color: var(--sx-accent); }
+.t-head b { flex: 1; font: 400 .86em var(--sx-font-display); letter-spacing: .04em; text-transform: uppercase; }
+.t-head em { font: 700 .72em/1.2 var(--sx-font-mono); font-style: normal; letter-spacing: .04em; padding: .3em .55em; color: var(--sx-accent); border: 1px solid color-mix(in srgb, var(--sx-accent) 30%, transparent); background: var(--sx-accent-dim); text-transform: uppercase; }
+.t-lab { display: flex; justify-content: space-between; font: 700 .72em var(--sx-font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--sx-ink-3); margin-bottom: .4em; }
+.t-in { height: 2.5em; display: flex; align-items: center; padding: 0 .8em; background: var(--sx-surface-2); border: 1px solid var(--sx-ink); font: .78em var(--sx-font-mono); color: var(--sx-ink-3); white-space: nowrap; overflow: hidden; }
+.t-in.area { height: 5em; align-items: flex-start; padding-top: .6em; }
+.t-models { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5em; }
+.t-model { background: var(--sx-surface-2); border: 1px solid var(--sx-rule); padding: .6em; display: grid; gap: .2em; font: 600 .78em var(--sx-font-mono); }
+.t-model.on { border: 2px solid var(--sx-accent); }
+.t-model small { color: var(--sx-ink-3); font-weight: 400; } .t-model em { font-style: normal; color: var(--sx-success); font-size: .9em; }
+.t-g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7em; } .t-g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7em; }
+.t-range { height: .4em; background: var(--sx-surface-3); position: relative; margin: .8em 0; } .t-range::after { content: ''; position: absolute; left: 30%; top: -.4em; width: 1.2em; height: 1.2em; background: var(--sx-accent); }
+.t-tog { display: flex; gap: .6em; align-items: center; font-size: .88em; } .t-tog::before { content: ''; flex: none; width: 2.2em; height: 1.2em; border: 1px solid var(--sx-ink); background: var(--sx-surface-2); }
+.t-note { font-size: .82em; color: var(--sx-ink-2); }
+.t-cost { border: 1px solid color-mix(in srgb, var(--sx-accent) 30%, transparent); padding: .9em; font: .76em/1.6 var(--sx-font-mono); color: var(--sx-ink-2); display: grid; gap: .5em; }
+.t-render { height: 3.5em; display: grid; place-items: center; background: var(--sx-accent); color: var(--sx-on-accent); font: 700 1em var(--sx-font-sans); letter-spacing: .06em; }
+.t-gate { font: .8em var(--sx-font-mono); letter-spacing: .08em; color: var(--sx-warn); }
+.t-pin { position: absolute; top: -.7em; right: -.7em; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--sx-accent); color: var(--sx-on-accent); display: grid; place-items: center; font-weight: 700; font-size: .9em; z-index: 3; }
+.x-foldline { position: absolute; left: 0; right: 0; top: 50.625em; border-top: 2px dashed var(--sx-accent); z-index: 5; pointer-events: none; }
+.x-foldline span { position: absolute; right: 1em; top: -2.4em; background: var(--sx-accent); color: var(--sx-on-accent); font: 600 .8em var(--sx-font-mono); letter-spacing: .06em; text-transform: uppercase; padding: .4em .7em; border-radius: .3em .3em 0 0; }
+
+@media (max-width: 900px) {
+  .cols, .pc { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(2) { border-right: 0; } .stat:nth-child(n+3) { border-top: 1px solid var(--sx-rule); } .stat:nth-child(3) { padding-left: 0; }
+}
+</style>
+
+<div class="r-top"><div class="r-top-in">
+  <a class="r-brand" href="#summary">ECHO</a>
+  <nav class="r-nav" aria-label="Sections">
+    <a href="#today">Today</a><a href="#language">Design language</a><a href="#words">Plain words</a>
+    <a href="#a">A · Three steps</a><a href="#b">B · Gallery first</a><a href="gallery-variations.html">B variations ↗</a><a href="#c">C · Composer</a>
+    <a href="#cases">Cases</a><a href="#controls">Controls</a><a href="#gallery">Gallery and backend</a><a href="#pick">Recommendation</a>
+  </nav>
+  <button class="r-theme" id="themeBtn" type="button">Switch theme</button>
+</div></div>
+
+<main>
+<header id="summary" class="col">
+  <p class="kick">Upload redesign · thought exercise · no app code changed</p>
+  <h1>Upload, made readable</h1>
+  <div class="rule2"></div>
+  <p class="lede">The Upload page shows every engine setting to every person, and on a laptop the Share button sits about three screens down. Below are three laptop layouts in ECHO's Paper &amp; Ink language, each with a gallery so media can be extended now and posted later, from any device.</p>
+  <div class="stats">
+    <div class="stat"><b>9</b><span>numbered sections a video post can show today</span></div>
+    <div class="stat"><b>~20</b><span>settings before the first render (video, LTX + Bytedance)</span></div>
+    <div class="stat"><b>≈3</b><span>laptop screens of scrolling to reach Share, in the recreation below</span></div>
+    <div class="stat"><b>1</b><span>screen in each redesign at 1440 × 900, with the priced button in view</span></div>
+  </div>
+  <div class="box lead" style="margin-top:26px">
+    <h3>Short version</h3>
+    <ul>
+      <li><b>Pick B, Gallery first.</b> It is the only design where "extend now, post later" is the page itself, and it removes the POST / BATCH switch.</li>
+      <li><b>Posting later from another device needs a small server addition.</b> The server already records every upload per user for staff, but no route shows a person their own. The gallery needs that route, plus a place to keep draft text. Decided scope: finished renders only. Described in <a href="#gallery">Gallery and backend</a>; nothing is built.</li>
+      <li><b>Upload never got the editorial pass.</b> <code>editorial.css</code> has no rule for the studio, its segmented controls or the cost panel. The page inherits the Paper &amp; Ink colours and fonts but keeps the old cockpit structure. That is a large part of why it reads as technical.</li>
+      <li><b>The wording can ship first.</b> The plain-words table needs no layout change and no backend.</li>
+    </ul>
+  </div>
+  <p class="intro" style="margin-top:18px">All screens are drawn at <b>1440 × 810</b>: a 1440 × 900 laptop minus browser chrome. They follow the theme of this page; use "Switch theme" to see carbon. Media is stood in for by colour gradients, and credits, lengths and model names are example values.</p>
+</header>
+
+<section id="today">
+  <div class="sec-head col"><p class="kick">Where it stands</p><h2>Today's page, <em>on a laptop</em></h2></div>
+  <p class="intro">Recreated from <code>UploadPage.jsx</code>, <code>ExtendDeck.jsx</code>, <code>PostDeck.jsx</code>, <code>StudioStage.jsx</code> and <code>global.css</code>, with the app's real labels. It is not a live screenshot: the backend would not start in this session and the page needs a sign-in, so heights are approximate. Case shown: one tall phone video with cloud outpaint. The dashed line is the bottom of the first screen.</p>
+  <figure>
+    <div class="frame"><div class="scr" data-mast>
+      <div class="x-page" style="gap:1em">
+        <div class="t-hero"><span>UPLOAD STUDIO</span><span class="t-meta">PIPELINE: <b>OUTPAINT: LTX · UPSCALE: BYTEDANCE 4K</b></span></div>
+        <div class="t-grid">
+          <div class="t-col">
+            <div class="t-bar"><span class="t-seg"><b>POST</b><i>BATCH</i></span><span class="t-seg"><b>ORIGINAL</b><i>EXTENDED</i></span><span class="t-pill">● 1080×1920 ➔ 3840×3840</span></div>
+            <div class="x-stage t-stage"><span class="x-hatch"></span><span class="x-clip tall g1"></span><span class="x-flag">+840PX OUTPAINT</span></div>
+            <div class="t-bar"><span class="t-pill">▶</span><span class="t-pill">⏮</span><span class="t-pill">−1s</span><span class="t-pill">+1s</span><span class="t-meta">00:00 / 00:24</span><span class="t-meta" style="margin-left:auto">☑ LOOP &nbsp; ☐ SOUND</span><span class="t-pill">SOURCE</span></div>
+            <div class="t-block warn"><b>24s EXCEEDS THE 10s THRESHOLD</b>Cloud video outpainting is billed per second. Consider enabling the 15s Trimmer to optimize costs.</div>
+          </div>
+          <div class="t-col">
+            <div class="t-card"><span class="t-pin">1</span><div class="t-head"><i>01</i><b>SOURCE &amp; PUBLISH PATH</b><em>EXTEND TO 1:1</em></div>
+              <div class="t-block warn"><b>1:1 REQUIRED — EXTEND TO CONTINUE</b>This media is PORTRAIT. Configure the extender pipeline below.</div></div>
+            <div class="t-card"><span class="t-pin">2</span><div class="t-head"><i>02</i><b>CORE ENGINE &amp; PROMPT</b><em>STAGE 1</em></div>
+              <div><div class="t-lab">PIPELINE EXECUTION MODE</div><span class="t-seg"><b>OUTPAINT + UPSCALE</b><i>UPSCALE ONLY</i></span></div>
+              <div><div class="t-lab">OUTPAINT GENERATION MODEL</div><div class="t-models"><div class="t-model on">LTX<small>ltx/outpaint</small><em>CREDITS OK</em></div><div class="t-model">LTX + LoRA<small>ltx/lora</small><em style="color:var(--sx-warn)">MY FAL KEY</em></div><div class="t-model">LUMA<small>luma/reframe</small><em>CREDITS OK</em></div></div></div>
+              <div><div class="t-lab">OUTPAINT EXTENSION PROMPT</div><div class="t-in area">Describe the extended square background environment...</div></div>
+              <div><div class="t-lab">NEGATIVE PROMPT FILTER</div><div class="t-in">yellow tint, sepia, warm cast, color distortion, discoloration, overexposure</div></div></div>
+            <div class="t-card"><div class="t-head"><i>03</i><b>ADVANCED INFERENCE &amp; LoRA</b><em>TUNING</em></div>
+              <div class="t-g2"><div><div class="t-lab"><span>GUIDANCE SCALE (CFG)</span><span>3.5</span></div><div class="t-range"></div></div><div><div class="t-lab">OUTPUT RESOLUTION TIER</div><div class="t-in">720p ▾</div></div></div>
+              <div class="t-g2"><span class="t-tog">Preserve Audio Track</span><span class="t-tog">Enable Prompt Expansion (LLM Enrich)</span></div>
+              <div><div class="t-lab"><span>CUSTOM LoRA STACK (MAX 3)</span><span>1 / 3</span></div><div class="t-note">Each LoRA must be a direct http(s) URL to a .safetensors file (max 3 GB each). Leave a path empty to skip that slot. Civitai: paste the plain https://civitai.com/api/download/models/&lt;versionId&gt; link…</div></div>
+              <div><div class="t-lab"><span>LoRA #1 — SAFETENSORS URL</span><span>MAX 3 GB</span></div><div class="t-in">https://example.com/path/to/lora.safetensors</div></div>
+              <div class="t-g2"><div><div class="t-lab">SCALE</div><div class="t-in">1</div></div><div><div class="t-lab">TRANSFORMER</div><div class="t-in">both ▾</div></div></div></div>
+            <div class="t-card"><span class="t-pin">3</span><div class="t-head"><i>04</i><b>4K UPSCALE &amp; NEURAL POLISH</b><em>3840×3840</em></div>
+              <div><div class="t-lab">UPSCALER BACKEND</div><span class="t-seg"><i>FAST</i><i>STUDIO</i><b>FAL AI</b></span></div>
+              <div><div class="t-lab">FAL AI UPSCALE MODEL</div><div class="t-models"><div class="t-model on">BYTEDANCE<small>bytedance/upscale</small><em>CREDITS OK</em></div><div class="t-model">SEEDVR2<small>seedvr/upscale</small><em>CREDITS OK</em></div><div class="t-model">CUSTOM<small>FAL AI</small><em style="color:var(--sx-warn)">MY FAL KEY</em></div></div></div>
+              <div class="t-g3"><div><div class="t-lab">TARGET RESOLUTION</div><div class="t-in">4k ▾</div></div><div><div class="t-lab">TARGET FPS</div><div class="t-in">30fps ▾</div></div><div><div class="t-lab">QUALITY TIER</div><div class="t-in">fast ▾</div></div><div><div class="t-lab">SCENARIO PRESET</div><div class="t-in">general ▾</div></div><div><div class="t-lab">FIDELITY INTENSITY</div><div class="t-in">medium ▾</div></div></div>
+              <div><div class="t-lab"><span>CONTRAST ADAPTIVE SHARPENING (CAS)</span><span>30%</span></div><div class="t-range"></div></div>
+              <div><div class="t-lab">CLIP TRIMMING (MAX 15 SECONDS)</div><span class="t-tog">Enable 15s Video Trimming</span></div>
+              <div class="t-in">RANGE: 0.0s ➔ 24.0s &nbsp;·&nbsp; FULL CLIP</div></div>
+            <div class="t-card"><span class="t-pin">4</span><div class="t-head"><i>05</i><b>COMPUTE QUOTA &amp; EXECUTE</b><em>READY TO DISPATCH</em></div>
+              <div class="t-cost"><div class="t-lab" style="margin:0">CLOUD PAYMENT SOURCE</div><span class="t-seg" style="justify-self:start"><b>ECHO CREDITS</b><i>MY FAL KEY</i></span><div>• <b>Wallet:</b> 140 credits available<br>• <b>Authoritative quote:</b> 12 credits<br>• <b>Provider estimate:</b> $0.2400 USD across 1 item(s)</div><div>Cloud processing sends the photos or videos you upload, and your job settings, to fal.ai, a third-party AI provider, to produce the result. See the Privacy Policy.</div></div>
+              <div class="t-render">▶ RENDER 4K SQUARE MASTER</div></div>
+            <div class="t-card"><div class="t-head"><i>06</i><b>SPATIAL 3D</b><em>COLOUR + DEPTH · NO CREDITS</em></div><span class="t-tog">SPATIAL 3D</span><div class="t-note">Starts once the 4K square master is rendered. VR viewers see the post in 3D; 2D views never load it. Videos up to 60 s.</div></div>
+            <div class="t-card"><span class="t-pin">5</span><div class="t-head"><i>07</i><b>POST DETAILS</b><em>TITLE · CAPTION · TAGS · LOCATION</em></div>
+              <div><div class="t-lab"><span>TITLE (COVER TITLE · MAX 100)</span><span>11/100</span></div><div class="t-in">Sunset ride</div></div>
+              <div><div class="t-lab"><span>CAPTION (MAX 2200 · #HASHTAGS AUTO-TAGGED)</span><span>0/2200</span></div><div class="t-in area">Say something about this reel… #neon #viral</div></div>
+              <div class="t-g2"><div><div class="t-lab">TAGS (MAX 5)</div><div class="t-in">Add a tag… (Enter)</div></div><div><div class="t-lab">LOCATION (FREE TEXT · MATCHED TO MAP)</div><div class="t-in">City, country</div></div></div></div>
+            <div class="t-card"><div class="t-head"><i>08</i><b>SHARE</b><em>EXPLORE + REELS</em></div><div class="t-render" style="opacity:.4">SHARE REEL TO UPLOADS</div><div class="t-gate">⚠ RENDER THE 1:1 EXTEND FIRST</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="x-foldline"><span>Bottom of a 1440 × 900 laptop screen</span></div>
+    </div></div>
+  </figure>
+  <div class="cols col">
+    <div class="box">
+      <h3>What gets in the way</h3>
+      <ol class="pins">
+        <li><span class="pin">1</span><span><b>The page states a rule, not a plan.</b> "1:1 REQUIRED" says what is wrong. It does not say what will happen or what it costs.</span></li>
+        <li><span class="pin">2</span><span><b>Engine names are the interface.</b> Outpaint, LTX, CFG, LoRA, CAS. Each is a decision most people cannot make and do not need to.</span></li>
+        <li><span class="pin">3</span><span><b>Everything has equal weight.</b> Uppercase labels, numbered cards and a badge on every section. Nothing reads as "do this next".</span></li>
+        <li><span class="pin">4</span><span><b>The price is two screens down and written for accounting.</b> People need one number, beside the button, on the first screen.</span></li>
+        <li><span class="pin">5</span><span><b>Render and post are one sitting.</b> A finished render lives only in this page's memory. Reload, and the page forgets it, though the server still has it.</span></li>
+      </ol>
+    </div>
+    <div class="box">
+      <h3>What works and should stay</h3>
+      <ul>
+        <li>The square stage that shows where the video sits and which parts get filled. It explains the product better than any text, and it stays visible while the right column scrolls.</li>
+        <li>Automatic choices: square files skip extending, detected 3D files publish as-is, the file name becomes the title.</li>
+        <li>The price before any charge, and the fal.ai disclosure. Both stay visible in every design.</li>
+        <li>Slideshow reorder, cover image, hashtags picked up from the caption.</li>
+        <li>The standalone Image and Video pages, as the full cockpit for people who want every dial.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="language" class="col">
+  <div class="sec-head"><p class="kick">House style</p><h2>Design language <em>the mockups follow</em></h2></div>
+  <p class="intro">Taken from <code>tokens.css</code> and <code>editorial.css</code>, and from how Explore, Profile and Sign in already look. The redesigns add no new colours, fonts or shapes.</p>
+  <div class="scroll"><table>
+    <tr><th style="width:24%">Element</th><th>Rule in the system</th><th style="width:36%">How the redesign uses it</th></tr>
+    <tr><td><b>Page opener</b></td><td>Mono-caps kicker led by a short vermilion rule, Fraunces headline in mixed case, double ink rule under.</td><td>"New post" and "My media" open the page the way "Explore" does. No "UPLOAD STUDIO" in capitals.</td></tr>
+    <tr><td><b>One action colour</b></td><td>Vermilion carries every action. Other buttons are ink outlines.</td><td>The redesign adds its own rule: one filled button in the page body, always the next step, with the price on it. The header keeps its filled Upload.</td></tr>
+    <tr><td><b>Mono caps</b></td><td>12px floor. For eyebrows, badges and control labels. Sentences are set in sentence case.</td><td>Kept for one- or two-word labels (TITLE, CAPTION) and status badges. Every explanation is a sentence in Instrument Sans.</td></tr>
+    <tr><td><b>Proof-yellow</b></td><td>Highlighter for marks, badges and "new" moments, with ink on top.</td><td>"Needs square" badges and the one money-saving tip.</td></tr>
+    <tr><td><b>Tabs and filters</b></td><td>Ink-filled when selected, as on Explore.</td><td>Replaces the mono segmented controls for New post / My media and the gallery filters.</td></tr>
+    <tr><td><b>Numerals</b></td><td>Instrument Sans, lining and tabular, for stats and credits.</td><td>Prices and balances.</td></tr>
+    <tr><td><b>Corners</b></td><td>4px on every box and button. The player frame stays square and wears corner brackets.</td><td>Cards, inputs and tiles take 4px. The stage stays square with brackets.</td></tr>
+    <tr><td><b>Stage</b></td><td>A screening room: carbon in both themes.</td><td>Unchanged. It is the one dark object on a paper page.</td></tr>
+    <tr><td><b>Empty states</b></td><td>An italic headline between two rules, not a dashed box.</td><td>Empty gallery. Only the drop target itself is dashed.</td></tr>
+    <tr><td><b>Purple</b></td><td>Reserved for Enter VR.</td><td>Not used for 3D options on this page.</td></tr>
+  </table></div>
+</section>
+
+<section id="words" class="col">
+  <div class="sec-head"><p class="kick">Copy</p><h2>Plain words</h2></div>
+  <p class="intro">Left: strings in the app today. Right: what a person should read. This applies to every design and can ship on the current layout.</p>
+  <div class="scroll"><table>
+    <tr><th style="width:44%">Today</th><th>Proposed</th><th style="width:24%">Why</th></tr>
+    <tr><td class="now">UPLOAD STUDIO · PIPELINE: OUTPAINT: … · UPSCALE: …</td><td class="new">New post</td><td>Name the job, not the machine.</td></tr>
+    <tr><td class="now">1:1 REQUIRED — EXTEND TO CONTINUE. This media is PORTRAIT. Configure the extender pipeline below.</td><td class="new">Your video is tall. We'll fill the sides so it's square.</td><td>Say what will happen.</td></tr>
+    <tr><td class="now">PIPELINE EXECUTION MODE: OUTPAINT + UPSCALE | UPSCALE ONLY</td><td class="new">Fill the sides with AI · Stretch to fit</td><td>Describe the result.</td></tr>
+    <tr><td class="now">OUTPAINT EXTENSION PROMPT</td><td class="new">Background (optional)</td><td>Optional must say so.</td></tr>
+    <tr><td class="now">UPSCALER BACKEND: FAST | STUDIO | FAL AI</td><td class="new">Quality: Standard · Best</td><td>Outcome, not vendor.</td></tr>
+    <tr><td class="now">CONTRAST ADAPTIVE SHARPENING (CAS)</td><td class="new">Sharpness</td><td></td></tr>
+    <tr><td class="now">CLIP TRIMMING (MAX 15 SECONDS) · START TIME (s) · CLIP DURATION (s)</td><td class="new">Trim, with two handles on the timeline</td><td>Dragging beats two number fields.</td></tr>
+    <tr><td class="now">24s EXCEEDS THE 10s THRESHOLD</td><td class="new">This video is 24 s. Trim to 10 s and it costs 5 credits.</td><td>Give the saving, not the threshold.</td></tr>
+    <tr><td class="now">COMPUTE QUOTA &amp; EXECUTE · READY TO DISPATCH</td><td class="new">(no heading; the button carries it)</td><td></td></tr>
+    <tr><td class="now">Authoritative quote: 12 credits · Provider estimate: $0.2400 USD across 1 item(s)</td><td class="new">12 credits. You have 140.</td><td>One number. The dollar figure moves to Advanced.</td></tr>
+    <tr><td class="now">CLOUD PAYMENT SOURCE: ECHO CREDITS | MY FAL KEY</td><td class="new">Pay with: Credits · My own fal.ai key</td><td>Shown only when a key is saved.</td></tr>
+    <tr><td class="now">▶ RENDER 4K SQUARE MASTER</td><td class="new">Make it square · 12 credits</td><td>Price on the button.</td></tr>
+    <tr><td class="now">STAGING UPLOAD… · CONNECTING TO PIPELINE…</td><td class="new">Uploading… · Starting…</td><td></td></tr>
+    <tr><td class="now">HEVC MASTER — BROWSER PREVIEW NEEDS AN H.264 PROXY</td><td class="new">This browser can't preview the 4K file. Download it to watch.</td><td>Say what to do.</td></tr>
+    <tr><td class="now">PIPELINE EXECUTION FAILED · EXECUTION ERROR</td><td class="new">That didn't work. + the reason, + whether credits were returned</td><td>The credits line must come from the real billing state.</td></tr>
+    <tr><td class="now">3D … DETECTED · STEREOSCOPIC 3D · One square per eye; skips the extender</td><td class="new">This looks like a 3D video. Post it in 3D?</td><td>A question with a default.</td></tr>
+    <tr><td class="now">SPATIAL 3D · COLOUR + DEPTH · NO CREDITS</td><td class="new">Add depth for VR headsets (free)</td><td></td></tr>
+    <tr><td class="now">MAKE 3D · SIDE-BY-SIDE · NO CREDITS</td><td class="new">Turn into 3D for VR (free)</td><td></td></tr>
+    <tr><td class="now">BATCH · NO PUBLISH · RESULTS: /api/video/jobs/3f2a…/result</td><td class="new">Select several, then "Make square". Download all.</td><td>API paths should never reach the screen.</td></tr>
+    <tr><td class="now">SHARE REEL TO UPLOADS · ✓ SHARED — LIVE IN EXPLORE + REELS</td><td class="new">Post · Posted. View it</td><td></td></tr>
+    <tr><td class="now">ENVIRONMENT NOT READY · ffmpeg: … · pip install vapoursynth</td><td class="new">Uploads are paused right now. Try again soon.</td><td>Install hints belong to the operator.</td></tr>
+  </table></div>
+</section>
+
+<section id="a">
+  <div class="sec-head col"><div class="dh"><span class="letter">A</span><div><p class="kick">Smallest change</p><h2>Three steps</h2></div></div></div>
+  <p class="intro">The current page, cut into Add → Make it square → Post. The stage stays on the left, as today. The right column shows one decision at a time and never scrolls. Square files, 3D files and slideshows skip step 2 without being asked. The gallery is the "My media" tab.</p>
+  <figure>
+    <div class="cap"><span class="tag">A · Step 2</span><b>The heaviest moment today, on one screen.</b> Two choices, one optional field, the price on the button.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div><div class="x-tabs"><span class="x-tab on">New post</span><span class="x-tab">My media · 4</span></div></div>
+      <div class="x-two">
+        <div class="x-stage"><span class="x-hatch"></span><span class="x-clip tall g1"></span><span class="x-flag">AI fills the sides</span></div>
+        <div class="x-col">
+          <div class="x-steps"><span class="x-step done"><i>✓</i>Add</span><span class="x-step on"><i>2</i>Make it square</span><span class="x-step"><i>3</i>Post</span></div>
+          <div class="x-h2">Your video is tall. We'll fill the sides so it's square.</div>
+          <div class="x-opt on"><span class="x-rad"></span><span>Fill the sides with AI<small>Recommended. New picture is made to match yours.</small></span><span class="x-price">12 credits</span></div>
+          <div class="x-opt"><span class="x-rad"></span><span>Stretch to fit<small>Distorts the picture. Free at standard quality.</small></span><span class="x-price">Free</span></div>
+          <div><div class="x-lab"><span>Background</span><span>Optional</span></div><div class="x-in">Describe what should appear at the sides</div></div>
+          <div class="x-tip">This video is 24 s. Trim to 10 s and it costs 5 credits. <u>Trim</u></div>
+          <div class="x-adv"><span>Advanced</span><span class="x-note">Model, quality, sharpness, payment &nbsp;+</span></div>
+          <div class="x-btn pri">Make it square · 12 credits</div>
+          <div class="x-note">You have 140 credits. Your video is sent to fal.ai to be processed. <u>Privacy Policy</u></div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">A · Step 1</span><b>Empty.</b> The drop target takes the stage's place. Recent media offers a way back in.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div><div class="x-tabs"><span class="x-tab on">New post</span><span class="x-tab">My media · 4</span></div></div>
+      <div class="x-two">
+        <div class="x-drop"><div class="x-h2">Drop a video or photos here</div><div class="x-p">One video, or up to 10 photos for a slideshow</div><div class="x-btn pri">Choose files</div><div class="x-note">MP4, MOV, WEBM, AVI · PNG, JPG, WEBP</div></div>
+        <div class="x-col" style="gap:1.3em">
+          <div class="x-steps"><span class="x-step on"><i>1</i>Add</span><span class="x-step"><i>2</i>Make it square</span><span class="x-step"><i>3</i>Post</span></div>
+          <div class="x-h2">Every post on ECHO is square, so it fills the view in VR.</div>
+          <div class="x-list">
+            <div class="x-li"><i>1</i><span><b>Add</b> a video or photos.</span></div>
+            <div class="x-li"><i>2</i><span><b>We make it square.</b> Tall and wide files get their sides filled. You see the price first. Square files skip this.</span></div>
+            <div class="x-li"><i>3</i><span><b>Post</b> now, or save it and post later.</span></div>
+          </div>
+          <div><div class="x-lab"><span>Pick up where you left off</span><span>My media · 4</span></div>
+            <div class="x-thumbs"><span class="x-thumb"><span class="x-clip sq g2"></span><b></b></span><span class="x-thumb"><span class="x-clip sq g3"></span><b></b></span><span class="x-thumb"><span class="x-clip tall g4"></span><b class="w"></b></span><span class="x-thumb"><span class="x-clip sq g5"></span><b class="a"></b></span></div></div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">A · Step 3</span><b>Done.</b> The render is already saved; posting is optional.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div><div class="x-tabs"><span class="x-tab on">New post</span><span class="x-tab">My media · 5</span></div></div>
+      <div class="x-two">
+        <div class="x-stage"><span class="x-clip sq g1"></span><span class="x-flags"><span class="x-flag">Original</span><span class="x-flag inv">Square</span></span></div>
+        <div class="x-col">
+          <div class="x-steps"><span class="x-step done"><i>✓</i>Add</span><span class="x-step done"><i>✓</i>Make it square</span><span class="x-step on"><i>3</i>Post</span></div>
+          <div class="x-row"><div class="x-h2">It's square. Add the details.</div><span class="x-badge" style="margin-left:auto">Saved to My media</span></div>
+          <div><div class="x-lab"><span>Title</span><span>11 / 100</span></div><div class="x-in"><b>Sunset ride</b></div></div>
+          <div><div class="x-lab"><span>Caption</span><span>#hashtags become tags</span></div><div class="x-in area">Say something about this reel…</div></div>
+          <div><div class="x-lab"><span>Place</span><span>Optional</span></div><div class="x-in">City or landmark</div></div>
+          <div class="x-chk on"><i>✓</i><span>Add depth for VR headsets <small>· free, ready in about a minute</small></span></div>
+          <div class="x-row"><div class="x-btn grow">Save for later</div><div class="x-btn pri grow">Post</div></div>
+          <div class="x-note">Unposted renders stay in My media for 30 days. <u>Download</u> · <u>Turn into 3D</u> · <u>Redo</u></div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <div class="pc col">
+    <div class="box"><h3>Good</h3><ul><li>Lowest risk: the stage, the config hooks and the publish call are reused as they are.</li><li>First-time users cannot get lost.</li><li>Nothing scrolls on a laptop.</li></ul></div>
+    <div class="box"><h3>Weak</h3><ul><li>The gallery is a side room. Extending ten clips means walking the steps ten times.</li><li>BATCH stays behind on the Image and Video pages.</li><li>About a fifth of a 1440px screen is unused beside the form.</li></ul></div>
+    <div class="box"><h3>Backend</h3><p style="margin:0 0 8px"><span class="tag good">Flow works today</span></p><ul><li>Steps 1–3 use the existing endpoints in the existing order.</li><li>My media on another device needs the list route in <a href="#gallery">Gallery and backend</a>.</li></ul></div>
+  </div>
+</section>
+
+<section id="b">
+  <div class="sec-head col"><div class="dh"><span class="letter">B</span><div><p class="kick">Recommended</p><h2>Gallery first</h2></div></div></div>
+  <p class="intro"><b>Four layout variations of this option are in <a href="gallery-variations.html">My media, four ways</a>.</b> The page is your media, laid out like the Explore contact sheet. Files become tiles the moment they are added, and each tile says what it needs. A fixed panel on the right acts on the selection: one tile to extend or post, several to extend together. That replaces BATCH. A wide screen is used for what it is good at: seeing many things at once.</p>
+  <figure>
+    <div class="cap"><span class="tag">B · One selected</span><b>A ready render, posted whenever the person decides.</b></div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-body">
+      <div class="x-page">
+        <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">My media</div></div><div class="x-btn">Add media</div></div>
+        <div class="x-row" style="justify-content:space-between"><div class="x-tabs"><span class="x-tab on">All · 9</span><span class="x-tab">Needs square · 2</span><span class="x-tab">Ready · 4</span><span class="x-tab">Posted · 2</span></div><div class="x-btn sm">Select several</div></div>
+        <div class="x-tiles">
+          <div class="x-tile add"><div><span>+</span>Add media</div></div>
+          <div class="x-tile on"><span class="x-clip sq g1"></span><span class="x-badge ok">Ready</span><span class="len">0:24</span></div>
+          <div class="x-tile"><span class="x-clip tall g2"></span><span class="x-badge">Needs square</span><span class="dev">On this device</span><span class="len">0:09</span></div>
+          <div class="x-tile"><span class="x-clip sq g3" style="opacity:.5"></span><span class="x-badge acc">Working · 62%</span></div>
+          <div class="x-tile"><span class="x-clip sq g4"></span><span class="x-badge ok">Ready</span><span class="len">Photo</span></div>
+          <div class="x-tile"><span class="x-clip wide g5"></span><span class="x-badge">Needs square</span><span class="dev">On this device</span><span class="len">0:15</span></div>
+          <div class="x-tile"><span class="x-clip sq g6"></span><span class="x-badge ok">Ready · 3D</span><span class="len">0:31</span></div>
+          <div class="x-tile"><span class="x-clip sq g3"></span><span class="x-badge ok">Ready</span><span class="len">Photo</span></div>
+          <div class="x-tile"><span class="x-clip sq g2" style="opacity:.55"></span><span class="x-badge ink">Posted</span></div>
+          <div class="x-tile"><span class="x-clip sq g5" style="opacity:.55"></span><span class="x-badge ink">Posted</span></div>
+        </div>
+        <div class="x-note">Square versions follow your account to every device and are kept for 30 days. Files not yet made square stay on this device.</div>
+      </div>
+      <div class="x-rail">
+        <div class="x-row"><span class="x-badge ok">Ready</span><span class="x-note" style="margin-left:auto">Kept until 14 Dec &nbsp;✕</span></div>
+        <div class="x-prev"><span class="x-clip sq g1"></span><span class="x-flags"><span class="x-flag">Original</span><span class="x-flag inv">Square</span></span></div>
+        <div><div class="x-lab"><span>Title</span><span>11 / 100</span></div><div class="x-in"><b>Sunset ride</b></div></div>
+        <div><div class="x-lab"><span>Caption</span><span>#hashtags become tags</span></div><div class="x-in area">Say something about this reel…</div></div>
+        <div><div class="x-lab"><span>Place</span><span>Optional</span></div><div class="x-in">City or landmark</div></div>
+        <div class="x-chk on"><i>✓</i><span>Add depth for VR headsets <small>· free</small></span></div>
+        <div class="x-btn pri">Post</div>
+        <div class="x-row"><div class="x-btn sm grow">Download</div><div class="x-btn sm grow">Redo</div><div class="x-btn sm grow">Turn into 3D</div></div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">B · Several selected</span><b>What BATCH becomes.</b> One choice, one total, each file's price listed.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-body">
+      <div class="x-page">
+        <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">My media</div></div><div class="x-btn dim">Add media</div></div>
+        <div class="x-row" style="justify-content:space-between"><div class="x-tabs"><span class="x-tab">All · 9</span><span class="x-tab on">Needs square · 3</span><span class="x-tab">Ready · 3</span><span class="x-tab">Posted · 2</span></div><div class="x-btn sm">Clear selection</div></div>
+        <div class="x-tiles">
+          <div class="x-tile on"><span class="x-clip tall g2"></span><span class="x-badge">Needs square</span><span class="dev">On this device</span><span class="len">0:09</span><span class="x-ck on">✓</span></div>
+          <div class="x-tile on"><span class="x-clip wide g5"></span><span class="x-badge">Needs square</span><span class="dev">On this device</span><span class="len">0:15</span><span class="x-ck on">✓</span></div>
+          <div class="x-tile on"><span class="x-clip tall g4"></span><span class="x-badge">Needs square</span><span class="dev">On this device</span><span class="len">0:24</span><span class="x-ck on">✓</span></div>
+        </div>
+        <div class="x-note">Filter shows the three files that still need to be made square.</div>
+      </div>
+      <div class="x-rail">
+        <div class="x-row"><span class="x-badge">3 selected</span></div>
+        <div class="x-h2">Make 3 videos square</div>
+        <div class="x-opt on"><span class="x-rad"></span><span>Fill the sides with AI<small>Recommended</small></span><span class="x-price">30 credits</span></div>
+        <div class="x-opt"><span class="x-rad"></span><span>Stretch to fit<small>Free at standard quality</small></span><span class="x-price">Free</span></div>
+        <div class="x-items">
+          <div class="x-item"><span class="x-thumb"><span class="x-clip tall g2"></span></span><span>beach-walk.mp4 · 9 s</span><span class="x-price">6</span></div>
+          <div class="x-item"><span class="x-thumb"><span class="x-clip wide g5"></span></span><span>harbour.mov · 15 s</span><span class="x-price">12</span></div>
+          <div class="x-item"><span class="x-thumb"><span class="x-clip tall g4"></span></span><span>night-market.mp4 · 24 s</span><span class="x-price">12</span></div>
+        </div>
+        <div class="x-adv"><span>Advanced</span><span class="x-note">Same settings for all three &nbsp;+</span></div>
+        <div class="x-btn pri">Make 3 square · 30 credits</div>
+        <div class="x-note">You have 140 credits. Files are sent to fal.ai to be processed. <u>Privacy Policy</u></div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">B · Empty</span><b>First visit.</b> A headline between rules, per the house empty state. Only the drop target is dashed.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page" style="gap:1.6em">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">My media</div></div><div class="x-btn">Add media</div></div>
+      <div class="x-empty"><div class="x-h1">Nothing here yet.</div><div class="x-p">Add a video or photos. Once a file is square, it stays here on every device you sign in on, until you post it.</div></div>
+      <div class="x-zone"><div><div class="x-h2">Drop videos or photos here</div><div class="x-p">As many as you like. One video, or up to 10 photos, makes one post.</div></div><div class="x-btn pri">Choose files</div></div>
+      <div class="x-three">
+        <div class="x-li"><i>1</i><span><b>Add.</b> Each file becomes a tile.</span></div>
+        <div class="x-li"><i>2</i><span><b>We make it square.</b> Tall and wide files get their sides filled. You see the price first.</span></div>
+        <div class="x-li"><i>3</i><span><b>Post</b> now, or come back later.</span></div>
+      </div>
+    </div></div></div>
+  </figure>
+  <div class="pc col">
+    <div class="box"><h3>Good</h3><ul><li>"Extend now, post later" is the default behaviour, not a feature.</li><li>POST and BATCH merge: one file or twenty, same screen.</li><li>Uses the laptop's width: ten tiles and the full post form, with no scrolling.</li><li>It is Explore's contact sheet, so it already looks like ECHO.</li></ul></div>
+    <div class="box"><h3>Weak</h3><ul><li>Largest rebuild: new page shell, tile list, per-tile state.</li><li>The preview is smaller than today's stage. A click on it should open the full stage.</li><li>A slideshow is several tiles posted as one. The server accepts only un-extended photos in a slideshow.</li></ul></div>
+    <div class="box"><h3>Backend</h3><p style="margin:0 0 8px"><span class="tag bad">Needs backend</span></p><ul><li>The page is the list of a person's uploads. The server records them but has no route to show them. Details in <a href="#gallery">Gallery and backend</a>.</li><li>Extending and posting use the existing endpoints. Publish already accepts any finished render the account owns, including batch renders.</li></ul></div>
+  </div>
+</section>
+
+<section id="c">
+  <div class="sec-head col"><div class="dh"><span class="letter">C</span><div><p class="kick">Fewest decisions</p><h2>One-screen composer</h2></div></div></div>
+  <p class="intro">No steps. After a file is added, one line states the plan and the price, and the post form is already there. On a laptop the caption can be written while the render runs. "Post" extends, shows the result, then publishes. Drafts sit in a tray in the page opener.</p>
+  <figure>
+    <div class="cap"><span class="tag">C · Composer</span><b>The whole flow.</b> One line carries the plan and the price.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div>
+        <div><div class="x-lab"><span>Drafts · 3</span><span><u>All media</u></span></div><div class="x-thumbs"><span class="x-thumb add">+</span><span class="x-thumb on"><span class="x-clip tall g4"></span><b class="w"></b></span><span class="x-thumb"><span class="x-clip sq g1"></span><b></b></span><span class="x-thumb"><span class="x-clip sq g3"></span><b></b></span></div></div></div>
+      <div class="x-two">
+        <div class="x-stage"><span class="x-hatch"></span><span class="x-clip tall g4"></span><span class="x-flag">AI fills the sides</span></div>
+        <div class="x-col">
+          <div class="x-plan"><div style="flex:1"><div class="x-h3">Tall video. We'll fill the sides so it's square.</div><div class="x-p"><span class="x-num">12 credits</span> · you have 140</div></div><div class="x-btn sm">Change</div></div>
+          <div><div class="x-lab"><span>Title</span><span>17 / 100</span></div><div class="x-in"><b>Night market walk</b></div></div>
+          <div><div class="x-lab"><span>Caption</span><span>#hashtags become tags</span></div><div class="x-in area">Say something about this reel…</div></div>
+          <div><div class="x-lab"><span>Place</span><span>Optional</span></div><div class="x-in">City or landmark</div></div>
+          <div class="x-chk on"><i>✓</i><span>Add depth for VR headsets <small>· free</small></span></div>
+          <div class="x-chk on"><i>✓</i><span>Show me the result before it goes public</span></div>
+          <div class="x-row"><div class="x-btn grow">Save draft</div><div class="x-btn pri grow">Post · 12 credits</div></div>
+          <div class="x-note">Your video is sent to fal.ai to be processed. <u>Privacy Policy</u></div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">C · Change</span><b>A popover under the plan line.</b> Advanced sits one more level down.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div>
+        <div><div class="x-lab"><span>Drafts · 3</span><span><u>All media</u></span></div><div class="x-thumbs"><span class="x-thumb add">+</span><span class="x-thumb on"><span class="x-clip tall g4"></span><b class="w"></b></span><span class="x-thumb"><span class="x-clip sq g1"></span><b></b></span><span class="x-thumb"><span class="x-clip sq g3"></span><b></b></span></div></div></div>
+      <div class="x-two">
+        <div class="x-stage"><span class="x-hatch"></span><span class="x-clip tall g4"></span><span class="x-flag">AI fills the sides</span></div>
+        <div class="x-col x-veil">
+          <div class="x-plan"><div style="flex:1"><div class="x-h3">Tall video. We'll fill the sides so it's square.</div><div class="x-p"><span class="x-num">12 credits</span> · you have 140</div></div><div class="x-btn sm" style="background:var(--sx-ink);color:var(--sx-surface)">Change</div></div>
+          <div class="x-pop">
+            <div class="x-h3">How should we make it square?</div>
+            <div class="x-opt on"><span class="x-rad"></span><span>Fill the sides with AI<small>Recommended</small></span><span class="x-price">12 credits</span></div>
+            <div class="x-opt"><span class="x-rad"></span><span>Stretch to fit<small>Free at standard quality</small></span><span class="x-price">Free</span></div>
+            <div><div class="x-lab"><span>Background</span><span>Optional</span></div><div class="x-in">Describe what should appear at the sides</div></div>
+            <div class="x-chk"><i></i><span>Trim to 10 seconds <small>· brings it to 5 credits</small></span></div>
+            <div class="x-adv"><span>Advanced</span><span class="x-note">Model, quality, sharpness, payment &nbsp;+</span></div>
+            <div class="x-row" style="justify-content:flex-end"><div class="x-btn">Done</div></div>
+          </div>
+          <div><div class="x-lab"><span>Title</span><span>17 / 100</span></div><div class="x-in"><b>Night market walk</b></div></div>
+          <div><div class="x-lab"><span>Caption</span><span>#hashtags become tags</span></div><div class="x-in area">Say something about this reel…</div></div>
+          <div><div class="x-lab"><span>Place</span><span>Optional</span></div><div class="x-in">City or landmark</div></div>
+          <div class="x-chk on"><i>✓</i><span>Add depth for VR headsets <small>· free</small></span></div>
+          <div class="x-chk on"><i>✓</i><span>Show me the result before it goes public</span></div>
+          <div class="x-row"><div class="x-btn grow">Save draft</div><div class="x-btn pri grow">Post · 12 credits</div></div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <figure>
+    <div class="cap"><span class="tag">C · Working</span><b>Write while it renders.</b> The form stays live; the result is shown before anything is public.</div>
+    <div class="frame"><div class="scr fold" data-mast><div class="x-page">
+      <div class="x-open"><div><div class="x-kick">Echo · Upload</div><div class="x-h1">New post</div></div>
+        <div><div class="x-lab"><span>Drafts · 3</span><span><u>All media</u></span></div><div class="x-thumbs"><span class="x-thumb add">+</span><span class="x-thumb on"><span class="x-clip tall g4"></span><b class="a"></b></span><span class="x-thumb"><span class="x-clip sq g1"></span><b></b></span><span class="x-thumb"><span class="x-clip sq g3"></span><b></b></span></div></div></div>
+      <div class="x-two">
+        <div class="x-stage"><span class="x-hatch"></span><span class="x-clip tall g4" style="opacity:.6"></span><div class="x-work"><div class="x-row" style="justify-content:space-between"><b>Making it square</b><span>62%</span></div><div class="x-bar"><i></i></div></div></div>
+        <div class="x-col">
+          <div class="x-plan"><div style="flex:1"><div class="x-h3">Making it square. About a minute left.</div><div class="x-p">Keep writing. You can also leave; it will be in Drafts.</div></div><div class="x-btn sm">Cancel</div></div>
+          <div><div class="x-lab"><span>Title</span><span>17 / 100</span></div><div class="x-in"><b>Night market walk</b></div></div>
+          <div><div class="x-lab"><span>Caption</span><span>#hashtags become tags</span></div><div class="x-in area"><b>Friday night at the market. #streetfood #night</b></div></div>
+          <div><div class="x-lab"><span>Place</span><span>Optional</span></div><div class="x-in"><b>Hanoi, Vietnam</b></div></div>
+          <div class="x-chk on"><i>✓</i><span>Add depth for VR headsets <small>· free</small></span></div>
+          <div class="x-chk on"><i>✓</i><span>Show me the result before it goes public</span></div>
+          <div class="x-row"><div class="x-btn grow">Start another</div><div class="x-btn pri grow dim">Review and post</div></div>
+          <div class="x-note">"Review and post" unlocks when the square version is ready.</div>
+        </div>
+      </div>
+    </div></div></div>
+  </figure>
+  <div class="pc col">
+    <div class="box"><h3>Good</h3><ul><li>Fewest decisions of the three. Familiar from other social apps.</li><li>Render time becomes writing time.</li><li>The stage stays large, as today.</li></ul></div>
+    <div class="box"><h3>Weak</h3><ul><li>One button spends credits and starts a post. The "show me the result first" check has to be on by default.</li><li>The tray handles a handful of drafts, not fifty. It still needs a gallery page behind "All media".</li><li>Several files at once has no natural home.</li></ul></div>
+    <div class="box"><h3>Backend</h3><p style="margin:0 0 8px"><span class="tag good">Flow works today</span></p><ul><li>"Post" chains the existing process and publish calls in the browser.</li><li>Drafts on another device need the list route and stored draft text.</li></ul></div>
+  </div>
+</section>
+
+<section id="cases" class="col">
+  <div class="sec-head"><p class="kick">Stress test</p><h2>Same cases, <em>each design</em></h2></div>
+  <p class="intro">A happy-path mockup hides where the complexity went. These are the cases the current page handles.</p>
+  <div class="scroll"><table>
+    <tr><th style="width:19%">Case</th><th>A · Three steps</th><th>B · Gallery first</th><th>C · Composer</th></tr>
+    <tr><td><b>Tall or wide video</b></td><td>Step 2 shown. Button carries the price.</td><td>Tile "Needs square". Panel shows the same two choices.</td><td>Plan line: "We'll fill the sides · 12 credits".</td></tr>
+    <tr><td><b>Already square</b></td><td>Step 2 skipped. A link offers "Improve to 4K".</td><td>Tile is "Ready" on arrival.</td><td>Plan line reads "Ready to post". No price.</td></tr>
+    <tr><td><b>3D file detected</b></td><td>Step 2 becomes one question: "Post it in 3D?" Yes by default.</td><td>Tile "Ready · 3D". The panel has the same question.</td><td>Plan line reads "3D video, posted as it is". "Change" turns 3D off.</td></tr>
+    <tr><td><b>Up to 10 photos</b></td><td>Step 2 skipped. Step 3 shows the reorder strip under the stage.</td><td>Select the tiles, "Post together". Drag to reorder in the panel. Un-extended photos only.</td><td>The stage gets a reorder strip under it.</td></tr>
+    <tr><td><b>Several files to extend</b></td><td>Not covered. Stays on the Video and Image pages.</td><td>Multi-select, one button, one total price.</td><td>Not covered. "Start another" while one works.</td></tr>
+    <tr><td><b>Price before paying</b></td><td>On the step 2 button.</td><td>On the panel button, with each file's share listed.</td><td>In the plan line and on the Post button.</td></tr>
+    <tr><td><b>Not enough credits</b></td><td colspan="3">Same in all three: the button becomes "Add credits" and links to the wallet. "Stretch to fit" at standard quality stays as the free route.</td></tr>
+    <tr><td><b>Extend now, post later</b></td><td>"Save for later", then the My media tab.</td><td>Default. Nothing to choose.</td><td>"Save draft", then the tray.</td></tr>
+    <tr><td><b>Post later from another device</b></td><td colspan="3">Same in all three: works for files that are already square, once the server can list a person's renders and hold the draft text. Files not yet made square stay on the device where they were added. See <a href="#gallery">Gallery and backend</a>.</td></tr>
+    <tr><td><b>Render fails</b></td><td>Stays on step 2 with the reason and "Try again".</td><td>Tile turns "Failed" with "Try again". Other tiles are unaffected.</td><td>Plan line turns into the reason and "Try again".</td></tr>
+    <tr><td><b>Shorter laptop (1366 × 768)</b></td><td colspan="3">The mockups are drawn for 810px of height; a 768px-tall laptop shows about 690px. Rule for all three: the stage shrinks first, and the row holding the priced button is pinned to the bottom of its column, so it is always in view. In B the panel scrolls above its pinned button, and the grid drops to four columns.</td></tr>
+  </table></div>
+</section>
+
+<section id="controls" class="col">
+  <div class="sec-head"><p class="kick">Nothing removed</p><h2>Where every control goes</h2></div>
+  <p class="intro"><b>Auto</b>: the app decides. <b>Default</b>: visible. <b>Change</b>: one click away. <b>Advanced</b>: in the closed group. <b>Pro pages</b>: only on the standalone Image and Video pages.</p>
+  <div class="scroll"><table>
+    <tr><th style="width:36%">Control today</th><th>A</th><th>B</th><th>C</th></tr>
+    <tr><td>Share directly / Extend anyway / Make 3D (square files)</td><td>Auto + link</td><td>Panel actions</td><td>Change</td></tr>
+    <tr><td>Mode: outpaint + upscale / upscale only</td><td>Default</td><td>Default</td><td>Change</td></tr>
+    <tr><td>Background prompt</td><td>Default, optional</td><td>Default, optional</td><td>Change</td></tr>
+    <tr><td>Outpaint model, upscale model</td><td>Advanced</td><td>Advanced</td><td>Advanced</td></tr>
+    <tr><td>Upscaler backend (Fast / Studio / Fal AI)</td><td colspan="3">Advanced, as "Quality"</td></tr>
+    <tr><td>Sharpening (CAS)</td><td>Advanced</td><td>Advanced</td><td>Advanced</td></tr>
+    <tr><td>Trim</td><td>Tip when the video is long</td><td>Tip when the video is long</td><td>Change</td></tr>
+    <tr><td>Negative prompt, CFG, resolution tier, prompt expansion, keep audio</td><td colspan="3">Pro pages</td></tr>
+    <tr><td>LoRA stack, custom model arguments</td><td colspan="3">Pro pages</td></tr>
+    <tr><td>Bytedance and SeedVR settings</td><td colspan="3">Pro pages</td></tr>
+    <tr><td>Payment source (credits / own key)</td><td>Advanced</td><td>Advanced</td><td>Advanced</td></tr>
+    <tr><td>Price in credits</td><td>Default, on the button</td><td>Default, on the button</td><td>Default, in the plan line</td></tr>
+    <tr><td>Provider estimate in USD</td><td>Advanced</td><td>Advanced</td><td>Advanced</td></tr>
+    <tr><td>fal.ai disclosure</td><td colspan="3">Default, under the button</td></tr>
+    <tr><td>3D detected switch</td><td>Default, as a question</td><td>Default, as a question</td><td>Change</td></tr>
+    <tr><td>Spatial 3D (depth for VR)</td><td colspan="3">Default, one checkbox, on</td></tr>
+    <tr><td>Make 3D</td><td>Step 3 link</td><td>Panel action</td><td>After the render</td></tr>
+    <tr><td>Slideshow reorder and cover</td><td>Default</td><td>Default</td><td>Default</td></tr>
+    <tr><td>Batch mode</td><td>Pro pages</td><td>Default, as multi-select</td><td>Pro pages</td></tr>
+    <tr><td>Title, caption, place</td><td>Default</td><td>Default</td><td>Default</td></tr>
+    <tr><td>Tags field</td><td colspan="3">Folded into the caption. Hashtags already become tags; the separate field goes behind "Add tags".</td></tr>
+    <tr><td>System probe banners and install hints</td><td colspan="3">One plain "paused" message. Details stay on the Pro pages and in the staff console.</td></tr>
+  </table></div>
+</section>
+
+<section id="gallery" class="col">
+  <div class="sec-head"><p class="kick">Posting later, from any device</p><h2>Gallery <em>and backend</em></h2></div>
+  <p class="intro">Checked in <code>server/jobs.py</code>, <code>server/output.py</code>, <code>server/upload_log.py</code>, <code>server/social/models.py</code>, <code>server/routers/uploads.py</code> and <code>server/routers/video.py</code>. Posting later from another device is a requirement, so the gallery cannot live in the browser. This section says what the server already does and what it lacks. Nothing here is built.</p>
+  <div class="cols">
+    <div class="box">
+      <h3>Already there</h3>
+      <ul>
+        <li><b>Publish takes a render id.</b> <code>POST /api/uploads/publish</code> accepts any completed <code>job_id</code> the account owns. It does not care when, where or on which page the render was made, so batch renders qualify.</li>
+        <li><b>Finished renders are kept.</b> With object storage on (production), every completed render, paid or free, is restorable by id for <b>30 days</b>. Without it (local dev), <b>6 hours</b>.</li>
+        <li><b>Every upload already has a per-user record.</b> The staff upload log keeps a row in <code>upload_traces</code>: user, kind, file name, status (staged, processing, processed, failed, published), render id and post id. It also copies the original file to a private bucket for staff review.</li>
+        <li><b>Status by id.</b> <code>GET /api/{kind}/jobs/{id}</code> and its stream work for any known id.</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Missing for another device</h3>
+      <ul>
+        <li><b>No route shows a person their own uploads.</b> The record is read only by staff routes (<code>/api/admin/upload-logs</code>). A second device has no way to learn the render ids.</li>
+        <li><b>That record is a log, not a product table.</b> It is written only when the log bucket is configured, and its writes are allowed to fail silently so they never break a render.</li>
+        <li><b>Draft text is stored nowhere.</b> Title, caption and place exist only in the page until publish.</li>
+        <li><b>The working copy of an original is short-lived.</b> A file with no render behind it is usable for <b>6 hours</b> and is lost on restart. That covers "Needs square" tiles, already-square files, 3D as-is files and slideshow photos. The staff copy is not wired to anything a user can do.</li>
+        <li><b>No small previews.</b> Videos get a full-length browser proxy, images nothing. A gallery of twenty 4K files needs thumbnails.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="scroll" style="margin-top:18px"><table>
+    <tr><th style="width:26%">What the gallery shows</th><th style="width:22%">Today</th><th>What it would take</th></tr>
+    <tr><td>Finished renders, on any device</td><td><span class="tag">Data exists, no route</span></td><td>A route that returns the signed-in person's rows. Smallest: read <code>upload_traces</code>. Safer: a dedicated table written in the same places, so the gallery does not depend on a log that may drop writes.</td></tr>
+    <tr><td>Draft title, caption, place</td><td><span class="tag bad">Not possible</span></td><td>A small drafts table keyed by render, or draft fields on the same record.</td></tr>
+    <tr><td>Files not yet extended, on any device</td><td><span class="tag">Out of scope for now</span></td><td>Let the extend step read an original back from object storage instead of server memory. The staff log already stores a copy; using it for a user feature is a privacy and retention decision, not only code.</td></tr>
+    <tr><td>Unposted items older than 30 days</td><td><span class="tag bad">Not possible</span></td><td>A storage policy change, which has a cost.</td></tr>
+    <tr><td>Posting a listed render</td><td><span class="tag good">Works</span></td><td>Nothing. Publish already accepts the id.</td></tr>
+  </table></div>
+  <div class="box lead" style="margin-top:18px">
+    <h3>Decided scope: finished renders only</h3>
+    <p style="margin:0">The gallery syncs <b>finished renders and their draft text</b> across devices. Files that were added but not yet extended stay on the device where they were added, marked "On this device". That needs one read route and the draft fields, and leaves originals for later. It covers the stated need: extend first, decide to post later, from anywhere.</p>
+  </div>
+</section>
+
+<section id="pick" class="col">
+  <div class="sec-head"><p class="kick">Verdict</p><h2>Recommendation</h2></div>
+  <div class="cols">
+    <div class="box lead">
+      <h3>Build B, in three passes</h3>
+      <p style="margin:0 0 10px">For the layout of the gallery page itself, see <a href="gallery-variations.html">four variations of B</a>. The pick there is Shelves, not the contact sheet drawn above.</p>
+      <ol>
+        <li><b>Words and the editorial pass, on the current layout.</b> Apply the plain-words table, put the price on the button, close sections 02–04 into one "Advanced" group, and give the page the opener, tabs and corners the rest of ECHO has. Frontend only.</li>
+        <li><b>A "my uploads" route and draft fields.</b> The decided scope: finished renders only. Backend, small: the per-user record already exists.</li>
+        <li><b>The gallery page.</b> Tiles, statuses, the fixed panel, multi-select instead of BATCH. Design A's step 2 is the panel for a "Needs square" tile; design C's plan line is its first row.</li>
+      </ol>
+    </div>
+    <div class="box">
+      <h3>Why not A or C alone</h3>
+      <ul>
+        <li><b>A</b> fixes readability but keeps the gallery as a side room, leaves BATCH behind and wastes laptop width.</li>
+        <li><b>C</b> is the easiest to read, but still needs a gallery page behind its tray.</li>
+        <li><b>B</b> costs the most. It is also the only one whose structure matches the request and the screen most people use.</li>
+      </ul>
+      <h3 style="margin-top:16px">Open questions</h3>
+      <ul>
+        <li>Do the Image and Video pages stay as the pro cockpit, or does Upload replace them?</li>
+        <li>Is a 30-day limit on unposted renders acceptable to show users?</li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+// Same masthead on every mock screen, and a theme switch for the page.
+const mast = '<div class="x-mast"><span class="x-burger"><i></i></span><span class="x-brand">ECHO</span><span class="x-nav">Reels/VR</span><span class="x-nav">Explore</span><span class="x-search">Search people, tags, reels…</span><span class="x-btn pri">Upload</span><span class="x-credits">140 credits</span><span class="x-av">AV</span></div>';
+document.querySelectorAll('.scr[data-mast]').forEach((screen) => screen.insertAdjacentHTML('afterbegin', mast));
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+});
+</script>
+</html>
