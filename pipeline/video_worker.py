@@ -23,6 +23,11 @@ from pipeline.utils import (
     attach_civitai_token,
 )
 
+# Final 4K square scale. setsar=1 makes the pixels square too: scale alone
+# records a stretched source's old shape as the sample aspect ratio, so a
+# 720x1280 clip came out 3840x3840 tagged 9:16 and played portrait.
+SQUARE_UPSCALE_VF = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,setsar=1"
+
 def extract_video_url(result):
     """
     Extracts the video URL from a fal.ai API result dictionary.
@@ -548,9 +553,7 @@ def _process_video_impl(
         elif has_audio_stream(video_to_process):
             audio_src = video_to_process
 
-        vf_parts = [] if _is_already_square(temp_fal_vid) else [
-            "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
-        ]
+        vf_parts = [] if _is_already_square(temp_fal_vid) else [SQUARE_UPSCALE_VF]
         if sharpening > 0.0:
             vf_parts.append(f"cas={sharpening}")
         vf_filter = ",".join(vf_parts)
@@ -705,9 +708,7 @@ clip.set_output()
         if status_callback:
             status_callback("Performing hardware-accelerated 4K upscale via FFmpeg...")
 
-        vf_parts = [] if _is_already_square(temp_outpaint_path) else [
-            "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
-        ]
+        vf_parts = [] if _is_already_square(temp_outpaint_path) else [SQUARE_UPSCALE_VF]
         if sharpening > 0.0:
             vf_parts.append(f"cas={sharpening}")
         vf_filter = ",".join(vf_parts)

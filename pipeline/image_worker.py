@@ -6,7 +6,7 @@ from PIL import Image
 from core import models as _models
 from core.pricing import image_work_dimensions
 from pipeline.utils import get_image_dimensions, calculate_square_padding, fetch_fal_result
-from pipeline.video_worker import poll_job_status
+from pipeline.video_worker import SQUARE_UPSCALE_VF, poll_job_status
 
 def extract_image_url(result):
     """
@@ -194,7 +194,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
 
         import subprocess
         # Use FFmpeg to scale the image using Lanczos and optional CAS sharpening
-        vf_filter = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp"
+        vf_filter = SQUARE_UPSCALE_VF
         if sharpening > 0.0:
             vf_filter += f",cas={sharpening}"
 
