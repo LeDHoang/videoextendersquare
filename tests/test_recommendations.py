@@ -2176,3 +2176,87 @@ def test_pipeline_context_decays_stored_affinities(app):
     assert context.tag_affinity[tag_id] == pytest.approx(1.0)
     assert context.item_affinity.get(posts[0].id, 0.0) == 0.0  # a dislike older than the fade is gone
     assert context.item_affinity[posts[1].id] == 6.0
+
+
+def test_explore_grid_places_packs_by_their_member_reels(app):
+    from server.social.models import ReelPack, ReelPackItem
+
+    seed_catalog(app, creators=4, posts_per_creator=6)
+    params = {"folder": "ALL FOLDERS", "sort": "for_you"}
+    with TestClient(app) as client:
+        full = client.get("/api/reels", params={**params, "limit": 100}).json()
+        assert "packs" not in full
+        order = [video["post_id"] for video in full["videos"]]
+        assert len(order) == 24
+
+        with app.state.testing_session() as db:
+            owner_id = db.query(Post).first().owner_id
+            # Published, but not in the scanned list the grid ranks.
+            unlisted = [
+                Post(owner_id=owner_id, media_path=f"tests/unlisted-{n}.jpg", media_type="image", title="Unlisted",
+                     caption="", location={}, source="upload", status="published")
+                for n in range(2)
+            ]
+            db.add_all(unlisted)
+            db.flush()
+            for title, members in (
+                ("Low", order[-3:]), ("Top", order[:3]), ("Near", order[1:4]),
+                ("Mixed", [order[8], *(post.id for post in unlisted)]),
+            ):
+                pack = ReelPack(owner_id=owner_id, title=title, status="published", visibility="public")
+                db.add(pack)
+                db.flush()
+                for position, post_id in enumerate(members):
+                    db.add(ReelPackItem(pack_id=pack.id, post_id=post_id, position=position))
+            db.commit()
+
+        pages, cursor = [], None
+        while True:
+            page = client.get(
+                "/api/reels",
+                params={**params, "limit": 8, "packs": True, **({"cursor": cursor} if cursor else {})},
+            )
+            assert page.status_code == 200, page.text
+            pages.append([(pack["title"], pack["slot"]) for pack in page.json()["packs"]])
+            cursor = page.json()["next_cursor"]
+            if not cursor:
+                break
+
+    # A pack sits at the mean rank of its best three members (a member that is
+    # not in the list counts as last), at least 8 tiles after the pack before
+    # it, and comes once, on the page of its slot.
+    assert pages == [[("Top", 1)], [("Near", 9)], [("Mixed", 18), ("Low", 26)]]
+
+
+def test_explore_grid_search_puts_title_matches_first(app):
+    from server.social.models import ReelPack, ReelPackItem
+
+    seed_catalog(app, creators=4, posts_per_creator=6)
+    # Every seeded caption says "cinematic"; no title does yet.
+    params = {"folder": "ALL FOLDERS", "sort": "for_you", "search": "cinematic", "limit": 100, "packs": True}
+    with TestClient(app) as client:
+        order = [video["post_id"] for video in client.get("/api/reels", params=params).json()["videos"]]
+        assert len(order) == 24
+        titled = order[-2:]
+
+        with app.state.testing_session() as db:
+            for post_id in titled:
+                db.get(Post, post_id).title = "Cinematic dawn"
+            owner_id = db.query(Post).first().owner_id
+            for title, description in (("Night walks", "cinematic"), ("Cinematic picks", "")):
+                pack = ReelPack(
+                    owner_id=owner_id, title=title, description=description, status="published", visibility="public",
+                )
+                db.add(pack)
+                db.flush()
+                for position, post_id in enumerate(order[10:13]):
+                    db.add(ReelPackItem(pack_id=pack.id, post_id=post_id, position=position))
+            db.commit()
+
+        body = client.get("/api/reels", params=params).json()
+
+    # Reels and packs with the search in the title lead; the pack sits right
+    # after the two title-matched reels, though its members rank lower.
+    assert {video["post_id"] for video in body["videos"][:2]} == set(titled)
+    assert [(pack["title"], pack["slot"]) for pack in body["packs"]][0] == ("Cinematic picks", 2)
+    assert [pack["title"] for pack in body["packs"]] == ["Cinematic picks", "Night walks"]

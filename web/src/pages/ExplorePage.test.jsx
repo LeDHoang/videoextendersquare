@@ -21,6 +21,10 @@ vi.mock('../components/explore/ExploreTile.jsx', async () => {
   };
 });
 
+vi.mock('../components/packs/PackTile.jsx', () => ({
+  default: ({ pack }) => <article data-testid="tile">{pack.title}</article>,
+}));
+
 // Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
 function memoryStorage() {
   const data = new Map();
@@ -104,6 +108,28 @@ describe('ExplorePage beta controls', () => {
     expect(stats.getByText('FOLDERS')).toBeInTheDocument();
   });
 
+  it('ranks reels for the viewer and puts each pack at its slot in the ALL grid', async () => {
+    const reel = (name) => ({ path: 'published/' + name + '.mp4', title: 'Reel ' + name, preview_url: '/p.mp4', poster_url: '/p.jpg' });
+    const pack = (name, slot) => ({ id: name, title: 'Pack ' + name, slot });
+    mocks.api.get.mockImplementation(async (path, params) => {
+      if (path === '/api/packs') return { total: 3, items: [], next_offset: null };
+      return params.cursor === 'page-2'
+        ? { ...reels, count: 4, videos: [reel('C'), reel('D')], packs: [pack('Y', 3), pack('Z', 9)], next_cursor: null }
+        : { ...reels, count: 4, videos: [reel('A'), reel('B')], packs: [pack('X', 1)], next_cursor: 'page-2' };
+    });
+    renderPage();
+    await screen.findByText('Reel A');
+
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ sort: 'for_you', packs: true }));
+    expect(screen.getAllByTestId('tile').map((tile) => tile.textContent)).toEqual(['Reel A', 'Pack X', 'Reel B']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'LOAD MORE REELS' }));
+
+    await screen.findByText('Reel D');
+    expect(screen.getAllByTestId('tile').map((tile) => tile.textContent))
+      .toEqual(['Reel A', 'Pack X', 'Reel B', 'Reel C', 'Pack Y', 'Reel D', 'Pack Z']);
+  });
+
   it('loads reels a page at a time and appends the next page', async () => {
     const reel = (name) => ({ path: 'published/' + name + '.mp4', title: 'Reel ' + name, preview_url: '/p.mp4', poster_url: '/p.jpg' });
     mocks.api.get.mockImplementation(async (path, params) => {
@@ -123,7 +149,7 @@ describe('ExplorePage beta controls', () => {
 
     await screen.findByText('Reel C');
     expect(screen.getAllByTestId('tile').map((tile) => tile.textContent)).toEqual(['Reel A', 'Reel B', 'Reel C']);
-    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ cursor: 'page-2', limit: 48, sort: 'shuffle' }));
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ cursor: 'page-2', limit: 48, sort: 'for_you' }));
     expect(screen.queryByRole('button', { name: 'LOAD MORE REELS' })).not.toBeInTheDocument();
   });
 });
